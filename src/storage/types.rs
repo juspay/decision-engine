@@ -913,3 +913,14 @@ pub struct UserEmailVerifiedUpdate {
 pub struct UserPasswordUpdate {
     pub password_hash: String,
 }
+
+#[derive(AsChangeset, Debug)]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::users))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::users))]
+pub struct UserPasswordResetUpdate {
+    pub password_hash: String,
+    #[cfg(feature = "mysql")]
+    pub email_verified: i8,
+    #[cfg(feature = "postgres")]
+    pub email_verified: bool,
+}

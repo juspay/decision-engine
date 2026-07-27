@@ -620,7 +620,18 @@ where
             "/merchant/members/invite",
             post(routes::user_auth::invite_member),
         )
-        .route("/auth/verify-email", get(routes::user_auth::verify_email))
+        .route(
+            "/auth/verify-email",
+            get(routes::user_auth::verify_email_get).post(routes::user_auth::verify_email),
+        )
+        .route(
+            "/auth/forgot-password",
+            post(routes::user_auth::forgot_password),
+        )
+        .route(
+            "/auth/reset-password",
+            post(routes::user_auth::reset_password),
+        )
         .route(
             "/auth/change-password",
             post(routes::user_auth::change_password),

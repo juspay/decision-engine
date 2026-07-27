@@ -83,15 +83,19 @@ curl --location "$BASE_URL/auth/logout" \
 
 ## Verify Email
 
-Public route — the link sent by the signup email-verification flow calls this with the token from the email.
+Public route — the emailed verification link opens the dashboard's `/verify-email` page, which submits the single-use token here in the request body (never in the URL, so it cannot leak into request logs).
 
 ```bash
-curl "$BASE_URL/auth/verify-email?token=vf_9f21a6c0..."
+curl --location "$BASE_URL/auth/verify-email" \
+  --header "Content-Type: application/json" \
+  --data '{ "token": "vf_9f21a6c0..." }'
 ```
 
 ```json
-{ "message": "Email verified successfully." }
+{ "message": "Email verified successfully. You can now log in." }
 ```
+
+The token is single-use: a second submission returns `400` with `"Invalid or expired verification token"`. `GET /auth/verify-email?token=...` is still accepted as a deprecated compatibility shim for one release and will be removed.
 
 ## Change Password
 
@@ -106,8 +110,43 @@ curl --location "$BASE_URL/auth/change-password" \
 ```
 
 ```json
-{ "message": "Password updated successfully." }
+{ "message": "Password updated successfully.", "token": "eyJhbGciOi..." }
 ```
+
+Changing the password invalidates **all** previously issued JWTs for the user, including the one this request was made with — replace `$AUTH_HEADER` with the fresh `token` from the response.
+
+## Forgot Password
+
+Public route — requests a password-reset email. Always returns the same generic `200` regardless of whether the address has an account (no account enumeration). The emailed link is single-use and expires in 30 minutes. Rate limited per email address and per client IP; over-limit requests still receive the generic `200` but no email is sent.
+
+```bash
+curl --location "$BASE_URL/auth/forgot-password" \
+  --header "Content-Type: application/json" \
+  --data '{ "email": "operator@example.com" }'
+```
+
+```json
+{ "message": "If an account exists for that email, a password reset link has been sent." }
+```
+
+## Reset Password
+
+Public route — the link from the reset email opens the dashboard's `/reset-password` page, which submits the single-use token here. A successful reset also marks the email verified (mailbox control is proven) and invalidates all previously issued JWTs and any other outstanding reset links for the user.
+
+```bash
+curl --location "$BASE_URL/auth/reset-password" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "token": "DE_9f21a6c0...",
+    "new_password": "EvenStrongerPass#456"
+  }'
+```
+
+```json
+{ "message": "Password reset successfully. You can now sign in with your new password." }
+```
+
+An invalid, expired, or already-used token returns `400` with `"Invalid or expired password reset link"`.
 
 ## Team Management
 

@@ -26,7 +26,22 @@ export function VerifyEmailPage() {
       return
     }
 
-    apiFetch(`/auth/verify-email?token=${encodeURIComponent(token)}`, { method: 'GET' })
+    // Strip the token from the address bar/history once captured. Plain replaceState
+    // bypasses the router, so `searchParams` (and the guard above) are unaffected.
+    const params = new URLSearchParams(window.location.search)
+    if (params.has('token')) {
+      params.delete('token')
+      const newSearch = params.toString()
+      window.history.replaceState(
+        null,
+        '',
+        window.location.pathname + (newSearch ? `?${newSearch}` : ''),
+      )
+    }
+
+    // POST with the token in the body — it must never ride in a backend URL, where
+    // request tracing would log it.
+    apiFetch('/auth/verify-email', { method: 'POST', body: JSON.stringify({ token }) })
       .then(() => {
         setStatus('success')
         setTimeout(() => {

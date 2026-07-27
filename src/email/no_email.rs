@@ -5,25 +5,26 @@ pub struct NoEmailClient;
 #[async_trait::async_trait]
 impl EmailClient for NoEmailClient {
     async fn send_email(&self, message: EmailMessage) -> error_stack::Result<(), EmailError> {
-        // Extract the verification URL from the body so developers can complete
-        // email verification manually. Avoid logging the full HTML body for other
-        // email types (e.g. invite emails) because it would expose temporary passwords.
-        let verification_url = if message
-            .subject
-            .to_lowercase()
-            .contains("confirm your email")
+        // Extract the action URL from the body so developers can complete email
+        // verification or password reset manually. Avoid logging the full HTML body
+        // for other email types (e.g. invite emails) because it would expose
+        // temporary passwords. Reset URLs carry a live single-use credential, so they
+        // are only logged in debug builds — never from a release binary.
+        let subject_lower = message.subject.to_lowercase();
+        let action_url = if subject_lower.contains("confirm your email")
+            || (cfg!(debug_assertions) && subject_lower.contains("reset your password"))
         {
             extract_href_from_cta(&message.html_body)
         } else {
             None
         };
 
-        match verification_url {
+        match action_url {
             Some(url) => crate::logger::info!(
                 to = %message.to,
                 subject = %message.subject,
-                verification_url = %url,
-                "Email sending skipped (no_email_client) — use the verification_url to verify manually"
+                action_url = %url,
+                "Email sending skipped (no_email_client) — use the action_url to complete the flow manually"
             ),
             None => crate::logger::info!(
                 to = %message.to,

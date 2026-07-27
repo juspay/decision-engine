@@ -89,6 +89,21 @@ const EMAIL_VERIFICATION_TTL_SECONDS: i64 = 86400; // 24 hours
 const PENDING_SIGNUP_PREFIX: &str = "pending_signup:";
 const PENDING_SIGNUP_TTL_SECONDS: i64 = 300; // 5 minutes
 
+/// One-time password-reset codes. Stored by SHA-256 of the code (never the code itself),
+/// so a leaked Redis snapshot cannot yield live reset links. Single-use via atomic DEL.
+const PASSWORD_RESET_CODE_PREFIX: &str = "password_reset_code:";
+const PASSWORD_RESET_CODE_TTL_SECONDS: i64 = 1800; // 30 minutes
+
+/// Unix timestamp of the user's last password change/reset. Any JWT minted before it is
+/// rejected in `verify_jwt_not_revoked`; the key self-expires once all such tokens would
+/// have expired anyway.
+const PASSWORD_RESET_AT_PREFIX: &str = "user_pwreset_at:";
+
+const FORGOT_PASSWORD_RATE_PREFIX: &str = "forgot_password_rate:";
+const FORGOT_PASSWORD_RATE_WINDOW_SECONDS: i64 = 3600;
+const FORGOT_PASSWORD_RATE_MAX_PER_EMAIL: i64 = 3;
+const FORGOT_PASSWORD_RATE_MAX_PER_IP: i64 = 30;
+
 #[axum::debug_handler]
 pub async fn signup(
     Json(payload): Json<SignupRequest>,
@@ -559,6 +574,28 @@ pub struct ChangePasswordRequest {
 #[derive(Debug, Serialize)]
 pub struct ChangePasswordResponse {
     pub message: String,
+    pub token: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ForgotPasswordRequest {
+    pub email: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ForgotPasswordResponse {
+    pub message: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResetPasswordRequest {
+    pub token: String,
+    pub new_password: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ResetPasswordResponse {
+    pub message: String,
 }
 
 #[axum::debug_handler]
@@ -597,6 +634,12 @@ pub async fn change_password(
     let new_hash = auth::hash_password(&payload.new_password)
         .change_context(UserAuthError::PasswordHashingFailed)?;
 
+    // Revoke every session minted before this change — fail-closed and BEFORE the DB
+    // update: if Redis is down nothing has changed and the user retries; if the DB update
+    // below fails, sessions were revoked but the password is unchanged, which is safe.
+    // The fresh token is minted after, so its iat never precedes the cutoff.
+    record_password_reset_timestamp(&app_state, &claims.user_id, &global_config).await?;
+
     let conn = app_state
         .db
         .get_conn()
@@ -617,8 +660,348 @@ pub async fn change_password(
     .await
     .change_context(UserAuthError::StorageError)?;
 
+    let new_token = auth::generate_jwt(
+        &claims.user_id,
+        &claims.email,
+        &claims.merchant_id,
+        &claims.role,
+        &global_config.user_auth.jwt_secret,
+        global_config.user_auth.jwt_expiry_seconds,
+    )
+    .change_context(UserAuthError::TokenGenerationFailed)?;
+
     Ok(Json(ChangePasswordResponse {
         message: "Password updated successfully.".to_string(),
+        token: new_token,
+    }))
+}
+
+/// Record "passwords changed at" so `verify_jwt_not_revoked` rejects all JWTs minted
+/// earlier and `reset_password` rejects reset codes issued earlier. Fail-closed: a
+/// password change must not report success while old sessions remain revocable-in-name-
+/// only, so a Redis write failure is surfaced as an error (the read side stays fail-open,
+/// matching the jti denylist). The key outlives both every pre-change JWT and every
+/// outstanding reset code.
+async fn record_password_reset_timestamp(
+    app_state: &crate::app::TenantAppState,
+    user_id: &str,
+    global_config: &crate::config::GlobalConfig,
+) -> Result<(), error::ContainerError<UserAuthError>> {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|_| error::ContainerError::from(UserAuthError::StorageError))?;
+    let reset_at_key = format!("{}{}", PASSWORD_RESET_AT_PREFIX, user_id);
+    let ttl = std::cmp::max(
+        global_config.user_auth.jwt_expiry_seconds as i64,
+        PASSWORD_RESET_CODE_TTL_SECONDS,
+    );
+    if let Err(err) = app_state
+        .redis_conn
+        .set_key_with_ttl(&reset_at_key, &now.as_secs().to_string(), ttl)
+        .await
+    {
+        crate::logger::warn!(
+            error = ?err,
+            "Failed to record password change timestamp; refusing to complete the change"
+        );
+        return Err(error::ContainerError::from(UserAuthError::StorageError));
+    }
+    Ok(())
+}
+
+/// INCR-first fixed-window counter; returns true when the bucket is over `max`. The
+/// window TTL is attached when this INCR created the key (count == 1); if attaching it
+/// fails the counter is deleted so a TTL-less key can never lock a bucket out
+/// permanently. Redis errors fail open (never throttle).
+async fn is_forgot_password_rate_limited(
+    app_state: &crate::app::TenantAppState,
+    key: &str,
+    max: i64,
+) -> bool {
+    let Ok(count) = app_state.redis_conn.increment_key(key).await else {
+        return false;
+    };
+    if count == 1 {
+        if let Err(err) = app_state
+            .redis_conn
+            .expire_key(key, FORGOT_PASSWORD_RATE_WINDOW_SECONDS)
+            .await
+        {
+            let _ = app_state.redis_conn.delete_key(key).await;
+            crate::logger::warn!(error = ?err, "Failed to set forgot-password rate-limit TTL");
+        }
+    }
+    count > max
+}
+
+#[axum::debug_handler]
+pub async fn forgot_password(
+    headers: HeaderMap,
+    Json(payload): Json<ForgotPasswordRequest>,
+) -> Result<Json<ForgotPasswordResponse>, error::ContainerError<UserAuthError>> {
+    let app_state = get_tenant_app_state().await;
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+    let email_client = APP_STATE
+        .get()
+        .map(|s| s.email_client.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    // Every path below returns this same body — the response must never reveal whether
+    // the address has an account.
+    let generic_response = || {
+        Json(ForgotPasswordResponse {
+            message: "If an account exists for that email, a password reset link has been sent."
+                .to_string(),
+        })
+    };
+
+    let email = payload.email.trim().to_string();
+    if email.is_empty()
+        || email.len() > 254
+        || !email.contains('@')
+        || email.contains(char::is_whitespace)
+    {
+        return Ok(generic_response());
+    }
+
+    // Rate limit per email and per client IP. Counters advance for existing and
+    // unknown emails alike so limiter behavior leaks nothing about account existence.
+    let email_rate_key = format!(
+        "{}email:{}",
+        FORGOT_PASSWORD_RATE_PREFIX,
+        auth::hash_api_key(&email.to_lowercase())
+    );
+    if is_forgot_password_rate_limited(&app_state, &email_rate_key, FORGOT_PASSWORD_RATE_MAX_PER_EMAIL)
+        .await
+    {
+        return Ok(generic_response());
+    }
+
+    // Only the RIGHTMOST x-forwarded-for entry is trustworthy — it is the hop appended by
+    // our own reverse proxy; everything left of it is client-supplied. Parsing as an IP
+    // rejects forged free-text so arbitrary header bytes can't become Redis keys.
+    let client_ip = headers
+        .get("x-forwarded-for")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.rsplit(',').next())
+        .and_then(|value| value.trim().parse::<std::net::IpAddr>().ok())
+        .or_else(|| {
+            headers
+                .get("x-real-ip")
+                .and_then(|value| value.to_str().ok())
+                .and_then(|value| value.trim().parse::<std::net::IpAddr>().ok())
+        });
+    if let Some(ip) = client_ip {
+        let ip_rate_key = format!("{}ip:{}", FORGOT_PASSWORD_RATE_PREFIX, ip);
+        if is_forgot_password_rate_limited(&app_state, &ip_rate_key, FORGOT_PASSWORD_RATE_MAX_PER_IP)
+            .await
+        {
+            return Ok(generic_response());
+        }
+    }
+
+    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+        &app_state.db,
+        dsl::email.eq(email.clone()),
+    )
+    .await
+    .change_error(UserAuthError::StorageError)?;
+
+    let Some(user) = users.pop() else {
+        return Ok(generic_response());
+    };
+
+    let is_active = {
+        #[cfg(feature = "mysql")]
+        {
+            user.is_active != 0
+        }
+        #[cfg(feature = "postgres")]
+        {
+            user.is_active
+        }
+    };
+    if !is_active {
+        return Ok(generic_response());
+    }
+    // Unverified-but-active users DO get the email: completing a reset proves mailbox
+    // control (it sets email_verified), so this is also the escape hatch for users who
+    // lost their verification email.
+
+    // Issue the code and send the email off the request path: the SES round trip and any
+    // failure it produces must not be observable in the response, or they become an
+    // account-existence oracle (latency, or a 500 only the user-exists branch can hit).
+    let base_url = global_config.email.base_url.clone();
+    let bg_state = app_state.clone();
+    tokio::spawn(async move {
+        let code = auth::generate_api_key();
+        let code_key = format!("{}{}", PASSWORD_RESET_CODE_PREFIX, auth::hash_api_key(&code));
+        // The value carries the issue time so redemption can reject codes issued before
+        // the user's last password change/reset (see `reset_password`).
+        let issued_at = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        let code_value = format!("{}:{}", user.user_id, issued_at);
+        if let Err(err) = bg_state
+            .redis_conn
+            .set_key_with_ttl(&code_key, &code_value, PASSWORD_RESET_CODE_TTL_SECONDS)
+            .await
+        {
+            crate::logger::warn!(error = ?err, "Failed to store password reset code");
+            return;
+        }
+
+        let reset_url = format!("{}/reset-password?token={}", base_url, code);
+        if let Err(err) = email_client
+            .send_email(
+                crate::email::templates::PasswordResetTemplate {
+                    user_email: user.email.clone(),
+                    reset_url,
+                }
+                .into_message(),
+            )
+            .await
+        {
+            crate::logger::warn!(
+                to = %user.email,
+                error = ?err,
+                "Failed to send password reset email"
+            );
+            let _ = bg_state.redis_conn.delete_key(&code_key).await;
+        }
+    });
+
+    Ok(generic_response())
+}
+
+#[axum::debug_handler]
+pub async fn reset_password(
+    Json(payload): Json<ResetPasswordRequest>,
+) -> Result<Json<ResetPasswordResponse>, error::ContainerError<UserAuthError>> {
+    let app_state = get_tenant_app_state().await;
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    // Validate strength before touching the code — a weak password must not burn the
+    // single-use link.
+    auth::validate_password_strength(&payload.new_password)
+        .change_context(UserAuthError::WeakPassword)?;
+
+    let code_key = format!(
+        "{}{}",
+        PASSWORD_RESET_CODE_PREFIX,
+        auth::hash_api_key(&payload.token)
+    );
+    // A missing/expired/unknown code reads as a failure — treat any failure to read it as
+    // an invalid code, not a server error.
+    let stored_value = match app_state.redis_conn.get_key_string(&code_key).await {
+        Ok(value) if !value.is_empty() => value,
+        _ => return Err(error::ContainerError::from(UserAuthError::InvalidResetToken)),
+    };
+
+    // Atomically claim the code by deleting it. `DEL` reports whether *this* call removed
+    // the key, so with two concurrent redemptions exactly one sees KeyDeleted — the other
+    // (already consumed, expired, or replayed) is rejected.
+    let claimed = app_state
+        .redis_conn
+        .delete_key(&code_key)
+        .await
+        .change_context(UserAuthError::StorageError)?;
+    if !matches!(claimed, redis_interface::types::DelReply::KeyDeleted) {
+        return Err(error::ContainerError::from(UserAuthError::InvalidResetToken));
+    }
+
+    // Value format: "<user_id>:<issued_at_unix>" (user_ids are UUIDs, so the last colon
+    // is unambiguous).
+    let Some((user_id, issued_at)) = stored_value
+        .rsplit_once(':')
+        .and_then(|(id, ts)| ts.parse::<u64>().ok().map(|ts| (id.to_string(), ts)))
+    else {
+        return Err(error::ContainerError::from(UserAuthError::InvalidResetToken));
+    };
+
+    // Reject codes issued before the user's last password change/reset — once the
+    // password changes, every previously emailed link must die with it. Strict `<`
+    // mirrors the JWT iat check; fail-open on Redis read errors, like that check.
+    let reset_at_key = format!("{}{}", PASSWORD_RESET_AT_PREFIX, user_id);
+    if let Ok(val) = app_state.redis_conn.get_key_string(&reset_at_key).await {
+        if let Ok(reset_at) = val.parse::<u64>() {
+            if issued_at < reset_at {
+                return Err(error::ContainerError::from(UserAuthError::InvalidResetToken));
+            }
+        }
+    }
+
+    // Re-check the account at redemption time — it may have been deactivated during the
+    // code's 30-minute lifetime. Report inactive/missing identically to a bad code.
+    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+        &app_state.db,
+        dsl::user_id.eq(user_id.clone()),
+    )
+    .await
+    .change_error(UserAuthError::StorageError)?;
+    let Some(user) = users.pop() else {
+        return Err(error::ContainerError::from(UserAuthError::InvalidResetToken));
+    };
+    let is_active = {
+        #[cfg(feature = "mysql")]
+        {
+            user.is_active != 0
+        }
+        #[cfg(feature = "postgres")]
+        {
+            user.is_active
+        }
+    };
+    if !is_active {
+        return Err(error::ContainerError::from(UserAuthError::InvalidResetToken));
+    }
+
+    // No same-as-old-password check here, deliberately: the requester has proven mailbox
+    // control, and rejecting reuse after the atomic claim would burn the single-use code
+    // on a recoverable error while confirming the current password to whoever holds the
+    // link. Checking before the claim would be worse — a non-consuming password oracle.
+    let new_hash = auth::hash_password(&payload.new_password)
+        .change_context(UserAuthError::PasswordHashingFailed)?;
+
+    let conn = app_state
+        .db
+        .get_conn()
+        .await
+        .change_error(UserAuthError::StorageError)?;
+
+    // Completing a reset proves control of the mailbox, so mark the email verified in
+    // the same statement — this also unsticks users who never received the signup
+    // verification email.
+    crate::generics::generic_update_if_present::<
+        <User as HasTable>::Table,
+        crate::storage::types::UserPasswordResetUpdate,
+        _,
+    >(
+        &conn,
+        dsl::user_id.eq(user_id.clone()),
+        crate::storage::types::UserPasswordResetUpdate {
+            password_hash: new_hash,
+            #[cfg(feature = "mysql")]
+            email_verified: 1,
+            #[cfg(feature = "postgres")]
+            email_verified: true,
+        },
+    )
+    .await
+    .change_context(UserAuthError::StorageError)?;
+
+    record_password_reset_timestamp(&app_state, &user_id, &global_config).await?;
+
+    Ok(Json(ResetPasswordResponse {
+        message: "Password reset successfully. You can now sign in with your new password."
+            .to_string(),
     }))
 }
 
@@ -1061,21 +1444,59 @@ pub struct VerifyEmailQuery {
     pub token: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct VerifyEmailRequest {
+    pub token: String,
+}
+
+/// POST /auth/verify-email — the SPA submits the token from the emailed link in the JSON
+/// body, so the live token never appears in a backend URL (the request tracing span
+/// records full URIs, query string included).
 #[axum::debug_handler]
 pub async fn verify_email(
+    Json(payload): Json<VerifyEmailRequest>,
+) -> Result<Json<VerifyEmailResponse>, error::ContainerError<UserAuthError>> {
+    consume_verification_token(&payload.token).await
+}
+
+/// GET /auth/verify-email?token= — deprecated compatibility shim for SPA bundles cached
+/// from before the POST variant existed; remove after one release. This path puts the
+/// token in a logged URL, which is exactly what the POST variant exists to avoid.
+#[axum::debug_handler]
+pub async fn verify_email_get(
     Query(query): Query<VerifyEmailQuery>,
+) -> Result<Json<VerifyEmailResponse>, error::ContainerError<UserAuthError>> {
+    consume_verification_token(&query.token).await
+}
+
+async fn consume_verification_token(
+    token: &str,
 ) -> Result<Json<VerifyEmailResponse>, error::ContainerError<UserAuthError>> {
     let app_state = get_tenant_app_state().await;
 
-    let redis_key = format!("{}{}", EMAIL_VERIFICATION_PREFIX, query.token);
+    let redis_key = format!("{}{}", EMAIL_VERIFICATION_PREFIX, token);
 
-    let user_id = app_state
+    // A missing/expired/unknown token reads as a failure — treat any failure to read it
+    // as an invalid token, not a server error (same mapping as `reset_password`).
+    let user_id = match app_state.redis_conn.get_key_string(&redis_key).await {
+        Ok(user_id) if !user_id.is_empty() => user_id,
+        _ => {
+            return Err(error::ContainerError::from(
+                UserAuthError::InvalidVerificationToken,
+            ))
+        }
+    };
+
+    // Atomically claim the token by deleting it BEFORE the DB write — with two concurrent
+    // submissions exactly one sees KeyDeleted (same single-use pattern as
+    // `reset_password`). If the DB update below then fails the token is burned; the user
+    // is not stranded — completing a password reset also marks the email verified.
+    let claimed = app_state
         .redis_conn
-        .get_key_string(&redis_key)
+        .delete_key(&redis_key)
         .await
         .change_context(UserAuthError::StorageError)?;
-
-    if user_id.is_empty() {
+    if !matches!(claimed, redis_interface::types::DelReply::KeyDeleted) {
         return Err(error::ContainerError::from(
             UserAuthError::InvalidVerificationToken,
         ));
@@ -1111,8 +1532,6 @@ pub async fn verify_email(
         ));
     }
 
-    let _ = app_state.redis_conn.delete_key(&redis_key).await;
-
     Ok(Json(VerifyEmailResponse {
         message: "Email verified successfully. You can now log in.".to_string(),
     }))
@@ -1137,6 +1556,18 @@ pub async fn verify_jwt_not_revoked(
     if let Ok(val) = app_state.redis_conn.get_key_string(&deny_key).await {
         if !val.is_empty() {
             return Err(ContainerError::from(UserAuthError::InvalidToken));
+        }
+    }
+
+    // Reject tokens minted before the user's last password change/reset. Strict `<`
+    // keeps a token minted in the same second as the change (e.g. the fresh token
+    // change-password returns) valid. Fail-open on Redis errors, like the denylist.
+    let reset_key = format!("{}{}", PASSWORD_RESET_AT_PREFIX, claims.user_id);
+    if let Ok(val) = app_state.redis_conn.get_key_string(&reset_key).await {
+        if let Ok(reset_at) = val.parse::<u64>() {
+            if claims.iat < reset_at {
+                return Err(ContainerError::from(UserAuthError::InvalidToken));
+            }
         }
     }
 

@@ -198,6 +198,107 @@ impl EmailVerificationTemplate {
     }
 }
 
+pub struct PasswordResetTemplate {
+    pub user_email: String,
+    pub reset_url: String,
+}
+
+impl PasswordResetTemplate {
+    pub fn into_message(self) -> EmailMessage {
+        let url = escape_html(&self.reset_url);
+        let html_body = format!(
+            r#"<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1.0">
+  <title>Reset your password — Juspay Decision Engine</title>
+</head>
+<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <!-- Preheader -->
+  <span style="display:none;max-height:0;overflow:hidden;mso-hide:all;">Reset your Juspay Decision Engine password. This link expires in 30 minutes.&#8202;&#65279;&#847;</span>
+
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background-color:#f1f5f9;">
+    <tr>
+      <td align="center" style="padding:40px 16px;">
+        <table width="600" cellpadding="0" cellspacing="0" role="presentation" style="max-width:600px;width:100%;">
+
+          <!-- Header -->
+          <tr>
+            <td style="background-color:#0b0e14;border-radius:16px 16px 0 0;padding:28px 40px;text-align:center;">
+              <span style="font-size:18px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">
+                <span style="color:#3b82f6;">&#9679;</span>&nbsp;Decision Engine
+              </span>
+            </td>
+          </tr>
+
+          <!-- Body -->
+          <tr>
+            <td style="background-color:#ffffff;padding:48px 48px 44px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
+
+              <h1 style="margin:0 0 16px;font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.02em;line-height:1.3;">
+                Reset your password
+              </h1>
+              <p style="margin:0 0 32px;font-size:15px;line-height:1.75;color:#475569;">
+                We received a request to reset the password for your Juspay Decision Engine account. Click the button below to choose a new password.
+              </p>
+
+              <!-- CTA button -->
+              <table cellpadding="0" cellspacing="0" role="presentation" style="margin:0 0 40px;">
+                <tr>
+                  <td style="background-color:#4371ff;border-radius:12px;">
+                    <a href="{url}"
+                       style="display:inline-block;background-color:#4371ff;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 32px;border-radius:12px;letter-spacing:-0.01em;">
+                      Reset password &rarr;
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Divider -->
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:0 0 28px;">
+                <tr><td style="border-top:1px solid #e2e8f0;"></td></tr>
+              </table>
+
+              <p style="margin:0 0 8px;font-size:13px;color:#94a3b8;">
+                Button not working? Copy and paste this link into your browser:
+              </p>
+              <p style="margin:0;font-size:12px;word-break:break-all;line-height:1.6;">
+                <a href="{url}" style="color:#3b82f6;text-decoration:none;">{url}</a>
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color:#f8fafc;border-radius:0 0 16px 16px;padding:24px 48px;border:1px solid #e2e8f0;border-top:none;">
+              <p style="margin:0 0 6px;font-size:12px;color:#94a3b8;line-height:1.65;">
+                This link expires in <strong style="color:#64748b;">30 minutes</strong> and can be used only once.
+                If you didn&rsquo;t request a password reset, you can safely ignore this email &mdash; your password will not change.
+              </p>
+              <p style="margin:10px 0 0;font-size:11px;color:#cbd5e1;">
+                Juspay Decision Engine &nbsp;&middot;&nbsp; Automated security email &mdash; please do not reply.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>"#,
+            url = url
+        );
+
+        EmailMessage {
+            to: self.user_email,
+            subject: "Reset your password — Juspay Decision Engine".to_string(),
+            html_body,
+        }
+    }
+}
+
 pub struct InviteUserTemplate {
     pub user_email: String,
     pub merchant_name: String,

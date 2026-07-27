@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
   Building2,
@@ -14,6 +14,8 @@ import {
 import { useAuthStore, MerchantInfo } from '../store/authStore'
 import { useMerchantStore } from '../store/merchantStore'
 import { apiFetch } from '../lib/api'
+import { getApiErrorMessage } from '../lib/apiError'
+import { getPasswordPolicyError } from '../lib/passwordPolicy'
 import { getResolvedThemePreference, persistThemePreference } from '../lib/theme'
 import { SurfaceLabel } from '../components/ui/Card'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
@@ -51,44 +53,6 @@ interface AuthLocationState {
 
 function getTabFromPath(pathname: string): Tab {
   return pathname.endsWith('/signup') ? 'signup' : 'login'
-}
-
-function getPasswordPolicyError(password: string): string | null {
-  if (password.length < 10) {
-    return 'Use at least 10 characters.'
-  }
-
-  if (!/[A-Z]/.test(password)) {
-    return 'Add at least one uppercase letter.'
-  }
-
-  if (!/[a-z]/.test(password)) {
-    return 'Add at least one lowercase letter.'
-  }
-
-  if (!/[0-9]/.test(password)) {
-    return 'Add at least one number.'
-  }
-
-  if (!/[^A-Za-z0-9]/.test(password)) {
-    return 'Add at least one special character.'
-  }
-
-  return null
-}
-
-function getApiErrorMessage(err: unknown): string {
-  const msg = err instanceof Error ? err.message : 'Something went wrong'
-  const match = msg.match(/API error \d+: (.+)/)
-
-  if (!match) return msg
-
-  try {
-    const parsed = JSON.parse(match[1])
-    return parsed.message ?? msg
-  } catch {
-    return match[1]
-  }
 }
 
 function isDuplicateEmailError(message: string): boolean {
@@ -359,9 +323,16 @@ export function AuthPage() {
                   <Field
                     label="Password"
                     footer={
-                      tab === 'login'
-                        ? 'Password reset is managed by your account admin.'
-                        : 'Use at least 10 characters with uppercase, lowercase, number, and special character.'
+                      tab === 'login' ? (
+                        <Link
+                          to="/forgot-password"
+                          className="font-medium text-brand-500 hover:underline"
+                        >
+                          Forgot password?
+                        </Link>
+                      ) : (
+                        'Use at least 10 characters with uppercase, lowercase, number, and special character.'
+                      )
                     }
                   >
                     <div className="relative">
@@ -466,14 +437,18 @@ function Field({
 }: {
   label: string
   children: React.ReactNode
-  footer?: string
+  footer?: React.ReactNode
 }) {
+  // The footer renders outside the <label>: it may contain interactive content (e.g. the
+  // "Forgot password?" link), which must not be part of the input's label subtree.
   return (
-    <label className="block">
-      <SurfaceLabel className="mb-2 block text-slate-500 dark:text-[#8a94a7]">{label}</SurfaceLabel>
-      {children}
+    <div>
+      <label className="block">
+        <SurfaceLabel className="mb-2 block text-slate-500 dark:text-[#8a94a7]">{label}</SurfaceLabel>
+        {children}
+      </label>
       {footer ? <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-[#7b8496]">{footer}</p> : null}
-    </label>
+    </div>
   )
 }
 

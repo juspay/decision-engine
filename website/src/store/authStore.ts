@@ -21,6 +21,7 @@ interface AuthStore {
   merchants: MerchantInfo[]
   hasHydrated: boolean
   setAuth: (token: string, user: AuthUser, merchants?: MerchantInfo[]) => void
+  setToken: (token: string) => void
   updateMerchant: (token: string, merchantId: string, merchants: MerchantInfo[]) => void
   clearAuth: () => void
   setHasHydrated: (hasHydrated: boolean) => void
@@ -36,6 +37,10 @@ export const useAuthStore = create<AuthStore>()(
       setAuth: (token, user, merchants = []) => {
         tokenRef.set(token)
         set({ token, user, merchants })
+      },
+      setToken: (token) => {
+        tokenRef.set(token)
+        set({ token })
       },
       updateMerchant: (token, merchantId, merchants) => {
         tokenRef.set(token)

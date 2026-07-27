@@ -1,20 +1,20 @@
 import { useState } from 'react'
 import { Eye, EyeOff, KeyRound } from 'lucide-react'
 import { apiFetch } from '../lib/api'
+import { getApiErrorMessage } from '../lib/apiError'
+import { getPasswordPolicyError } from '../lib/passwordPolicy'
+import { useAuthStore } from '../store/authStore'
 import { Card, CardBody, CardHeader } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
 
-function getPasswordPolicyError(password: string): string | null {
-  if (password.length < 10) return 'Use at least 10 characters.'
-  if (!/[A-Z]/.test(password)) return 'Add at least one uppercase letter.'
-  if (!/[a-z]/.test(password)) return 'Add at least one lowercase letter.'
-  if (!/[0-9]/.test(password)) return 'Add at least one number.'
-  if (!/[^A-Za-z0-9]/.test(password)) return 'Add at least one special character.'
-  return null
+interface ChangePasswordResponse {
+  message: string
+  token: string
 }
 
 export function AccountPage() {
+  const setToken = useAuthStore((s) => s.setToken)
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -36,23 +36,19 @@ export function AccountPage() {
 
     setLoading(true)
     try {
-      await apiFetch('/auth/change-password', {
+      const res = await apiFetch<ChangePasswordResponse>('/auth/change-password', {
         method: 'POST',
         body: JSON.stringify({ current_password: currentPassword, new_password: newPassword }),
       })
+      // Changing the password revokes every previously issued session token, including
+      // the one this request was made with — swap in the fresh one from the response.
+      if (res.token) setToken(res.token)
       setSuccess(true)
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Something went wrong'
-      const match = msg.match(/API error \d+: (.+)/)
-      if (match) {
-        try { setError(JSON.parse(match[1]).message ?? match[1]) }
-        catch { setError(match[1]) }
-      } else {
-        setError(msg)
-      }
+      setError(getApiErrorMessage(err))
     } finally {
       setLoading(false)
     }
