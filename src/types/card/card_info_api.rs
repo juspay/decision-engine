@@ -149,8 +149,6 @@ fn map_response_to_card_info(res: CardInfoResponse) -> Option<CardInfo> {
         .as_deref()
         .and_then(|ct| to_card_type(ct).ok());
 
-    // The API now returns the ISO alpha-2 issuing country code ("CN") directly, so we use it
-    // as-is for downstream region bucketing (issuer_region) instead of mapping a country name.
     let card_issuer_country = res.country_code;
 
     Some(CardInfo {
