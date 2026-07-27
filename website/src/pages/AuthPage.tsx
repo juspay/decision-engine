@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
   Building2,
@@ -360,7 +360,7 @@ export function AuthPage() {
                     label="Password"
                     footer={
                       tab === 'login'
-                        ? 'Password reset is managed by your account admin.'
+                        ? undefined
                         : 'Use at least 10 characters with uppercase, lowercase, number, and special character.'
                     }
                   >
@@ -385,6 +385,18 @@ export function AuthPage() {
                       </button>
                     </div>
                   </Field>
+
+                  {tab === 'login' ? (
+                    <div className="-mt-1 flex justify-end">
+                      <Link
+                        to="/forgot-password"
+                        state={{ email }}
+                        className="text-sm font-medium text-brand-600 transition-colors hover:text-brand-700 dark:text-brand-500 dark:hover:text-brand-100"
+                      >
+                        Forgot password?
+                      </Link>
+                    </div>
+                  ) : null}
 
                   {tab === 'signup' ? (
                     <p className="text-xs leading-5 text-slate-500 dark:text-[#7b8496]">

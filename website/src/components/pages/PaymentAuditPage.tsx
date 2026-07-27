@@ -330,6 +330,22 @@ function selectClassName() {
   return `${controlClassName()} appearance-none pr-7 bg-[url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")] bg-no-repeat bg-[right_8px_center]`
 }
 
+function fieldClassName() {
+  return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7] dark:placeholder:text-[#555f6e]'
+}
+
+function fieldSelectClassName() {
+  return `${fieldClassName()} appearance-none pr-9 bg-[url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")] bg-no-repeat bg-[right_12px_center]`
+}
+
+function FieldLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <label className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-[#8a8a93]">
+      {children}
+    </label>
+  )
+}
+
 function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="flex items-center gap-3">
@@ -368,20 +384,153 @@ function InspectorKeyValueGrid({ rows }: { rows: Array<{ label: string; value: s
   )
 }
 
-function InspectorJsonPanel({ title, value, emptyMessage }: { title: string; value: unknown; emptyMessage: string }) {
+function JsonBlock({ value }: { value: unknown }) {
+  return (
+    <pre className="overflow-x-auto rounded-[22px] border border-slate-200/80 bg-slate-50/90 px-4 py-4 font-mono text-xs leading-6 text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_16px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#0b1017] dark:text-[#d8e1ef] dark:shadow-none">
+      {stringifyValue(value)}
+    </pre>
+  )
+}
+
+function PanelSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
-      <div>
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{title}</h3>
-      </div>
+      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{title}</h3>
+      {children}
+    </div>
+  )
+}
+
+function InspectorJsonPanel({ title, value, emptyMessage }: { title: string; value: unknown; emptyMessage: string }) {
+  return (
+    <PanelSection title={title}>
       {value ? (
-        <pre className="overflow-x-auto rounded-[22px] border border-slate-200/80 bg-slate-50/90 px-4 py-4 font-mono text-xs leading-6 text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_16px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#0b1017] dark:text-[#d8e1ef] dark:shadow-none">
-          {stringifyValue(value)}
-        </pre>
+        <JsonBlock value={value} />
       ) : (
         <EmptyState title={`No ${title.toLowerCase()} captured`} body={emptyMessage} />
       )}
-    </div>
+    </PanelSection>
+  )
+}
+
+/** Entries of a flat record whose values are all finite numbers, else null. */
+function asNumberEntries(value: unknown): Array<[string, number]> | null {
+  if (!isRecord(value)) return null
+  const keys = Object.keys(value)
+  const entries = Object.entries(value).filter(
+    (entry): entry is [string, number] => typeof entry[1] === 'number' && Number.isFinite(entry[1]),
+  )
+  return entries.length && entries.length === keys.length ? entries : null
+}
+
+/** Entries of a flat record whose values are all scalars (string/number/bool/null), else null. */
+function asScalarEntries(value: unknown): Array<[string, string | number | boolean | null]> | null {
+  if (!isRecord(value)) return null
+  const entries = Object.entries(value)
+  if (!entries.length) return null
+  const allScalar = entries.every(
+    ([, val]) => val === null || ['string', 'number', 'boolean'].includes(typeof val),
+  )
+  return allScalar ? (entries as Array<[string, string | number | boolean | null]>) : null
+}
+
+function formatScalar(value: string | number | boolean | null): string {
+  if (value === null) return '—'
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No'
+  if (typeof value === 'number') return value.toLocaleString(undefined, { maximumFractionDigits: 6 })
+  return value
+}
+
+function ConnectorScorePanel({
+  title,
+  value,
+  emptyMessage,
+  selectedGateway,
+}: {
+  title: string
+  value: unknown
+  emptyMessage: string
+  selectedGateway?: string | null
+}) {
+  const entries = asNumberEntries(value)
+
+  if (!entries) {
+    return (
+      <PanelSection title={title}>
+        {value ? <JsonBlock value={value} /> : <EmptyState title={`No ${title.toLowerCase()} captured`} body={emptyMessage} />}
+      </PanelSection>
+    )
+  }
+
+  const sorted = [...entries].sort((left, right) => right[1] - left[1])
+  const max = Math.max(...sorted.map(([, score]) => score))
+  const asFraction = max <= 1
+  const denom = asFraction ? 1 : max || 1
+  const winner = selectedGateway && sorted.some(([gateway]) => gateway === selectedGateway)
+    ? selectedGateway
+    : sorted[0][0]
+
+  return (
+    <PanelSection title={title}>
+      <div className="space-y-3 rounded-[22px] border border-slate-200/80 bg-slate-50/90 px-4 py-4 dark:border-[#2a303a] dark:bg-[#0b1017]">
+        {sorted.map(([gateway, score]) => {
+          const isWinner = gateway === winner
+          const width = Math.max(3, Math.min(100, (score / denom) * 100))
+          return (
+            <div key={gateway} className="space-y-1.5">
+              <div className="flex items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <span className="truncate text-sm font-medium text-slate-900 dark:text-white">{gateway}</span>
+                  {isWinner ? (
+                    <span className="shrink-0 rounded-md bg-brand-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-300">
+                      Selected
+                    </span>
+                  ) : null}
+                </div>
+                <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-700 dark:text-[#d8e1ef]">
+                  {asFraction ? `${(score * 100).toFixed(1)}%` : score.toLocaleString(undefined, { maximumFractionDigits: 4 })}
+                </span>
+              </div>
+              <div className="h-2 overflow-hidden rounded-full bg-slate-200/70 dark:bg-[#1e2330]">
+                <div
+                  className="h-full rounded-full transition-all"
+                  style={{ width: `${width}%`, backgroundColor: isWinner ? '#0069ED' : '#94a3b8' }}
+                />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </PanelSection>
+  )
+}
+
+function StructuredRecordPanel({ title, value, emptyMessage }: { title: string; value: unknown; emptyMessage: string }) {
+  const entries = asScalarEntries(value)
+
+  if (!entries) {
+    return (
+      <PanelSection title={title}>
+        {value ? <JsonBlock value={value} /> : <EmptyState title={`No ${title.toLowerCase()} captured`} body={emptyMessage} />}
+      </PanelSection>
+    )
+  }
+
+  return (
+    <PanelSection title={title}>
+      <div className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-[22px] border border-slate-200/80 bg-slate-50/90 px-4 py-4 dark:border-[#2a303a] dark:bg-[#0b1017]">
+        {entries.map(([key, val]) => (
+          <div key={key} className="min-w-0">
+            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#555f6e]">
+              {humanizeAuditValue(key)}
+            </p>
+            <p className={`mt-0.5 break-all text-sm ${val === null ? 'text-slate-400 dark:text-[#555f6e]' : 'text-slate-900 dark:text-white'}`}>
+              {formatScalar(val)}
+            </p>
+          </div>
+        ))}
+      </div>
+    </PanelSection>
   )
 }
 
@@ -902,47 +1051,56 @@ export function PaymentAuditPage() {
         </div>
 
         <form
-          className="flex flex-wrap items-center gap-3"
+          className="flex flex-wrap items-end gap-3"
           onSubmit={(e) => { e.preventDefault(); applyFilters() }}
         >
-          <input
-            className={`${controlClassName()} min-w-[320px] flex-[1.4]`}
-            value={filters.paymentId || filters.requestId}
-            onChange={(event) => updateFilter('paymentId', event.target.value)}
-            placeholder={mode === 'rule_based' ? 'Decision payment ID' : 'Payment ID'}
-          />
-          <input
-            className={`${controlClassName()} min-w-[180px] flex-1`}
-            value={filters.gateway}
-            onChange={(event) => updateFilter('gateway', event.target.value)}
-            placeholder="Any gateway"
-          />
-          <select
-            className={`${selectClassName()} min-w-[160px]`}
-            value={filters.status}
-            onChange={(event) => updateFilter('status', event.target.value)}
-          >
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value || 'all'} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <Button type="submit" size="sm" className="min-w-[72px]">
+          <div className="min-w-[280px] flex-[1.4]">
+            <FieldLabel>{mode === 'rule_based' ? 'Decision payment ID' : 'Payment ID'}</FieldLabel>
+            <input
+              className={fieldClassName()}
+              value={filters.paymentId || filters.requestId}
+              onChange={(event) => updateFilter('paymentId', event.target.value)}
+              placeholder={mode === 'rule_based' ? 'Decision payment ID' : 'PaymentID'}
+            />
+          </div>
+          <div className="min-w-[180px] flex-1">
+            <FieldLabel>Gateway</FieldLabel>
+            <input
+              className={fieldClassName()}
+              value={filters.gateway}
+              onChange={(event) => updateFilter('gateway', event.target.value)}
+              placeholder="Any gateway"
+            />
+          </div>
+          <div className="min-w-[160px] flex-1">
+            <FieldLabel>Status</FieldLabel>
+            <select
+              className={fieldSelectClassName()}
+              value={filters.status}
+              onChange={(event) => updateFilter('status', event.target.value)}
+            >
+              {STATUS_OPTIONS.map((option) => (
+                <option key={option.value || 'all'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <Button type="submit" className="h-11 min-w-[88px]">
             Search
           </Button>
-          <Button size="sm" variant="ghost" onClick={clearFilters}>
+          <Button variant="ghost" onClick={clearFilters} className="h-11">
             Clear
           </Button>
           <Button
             type="button"
-            size="sm"
             variant="secondary"
             onClick={() => setShowAdvancedFilters((value) => !value)}
-            className={showAdvancedFilters ? 'text-brand-600 dark:text-brand-400' : ''}
+            aria-label="More filters"
+            title="More filters"
+            className={`h-11 !px-3 ${showAdvancedFilters ? '!text-brand-600 dark:!text-brand-400' : ''}`}
           >
-            <SlidersHorizontal className="h-3.5 w-3.5" />
-            Filters
+            <SlidersHorizontal className="h-4 w-4" />
           </Button>
         </form>
 
@@ -983,26 +1141,38 @@ export function PaymentAuditPage() {
       )}
 
       {auditSearch.data ? (
-        <div className="flex flex-wrap items-stretch gap-2">
-          <div className="flex items-center gap-1.5 rounded-[14px] border border-slate-200/80 bg-white/60 px-3.5 py-2 dark:border-[#23232a] dark:bg-[#0e1117]">
-            <span className="text-base font-bold tabular-nums text-slate-900 dark:text-white">{totalMatches}</span>
-            <span className="text-xs font-medium text-slate-500 dark:text-[#8a8a93]">Matches</span>
-          </div>
-          <div className="flex items-center gap-1.5 rounded-[14px] border border-emerald-200/60 bg-emerald-50/70 px-3.5 py-2 dark:border-emerald-500/20 dark:bg-emerald-500/[0.07]">
-            <span className="text-base font-bold tabular-nums text-emerald-700 dark:text-emerald-400">{successCount}</span>
-            <span className="text-xs font-medium text-emerald-600/80 dark:text-emerald-500/80">Success</span>
-          </div>
-          <div className="flex items-center gap-1.5 rounded-[14px] border border-red-200/60 bg-red-50/70 px-3.5 py-2 dark:border-red-500/20 dark:bg-red-500/[0.07]">
-            <span className="text-base font-bold tabular-nums text-red-600 dark:text-red-400">{failureCount}</span>
-            <span className="text-xs font-medium text-red-500/80 dark:text-red-400/80">Failure</span>
-          </div>
-          {activeGatewayList.length > 0 && (
-            <div className="flex items-center gap-1.5 rounded-[14px] border border-violet-200/60 bg-violet-50/70 px-3.5 py-2 dark:border-violet-500/20 dark:bg-violet-500/[0.07]">
-              <span className="text-base font-bold tabular-nums text-violet-700 dark:text-violet-400">{activeGateways}</span>
-              <span className="text-xs font-medium text-violet-600/80 dark:text-violet-400/80">Connectors</span>
-              <span className="text-[11px] text-violet-500/60 dark:text-violet-600/60">· {activeGatewayList.slice(0, 2).join(', ')}</span>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <GlassCard className="flex items-center gap-3 px-5 py-4">
+            <span className="text-2xl font-bold tabular-nums text-slate-900 dark:text-white">
+              {totalMatches.toLocaleString()}
+            </span>
+            <span className="text-sm font-medium text-slate-500 dark:text-[#8a8a93]">Matches</span>
+          </GlassCard>
+          <GlassCard className="flex items-center gap-3 px-5 py-4">
+            <span className="text-2xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
+              {successCount.toLocaleString()}
+            </span>
+            <Badge variant="green">Success</Badge>
+          </GlassCard>
+          <GlassCard className="flex items-center gap-3 px-5 py-4">
+            <span className="text-2xl font-bold tabular-nums text-red-600 dark:text-red-400">
+              {failureCount.toLocaleString()}
+            </span>
+            <Badge variant="red">Failure</Badge>
+          </GlassCard>
+          <GlassCard className="flex items-center gap-3 px-5 py-4">
+            <span className="text-2xl font-bold tabular-nums text-slate-900 dark:text-white">
+              {activeGateways}
+            </span>
+            <div className="min-w-0">
+              <p className="text-sm font-medium text-slate-500 dark:text-[#8a8a93]">Connectors</p>
+              {activeGatewayList.length > 0 ? (
+                <p className="truncate text-xs text-slate-400 dark:text-[#555f6e]">
+                  {activeGatewayList.slice(0, 3).join(', ')}
+                </p>
+              ) : null}
             </div>
-          )}
+          </GlassCard>
         </div>
       ) : null}
 
@@ -1016,7 +1186,7 @@ export function PaymentAuditPage() {
                   Back to results
                 </Button>
                 <div className="flex items-center justify-between gap-3">
-                  <h2 className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                  <h2 className="truncate text-base font-semibold text-slate-900 dark:text-white">
                     {selectedSummary?.payment_id || selectedSummary?.request_id || selectedSummary?.lookup_key || 'Selected payment'}
                   </h2>
                   <div className="flex shrink-0 items-center gap-2">
@@ -1036,7 +1206,7 @@ export function PaymentAuditPage() {
 
           {!trailFocused ? (
             <>
-            <div className="flex-1 overflow-y-auto p-2">
+            <div className="flex-1 space-y-2 overflow-y-auto p-3">
               {resultRows.length > 0 ? resultRows.map((row) => {
                 const isSelected = selectedSummary?.lookup_key === row.lookup_key
                 return (
@@ -1044,30 +1214,37 @@ export function PaymentAuditPage() {
                   key={row.lookup_key}
                   type="button"
                   onClick={() => selectSummary(row.lookup_key, row.event_count)}
-                  className={`relative w-full rounded-lg px-3 py-2.5 text-left transition-all ${
+                  className={`relative w-full overflow-hidden rounded-2xl border px-4 py-3 text-left transition-all ${
                     isSelected
-                      ? 'bg-brand-50 dark:bg-[#161b24]'
-                      : 'hover:bg-slate-50/80 dark:hover:bg-[#13131a]'
+                      ? 'border-brand-300 bg-brand-50 dark:border-brand-500/40 dark:bg-[#161b24]'
+                      : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/80 dark:border-[#23232a] dark:bg-[#0e1117] dark:hover:border-[#2a303a] dark:hover:bg-[#13131a]'
                   }`}
                 >
                   {isSelected && (
-                    <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-brand-500" />
+                    <span className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-brand-500" />
                   )}
-                  <div className="flex items-center gap-2.5">
-                    <div className="min-w-0 flex-1">
-                      <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
-                        {row.payment_id || row.request_id || row.lookup_key}
-                      </p>
-                      <p className="mt-0.5 truncate text-xs text-slate-400 dark:text-[#555f6e]">
-                        {compactMeta([row.latest_gateway || null, `${row.event_count} event${row.event_count === 1 ? '' : 's'}`])}
-                      </p>
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900 dark:text-white">
+                      {row.payment_id || row.request_id || row.lookup_key}
+                    </p>
+                    <span className="shrink-0 text-[11px] text-slate-400 dark:text-[#555f6e]">
+                      {formatRelative(row.last_seen_ms)}
+                    </span>
+                  </div>
+                  <div className="mt-2 flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-2">
+                      {row.latest_gateway ? (
+                        <span className="shrink-0 rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-[#1e2330] dark:text-[#a7b2c6]">
+                          {row.latest_gateway}
+                        </span>
+                      ) : null}
+                      <span className="truncate text-xs text-slate-400 dark:text-[#555f6e]">
+                        {row.event_count} event{row.event_count === 1 ? '' : 's'}
+                      </span>
                     </div>
-                    <div className="shrink-0 text-right">
-                      <p className="text-[11px] text-slate-400 dark:text-[#555f6e]">{formatRelative(row.last_seen_ms)}</p>
-                      <Badge variant={summaryBadgeVariant(row.latest_status)}>
-                        {humanizeAuditValue(row.latest_status) || 'Unknown'}
-                      </Badge>
-                    </div>
+                    <Badge variant={summaryBadgeVariant(row.latest_status)}>
+                      {humanizeAuditValue(row.latest_status) || 'Unknown'}
+                    </Badge>
                   </div>
                 </button>
               )}) : (
@@ -1108,9 +1285,9 @@ export function PaymentAuditPage() {
             </div>
             </>
           ) : (
-            <div className="flex-1 overflow-y-auto p-2">
+            <div className="flex-1 space-y-1.5 overflow-y-auto p-3">
               {timeline.length ? (
-                <div>
+                <>
                   {timeline.map((event, index) => {
                     const selected = selectedEvent?.id === event.id
                     return (
@@ -1121,17 +1298,17 @@ export function PaymentAuditPage() {
                           setSelectedEventId(event.id)
                           setInspectorTab('summary')
                         }}
-                        className={`relative w-full rounded-lg px-3 py-2.5 text-left transition-all ${
+                        className={`relative w-full overflow-hidden rounded-2xl px-4 py-3 text-left transition-all ${
                           selected
                             ? 'bg-brand-50 dark:bg-[#161b24]'
                             : 'hover:bg-slate-50/80 dark:hover:bg-[#13131a]'
                         }`}
                       >
                         {selected && (
-                          <span className="absolute inset-y-1.5 left-0 w-[3px] rounded-full bg-brand-500" />
+                          <span className="absolute inset-y-2.5 left-0 w-[3px] rounded-full bg-brand-500" />
                         )}
-                        <div className="flex items-center gap-2.5">
-                          <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full text-[10px] font-bold ${
+                        <div className="flex items-start gap-3">
+                          <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
                             selected
                               ? 'bg-brand-500/15 text-brand-500 dark:text-brand-400'
                               : 'bg-slate-100 text-slate-500 dark:bg-[#1e2330] dark:text-[#8a8a93]'
@@ -1155,7 +1332,7 @@ export function PaymentAuditPage() {
                               </p>
                             ) : null}
                           </div>
-                          <div className="shrink-0 text-right">
+                          <div className="shrink-0 space-y-1 text-right">
                             <p className="text-[11px] text-slate-400 dark:text-[#555f6e]">{formatRelative(event.created_at_ms)}</p>
                             {event.status ? (
                               <Badge variant={summaryBadgeVariant(event.status)}>
@@ -1167,7 +1344,7 @@ export function PaymentAuditPage() {
                       </button>
                     )
                   })}
-                </div>
+                </>
               ) : (
                 <EmptyState
                   title="No timeline selected yet"
@@ -1216,31 +1393,40 @@ export function PaymentAuditPage() {
                   </InsetPanel>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
+                <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-full border border-slate-200 bg-slate-100/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
                   {INSPECTOR_TABS.map((tab) => (
-                    <Button
+                    <button
                       key={tab}
-                      size="sm"
-                      variant="secondary"
-                      className={sectionButtonClass(inspectorTab === tab)}
+                      type="button"
                       onClick={() => setInspectorTab(tab)}
+                      className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+                        inspectorTab === tab
+                          ? 'bg-white text-slate-900 shadow-sm dark:bg-[#161b24] dark:text-white'
+                          : 'text-slate-500 hover:text-slate-900 dark:text-[#a7b2c6] dark:hover:text-white'
+                      }`}
                     >
                       {tab === 'summary' ? 'Summary' : tab === 'input' ? 'Input' : tab === 'response' ? 'Response' : 'Raw JSON'}
-                    </Button>
+                    </button>
                   ))}
                 </div>
 
                 {inspectorTab === 'summary' ? (
                   <div className="space-y-4">
                     {selectedEventIsDecision ? (
-                      <InspectorJsonPanel
+                      <ConnectorScorePanel
                         title="Connector scores"
                         value={inspectorModel.scoreContext}
+                        selectedGateway={selectedEvent.gateway}
                         emptyMessage="No connector score map was captured for this event."
                       />
                     ) : null}
-                    <InspectorKeyValueGrid rows={inspectorModel.summaryRows} />
-                    <InspectorJsonPanel
+                    {inspectorModel.summaryRows.length ? (
+                      <div className="space-y-3">
+                        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Decision metadata</h3>
+                        <InspectorKeyValueGrid rows={inspectorModel.summaryRows} />
+                      </div>
+                    ) : null}
+                    <StructuredRecordPanel
                       title="Selection reason"
                       value={inspectorModel.selectionReason}
                       emptyMessage="No explicit selection reason was captured for this event."
