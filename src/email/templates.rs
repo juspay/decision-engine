@@ -127,7 +127,10 @@ impl MemberAddedTemplate {
             to: self.user_email,
             subject: format!("You now have access to {}", self.merchant_name),
             html_body: render_layout(
-                &format!("You now have access to {} on Juspay Decision Engine.", self.merchant_name),
+                &format!(
+                    "You now have access to {} on Juspay Decision Engine.",
+                    self.merchant_name
+                ),
                 &content,
             ),
         }
@@ -246,7 +249,10 @@ impl InviteUserTemplate {
             to: self.user_email,
             subject: format!("You've been invited to {}", self.merchant_name),
             html_body: render_layout(
-                &format!("You've been added to {} on Juspay Decision Engine.", self.merchant_name),
+                &format!(
+                    "You've been added to {} on Juspay Decision Engine.",
+                    self.merchant_name
+                ),
                 &content,
             ),
         }

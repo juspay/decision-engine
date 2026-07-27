@@ -1134,7 +1134,10 @@ pub async fn forgot_password(
 
     let token = uuid::Uuid::new_v4().to_string();
     let redis_key = format!("{}{}", PASSWORD_RESET_PREFIX, token);
-    let reset_url = format!("{}/reset-password?token={}", global_config.email.base_url, token);
+    let reset_url = format!(
+        "{}/reset-password?token={}",
+        global_config.email.base_url, token
+    );
 
     app_state
         .redis_conn
@@ -1174,21 +1177,22 @@ pub async fn reset_password(
 
     let redis_key = format!("{}{}", PASSWORD_RESET_PREFIX, payload.token);
 
-    let user_id = app_state
-        .redis_conn
-        .get_key_string(&redis_key)
-        .await
-        .change_context(UserAuthError::StorageError)?;
-
-    if user_id.is_empty() {
-        return Err(error::ContainerError::from(UserAuthError::InvalidResetToken));
-    }
-
+    // Validate and hash before touching the token so a weak password doesn't consume it.
     auth::validate_password_strength(&payload.new_password)
         .change_context(UserAuthError::WeakPassword)?;
 
     let new_hash = auth::hash_password(&payload.new_password)
         .change_context(UserAuthError::PasswordHashingFailed)?;
+
+    // Single-use token: GETDEL consumes it atomically, so concurrent requests carrying the
+    // same token can't both read it and reset the password twice.
+    let user_id = app_state
+        .redis_conn
+        .get_and_delete_key_string(&redis_key)
+        .await
+        .change_context(UserAuthError::StorageError)?
+        .filter(|user_id| !user_id.is_empty())
+        .ok_or(UserAuthError::InvalidResetToken)?;
 
     let conn = app_state
         .db
@@ -1212,11 +1216,10 @@ pub async fn reset_password(
 
     if rows_updated == 0 {
         crate::logger::error!(user_id = %user_id, "Password reset matched 0 rows — user_id not found in DB");
-        return Err(error::ContainerError::from(UserAuthError::InvalidResetToken));
+        return Err(error::ContainerError::from(
+            UserAuthError::InvalidResetToken,
+        ));
     }
-
-    // Single-use token: consume it so the link can't be replayed.
-    let _ = app_state.redis_conn.delete_key(&redis_key).await;
 
     Ok(Json(MessageResponse {
         message: "Password reset successfully. You can now sign in with your new password."
