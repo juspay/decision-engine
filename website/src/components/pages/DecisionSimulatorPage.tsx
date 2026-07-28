@@ -14,7 +14,7 @@ import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { useAuthStore } from '../../store/authStore'
-import { apiPost, fetcher } from '../../lib/api'
+import { apiErrorStatus, apiPost, fetcher } from '../../lib/api'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import { DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
@@ -816,9 +816,9 @@ function phaseBadgeVariant(phase: string): 'blue' | 'green' | 'purple' | 'red' |
 }
 
 function isTraceIndexingError(error: unknown) {
-  const status = typeof error === 'object' && error ? (error as { status?: number }).status : undefined
-  const message = error instanceof Error ? error.message : String(error || '')
-  return status === 404 || message.includes('API error 404')
+  // Status only — the message no longer carries the code, and sniffing prose for it was always
+  // brittle (a body that merely mentioned 404 would have matched).
+  return apiErrorStatus(error) === 404
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

@@ -85,19 +85,67 @@ function extractErrorMessageFromJson(value: unknown): string | null {
   return null
 }
 
+/** Longest server message worth showing verbatim. Past this it is a dump, not a sentence. */
+const MAX_DETAIL_LENGTH = 200
+
+const GENERIC_ERROR = 'Something went wrong. Please try again.'
+
+/**
+ * The message a user sees when a request fails.
+ *
+ * Only a body that reads like a sentence written for a person is shown verbatim — our API's own
+ * errors ("ingestion not found", "unknown connector: foo") are exactly that, and are far more useful
+ * than a generic line. Everything else collapses to [`GENERIC_ERROR`]:
+ *
+ *  - **HTML** — the request was answered by a CDN, ingress, or the marketing site rather than the
+ *    API (every backend error is plain text or JSON), so the body describes someone else's 404 page.
+ *    It was previously pasted into the UI in full, kilobytes of markup and consent-banner scripts.
+ *  - **Anything over [`MAX_DETAIL_LENGTH`]** — a stack trace or a serialized blob, not a message.
+ *
+ * The raw body is never lost: it goes to the console with the status, so a failure stays debuggable
+ * without putting a wall of markup in front of the user.
+ *
+ * No `API error <status>:` prefix — a status code is not information a merchant can act on, and it
+ * invited callers to re-parse the message. Use [`apiErrorMessage`] to display a failure and
+ * [`apiErrorStatus`] to branch on the code.
+ */
 function buildApiErrorMessage(status: number, statusText: string, responseText: string) {
   const trimmed = responseText.trim()
-  let detail = ''
-
   if (trimmed) {
-    try {
-      detail = extractErrorMessageFromJson(JSON.parse(trimmed)) || trimmed
-    } catch {
-      detail = trimmed
-    }
+    console.error(`[api] ${status} ${statusText || ''}`.trim(), trimmed.slice(0, 2000))
   }
 
-  return `API error ${status}: ${detail || statusText || 'Request failed'}`
+  const isHtml = /^\s*(<!doctype html|<html\b|<\?xml\b)/i.test(trimmed)
+  if (!trimmed || isHtml) return GENERIC_ERROR
+
+  let detail = ''
+  try {
+    detail = extractErrorMessageFromJson(JSON.parse(trimmed)) || trimmed
+  } catch {
+    detail = trimmed
+  }
+  detail = detail.trim()
+
+  return detail && detail.length <= MAX_DETAIL_LENGTH ? detail : GENERIC_ERROR
+}
+
+/** HTTP status of a rejected API call, or `undefined` if it failed before getting one (network, abort). */
+export function apiErrorStatus(err: unknown): number | undefined {
+  return typeof err === 'object' && err ? (err as { status?: number }).status : undefined
+}
+
+/**
+ * The display message for a rejected API call.
+ *
+ * [`buildApiErrorMessage`] has already reduced the response to something showable — a short server
+ * sentence or [`GENERIC_ERROR`] — so this only unwraps the `Error` and supplies a caller-specific
+ * fallback for a non-`Error` rejection. Callers must NOT re-parse the message: it once carried an
+ * `API error <status>: ` prefix (and sometimes raw JSON) that every page peeled off by hand, which
+ * is exactly the duplication this replaces. Read [`apiErrorStatus`] when you need the code.
+ */
+export function apiErrorMessage(err: unknown, fallback = 'Something went wrong'): string {
+  const message = err instanceof Error ? err.message.trim() : ''
+  return message || fallback
 }
 
 export async function apiFetch<T>(
@@ -118,10 +166,20 @@ export async function apiFetch<T>(
       headers.set('Authorization', `Bearer ${token}`)
     }
 
-    const res = await fetch(requestPath, {
-      ...options,
-      headers,
-    })
+    let res: Response
+    try {
+      res = await fetch(requestPath, { ...options, headers })
+    } catch (cause) {
+      // `fetch` rejects only when no response arrived at all — offline, DNS/TLS failure, CORS
+      // rejection, or the request being cut. The browser's own text ("Failed to fetch",
+      // "NetworkError when attempting to fetch resource") names none of that usefully, and carries
+      // no status for callers to branch on.
+      const error = new Error('Could not reach the server. Check your connection and try again.') as
+        Error & { cause?: unknown }
+      error.cause = cause
+      logError(requestPath, cause)
+      throw error
+    }
 
     const responseText = await res.text()
     // let responseBody: string
@@ -174,7 +232,24 @@ export async function apiFetch<T>(
       return undefined as T
     }
 
-    return JSON.parse(responseText) as T
+    try {
+      return JSON.parse(responseText) as T
+    } catch (cause) {
+      // A 2xx whose body is not JSON. An edge (CDN, ingress, SPA fallback) can answer 200 with an
+      // HTML page, and a bare `JSON.parse` failure surfaces as "Unexpected token < in JSON at
+      // position 0" — which reads like an app bug rather than a request that never reached the API.
+      const error = new Error(GENERIC_ERROR) as Error & {
+        status?: number
+        responseText?: string
+        cause?: unknown
+      }
+      error.status = res.status
+      error.responseText = responseText
+      error.cause = cause
+      console.error(`[api] ${res.status} non-JSON response`, responseText.slice(0, 2000))
+      logError(requestPath, error)
+      throw error
+    }
   } catch (error) {
     logError(requestPath, error)
     throw error
@@ -263,8 +338,11 @@ export function apiUploadWithProgress<T>(
       reject(error)
     }
     xhr.timeout = 30 * 60 * 1000
-    xhr.onerror = () => reject(new Error('Network error during upload'))
-    xhr.ontimeout = () => reject(new Error('Upload timed out'))
+    xhr.onerror = () => reject(new Error('Could not reach the server. Check your connection and try again.'))
+    xhr.ontimeout = () => reject(new Error('Upload timed out. Please try again.'))
+    // Without this the promise never settles when the transfer is cut (navigation, tab close, an
+    // explicit abort), leaving the caller's spinner running forever.
+    xhr.onabort = () => reject(new Error('Upload cancelled.'))
 
     xhr.send(file)
   })

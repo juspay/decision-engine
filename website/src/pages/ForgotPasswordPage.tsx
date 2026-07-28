@@ -1,24 +1,12 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { ArrowLeft, ArrowRight, CheckCircle, Loader2, Mail, Moon, Sun } from 'lucide-react'
-import { apiFetch } from '../lib/api'
+import { apiErrorMessage, apiFetch } from '../lib/api'
 import { getResolvedThemePreference, persistThemePreference } from '../lib/theme'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
 
 interface ForgotPasswordResponse {
   message: string
-}
-
-function getApiErrorMessage(err: unknown): string {
-  const msg = err instanceof Error ? err.message : 'Something went wrong'
-  const match = msg.match(/API error \d+: (.+)/)
-  if (!match) return msg
-  try {
-    const parsed = JSON.parse(match[1])
-    return parsed.message ?? msg
-  } catch {
-    return match[1]
-  }
 }
 
 export function ForgotPasswordPage() {
@@ -52,7 +40,7 @@ export function ForgotPasswordPage() {
           'If an account exists for that email, a password reset link has been sent.',
       )
     } catch (err) {
-      setError(getApiErrorMessage(err))
+      setError(apiErrorMessage(err))
     } finally {
       setLoading(false)
     }

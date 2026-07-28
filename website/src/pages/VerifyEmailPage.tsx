@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { CheckCircle, Loader2, Moon, Sun, XCircle } from 'lucide-react'
-import { apiFetch } from '../lib/api'
+import { apiErrorMessage, apiFetch } from '../lib/api'
 import { getResolvedThemePreference, persistThemePreference } from '../lib/theme'
 
 type Status = 'verifying' | 'success' | 'error'
@@ -37,18 +37,7 @@ export function VerifyEmailPage() {
         }, 2500)
       })
       .catch((err: unknown) => {
-        const msg = err instanceof Error ? err.message : 'Verification failed'
-        const match = msg.match(/API error \d+: (.+)/)
-        if (match) {
-          try {
-            const parsed = JSON.parse(match[1])
-            setErrorMessage(parsed.message ?? match[1])
-          } catch {
-            setErrorMessage(match[1])
-          }
-        } else {
-          setErrorMessage(msg)
-        }
+        setErrorMessage(apiErrorMessage(err, 'Verification failed'))
         setStatus('error')
       })
   }, [navigate, searchParams])

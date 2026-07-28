@@ -13,7 +13,7 @@ import {
 } from 'lucide-react'
 import { useAuthStore, MerchantInfo } from '../store/authStore'
 import { useMerchantStore } from '../store/merchantStore'
-import { apiFetch } from '../lib/api'
+import { apiErrorMessage, apiFetch } from '../lib/api'
 import { getResolvedThemePreference, persistThemePreference } from '../lib/theme'
 import { SurfaceLabel } from '../components/ui/Card'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
@@ -75,20 +75,6 @@ function getPasswordPolicyError(password: string): string | null {
   }
 
   return null
-}
-
-function getApiErrorMessage(err: unknown): string {
-  const msg = err instanceof Error ? err.message : 'Something went wrong'
-  const match = msg.match(/API error \d+: (.+)/)
-
-  if (!match) return msg
-
-  try {
-    const parsed = JSON.parse(match[1])
-    return parsed.message ?? msg
-  } catch {
-    return match[1]
-  }
 }
 
 function isDuplicateEmailError(message: string): boolean {
@@ -230,7 +216,7 @@ export function AuthPage() {
         navigate('/', { replace: true })
       }
     } catch (err) {
-      const msg = getApiErrorMessage(err)
+      const msg = apiErrorMessage(err)
 
       if (tab === 'signup' && isDuplicateEmailError(msg)) {
         setTab('login')

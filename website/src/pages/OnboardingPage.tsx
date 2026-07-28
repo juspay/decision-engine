@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { ArrowRight, Building2, Loader2 } from 'lucide-react'
 import { useAuthStore, MerchantInfo } from '../store/authStore'
 import { useMerchantStore } from '../store/merchantStore'
-import { apiFetch } from '../lib/api'
+import { apiErrorMessage, apiFetch } from '../lib/api'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
 
 interface CreateMerchantResponse {
@@ -68,18 +68,7 @@ export function OnboardingPage() {
       setMerchantId(res.merchant_id)
       navigate('/', { replace: true })
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Something went wrong'
-      const match = msg.match(/API error \d+: (.+)/)
-      if (match) {
-        try {
-          const parsed = JSON.parse(match[1])
-          setError(parsed.message ?? msg)
-        } catch {
-          setError(match[1])
-        }
-      } else {
-        setError(msg)
-      }
+      setError(apiErrorMessage(err))
     } finally {
       setLoading(false)
     }
