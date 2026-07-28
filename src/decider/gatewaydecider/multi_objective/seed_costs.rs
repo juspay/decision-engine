@@ -34,10 +34,30 @@
 
 use std::collections::HashMap;
 
-use crate::config::{SeedCostEntry, SeedCostTier};
+use crate::config::{fee_components, SeedCostEntry, SeedCostTier};
 
 use super::cluster_key::ClusterKey;
 use super::hypersense_client::PspCost;
+
+/// A resolved seed fee for a PSP against a cluster — the contract components (bps) plus the flat
+/// per-transaction fee. The effective percentage rate is the sum of the three components (see
+/// [`ResolvedFee::pct_bps`]); a legacy blended entry surfaces as `interchange_bps == pct_bps` with
+/// zero scheme/markup, so it collapses to the same effective rate.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolvedFee {
+    pub interchange_bps: f64,
+    pub scheme_bps: f64,
+    pub markup_bps: f64,
+    /// Flat per-transaction fee in the cluster's major currency unit.
+    pub fixed: f64,
+}
+
+impl ResolvedFee {
+    /// Effective percentage rate (bps) = interchange + scheme + markup.
+    pub fn pct_bps(&self) -> f64 {
+        self.interchange_bps + self.scheme_bps + self.markup_bps
+    }
+}
 
 /// Effective bps for an amount-independent `{pct_bps, fixed}` split.
 fn effective_cost_bps(pct_bps: f64, fixed: f64, amount: f64) -> f64 {
@@ -61,7 +81,7 @@ fn field(value: &Option<String>) -> &str {
 /// more fields always outranks one matching fewer, and same-count ties resolve by the more
 /// discriminating dimension (issuer_region > currency > network > funding > program). A
 /// wildcard (`None`) field adds nothing.
-fn tier_score(tier: &SeedCostTier, cluster: &ClusterKey) -> Option<u32> {
+pub(crate) fn tier_score(tier: &SeedCostTier, cluster: &ClusterKey) -> Option<u32> {
     let mut count = 0u32;
     let mut tiebreak = 0u32;
 
@@ -104,16 +124,53 @@ fn tier_score(tier: &SeedCostTier, cluster: &ClusterKey) -> Option<u32> {
     Some(count * 32 + tiebreak)
 }
 
-/// Resolve the `{pct_bps, fixed}` for a PSP entry against a cluster: the most specific
-/// matching tier, falling back to the entry's `default`.
-fn resolve_fee(entry: &SeedCostEntry, cluster: &ClusterKey) -> (f64, f64) {
+/// Resolve the fee for a PSP entry against a cluster: the most specific matching tier, falling
+/// back to the entry's `default`. Returns the interchange/scheme/markup breakdown plus the fixed
+/// fee so callers (decide and the simulation preview) can show the components as well as the total.
+pub(crate) fn resolve_fee(entry: &SeedCostEntry, cluster: &ClusterKey) -> ResolvedFee {
     entry
         .tiers
         .iter()
         .filter_map(|t| tier_score(t, cluster).map(|s| (s, t)))
         .max_by_key(|(s, _)| *s)
-        .map(|(_, t)| (t.pct_bps, t.fixed))
-        .unwrap_or((entry.default.pct_bps, entry.default.fixed))
+        .map(|(_, t)| {
+            fee_from(
+                t.pct_bps,
+                t.interchange_bps,
+                t.scheme_bps,
+                t.markup_bps,
+                t.fixed,
+            )
+        })
+        .unwrap_or_else(|| {
+            let d = &entry.default;
+            fee_from(
+                d.pct_bps,
+                d.interchange_bps,
+                d.scheme_bps,
+                d.markup_bps,
+                d.fixed,
+            )
+        })
+}
+
+/// Build a [`ResolvedFee`] from a tier/default's raw fields, attributing a legacy blended `pct_bps`
+/// to interchange when no explicit components are set (see [`fee_components`]).
+fn fee_from(
+    pct_bps: f64,
+    interchange_bps: Option<f64>,
+    scheme_bps: Option<f64>,
+    markup_bps: Option<f64>,
+    fixed: f64,
+) -> ResolvedFee {
+    let (interchange_bps, scheme_bps, markup_bps) =
+        fee_components(pct_bps, interchange_bps, scheme_bps, markup_bps);
+    ResolvedFee {
+        interchange_bps,
+        scheme_bps,
+        markup_bps,
+        fixed,
+    }
 }
 
 /// Returns deterministic per-PSP costs from the config seed table, mirroring the shape of
@@ -129,18 +186,19 @@ pub fn lookup_seed_costs(
     psps.iter()
         .filter_map(|psp| {
             let entry = entries.iter().find(|e| e.psp.eq_ignore_ascii_case(psp))?;
-            let (pct_bps, fixed) = resolve_fee(entry, cluster);
+            let fee = resolve_fee(entry, cluster);
+            let pct_bps = fee.pct_bps();
             Some((
                 psp.clone(),
                 PspCost {
                     available: true,
-                    effective_cost_bps: effective_cost_bps(pct_bps, fixed, amount),
+                    effective_cost_bps: effective_cost_bps(pct_bps, fee.fixed, amount),
                     source: super::CostSource::Seed,
                     cost_model: Some(super::CostModel {
                         brand: cluster.card_network.clone(),
                         ccy: cluster.transaction_currency.clone(),
                         pct_bps: Some(pct_bps),
-                        fixed_fee: Some(fixed),
+                        fixed_fee: Some(fee.fixed),
                         variant: None,
                         issuer: None,
                         ic_category: None,
@@ -196,6 +254,7 @@ mod tests {
             card_issuing_country: None,
             pct_bps,
             fixed,
+            ..Default::default()
         }
     }
 
@@ -236,6 +295,7 @@ mod tests {
                 default: SeedFeeModel {
                     pct_bps: 290.0,
                     fixed: 0.30,
+                    ..Default::default()
                 },
                 tiers: vec![],
             },
@@ -244,6 +304,7 @@ mod tests {
                 default: SeedFeeModel {
                     pct_bps: 194.0,
                     fixed: 0.24,
+                    ..Default::default()
                 }, // global fallback = US visa credit standard
                 tiers: vec![
                     // US (USD)
@@ -436,6 +497,7 @@ mod tests {
             default: SeedFeeModel {
                 pct_bps: 194.0,
                 fixed: 0.24,
+                ..Default::default()
             },
             tiers: vec![
                 region_tier("us", Some("visa"), Some("debit"), None, 78.0, 0.30), // ~108bps @ $100
@@ -467,6 +529,7 @@ mod tests {
             default: SeedFeeModel {
                 pct_bps: 194.0,
                 fixed: 0.24,
+                ..Default::default()
             },
             tiers: vec![
                 region_tier(
@@ -504,5 +567,38 @@ mod tests {
         let psps = vec!["adyen".to_string(), "stripe".to_string()];
         let costs = lookup_seed_costs(&[], &usd_credit("visa", "standard", 100.0), &psps);
         assert!(costs.is_empty());
+    }
+
+    // A component-form tier prices at the SUM of interchange + scheme + markup, and the summed
+    // percentage is what surfaces on the cost model — while a legacy `pct_bps` tier is unaffected.
+    #[test]
+    fn component_tier_effective_bps_is_the_sum_of_components() {
+        let entry = SeedCostEntry {
+            psp: "adyen".to_string(),
+            default: SeedFeeModel {
+                pct_bps: 194.0,
+                fixed: 0.24,
+                ..Default::default()
+            },
+            tiers: vec![SeedCostTier {
+                transaction_currency: Some("AED".to_string()),
+                card_network: Some("visa".to_string()),
+                payment_method_type: Some("debit".to_string()),
+                interchange_bps: Some(100.0),
+                scheme_bps: Some(12.0),
+                markup_bps: Some(15.0),
+                fixed: 0.50,
+                ..Default::default()
+            }],
+        };
+        let c = cluster("visa", "debit", "standard", "AED", 6500.0);
+        let costs = lookup_seed_costs(&[entry], &c, &["adyen".to_string()]);
+        // 100 + 12 + 15 = 127 bps, + AED 0.50 on 6500 ≈ 127.77 bps.
+        let expected = 127.0 + (0.50 / 6500.0) * 10_000.0;
+        assert!((costs["adyen"].effective_cost_bps - expected).abs() < 1e-6);
+        assert_eq!(
+            costs["adyen"].cost_model.as_ref().unwrap().pct_bps,
+            Some(127.0)
+        );
     }
 }

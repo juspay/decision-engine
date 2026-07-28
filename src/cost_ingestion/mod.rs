@@ -23,6 +23,7 @@ pub mod pipeline;
 pub mod poller;
 pub mod preflight;
 pub mod rollup;
+pub mod segment;
 pub mod serving;
 pub mod sink;
 pub mod source;

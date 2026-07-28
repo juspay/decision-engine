@@ -17,6 +17,7 @@ pub mod invoice_upload;
 pub mod merchant_account_config;
 pub mod report_upload;
 pub mod rule_configuration;
+pub mod seed_costs;
 pub mod settlement_webhook;
 pub mod update_gateway_score;
 pub mod update_score;

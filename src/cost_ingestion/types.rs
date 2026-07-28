@@ -30,6 +30,15 @@ pub struct SettledFeeRow {
     pub currency: String,
     /// Interchange category from the report; `""` for flat-fee methods (iDEAL/Klarna/CB).
     pub ic_category: String,
+    /// The published interchange **rate** for this transaction, as an integer-bps string (e.g.
+    /// `"135"`), or `""` when the report carries none (blended/bundled connectors). NOT itself a
+    /// cluster key — it is the *training signal* for the per-BIN `card_product`: the rollup folds
+    /// each (BIN, rate) observation into the global `cost_bin_product` map, and the cluster is keyed
+    /// on the BIN's DOMINANT rate (resolved from that map), not on this per-row value. That
+    /// indirection is what makes the fan-separating key reproducible at decide time, where the rate
+    /// is unknown but the BIN is not. On a cold BIN (not yet in the map) this per-row rate is the
+    /// fallback, so the fan still splits on the very first ingest.
+    pub ic_bps: String,
     /// Transaction (booking) date, when the report carries one. Not staged into ClickHouse — used
     /// only to compute the ingested report's period (min/max) for the history record.
     pub txn_date: Option<NaiveDate>,
@@ -48,8 +57,9 @@ pub struct SettledFeeRow {
     pub markup: f64,
     pub commission: f64,
     /// Issuer BIN (leading PAN digits) when the report carries the card number, else `""`. Seeds the
-    /// global `cost_bin_product` map that resolves the card product for co-badged schemes whose
-    /// `variant` leaves `funding` blank (Open Risk #4). Never itself a fit dimension.
+    /// global `cost_bin_product` map and, canonicalised to 6 digits via [`SettledFeeRow::bin_key`],
+    /// is the lookup key that resolves this row's `card_product` (the BIN's dominant interchange
+    /// rate). Never itself a fit dimension — it is high-cardinality and would shatter clusters.
     pub bin: String,
 }
 
@@ -104,6 +114,17 @@ impl SettledFeeRow {
         }
     }
 
+    /// Normalize an optional published interchange rate into the [`SettledFeeRow::ic_bps`] training
+    /// string: rounded to whole bps (`Some(135.0)` → `"135"`), or `""` when absent or non-positive
+    /// (blended / no-interchange rows). This per-row rate feeds the per-BIN `card_product` map and is
+    /// the cold-BIN fallback for the cluster key; it is not itself the cluster key.
+    pub fn ic_bps_key(bps: Option<f64>) -> String {
+        match bps {
+            Some(b) if b > 0.0 => (b.round() as i64).to_string(),
+            _ => String::new(),
+        }
+    }
+
     /// Extract the issuer BIN from a PAN as the report states it — reports mask the middle
     /// (`489678****4354`), so we take the leading run of digits, capped at 8 (the modern BIN
     /// length). Returns `""` when the field is empty or non-numeric (trimmed/tokenized reports),
@@ -113,6 +134,19 @@ impl SettledFeeRow {
             .chars()
             .take_while(|c| c.is_ascii_digit())
             .take(8)
+            .collect()
+    }
+
+    /// Canonical `cost_bin_product` key: the BIN's leading (up to) 6 digits. Both sides of the map —
+    /// the ingest observation (from the report PAN) and the decide-time lookup (from `card_isin`) —
+    /// must reduce to the same key or the resolved `card_product` can never match. 6 is the classic
+    /// issuer BIN length that both sources reliably carry (the report PAN may expose 8, the request
+    /// `card_isin` often only 6), so we truncate to the common denominator. Non-digits and short
+    /// inputs pass through as-is (`""` stays `""` → no map entry, graceful coarse fallback).
+    pub fn bin_key(bin: &str) -> String {
+        bin.chars()
+            .take_while(|c| c.is_ascii_digit())
+            .take(6)
             .collect()
     }
 }

@@ -153,20 +153,27 @@ async fn process(
 /// Log the fit outcome. A snapshot with no GOOD clusters is written but flagged — serving only ever
 /// reads GOOD rows (§10), so this is "no coverage", never a bad cost.
 fn log_fit(id: &str, outcome: &IngestOutcome) {
-    if outcome.summary.good_clusters == 0 {
+    let s = &outcome.summary;
+    // The warning gate stays on the SNAPSHOT: "this merchant now has no usable cost model" is the
+    // alarming condition. A single report contributing no GOOD cluster of its own is ordinary (a
+    // small or thin report), so it must not fire the warning — but both scopes are logged, since
+    // "6 of this report's clusters, 1,572 in the model" is what makes a fit outcome readable.
+    if s.good_clusters == 0 {
         logger::warn!(
             tag = "ingest_worker",
             "job {} fit produced 0 GOOD clusters out of {} — snapshot has no usable cost models",
             id,
-            outcome.summary.total_clusters
+            s.total_clusters
         );
     } else {
         logger::info!(
             tag = "ingest_worker",
-            "job {} fit: {}/{} clusters GOOD ({} rows staged)",
+            "job {} fit: {}/{} clusters GOOD from this report ({}/{} in the snapshot, {} rows staged)",
             id,
-            outcome.summary.good_clusters,
-            outcome.summary.total_clusters,
+            s.ingested_good_clusters,
+            s.ingested_clusters,
+            s.good_clusters,
+            s.total_clusters,
             outcome.staged
         );
     }

@@ -47,6 +47,7 @@ CREATE TABLE IF NOT EXISTS cost_daily_stats (
     issuer_country   LowCardinality(String),    -- 'FR', 'IT', …             │
     currency         LowCardinality(String),    -- 'EUR', 'AUD', …           │
     ic_category      String,                     -- interchange category (''=flat-fee) ┘
+    card_product     LowCardinality(String) DEFAULT '',  -- resolved card-product tier: the issuer BIN's DOMINANT interchange rate (bps string), from cost_bin_product; '' = blended/no-rate. Separates same-category cards priced differently (a fan). Resolved from the BIN at ingest so the SAME key is reproducible at decide time (unlike a per-row rate). Falls back to the row's own rate on a cold BIN.
     channel          LowCardinality(String) DEFAULT '',  -- 'pos' | 'ecom' — predictor feature (§9), summed away by the fit
     band             LowCardinality(String) DEFAULT '',  -- amount band ('lo'..'hi') — predictor feature, summed away by the fit
     -- Sufficient statistics over the txns in this bucket (gross >= 5 only). All additive.
@@ -70,8 +71,13 @@ CREATE TABLE IF NOT EXISTS cost_daily_stats (
 -- month-complete batches). The fit windows on `txn_date`, independent of when the rows arrived.
 ENGINE = ReplacingMergeTree(ingested_at)
 PARTITION BY toYYYYMM(txn_date)
+-- card_product sits LAST (after the channel/band predictor features) rather than beside the other
+-- cluster-key columns. That placement is deliberate: it lets an already-provisioned table gain the
+-- column as a pure sort-key APPEND (the only MODIFY ORDER BY ClickHouse can do in place — see
+-- 038_cost_card_product.sh), so fresh installs and migrated databases end up with the identical key.
+-- The ReplacingMergeTree dedup identity is the full column set, so position doesn't change the fit.
 ORDER BY (connector, account, merchant_id, txn_date,
-          card_network, variant, funding, issuer_country, currency, ic_category, channel, band)
+          card_network, variant, funding, issuer_country, currency, ic_category, channel, band, card_product)
 -- Generous retention: the fit windows on the *latest* transaction date in the data (not the wall
 -- clock), so this only needs to outlast a backfill of older reports, not track "now".
 TTL txn_date + INTERVAL 400 DAY;
@@ -92,6 +98,7 @@ CREATE TABLE IF NOT EXISTS cost_fee_model (
     issuer_country   LowCardinality(String),
     currency         LowCardinality(String),
     ic_category      String,                     -- '' = first-class key (iDEAL / Klarna / CB)
+    card_product     LowCardinality(String) DEFAULT '',  -- resolved card-product tier (BIN's dominant interchange rate, bps string) — fan-separating dimension; '' = blended/no-rate
     pct_bps          Float64,                     -- OLS slope × 10 000
     fixed            Float64,                     -- OLS intercept (settlement-currency units)
     n                UInt64,                      -- cluster sample size
@@ -103,5 +110,5 @@ CREATE TABLE IF NOT EXISTS cost_fee_model (
 ) ENGINE = ReplacingMergeTree(fitted_at)
 PARTITION BY toYYYYMM(report_date)
 ORDER BY (connector, account, merchant_id, report_date,
-          card_network, variant, issuer_country, currency, ic_category);
+          card_network, variant, issuer_country, currency, ic_category, card_product);
 SQL
