@@ -107,7 +107,10 @@ struct FineBlend {
 impl FineBlend {
     fn for_amount(&self, amount: f64) -> ServingCost {
         if self.total_weight <= 0.0 {
-            return ServingCost { pct_bps: 0.0, fixed: 0.0 };
+            return ServingCost {
+                pct_bps: 0.0,
+                fixed: 0.0,
+            };
         }
         let (mut pct, mut fixed) = (0.0, 0.0);
         for (w, m) in &self.members {
@@ -831,7 +834,10 @@ async fn refresh_inner(
                 if let Some(k) = without_variant(display) {
                     members.entry(k).or_default().push((w, cost.clone()));
                 }
-                members.entry(display.to_string()).or_default().push((w, cost));
+                members
+                    .entry(display.to_string())
+                    .or_default()
+                    .push((w, cost));
             };
             if let Some(weights) = fine_weight.get(merchant) {
                 for (model_key, cost) in &models.fine {
@@ -853,7 +859,13 @@ async fn refresh_inner(
             .into_iter()
             .map(|(k, members)| {
                 let total_weight = members.iter().map(|(w, _)| w).sum();
-                (k, FineBlend { members, total_weight })
+                (
+                    k,
+                    FineBlend {
+                        members,
+                        total_weight,
+                    },
+                )
             })
             .collect();
     }
@@ -1141,7 +1153,14 @@ fn segments_from_tsv(rows: &str) -> HashMap<String, HashMap<String, SegmentedCos
             // (ascending, contiguous) local to this function rather than a property of the query.
             segments.sort_by(|a, b| a.lo.total_cmp(&b.lo));
             let weight = blends_w.get(&key).copied().unwrap_or(0.0);
-            entry.insert(key, SegmentedCost { segments, blend, weight });
+            entry.insert(
+                key,
+                SegmentedCost {
+                    segments,
+                    blend,
+                    weight,
+                },
+            );
         }
     }
     out
@@ -1382,7 +1401,13 @@ m1\tadyen\tvisa\tvisadebit\tdebit\tAE\tAED\tVisa UAE Consumer Debit\t100\t0\t20\
         let blend = FineBlend {
             members: vec![
                 // 1M of a plain 200 bps product.
-                (1_000_000.0, MemberCost::Flat(ServingCost { pct_bps: 200.0, fixed: 0.0 })),
+                (
+                    1_000_000.0,
+                    MemberCost::Flat(ServingCost {
+                        pct_bps: 200.0,
+                        fixed: 0.0,
+                    }),
+                ),
                 // 1M of the capped UAE debit ladder: 170.1 bps under the knot, 69.7 above.
                 (1_000_000.0, MemberCost::Tiered(uae_debit())),
             ],
@@ -1405,7 +1430,10 @@ m1\tadyen\tvisa\tvisadebit\tdebit\tAE\tAED\tVisa UAE Consumer Debit\t100\t0\t20\
             total_weight: 1_803_717.0,
         };
         let cost = blend.for_amount(6_046.0);
-        assert!((cost.pct_bps - 69.7).abs() < 0.01, "6,046 lands in the upper tier");
+        assert!(
+            (cost.pct_bps - 69.7).abs() < 0.01,
+            "6,046 lands in the upper tier"
+        );
         assert!((cost.fixed - 50.72).abs() < 0.01);
         // ~153 bps all-in, vs the 137.8 bps the seed table was claiming for this route.
         assert!(
@@ -1421,7 +1449,13 @@ m1\tadyen\tvisa\tvisadebit\tdebit\tAE\tAED\tVisa UAE Consumer Debit\t100\t0\t20\
     #[test]
     fn variant_blanked_key_bridges_a_report_spelling_we_cannot_reconstruct() {
         let stored = fine_key(
-            "adyen", "visa", "visadebit", "debit", "AE", "AED", "Visa UAE Consumer Debit",
+            "adyen",
+            "visa",
+            "visadebit",
+            "debit",
+            "AE",
+            "AED",
+            "Visa UAE Consumer Debit",
         );
         let decide_time = fine_key(
             "adyen",
@@ -1448,15 +1482,29 @@ m1\tadyen\tvisa\tvisadebit\tdebit\tAE\tAED\tVisa UAE Consumer Debit\t100\t0\t20\
     /// LEFT, so trailing content is untouched whatever it holds.
     #[test]
     fn without_variant_is_unaffected_by_separators_in_the_category() {
-        let k = fine_key("adyen", "visa", "visadebit", "debit", "AE", "AED", "odd|category");
-        assert_eq!(without_variant(&k).unwrap(), "adyen|visa||debit|ae|aed|odd|category");
+        let k = fine_key(
+            "adyen",
+            "visa",
+            "visadebit",
+            "debit",
+            "AE",
+            "AED",
+            "odd|category",
+        );
+        assert_eq!(
+            without_variant(&k).unwrap(),
+            "adyen|visa||debit|ae|aed|odd|category"
+        );
         // Too few fields to locate a variant ⇒ no key rather than a malformed one.
         assert!(without_variant("adyen|visa").is_none());
     }
 
     #[test]
     fn a_zero_weight_blend_cannot_divide_by_zero() {
-        let blend = FineBlend { members: vec![], total_weight: 0.0 };
+        let blend = FineBlend {
+            members: vec![],
+            total_weight: 0.0,
+        };
         assert_eq!(blend.for_amount(100.0).pct_bps, 0.0);
     }
 
