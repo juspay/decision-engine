@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Eye, EyeOff, KeyRound } from 'lucide-react'
-import { apiFetch } from '../lib/api'
+import { apiErrorMessage, apiFetch } from '../lib/api'
 import { Card, CardBody, CardHeader } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
@@ -45,14 +45,7 @@ export function AccountPage() {
       setNewPassword('')
       setConfirmPassword('')
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Something went wrong'
-      const match = msg.match(/API error \d+: (.+)/)
-      if (match) {
-        try { setError(JSON.parse(match[1]).message ?? match[1]) }
-        catch { setError(match[1]) }
-      } else {
-        setError(msg)
-      }
+      setError(apiErrorMessage(err))
     } finally {
       setLoading(false)
     }
