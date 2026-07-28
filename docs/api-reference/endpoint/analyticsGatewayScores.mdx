@@ -29,7 +29,7 @@ export TENANT_HEADER="x-tenant-id: public"
 
 - Method and path: `GET /analytics/gateway-scores`
 - Parameters:
-  - `x-tenant-id` (header, required, string) — see [Environment setup](/api-refs/api-ref#environment-setup).
+  - `x-tenant-id` (header, required, string) — see [Environment setup](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx#environment-setup).
   - `range` (query, optional, string)
   - `start_ms` (query, optional, integer)
   - `end_ms` (query, optional, integer)
@@ -96,6 +96,6 @@ curl "$BASE_URL/analytics/gateway-scores?range=1d&gateway=stripe,adyen" \
 
 ## Related
 
-- [Update Gateway Score](/api-reference/endpoint/updateGatewayScore)
-- [Analytics Overview](/api-reference/endpoint/analyticsOverview)
-- [Analytics Endpoints](/api-refs/analytics-endpoints)
+- [Update Gateway Score](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/updateGatewayScore.mdx)
+- [Analytics Overview](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsOverview.mdx)
+- [Analytics Endpoints](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/analytics-endpoints.mdx)

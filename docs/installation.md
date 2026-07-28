@@ -22,22 +22,22 @@ Expected response:
 { "message": "Health is good" }
 ```
 
-For the API, dashboard, and docs together, use `--profile dashboard-postgres-ghcr` instead — see [Dashboard](/dashboard-guide).
+For the API, dashboard, and docs together, use `--profile dashboard-postgres-ghcr` instead — see [Dashboard](https://github.com/juspay/decision-engine/blob/main/docs/dashboard-guide.mdx).
 
 ## In This Section
 
 | Page | Use it for |
 | --- | --- |
-| [Local Setup](/local-setup) | The canonical guide — Compose profiles, source builds, Docker images without Compose, Helm, and troubleshooting. |
-| [PostgreSQL Setup](/setup-guide-postgres) | Postgres-specific Compose profiles, `make` targets, and verification. |
-| [MySQL Setup](/setup-guide-mysql) | The same, for MySQL. |
-| [Configuration](/configuration) | Config file reference and environment variable overrides once the service is up. |
-| [Dashboard](/dashboard-guide) | Bring up the React operator dashboard alongside the API. |
+| [Local Setup](https://github.com/juspay/decision-engine/blob/main/docs/local-setup.md) | The canonical guide — Compose profiles, source builds, Docker images without Compose, Helm, and troubleshooting. |
+| [PostgreSQL Setup](https://github.com/juspay/decision-engine/blob/main/docs/setup-guide-postgres.md) | Postgres-specific Compose profiles, `make` targets, and verification. |
+| [MySQL Setup](https://github.com/juspay/decision-engine/blob/main/docs/setup-guide-mysql.md) | The same, for MySQL. |
+| [Configuration](https://github.com/juspay/decision-engine/blob/main/docs/configuration.md) | Config file reference and environment variable overrides once the service is up. |
+| [Dashboard](https://github.com/juspay/decision-engine/blob/main/docs/dashboard-guide.mdx) | Bring up the React operator dashboard alongside the API. |
 
 ## Choosing A Database
 
-Decision Engine supports PostgreSQL and MySQL as interchangeable backends. Pick one and follow its dedicated guide, or go straight to [Local Setup](/local-setup) if you want the full profile matrix (dashboard, monitoring, source builds) rather than a database-first walkthrough.
+Decision Engine supports PostgreSQL and MySQL as interchangeable backends. Pick one and follow its dedicated guide, or go straight to [Local Setup](https://github.com/juspay/decision-engine/blob/main/docs/local-setup.md) if you want the full profile matrix (dashboard, monitoring, source builds) rather than a database-first walkthrough.
 
 ## Next Steps
 
-- [API Guide](/api-refs/api-ref) — copy-paste `curl` examples once the service is running.
+- [API Guide](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx) — copy-paste `curl` examples once the service is running.

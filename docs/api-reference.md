@@ -7,16 +7,16 @@ description: "Schema-backed reference for every Decision Engine endpoint, with r
 
 This is the schema-backed reference for every Decision Engine endpoint. Each page below shows the full request and response model and includes an interactive playground, generated from the OpenAPI contract.
 
-Looking for copy-paste examples and end-to-end flows instead? Start with the [API Guide](/api-refs/api-ref).
+Looking for copy-paste examples and end-to-end flows instead? Start with the [API Guide](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx).
 
 ## Two ways to read the API
 
 | Surface | Best for |
 | --- | --- |
-| [API Guide](/api-refs/api-ref) | Task-oriented `curl` examples, complete flows, and request variants. |
+| [API Guide](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx) | Task-oriented `curl` examples, complete flows, and request variants. |
 | API Reference (this section) | Exact request/response schemas and an interactive playground, one page per endpoint. |
 
-For advanced rule examples — AND, OR, nested AND+OR, `volume_split_priority`, enum arrays, and number-array matching — see the [Advanced Routing Example](/api-refs/routing-advanced-example). For the exact `POST /routing/create` schema, use [Create Routing Rule](/api-reference/endpoint/createRoutingRule).
+For advanced rule examples — AND, OR, nested AND+OR, `volume_split_priority`, enum arrays, and number-array matching — see the [Advanced Routing Example](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-advanced-example.mdx). For the exact `POST /routing/create` schema, use [Create Routing Rule](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/createRoutingRule.mdx).
 
 ## Access classes
 
@@ -31,77 +31,77 @@ For advanced rule examples — AND, OR, nested AND+OR, `volume_split_priority`, 
 
 ### Health
 
-- [Health Check](/api-reference/endpoint/healthCheck)
-- [Health Ready](/api-reference/endpoint/healthReady)
-- [Health Diagnostics](/api-reference/endpoint/healthDiagnostics)
+- [Health Check](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/healthCheck.mdx)
+- [Health Ready](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/healthReady.mdx)
+- [Health Diagnostics](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/healthDiagnostics.mdx)
 
 ### Auth And Onboarding
 
-- [Signup](/api-reference/endpoint/signup)
-- [Login](/api-reference/endpoint/login)
-- [Logout](/api-reference/endpoint/logout)
-- [Current User](/api-reference/endpoint/me)
-- [List User Merchants](/api-reference/endpoint/listUserMerchants)
-- [Switch Merchant](/api-reference/endpoint/switchMerchant)
-- [Onboard Merchant](/api-reference/endpoint/onboardMerchant)
+- [Signup](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/signup.mdx)
+- [Login](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/login.mdx)
+- [Logout](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/logout.mdx)
+- [Current User](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/me.mdx)
+- [List User Merchants](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/listUserMerchants.mdx)
+- [Switch Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/switchMerchant.mdx)
+- [Onboard Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/onboardMerchant.mdx)
 
 ### API Keys
 
-- [Create API Key](/api-reference/endpoint/createApiKey)
-- [List API Keys](/api-reference/endpoint/listApiKeys)
-- [Revoke API Key](/api-reference/endpoint/revokeApiKey)
+- [Create API Key](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/createApiKey.mdx)
+- [List API Keys](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/listApiKeys.mdx)
+- [Revoke API Key](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/revokeApiKey.mdx)
 
 ### Merchant Account
 
-- [Create Merchant](/api-reference/endpoint/createMerchant)
-- [Get Merchant](/api-reference/endpoint/getMerchant)
-- [Delete Merchant](/api-reference/endpoint/deleteMerchant)
-- [Get Merchant Debit Routing](/api-reference/endpoint/getMerchantDebitRouting)
-- [Update Merchant Debit Routing](/api-reference/endpoint/updateMerchantDebitRouting)
+- [Create Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/createMerchant.mdx)
+- [Get Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/getMerchant.mdx)
+- [Delete Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/deleteMerchant.mdx)
+- [Get Merchant Debit Routing](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/getMerchantDebitRouting.mdx)
+- [Update Merchant Debit Routing](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/updateMerchantDebitRouting.mdx)
 
 ### Gateway Decision
 
-- [Decide Gateway](/api-reference/endpoint/decideGateway)
-- [Legacy Decision Gateway](/api-reference/endpoint/legacyDecisionGateway)
-- [Update Gateway Score](/api-reference/endpoint/updateGatewayScore)
-- [Legacy Update Score](/api-reference/endpoint/legacyUpdateScore)
+- [Decide Gateway](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/decideGateway.mdx)
+- [Legacy Decision Gateway](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/legacyDecisionGateway.mdx)
+- [Update Gateway Score](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/updateGatewayScore.mdx)
+- [Legacy Update Score](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/legacyUpdateScore.mdx)
 
 ### Routing Rules
 
-- [Create Routing Rule](/api-reference/endpoint/createRoutingRule)
-- [Activate Routing Rule](/api-reference/endpoint/activateRoutingRule)
-- [Deactivate Routing Rule](/api-reference/endpoint/deactivateRoutingRule)
-- [List Routing Rules](/api-reference/endpoint/listRoutingRules)
-- [Get Active Routing Rule](/api-reference/endpoint/getActiveRoutingRule)
-- [Evaluate Routing Rule](/api-reference/endpoint/evaluateRoutingRule)
-- [Hybrid Routing](/api-reference/endpoint/hybridRouting)
+- [Create Routing Rule](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/createRoutingRule.mdx)
+- [Activate Routing Rule](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/activateRoutingRule.mdx)
+- [Deactivate Routing Rule](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/deactivateRoutingRule.mdx)
+- [List Routing Rules](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/listRoutingRules.mdx)
+- [Get Active Routing Rule](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/getActiveRoutingRule.mdx)
+- [Evaluate Routing Rule](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/evaluateRoutingRule.mdx)
+- [Hybrid Routing](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/hybridRouting.mdx)
 
 ### Rule Configuration
 
-- [Create Rule Config](/api-reference/endpoint/createRuleConfig)
-- [Get Rule Config](/api-reference/endpoint/getRuleConfig)
-- [Update Rule Config](/api-reference/endpoint/updateRuleConfig)
-- [Delete Rule Config](/api-reference/endpoint/deleteRuleConfig)
+- [Create Rule Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/createRuleConfig.mdx)
+- [Get Rule Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/getRuleConfig.mdx)
+- [Update Rule Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/updateRuleConfig.mdx)
+- [Delete Rule Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/deleteRuleConfig.mdx)
 
 ### Config
 
-- [Get Routing Config](/api-reference/endpoint/getRoutingConfig)
-- [Configure SR Dimensions](/api-reference/endpoint/configSrDimension)
+- [Get Routing Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/getRoutingConfig.mdx)
+- [Configure SR Dimensions](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/configSrDimension.mdx)
 
 ### Analytics
 
-- [Overview](/api-reference/endpoint/analyticsOverview)
-- [Gateway Scores](/api-reference/endpoint/analyticsGatewayScores)
-- [Decisions](/api-reference/endpoint/analyticsDecisions)
-- [Routing Stats](/api-reference/endpoint/analyticsRoutingStats)
-- [Log Summaries](/api-reference/endpoint/analyticsLogSummaries)
-- [Payment Audit](/api-reference/endpoint/analyticsPaymentAudit)
-- [Preview Trace](/api-reference/endpoint/analyticsPreviewTrace)
-- [Cost Savings](/api-reference/endpoint/analyticsCostSavings)
-- [Routing Events](/api-reference/endpoint/analyticsRoutingEvents)
-- [A/B Test Experiment Results](/api-reference/endpoint/analyticsExperimentResults)
-- [A/B Test Experiment Transactions](/api-reference/endpoint/analyticsExperimentTransactions)
+- [Overview](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsOverview.mdx)
+- [Gateway Scores](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsGatewayScores.mdx)
+- [Decisions](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsDecisions.mdx)
+- [Routing Stats](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsRoutingStats.mdx)
+- [Log Summaries](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsLogSummaries.mdx)
+- [Payment Audit](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsPaymentAudit.mdx)
+- [Preview Trace](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsPreviewTrace.mdx)
+- [Cost Savings](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsCostSavings.mdx)
+- [Routing Events](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsRoutingEvents.mdx)
+- [A/B Test Experiment Results](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsExperimentResults.mdx)
+- [A/B Test Experiment Transactions](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsExperimentTransactions.mdx)
 
 ## Curl Examples
 
-For local and sandbox smoke-test examples, use [API Examples](/api-refs/api-ref).
+For local and sandbox smoke-test examples, use [API Examples](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx).
