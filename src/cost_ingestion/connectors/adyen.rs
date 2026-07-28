@@ -23,7 +23,23 @@ use crate::cost_ingestion::types::{
 
 /// Adyen record types that actually carry settlement fees; everything else (Authorised,
 /// Received, Refused, …) has empty fee columns and would pollute the fit.
-const FEE_RECORD_TYPES: [&str; 2] = ["SentForSettle", "Settled"];
+///
+/// **`Settled` ONLY — deliberately not `SentForSettle` too.** The Payments Accounting Report is an
+/// accounting *journal*, not a transaction list: one payment writes a line per lifecycle stage, and
+/// the `SentForSettle` and `Settled` lines carry byte-identical money columns (measured over a real
+/// 924k-row export: 172,908 paired references, **0** with any difference in gross, total fee,
+/// interchange, scheme fee or markup). Accepting both folded every transaction into the rollup twice.
+///
+/// Duplication leaves the OLS slope and intercept untouched (the normal equations scale on both
+/// sides) and `bps_rmse` is an RMS, so this was never a *mispricing* — it inflated `n` and
+/// `gross_sum` 2× in the dashboard, and shrank the slope CI by ~√2, which let the `MIN_N` / `SEG_FLOOR`
+/// gates and the L2 `ci_bps` promotion pass on samples that did not exist.
+///
+/// Trade-off accepted: a transaction captured but not yet settled at the report cutoff (~3.9% of
+/// references in that export) contributes nothing until it settles. It returns in a later report's
+/// `Settled` rows, and `cost_daily_stats` is a `ReplacingMergeTree` keyed on the transaction day, so
+/// the newer report supersedes that day cleanly.
+const FEE_RECORD_TYPES: [&str; 1] = ["Settled"];
 
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -251,6 +267,7 @@ impl SettlementReportSource for AdyenReportSource {
                     issuer_country: row.get(c.issuer).to_string(),
                     currency: row.get(c.ccy).to_string(),
                     ic_category: ic_category(icsf),
+                    ic_bps: SettledFeeRow::ic_bps_key(interchange_bps),
                     txn_date,
                     channel,
                     gross,
@@ -442,6 +459,30 @@ fn parse_booking_date(s: &str) -> Option<chrono::NaiveDate> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One payment writes a journal line per lifecycle stage, and its `SentForSettle` and `Settled`
+    /// lines carry identical money columns. Only the `Settled` leg may reach the rollup — counting
+    /// both folded every transaction in twice, inflating `n`/`gross_sum` 2× and shrinking the slope
+    /// CI by ~√2 (see [`FEE_RECORD_TYPES`]).
+    #[test]
+    fn duplicate_sent_for_settle_leg_is_dropped() {
+        let csv = "\
+Psp Reference,Record Type,Payment Method Variant,Global Card Brand,Issuer Country,Settlement Currency,Payable (SC),Commission (SC),Markup (SC),Scheme Fees (SC),Interchange (SC),ICSF details\n\
+ref1,SentForSettle,visastandarddebit,visa,FR,EUR,40.01,0.00,0.04,0.06,0.08,\n\
+ref1,Settled,visastandarddebit,visa,FR,EUR,40.01,0.00,0.04,0.06,0.08,\n";
+        let rows = AdyenReportSource::new()
+            .parse_report(csv.as_bytes())
+            .unwrap();
+        assert_eq!(
+            rows.len(),
+            1,
+            "the same payment must be counted once, not once per leg"
+        );
+        assert!(
+            (rows[0].gross - 40.19).abs() < 1e-9,
+            "40.01 payable + 0.18 fee"
+        );
+    }
 
     #[test]
     fn parses_settled_rows_and_skips_non_fee_records() {

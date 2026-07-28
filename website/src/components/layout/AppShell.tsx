@@ -13,7 +13,9 @@ export function AppShell() {
         <div className="flex-1 flex flex-col overflow-hidden relative z-10">
           <TopBar />
           <main className="relative flex-1 overflow-y-auto px-4 py-5 sm:px-5 sm:py-6 lg:px-6 lg:py-7 xl:px-8">
-            <div className="mx-auto w-full max-w-[1760px] px-1 sm:px-2 lg:px-3">
+            {/* No horizontal padding here — `main` already owns the page gutter, and padding both
+                nested the gutter twice (44px at xl), pushing every page's content off the sidebar. */}
+            <div className="mx-auto w-full max-w-[1760px]">
               <Outlet />
             </div>
           </main>

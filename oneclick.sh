@@ -63,6 +63,8 @@ EXPECTED_CLICKHOUSE_TABLES=(
     analytics_domain_events
     cost_daily_stats
     cost_fee_model
+    cost_fee_model_segment
+    cost_bin_product
     connector_markup_overlay
 )
 
@@ -232,6 +234,22 @@ check_clickhouse_schema() {
             missing=1
         fi
     done
+
+    # Column-level drift, not just table existence: the card_product dimension is ADDED to
+    # already-created cost tables by the 038 migration. A DB that has every table but pre-dates
+    # card_product (ran 035-037 before it existed) passes the existence loop yet still needs 038 —
+    # without this check the heal never fires and ingestion 500s on the missing column. Probing
+    # cost_daily_stats (the ingest target) is representative: the four cost tables migrate together.
+    # A transient curl failure defaults to "0" → re-runs the idempotent 038, which is harmless.
+    local col_query col_result
+    col_query="SELECT%20count()%20FROM%20system.columns%20WHERE%20database%20%3D%20'${CLICKHOUSE_DATABASE}'%20AND%20table%20%3D%20'cost_daily_stats'%20AND%20name%20%3D%20'card_product'"
+    col_result=$(curl -fsS \
+        --user "${CLICKHOUSE_USER}:${CLICKHOUSE_PASSWORD}" \
+        "${CLICKHOUSE_HTTP_URL}/?query=${col_query}" 2>/dev/null || echo "0")
+    if [ "$col_result" != "1" ]; then
+        echo "  [missing] ClickHouse column cost_daily_stats.card_product (needs 038 migration)"
+        missing=1
+    fi
 
     return "$missing"
 }
@@ -542,15 +560,21 @@ run_infra_checklist
 if ! check_clickhouse_schema; then
     echo ""
     echo "ClickHouse schema is incomplete — attempting to (re)create cost-ingestion tables..."
-    # The cost tables (cost_daily_stats / cost_fee_model / connector_markup_overlay) come from
-    # 035_cost_model.sh, which the container only auto-runs on a fresh clickhouse-data volume.
-    # All its DDL is IF NOT EXISTS, so re-running it against an existing DB is idempotent and
-    # non-destructive — this heals a pre-existing volume without wiping analytics data.
-    if docker compose exec -T clickhouse sh /docker-entrypoint-initdb.d/035_cost_model.sh >/dev/null 2>&1; then
-        echo "  Ran 035_cost_model.sh."
-    else
-        echo "  Could not run 035_cost_model.sh in the clickhouse container."
-    fi
+    # The cost tables (cost_daily_stats / cost_fee_model / connector_markup_overlay from
+    # 035_cost_model.sh, cost_bin_product from 036, the piecewise cost_fee_model_segment from 037,
+    # and the card_product ALTER migration in 038) are only auto-run by the container on a fresh
+    # clickhouse-data volume. Every one is idempotent and non-destructive — the CREATEs are
+    # IF NOT EXISTS, and 038 is ADD COLUMN IF NOT EXISTS + a same-key MODIFY ORDER BY (a metadata-only
+    # append) — so re-running against an existing DB heals it without wiping analytics data. 038 is
+    # what upgrades a database that already ran 035/036 before card_product existed. Add new cost DDL
+    # scripts here.
+    for cost_script in 035_cost_model.sh 036_cost_bin_product.sh 037_cost_fee_model_segment.sh 038_cost_card_product.sh; do
+        if docker compose exec -T clickhouse sh "/docker-entrypoint-initdb.d/${cost_script}" >/dev/null 2>&1; then
+            echo "  Ran ${cost_script}."
+        else
+            echo "  Could not run ${cost_script} in the clickhouse container."
+        fi
+    done
 
     if ! check_clickhouse_schema; then
         echo ""
