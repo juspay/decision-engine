@@ -5,7 +5,7 @@ description: "Curl examples for /routing/update and /routing/delete."
 
 # Update & Delete Routing Algorithm
 
-Edit or remove a previously created routing algorithm — including [A/B test experiments](/api-refs/ab-testing-create), which are stored the same way. Both operations only work on an **inactive** algorithm; deactivate it first with [`/routing/deactivate`](/api-refs/routing-algorithm-deactivate) if it's currently live.
+Edit or remove a previously created routing algorithm — including [A/B test experiments](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-create.mdx), which are stored the same way. Both operations only work on an **inactive** algorithm; deactivate it first with [`/routing/deactivate`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-deactivate.mdx) if it's currently live.
 
 ## Update
 
@@ -30,7 +30,7 @@ curl --location "$BASE_URL/routing/update" \
   }'
 ```
 
-`algorithm` accepts the same `type` values as [`/routing/create`](/api-refs/routing-algorithm-create) — `single`, `priority`, `volume_split`, `advanced`, or `ab_test`.
+`algorithm` accepts the same `type` values as [`/routing/create`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-create.mdx) — `single`, `priority`, `volume_split`, `advanced`, or `ab_test`.
 
 ```json
 {
@@ -65,7 +65,7 @@ curl --location "$BASE_URL/routing/delete" \
 
 ## Related
 
-- [Create Routing Algorithm](/api-refs/routing-algorithm-create)
-- [Activate Routing Algorithm](/api-refs/routing-algorithm-activate)
-- [Deactivate Routing Algorithm](/api-refs/routing-algorithm-deactivate)
-- [A/B Testing: Create An Experiment](/api-refs/ab-testing-create)
+- [Create Routing Algorithm](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-create.mdx)
+- [Activate Routing Algorithm](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-activate.mdx)
+- [Deactivate Routing Algorithm](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-deactivate.mdx)
+- [A/B Testing: Create An Experiment](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-create.mdx)

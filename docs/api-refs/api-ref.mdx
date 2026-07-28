@@ -7,7 +7,7 @@ description: "A practical, copy-paste guide to the Decision Engine API — from 
 
 This guide walks the Decision Engine API in the order you'll actually use it: set up a merchant, configure how transactions should be routed, send transactions to `/decide-gateway`, feed outcomes back, and review analytics.
 
-Every page below includes ready-to-run `curl` examples with realistic payloads. For exact request and response schemas plus an interactive playground, use the [OpenAPI Reference](/api-reference).
+Every page below includes ready-to-run `curl` examples with realistic payloads. For exact request and response schemas plus an interactive playground, use the [OpenAPI Reference](https://github.com/juspay/decision-engine/blob/main/docs/api-reference.md).
 
 <Note>
   **Two reference surfaces are available.** Start here for task-oriented flows; switch to the OpenAPI Reference when you need exact schemas.
@@ -15,7 +15,7 @@ Every page below includes ready-to-run `curl` examples with realistic payloads. 
   | Surface | Best for |
   | --- | --- |
   | **API Guide** (this section) | Copy-paste `curl` examples, end-to-end flows, and request variants. |
-  | **[OpenAPI Reference](/api-reference)** | One page per endpoint with full schemas and a request playground. |
+  | **[OpenAPI Reference](https://github.com/juspay/decision-engine/blob/main/docs/api-reference.md)** | One page per endpoint with full schemas and a request playground. |
 </Note>
 
 ## Integration flow
@@ -25,27 +25,27 @@ A typical integration follows these steps. Each links to the page with the exact
 <Steps>
   <Step title="Create a merchant">
     Create the merchant record that owns your routing config, API keys, and analytics.
-    See [Create Merchant Account](/api-refs/merchant-account-create).
+    See [Create Merchant Account](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/merchant-account-create.mdx).
   </Step>
   <Step title="Create an API key">
     Issue a server-to-server API key to authenticate the calls that follow.
-    See [API Keys](/api-refs/api-keys).
+    See [API Keys](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-keys.mdx).
   </Step>
   <Step title="Configure routing">
     Decide how connectors are chosen — a fixed connector, a priority list, a volume split, or an advanced rule tree — then activate it.
-    See [Create Routing Algorithm](/api-refs/routing-algorithm-create).
+    See [Create Routing Algorithm](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-create.mdx).
   </Step>
   <Step title="Run transactions">
     Call `/decide-gateway` for each payment to get the connector to use.
-    See [Run Transactions](/api-refs/decide-gateway-sr-based).
+    See [Run Transactions](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-sr-based.mdx).
   </Step>
   <Step title="Send feedback">
     Report the authorization outcome so scoring and analytics stay accurate.
-    See [Update Gateway Score](/api-refs/update-gateway-score).
+    See [Update Gateway Score](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/update-gateway-score.mdx).
   </Step>
   <Step title="Review analytics">
     Inspect gateway scores, decisions, and audit trails.
-    See [Analytics & Audit](/api-refs/analytics-endpoints).
+    See [Analytics & Audit](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/analytics-endpoints.mdx).
   </Step>
 </Steps>
 
@@ -100,40 +100,40 @@ curl "$BASE_URL/analytics/overview?range=1d" \
 ## Browse by task
 
 <CardGroup cols={2}>
-  <Card title="Health & Status" icon="heart-pulse" href="/api-refs/health-check">
+  <Card title="Health & Status" icon="heart-pulse" href="https://github.com/juspay/decision-engine/blob/main/docs/api-refs/health-check.mdx">
     Liveness, readiness, and dependency diagnostics.
   </Card>
-  <Card title="Authentication & Onboarding" icon="key" href="/api-refs/auth-and-onboarding">
+  <Card title="Authentication & Onboarding" icon="key" href="https://github.com/juspay/decision-engine/blob/main/docs/api-refs/auth-and-onboarding.mdx">
     Sign up, log in, switch merchants, and manage API keys.
   </Card>
-  <Card title="Merchant Accounts" icon="building" href="/api-refs/merchant-account-create">
+  <Card title="Merchant Accounts" icon="building" href="https://github.com/juspay/decision-engine/blob/main/docs/api-refs/merchant-account-create.mdx">
     Create, read, delete a merchant, and manage debit routing.
   </Card>
-  <Card title="Configure Routing" icon="route" href="/api-refs/routing-algorithm-create">
+  <Card title="Configure Routing" icon="route" href="https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-create.mdx">
     Single, priority, volume-split, and advanced rule trees — plus activation.
   </Card>
-  <Card title="Scoring Configuration" icon="sliders" href="/api-refs/success-rate-config-create">
+  <Card title="Scoring Configuration" icon="sliders" href="https://github.com/juspay/decision-engine/blob/main/docs/api-refs/success-rate-config-create.mdx">
     Success-rate and elimination (downtime) scoring config.
   </Card>
-  <Card title="Run Transactions" icon="bolt" href="/api-refs/decide-gateway-sr-based">
+  <Card title="Run Transactions" icon="bolt" href="https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-sr-based.mdx">
     Choose a connector per payment via `/decide-gateway`.
   </Card>
-  <Card title="Feedback & Scoring" icon="arrow-rotate-left" href="/api-refs/update-gateway-score">
+  <Card title="Feedback & Scoring" icon="arrow-rotate-left" href="https://github.com/juspay/decision-engine/blob/main/docs/api-refs/update-gateway-score.mdx">
     Report authorization outcomes to keep scoring accurate.
   </Card>
-  <Card title="Analytics & Audit" icon="chart-line" href="/api-refs/analytics-endpoints">
+  <Card title="Analytics & Audit" icon="chart-line" href="https://github.com/juspay/decision-engine/blob/main/docs/api-refs/analytics-endpoints.mdx">
     Overview, gateway scores, decisions, routing stats, and audit.
   </Card>
-  <Card title="Multi-Objective Routing" icon="scale-balanced" href="/api-refs/decide-gateway-multi-objective">
+  <Card title="Multi-Objective Routing" icon="scale-balanced" href="https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-multi-objective.mdx">
     Cost-aware post-step that re-ranks gateways on expected value.
   </Card>
-  <Card title="Cost Data Ingestion" icon="file-invoice-dollar" href="/api-refs/cost-ingestion-setup">
+  <Card title="Cost Data Ingestion" icon="file-invoice-dollar" href="https://github.com/juspay/decision-engine/blob/main/docs/api-refs/cost-ingestion-setup.mdx">
     Learn real per-gateway fees from settlement reports and invoices.
   </Card>
-  <Card title="A/B Testing" icon="flask" href="/api-refs/ab-testing-create">
+  <Card title="A/B Testing" icon="flask" href="https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-create.mdx">
     Compare two routing strategies on live traffic with guardrails.
   </Card>
-  <Card title="Autopilot & Feature Flags" icon="sliders" href="/api-refs/merchant-features">
+  <Card title="Autopilot & Feature Flags" icon="sliders" href="https://github.com/juspay/decision-engine/blob/main/docs/api-refs/merchant-features.mdx">
     Self-tuning SR scoring, plus every merchant-level toggle.
   </Card>
 </CardGroup>
@@ -144,13 +144,13 @@ curl "$BASE_URL/analytics/overview?range=1d" \
 
 | Strategy | Request value | Guide |
 | --- | --- | --- |
-| Success-rate (auth-rate) based | `SR_BASED_ROUTING` | [SR-based routing](/api-refs/decide-gateway-sr-based) |
-| Priority-list based | `PL_BASED_ROUTING` | [Priority-list routing](/api-refs/decide-gateway-pl-based) |
-| Debit / network based | `NTW_BASED_ROUTING` | [Debit routing](/api-refs/decide-gateway-debit-routing) |
-| Network + SR hybrid | `NTW_SR_HYBRID_ROUTING` | [Hybrid routing](/api-refs/decide-gateway-hybrid-routing) |
+| Success-rate (auth-rate) based | `SR_BASED_ROUTING` | [SR-based routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-sr-based.mdx) |
+| Priority-list based | `PL_BASED_ROUTING` | [Priority-list routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-pl-based.mdx) |
+| Debit / network based | `NTW_BASED_ROUTING` | [Debit routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-debit-routing.mdx) |
+| Network + SR hybrid | `NTW_SR_HYBRID_ROUTING` | [Hybrid routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-hybrid-routing.mdx) |
 
 <Info>
-  **Multi-objective (cost-aware) routing** is not a `rankingAlgorithm` value. It is a post-step on success-rate scoring, toggled per request with `enableMultiObjective` or per merchant with the `multi_objective_routing_enabled` feature flag. When active, responses carry a `multi_objective_info` block. See [Multi-objective routing](/api-refs/decide-gateway-multi-objective).
+  **Multi-objective (cost-aware) routing** is not a `rankingAlgorithm` value. It is a post-step on success-rate scoring, toggled per request with `enableMultiObjective` or per merchant with the `multi_objective_routing_enabled` feature flag. When active, responses carry a `multi_objective_info` block. See [Multi-objective routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-multi-objective.mdx).
 </Info>
 
 ## Advanced capabilities
@@ -159,14 +159,14 @@ Beyond the core decide/feedback loop, Decision Engine ships several self-contain
 
 | Capability | What it does | Start here |
 | --- | --- | --- |
-| Cost data ingestion | Learns each connector's actual fee (from settlement reports and invoices) at a per-cluster level, feeding multi-objective routing's expected-value ranking. | [Connector setup](/api-refs/cost-ingestion-setup) → [uploads](/api-refs/cost-ingestion-uploads) → [fees & coverage](/api-refs/cost-ingestion-fees) |
-| A/B testing | Splits traffic between a control and variant routing strategy — auth vs. cost-aware, manual vs. autopilot, or any two saved algorithms — with a guardrail and significance testing. | [Create an experiment](/api-refs/ab-testing-create) → [read results](/api-refs/ab-testing-results) |
-| Simulation | Preview what any routing algorithm (including an A/B test arm) would decide for a given payment context, without a real transaction. | [Evaluate Routing Algorithm](/api-refs/routing-algorithm-evaluate) |
-| Autopilot & auto-calibration | Background job that self-tunes SR hedging % and bucket size from observed traffic, with a hard-reset endpoint for simulation runs. | [Merchant Features](/api-refs/merchant-features) |
+| Cost data ingestion | Learns each connector's actual fee (from settlement reports and invoices) at a per-cluster level, feeding multi-objective routing's expected-value ranking. | [Connector setup](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/cost-ingestion-setup.mdx) → [uploads](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/cost-ingestion-uploads.mdx) → [fees & coverage](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/cost-ingestion-fees.mdx) |
+| A/B testing | Splits traffic between a control and variant routing strategy — auth vs. cost-aware, manual vs. autopilot, or any two saved algorithms — with a guardrail and significance testing. | [Create an experiment](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-create.mdx) → [read results](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-results.mdx) |
+| Simulation | Preview what any routing algorithm (including an A/B test arm) would decide for a given payment context, without a real transaction. | [Evaluate Routing Algorithm](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-evaluate.mdx) |
+| Autopilot & auto-calibration | Background job that self-tunes SR hedging % and bucket size from observed traffic, with a hard-reset endpoint for simulation runs. | [Merchant Features](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/merchant-features.mdx) |
 
 ## Backward compatibility
 
 Legacy routes are kept for older integrations. New integrations should use `/decide-gateway` and `/update-gateway-score`.
 
-- [Legacy decision endpoint](/api-refs/decision-gateway-legacy) — the older `/decision_gateway` route.
-- [Legacy update score](/api-refs/update-score-legacy) — the older `/update-score` route.
+- [Legacy decision endpoint](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decision-gateway-legacy.mdx) — the older `/decision_gateway` route.
+- [Legacy update score](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/update-score-legacy.mdx) — the older `/update-score` route.

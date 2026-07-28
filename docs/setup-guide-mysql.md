@@ -5,7 +5,7 @@ description: "Set up Decision Engine with a MySQL database."
 
 # MySQL Setup Guide
 
-This page provides MySQL-focused commands. For the full end-to-end setup — CLI, Docker, Compose, Helm — see the [Local Setup Guide](/local-setup).
+This page provides MySQL-focused commands. For the full end-to-end setup — CLI, Docker, Compose, Helm — see the [Local Setup Guide](https://github.com/juspay/decision-engine/blob/main/docs/local-setup.md).
 
 ## Docker Compose (GHCR track)
 
@@ -53,7 +53,7 @@ Expected response:
 
 ## Related Docs
 
-- [Installation](/installation)
-- [Local Setup Guide](/local-setup)
-- [PostgreSQL Setup](/setup-guide-postgres)
-- [Configuration](/configuration)
+- [Installation](https://github.com/juspay/decision-engine/blob/main/docs/installation.md)
+- [Local Setup Guide](https://github.com/juspay/decision-engine/blob/main/docs/local-setup.md)
+- [PostgreSQL Setup](https://github.com/juspay/decision-engine/blob/main/docs/setup-guide-postgres.md)
+- [Configuration](https://github.com/juspay/decision-engine/blob/main/docs/configuration.md)

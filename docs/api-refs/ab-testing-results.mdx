@@ -5,7 +5,7 @@ description: "Curl examples for reading A/B test results, transaction logs, and 
 
 # A/B Testing: Results
 
-Once an experiment (see [Create An Experiment](/api-refs/ab-testing-create)) is active and taking traffic, use these endpoints to monitor it. Both routes below live under `/analytics/` and require `$TENANT_HEADER` in addition to `$AUTH_HEADER` — see [Environment setup](/api-refs/api-ref#environment-setup).
+Once an experiment (see [Create An Experiment](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-create.mdx)) is active and taking traffic, use these endpoints to monitor it. Both routes below live under `/analytics/` and require `$TENANT_HEADER` in addition to `$AUTH_HEADER` — see [Environment setup](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx#environment-setup).
 
 ## Experiment Results
 
@@ -110,10 +110,10 @@ curl --location "$BASE_URL/merchant-account/merchant_demo/features/ab-test-real-
   --data '{ "enabled": true }'
 ```
 
-See [Merchant Features](/api-refs/merchant-features) for the full feature-flag reference. Until this is enabled, `/routing/evaluate` still previews both arms for simulation purposes even though `/decide-gateway` traffic is unaffected.
+See [Merchant Features](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/merchant-features.mdx) for the full feature-flag reference. Until this is enabled, `/routing/evaluate` still previews both arms for simulation purposes even though `/decide-gateway` traffic is unaffected.
 
 ## Related
 
-- [A/B Testing: Create An Experiment](/api-refs/ab-testing-create)
-- [Merchant Features](/api-refs/merchant-features)
-- [Analytics Endpoints](/api-refs/analytics-endpoints)
+- [A/B Testing: Create An Experiment](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-create.mdx)
+- [Merchant Features](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/merchant-features.mdx)
+- [Analytics Endpoints](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/analytics-endpoints.mdx)

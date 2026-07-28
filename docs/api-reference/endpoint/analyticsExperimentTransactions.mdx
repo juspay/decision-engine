@@ -8,7 +8,7 @@ openapi: "openapi.json GET /analytics/experiment/{experiment_id}/transactions"
 
 ## Use case
 
-Returns a paginated per-transaction log for a routing [A/B test experiment](/api-refs/ab-testing-create) — which arm each payment landed in, the gateway chosen, and the outcome. Useful for spot-checking arm assignment or debugging a specific payment.
+Returns a paginated per-transaction log for a routing [A/B test experiment](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-create.mdx) — which arm each payment landed in, the gateway chosen, and the outcome. Useful for spot-checking arm assignment or debugging a specific payment.
 
 ## Authentication
 
@@ -29,7 +29,7 @@ export TENANT_HEADER="x-tenant-id: public"
 
 - Method and path: `GET /analytics/experiment/{experiment_id}/transactions`
 - Parameters:
-  - `x-tenant-id` (header, required, string) — see [Environment setup](/api-refs/api-ref#environment-setup).
+  - `x-tenant-id` (header, required, string) — see [Environment setup](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx#environment-setup).
   - `experiment_id` (path, required, string) — the `rule_id` returned by `/routing/create` for the `ab_test` algorithm.
   - `start_ms` (query, optional, integer)
   - `page` (query, optional, integer) — defaults to `1`.
@@ -69,6 +69,6 @@ curl "$BASE_URL/analytics/experiment/routing_a1b2c3d4-1111-2222-3333-44445555666
 
 ## Related
 
-- [A/B Test Experiment Results](/api-reference/endpoint/analyticsExperimentResults)
-- [A/B Testing: Results](/api-refs/ab-testing-results)
-- [Analytics Endpoints](/api-refs/analytics-endpoints)
+- [A/B Test Experiment Results](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsExperimentResults.mdx)
+- [A/B Testing: Results](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-results.mdx)
+- [Analytics Endpoints](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/analytics-endpoints.mdx)
