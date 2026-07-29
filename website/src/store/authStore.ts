@@ -13,6 +13,7 @@ export interface AuthUser {
   email: string
   merchantId: string
   role: string
+  isRedirectSession: boolean
 }
 
 interface AuthStore {
