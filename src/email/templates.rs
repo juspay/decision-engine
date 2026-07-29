@@ -8,57 +8,36 @@ fn escape_html(s: &str) -> String {
         .replace('\'', "&#x27;")
 }
 
-pub struct MemberAddedTemplate {
-    pub user_email: String,
-    pub merchant_name: String,
-    pub base_url: String,
-}
-
-impl MemberAddedTemplate {
-    pub fn into_message(self) -> EmailMessage {
-        let merchant = escape_html(&self.merchant_name);
-        let base_url = escape_html(&self.base_url);
-        let html_body = format!(
-            r#"<!DOCTYPE html>
+/// Shared chrome for every transactional email: a plain wordmark, a white content
+/// card, and a neutral footer. `preheader` is the hidden inbox-preview line;
+/// `content` is the already-escaped inner HTML of the message body.
+fn render_layout(preheader: &str, content: &str) -> String {
+    format!(
+        r#"<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width,initial-scale=1.0">
-  <title>You've been added to a merchant — Juspay Decision Engine</title>
+  <meta name="x-apple-disable-message-reformatting">
+  <title>Juspay Decision Engine</title>
 </head>
-<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  <span style="display:none;max-height:0;overflow:hidden;mso-hide:all;">You now have access to {merchant} on Juspay Decision Engine.&#8202;&#65279;&#847;</span>
+<body style="margin:0;padding:0;background-color:#f4f5f7;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
+  <span style="display:none;max-height:0;overflow:hidden;mso-hide:all;">{preheader}</span>
 
-  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background-color:#f1f5f9;">
+  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background-color:#f4f5f7;">
     <tr>
-      <td align="center" style="padding:40px 16px;">
+      <td align="center" style="padding:32px 16px;">
         <table width="600" cellpadding="0" cellspacing="0" role="presentation" style="max-width:600px;width:100%;">
 
           <tr>
-            <td style="background-color:#0b0e14;border-radius:16px 16px 0 0;padding:28px 40px;text-align:center;">
-              <span style="font-size:18px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">
-                <span style="color:#3b82f6;">&#9679;</span>&nbsp;Decision Engine
-              </span>
-            </td>
-          </tr>
-
-          <tr>
-            <td style="background-color:#ffffff;padding:48px 48px 44px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
-              <h1 style="margin:0 0 16px;font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.02em;line-height:1.3;">
-                You&rsquo;ve been added to a merchant
-              </h1>
-              <p style="margin:0 0 32px;font-size:15px;line-height:1.75;color:#475569;">
-                An admin has granted you access to <strong style="color:#0f172a;">{merchant}</strong> on Juspay Decision Engine.
-                Sign in with your existing credentials to access this merchant&rsquo;s routing, analytics, and payment audits.
-              </p>
-
-              <table cellpadding="0" cellspacing="0" role="presentation" style="margin:0 0 8px;">
+            <td style="padding:4px 4px 22px;">
+              <table cellpadding="0" cellspacing="0" role="presentation">
                 <tr>
-                  <td style="background-color:#4371ff;border-radius:12px;">
-                    <a href="{base_url}/login"
-                       style="display:inline-block;background-color:#4371ff;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 32px;border-radius:12px;letter-spacing:-0.01em;">
-                      Go to Decision Engine &rarr;
-                    </a>
+                  <td width="38" height="38" align="center" valign="middle" style="background-color:#0561E2;background-image:linear-gradient(135deg,#0099FF,#0561E2);border-radius:10px;">
+                    <span style="font-size:19px;font-weight:700;color:#ffffff;line-height:38px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">J</span>
+                  </td>
+                  <td style="padding-left:12px;" valign="middle">
+                    <span style="font-size:17px;font-weight:700;color:#0F172A;letter-spacing:-0.02em;">Juspay</span><span style="font-size:17px;font-weight:500;color:#475569;letter-spacing:-0.02em;">&nbsp;Decision Engine</span>
                   </td>
                 </tr>
               </table>
@@ -66,12 +45,15 @@ impl MemberAddedTemplate {
           </tr>
 
           <tr>
-            <td style="background-color:#f8fafc;border-radius:0 0 16px 16px;padding:24px 48px;border:1px solid #e2e8f0;border-top:none;">
-              <p style="margin:0 0 6px;font-size:12px;color:#94a3b8;line-height:1.65;">
-                If you weren&rsquo;t expecting this, contact your account administrator.
-              </p>
-              <p style="margin:10px 0 0;font-size:11px;color:#cbd5e1;">
-                Juspay Decision Engine &nbsp;&middot;&nbsp; Automated security email &mdash; please do not reply.
+            <td style="background-color:#ffffff;border:1px solid #e5e7eb;border-radius:10px;padding:40px 40px 36px;">
+{content}
+            </td>
+          </tr>
+
+          <tr>
+            <td style="padding:20px 4px 4px;">
+              <p style="margin:0;font-size:12px;line-height:1.6;color:#9ca3af;">
+                This is an automated message from Juspay Decision Engine. Please do not reply to this email.
               </p>
             </td>
           </tr>
@@ -82,17 +64,75 @@ impl MemberAddedTemplate {
   </table>
 </body>
 </html>"#,
+        preheader = escape_html(preheader),
+        content = content,
+    )
+}
+
+/// A single primary call-to-action button. `href` is escaped; `label` is trusted
+/// static copy supplied by the caller.
+fn primary_button(href: &str, label: &str) -> String {
+    format!(
+        r#"              <table cellpadding="0" cellspacing="0" role="presentation" style="margin:0;">
+                <tr>
+                  <td style="background-color:#2563eb;border-radius:8px;">
+                    <a href="{href}" style="display:inline-block;background-color:#2563eb;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:13px 28px;border-radius:8px;">{label}</a>
+                  </td>
+                </tr>
+              </table>"#,
+        href = escape_html(href),
+        label = label,
+    )
+}
+
+/// The plain-text fallback shown under a CTA for clients that block buttons.
+fn fallback_link(url: &str) -> String {
+    let url = escape_html(url);
+    format!(
+        r#"              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:32px 0 0;">
+                <tr><td style="border-top:1px solid #e5e7eb;"></td></tr>
+              </table>
+              <p style="margin:24px 0 6px;font-size:13px;color:#6b7280;">Or paste this link into your browser:</p>
+              <p style="margin:0;font-size:13px;word-break:break-all;line-height:1.6;">
+                <a href="{url}" style="color:#2563eb;text-decoration:none;">{url}</a>
+              </p>"#,
+        url = url
+    )
+}
+
+pub struct MemberAddedTemplate {
+    pub user_email: String,
+    pub merchant_name: String,
+    pub base_url: String,
+}
+
+impl MemberAddedTemplate {
+    pub fn into_message(self) -> EmailMessage {
+        let merchant = escape_html(&self.merchant_name);
+        let login_url = format!("{}/login", self.base_url);
+        let content = format!(
+            r#"              <h1 style="margin:0 0 14px;font-size:20px;font-weight:600;color:#111827;line-height:1.3;">Access granted</h1>
+              <p style="margin:0 0 28px;font-size:15px;line-height:1.6;color:#374151;">
+                An administrator has granted your account access to <strong style="color:#111827;">{merchant}</strong> on Juspay Decision Engine. Sign in with your existing credentials to continue.
+              </p>
+{button}
+              <p style="margin:28px 0 0;font-size:13px;line-height:1.6;color:#6b7280;">
+                If you were not expecting this, please contact your account administrator.
+              </p>"#,
             merchant = merchant,
-            base_url = base_url,
+            button = primary_button(&login_url, "Sign in"),
         );
 
         EmailMessage {
             to: self.user_email,
-            subject: format!(
-                "You've been added to {} on Decision Engine",
-                self.merchant_name
+            subject: format!("You now have access to {}", self.merchant_name),
+            html_body: render_layout(
+                &format!(
+                    "You now have access to {} on Juspay Decision Engine.",
+                    self.merchant_name
+                ),
+                &content,
             ),
-            html_body,
         }
     }
 }
@@ -104,96 +144,59 @@ pub struct EmailVerificationTemplate {
 
 impl EmailVerificationTemplate {
     pub fn into_message(self) -> EmailMessage {
-        let url = escape_html(&self.verification_url);
-        let html_body = format!(
-            r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1.0">
-  <title>Confirm your email — Juspay Decision Engine</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  <!-- Preheader -->
-  <span style="display:none;max-height:0;overflow:hidden;mso-hide:all;">Confirm your email address to activate your Juspay Decision Engine account.&#8202;&#65279;&#847;</span>
-
-  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background-color:#f1f5f9;">
-    <tr>
-      <td align="center" style="padding:40px 16px;">
-        <table width="600" cellpadding="0" cellspacing="0" role="presentation" style="max-width:600px;width:100%;">
-
-          <!-- Header -->
-          <tr>
-            <td style="background-color:#0b0e14;border-radius:16px 16px 0 0;padding:28px 40px;text-align:center;">
-              <span style="font-size:18px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">
-                <span style="color:#3b82f6;">&#9679;</span>&nbsp;Decision Engine
-              </span>
-            </td>
-          </tr>
-
-          <!-- Body -->
-          <tr>
-            <td style="background-color:#ffffff;padding:48px 48px 44px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
-
-              <h1 style="margin:0 0 16px;font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.02em;line-height:1.3;">
-                Confirm your email address
-              </h1>
-              <p style="margin:0 0 32px;font-size:15px;line-height:1.75;color:#475569;">
-                Thanks for signing up for Juspay Decision Engine. Click the button below to verify your email and activate your account. Once confirmed you'll have full access to gateway routing, analytics, and payment audits.
+        let content = format!(
+            r#"              <h1 style="margin:0 0 14px;font-size:20px;font-weight:600;color:#111827;line-height:1.3;">Confirm your email address</h1>
+              <p style="margin:0 0 28px;font-size:15px;line-height:1.6;color:#374151;">
+                Please confirm this email address to activate your Juspay Decision Engine account.
               </p>
-
-              <!-- CTA button -->
-              <table cellpadding="0" cellspacing="0" role="presentation" style="margin:0 0 40px;">
-                <tr>
-                  <td style="background-color:#4371ff;border-radius:12px;">
-                    <a href="{url}"
-                       style="display:inline-block;background-color:#4371ff;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 32px;border-radius:12px;letter-spacing:-0.01em;">
-                      Verify email address &rarr;
-                    </a>
-                  </td>
-                </tr>
-              </table>
-
-              <!-- Divider -->
-              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="margin:0 0 28px;">
-                <tr><td style="border-top:1px solid #e2e8f0;"></td></tr>
-              </table>
-
-              <p style="margin:0 0 8px;font-size:13px;color:#94a3b8;">
-                Button not working? Copy and paste this link into your browser:
+{button}
+              <p style="margin:28px 0 0;font-size:13px;line-height:1.6;color:#6b7280;">
+                This link expires in 24 hours. If you did not create an account, you can ignore this email.
               </p>
-              <p style="margin:0;font-size:12px;word-break:break-all;line-height:1.6;">
-                <a href="{url}" style="color:#3b82f6;text-decoration:none;">{url}</a>
-              </p>
-            </td>
-          </tr>
-
-          <!-- Footer -->
-          <tr>
-            <td style="background-color:#f8fafc;border-radius:0 0 16px 16px;padding:24px 48px;border:1px solid #e2e8f0;border-top:none;">
-              <p style="margin:0 0 6px;font-size:12px;color:#94a3b8;line-height:1.65;">
-                This link expires in <strong style="color:#64748b;">24 hours</strong>.
-                If you didn&rsquo;t create an account, you can safely ignore this email &mdash; no action is needed and your address will not be used.
-              </p>
-              <p style="margin:10px 0 0;font-size:11px;color:#cbd5e1;">
-                Juspay Decision Engine &nbsp;&middot;&nbsp; Automated security email &mdash; please do not reply.
-              </p>
-            </td>
-          </tr>
-
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>"#,
-            url = url
+{fallback}"#,
+            button = primary_button(&self.verification_url, "Confirm email address"),
+            fallback = fallback_link(&self.verification_url),
         );
 
         EmailMessage {
             to: self.user_email,
-            subject: "Confirm your email — Juspay Decision Engine".to_string(),
-            html_body,
+            subject: "Confirm your email address".to_string(),
+            html_body: render_layout(
+                "Confirm your email address to activate your Juspay Decision Engine account.",
+                &content,
+            ),
+        }
+    }
+}
+
+pub struct PasswordResetTemplate {
+    pub user_email: String,
+    pub reset_url: String,
+}
+
+impl PasswordResetTemplate {
+    pub fn into_message(self) -> EmailMessage {
+        let content = format!(
+            r#"              <h1 style="margin:0 0 14px;font-size:20px;font-weight:600;color:#111827;line-height:1.3;">Reset your password</h1>
+              <p style="margin:0 0 28px;font-size:15px;line-height:1.6;color:#374151;">
+                We received a request to reset the password for your Juspay Decision Engine account. Use the button below to choose a new password.
+              </p>
+{button}
+              <p style="margin:28px 0 0;font-size:13px;line-height:1.6;color:#6b7280;">
+                This link expires in 1 hour. If you did not request a password reset, you can ignore this email and your password will remain unchanged.
+              </p>
+{fallback}"#,
+            button = primary_button(&self.reset_url, "Reset password"),
+            fallback = fallback_link(&self.reset_url),
+        );
+
+        EmailMessage {
+            to: self.user_email,
+            subject: "Reset your password".to_string(),
+            html_body: render_layout(
+                "Reset the password for your Juspay Decision Engine account.",
+                &content,
+            ),
         }
     }
 }
@@ -210,109 +213,48 @@ impl InviteUserTemplate {
         let merchant = escape_html(&self.merchant_name);
         let email = escape_html(&self.user_email);
         let password = escape_html(&self.temporary_password);
-        let base_url = escape_html(&self.base_url);
-        let html_body = format!(
-            r#"<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1.0">
-  <title>You're invited to Decision Engine</title>
-</head>
-<body style="margin:0;padding:0;background-color:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;">
-  <!-- Preheader -->
-  <span style="display:none;max-height:0;overflow:hidden;mso-hide:all;">You&rsquo;ve been added to {merchant} on Juspay Decision Engine. Your login details are inside.&#8202;&#65279;&#847;</span>
-
-  <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background-color:#f1f5f9;">
-    <tr>
-      <td align="center" style="padding:40px 16px;">
-        <table width="600" cellpadding="0" cellspacing="0" role="presentation" style="max-width:600px;width:100%;">
-
-          <!-- Header -->
-          <tr>
-            <td style="background-color:#0b0e14;border-radius:16px 16px 0 0;padding:28px 40px;text-align:center;">
-              <span style="font-size:18px;font-weight:700;color:#ffffff;letter-spacing:-0.02em;">
-                <span style="color:#3b82f6;">&#9679;</span>&nbsp;Decision Engine
-              </span>
-            </td>
-          </tr>
-
-          <!-- Body -->
-          <tr>
-            <td style="background-color:#ffffff;padding:48px 48px 44px;border-left:1px solid #e2e8f0;border-right:1px solid #e2e8f0;">
-
-              <h1 style="margin:0 0 16px;font-size:22px;font-weight:700;color:#0f172a;letter-spacing:-0.02em;line-height:1.3;">
-                You&rsquo;ve been invited
-              </h1>
-              <p style="margin:0 0 32px;font-size:15px;line-height:1.75;color:#475569;">
-                You&rsquo;ve been added to <strong style="color:#0f172a;">{merchant}</strong> on Juspay Decision Engine.
-                Use the credentials below to sign in, then change your password from your account settings.
+        let login_url = format!("{}/login", self.base_url);
+        let content = format!(
+            r#"              <h1 style="margin:0 0 14px;font-size:20px;font-weight:600;color:#111827;line-height:1.3;">You have been invited to {merchant}</h1>
+              <p style="margin:0 0 28px;font-size:15px;line-height:1.6;color:#374151;">
+                You have been added to <strong style="color:#111827;">{merchant}</strong> on Juspay Decision Engine. Sign in with the credentials below, then change your password from your account settings.
               </p>
 
-              <!-- Credentials card -->
-              <table width="100%" cellpadding="0" cellspacing="0" role="presentation"
-                     style="background-color:#f8fafc;border:1px solid #e2e8f0;border-radius:12px;margin:0 0 36px;">
+              <table width="100%" cellpadding="0" cellspacing="0" role="presentation" style="background-color:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;margin:0 0 28px;">
                 <tr>
-                  <td style="padding:20px 24px 16px;">
-                    <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Email</p>
-                    <p style="margin:0;font-size:15px;color:#0f172a;">{email}</p>
+                  <td style="padding:16px 20px 12px;">
+                    <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;">Email</p>
+                    <p style="margin:0;font-size:14px;color:#111827;">{email}</p>
                   </td>
                 </tr>
                 <tr>
-                  <td style="border-top:1px solid #e2e8f0;padding:16px 24px 20px;">
-                    <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;">Temporary password</p>
-                    <p style="margin:0;font-size:15px;font-family:'Courier New',Courier,monospace;color:#0f172a;letter-spacing:0.04em;">{password}</p>
+                  <td style="border-top:1px solid #e5e7eb;padding:12px 20px 16px;">
+                    <p style="margin:0 0 4px;font-size:11px;font-weight:600;color:#9ca3af;text-transform:uppercase;letter-spacing:0.05em;">Temporary password</p>
+                    <p style="margin:0;font-size:14px;font-family:'Courier New',Courier,monospace;color:#111827;">{password}</p>
                   </td>
                 </tr>
               </table>
 
-              <!-- CTA button -->
-              <table cellpadding="0" cellspacing="0" role="presentation" style="margin:0 0 8px;">
-                <tr>
-                  <td style="background-color:#4371ff;border-radius:12px;">
-                    <a href="{base_url}/login"
-                       style="display:inline-block;background-color:#4371ff;color:#ffffff;font-size:15px;font-weight:600;text-decoration:none;padding:14px 32px;border-radius:12px;letter-spacing:-0.01em;">
-                      Sign in to Decision Engine &rarr;
-                    </a>
-                  </td>
-                </tr>
-              </table>
-
-            </td>
-          </tr>
-
-          <!-- Footer -->
-          <tr>
-            <td style="background-color:#f8fafc;border-radius:0 0 16px 16px;padding:24px 48px;border:1px solid #e2e8f0;border-top:none;">
-              <p style="margin:0 0 6px;font-size:12px;color:#94a3b8;line-height:1.65;">
-                For your security, please <strong style="color:#64748b;">change your password</strong> after signing in.
-                If you weren&rsquo;t expecting this invitation, contact your account administrator.
-              </p>
-              <p style="margin:10px 0 0;font-size:11px;color:#cbd5e1;">
-                Juspay Decision Engine &nbsp;&middot;&nbsp; Automated security email &mdash; please do not reply.
-              </p>
-            </td>
-          </tr>
-
-        </table>
-      </td>
-    </tr>
-  </table>
-</body>
-</html>"#,
+{button}
+              <p style="margin:28px 0 0;font-size:13px;line-height:1.6;color:#6b7280;">
+                For security, change your password after your first sign-in. If you were not expecting this invitation, please contact your account administrator.
+              </p>"#,
             merchant = merchant,
             email = email,
             password = password,
-            base_url = base_url
+            button = primary_button(&login_url, "Sign in"),
         );
 
         EmailMessage {
             to: self.user_email,
-            subject: format!(
-                "You've been invited to join {} on Decision Engine",
-                self.merchant_name
+            subject: format!("You've been invited to {}", self.merchant_name),
+            html_body: render_layout(
+                &format!(
+                    "You've been added to {} on Juspay Decision Engine.",
+                    self.merchant_name
+                ),
+                &content,
             ),
-            html_body,
         }
     }
 }

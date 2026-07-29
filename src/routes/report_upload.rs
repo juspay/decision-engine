@@ -154,6 +154,10 @@ pub async fn delete_ingestion(
         &row.account,
         &merchant_id,
         &report_date,
+        // No ingestion to attribute clusters to — this refit exists precisely because that
+        // ingestion's rows were just deleted. Empty asks for the snapshot-wide summary, which is
+        // the only meaningful scope here (and the summary is only logged on failure anyway).
+        "",
     )
     .await
     {

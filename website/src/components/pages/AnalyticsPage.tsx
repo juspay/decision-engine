@@ -13,6 +13,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
+import { CheckCircle2, ChevronRight } from 'lucide-react'
 import { fetcher } from '../../lib/api'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
@@ -588,27 +589,45 @@ function RoutingAlignmentCard({
 
   return (
     <Card className="overflow-visible">
-      <CardHeader className={expanded ? 'px-5 py-4' : 'px-5 py-3 !border-b-0'}>
+      <CardHeader className={expanded ? 'px-5 py-4' : 'px-5 py-4 !border-b-0'}>
         <div className={`flex flex-wrap justify-between gap-3 ${expanded ? 'items-start' : 'items-center'}`}>
-          <div className={expanded ? 'min-w-0' : 'flex min-w-0 flex-wrap items-center gap-2'}>
-            <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
-              Routing alignment
-            </h2>
-            {expanded ? (
+          {expanded ? (
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
+                Routing alignment
+              </h2>
               <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
                 Traffic share: checks if the best-scoring connector is also getting the largest share.
               </p>
-            ) : (
-              <span className="min-w-0 truncate text-xs font-medium text-slate-500 dark:text-[#9aa7bb]">
+            </div>
+          ) : (
+            <div className="flex min-w-0 flex-wrap items-center gap-2">
+              <CheckCircle2 size={18} className="shrink-0 text-emerald-500" />
+              <span className="min-w-0 text-sm text-slate-600 dark:text-[#9aa7bb]">
+                <span className="font-semibold text-slate-800 dark:text-white">Routing alignment</span>
+                {' — '}
                 {collapsedReadout}
               </span>
-            )}
-          </div>
+            </div>
+          )}
           <div className="flex shrink-0 items-center gap-2">
-            <InfoButton content={CARD_INFO.alignment} />
-            <Button size="sm" variant="secondary" onClick={onToggle}>
-              {expanded ? 'Hide details' : 'Show details'}
-            </Button>
+            {expanded ? (
+              <>
+                <InfoButton content={CARD_INFO.alignment} />
+                <Button size="sm" variant="secondary" onClick={onToggle}>
+                  Hide details
+                </Button>
+              </>
+            ) : (
+              <button
+                type="button"
+                onClick={onToggle}
+                className="inline-flex items-center gap-1 text-sm font-semibold text-brand-600 transition hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-200"
+              >
+                Show details
+                <ChevronRight size={16} />
+              </button>
+            )}
           </div>
         </div>
       </CardHeader>
@@ -1712,14 +1731,36 @@ export function AnalyticsPage() {
 
   return (
     <div className="space-y-8 px-5 sm:px-6 lg:px-8 xl:px-10">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
+      <div className="space-y-4">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="space-y-1">
             <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Analytics</h1>
+            <p className="text-sm text-slate-500 dark:text-[#8a8a93]">
+              Real-time multi-gateway routing performance overview.
+            </p>
+          </div>
+
+          <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
+            <Button
+              size="sm"
+              variant="secondary"
+              className={sectionButtonClass(view === 'transactions')}
+              onClick={() => setView('transactions')}
+            >
+              {ANALYTICS_VIEW_LABELS.transactions}
+            </Button>
+            <Button
+              size="sm"
+              variant="secondary"
+              className={sectionButtonClass(view === 'rule_based')}
+              onClick={() => setView('rule_based')}
+            >
+              {ANALYTICS_VIEW_LABELS.rule_based}
+            </Button>
           </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2 md:justify-end">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           <Button size="sm" variant="ghost" onClick={refreshAll}>
             Refresh
           </Button>
@@ -1793,25 +1834,6 @@ export function AnalyticsPage() {
         </div>
       </div>
 
-      <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
-        <Button
-          size="sm"
-          variant="secondary"
-          className={sectionButtonClass(view === 'transactions')}
-          onClick={() => setView('transactions')}
-        >
-          {ANALYTICS_VIEW_LABELS.transactions}
-        </Button>
-        <Button
-          size="sm"
-          variant="secondary"
-          className={sectionButtonClass(view === 'rule_based')}
-          onClick={() => setView('rule_based')}
-        >
-          {ANALYTICS_VIEW_LABELS.rule_based}
-        </Button>
-      </div>
-
       <ErrorMessage error={error} />
 
       {loading ? (
@@ -1824,67 +1846,71 @@ export function AnalyticsPage() {
       <div className="relative">
       {view === 'transactions' ? (
         <div className="space-y-6">
-          <Card>
-            <CardBody>
-              <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-4">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-                    Overall auth rate
-                  </p>
-                  {overallAuthRate !== null ? (
-                    <>
-                      <p className={`mt-2 text-4xl font-semibold tabular-nums ${authRateColor(overallAuthRate)}`}>
-                        {formatPercent(overallAuthRate)}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                        Weighted across all gateways
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="mt-2 text-4xl font-semibold text-slate-300 dark:text-slate-700">—</p>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">No score data yet</p>
-                    </>
-                  )}
-                </div>
-                {transactionRouteHits.map((item) => (
-                  <div key={item.route}>
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-                      {analyticsRouteLabel(item.route)}
-                    </p>
-                    <p className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">
-                      {formatNumber(item.count, 0)}
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardBody>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                  Overall auth rate
+                </p>
+                {overallAuthRate !== null ? (
+                  <>
+                    <p className={`mt-2 text-4xl font-semibold tabular-nums ${authRateColor(overallAuthRate)}`}>
+                      {formatPercent(overallAuthRate)}
                     </p>
                     <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                      {item.route === '/decide_gateway' ? 'routing decisions' : 'score feedback calls'}
+                      Weighted across all gateways
                     </p>
-                  </div>
-                ))}
-                <div>
+                  </>
+                ) : (
+                  <>
+                    <p className="mt-2 text-4xl font-semibold text-slate-300 dark:text-slate-700">—</p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">No score data yet</p>
+                  </>
+                )}
+              </CardBody>
+            </Card>
+
+            {transactionRouteHits.map((item) => (
+              <Card key={item.route}>
+                <CardBody>
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-                    Total cost saved
+                    {analyticsRouteLabel(item.route)}
                   </p>
-                  {costSavings.data && costSavings.data.currency && costSavings.data.totals.saved_value > 0 ? (
-                    <>
-                      <p className="mt-2 text-2xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
-                        {formatCurrencyValue(costSavings.data.totals.saved_value, costSavings.data.currency)}
-                      </p>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                        {formatNumber(costSavings.data.totals.cost_won_count, 0)} of {formatNumber(costSavings.data.totals.total_decisions, 0)} cost decisions
-                      </p>
-                    </>
-                  ) : (
-                    <>
-                      <p className="mt-2 text-2xl font-semibold text-slate-300 dark:text-slate-700">—</p>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                        {costSavings.data ? 'No multi-objective wins yet' : 'Loading…'}
-                      </p>
-                    </>
-                  )}
-                </div>
-              </div>
-            </CardBody>
-          </Card>
+                  <p className="mt-2 text-4xl font-semibold tabular-nums text-slate-950 dark:text-white">
+                    {formatNumber(item.count, 0)}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                    {item.route === '/decide_gateway' ? 'routing decisions' : 'score feedback calls'}
+                  </p>
+                </CardBody>
+              </Card>
+            ))}
+
+            <Card>
+              <CardBody>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                  Total cost saved
+                </p>
+                {costSavings.data && costSavings.data.currency && costSavings.data.totals.saved_value > 0 ? (
+                  <>
+                    <p className="mt-2 text-4xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                      {formatCurrencyValue(costSavings.data.totals.saved_value, costSavings.data.currency)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                      {formatNumber(costSavings.data.totals.cost_won_count, 0)} of {formatNumber(costSavings.data.totals.total_decisions, 0)} cost decisions
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="mt-2 text-4xl font-semibold text-slate-300 dark:text-slate-700">—</p>
+                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                      {costSavings.data ? 'No multi-objective wins yet' : 'Loading…'}
+                    </p>
+                  </>
+                )}
+              </CardBody>
+            </Card>
+          </div>
 
           <RoutingAlignmentCard
             summary={routingAlignmentSummary}

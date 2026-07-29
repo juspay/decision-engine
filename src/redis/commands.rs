@@ -423,6 +423,29 @@ impl RedisConnectionWrapper {
         self.get_key::<String>(key, "").await
     }
 
+    /// Atomically read and delete a string key (`GETDEL`), returning `None` when the key
+    /// did not exist. Use this for single-use tokens: a plain `get` followed by a later
+    /// `delete` lets two concurrent requests read the same token before either removes it.
+    pub async fn get_and_delete_key_string(
+        &self,
+        key: &str,
+    ) -> Result<Option<String>, errors::RedisError> {
+        let value: Vec<u8> = self
+            .conn
+            .pool
+            .getdel(self.conn.add_prefix(key))
+            .await
+            .change_context(errors::RedisError::GetFailed)?;
+
+        if value.is_empty() {
+            return Ok(None);
+        }
+
+        serde_json::from_slice(&value)
+            .change_context(errors::RedisError::JsonDeserializationFailed)
+            .map(Some)
+    }
+
     pub async fn get_list_length(&self, key: &str) -> Result<usize, errors::RedisError> {
         self.conn
             .pool

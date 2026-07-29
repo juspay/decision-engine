@@ -1,10 +1,10 @@
 import { useEffect } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Database, LineChart, SlidersHorizontal, type LucideIcon } from 'lucide-react'
+import { Coins, Database, LineChart, type LucideIcon } from 'lucide-react'
 import { Card, CardBody, CardHeader } from '../ui/Card'
 import * as type from '../ui/typography'
 import { CoverageBreakdown } from './CostCoverageCard'
-import { ConnectorsPanel } from './ConnectorsPanel'
+import { CostsPanel } from './CostsPanel'
 import { ConnectorCredentialsForm } from './ConnectorCredentialsForm'
 import { ManualReportUpload } from './ManualReportUpload'
 import { InvoiceUpload } from './InvoiceUpload'
@@ -12,9 +12,9 @@ import { IngestionHistory } from './IngestionHistory'
 import { PriceChanges } from './PriceChanges'
 import { useCostCoverage, useIngestionHistory } from '../../hooks/useCostRouting'
 
-/** The three concerns of cost estimation, as vertical sections. */
-type Section = 'ingestion' | 'data' | 'overrides'
-const COST_SECTIONS: readonly Section[] = ['ingestion', 'data', 'overrides']
+/** The concerns of cost estimation, as vertical sections. */
+type Section = 'ingestion' | 'data' | 'costs'
+const COST_SECTIONS: readonly Section[] = ['ingestion', 'data', 'costs']
 type IngestMode = 'automatic' | 'manual' | 'invoice'
 
 interface SectionDef {
@@ -45,10 +45,10 @@ const SECTIONS: SectionDef[] = [
     blurb: 'What we learned — coverage & history',
   },
   {
-    id: 'overrides',
-    icon: SlidersHorizontal,
-    title: 'Manual overrides',
-    blurb: 'Set your own blended fee per connector',
+    id: 'costs',
+    icon: Coins,
+    title: 'Costs',
+    blurb: 'Effective fees per connector — overrides, learned rates & contract baseline',
   },
 ]
 
@@ -60,12 +60,15 @@ const SECTIONS: SectionDef[] = [
 export function CostEstimationPanel({ merchantId }: { merchantId?: string }) {
   // Active section is kept in the URL (?section=…, shared with the SR Manual tab
   // since only one SR tab is visible at a time) so a search result or shared link
-  // can open Data Ingestion / Ingested Data directly. Default (overrides) is omitted.
+  // can open Data Ingestion / Ingested Data directly. Default (costs) is omitted.
+  // Legacy values (?section=overrides / =contract, from before those two panels were
+  // merged into Costs) fall through to the default here, and the canonicalizer below
+  // strips them from the URL — so old bookmarks still land on the merged Costs view.
   const [searchParams, setSearchParams] = useSearchParams()
   const sectionParam = searchParams.get('section')
   const section: Section = COST_SECTIONS.includes(sectionParam as Section)
     ? (sectionParam as Section)
-    : 'overrides'
+    : 'costs'
 
   // Which ingestion child is open, from ?source= — so a search result can land on Data Ingestion →
   // Manual directly. Only meaningful under section=ingestion; canonicalized away everywhere else.
@@ -83,7 +86,7 @@ export function CostEstimationPanel({ merchantId }: { merchantId?: string }) {
     setSearchParams(
       (prev) => {
         const params = new URLSearchParams(prev)
-        if (nextSection === 'overrides') params.delete('section')
+        if (nextSection === 'costs') params.delete('section')
         else params.set('section', nextSection)
         // `source` is ingestion's alone, and 'automatic' is the default — neither belongs in the URL.
         if (nextSection !== 'ingestion' || nextMode === 'automatic') params.delete('source')
@@ -98,7 +101,7 @@ export function CostEstimationPanel({ merchantId }: { merchantId?: string }) {
   // unknown values (e.g. a leftover SR Manual section, or ?source= on a non-ingestion section) and
   // the defaults, so the URL never advertises a state the panel isn't showing.
   useEffect(() => {
-    const canonicalSection = section === 'overrides' ? null : section
+    const canonicalSection = section === 'costs' ? null : section
     const canonicalSource =
       section === 'ingestion' && ingestMode !== 'automatic' ? ingestMode : null
     if (sectionParam !== canonicalSection || sourceParam !== canonicalSource) {
@@ -108,7 +111,7 @@ export function CostEstimationPanel({ merchantId }: { merchantId?: string }) {
   }, [section, sectionParam, ingestMode, sourceParam])
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[220px_1fr] lg:items-start">
+    <div className="grid gap-4 lg:grid-cols-[184px_1fr] lg:items-start">
       <SectionRail
         merchantId={merchantId}
         active={section}
@@ -120,7 +123,7 @@ export function CostEstimationPanel({ merchantId }: { merchantId?: string }) {
       <div className="min-w-0">
         {section === 'ingestion' && <IngestionSection merchantId={merchantId} mode={ingestMode} />}
         {section === 'data' && <IngestedDataSection merchantId={merchantId} />}
-        {section === 'overrides' && <OverridesSection merchantId={merchantId} />}
+        {section === 'costs' && <CostsPanel merchantId={merchantId} />}
       </div>
     </div>
   )
@@ -149,11 +152,14 @@ function SectionRail({
       ingestions.length > 0
         ? `${ingestions.length} report${ingestions.length === 1 ? '' : 's'}`
         : 'Not set up',
+    // "Covered" means the router can price it — GOOD **plus** tiered. Using `good_gross_pct` here
+    // reported a merchant whose big-ticket segments are capped as roughly half-covered while the
+    // router was in fact pricing ~95% of their volume.
     data:
       coverage && coverage.total_clusters > 0
-        ? `${coverage.good_gross_pct.toFixed(1)}% volume covered`
+        ? `${coverage.priced_gross_pct.toFixed(1)}% volume covered`
         : 'No data yet',
-    overrides: undefined,
+    costs: undefined,
   }
 
   return (
@@ -166,28 +172,31 @@ function SectionRail({
               type="button"
               onClick={() => onSelect(id)}
               aria-current={on ? 'page' : undefined}
-              className={`flex w-full items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors ${
+              className={`flex w-full flex-col rounded-xl border px-2.5 py-2.5 text-left transition-colors ${
                 on
                   ? 'border-brand-500/40 bg-brand-500/8 text-slate-900 dark:text-white'
                   : 'border-transparent text-slate-600 hover:bg-slate-50 dark:text-[#9ca7ba] dark:hover:bg-[#141923]'
               }`}
             >
-              <Icon
-                size={18}
-                className={`mt-0.5 shrink-0 ${on ? 'text-brand-500' : 'text-slate-400'}`}
-              />
-              <span className="min-w-0">
-                <span className="block text-sm font-medium">{title}</span>
-                <span className="mt-0.5 hidden text-xs text-slate-400 lg:block">
-                  {hint[id] ?? blurb}
-                </span>
+              {/* The icon sits inline with the title rather than in its own column: the titles are
+                  short enough to share a line with it, and the hint below — the line that actually
+                  wraps — then gets the rail's full width instead of starting at an icon indent. */}
+              <span className="flex min-w-0 items-center gap-2">
+                <Icon
+                  size={16}
+                  className={`shrink-0 ${on ? 'text-brand-500' : 'text-slate-400'}`}
+                />
+                <span className="truncate text-sm font-medium">{title}</span>
+              </span>
+              <span className="mt-0.5 hidden text-xs text-slate-400 lg:block">
+                {hint[id] ?? blurb}
               </span>
             </button>
 
             {/* Ingestion's three sources hang off it as a nested rail, revealed only while the
                 section is open so the rail stays three items tall the rest of the time. */}
             {id === 'ingestion' && on && (
-              <div className="ml-[1.4rem] mt-1 flex flex-col gap-0.5 border-l border-slate-200 pl-2 dark:border-[#2a3344]">
+              <div className="ml-[1.125rem] mt-1 flex flex-col gap-0.5 border-l border-slate-200 pl-2 dark:border-[#2a3344]">
                 {INGEST_MODES.map((m) => {
                   const sub = ingestMode === m.id
                   return (
@@ -225,21 +234,6 @@ function SectionHeading({ title, subtitle }: { title: string; subtitle: string }
   )
 }
 
-/** 3 — Manual overrides: the primary action. Two levels — a surgical per-segment fee on the
- * highest-traffic clusters, and a blanket per-connector fee. Precedence: segment > connector. */
-function OverridesSection({ merchantId }: { merchantId?: string }) {
-  return (
-    <div className="space-y-6">
-      <SectionHeading
-        title="Manual overrides"
-        subtitle="Set your own fee, and we'll use it instead of the learned model in every economic-value calculation. Set a connector-wide fee, or expand a connector to override its individual segments — a segment fee beats the connector fee beats the model."
-      />
-
-      <ConnectorsPanel merchantId={merchantId} />
-    </div>
-  )
-}
-
 /** 2 — Ingested data: what the reports taught us — coverage, and each report's fitted segments
  * (expand a row in the history to see that report's per-segment fees). */
 function IngestedDataSection({ merchantId }: { merchantId?: string }) {
@@ -250,7 +244,12 @@ function IngestedDataSection({ merchantId }: { merchantId?: string }) {
         subtitle="What your settlement reports taught us: how much volume we can cost accurately, and — inside each report below — the fee learned for every segment."
       />
 
-      <PriceChanges merchantId={merchantId} />
+      {/* "Clusters whose price moved" is hidden for now. Its query (`detect.rs CHANGES_SQL`) ranks
+          each cluster's two most recent fits with a `row_number()` partition that omits
+          `card_product`, so two card products under one display key can be ranked rn=1/rn=2 *within
+          a single snapshot* — reporting a standing rate difference between two card programs as a
+          fresh price change on every refit. Re-enable once that partition covers the full fit key. */}
+      {false && <PriceChanges merchantId={merchantId} />}
 
       <Card>
         <CardHeader>

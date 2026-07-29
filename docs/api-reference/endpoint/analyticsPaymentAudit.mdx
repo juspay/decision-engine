@@ -29,7 +29,7 @@ export TENANT_HEADER="x-tenant-id: public"
 
 - Method and path: `GET /analytics/payment-audit`
 - Parameters:
-  - `x-tenant-id` (header, required, string) — see [Environment setup](/api-refs/api-ref#environment-setup).
+  - `x-tenant-id` (header, required, string) — see [Environment setup](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx#environment-setup).
   - `range` (query, optional, string)
   - `start_ms` (query, optional, integer)
   - `end_ms` (query, optional, integer)
@@ -120,6 +120,6 @@ curl "$BASE_URL/analytics/payment-audit?range=1d&routing_approach=NTW_BASED_ROUT
 
 ## Related
 
-- [Preview Trace](/api-reference/endpoint/analyticsPreviewTrace)
-- [Analytics Log Summaries](/api-reference/endpoint/analyticsLogSummaries)
-- [Analytics Endpoints](/api-refs/analytics-endpoints)
+- [Preview Trace](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsPreviewTrace.mdx)
+- [Analytics Log Summaries](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsLogSummaries.mdx)
+- [Analytics Endpoints](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/analytics-endpoints.mdx)

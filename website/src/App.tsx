@@ -19,6 +19,8 @@ import { OnboardingPage } from './pages/OnboardingPage'
 import { MembersPage } from './pages/MembersPage'
 import { ApiKeysPage } from './pages/ApiKeysPage'
 import { VerifyEmailPage } from './pages/VerifyEmailPage'
+import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
+import { ResetPasswordPage } from './pages/ResetPasswordPage'
 import { AccountPage } from './pages/AccountPage'
 import { useAuthStore } from './store/authStore'
 import { useMerchantStore } from './store/merchantStore'
@@ -85,6 +87,8 @@ export default function App() {
       <Route path="login" element={<AuthPage />} />
       <Route path="signup" element={<AuthPage />} />
       <Route path="verify-email" element={<VerifyEmailPage />} />
+      <Route path="forgot-password" element={<ForgotPasswordPage />} />
+      <Route path="reset-password" element={<ResetPasswordPage />} />
       <Route element={<AuthGuard />}>
         <Route path="onboarding" element={<OnboardingPage />} />
         <Route element={<AppShell />}>

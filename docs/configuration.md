@@ -103,7 +103,7 @@ public = { schema = "public" }
 
 Maps tenant identifiers to database schemas. The shipped config files (`config/development.toml`, `config/docker-configuration.toml`) define only the `public` tenant — add entries for any additional tenant you want to support.
 
-Some routes resolve the tenant from an `x-tenant-id` request header rather than the authenticated merchant, and reject the request outright if it's missing (`TE_03`). Send `x-tenant-id: public` on `GET /health/diagnostics`, every `GET /analytics/*` route, and `POST /gateway-score/reset` — see [API Guide](/api-refs/api-ref#environment-setup).
+Some routes resolve the tenant from an `x-tenant-id` request header rather than the authenticated merchant, and reject the request outright if it's missing (`TE_03`). Send `x-tenant-id: public` on `GET /health/diagnostics`, every `GET /analytics/*` route, and `POST /gateway-score/reset` — see [API Guide](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx#environment-setup).
 
 ### Redis
 
@@ -222,7 +222,7 @@ Selected values can be overridden at runtime via environment variables. This is 
 
 ## Related Docs
 
-- [Installation](/installation)
-- [Local Setup Guide](/local-setup)
-- [API Guide](/api-refs/api-ref)
-- [API Reference](/api-reference)
+- [Installation](https://github.com/juspay/decision-engine/blob/main/docs/installation.md)
+- [Local Setup Guide](https://github.com/juspay/decision-engine/blob/main/docs/local-setup.md)
+- [API Guide](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx)
+- [API Reference](https://github.com/juspay/decision-engine/blob/main/docs/api-reference.md)

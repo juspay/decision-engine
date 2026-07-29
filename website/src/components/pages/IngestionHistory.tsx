@@ -20,10 +20,10 @@ import {
 export function IngestionHistory({ merchantId }: { merchantId?: string }) {
   const { ingestions, isLoading, mutate } = useIngestionHistory(merchantId)
   const { mutate: mutateCoverage } = useCostCoverage(merchantId)
-  const [expanded, setExpanded] = useState<Set<number>>(new Set())
-  const [deletingId, setDeletingId] = useState<number | null>(null)
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [deletingId, setDeletingId] = useState<string | null>(null)
 
-  function toggle(id: number) {
+  function toggle(id: string) {
     setExpanded((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
@@ -91,7 +91,15 @@ export function IngestionHistory({ merchantId }: { merchantId?: string }) {
                   <th className="py-2 pr-3 text-right font-semibold">Rows</th>
                   <th className="py-2 pr-3 text-right font-semibold">Ccy</th>
                   <th className="py-2 pr-3 text-right font-semibold">Ctry</th>
-                  <th className="py-2 pr-3 text-right font-semibold">GOOD</th>
+                  {/* Fit grades, not row counts: a segment can be listed below (and priced) while
+                      still grading Thin or Poor fit, so this ratio is usually smaller than the
+                      number of segments in the expanded view. */}
+                  <th
+                    className="py-2 pr-3 text-right font-semibold"
+                    title="Segments whose fitted rate graded GOOD, out of all fitted segments. Expand a row to see every segment with its grade."
+                  >
+                    GOOD
+                  </th>
                   <th className="py-2 pr-2 font-semibold" />
                 </tr>
               </thead>
@@ -207,21 +215,35 @@ function Row({
               )}
             </dl>
 
-            {/* This report's fitted segments and the fee we learned for each. */}
+            {/* This report's fitted segments and the fee we learned for each. Editable: a thin or
+                poorly-fitting segment is exactly the one worth correcting with a contract rate, and
+                this is where the merchant sees the grade. The override is keyed by cluster (not by
+                snapshot), so it applies to routing from here on. */}
             {job.status === 'completed' && job.report_date && (
               <div className="mt-4 border-t border-slate-200 pt-3 dark:border-[#232833]">
                 <p className="mb-2 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa]">
-                  Fitted segments (top by txns)
+                  Fitted segments (top by txns) — edit any rate to override it
                 </p>
                 <ClustersPanel
                   merchantId={merchantId}
+                  // Read-only. This view answers "what did this report contain"; editing a fee is a
+                  // merchant-wide decision that outlives any one ingestion, so overrides live solely
+                  // on the Costs page. Two edit surfaces for the same override would also let a stale
+                  // snapshot's row silently rewrite the current fee.
                   editable={false}
-                  limit={20}
+                  // Every cluster in the snapshot, not a top-N: the filter bar is what narrows the
+                  // list now, and a low-traffic cluster is exactly the one worth inspecting.
+                  limit={2000}
                   defaultSort="n"
                   scope={{
                     connector: job.connector,
                     account: job.account,
                     reportDate: job.report_date,
+                    // THIS upload's clusters, not the whole snapshot's. The fit is a rolling-window
+                    // re-fit, so two uploads on the same day under one account land in the same
+                    // snapshot — without this a 4.2k-row report listed 1,109 segments, nearly all of
+                    // them from an earlier report.
+                    ingestionId: job.id,
                   }}
                 />
               </div>

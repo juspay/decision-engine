@@ -94,6 +94,8 @@ const EMAIL_VERIFICATION_PREFIX: &str = "email_verification:";
 const EMAIL_VERIFICATION_TTL_SECONDS: i64 = 86400; // 24 hours
 const PENDING_SIGNUP_PREFIX: &str = "pending_signup:";
 const PENDING_SIGNUP_TTL_SECONDS: i64 = 300; // 5 minutes
+const PASSWORD_RESET_PREFIX: &str = "password_reset:";
+const PASSWORD_RESET_TTL_SECONDS: i64 = 3600; // 1 hour
 
 #[axum::debug_handler]
 pub async fn signup(
@@ -1102,6 +1104,175 @@ async fn fetch_user_merchants(
         });
     }
     Ok(result)
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ForgotPasswordRequest {
+    pub email: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ResetPasswordRequest {
+    pub token: String,
+    pub new_password: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MessageResponse {
+    pub message: String,
+}
+
+/// Generic message returned by `forgot_password` regardless of whether the email
+/// exists — this prevents attackers from using the endpoint to enumerate accounts.
+const FORGOT_PASSWORD_GENERIC_MESSAGE: &str =
+    "If an account exists for that email, a password reset link has been sent.";
+
+#[axum::debug_handler]
+pub async fn forgot_password(
+    Json(payload): Json<ForgotPasswordRequest>,
+) -> Result<Json<MessageResponse>, error::ContainerError<UserAuthError>> {
+    let generic_ok = || {
+        Ok(Json(MessageResponse {
+            message: FORGOT_PASSWORD_GENERIC_MESSAGE.to_string(),
+        }))
+    };
+
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    // Without a configured email backend there is no way to deliver the reset link,
+    // so short-circuit — but still return the generic response to avoid leaking that.
+    if !global_config.email.is_active() {
+        crate::logger::warn!(
+            "forgot_password requested but no email backend is configured; skipping send"
+        );
+        return generic_ok();
+    }
+
+    let app_state = get_tenant_app_state().await;
+
+    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+        &app_state.db,
+        dsl::email.eq(payload.email.clone()),
+    )
+    .await
+    .change_error(UserAuthError::StorageError)?;
+
+    let user = match users.pop() {
+        Some(user) => user,
+        // Unknown email — respond as if it succeeded so callers can't probe for accounts.
+        None => return generic_ok(),
+    };
+
+    let is_active = {
+        #[cfg(feature = "mysql")]
+        {
+            user.is_active != 0
+        }
+        #[cfg(feature = "postgres")]
+        {
+            user.is_active
+        }
+    };
+    if !is_active {
+        return generic_ok();
+    }
+
+    let token = uuid::Uuid::new_v4().to_string();
+    let redis_key = format!("{}{}", PASSWORD_RESET_PREFIX, token);
+    let reset_url = format!(
+        "{}/reset-password?token={}",
+        global_config.email.base_url, token
+    );
+
+    app_state
+        .redis_conn
+        .set_key_with_ttl(&redis_key, &user.user_id, PASSWORD_RESET_TTL_SECONDS)
+        .await
+        .change_context(UserAuthError::StorageError)?;
+
+    let email_client = APP_STATE
+        .get()
+        .map(|s| s.email_client.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    let send_result = email_client
+        .send_email(
+            crate::email::templates::PasswordResetTemplate {
+                user_email: user.email.clone(),
+                reset_url,
+            }
+            .into_message(),
+        )
+        .await;
+
+    if send_result.is_err() {
+        // Drop the token so a failed send doesn't leave a dangling reset entry.
+        let _ = app_state.redis_conn.delete_key(&redis_key).await;
+        send_result.change_context(UserAuthError::EmailSendFailed)?;
+    }
+
+    generic_ok()
+}
+
+#[axum::debug_handler]
+pub async fn reset_password(
+    Json(payload): Json<ResetPasswordRequest>,
+) -> Result<Json<MessageResponse>, error::ContainerError<UserAuthError>> {
+    let app_state = get_tenant_app_state().await;
+
+    let redis_key = format!("{}{}", PASSWORD_RESET_PREFIX, payload.token);
+
+    // Validate and hash before touching the token so a weak password doesn't consume it.
+    auth::validate_password_strength(&payload.new_password)
+        .change_context(UserAuthError::WeakPassword)?;
+
+    let new_hash = auth::hash_password(&payload.new_password)
+        .change_context(UserAuthError::PasswordHashingFailed)?;
+
+    // Single-use token: GETDEL consumes it atomically, so concurrent requests carrying the
+    // same token can't both read it and reset the password twice.
+    let user_id = app_state
+        .redis_conn
+        .get_and_delete_key_string(&redis_key)
+        .await
+        .change_context(UserAuthError::StorageError)?
+        .filter(|user_id| !user_id.is_empty())
+        .ok_or(UserAuthError::InvalidResetToken)?;
+
+    let conn = app_state
+        .db
+        .get_conn()
+        .await
+        .change_error(UserAuthError::StorageError)?;
+
+    let rows_updated = crate::generics::generic_update_if_present::<
+        <User as HasTable>::Table,
+        crate::storage::types::UserPasswordUpdate,
+        _,
+    >(
+        &conn,
+        dsl::user_id.eq(user_id.clone()),
+        crate::storage::types::UserPasswordUpdate {
+            password_hash: new_hash,
+        },
+    )
+    .await
+    .change_context(UserAuthError::StorageError)?;
+
+    if rows_updated == 0 {
+        crate::logger::error!(user_id = %user_id, "Password reset matched 0 rows — user_id not found in DB");
+        return Err(error::ContainerError::from(
+            UserAuthError::InvalidResetToken,
+        ));
+    }
+
+    Ok(Json(MessageResponse {
+        message: "Password reset successfully. You can now sign in with your new password."
+            .to_string(),
+    }))
 }
 
 #[derive(Debug, Deserialize)]
