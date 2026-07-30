@@ -1194,10 +1194,16 @@ export function DecisionSimulatorPage() {
   const eliminationEnabled = Object.values(gatewaySimConfigs).some(c => c.failureMode === 'timeout')
   const simulationAbortRef = useRef(false)
   useEffect(() => () => { simulationAbortRef.current = true }, [])
-  // Set when the results are cleared out from under a live run. Aborting alone isn't enough: the
-  // run loop owns a local `results` array and flushes it into state as it goes and once more on the
-  // way out, so without this the cleared transaction log would repopulate a moment later.
-  const discardRunResultsRef = useRef(false)
+  /**
+   * Bumped on every run start, and by anything that discards a run outright (Clear results, a
+   * merchant-scope switch). A run captures the value at entry and only touches shared state while it
+   * still matches, which `simulationAbortRef` alone cannot express: the abort flag is reset to false
+   * at the top of the next run, so workers parked in an `await` would wake up, see it cleared and
+   * carry on — two live runs interleaving rows into the same state and both posting real feedback to
+   * the engine. The token can only move forward, so a superseded run can never mistake itself for
+   * the current one.
+   */
+  const runGenerationRef = useRef(0)
 
   const [debitForm, setDebitForm] = useState<DebitRoutingFormState>(initialState.debitForm)
 
@@ -1690,6 +1696,9 @@ export function DecisionSimulatorPage() {
     setSetupPrompt(null)
     setLoading(false)
     simulationAbortRef.current = true
+    // Retire the run as well as aborting it — see runGenerationRef. Without this, a worker parked in
+    // a request would resume once the next run clears the abort flag.
+    runGenerationRef.current++
     setIsSimulating(false)
   }
 
@@ -1740,6 +1749,9 @@ export function DecisionSimulatorPage() {
     setSetupPrompt(null)
     setLoading(false)
     simulationAbortRef.current = true
+    // Retire the run as well as aborting it — see runGenerationRef. Without this, a worker parked in
+    // a request would resume once the next run clears the abort flag.
+    runGenerationRef.current++
     setIsSimulating(false)
   }
 
@@ -2269,7 +2281,10 @@ export function DecisionSimulatorPage() {
     setSetupPrompt(null)
     if (!isResume) setSimulationResults([])
     simulationAbortRef.current = false
-    discardRunResultsRef.current = false
+    // Claim ownership of the shared run state. Any earlier run still unwinding is now superseded and
+    // will drop out of its loop without writing.
+    const runId = ++runGenerationRef.current
+    const isCurrentRun = () => runGenerationRef.current === runId
 
     const gateways = form.eligible_gateways.split(',').map(s => s.trim()).filter(Boolean)
     // Seed from the completed rows on resume so new transactions append rather than replace.
@@ -2448,8 +2463,9 @@ export function DecisionSimulatorPage() {
       // Commit the accumulated rows + refresh the events feed, throttled so a fast loop can't
       // spam re-renders (force=true bypasses the throttle for pause/end-of-run flushes).
       const flushResults = (force: boolean) => {
-        // The user cleared the results mid-run — this run's rows are no longer wanted on screen.
-        if (discardRunResultsRef.current) return
+        // Superseded — the results were cleared, or a newer run owns the screen now. Either way this
+        // run's rows are not wanted.
+        if (!isCurrentRun()) return
         const now = Date.now()
         if (force || now - lastUIUpdate > 150) {
           setSimulationResults([...results])
@@ -2464,14 +2480,17 @@ export function DecisionSimulatorPage() {
 
       const worker = async (): Promise<void> => {
         while (true) {
-          if (simulationAbortRef.current) return
+          // The generation check is what stops a superseded run: a worker parked in `runTxn` misses
+          // the abort flag entirely, and by the time it wakes the next run may have already cleared
+          // that flag — without this it would keep claiming indices and hitting the real API.
+          if (simulationAbortRef.current || !isCurrentRun()) return
           // Idle here while paused — without claiming new work — so the in-flight requests drain
           // and the resume index stays put; a Stop still breaks out. Flush once on the way in so a
           // page-leave/return resumes from exactly the committed rows.
           if (simulationPausedRef.current) {
             runProgressRef.current = results.length
             flushResults(true)
-            while (simulationPausedRef.current && !simulationAbortRef.current) {
+            while (simulationPausedRef.current && !simulationAbortRef.current && isCurrentRun()) {
               await new Promise(resolve => setTimeout(resolve, 120))
             }
             continue
@@ -2497,6 +2516,9 @@ export function DecisionSimulatorPage() {
             await new Promise(resolve => setTimeout(resolve, 300))
           }
 
+          // The row landed after this run was superseded: drop it rather than move the shared resume
+          // point, which now belongs to whichever run replaced this one.
+          if (!isCurrentRun()) return
           // Record the resume point as the committed count and flush on the shared throttle.
           runProgressRef.current = results.length
           flushResults(false)
@@ -2508,16 +2530,23 @@ export function DecisionSimulatorPage() {
       await Promise.all(Array.from({ length: concurrency }, () => worker()))
 
       // If a worker tripped the error threshold (as opposed to a user Stop), surface the failure.
-      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+      // Not ours to report if this run was already discarded.
+      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS && isCurrentRun()) {
         handleRunError(lastError, 'batch', `Simulation stopped after ${MAX_CONSECUTIVE_ERRORS} consecutive errors. Check that the server is running.`)
         return
       }
     } finally {
-      if (!discardRunResultsRef.current) setSimulationResults([...results])
-      setIsSimulating(false)
-      setIsPaused(false)
-      simulationPausedRef.current = false
-      // Final flush: events from the last txns can land just after the loop ends.
+      // A superseded run must not write any of this: its rows are stale, and `isSimulating` /
+      // `isPaused` now describe the run that replaced it — flipping them here is what let the old
+      // run hide a live run's Stop button and re-offer Run simulation.
+      if (isCurrentRun()) {
+        setSimulationResults([...results])
+        setIsSimulating(false)
+        setIsPaused(false)
+        simulationPausedRef.current = false
+      }
+      // Events from the last txns can land just after the loop ends. Safe either way — it only
+      // refetches the feed.
       routingEvents.refresh()
     }
   }
@@ -3290,9 +3319,11 @@ export function DecisionSimulatorPage() {
     // Autopilot Actions feed (scoped to simulationStartedAtMs) clears back
     // to its empty state instead of replaying the previous run's events.
     simulationAbortRef.current = true
-    // Aborted workers still unwind through the loop's final flush, which would put the rows we
-    // just cleared straight back; this tells that run to drop them.
-    discardRunResultsRef.current = true
+    // Retire the run outright. Aborting alone isn't enough on two counts: its workers unwind through
+    // a final flush that would put the rows we just cleared straight back, and the next run resets
+    // the abort flag, which would let any worker still parked in a request resume against a run it
+    // no longer belongs to.
+    runGenerationRef.current++
     setSimulationStartedAtMs(null)
     setIsSimulating(false)
     setIsPaused(false)
