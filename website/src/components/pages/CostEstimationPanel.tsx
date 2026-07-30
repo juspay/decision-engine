@@ -111,7 +111,7 @@ export function CostEstimationPanel({ merchantId }: { merchantId?: string }) {
   }, [section, sectionParam, ingestMode, sourceParam])
 
   return (
-    <div className="grid gap-4 lg:grid-cols-[184px_1fr] lg:items-start">
+    <div className="grid gap-6 lg:grid-cols-[220px_1fr] lg:items-start">
       <SectionRail
         merchantId={merchantId}
         active={section}
@@ -172,31 +172,29 @@ function SectionRail({
               type="button"
               onClick={() => onSelect(id)}
               aria-current={on ? 'page' : undefined}
-              className={`flex w-full flex-col rounded-xl border px-2.5 py-2.5 text-left transition-colors ${
+              className={`flex w-full items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition-colors ${
                 on
                   ? 'border-brand-500/40 bg-brand-500/8 text-slate-900 dark:text-white'
                   : 'border-transparent text-slate-600 hover:bg-slate-50 dark:text-[#9ca7ba] dark:hover:bg-[#141923]'
               }`}
             >
-              {/* The icon sits inline with the title rather than in its own column: the titles are
-                  short enough to share a line with it, and the hint below — the line that actually
-                  wraps — then gets the rail's full width instead of starting at an icon indent. */}
-              <span className="flex min-w-0 items-center gap-2">
-                <Icon
-                  size={16}
-                  className={`shrink-0 ${on ? 'text-brand-500' : 'text-slate-400'}`}
-                />
-                <span className="truncate text-sm font-medium">{title}</span>
-              </span>
-              <span className="mt-0.5 hidden text-xs text-slate-400 lg:block">
-                {hint[id] ?? blurb}
+              <Icon
+                size={18}
+                className={`mt-0.5 shrink-0 ${on ? 'text-brand-500' : 'text-slate-400'}`}
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium">{title}</span>
+                <span className="mt-0.5 hidden text-xs text-slate-400 lg:block">
+                  {hint[id] ?? blurb}
+                </span>
               </span>
             </button>
 
             {/* Ingestion's three sources hang off it as a nested rail, revealed only while the
-                section is open so the rail stays three items tall the rest of the time. */}
+                section is open so the rail stays three items tall the rest of the time. The indent
+                lines the divider up with the icon's centre (px-3 + half of an 18px icon). */}
             {id === 'ingestion' && on && (
-              <div className="ml-[1.125rem] mt-1 flex flex-col gap-0.5 border-l border-slate-200 pl-2 dark:border-[#2a3344]">
+              <div className="ml-[1.3125rem] mt-1 flex flex-col gap-0.5 border-l border-slate-200 pl-2 dark:border-[#2a3344]">
                 {INGEST_MODES.map((m) => {
                   const sub = ingestMode === m.id
                   return (
