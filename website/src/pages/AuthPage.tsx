@@ -9,11 +9,13 @@ import {
   LockKeyhole,
   Mail,
   Moon,
+  ShieldCheck,
   Sun,
 } from 'lucide-react'
 import { useAuthStore, MerchantInfo } from '../store/authStore'
 import { useMerchantStore } from '../store/merchantStore'
 import { apiFetch } from '../lib/api'
+import { signupEnabled } from '../lib/appConfig'
 import { getResolvedThemePreference, persistThemePreference } from '../lib/theme'
 import { SurfaceLabel } from '../components/ui/Card'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
@@ -50,6 +52,7 @@ interface AuthLocationState {
 }
 
 function getTabFromPath(pathname: string): Tab {
+  if (!signupEnabled) return 'login'
   return pathname.endsWith('/signup') ? 'signup' : 'login'
 }
 
@@ -109,6 +112,7 @@ export function AuthPage() {
   const [email, setEmail] = useState(locationState?.email ?? '')
   const [password, setPassword] = useState('')
   const [merchantName, setMerchantName] = useState('')
+  const [adminSecret, setAdminSecret] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -175,9 +179,12 @@ export function AuthPage() {
     try {
       const path = tab === 'login' ? '/auth/login' : '/auth/signup'
       const normalizedMerchantName = merchantName.trim()
+      // Signup is admin-gated on the backend (parity with merchant-account create),
+      // so forward the operator-supplied admin secret as `x-admin-secret`.
       const res = await apiFetch<SignupResponse>(path, {
         method: 'POST',
         body: JSON.stringify({ email, password }),
+        headers: tab === 'signup' ? { 'x-admin-secret': adminSecret.trim() } : undefined,
       })
 
       if ('email_verification_required' in res && res.email_verification_required) {
@@ -322,9 +329,11 @@ export function AuthPage() {
                 <AuthTabButton active={tab === 'login'} onClick={() => switchTab('login')}>
                   Sign in
                 </AuthTabButton>
-                <AuthTabButton active={tab === 'signup'} onClick={() => switchTab('signup')}>
-                  Sign up
-                </AuthTabButton>
+                {signupEnabled ? (
+                  <AuthTabButton active={tab === 'signup'} onClick={() => switchTab('signup')}>
+                    Sign up
+                  </AuthTabButton>
+                ) : null}
               </div>
 
               <div className="mt-10 border-t border-slate-200 pt-10 dark:border-[#1d1d23]">
@@ -352,6 +361,22 @@ export function AuthPage() {
                         placeholder="e.g. Acme Corp"
                         required
                         icon={<Building2 size={16} />}
+                      />
+                    </Field>
+                  ) : null}
+
+                  {tab === 'signup' ? (
+                    <Field
+                      label="Admin secret"
+                      footer="Account creation is admin-gated. Enter the configured admin secret to provision this account."
+                    >
+                      <FieldInput
+                        type="password"
+                        value={adminSecret}
+                        onChange={(e) => setAdminSecret(e.target.value)}
+                        placeholder="x-admin-secret"
+                        required
+                        icon={<ShieldCheck size={16} />}
                       />
                     </Field>
                   ) : null}

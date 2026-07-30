@@ -93,6 +93,7 @@ const PASSWORD_RESET_TTL_SECONDS: i64 = 3600; // 1 hour
 
 #[axum::debug_handler]
 pub async fn signup(
+    headers: HeaderMap,
     Json(payload): Json<SignupRequest>,
 ) -> Result<Json<SignupResponse>, error::ContainerError<UserAuthError>> {
     let app_state = get_tenant_app_state().await;
@@ -100,6 +101,14 @@ pub async fn signup(
         .get()
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
+
+    let provided_admin_secret = headers
+        .get("x-admin-secret")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if provided_admin_secret != global_config.admin_secret.secret {
+        return Err(error::ContainerError::from(UserAuthError::Unauthorized));
+    }
 
     let existing = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
         &app_state.db,
