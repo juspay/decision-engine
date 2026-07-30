@@ -3558,12 +3558,14 @@ export function DecisionSimulatorPage() {
       )}
 
       {activeTab === 'batch' && (
-        <div className="flex flex-wrap items-start gap-x-6 gap-y-4 rounded-2xl border border-slate-200 bg-white px-5 py-3 dark:border-[#222226] dark:bg-[#0b0b10]">
+        <div className="flex flex-wrap items-start gap-x-6 gap-y-3 rounded-2xl border border-slate-200 bg-white px-5 py-3 dark:border-[#222226] dark:bg-[#0b0b10]">
             {/* Own row at the container's top-right: `w-full` makes the wrap break after it, which
-                keeps the reset out of the action cluster (whose buttons bottom-align with the input
-                row) instead of absolutely positioning it into that cluster's space. Scoped to the
-                controls in this container — the results below have their own Clear. */}
-            <div className="-mb-2 flex w-full justify-end">
+                keeps the reset out of the action cluster instead of absolutely positioning it into
+                that cluster's space. Pulled into the card's padding on three sides (ghost button, so
+                there's no background to look clipped) so it tucks into the corner rather than opening
+                a band above the inputs. Scoped to the controls in this container — the results below
+                have their own Clear. */}
+            <div className="-mb-1 -mr-2 -mt-2 flex w-full justify-end">
               <Button
                 size="sm"
                 variant="ghost"
@@ -3779,12 +3781,11 @@ export function DecisionSimulatorPage() {
               )
             })()}
 
-            {/* Action cluster, pushed to the trailing edge. The invisible spacer matches the
-                SurfaceLabel height (leading-4 = 16px) so the control row lines up with the
-                SR inputs / Card scenario select rather than bottom-aligning under the sliders. */}
-            <div className="flex flex-col gap-1.5 lg:ml-auto">
-              <span className="block h-4" aria-hidden />
-              <div className="flex flex-wrap items-center gap-3">
+            {/* Action cluster, pushed to the trailing edge. `self-end` bottom-aligns it with the
+                input row it shares a line with — the same effect the old invisible SurfaceLabel-height
+                spacer had, but without carrying 22px of dead space above the buttons once the cluster
+                wraps onto a line of its own (where the spacer aligned it with nothing). */}
+            <div className="flex flex-wrap items-center gap-3 self-end lg:ml-auto">
                 <Button
                   size="sm"
                   variant="ghost"
@@ -3838,7 +3839,6 @@ export function DecisionSimulatorPage() {
                     </Button>
                   </>
                 )}
-              </div>
             </div>
           </div>
       )}
