@@ -544,7 +544,9 @@ pub async fn switch_merchant(
     let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
 
     if claims.token_type == TOKEN_TYPE_HS_REDIRECT {
-        return Err(error::ContainerError::from(UserAuthError::UnsupportedOperation));
+        return Err(error::ContainerError::from(
+            UserAuthError::UnsupportedOperation,
+        ));
     }
 
     let app_state = get_tenant_app_state().await;
@@ -601,7 +603,9 @@ pub async fn change_password(
     let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
 
     if claims.token_type == TOKEN_TYPE_HS_REDIRECT {
-        return Err(error::ContainerError::from(UserAuthError::UnsupportedOperation));
+        return Err(error::ContainerError::from(
+            UserAuthError::UnsupportedOperation,
+        ));
     }
 
     let app_state = get_tenant_app_state().await;

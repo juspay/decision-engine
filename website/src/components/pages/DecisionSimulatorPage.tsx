@@ -1068,6 +1068,63 @@ function InspectorJsonPanel({
   )
 }
 
+/**
+ * A number input for one end of the amount range.
+ *
+ * The naive version — clamp `e.target.value` into state on every keystroke — makes the field
+ * impossible to retype: clearing "100" produces an empty string, which clamps to the lower bound
+ * and re-renders as "1", so the next digits land *after* that 1 ("5000" becomes 15000, truncated
+ * back down by the clamp). So while the field is focused we show exactly what was typed and keep
+ * the committed number in step behind it, and only re-sync the text to the canonical (clamped,
+ * cross-clamped) value on blur.
+ */
+function AmountBoundInput({
+  value,
+  min,
+  max,
+  ariaLabel,
+  className,
+  onCommit,
+  onSettle,
+}: {
+  value: number
+  min: number
+  max: number
+  ariaLabel: string
+  className: string
+  /** Called with a clamped number for every keystroke that parses — keeps a run's config valid. */
+  onCommit: (next: number) => void
+  /** Called on blur, after the draft is dropped — where the two bounds get cross-clamped. */
+  onSettle: () => void
+}) {
+  // null ⇒ not being edited, so mirror `value`. A string ⇒ the user's in-progress text, shown
+  // verbatim (including empty) no matter what the clamp did to the committed number.
+  const [draft, setDraft] = useState<string | null>(null)
+
+  return (
+    <input
+      type="number" min={min} max={max} step={5}
+      aria-label={ariaLabel}
+      value={draft ?? String(value)}
+      onChange={e => {
+        const text = e.target.value
+        setDraft(text)
+        // An empty or half-typed field leaves the last valid number committed, so starting a
+        // simulation mid-edit can never draw amounts from a NaN range.
+        const parsed = Number(text)
+        if (text !== '' && Number.isFinite(parsed)) {
+          onCommit(Math.max(min, Math.min(max, parsed)))
+        }
+      }}
+      onBlur={() => {
+        setDraft(null)
+        onSettle()
+      }}
+      className={className}
+    />
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Extracts RuleEvaluateParams from a routing algorithm's Euclid conditions.
 // Walks all rules and statements, collecting unique lhs keys with their first
@@ -1137,6 +1194,16 @@ export function DecisionSimulatorPage() {
   const eliminationEnabled = Object.values(gatewaySimConfigs).some(c => c.failureMode === 'timeout')
   const simulationAbortRef = useRef(false)
   useEffect(() => () => { simulationAbortRef.current = true }, [])
+  /**
+   * Bumped on every run start, and by anything that discards a run outright (Clear results, a
+   * merchant-scope switch). A run captures the value at entry and only touches shared state while it
+   * still matches, which `simulationAbortRef` alone cannot express: the abort flag is reset to false
+   * at the top of the next run, so workers parked in an `await` would wake up, see it cleared and
+   * carry on — two live runs interleaving rows into the same state and both posting real feedback to
+   * the engine. The token can only move forward, so a superseded run can never mistake itself for
+   * the current one.
+   */
+  const runGenerationRef = useRef(0)
 
   const [debitForm, setDebitForm] = useState<DebitRoutingFormState>(initialState.debitForm)
 
@@ -1629,6 +1696,9 @@ export function DecisionSimulatorPage() {
     setSetupPrompt(null)
     setLoading(false)
     simulationAbortRef.current = true
+    // Retire the run as well as aborting it — see runGenerationRef. Without this, a worker parked in
+    // a request would resume once the next run clears the abort flag.
+    runGenerationRef.current++
     setIsSimulating(false)
   }
 
@@ -1679,6 +1749,9 @@ export function DecisionSimulatorPage() {
     setSetupPrompt(null)
     setLoading(false)
     simulationAbortRef.current = true
+    // Retire the run as well as aborting it — see runGenerationRef. Without this, a worker parked in
+    // a request would resume once the next run clears the abort flag.
+    runGenerationRef.current++
     setIsSimulating(false)
   }
 
@@ -2208,6 +2281,10 @@ export function DecisionSimulatorPage() {
     setSetupPrompt(null)
     if (!isResume) setSimulationResults([])
     simulationAbortRef.current = false
+    // Claim ownership of the shared run state. Any earlier run still unwinding is now superseded and
+    // will drop out of its loop without writing.
+    const runId = ++runGenerationRef.current
+    const isCurrentRun = () => runGenerationRef.current === runId
 
     const gateways = form.eligible_gateways.split(',').map(s => s.trim()).filter(Boolean)
     // Seed from the completed rows on resume so new transactions append rather than replace.
@@ -2386,6 +2463,9 @@ export function DecisionSimulatorPage() {
       // Commit the accumulated rows + refresh the events feed, throttled so a fast loop can't
       // spam re-renders (force=true bypasses the throttle for pause/end-of-run flushes).
       const flushResults = (force: boolean) => {
+        // Superseded — the results were cleared, or a newer run owns the screen now. Either way this
+        // run's rows are not wanted.
+        if (!isCurrentRun()) return
         const now = Date.now()
         if (force || now - lastUIUpdate > 150) {
           setSimulationResults([...results])
@@ -2400,14 +2480,17 @@ export function DecisionSimulatorPage() {
 
       const worker = async (): Promise<void> => {
         while (true) {
-          if (simulationAbortRef.current) return
+          // The generation check is what stops a superseded run: a worker parked in `runTxn` misses
+          // the abort flag entirely, and by the time it wakes the next run may have already cleared
+          // that flag — without this it would keep claiming indices and hitting the real API.
+          if (simulationAbortRef.current || !isCurrentRun()) return
           // Idle here while paused — without claiming new work — so the in-flight requests drain
           // and the resume index stays put; a Stop still breaks out. Flush once on the way in so a
           // page-leave/return resumes from exactly the committed rows.
           if (simulationPausedRef.current) {
             runProgressRef.current = results.length
             flushResults(true)
-            while (simulationPausedRef.current && !simulationAbortRef.current) {
+            while (simulationPausedRef.current && !simulationAbortRef.current && isCurrentRun()) {
               await new Promise(resolve => setTimeout(resolve, 120))
             }
             continue
@@ -2433,6 +2516,9 @@ export function DecisionSimulatorPage() {
             await new Promise(resolve => setTimeout(resolve, 300))
           }
 
+          // The row landed after this run was superseded: drop it rather than move the shared resume
+          // point, which now belongs to whichever run replaced this one.
+          if (!isCurrentRun()) return
           // Record the resume point as the committed count and flush on the shared throttle.
           runProgressRef.current = results.length
           flushResults(false)
@@ -2444,16 +2530,23 @@ export function DecisionSimulatorPage() {
       await Promise.all(Array.from({ length: concurrency }, () => worker()))
 
       // If a worker tripped the error threshold (as opposed to a user Stop), surface the failure.
-      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+      // Not ours to report if this run was already discarded.
+      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS && isCurrentRun()) {
         handleRunError(lastError, 'batch', `Simulation stopped after ${MAX_CONSECUTIVE_ERRORS} consecutive errors. Check that the server is running.`)
         return
       }
     } finally {
-      setSimulationResults([...results])
-      setIsSimulating(false)
-      setIsPaused(false)
-      simulationPausedRef.current = false
-      // Final flush: events from the last txns can land just after the loop ends.
+      // A superseded run must not write any of this: its rows are stale, and `isSimulating` /
+      // `isPaused` now describe the run that replaced it — flipping them here is what let the old
+      // run hide a live run's Stop button and re-offer Run simulation.
+      if (isCurrentRun()) {
+        setSimulationResults([...results])
+        setIsSimulating(false)
+        setIsPaused(false)
+        simulationPausedRef.current = false
+      }
+      // Events from the last txns can land just after the loop ends. Safe either way — it only
+      // refetches the feed.
       routingEvents.refresh()
     }
   }
@@ -2616,10 +2709,57 @@ export function DecisionSimulatorPage() {
     [form.eligible_gateways],
   )
 
-  const gatewayColorMap = useMemo(
-    () => Object.fromEntries(eligibleGatewaysParsed.map((gw, i) => [gw, GW_COLOR_OVERRIDES[gw.toLowerCase()] ?? GW_PALETTE[i % GW_PALETTE.length]])),
-    [eligibleGatewaysParsed],
-  )
+  // Processors we already know something about, offered as one-click options in the add modal so the
+  // common case isn't a spelling exercise. Two sources, both meaningful here because they're exactly
+  // what the sim can price: the merchant's contract-rate seeds, and anything we've fitted a cost
+  // model for from ingested reports. Ones already in the comparison are dropped — adding them again
+  // is a no-op the modal would only reject.
+  const addableConnectorOptions = useMemo(() => {
+    const withCostModel = new Set(ingestedConnectors)
+    const inComparison = new Set(eligibleGatewaysParsed)
+    const names = new Set<string>([
+      ...seedRows.map(r => r.psp.trim().toLowerCase()).filter(Boolean),
+      ...withCostModel,
+    ])
+    return [...names]
+      .filter(name => !inComparison.has(name))
+      .sort()
+      .map(name => ({ name, hasCostModel: withCostModel.has(name) }))
+  }, [seedRows, ingestedConnectors, eligibleGatewaysParsed])
+
+  /**
+   * One color per eligible connector. The overrides are keyed by name and the palette is handed out
+   * by position, so taking `GW_PALETTE[i]` blindly can re-issue a color an override already owns:
+   * Stripe's purple *is* `GW_PALETTE[1]`, so [stripe, adyen, checkout] rendered fine but dropping
+   * Adyen moved Checkout to index 1 and painted it Stripe's purple.
+   *
+   * So: claim the override colors up front, then let each remaining connector take the first unused
+   * palette entry at or after its own index. Searching from `i` rather than from 0 keeps a
+   * connector's color stable when one earlier in the list is removed — Checkout stays orange whether
+   * or not Adyen is present — instead of shuffling the whole legend on every add/remove.
+   */
+  const gatewayColorMap = useMemo(() => {
+    const used = new Set(
+      eligibleGatewaysParsed.map(gw => GW_COLOR_OVERRIDES[gw.toLowerCase()]).filter(Boolean),
+    )
+    const takeFrom = (start: number) => {
+      for (let k = 0; k < GW_PALETTE.length; k++) {
+        const color = GW_PALETTE[(start + k) % GW_PALETTE.length]
+        if (!used.has(color)) return color
+      }
+      // More connectors than colors — a repeat is unavoidable, so fall back to the positional pick.
+      return GW_PALETTE[start % GW_PALETTE.length]
+    }
+    return Object.fromEntries(
+      eligibleGatewaysParsed.map((gw, i) => {
+        const override = GW_COLOR_OVERRIDES[gw.toLowerCase()]
+        if (override) return [gw, override]
+        const color = takeFrom(i)
+        used.add(color)
+        return [gw, color]
+      }),
+    )
+  }, [eligibleGatewaysParsed])
 
   // Auto-populate errorInfo for any gateway whose config has no error code yet,
   // once GSM rules have loaded from the API.
@@ -3152,26 +3292,78 @@ export function DecisionSimulatorPage() {
     setPreviewInspectorTab('summary')
   }
 
+  // Reset form fields to the first available option from routing config so
+  // required fields like currency are never sent as empty strings.
+  function populatedForm(base: FormState): FormState {
+    const next = { ...base }
+    if (currencyOptions.length > 0 && !currencyOptions.includes(next.currency))
+      next.currency = currencyOptions[0]
+    if (paymentMethodTypeOptions.length > 0 && !paymentMethodTypeOptions.includes(next.payment_method_type))
+      next.payment_method_type = paymentMethodTypeOptions[0]
+    const methodsForType = toUpperOptions(routingKeysConfig[next.payment_method_type.toLowerCase()]?.values || [])
+    if (methodsForType.length > 0 && !methodsForType.includes(next.payment_method))
+      next.payment_method = methodsForType[0]
+    if (authTypeOptions.length > 0 && !authTypeOptions.includes(next.auth_type))
+      next.auth_type = authTypeOptions[0]
+    if (cardBrandOptions.length > 0 && !cardBrandOptions.includes(next.card_brand))
+      next.card_brand = cardBrandOptions[0]
+    return next
+  }
+
+  // The batch tab's two halves clear independently, because wanting one rarely means wanting the
+  // other: retuning the controls shouldn't throw away the run you're comparing against, and
+  // clearing a finished run shouldn't undo the setup that produced it.
+
+  /** The control bar only — scenario inputs, amount range, TPS, retry, and the processor set. */
+  function resetBatchInputs() {
+    const defaults = getDefaultExplorerState()
+    setForm({ ...populatedForm(defaults.form), currency: MULTI_OBJECTIVE_CURRENCY })
+    setMoCurrency(MULTI_OBJECTIVE_CURRENCY)
+    setSimulationConfig(defaults.simulationConfig)
+    setMultiObjScenario(defaults.multiObjScenario)
+    // Drop any manually added/removed processors so the comparison returns to the default pair.
+    setExtraConnectors(defaults.extraConnectors)
+    setRemovedConnectors(defaults.removedConnectors)
+    setSmartRetryEnabled(defaults.smartRetryEnabled)
+    // Preserve the currently selected per-gateway success rate scores (e.g.
+    // Stripe/Adyen) across a reset — only clear the other sim config fields.
+    setGatewaySimConfigs(prev =>
+      Object.fromEntries(
+        Object.entries(prev).map(([gw, cfg]) => [
+          gw,
+          { ...DEFAULT_GW_SIM_CONFIG, successRate: cfg.successRate },
+        ]),
+      ),
+    )
+    setError(null)
+    setSetupPrompt(null)
+  }
+
+  /** Everything below the control bar — the charts, the summary column and the transaction log. */
+  function clearBatchResults() {
+    const defaults = getDefaultExplorerState()
+    setSimulationResults(defaults.simulationResults)
+    setResumableRun(defaults.resumableRun)
+    // Abort any in-flight run and drop the run-start timestamp so the
+    // Autopilot Actions feed (scoped to simulationStartedAtMs) clears back
+    // to its empty state instead of replaying the previous run's events.
+    simulationAbortRef.current = true
+    // Retire the run outright. Aborting alone isn't enough on two counts: its workers unwind through
+    // a final flush that would put the rows we just cleared straight back, and the next run resets
+    // the abort flag, which would let any worker still parked in a request resume against a run it
+    // no longer belongs to.
+    runGenerationRef.current++
+    setSimulationStartedAtMs(null)
+    setIsSimulating(false)
+    setIsPaused(false)
+    simulationPausedRef.current = false
+    // The log's column filters describe rows that no longer exist.
+    setTxFilters({})
+    setError(null)
+  }
+
   function resetCurrentTabState() {
     const defaults = getDefaultExplorerState()
-
-    // Reset form fields to the first available option from routing config so
-    // required fields like currency are never sent as empty strings.
-    function populatedForm(base: FormState): FormState {
-      const next = { ...base }
-      if (currencyOptions.length > 0 && !currencyOptions.includes(next.currency))
-        next.currency = currencyOptions[0]
-      if (paymentMethodTypeOptions.length > 0 && !paymentMethodTypeOptions.includes(next.payment_method_type))
-        next.payment_method_type = paymentMethodTypeOptions[0]
-      const methodsForType = toUpperOptions(routingKeysConfig[next.payment_method_type.toLowerCase()]?.values || [])
-      if (methodsForType.length > 0 && !methodsForType.includes(next.payment_method))
-        next.payment_method = methodsForType[0]
-      if (authTypeOptions.length > 0 && !authTypeOptions.includes(next.auth_type))
-        next.auth_type = authTypeOptions[0]
-      if (cardBrandOptions.length > 0 && !cardBrandOptions.includes(next.card_brand))
-        next.card_brand = cardBrandOptions[0]
-      return next
-    }
 
     if (activeTab === 'single') {
       setForm(populatedForm(defaults.form))
@@ -3180,31 +3372,9 @@ export function DecisionSimulatorPage() {
       setSingleRunOutcome(defaults.singleRunOutcome)
       setResponseOpen(defaults.responseOpen)
     } else if (activeTab === 'batch') {
-      setForm({ ...populatedForm(defaults.form), currency: MULTI_OBJECTIVE_CURRENCY })
-      setMoCurrency(MULTI_OBJECTIVE_CURRENCY)
-      setSimulationConfig(defaults.simulationConfig)
-      setMultiObjScenario(defaults.multiObjScenario)
-      // Drop any manually added/removed processors so the comparison returns to the default pair.
-      setExtraConnectors(defaults.extraConnectors)
-      setRemovedConnectors(defaults.removedConnectors)
-      // Preserve the currently selected per-gateway success rate scores (e.g.
-      // Stripe/Adyen) across a reset — only clear the other sim config fields.
-      setGatewaySimConfigs(prev =>
-        Object.fromEntries(
-          Object.entries(prev).map(([gw, cfg]) => [
-            gw,
-            { ...DEFAULT_GW_SIM_CONFIG, successRate: cfg.successRate },
-          ]),
-        ),
-      )
-      setSimulationResults(defaults.simulationResults)
-      setResumableRun(defaults.resumableRun)
-      // Abort any in-flight run and drop the run-start timestamp so the
-      // Autopilot Actions feed (scoped to simulationStartedAtMs) clears back
-      // to its empty state instead of replaying the previous run's events.
-      simulationAbortRef.current = true
-      setSimulationStartedAtMs(null)
-      setIsSimulating(false)
+      // The batch tab's own bar exposes these two separately; "reset the tab" is just both.
+      resetBatchInputs()
+      clearBatchResults()
     } else if (activeTab === 'rule') {
       setRuleResetSignal(n => n + 1)
     } else if (activeTab === 'volume') {
@@ -3238,13 +3408,13 @@ export function DecisionSimulatorPage() {
   }
 
   const resetButtonLabel =
-    activeTab === 'batch'
-      ? 'Reset'
-      : activeTab === 'rule'
-        ? 'Reset Rule Based Routing'
-        : activeTab === 'volume'
-          ? 'Reset Volume Based Routing'
-          : 'Reset Debit Routing'
+    activeTab === 'rule'
+      ? 'Reset Rule Based Routing'
+      : activeTab === 'volume'
+        ? 'Reset Volume Based Routing'
+        : activeTab === 'debit'
+          ? 'Reset Debit Routing'
+          : 'Reset'
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-5">
@@ -3289,17 +3459,71 @@ export function DecisionSimulatorPage() {
           <div className="relative w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl outline-none dark:border-[#2a303a] dark:bg-[#0d1118]">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Add a processor</h3>
             <p className="mt-2 text-sm leading-relaxed text-slate-500 dark:text-[#8a93a6]">
-              Enter a connector name (e.g. <span className="font-medium">braintree</span>,{' '}
-              <span className="font-medium">worldpay</span>). It joins the comparison with its own SR
-              slider — scored on its ingested cost model if it has one, otherwise seed costs.
+              {addableConnectorOptions.length > 0
+                ? 'Pick a processor we can already price, or type any other connector name. It joins the comparison with its own SR slider — scored on its ingested cost model if it has one, otherwise seed costs.'
+                : 'Enter a connector name (e.g. braintree, worldpay). It joins the comparison with its own SR slider — scored on its ingested cost model if it has one, otherwise seed costs.'}
             </p>
+
+            {/* Known processors as pickable options. Selecting one fills the field below rather than
+                adding straight away, so there's a single commit path (and the exact name that will
+                be saved is always visible before you commit). */}
+            {addableConnectorOptions.length > 0 && (
+              <div className="mt-4">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                  Known processors
+                </span>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {addableConnectorOptions.map(({ name, hasCostModel }) => {
+                    const selected = newConnectorName.trim().toLowerCase() === name
+                    return (
+                      <button
+                        key={name}
+                        type="button"
+                        onClick={() => {
+                          setNewConnectorName(name)
+                          setAddConnectorError(null)
+                        }}
+                        onDoubleClick={submitAddConnector}
+                        aria-pressed={selected}
+                        title={
+                          hasCostModel
+                            ? `${name} — has a fitted cost model from ingested reports`
+                            : `${name} — priced from your contract seed rates`
+                        }
+                        className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                          selected
+                            ? 'border-brand-500/50 bg-brand-500/10 text-brand-600 dark:text-brand-400'
+                            : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-[#2a303a] dark:text-[#9ca7ba] dark:hover:bg-white/5'
+                        }`}
+                      >
+                        {name}
+                        {hasCostModel && (
+                          <span
+                            className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 align-middle"
+                            aria-hidden
+                          />
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                  <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 align-middle" />
+                  has a fitted cost model; the rest use contract seed rates.
+                </p>
+              </div>
+            )}
+
             <input
               autoFocus
               type="text"
               value={newConnectorName}
-              placeholder="Connector name"
+              placeholder={addableConnectorOptions.length > 0 ? 'Or type a connector name' : 'Connector name'}
+              // Connector names are lowercase identifiers everywhere else in the engine, so fold the
+              // case as it's typed — what you see is then exactly what gets saved, and a typed name
+              // still lights up its matching option above.
               onChange={e => {
-                setNewConnectorName(e.target.value)
+                setNewConnectorName(e.target.value.toLowerCase())
                 if (addConnectorError) setAddConnectorError(null)
               }}
               onKeyDown={e => {
@@ -3334,7 +3558,25 @@ export function DecisionSimulatorPage() {
       )}
 
       {activeTab === 'batch' && (
-        <div className="flex flex-wrap items-start gap-x-6 gap-y-4 rounded-2xl border border-slate-200 bg-white px-5 py-3 dark:border-[#222226] dark:bg-[#0b0b10]">
+        <div className="flex flex-wrap items-start gap-x-6 gap-y-3 rounded-2xl border border-slate-200 bg-white px-5 py-3 dark:border-[#222226] dark:bg-[#0b0b10]">
+            {/* Own row at the container's top-right: `w-full` makes the wrap break after it, which
+                keeps the reset out of the action cluster instead of absolutely positioning it into
+                that cluster's space. Pulled into the card's padding on three sides (ghost button, so
+                there's no background to look clipped) so it tucks into the corner rather than opening
+                a band above the inputs. Scoped to the controls in this container — the results below
+                have their own Clear. */}
+            <div className="-mb-1 -mr-2 -mt-2 flex w-full justify-end">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={resetBatchInputs}
+                title="Restore the controls in this panel to their defaults (per-processor success rates are kept). Leaves the results below untouched."
+              >
+                <RefreshCw size={14} />
+                Reset inputs
+              </Button>
+            </div>
+
             {/* One SR slider per eligible connector. In cost mode the eligible set is driven by the
                 merchant's ingested connectors (see the seeding effect), so these follow suit instead
                 of a hardcoded stripe+adyen pair. */}
@@ -3350,10 +3592,11 @@ export function DecisionSimulatorPage() {
                   <div className="flex items-center gap-1.5">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
                     <SurfaceLabel>{label}</SurfaceLabel>
-                    {/* Any connector can be removed (default, ingested or user-added), but keep at
-                        least two so the routing comparison stays meaningful, and don't mutate the
-                        eligible set mid-run. */}
-                    {eligibleGatewaysParsed.length > 2 && !isSimulating && (
+                    {/* Any connector can be removed (default, ingested or user-added), down to a
+                        single one — a one-processor run is a legitimate baseline, so we only stop
+                        you from emptying the eligible set entirely. Hidden mid-run so a simulation
+                        can't have the set pulled out from under it. */}
+                    {eligibleGatewaysParsed.length > 1 && !isSimulating && (
                       <button
                         type="button"
                         onClick={() => removeConnector(key)}
@@ -3500,32 +3743,37 @@ export function DecisionSimulatorPage() {
             {SHOW_AMOUNT_RANGE_SLIDER && (() => {
               const BMIN = SIMULATION_AMOUNT_BOUND_MIN
               const BMAX = SIMULATION_AMOUNT_BOUND_MAX
-              const clamp = (v: number) => Math.max(BMIN, Math.min(BMAX, v))
               // Direct min/max number entry is easier to fine-tune than dragging two
-              // overlapped range thumbs. Cross-clamp on blur so min never exceeds max
-              // (and vice versa) without fighting the user mid-keystroke.
-              const inputCls = 'w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm font-semibold tabular-nums text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100'
+              // overlapped range thumbs. Both the bound clamp and the cross-clamp (min never
+              // exceeds max, and vice versa) land on blur so neither fights the user
+              // mid-keystroke — see AmountBoundInput.
+              // Spinners are hidden: at step=5 they're a slow way to cross a 1–100,000 range, and
+              // the pair is narrow enough that two sets of arrows crowd out the digits. Typing (and
+              // ↑/↓, which the spinners only duplicate) still works.
+              const inputCls = 'w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm font-semibold tabular-nums text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
               return (
                 <div className="flex w-[220px] flex-col gap-1.5">
                   <SurfaceLabel>
                     <span title="Per-transaction amount range (multi-objective sim). Each payment's amount is drawn uniformly from this range. Smaller amounts make the flat per-txn fee a bigger share of cost. Applies on the next run.">Amount range ({moCurrency})</span>
                   </SurfaceLabel>
                   <div className="flex items-center gap-1.5">
-                    <input
-                      type="number" min={BMIN} max={BMAX} step={5}
-                      aria-label="Minimum amount"
+                    <AmountBoundInput
+                      ariaLabel="Minimum amount"
                       value={simulationConfig.minAmount}
-                      onChange={e => setSimulationConfig(c => ({ ...c, minAmount: e.target.value === '' ? BMIN : clamp(Number(e.target.value)) }))}
-                      onBlur={() => setSimulationConfig(c => ({ ...c, minAmount: Math.min(c.minAmount, c.maxAmount) }))}
+                      min={BMIN}
+                      max={BMAX}
+                      onCommit={next => setSimulationConfig(c => ({ ...c, minAmount: next }))}
+                      onSettle={() => setSimulationConfig(c => ({ ...c, minAmount: Math.min(c.minAmount, c.maxAmount) }))}
                       className={inputCls}
                     />
                     <span className="shrink-0 text-xs text-slate-400">–</span>
-                    <input
-                      type="number" min={BMIN} max={BMAX} step={5}
-                      aria-label="Maximum amount"
+                    <AmountBoundInput
+                      ariaLabel="Maximum amount"
                       value={simulationConfig.maxAmount}
-                      onChange={e => setSimulationConfig(c => ({ ...c, maxAmount: e.target.value === '' ? BMAX : clamp(Number(e.target.value)) }))}
-                      onBlur={() => setSimulationConfig(c => ({ ...c, maxAmount: Math.max(c.minAmount, c.maxAmount) }))}
+                      min={BMIN}
+                      max={BMAX}
+                      onCommit={next => setSimulationConfig(c => ({ ...c, maxAmount: next }))}
+                      onSettle={() => setSimulationConfig(c => ({ ...c, maxAmount: Math.max(c.minAmount, c.maxAmount) }))}
                       className={inputCls}
                     />
                   </div>
@@ -3533,12 +3781,11 @@ export function DecisionSimulatorPage() {
               )
             })()}
 
-            {/* Action cluster, pushed to the trailing edge. The invisible spacer matches the
-                SurfaceLabel height (leading-4 = 16px) so the control row lines up with the
-                SR inputs / Card scenario select rather than bottom-aligning under the sliders. */}
-            <div className="flex flex-col gap-1.5 lg:ml-auto">
-              <span className="block h-4" aria-hidden />
-              <div className="flex flex-wrap items-center gap-3">
+            {/* Action cluster, pushed to the trailing edge. `self-end` bottom-aligns it with the
+                input row it shares a line with — the same effect the old invisible SurfaceLabel-height
+                spacer had, but without carrying 22px of dead space above the buttons once the cluster
+                wraps onto a line of its own (where the spacer aligned it with nothing). */}
+            <div className="flex flex-wrap items-center gap-3 self-end lg:ml-auto">
                 <Button
                   size="sm"
                   variant="ghost"
@@ -3548,11 +3795,6 @@ export function DecisionSimulatorPage() {
                   <SlidersHorizontal size={14} />
                   {showMoreInputs ? 'Less' : 'More'}
                 </Button>
-
-                <Button size="sm" variant="secondary" onClick={resetCurrentTabState}>
-          <RefreshCw size={14} />
-          {resetButtonLabel}
-        </Button>
 
                 {!isSimulating ? (
                   resumableRun ? (
@@ -3597,7 +3839,6 @@ export function DecisionSimulatorPage() {
                     </Button>
                   </>
                 )}
-              </div>
             </div>
           </div>
       )}
@@ -4394,6 +4635,14 @@ export function DecisionSimulatorPage() {
                 </Button>
               </>
             )}
+            {/* These tabs are a single form + its response, so one reset for both is the right
+                granularity — the batch tab is the one that splits it in two. */}
+            <div className="flex justify-end">
+              <Button size="sm" variant="ghost" onClick={resetCurrentTabState}>
+                <RefreshCw size={14} />
+                {resetButtonLabel}
+              </Button>
+            </div>
           </div>
         </Card>
         )}
@@ -4402,12 +4651,34 @@ export function DecisionSimulatorPage() {
         <div className={`min-w-0 flex flex-col gap-4 ${activeTab === 'batch' ? 'lg:min-h-0' : ''}`}>
           {activeTab === 'batch' && (
             <div className="flex flex-col justify-center gap-5 rounded-2xl border border-slate-200 bg-white px-5 py-4 dark:border-[#222226] dark:bg-[#0b0b10]">
+              {/* Clears this whole lower half — these stats, the charts and the transaction log — and
+                  nothing in the control bar. Shown whenever there is anything to clear, including
+                  mid-run: clearBatchResults aborts the run first, so it stays coherent, and gating on
+                  !isSimulating stranded the button for the whole run (and forever while a run sat
+                  paused, since a pause keeps isSimulating true).
+
+                  Pulled into the card's own padding on three sides (it's a ghost button, so there's no
+                  background to look clipped) — that tucks it into the corner and collapses the empty
+                  band it would otherwise open up above the first stat row. */}
+              {hasSimulationActivity && (
+                <div className="-mb-3 -mr-2 -mt-2 flex justify-end">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={clearBatchResults}
+                    title="Clear these stats, the charts and the transaction log. Leaves the controls above untouched."
+                  >
+                    <Trash2 size={14} />
+                    Clear
+                  </Button>
+                </div>
+              )}
               {(() => {
                 const ccy = costEconomics.currency || form.currency || 'USD'
                 return (
                   <>
                   {/* Row 1 — auth-rate & realized cost */}
-                    <div className="grid grid-cols-3 gap-4 border-t border-slate-100 pt-4 dark:border-[#1c1c24]">
+                    <div className="grid grid-cols-3 gap-4">
                       <div className="flex flex-col gap-1.5" title="First Attempt Auth Rate — share of decisions charged on the first attempt (first-attempt charges ÷ total decisions).">
                         <StatLabel label="First-attempt auth rate" abbr="FAAR" />
                         <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-600 dark:text-sky-400">
