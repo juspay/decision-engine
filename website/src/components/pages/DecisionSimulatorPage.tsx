@@ -2727,10 +2727,39 @@ export function DecisionSimulatorPage() {
       .map(name => ({ name, hasCostModel: withCostModel.has(name) }))
   }, [seedRows, ingestedConnectors, eligibleGatewaysParsed])
 
-  const gatewayColorMap = useMemo(
-    () => Object.fromEntries(eligibleGatewaysParsed.map((gw, i) => [gw, GW_COLOR_OVERRIDES[gw.toLowerCase()] ?? GW_PALETTE[i % GW_PALETTE.length]])),
-    [eligibleGatewaysParsed],
-  )
+  /**
+   * One color per eligible connector. The overrides are keyed by name and the palette is handed out
+   * by position, so taking `GW_PALETTE[i]` blindly can re-issue a color an override already owns:
+   * Stripe's purple *is* `GW_PALETTE[1]`, so [stripe, adyen, checkout] rendered fine but dropping
+   * Adyen moved Checkout to index 1 and painted it Stripe's purple.
+   *
+   * So: claim the override colors up front, then let each remaining connector take the first unused
+   * palette entry at or after its own index. Searching from `i` rather than from 0 keeps a
+   * connector's color stable when one earlier in the list is removed — Checkout stays orange whether
+   * or not Adyen is present — instead of shuffling the whole legend on every add/remove.
+   */
+  const gatewayColorMap = useMemo(() => {
+    const used = new Set(
+      eligibleGatewaysParsed.map(gw => GW_COLOR_OVERRIDES[gw.toLowerCase()]).filter(Boolean),
+    )
+    const takeFrom = (start: number) => {
+      for (let k = 0; k < GW_PALETTE.length; k++) {
+        const color = GW_PALETTE[(start + k) % GW_PALETTE.length]
+        if (!used.has(color)) return color
+      }
+      // More connectors than colors — a repeat is unavoidable, so fall back to the positional pick.
+      return GW_PALETTE[start % GW_PALETTE.length]
+    }
+    return Object.fromEntries(
+      eligibleGatewaysParsed.map((gw, i) => {
+        const override = GW_COLOR_OVERRIDES[gw.toLowerCase()]
+        if (override) return [gw, override]
+        const color = takeFrom(i)
+        used.add(color)
+        return [gw, color]
+      }),
+    )
+  }, [eligibleGatewaysParsed])
 
   // Auto-populate errorInfo for any gateway whose config has no error code yet,
   // once GSM rules have loaded from the API.
