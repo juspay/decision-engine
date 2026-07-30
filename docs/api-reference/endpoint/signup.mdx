@@ -12,13 +12,13 @@ Creates a dashboard operator account and associates it with the initial merchant
 
 ## Authentication
 
-Public. No JWT or API key is required. Sandbox traffic may still include `x-feature: decision-engine` when routed through Hyperswitch.
+Requires the deployment's admin secret in the `x-admin-secret` header — signup is not a public endpoint. No JWT or API key is required. Sandbox traffic may still include `x-feature: decision-engine` when routed through Hyperswitch.
 
 For local development, start with:
 
 ```bash
 export BASE_URL=http://localhost:8080
-export AUTH_HEADER="Authorization: Bearer <jwt_token>"
+export ADMIN_SECRET="<deployment_admin_secret>"
 # Sandbox only:
 # export BASE_URL=https://sandbox.hyperswitch.io
 # export FEATURE_HEADER="x-feature: decision-engine"
@@ -27,6 +27,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 ## Request
 
 - Method and path: `POST /auth/signup`
+- Headers: `x-admin-secret: <deployment_admin_secret>` (required).
 - Parameters: none.
 - Body: JSON body with `email`, `password`, and merchant identifier/name depending on the dashboard onboarding flow. Passwords must satisfy the dashboard policy.
 
@@ -37,6 +38,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 ```bash
 curl --location "$BASE_URL/auth/signup" \
   --header "Content-Type: application/json" \
+  --header "x-admin-secret: $ADMIN_SECRET" \
   --data '{
   "email": "operator@example.com",
   "password": "StrongPass#123",
