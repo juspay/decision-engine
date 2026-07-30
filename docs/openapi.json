@@ -1804,12 +1804,7 @@
           "Auth"
         ],
         "summary": "Signup",
-        "description": "Create an operator account. Password must meet dashboard password policy. Requires the deployment admin secret in the `x-admin-secret` header.",
-        "security": [
-          {
-            "AdminSecret": []
-          }
-        ],
+        "description": "Create an operator account. Password must meet dashboard password policy.",
         "requestBody": {
           "required": true,
           "content": {

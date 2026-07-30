@@ -138,6 +138,8 @@ pub struct UserAuthConfig {
     /// Send verification email on signup; block login until verified
     #[serde(default)]
     pub email_verification_enabled: bool,
+    #[serde(default = "default_true")]
+    pub signup_requires_admin_secret: bool,
 }
 
 fn default_true() -> bool {
@@ -181,6 +183,7 @@ impl Default for UserAuthConfig {
             jwt_expiry_seconds: default_jwt_expiry(),
             hs_redirect_jwt_expiry_seconds: default_hs_redirect_jwt_expiry(),
             email_verification_enabled: false,
+            signup_requires_admin_secret: true,
         }
     }
 }

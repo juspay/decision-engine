@@ -108,12 +108,14 @@ pub async fn signup(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let provided_admin_secret = headers
-        .get("x-admin-secret")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    if provided_admin_secret != global_config.admin_secret.secret {
-        return Err(error::ContainerError::from(UserAuthError::Unauthorized));
+    if global_config.user_auth.signup_requires_admin_secret {
+        let provided_admin_secret = headers
+            .get("x-admin-secret")
+            .and_then(|v| v.to_str().ok())
+            .unwrap_or("");
+        if provided_admin_secret != global_config.admin_secret.secret {
+            return Err(error::ContainerError::from(UserAuthError::Unauthorized));
+        }
     }
 
     let existing = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(

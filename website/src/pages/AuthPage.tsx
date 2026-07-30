@@ -9,7 +9,6 @@ import {
   LockKeyhole,
   Mail,
   Moon,
-  ShieldCheck,
   Sun,
 } from 'lucide-react'
 import { useAuthStore, MerchantInfo } from '../store/authStore'
@@ -98,7 +97,6 @@ export function AuthPage() {
   const [email, setEmail] = useState(locationState?.email ?? '')
   const [password, setPassword] = useState('')
   const [merchantName, setMerchantName] = useState('')
-  const [adminSecret, setAdminSecret] = useState('')
   const [showPassword, setShowPassword] = useState(false)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -165,12 +163,12 @@ export function AuthPage() {
     try {
       const path = tab === 'login' ? '/auth/login' : '/auth/signup'
       const normalizedMerchantName = merchantName.trim()
-      // Signup is admin-gated on the backend (parity with merchant-account create),
-      // so forward the operator-supplied admin secret as `x-admin-secret`.
+      // Signup is open self-service in sandbox/dev; in production the signup page is not
+      // shown at all (account creation is backend-only via the admin secret), so the
+      // dashboard never needs to send `x-admin-secret`.
       const res = await apiFetch<SignupResponse>(path, {
         method: 'POST',
         body: JSON.stringify({ email, password }),
-        headers: tab === 'signup' ? { 'x-admin-secret': adminSecret.trim() } : undefined,
       })
 
       if ('email_verification_required' in res && res.email_verification_required) {
@@ -347,22 +345,6 @@ export function AuthPage() {
                         placeholder="e.g. Acme Corp"
                         required
                         icon={<Building2 size={16} />}
-                      />
-                    </Field>
-                  ) : null}
-
-                  {tab === 'signup' ? (
-                    <Field
-                      label="Admin secret"
-                      footer="Account creation is admin-gated. Enter the configured admin secret to provision this account."
-                    >
-                      <FieldInput
-                        type="password"
-                        value={adminSecret}
-                        onChange={(e) => setAdminSecret(e.target.value)}
-                        placeholder="x-admin-secret"
-                        required
-                        icon={<ShieldCheck size={16} />}
                       />
                     </Field>
                   ) : null}

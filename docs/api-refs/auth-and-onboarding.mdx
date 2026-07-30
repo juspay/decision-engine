@@ -7,12 +7,9 @@ description: "Curl examples for dashboard auth, merchant selection, and merchant
 
 ## Sign Up
 
-Signup is gated by the deployment's admin secret — pass it in the `x-admin-secret` header:
-
 ```bash
 curl --location "$BASE_URL/auth/signup" \
   --header "Content-Type: application/json" \
-  --header "x-admin-secret: $ADMIN_SECRET" \
   --data '{
     "email": "operator@example.com",
     "password": "StrongPass#123",

@@ -87,8 +87,8 @@ curl "$BASE_URL/analytics/overview?range=1d" \
 | --- | --- | --- |
 | Public health | `GET /health`, `GET /health/ready` | None |
 | Public health (tenant-scoped) | `GET /health/diagnostics` | `TENANT_HEADER` — no auth |
-| Public auth entry | `POST /auth/login` | None |
-| Admin bootstrap | `POST /merchant-account/create`, `POST /auth/signup` | Admin secret configured for the deployment |
+| Public auth entry | `POST /auth/signup`, `POST /auth/login` | None |
+| Admin bootstrap | `POST /merchant-account/create` | Admin secret configured for the deployment |
 | Protected APIs | API keys, merchant reads/deletes, routing, rule config, decisions, score updates, config | `Authorization: Bearer <jwt_token>` or `x-api-key: <api_key>` |
 | Protected APIs (tenant-scoped) | All `GET /analytics/*`, `POST /gateway-score/reset` | The above, **plus** `TENANT_HEADER` |
 | Sandbox (Hyperswitch) | Same rules, served through `https://sandbox.hyperswitch.io` | Add `x-feature: decision-engine` |
