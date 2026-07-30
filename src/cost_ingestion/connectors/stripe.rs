@@ -205,6 +205,8 @@ impl SettlementReportSource for StripeReportSource {
                 issuer_country: String::new(),
                 currency,
                 ic_category: String::new(),
+                // Stripe's blended report has no interchange-rate line — one cluster.
+                ic_bps: String::new(),
                 txn_date,
                 channel,
                 gross,

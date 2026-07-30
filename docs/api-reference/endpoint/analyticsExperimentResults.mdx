@@ -8,7 +8,7 @@ openapi: "openapi.json GET /analytics/experiment/{experiment_id}/results"
 
 ## Use case
 
-Runs a statistical significance test between the control and variant arms of a routing [A/B test experiment](/api-refs/ab-testing-create): a two-sample z-test on expected value, collapsing to a plain auth-rate z-test for auth-only experiments. A guardrail check short-circuits to `guardrail_breached` before significance is computed.
+Runs a statistical significance test between the control and variant arms of a routing [A/B test experiment](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-create.mdx): a two-sample z-test on expected value, collapsing to a plain auth-rate z-test for auth-only experiments. A guardrail check short-circuits to `guardrail_breached` before significance is computed.
 
 ## Authentication
 
@@ -29,7 +29,7 @@ export TENANT_HEADER="x-tenant-id: public"
 
 - Method and path: `GET /analytics/experiment/{experiment_id}/results`
 - Parameters:
-  - `x-tenant-id` (header, required, string) — see [Environment setup](/api-refs/api-ref#environment-setup).
+  - `x-tenant-id` (header, required, string) — see [Environment setup](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx#environment-setup).
   - `experiment_id` (path, required, string) — the `rule_id` returned by `/routing/create` for the `ab_test` algorithm.
   - `start_ms` (query, optional, integer)
   - `end_ms` (query, optional, integer)
@@ -92,10 +92,10 @@ curl "$BASE_URL/analytics/experiment/routing_a1b2c3d4-1111-2222-3333-44445555666
 
 - `verdict` is one of `collecting_data`, `not_significant`, `variant_wins`, `variant_loses`, or `guardrail_breached`.
 - For an auth-only experiment (no cost data involved on either arm), the cost-related fields (`total_cost_saved`, `avg_cost_saved_bps`, `net_ev_bps`, `net_delta_bps`) are `null`.
-- Full field-by-field reference: [A/B Testing: Results](/api-refs/ab-testing-results).
+- Full field-by-field reference: [A/B Testing: Results](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-results.mdx).
 
 ## Related
 
-- [A/B Test Experiment Transactions](/api-reference/endpoint/analyticsExperimentTransactions)
-- [A/B Testing: Create An Experiment](/api-refs/ab-testing-create)
-- [Analytics Endpoints](/api-refs/analytics-endpoints)
+- [A/B Test Experiment Transactions](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsExperimentTransactions.mdx)
+- [A/B Testing: Create An Experiment](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-create.mdx)
+- [Analytics Endpoints](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/analytics-endpoints.mdx)

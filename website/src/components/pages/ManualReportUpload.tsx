@@ -41,7 +41,7 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
   const [uploading, setUploading] = useState(false)
   const [uploadPct, setUploadPct] = useState(0)
   const [error, setError] = useState<string | null>(null)
-  const [activeJobId, setActiveJobId] = useState<number | null>(null)
+  const [activeJobId, setActiveJobId] = useState<string | null>(null)
 
   // Header preflight, run the moment a file is chosen. `preflight` is null until it has run;
   // `sampleText` is the same few KB it ran on, kept so the mapping panel can show example values and

@@ -14,13 +14,19 @@ import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { useAuthStore } from '../../store/authStore'
-import { apiPost, fetcher } from '../../lib/api'
+import { apiErrorStatus, apiPost, fetcher } from '../../lib/api'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import { DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
-import { useConnectorFees } from '../../hooks/useCostRouting'
+import {
+  useConnectorFees,
+  useCostClusters,
+  useSeedCosts,
+  type ClusterFee,
+  type SeedCostRow,
+} from '../../hooks/useCostRouting'
 import { describeRoutingEvent, useRoutingEvents } from '../../hooks/useRoutingEvents'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { Play, Pause, RefreshCw, ChevronDown, ChevronUp, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings, ArrowRightLeft, Target, TrendingDown, Flag, SlidersHorizontal } from 'lucide-react'
@@ -89,6 +95,141 @@ const MULTI_OBJECTIVE_CLUSTER_VARIANTS: Array<{
 // default (falls back to the first variant if the label is ever renamed).
 const DEFAULT_MULTI_OBJ_SCENARIO: number | 'ALL' =
   Math.max(0, MULTI_OBJECTIVE_CLUSTER_VARIANTS.findIndex(v => v.label === 'US debit'))
+
+// One multi-objective card scenario. Widened from the built-in variants (whose network/program are
+// literal unions) so scenarios derived from the merchant's contract rates can carry any rail
+// (jaywan, mada, …) and an optional representative ticket.
+type MoClusterVariant = {
+  label: string
+  paymentMethod: 'CREDIT' | 'DEBIT'
+  cardSwitchProvider: string
+  cardProgram: string
+  cardIssuerCountry?: string
+  /** Representative ticket for this scenario (from the contract-rate table); used as the txn amount. */
+  exampleAmount?: number
+}
+
+/** `mc` in the fitted data, `MASTERCARD` on a scenario — the one alias the two vocabularies differ on. */
+function normNetwork(n: string): string {
+  const v = (n ?? '').trim().toLowerCase()
+  return v === 'mastercard' ? 'mc' : v
+}
+
+/**
+ * The issuer country whose settled volume dominates the merchant's OWN fitted clusters for a
+ * scenario, most specific match first.
+ *
+ * Derived from data rather than a table of currency→country guesses, for two reasons: a merchant can
+ * add a scenario in any currency from the UI, and a hardcoded map would silently return nothing for
+ * it; and the country only matters here insofar as it resolves a fitted cluster, so the merchant's
+ * actual traffic is the authoritative source. Returns `undefined` when they have no settlement data
+ * for the scenario — there is then no in-house model to reach, and an invented country buys nothing.
+ */
+function dominantIssuerCountry(
+  clusters: ClusterFee[],
+  currency: string,
+  network: string,
+  funding: string,
+): string | undefined {
+  const ccy = currency.toUpperCase()
+  const net = normNetwork(network)
+  const fund = (funding ?? '').trim().toLowerCase()
+  // Each rung drops one dimension, so a scenario with no exact fitted match still resolves to a
+  // plausible issuer for its currency.
+  const rungs: Array<(c: ClusterFee) => boolean> = [
+    (c) => normNetwork(c.card_network) === net && (c.funding ?? '').toLowerCase() === fund,
+    (c) => normNetwork(c.card_network) === net,
+    () => true,
+  ]
+  for (const matches of rungs) {
+    const volumeByCountry = new Map<string, number>()
+    for (const c of clusters) {
+      if ((c.currency ?? '').toUpperCase() !== ccy) continue
+      const country = (c.issuer_country ?? '').trim().toUpperCase()
+      if (!country || !matches(c)) continue
+      volumeByCountry.set(country, (volumeByCountry.get(country) ?? 0) + c.gross_sum)
+    }
+    let best: string | undefined
+    let bestVolume = 0
+    for (const [country, volume] of volumeByCountry) {
+      if (volume > bestVolume) {
+        best = country
+        bestVolume = volume
+      }
+    }
+    if (best) return best
+  }
+  return undefined
+}
+
+/**
+ * The raw ISO-2 issuer country to simulate for a seed-derived scenario. Without one the engine skips
+ * the whole fine path (`serving::lookup` needs a non-empty issuer both to build the cluster key and
+ * to predict the interchange category), so the request falls through to the seed table even when a
+ * fitted cluster matches exactly.
+ *
+ * A row's own `card_issuing_country` is used only when it names a real country. That column is a
+ * REGION bucket for seed matching — `seed_costs::tier_score` compares it against the cluster's
+ * *bucketed* region (`us` | `eu` | `intl`) — so forwarding `eu` verbatim would build a fine key with
+ * `issuer = "eu"` and match nothing. Of the three buckets only `eu` is not also a valid country code,
+ * which is the single case worth special-handling.
+ *
+ * (Writing a country into the seed rows instead would be the wrong fix: `tier_score` rejects a tier
+ * whose stated country the cluster's region doesn't equal, so `card_issuing_country = "ae"` would
+ * silently stop those rows pricing anything at all.)
+ */
+function issuerCountryFor(
+  row: SeedCostRow,
+  currency: string,
+  clusters: ClusterFee[],
+): string | undefined {
+  const stated = (row.card_issuing_country ?? '').trim().toLowerCase()
+  if (stated.length === 2 && stated !== 'eu') return stated.toUpperCase()
+  return dominantIssuerCountry(clusters, currency, row.card_network ?? '', row.payment_method_type ?? '')
+}
+
+/**
+ * Turn the merchant's configured seed-cost rows into simulator card scenarios for one currency: one
+ * scenario per distinct labelled tier (deduped across PSPs, which all price the same scenario).
+ * Returns `[]` when the currency has no configured scenarios, so the caller keeps the built-in set.
+ */
+function seedRowsToVariants(
+  rows: SeedCostRow[],
+  currency: string,
+  clusters: ClusterFee[],
+): MoClusterVariant[] {
+  const ccy = currency.toUpperCase()
+  const out: MoClusterVariant[] = []
+  const seen = new Set<string>()
+  for (const r of rows) {
+    if (r.is_default) continue
+    if ((r.transaction_currency ?? '').toUpperCase() !== ccy) continue
+    // A scenario is defined by its matching dimensions, not its label — several PSPs price the same
+    // scenario (often with slightly different labels), so dedupe on the dims and keep the first
+    // occurrence's label as the display name.
+    const dims = [
+      (r.card_network ?? '').toLowerCase(),
+      (r.payment_method_type ?? '').toLowerCase(),
+      (r.card_type ?? '').toLowerCase(),
+      (r.card_issuing_country ?? '').toLowerCase(),
+    ].join('|')
+    if (seen.has(dims)) continue
+    seen.add(dims)
+    const label =
+      r.label?.trim() ||
+      `${r.card_network ?? ''} ${r.payment_method_type ?? ''}`.trim() ||
+      'Scenario'
+    out.push({
+      label,
+      paymentMethod: (r.payment_method_type ?? '').toUpperCase() === 'DEBIT' ? 'DEBIT' : 'CREDIT',
+      cardSwitchProvider: (r.card_network ?? '').toUpperCase() || 'VISA',
+      cardProgram: (r.card_type ?? '').toUpperCase() || 'STANDARD',
+      cardIssuerCountry: issuerCountryFor(r, ccy, clusters),
+      exampleAmount: r.example_amount ?? undefined,
+    })
+  }
+  return out
+}
 
 interface DebitRoutingFormState {
   amount: string
@@ -350,7 +491,7 @@ const DEFAULT_SIMULATION_MIN_AMOUNT = 10
 const DEFAULT_SIMULATION_MAX_AMOUNT = 100
 // Hidden for now — the amount-range control isn't needed yet. The sim still runs
 // with the default range above; flip to true to bring the slider back.
-const SHOW_AMOUNT_RANGE_SLIDER = false
+const SHOW_AMOUNT_RANGE_SLIDER = true
 
 // Share of simulated failures modeled as soft declines (GSM `retry`) that are retried on an
 // alternate processor when smart retry is enabled. The rest are hard declines (no retry).
@@ -402,6 +543,11 @@ interface ExplorerPersistedState {
   smartRetryEnabled: boolean
   multiObjScenario: number | 'ALL'
   moCurrency: string
+  // Processors the user added / removed via the "+" and "×" controls. The comparison's
+  // `eligible_gateways` is *derived* from these (the seeding effect), so they — not the derived
+  // list — are the source of truth that must persist, or an add/remove is lost on reload.
+  extraConnectors: string[]
+  removedConnectors: string[]
   resumableRun: { total: number; nextIndex: number } | null
 }
 
@@ -446,6 +592,8 @@ function getDefaultExplorerState(): ExplorerPersistedState {
     smartRetryEnabled: false,
     multiObjScenario: DEFAULT_MULTI_OBJ_SCENARIO,
     moCurrency: MULTI_OBJECTIVE_CURRENCY,
+    extraConnectors: [],
+    removedConnectors: [],
     resumableRun: null,
   }
 }
@@ -515,6 +663,8 @@ function loadExplorerState(scopeKey: string): ExplorerPersistedState {
       volumeDistribution: parsed.volumeDistribution || defaults.volumeDistribution,
       volumeEvaluationLog: parsed.volumeEvaluationLog || defaults.volumeEvaluationLog,
       simulationResults: parsed.simulationResults || defaults.simulationResults,
+      extraConnectors: parsed.extraConnectors || defaults.extraConnectors,
+      removedConnectors: parsed.removedConnectors || defaults.removedConnectors,
     }
   } catch {
     return { ...getDefaultExplorerState(), scopeKey }
@@ -666,9 +816,9 @@ function phaseBadgeVariant(phase: string): 'blue' | 'green' | 'purple' | 'red' |
 }
 
 function isTraceIndexingError(error: unknown) {
-  const status = typeof error === 'object' && error ? (error as { status?: number }).status : undefined
-  const message = error instanceof Error ? error.message : String(error || '')
-  return status === 404 || message.includes('API error 404')
+  // Status only — the message no longer carries the code, and sniffing prose for it was always
+  // brittle (a body that merely mentioned 404 would have matched).
+  return apiErrorStatus(error) === 404
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -918,6 +1068,63 @@ function InspectorJsonPanel({
   )
 }
 
+/**
+ * A number input for one end of the amount range.
+ *
+ * The naive version — clamp `e.target.value` into state on every keystroke — makes the field
+ * impossible to retype: clearing "100" produces an empty string, which clamps to the lower bound
+ * and re-renders as "1", so the next digits land *after* that 1 ("5000" becomes 15000, truncated
+ * back down by the clamp). So while the field is focused we show exactly what was typed and keep
+ * the committed number in step behind it, and only re-sync the text to the canonical (clamped,
+ * cross-clamped) value on blur.
+ */
+function AmountBoundInput({
+  value,
+  min,
+  max,
+  ariaLabel,
+  className,
+  onCommit,
+  onSettle,
+}: {
+  value: number
+  min: number
+  max: number
+  ariaLabel: string
+  className: string
+  /** Called with a clamped number for every keystroke that parses — keeps a run's config valid. */
+  onCommit: (next: number) => void
+  /** Called on blur, after the draft is dropped — where the two bounds get cross-clamped. */
+  onSettle: () => void
+}) {
+  // null ⇒ not being edited, so mirror `value`. A string ⇒ the user's in-progress text, shown
+  // verbatim (including empty) no matter what the clamp did to the committed number.
+  const [draft, setDraft] = useState<string | null>(null)
+
+  return (
+    <input
+      type="number" min={min} max={max} step={5}
+      aria-label={ariaLabel}
+      value={draft ?? String(value)}
+      onChange={e => {
+        const text = e.target.value
+        setDraft(text)
+        // An empty or half-typed field leaves the last valid number committed, so starting a
+        // simulation mid-edit can never draw amounts from a NaN range.
+        const parsed = Number(text)
+        if (text !== '' && Number.isFinite(parsed)) {
+          onCommit(Math.max(min, Math.min(max, parsed)))
+        }
+      }}
+      onBlur={() => {
+        setDraft(null)
+        onSettle()
+      }}
+      className={className}
+    />
+  )
+}
+
 // ---------------------------------------------------------------------------
 // Extracts RuleEvaluateParams from a routing algorithm's Euclid conditions.
 // Walks all rules and statements, collecting unique lhs keys with their first
@@ -943,6 +1150,14 @@ export function DecisionSimulatorPage() {
   // scored on real fitted costs instead of the static stripe+adyen default — see the seeding effect
   // below. Only connectors with a fit (`model_pct_bps != null`) qualify.
   const { fees: connectorFees } = useConnectorFees(effectiveMerchantId || undefined)
+  // The merchant's configured contract rates (seed costs). Choosing a currency in the
+  // multi-objective sim auto-lists the scenarios configured for it and prices them from these rates.
+  const { rows: seedRows } = useSeedCosts(effectiveMerchantId || undefined)
+  // The merchant's fitted clusters, used only to resolve a representative issuer country per
+  // scenario (see `dominantIssuerCountry`) — never to price anything, which the engine does.
+  const { clusters: costClusters } = useCostClusters(effectiveMerchantId || undefined, {
+    limit: 2000,
+  })
   const ingestedConnectors = useMemo(
     () => connectorFees.filter(f => f.model_pct_bps != null).map(f => f.connector.toLowerCase()),
     [connectorFees],
@@ -979,6 +1194,16 @@ export function DecisionSimulatorPage() {
   const eliminationEnabled = Object.values(gatewaySimConfigs).some(c => c.failureMode === 'timeout')
   const simulationAbortRef = useRef(false)
   useEffect(() => () => { simulationAbortRef.current = true }, [])
+  /**
+   * Bumped on every run start, and by anything that discards a run outright (Clear results, a
+   * merchant-scope switch). A run captures the value at entry and only touches shared state while it
+   * still matches, which `simulationAbortRef` alone cannot express: the abort flag is reset to false
+   * at the top of the next run, so workers parked in an `await` would wake up, see it cleared and
+   * carry on — two live runs interleaving rows into the same state and both posting real feedback to
+   * the engine. The token can only move forward, so a superseded run can never mistake itself for
+   * the current one.
+   */
+  const runGenerationRef = useRef(0)
 
   const [debitForm, setDebitForm] = useState<DebitRoutingFormState>(initialState.debitForm)
 
@@ -1031,11 +1256,11 @@ export function DecisionSimulatorPage() {
   // Connectors the user manually added to the comparison via the "+" control. Unioned onto the
   // default pair + ingested set in the seeding effect below, so a third (or fourth) processor
   // gets its own SR slider alongside the ingested ones.
-  const [extraConnectors, setExtraConnectors] = useState<string[]>([])
+  const [extraConnectors, setExtraConnectors] = useState<string[]>(initialState.extraConnectors)
   // Connectors the user explicitly removed from the comparison (the "×" on a slider). Subtracted
   // from the default+ingested+extra union in the seeding effect, so even a default (stripe/adyen)
   // or ingested connector can be dropped and won't be re-added on the next render. Lowercased.
-  const [removedConnectors, setRemovedConnectors] = useState<string[]>([])
+  const [removedConnectors, setRemovedConnectors] = useState<string[]>(initialState.removedConnectors)
   // Open state + draft input for the "add connector" modal.
   const [addConnectorOpen, setAddConnectorOpen] = useState(false)
   const [newConnectorName, setNewConnectorName] = useState('')
@@ -1054,6 +1279,55 @@ export function DecisionSimulatorPage() {
   // Currency for the multi-objective sim (was hardcoded to USD). Drives whether a transaction can
   // match an in-house fitted cost model (keyed by currency) or falls back to the seed table.
   const [moCurrency, setMoCurrency] = useState<string>(initialState.moCurrency)
+
+  // Card scenarios available to the multi-objective sim for the selected currency. When the merchant
+  // has configured contract-rate scenarios for that currency (e.g. AED), use those — so choosing AED
+  // auto-lists the UAE scenarios and prices them from the configured rates. Otherwise fall back to
+  // the built-in set (USD/EUR/…). The run loop reads a ref so a currency switch takes effect live.
+  const activeVariants = useMemo<MoClusterVariant[]>(() => {
+    const seeded = seedRowsToVariants(seedRows, moCurrency, costClusters)
+    return seeded.length ? seeded : MULTI_OBJECTIVE_CLUSTER_VARIANTS
+    // `costClusters` belongs here: it arrives asynchronously, and without it the scenarios would keep
+    // the issuer country they were built with before the clusters loaded — i.e. none.
+  }, [seedRows, moCurrency, costClusters])
+  const activeVariantsRef = useRef(activeVariants)
+  useEffect(() => { activeVariantsRef.current = activeVariants }, [activeVariants])
+
+  // Currencies offered in the multi-objective sim: the built-in set plus any the merchant configured
+  // contract-rate scenarios for (so AED shows up once its scenarios exist).
+  const moCurrencyOptions = useMemo<string[]>(() => {
+    const configured = Array.from(
+      new Set(
+        seedRows
+          .filter(r => !r.is_default)
+          .map(r => (r.transaction_currency ?? '').toUpperCase())
+          .filter(Boolean),
+      ),
+    )
+    return Array.from(new Set<string>([...MULTI_OBJECTIVE_CURRENCIES, ...configured]))
+  }, [seedRows])
+
+  // Keep the pinned scenario valid when the active set changes (e.g. after a currency switch shrinks
+  // the list): clamp an out-of-range index back to the first scenario; 'ALL' is always valid.
+  useEffect(() => {
+    setMultiObjScenario(prev => (prev === 'ALL' || prev < activeVariants.length ? prev : 0))
+  }, [activeVariants.length])
+
+  // When a specific configured scenario is selected, center the amount-range slider on its
+  // representative ticket (e.g. AED 6,500) so default amounts are realistic for that currency. The
+  // user can still drag the range afterward; built-in variants carry no example, so their range is
+  // left untouched.
+  useEffect(() => {
+    if (multiObjScenario === 'ALL') return
+    const ex = activeVariants[multiObjScenario]?.exampleAmount
+    if (ex == null || ex <= 0) return
+    const lo = Math.max(SIMULATION_AMOUNT_BOUND_MIN, Math.round(ex * 0.5))
+    const hi = Math.min(SIMULATION_AMOUNT_BOUND_MAX, Math.round(ex * 1.5))
+    setSimulationConfig(c =>
+      c.minAmount === lo && c.maxAmount === hi ? c : { ...c, minAmount: lo, maxAmount: hi },
+    )
+  }, [multiObjScenario, activeVariants])
+
   // Acceptance channel sent on each multi-objective transaction. Drives the in-house category
   // predictor (ecom vs pos resolves the online/in-person interchange split). VGS-collected cards
   // are ecommerce, so this is fixed to 'ecom'.
@@ -1422,6 +1696,9 @@ export function DecisionSimulatorPage() {
     setSetupPrompt(null)
     setLoading(false)
     simulationAbortRef.current = true
+    // Retire the run as well as aborting it — see runGenerationRef. Without this, a worker parked in
+    // a request would resume once the next run clears the abort flag.
+    runGenerationRef.current++
     setIsSimulating(false)
   }
 
@@ -1457,6 +1734,8 @@ export function DecisionSimulatorPage() {
     setVolumeResponseOpen(nextState.volumeResponseOpen)
     setMultiObjScenario(nextState.multiObjScenario)
     setMoCurrency(nextState.moCurrency)
+    setExtraConnectors(nextState.extraConnectors)
+    setRemovedConnectors(nextState.removedConnectors)
     setResumableRun(nextState.resumableRun)
     setSelectedAuditPaymentId(null)
     setSelectedAuditEventId(null)
@@ -1470,6 +1749,9 @@ export function DecisionSimulatorPage() {
     setSetupPrompt(null)
     setLoading(false)
     simulationAbortRef.current = true
+    // Retire the run as well as aborting it — see runGenerationRef. Without this, a worker parked in
+    // a request would resume once the next run clears the abort flag.
+    runGenerationRef.current++
     setIsSimulating(false)
   }
 
@@ -1540,6 +1822,8 @@ export function DecisionSimulatorPage() {
       smartRetryEnabled,
       multiObjScenario,
       moCurrency,
+      extraConnectors,
+      removedConnectors,
       resumableRun: resumableRunSnapshot,
     }
 
@@ -1577,6 +1861,8 @@ export function DecisionSimulatorPage() {
     smartRetryEnabled,
     multiObjScenario,
     moCurrency,
+    extraConnectors,
+    removedConnectors,
   ])
 
   // Resume a paused run that survived a page unmount: continue the loop from the saved
@@ -1995,6 +2281,10 @@ export function DecisionSimulatorPage() {
     setSetupPrompt(null)
     if (!isResume) setSimulationResults([])
     simulationAbortRef.current = false
+    // Claim ownership of the shared run state. Any earlier run still unwinding is now superseded and
+    // will drop out of its loop without writing.
+    const runId = ++runGenerationRef.current
+    const isCurrentRun = () => runGenerationRef.current === runId
 
     const gateways = form.eligible_gateways.split(',').map(s => s.trim()).filter(Boolean)
     // Seed from the completed rows on resume so new transactions append rather than replace.
@@ -2046,10 +2336,11 @@ export function DecisionSimulatorPage() {
       // seed everything else (currency, eligible_gateways, etc).
       // Read live so a scenario switch made while paused takes effect on resume.
       const scenarioSel = multiObjScenarioRef.current
+      const activeVars = activeVariantsRef.current
       const variant = isMultiObjective
         ? (scenarioSel === 'ALL'
-            ? MULTI_OBJECTIVE_CLUSTER_VARIANTS[i % MULTI_OBJECTIVE_CLUSTER_VARIANTS.length]
-            : MULTI_OBJECTIVE_CLUSTER_VARIANTS[scenarioSel])
+            ? activeVars[i % activeVars.length]
+            : (activeVars[scenarioSel] ?? activeVars[0]))
         : null
       const paymentMethodType = isMultiObjective ? 'CARD' : form.payment_method_type
       const paymentMethod = variant ? variant.paymentMethod : form.payment_method
@@ -2058,8 +2349,11 @@ export function DecisionSimulatorPage() {
       const cardIssuerCountry = variant ? variant.cardIssuerCountry : undefined
       const amtLo = Math.min(amountRangeRef.current.min, amountRangeRef.current.max)
       const amtHi = Math.max(amountRangeRef.current.min, amountRangeRef.current.max)
+      // Each payment's amount is drawn from the (user-adjustable) amount-range slider. Selecting a
+      // configured scenario seeds that range from its representative ticket (see the effect below),
+      // so AED scenarios default to realistic amounts while the slider stays in control.
       const amount = isMultiObjective
-        ? Math.floor(amtLo + Math.random() * (amtHi - amtLo + 1)) // configurable amount range
+        ? Math.floor(amtLo + Math.random() * (amtHi - amtLo + 1))
         : (parseFloat(form.amount) || 1000)
 
       const decideRes = await apiPost<DecideGatewayResponse>('/decide-gateway', {
@@ -2169,6 +2463,9 @@ export function DecisionSimulatorPage() {
       // Commit the accumulated rows + refresh the events feed, throttled so a fast loop can't
       // spam re-renders (force=true bypasses the throttle for pause/end-of-run flushes).
       const flushResults = (force: boolean) => {
+        // Superseded — the results were cleared, or a newer run owns the screen now. Either way this
+        // run's rows are not wanted.
+        if (!isCurrentRun()) return
         const now = Date.now()
         if (force || now - lastUIUpdate > 150) {
           setSimulationResults([...results])
@@ -2183,14 +2480,17 @@ export function DecisionSimulatorPage() {
 
       const worker = async (): Promise<void> => {
         while (true) {
-          if (simulationAbortRef.current) return
+          // The generation check is what stops a superseded run: a worker parked in `runTxn` misses
+          // the abort flag entirely, and by the time it wakes the next run may have already cleared
+          // that flag — without this it would keep claiming indices and hitting the real API.
+          if (simulationAbortRef.current || !isCurrentRun()) return
           // Idle here while paused — without claiming new work — so the in-flight requests drain
           // and the resume index stays put; a Stop still breaks out. Flush once on the way in so a
           // page-leave/return resumes from exactly the committed rows.
           if (simulationPausedRef.current) {
             runProgressRef.current = results.length
             flushResults(true)
-            while (simulationPausedRef.current && !simulationAbortRef.current) {
+            while (simulationPausedRef.current && !simulationAbortRef.current && isCurrentRun()) {
               await new Promise(resolve => setTimeout(resolve, 120))
             }
             continue
@@ -2216,6 +2516,9 @@ export function DecisionSimulatorPage() {
             await new Promise(resolve => setTimeout(resolve, 300))
           }
 
+          // The row landed after this run was superseded: drop it rather than move the shared resume
+          // point, which now belongs to whichever run replaced this one.
+          if (!isCurrentRun()) return
           // Record the resume point as the committed count and flush on the shared throttle.
           runProgressRef.current = results.length
           flushResults(false)
@@ -2227,16 +2530,23 @@ export function DecisionSimulatorPage() {
       await Promise.all(Array.from({ length: concurrency }, () => worker()))
 
       // If a worker tripped the error threshold (as opposed to a user Stop), surface the failure.
-      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
+      // Not ours to report if this run was already discarded.
+      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS && isCurrentRun()) {
         handleRunError(lastError, 'batch', `Simulation stopped after ${MAX_CONSECUTIVE_ERRORS} consecutive errors. Check that the server is running.`)
         return
       }
     } finally {
-      setSimulationResults([...results])
-      setIsSimulating(false)
-      setIsPaused(false)
-      simulationPausedRef.current = false
-      // Final flush: events from the last txns can land just after the loop ends.
+      // A superseded run must not write any of this: its rows are stale, and `isSimulating` /
+      // `isPaused` now describe the run that replaced it — flipping them here is what let the old
+      // run hide a live run's Stop button and re-offer Run simulation.
+      if (isCurrentRun()) {
+        setSimulationResults([...results])
+        setIsSimulating(false)
+        setIsPaused(false)
+        simulationPausedRef.current = false
+      }
+      // Events from the last txns can land just after the loop ends. Safe either way — it only
+      // refetches the feed.
       routingEvents.refresh()
     }
   }
@@ -2399,10 +2709,57 @@ export function DecisionSimulatorPage() {
     [form.eligible_gateways],
   )
 
-  const gatewayColorMap = useMemo(
-    () => Object.fromEntries(eligibleGatewaysParsed.map((gw, i) => [gw, GW_COLOR_OVERRIDES[gw.toLowerCase()] ?? GW_PALETTE[i % GW_PALETTE.length]])),
-    [eligibleGatewaysParsed],
-  )
+  // Processors we already know something about, offered as one-click options in the add modal so the
+  // common case isn't a spelling exercise. Two sources, both meaningful here because they're exactly
+  // what the sim can price: the merchant's contract-rate seeds, and anything we've fitted a cost
+  // model for from ingested reports. Ones already in the comparison are dropped — adding them again
+  // is a no-op the modal would only reject.
+  const addableConnectorOptions = useMemo(() => {
+    const withCostModel = new Set(ingestedConnectors)
+    const inComparison = new Set(eligibleGatewaysParsed)
+    const names = new Set<string>([
+      ...seedRows.map(r => r.psp.trim().toLowerCase()).filter(Boolean),
+      ...withCostModel,
+    ])
+    return [...names]
+      .filter(name => !inComparison.has(name))
+      .sort()
+      .map(name => ({ name, hasCostModel: withCostModel.has(name) }))
+  }, [seedRows, ingestedConnectors, eligibleGatewaysParsed])
+
+  /**
+   * One color per eligible connector. The overrides are keyed by name and the palette is handed out
+   * by position, so taking `GW_PALETTE[i]` blindly can re-issue a color an override already owns:
+   * Stripe's purple *is* `GW_PALETTE[1]`, so [stripe, adyen, checkout] rendered fine but dropping
+   * Adyen moved Checkout to index 1 and painted it Stripe's purple.
+   *
+   * So: claim the override colors up front, then let each remaining connector take the first unused
+   * palette entry at or after its own index. Searching from `i` rather than from 0 keeps a
+   * connector's color stable when one earlier in the list is removed — Checkout stays orange whether
+   * or not Adyen is present — instead of shuffling the whole legend on every add/remove.
+   */
+  const gatewayColorMap = useMemo(() => {
+    const used = new Set(
+      eligibleGatewaysParsed.map(gw => GW_COLOR_OVERRIDES[gw.toLowerCase()]).filter(Boolean),
+    )
+    const takeFrom = (start: number) => {
+      for (let k = 0; k < GW_PALETTE.length; k++) {
+        const color = GW_PALETTE[(start + k) % GW_PALETTE.length]
+        if (!used.has(color)) return color
+      }
+      // More connectors than colors — a repeat is unavoidable, so fall back to the positional pick.
+      return GW_PALETTE[start % GW_PALETTE.length]
+    }
+    return Object.fromEntries(
+      eligibleGatewaysParsed.map((gw, i) => {
+        const override = GW_COLOR_OVERRIDES[gw.toLowerCase()]
+        if (override) return [gw, override]
+        const color = takeFrom(i)
+        used.add(color)
+        return [gw, color]
+      }),
+    )
+  }, [eligibleGatewaysParsed])
 
   // Auto-populate errorInfo for any gateway whose config has no error code yet,
   // once GSM rules have loaded from the API.
@@ -2935,26 +3292,78 @@ export function DecisionSimulatorPage() {
     setPreviewInspectorTab('summary')
   }
 
+  // Reset form fields to the first available option from routing config so
+  // required fields like currency are never sent as empty strings.
+  function populatedForm(base: FormState): FormState {
+    const next = { ...base }
+    if (currencyOptions.length > 0 && !currencyOptions.includes(next.currency))
+      next.currency = currencyOptions[0]
+    if (paymentMethodTypeOptions.length > 0 && !paymentMethodTypeOptions.includes(next.payment_method_type))
+      next.payment_method_type = paymentMethodTypeOptions[0]
+    const methodsForType = toUpperOptions(routingKeysConfig[next.payment_method_type.toLowerCase()]?.values || [])
+    if (methodsForType.length > 0 && !methodsForType.includes(next.payment_method))
+      next.payment_method = methodsForType[0]
+    if (authTypeOptions.length > 0 && !authTypeOptions.includes(next.auth_type))
+      next.auth_type = authTypeOptions[0]
+    if (cardBrandOptions.length > 0 && !cardBrandOptions.includes(next.card_brand))
+      next.card_brand = cardBrandOptions[0]
+    return next
+  }
+
+  // The batch tab's two halves clear independently, because wanting one rarely means wanting the
+  // other: retuning the controls shouldn't throw away the run you're comparing against, and
+  // clearing a finished run shouldn't undo the setup that produced it.
+
+  /** The control bar only — scenario inputs, amount range, TPS, retry, and the processor set. */
+  function resetBatchInputs() {
+    const defaults = getDefaultExplorerState()
+    setForm({ ...populatedForm(defaults.form), currency: MULTI_OBJECTIVE_CURRENCY })
+    setMoCurrency(MULTI_OBJECTIVE_CURRENCY)
+    setSimulationConfig(defaults.simulationConfig)
+    setMultiObjScenario(defaults.multiObjScenario)
+    // Drop any manually added/removed processors so the comparison returns to the default pair.
+    setExtraConnectors(defaults.extraConnectors)
+    setRemovedConnectors(defaults.removedConnectors)
+    setSmartRetryEnabled(defaults.smartRetryEnabled)
+    // Preserve the currently selected per-gateway success rate scores (e.g.
+    // Stripe/Adyen) across a reset — only clear the other sim config fields.
+    setGatewaySimConfigs(prev =>
+      Object.fromEntries(
+        Object.entries(prev).map(([gw, cfg]) => [
+          gw,
+          { ...DEFAULT_GW_SIM_CONFIG, successRate: cfg.successRate },
+        ]),
+      ),
+    )
+    setError(null)
+    setSetupPrompt(null)
+  }
+
+  /** Everything below the control bar — the charts, the summary column and the transaction log. */
+  function clearBatchResults() {
+    const defaults = getDefaultExplorerState()
+    setSimulationResults(defaults.simulationResults)
+    setResumableRun(defaults.resumableRun)
+    // Abort any in-flight run and drop the run-start timestamp so the
+    // Autopilot Actions feed (scoped to simulationStartedAtMs) clears back
+    // to its empty state instead of replaying the previous run's events.
+    simulationAbortRef.current = true
+    // Retire the run outright. Aborting alone isn't enough on two counts: its workers unwind through
+    // a final flush that would put the rows we just cleared straight back, and the next run resets
+    // the abort flag, which would let any worker still parked in a request resume against a run it
+    // no longer belongs to.
+    runGenerationRef.current++
+    setSimulationStartedAtMs(null)
+    setIsSimulating(false)
+    setIsPaused(false)
+    simulationPausedRef.current = false
+    // The log's column filters describe rows that no longer exist.
+    setTxFilters({})
+    setError(null)
+  }
+
   function resetCurrentTabState() {
     const defaults = getDefaultExplorerState()
-
-    // Reset form fields to the first available option from routing config so
-    // required fields like currency are never sent as empty strings.
-    function populatedForm(base: FormState): FormState {
-      const next = { ...base }
-      if (currencyOptions.length > 0 && !currencyOptions.includes(next.currency))
-        next.currency = currencyOptions[0]
-      if (paymentMethodTypeOptions.length > 0 && !paymentMethodTypeOptions.includes(next.payment_method_type))
-        next.payment_method_type = paymentMethodTypeOptions[0]
-      const methodsForType = toUpperOptions(routingKeysConfig[next.payment_method_type.toLowerCase()]?.values || [])
-      if (methodsForType.length > 0 && !methodsForType.includes(next.payment_method))
-        next.payment_method = methodsForType[0]
-      if (authTypeOptions.length > 0 && !authTypeOptions.includes(next.auth_type))
-        next.auth_type = authTypeOptions[0]
-      if (cardBrandOptions.length > 0 && !cardBrandOptions.includes(next.card_brand))
-        next.card_brand = cardBrandOptions[0]
-      return next
-    }
 
     if (activeTab === 'single') {
       setForm(populatedForm(defaults.form))
@@ -2963,28 +3372,9 @@ export function DecisionSimulatorPage() {
       setSingleRunOutcome(defaults.singleRunOutcome)
       setResponseOpen(defaults.responseOpen)
     } else if (activeTab === 'batch') {
-      setForm({ ...populatedForm(defaults.form), currency: MULTI_OBJECTIVE_CURRENCY })
-      setMoCurrency(MULTI_OBJECTIVE_CURRENCY)
-      setSimulationConfig(defaults.simulationConfig)
-      setMultiObjScenario(defaults.multiObjScenario)
-      // Preserve the currently selected per-gateway success rate scores (e.g.
-      // Stripe/Adyen) across a reset — only clear the other sim config fields.
-      setGatewaySimConfigs(prev =>
-        Object.fromEntries(
-          Object.entries(prev).map(([gw, cfg]) => [
-            gw,
-            { ...DEFAULT_GW_SIM_CONFIG, successRate: cfg.successRate },
-          ]),
-        ),
-      )
-      setSimulationResults(defaults.simulationResults)
-      setResumableRun(defaults.resumableRun)
-      // Abort any in-flight run and drop the run-start timestamp so the
-      // Autopilot Actions feed (scoped to simulationStartedAtMs) clears back
-      // to its empty state instead of replaying the previous run's events.
-      simulationAbortRef.current = true
-      setSimulationStartedAtMs(null)
-      setIsSimulating(false)
+      // The batch tab's own bar exposes these two separately; "reset the tab" is just both.
+      resetBatchInputs()
+      clearBatchResults()
     } else if (activeTab === 'rule') {
       setRuleResetSignal(n => n + 1)
     } else if (activeTab === 'volume') {
@@ -3018,13 +3408,13 @@ export function DecisionSimulatorPage() {
   }
 
   const resetButtonLabel =
-    activeTab === 'batch'
-      ? 'Reset'
-      : activeTab === 'rule'
-        ? 'Reset Rule Based Routing'
-        : activeTab === 'volume'
-          ? 'Reset Volume Based Routing'
-          : 'Reset Debit Routing'
+    activeTab === 'rule'
+      ? 'Reset Rule Based Routing'
+      : activeTab === 'volume'
+        ? 'Reset Volume Based Routing'
+        : activeTab === 'debit'
+          ? 'Reset Debit Routing'
+          : 'Reset'
 
   return (
     <div className="mx-auto max-w-[1500px] space-y-5">
@@ -3069,17 +3459,71 @@ export function DecisionSimulatorPage() {
           <div className="relative w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl outline-none dark:border-[#2a303a] dark:bg-[#0d1118]">
             <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Add a processor</h3>
             <p className="mt-2 text-sm leading-relaxed text-slate-500 dark:text-[#8a93a6]">
-              Enter a connector name (e.g. <span className="font-medium">braintree</span>,{' '}
-              <span className="font-medium">worldpay</span>). It joins the comparison with its own SR
-              slider — scored on its ingested cost model if it has one, otherwise seed costs.
+              {addableConnectorOptions.length > 0
+                ? 'Pick a processor we can already price, or type any other connector name. It joins the comparison with its own SR slider — scored on its ingested cost model if it has one, otherwise seed costs.'
+                : 'Enter a connector name (e.g. braintree, worldpay). It joins the comparison with its own SR slider — scored on its ingested cost model if it has one, otherwise seed costs.'}
             </p>
+
+            {/* Known processors as pickable options. Selecting one fills the field below rather than
+                adding straight away, so there's a single commit path (and the exact name that will
+                be saved is always visible before you commit). */}
+            {addableConnectorOptions.length > 0 && (
+              <div className="mt-4">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                  Known processors
+                </span>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {addableConnectorOptions.map(({ name, hasCostModel }) => {
+                    const selected = newConnectorName.trim().toLowerCase() === name
+                    return (
+                      <button
+                        key={name}
+                        type="button"
+                        onClick={() => {
+                          setNewConnectorName(name)
+                          setAddConnectorError(null)
+                        }}
+                        onDoubleClick={submitAddConnector}
+                        aria-pressed={selected}
+                        title={
+                          hasCostModel
+                            ? `${name} — has a fitted cost model from ingested reports`
+                            : `${name} — priced from your contract seed rates`
+                        }
+                        className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${
+                          selected
+                            ? 'border-brand-500/50 bg-brand-500/10 text-brand-600 dark:text-brand-400'
+                            : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-[#2a303a] dark:text-[#9ca7ba] dark:hover:bg-white/5'
+                        }`}
+                      >
+                        {name}
+                        {hasCostModel && (
+                          <span
+                            className="ml-1.5 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 align-middle"
+                            aria-hidden
+                          />
+                        )}
+                      </button>
+                    )
+                  })}
+                </div>
+                <p className="mt-1.5 text-[11px] text-slate-400">
+                  <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 align-middle" />
+                  has a fitted cost model; the rest use contract seed rates.
+                </p>
+              </div>
+            )}
+
             <input
               autoFocus
               type="text"
               value={newConnectorName}
-              placeholder="Connector name"
+              placeholder={addableConnectorOptions.length > 0 ? 'Or type a connector name' : 'Connector name'}
+              // Connector names are lowercase identifiers everywhere else in the engine, so fold the
+              // case as it's typed — what you see is then exactly what gets saved, and a typed name
+              // still lights up its matching option above.
               onChange={e => {
-                setNewConnectorName(e.target.value)
+                setNewConnectorName(e.target.value.toLowerCase())
                 if (addConnectorError) setAddConnectorError(null)
               }}
               onKeyDown={e => {
@@ -3114,7 +3558,25 @@ export function DecisionSimulatorPage() {
       )}
 
       {activeTab === 'batch' && (
-        <div className="flex flex-wrap items-start gap-x-6 gap-y-4 rounded-2xl border border-slate-200 bg-white px-5 py-3 dark:border-[#222226] dark:bg-[#0b0b10]">
+        <div className="flex flex-wrap items-start gap-x-6 gap-y-3 rounded-2xl border border-slate-200 bg-white px-5 py-3 dark:border-[#222226] dark:bg-[#0b0b10]">
+            {/* Own row at the container's top-right: `w-full` makes the wrap break after it, which
+                keeps the reset out of the action cluster instead of absolutely positioning it into
+                that cluster's space. Pulled into the card's padding on three sides (ghost button, so
+                there's no background to look clipped) so it tucks into the corner rather than opening
+                a band above the inputs. Scoped to the controls in this container — the results below
+                have their own Clear. */}
+            <div className="-mb-1 -mr-2 -mt-2 flex w-full justify-end">
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={resetBatchInputs}
+                title="Restore the controls in this panel to their defaults (per-processor success rates are kept). Leaves the results below untouched."
+              >
+                <RefreshCw size={14} />
+                Reset inputs
+              </Button>
+            </div>
+
             {/* One SR slider per eligible connector. In cost mode the eligible set is driven by the
                 merchant's ingested connectors (see the seeding effect), so these follow suit instead
                 of a hardcoded stripe+adyen pair. */}
@@ -3130,10 +3592,11 @@ export function DecisionSimulatorPage() {
                   <div className="flex items-center gap-1.5">
                     <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: color }} />
                     <SurfaceLabel>{label}</SurfaceLabel>
-                    {/* Any connector can be removed (default, ingested or user-added), but keep at
-                        least two so the routing comparison stays meaningful, and don't mutate the
-                        eligible set mid-run. */}
-                    {eligibleGatewaysParsed.length > 2 && !isSimulating && (
+                    {/* Any connector can be removed (default, ingested or user-added), down to a
+                        single one — a one-processor run is a legitimate baseline, so we only stop
+                        you from emptying the eligible set entirely. Hidden mid-run so a simulation
+                        can't have the set pulled out from under it. */}
+                    {eligibleGatewaysParsed.length > 1 && !isSimulating && (
                       <button
                         type="button"
                         onClick={() => removeConnector(key)}
@@ -3199,7 +3662,7 @@ export function DecisionSimulatorPage() {
             {form.ranking_algorithm === 'SR_MULTI_OBJECTIVE' && (
               <div className="flex w-[175px] flex-col gap-1.5">
                 <SurfaceLabel>
-                  <span title="Pin every multi-objective transaction to one card scenario so the SR Trend shows a single clean per-segment bucket. 'All scenarios' rotates through the 8 card types (interleaves dimensions on one chart). Editable while paused — the rest of the run continues in the new segment on resume.">Card scenario</span>
+                  <span title="Pin every multi-objective transaction to one card scenario so the SR Trend shows a single clean per-segment bucket. 'All scenarios' rotates through this currency's scenarios (interleaves dimensions on one chart). Choosing a currency with configured contract rates (e.g. AED) lists those scenarios here. Editable while paused — the rest of the run continues in the new segment on resume.">Card scenario</span>
                 </SurfaceLabel>
                 <select
                   value={String(multiObjScenario)}
@@ -3208,7 +3671,7 @@ export function DecisionSimulatorPage() {
                   className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50 disabled:cursor-not-allowed dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
                 >
                   <option value="ALL">All scenarios (rotate)</option>
-                  {MULTI_OBJECTIVE_CLUSTER_VARIANTS.map((v, idx) => (
+                  {activeVariants.map((v, idx) => (
                     <option key={v.label} value={idx}>{v.label}</option>
                   ))}
                 </select>
@@ -3226,7 +3689,7 @@ export function DecisionSimulatorPage() {
                   onChange={e => setMoCurrency(e.target.value)}
                   className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50 disabled:cursor-not-allowed dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
                 >
-                  {MULTI_OBJECTIVE_CURRENCIES.map(c => (
+                  {moCurrencyOptions.map(c => (
                     <option key={c} value={c}>{c}</option>
                   ))}
                 </select>
@@ -3280,51 +3743,49 @@ export function DecisionSimulatorPage() {
             {SHOW_AMOUNT_RANGE_SLIDER && (() => {
               const BMIN = SIMULATION_AMOUNT_BOUND_MIN
               const BMAX = SIMULATION_AMOUNT_BOUND_MAX
-              const lo = Math.max(BMIN, Math.min(simulationConfig.minAmount, simulationConfig.maxAmount))
-              const hi = Math.min(BMAX, Math.max(simulationConfig.minAmount, simulationConfig.maxAmount))
-              const pct = (v: number) => ((v - BMIN) / (BMAX - BMIN)) * 100
-              const amtColor = '#10b981'
-              // Two overlapped range inputs: track is transparent (the divs below draw it),
-              // and only the thumbs receive pointer events so both handles stay draggable.
-              const rangeCls = `pointer-events-none absolute inset-0 h-4 w-full appearance-none bg-transparent outline-none disabled:cursor-not-allowed
-                [&::-webkit-slider-runnable-track]:h-4 [&::-webkit-slider-runnable-track]:bg-transparent [&::-moz-range-track]:h-4 [&::-moz-range-track]:bg-transparent
-                [&::-webkit-slider-thumb]:pointer-events-auto [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:h-4 [&::-webkit-slider-thumb]:w-4 [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:border-2 [&::-webkit-slider-thumb]:border-white [&::-webkit-slider-thumb]:bg-[color:var(--thumb)] [&::-webkit-slider-thumb]:shadow [&::-webkit-slider-thumb]:cursor-pointer
-                [&::-moz-range-thumb]:pointer-events-auto [&::-moz-range-thumb]:h-4 [&::-moz-range-thumb]:w-4 [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-2 [&::-moz-range-thumb]:border-white [&::-moz-range-thumb]:border-solid [&::-moz-range-thumb]:bg-[color:var(--thumb)] [&::-moz-range-thumb]:shadow [&::-moz-range-thumb]:cursor-pointer`
+              // Direct min/max number entry is easier to fine-tune than dragging two
+              // overlapped range thumbs. Both the bound clamp and the cross-clamp (min never
+              // exceeds max, and vice versa) land on blur so neither fights the user
+              // mid-keystroke — see AmountBoundInput.
+              // Spinners are hidden: at step=5 they're a slow way to cross a 1–100,000 range, and
+              // the pair is narrow enough that two sets of arrows crowd out the digits. Typing (and
+              // ↑/↓, which the spinners only duplicate) still works.
+              const inputCls = 'w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm font-semibold tabular-nums text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
               return (
                 <div className="flex w-[220px] flex-col gap-1.5">
-                  <div className="flex items-center justify-between gap-1.5">
-                    <SurfaceLabel>
-                      <span title="Per-transaction amount range (multi-objective sim). Each payment's amount is drawn uniformly from this range. Smaller amounts make the flat per-txn fee a bigger share of cost. Applies on the next run.">Amount range</span>
-                    </SurfaceLabel>
-                    <span className="text-xs font-semibold tabular-nums text-slate-600 dark:text-slate-300">${lo}–${hi}</span>
-                  </div>
-                  <div className="relative mt-2 h-4 w-full">
-                    <div className="absolute top-1/2 h-1.5 w-full -translate-y-1/2 rounded-full bg-slate-200 dark:bg-[#23232b]" />
-                    <div
-                      className="absolute top-1/2 h-1.5 -translate-y-1/2 rounded-full"
-                      style={{ left: `${pct(lo)}%`, right: `${100 - pct(hi)}%`, background: amtColor }}
+                  <SurfaceLabel>
+                    <span title="Per-transaction amount range (multi-objective sim). Each payment's amount is drawn uniformly from this range. Smaller amounts make the flat per-txn fee a bigger share of cost. Applies on the next run.">Amount range ({moCurrency})</span>
+                  </SurfaceLabel>
+                  <div className="flex items-center gap-1.5">
+                    <AmountBoundInput
+                      ariaLabel="Minimum amount"
+                      value={simulationConfig.minAmount}
+                      min={BMIN}
+                      max={BMAX}
+                      onCommit={next => setSimulationConfig(c => ({ ...c, minAmount: next }))}
+                      onSettle={() => setSimulationConfig(c => ({ ...c, minAmount: Math.min(c.minAmount, c.maxAmount) }))}
+                      className={inputCls}
                     />
-                    <input
-                      type="range" min={BMIN} max={BMAX} step={5} value={lo}
-                      onChange={e => { const v = Math.min(Number(e.target.value), hi); setSimulationConfig(c => ({ ...c, minAmount: v })) }}
-                      className={rangeCls} style={{ '--thumb': amtColor } as CSSProperties}
-                    />
-                    <input
-                      type="range" min={BMIN} max={BMAX} step={5} value={hi}
-                      onChange={e => { const v = Math.max(Number(e.target.value), lo); setSimulationConfig(c => ({ ...c, maxAmount: v })) }}
-                      className={rangeCls} style={{ '--thumb': amtColor } as CSSProperties}
+                    <span className="shrink-0 text-xs text-slate-400">–</span>
+                    <AmountBoundInput
+                      ariaLabel="Maximum amount"
+                      value={simulationConfig.maxAmount}
+                      min={BMIN}
+                      max={BMAX}
+                      onCommit={next => setSimulationConfig(c => ({ ...c, maxAmount: next }))}
+                      onSettle={() => setSimulationConfig(c => ({ ...c, maxAmount: Math.max(c.minAmount, c.maxAmount) }))}
+                      className={inputCls}
                     />
                   </div>
                 </div>
               )
             })()}
 
-            {/* Action cluster, pushed to the trailing edge. The invisible spacer matches the
-                SurfaceLabel height (leading-4 = 16px) so the control row lines up with the
-                SR inputs / Card scenario select rather than bottom-aligning under the sliders. */}
-            <div className="flex flex-col gap-1.5 lg:ml-auto">
-              <span className="block h-4" aria-hidden />
-              <div className="flex flex-wrap items-center gap-3">
+            {/* Action cluster, pushed to the trailing edge. `self-end` bottom-aligns it with the
+                input row it shares a line with — the same effect the old invisible SurfaceLabel-height
+                spacer had, but without carrying 22px of dead space above the buttons once the cluster
+                wraps onto a line of its own (where the spacer aligned it with nothing). */}
+            <div className="flex flex-wrap items-center gap-3 self-end lg:ml-auto">
                 <Button
                   size="sm"
                   variant="ghost"
@@ -3334,11 +3795,6 @@ export function DecisionSimulatorPage() {
                   <SlidersHorizontal size={14} />
                   {showMoreInputs ? 'Less' : 'More'}
                 </Button>
-
-                <Button size="sm" variant="secondary" onClick={resetCurrentTabState}>
-          <RefreshCw size={14} />
-          {resetButtonLabel}
-        </Button>
 
                 {!isSimulating ? (
                   resumableRun ? (
@@ -3383,7 +3839,6 @@ export function DecisionSimulatorPage() {
                     </Button>
                   </>
                 )}
-              </div>
             </div>
           </div>
       )}
@@ -4180,6 +4635,14 @@ export function DecisionSimulatorPage() {
                 </Button>
               </>
             )}
+            {/* These tabs are a single form + its response, so one reset for both is the right
+                granularity — the batch tab is the one that splits it in two. */}
+            <div className="flex justify-end">
+              <Button size="sm" variant="ghost" onClick={resetCurrentTabState}>
+                <RefreshCw size={14} />
+                {resetButtonLabel}
+              </Button>
+            </div>
           </div>
         </Card>
         )}
@@ -4188,12 +4651,34 @@ export function DecisionSimulatorPage() {
         <div className={`min-w-0 flex flex-col gap-4 ${activeTab === 'batch' ? 'lg:min-h-0' : ''}`}>
           {activeTab === 'batch' && (
             <div className="flex flex-col justify-center gap-5 rounded-2xl border border-slate-200 bg-white px-5 py-4 dark:border-[#222226] dark:bg-[#0b0b10]">
+              {/* Clears this whole lower half — these stats, the charts and the transaction log — and
+                  nothing in the control bar. Shown whenever there is anything to clear, including
+                  mid-run: clearBatchResults aborts the run first, so it stays coherent, and gating on
+                  !isSimulating stranded the button for the whole run (and forever while a run sat
+                  paused, since a pause keeps isSimulating true).
+
+                  Pulled into the card's own padding on three sides (it's a ghost button, so there's no
+                  background to look clipped) — that tucks it into the corner and collapses the empty
+                  band it would otherwise open up above the first stat row. */}
+              {hasSimulationActivity && (
+                <div className="-mb-3 -mr-2 -mt-2 flex justify-end">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={clearBatchResults}
+                    title="Clear these stats, the charts and the transaction log. Leaves the controls above untouched."
+                  >
+                    <Trash2 size={14} />
+                    Clear
+                  </Button>
+                </div>
+              )}
               {(() => {
                 const ccy = costEconomics.currency || form.currency || 'USD'
                 return (
                   <>
                   {/* Row 1 — auth-rate & realized cost */}
-                    <div className="grid grid-cols-3 gap-4 border-t border-slate-100 pt-4 dark:border-[#1c1c24]">
+                    <div className="grid grid-cols-3 gap-4">
                       <div className="flex flex-col gap-1.5" title="First Attempt Auth Rate — share of decisions charged on the first attempt (first-attempt charges ÷ total decisions).">
                         <StatLabel label="First-attempt auth rate" abbr="FAAR" />
                         <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-600 dark:text-sky-400">

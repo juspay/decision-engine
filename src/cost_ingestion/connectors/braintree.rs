@@ -203,6 +203,8 @@ impl SettlementReportSource for BraintreeReportSource {
                     issuer_country: row.get_opt(c.issuer).trim().to_string(),
                     currency: row.get(c.ccy).trim().to_string(),
                     ic_category: row.get_opt(c.ic_desc).trim().to_string(),
+                    // No published interchange-rate line in the Braintree report — one cluster.
+                    ic_bps: String::new(),
                     txn_date,
                     // Braintree's PAR carries no terminal/POS indicator, so every row is treated as
                     // online. Revisit if in-person / pinless acceptance data becomes distinguishable.

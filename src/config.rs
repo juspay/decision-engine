@@ -129,6 +129,12 @@ pub struct UserAuthConfig {
     /// JWT expiry in seconds (default 24 hours)
     #[serde(default = "default_jwt_expiry")]
     pub jwt_expiry_seconds: u64,
+    /// Expiry (seconds) for HS-redirect SSO sessions. Short-lived by design — HS can re-mint on
+    /// demand — so a leaked session caps its own blast radius. Default 20 minutes. When it
+    /// expires the SPA sends the user back to Hyperswitch (not the DE login page — the synthetic
+    /// user has no password), so keep this comfortably above a typical routing edit.
+    #[serde(default = "default_hs_redirect_jwt_expiry")]
+    pub hs_redirect_jwt_expiry_seconds: u64,
     /// Send verification email on signup; block login until verified
     #[serde(default)]
     pub email_verification_enabled: bool,
@@ -140,6 +146,10 @@ fn default_true() -> bool {
 
 fn default_jwt_expiry() -> u64 {
     86400
+}
+
+fn default_hs_redirect_jwt_expiry() -> u64 {
+    1200 // 20 minutes
 }
 
 const DEFAULT_ADMIN_SECRET: &str = "test_admin";
@@ -169,6 +179,7 @@ impl Default for UserAuthConfig {
         Self {
             jwt_secret: "change_me_in_production_use_32chars!!".to_string(),
             jwt_expiry_seconds: default_jwt_expiry(),
+            hs_redirect_jwt_expiry_seconds: default_hs_redirect_jwt_expiry(),
             email_verification_enabled: false,
         }
     }
@@ -602,19 +613,65 @@ impl Default for HypersenseConfig {
     }
 }
 
+/// Split a percentage fee into its `(interchange, scheme, markup)` bps components: the explicit
+/// contract components when *any* is set, otherwise the whole blended `pct_bps` attributed to
+/// interchange. Effective percentage rate is always the sum of the returned triple, so a legacy
+/// blended entry (`pct_bps` only) and a component entry both collapse to the same effective bps.
+pub fn fee_components(
+    pct_bps: f64,
+    interchange_bps: Option<f64>,
+    scheme_bps: Option<f64>,
+    markup_bps: Option<f64>,
+) -> (f64, f64, f64) {
+    match (interchange_bps, scheme_bps, markup_bps) {
+        (None, None, None) => (pct_bps, 0.0, 0.0),
+        _ => (
+            interchange_bps.unwrap_or(0.0),
+            scheme_bps.unwrap_or(0.0),
+            markup_bps.unwrap_or(0.0),
+        ),
+    }
+}
+
 /// An amount-independent fee split — `effective_cost_bps = pct_bps + fixed/amount·10_000`.
 /// `fixed` is in the cluster's major currency unit (e.g. dollars).
-#[derive(Clone, Debug, serde::Deserialize)]
+///
+/// The percentage rate can be expressed two ways: the blended `pct_bps` (legacy), or the explicit
+/// contract components `interchange_bps` + `scheme_bps` + `markup_bps` (what a merchant negotiates).
+/// When any component is set, the effective rate is their sum and `pct_bps` is ignored — see
+/// [`fee_components`] and [`SeedFeeModel::effective_pct_bps`].
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct SeedFeeModel {
+    #[serde(default)]
     pub pct_bps: f64,
     pub fixed: f64,
+    #[serde(default)]
+    pub interchange_bps: Option<f64>,
+    #[serde(default)]
+    pub scheme_bps: Option<f64>,
+    #[serde(default)]
+    pub markup_bps: Option<f64>,
+}
+
+impl SeedFeeModel {
+    /// Effective percentage rate (bps): the sum of the contract components when any is present,
+    /// else the blended `pct_bps`.
+    pub fn effective_pct_bps(&self) -> f64 {
+        let (i, s, m) = fee_components(
+            self.pct_bps,
+            self.interchange_bps,
+            self.scheme_bps,
+            self.markup_bps,
+        );
+        i + s + m
+    }
 }
 
 /// A fee override scoped to a card scenario. Each field is matched against the same-named
 /// `ClusterKey` field; a `None` field is a wildcard (matches any value). The most specific
 /// matching tier wins (see `seed_costs`). Adding a network, currency, funding type, or
 /// program is just appending another tier — no code change.
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct SeedCostTier {
     /// Card network, e.g. "visa", "mastercard" (case-insensitive equality).
     /// Matches `ClusterKey::card_network`. `None` matches any.
@@ -641,14 +698,45 @@ pub struct SeedCostTier {
     /// `None` matches any.
     #[serde(default)]
     pub card_issuing_country: Option<String>,
+    /// Blended percentage rate in bps. Optional when the component fields below are set
+    /// (effective rate = interchange + scheme + markup); kept for the legacy blended form.
+    #[serde(default)]
     pub pct_bps: f64,
     pub fixed: f64,
+    /// Contract fee components (bps). When any is set, the effective percentage is their sum and
+    /// `pct_bps` is ignored — lets a merchant express interchange / scheme / markup line items.
+    #[serde(default)]
+    pub interchange_bps: Option<f64>,
+    #[serde(default)]
+    pub scheme_bps: Option<f64>,
+    #[serde(default)]
+    pub markup_bps: Option<f64>,
+    /// Human-readable scenario name for the dashboard (e.g. "High-value flight, UAE debit").
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Representative ticket amount for this scenario, used to pre-fill the simulation preview.
+    #[serde(default)]
+    pub example_amount: Option<f64>,
+}
+
+impl SeedCostTier {
+    /// Effective percentage rate (bps): the sum of the contract components when any is present,
+    /// else the blended `pct_bps`.
+    pub fn effective_pct_bps(&self) -> f64 {
+        let (i, s, m) = fee_components(
+            self.pct_bps,
+            self.interchange_bps,
+            self.scheme_bps,
+            self.markup_bps,
+        );
+        i + s + m
+    }
 }
 
 /// The seed pricing for one PSP: a `default` fee used when no tier matches, plus optional
 /// per-(network, program) `tiers`. A blended PSP needs only `default`; an IC++ PSP lists a
 /// tier per card type it prices differently.
-#[derive(Clone, Debug, serde::Deserialize)]
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct SeedCostEntry {
     /// PSP / gateway name (case-insensitive), e.g. "adyen", "stripe".
     pub psp: String,

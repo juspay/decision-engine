@@ -539,6 +539,9 @@ fn inhouse_costs(
     let region = cluster.card_issuing_country.as_deref().unwrap_or("");
     let channel = cluster.channel.as_deref().unwrap_or("");
     let wallet = cluster.wallet.as_deref().unwrap_or("");
+    // BIN resolves the card's product tier (the fan-separating dimension) at decide time — the same
+    // value the fit stamped at ingest. Absent ⇒ "" ⇒ fine falls back to the coarse blend.
+    let bin = cluster.card_bin.map(|b| b.to_string()).unwrap_or_default();
     let amount = cluster.amount.unwrap_or(0.0);
 
     let mut out = HashMap::new();
@@ -554,6 +557,7 @@ fn inhouse_costs(
             region,
             channel,
             wallet,
+            &bin,
             amount,
         ) {
             out.insert(
@@ -594,10 +598,12 @@ async fn fallback_lookup_costs(
     let app_state = get_tenant_app_state().await;
     let cfg = &app_state.config.hypersense;
 
-    // Simulator / offline mode: serve realistic IC++-vs-blended costs from the config seed
-    // table, skipping the token fetch, network round-trip, and the live model cache.
+    // Simulator / offline mode: serve realistic IC++-vs-blended costs from the seed table,
+    // skipping the token fetch, network round-trip, and the live model cache. The merchant's
+    // edited contract rates (if any) supersede the config default — see `seed_store`.
     if cfg.use_seed_costs {
-        return super::seed_costs::lookup_seed_costs(&cfg.seed_costs, cluster, psps);
+        let entries = super::seed_store::effective_seed_entries(merchant_id, cfg).await;
+        return super::seed_costs::lookup_seed_costs(&entries, cluster, psps);
     }
 
     // The request we'd send doubles as the (amount-independent) cache key, so build

@@ -80,7 +80,7 @@ const ALL_SEARCH_GROUPS: SearchGroup[] = [
       { to: '/routing/sr?tab=cost&section=ingestion&source=manual', label: 'Manual Report Upload', hint: 'Data Ingestion', icon: Upload, keywords: ['cost', 'ingest', 'upload', 'csv', 'settlement', 'report', 'par', 'sample', 'manual'] },
       { to: '/routing/sr?tab=cost&section=ingestion&source=invoice', label: 'Invoice Upload', hint: 'Data Ingestion', icon: FileText, keywords: ['cost', 'ingest', 'invoice', 'upload', 'monthly', 'scheme fees', 'billing'] },
       { to: '/routing/sr?tab=cost&section=data', label: 'Ingested Data', hint: 'Cost Estimation', icon: LineChart, keywords: ['cost', 'coverage', 'history', 'data'] },
-      { to: '/routing/sr?tab=cost', label: 'Manual Overrides', hint: 'Cost Estimation', icon: SlidersHorizontal, keywords: ['cost', 'override', 'blended fee', 'fee'] },
+      { to: '/routing/sr?tab=cost', label: 'Costs', hint: 'Cost Estimation', icon: SlidersHorizontal, keywords: ['cost', 'override', 'blended fee', 'fee', 'contract', 'seed', 'baseline', 'interchange', 'scheme', 'markup', 'connector', 'psp'] },
       { to: '/routing/rules', label: 'Rule Based', icon: BookOpen, keywords: ['euclid', 'rules', 'conditions'] },
       { to: '/routing/volume', label: 'Volume Split', icon: PieChart, keywords: ['distribution', 'percentage', 'weights'] },
       { to: '/routing/debit', label: 'Debit Routing', icon: Network, keywords: ['debit', 'network', 'card'] },

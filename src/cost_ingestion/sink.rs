@@ -16,7 +16,9 @@ use serde_json::json;
 
 use crate::config::ClickHouseAnalyticsConfig;
 
-use super::rollup::{BinProductRow, DailyStatRow};
+use std::collections::HashMap;
+
+use super::rollup::{BinProductMap, BinProductRow, DailyStatRow};
 use super::types::IngestError;
 
 const INSERT_TIMEOUT: Duration = Duration::from_secs(60);
@@ -34,7 +36,7 @@ const INSERT_CHUNK_ROWS: usize = 25_000;
 /// Columns we provide; `ingested_at` is intentionally omitted so ClickHouse applies its DEFAULT.
 const COLUMNS: &str =
     "connector,account,merchant_id,txn_date,ingestion_id,card_network,variant,funding,\
-issuer_country,currency,ic_category,channel,band,n,sx,sy,sxx,sxy,syy,su,suu,suy,suuy,syyuu";
+issuer_country,currency,ic_category,card_product,channel,band,n,sx,sy,sxx,sxy,syy,su,suu,suy,suuy,syyuu";
 
 fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
@@ -92,6 +94,7 @@ async fn insert_chunk(
             "issuer_country": r.issuer_country,
             "currency": r.currency,
             "ic_category": r.ic_category,
+            "card_product": r.card_product,
             "channel": r.channel,
             "band": r.band,
             "n": r.n,
@@ -139,7 +142,7 @@ async fn insert_chunk(
 }
 
 /// Column list for the global BIN → card-product table.
-const BIN_COLUMNS: &str = "bin,card_network,issuer_country,funding,support_n";
+const BIN_COLUMNS: &str = "bin,card_network,issuer_country,funding,card_product,support_n";
 
 /// Insert this report's per-BIN card-product observations into the GLOBAL `cost_bin_product` map.
 /// Unlike `cost_daily_stats`, this carries no (connector, account, merchant): a card's product is
@@ -170,6 +173,7 @@ async fn insert_bin_chunk(
             "card_network": r.card_network,
             "issuer_country": r.issuer_country,
             "funding": r.funding,
+            "card_product": r.card_product,
             "support_n": r.support_n,
         });
         body.push_str(
@@ -202,6 +206,55 @@ async fn insert_bin_chunk(
         )));
     }
     Ok(())
+}
+
+/// Per-BIN DOMINANT card-product: sums support across all traffic, then picks the highest-support
+/// rate tier for each 6-digit BIN. This is the map the rollup consults at ingest and serving loads
+/// for decide-time resolution — one global read, no merchant/connector scope (a BIN's product is
+/// universal). Returned as a shared `Arc` so it clones cheaply into the streaming accumulator.
+const LOAD_BIN_PRODUCT_SQL: &str = "\
+SELECT bin, argMax(cp, s) FROM (\
+  SELECT bin, card_product AS cp, sum(support_n) AS s \
+  FROM {db}.cost_bin_product WHERE card_product != '' GROUP BY bin, card_product\
+) GROUP BY bin FORMAT TSV";
+
+/// Load the global BIN → dominant-`card_product` map. Empty map on any failure or on a cold table —
+/// the caller (rollup / serving) then falls back to per-row rate / coarse blend, so this never blocks
+/// ingest or decide.
+pub async fn load_bin_product(cfg: &ClickHouseAnalyticsConfig) -> BinProductMap {
+    let sql = LOAD_BIN_PRODUCT_SQL.replace("{db}", &cfg.database);
+    let mut req = client().post(cfg.url.trim_end_matches('/')).body(sql);
+    if !cfg.user.is_empty() {
+        req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
+    }
+    let text = match req.send().await {
+        Ok(r) if r.status().is_success() => r.text().await.unwrap_or_default(),
+        Ok(r) => {
+            let status = r.status();
+            let body = r.text().await.unwrap_or_default();
+            crate::logger::warn!(
+                tag = "cost_ingestion",
+                "bin_product load failed ({status}): {body}"
+            );
+            return std::sync::Arc::new(HashMap::new());
+        }
+        Err(e) => {
+            crate::logger::warn!(tag = "cost_ingestion", "bin_product load failed: {e}");
+            return std::sync::Arc::new(HashMap::new());
+        }
+    };
+    let mut map = HashMap::new();
+    for line in text.lines() {
+        let mut f = line.split('\t');
+        let (Some(bin), Some(cp)) = (f.next(), f.next()) else {
+            continue;
+        };
+        let (bin, cp) = (bin.trim(), cp.trim());
+        if !bin.is_empty() && !cp.is_empty() {
+            map.insert(bin.to_string(), cp.to_string());
+        }
+    }
+    std::sync::Arc::new(map)
 }
 
 /// Delete the daily buckets an ingestion last wrote, identified by its `ingestion_id`, then the

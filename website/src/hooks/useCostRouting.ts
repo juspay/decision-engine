@@ -1,3 +1,4 @@
+import { useMemo } from 'react'
 import useSWR from 'swr'
 import { apiDelete, apiPost, apiPut, apiUploadWithProgress, fetcher, type UploadProgress } from '../lib/api'
 
@@ -5,18 +6,31 @@ export interface CoverageSummary {
   total_clusters: number
   good_clusters: number
   thin_clusters: number
+  /** One line can't price these, but their recovered amount tiers can — the router serves them. */
+  tiered_clusters: number
   non_linear_clusters: number
   total_txns: number
   good_txns: number
+  tiered_txns: number
   thin_txns: number
   non_linear_txns: number
   good_txn_pct: number
+  /** Share of transactions the router can price: GOOD **plus** TIERED. */
+  priced_txn_pct: number
   total_gross: number
   good_gross: number
+  tiered_gross: number
   thin_gross: number
   non_linear_gross: number
-  /** Share of settled volume (money) with a trustworthy cost model — the headline metric. */
+  /** Share of settled volume with a trustworthy SINGLE-LINE model. */
   good_gross_pct: number
+  /**
+   * Share of settled volume the router can actually price: GOOD **plus** TIERED — the real coverage
+   * headline. `good_gross_pct` alone under-reports any merchant whose big-ticket segments are capped
+   * (UAE/Saudi debit is 100% tiered), because a capped cluster's whole-cluster verdict is
+   * NON_LINEAR by construction even though its tiers price it fine.
+   */
+  priced_gross_pct: number
   bps_rmse_p50: number
   bps_rmse_p90: number
   /** Snapshot date these numbers are from (YYYY-MM-DD). */
@@ -41,13 +55,15 @@ export interface SetCredentialsResponse {
 
 /** 202 response from a manual upload — the created job's id, polled for progress. */
 export interface UploadAccepted {
-  id: number
+  /** Same UUIDv7 string as `IngestionDto.id`. */
+  id: string
   status: string
 }
 
 /** One ingestion (history + live progress). */
 export interface IngestionDto {
-  id: number
+  /** UUIDv7 string (`cost_ingestion.id` is a Varchar), despite reading like a numeric id. */
+  id: string
   connector: string
   account: string
   source: 'manual' | 'webhook' | string
@@ -146,6 +162,25 @@ export async function deleteFeeOverride(merchantId: string, connector: string) {
 }
 
 /**
+ * One recovered piece of a capped/tiered cluster: the fee it charges over an amount range `[lo, hi)`.
+ * A cluster whose interchange has an absolute cap (e.g. UAE debit `1.00% cap AED 50`) or a tiered
+ * schedule can't be priced by one line, so the fit recovers it into several of these.
+ */
+export interface ClusterSegment {
+  seg_idx: number
+  /** Amount range this piece prices: `[lo, hi)`. */
+  lo: number
+  hi: number
+  pct_bps: number | null
+  fixed: number | null
+  bps_rmse: number | null
+  n: number
+  gross_sum: number
+  /** `GOOD` | `THIN` | `NON_LINEAR`. */
+  verdict: string
+}
+
+/**
  * One fitted cluster (a specific segment like "Visa debit · US · USD"): its learned fee, GMV/txn
  * volume, and any per-cluster override. `key` identifies the cluster for the override endpoints.
  */
@@ -166,9 +201,26 @@ export interface ClusterFee {
   override_pct_bps: number | null
   override_fixed: number | null
   override_updated_at: string | null
-  effective_pct_bps: number
-  effective_fixed: number
-  source: 'override' | 'model' | string
+  /** `null` when the cluster has no usable rate (a one-transaction THIN cluster fits to nothing). */
+  effective_pct_bps: number | null
+  effective_fixed: number | null
+  source: 'override' | 'model' | 'segmented' | string
+  /**
+   * Fit grade of the learned rate. `''` when no fitted row backs the cluster (override-only, or a
+   * segmented cluster outside the fetched top-N). Non-GOOD rates are shown so they can be corrected;
+   * they are not what the router trusts.
+   */
+  verdict: 'GOOD' | 'THIN' | 'NON_LINEAR' | ''
+  /**
+   * Card-program proxy: the issuer BIN's dominant interchange rate as integer bps (`'115'`), or `''`
+   * when the report carried no PAN. Within one network+funding+country the rate tier is the program.
+   */
+  card_product: string
+  /**
+   * Recovered per-segment rates for a capped/tiered cluster; empty for an ordinary single-line
+   * cluster. Display-only for now — the decide path is not yet segment-aware.
+   */
+  segments?: ClusterSegment[]
 }
 
 export interface ClustersScope {
@@ -176,7 +228,50 @@ export interface ClustersScope {
   connector?: string
   account?: string
   reportDate?: string
+  /**
+   * Scope to ONE upload's clusters. Needed because the fit is a rolling-window re-fit that replaces
+   * the whole snapshot: two uploads on the same day under the same account share a snapshot, so the
+   * three fields above return both reports' clusters.
+   */
+  ingestionId?: string
 }
+
+/**
+ * Per-column narrowing of the cluster list. Each column holds a SET of accepted values — values
+ * within a column are OR'd, columns are AND'd — and `q` is a free-text substring across all of them.
+ * Applied in ClickHouse, not the browser: the list is long-tailed (a real report fits ~1.6k clusters,
+ * most of them low-traffic), so the tail has to be reachable without shipping every row.
+ */
+export interface ClusterFilters {
+  card_network?: string[]
+  variant?: string[]
+  funding?: string[]
+  issuer_country?: string[]
+  currency?: string[]
+  ic_category?: string[]
+  verdict?: string[]
+  q?: string
+}
+
+/** How many values are selected across every column (plus the free-text box). */
+export function countActiveFilters(f: ClusterFilters): number {
+  let n = f.q?.trim() ? 1 : 0
+  for (const [k, v] of Object.entries(f)) {
+    if (k !== 'q' && Array.isArray(v)) n += v.length
+  }
+  return n
+}
+
+/** The filterable columns, in table order — drives both the filter bar and the facets lookup. */
+export const CLUSTER_FILTER_COLUMNS = [
+  'card_network',
+  'variant',
+  'funding',
+  'issuer_country',
+  'currency',
+  'ic_category',
+  'verdict',
+] as const
 
 /**
  * The merchant's top clusters by GMV. Merchant-wide by default (the override targets, plus any
@@ -184,18 +279,29 @@ export interface ClustersScope {
  */
 export function useCostClusters(
   merchantId?: string,
-  opts: { limit?: number; order?: 'gross_sum' | 'n' } & ClustersScope = {},
+  opts: { limit?: number; order?: 'gross_sum' | 'n'; filters?: ClusterFilters } & ClustersScope = {},
 ) {
-  const { limit = 10, order, connector, account, reportDate } = opts
+  const { limit = 10, order, connector, account, reportDate, ingestionId, filters } = opts
   let path: string | null = null
   if (merchantId) {
     const params = new URLSearchParams({ limit: String(limit) })
+    // Multi-valued columns go out as REPEATED keys (`?card_network=visa&card_network=mc`) — a
+    // delimiter would corrupt values that legitimately contain one (several `ic_category` names
+    // contain a comma). Blank entries are dropped: they'd ask the backend to match the empty string.
+    for (const [k, v] of Object.entries(filters ?? {})) {
+      if (Array.isArray(v)) {
+        for (const one of v) if (one?.trim()) params.append(k, one.trim())
+      } else if (typeof v === 'string' && v.trim()) {
+        params.set(k, v.trim())
+      }
+    }
     // Each scope dimension is independent: a connector (+optional account) narrows to that
     // connector's latest-snapshot segments; adding report_date pins one exact ingestion. The
     // backend AND-combines whichever are present, so send each one we have.
     if (connector) params.set('connector', connector)
     if (account) params.set('account', account)
     if (reportDate) params.set('report_date', reportDate)
+    if (ingestionId) params.set('ingestion_id', ingestionId)
     // `order` picks which top-N the backend selects (not just display order): 'n' ranks by txn count,
     // otherwise settled GMV. Only send the non-default so GMV views keep clean URLs.
     if (order === 'n') params.set('order', 'txns')
@@ -205,6 +311,41 @@ export function useCostClusters(
     revalidateOnFocus: false,
   })
   return { clusters: data ?? [], error, isLoading, mutate }
+}
+
+/** One suggestible value for one filterable column, with the traffic behind it. */
+export interface ClusterFacet {
+  dim: string
+  value: string
+  txns: number
+}
+
+/**
+ * Distinct values for every filterable column, highest-traffic first — the autosuggestions behind the
+ * filter bar. Scoped like the cluster list, so a snapshot view only suggests values in that snapshot.
+ * Returns them grouped by column, ready to feed a `<datalist>`.
+ */
+export function useClusterFacets(merchantId?: string, scope: ClustersScope = {}) {
+  const { connector, account, reportDate, ingestionId } = scope
+  let path: string | null = null
+  if (merchantId) {
+    const params = new URLSearchParams()
+    if (connector) params.set('connector', connector)
+    if (account) params.set('account', account)
+    if (reportDate) params.set('report_date', reportDate)
+    if (ingestionId) params.set('ingestion_id', ingestionId)
+    const qs = params.toString()
+    path = `/merchant-account/${merchantId}/cost-cluster-facets${qs ? `?${qs}` : ''}`
+  }
+  const { data, error, isLoading } = useSWR<ClusterFacet[]>(path, fetcher, {
+    revalidateOnFocus: false,
+  })
+  const byDim = useMemo(() => {
+    const m: Record<string, ClusterFacet[]> = {}
+    for (const f of data ?? []) (m[f.dim] ??= []).push(f)
+    return m
+  }, [data])
+  return { facets: byDim, error, isLoading }
 }
 
 /** Set (upsert) a per-cluster fee override. Wins over the connector override and the learned model. */
@@ -224,6 +365,85 @@ export async function deleteClusterOverride(merchantId: string, clusterKey: stri
   return apiDelete(
     `/merchant-account/${merchantId}/cost-clusters/${encodeURIComponent(clusterKey)}/fee-override`,
   )
+}
+
+// ── Seed costs (contract rates for the multi-objective simulator) ────────────────────────────────
+
+/**
+ * One row of the merchant's seed cost table: a PSP's fee for one card scenario, split into the
+ * contract components (interchange / scheme / markup, all bps) plus the flat `fixed` per-txn fee.
+ * The matching dimensions (`card_network` … `card_issuing_country`) are wildcards when empty;
+ * `is_default` marks the PSP's fallback row (no dimensions).
+ */
+export interface SeedCostRow {
+  psp: string
+  card_network?: string | null
+  payment_method_type?: string | null
+  card_type?: string | null
+  transaction_currency?: string | null
+  card_issuing_country?: string | null
+  interchange_bps: number
+  scheme_bps: number
+  markup_bps: number
+  fixed: number
+  label?: string | null
+  example_amount?: number | null
+  is_default: boolean
+  /** Computed Total Effective Rate percentage = interchange + scheme + markup. */
+  effective_pct_bps: number
+}
+
+/** The merchant's editable seed cost table (their saved edits, else the config default). */
+export function useSeedCosts(merchantId?: string) {
+  const path = merchantId ? `/merchant-account/${merchantId}/seed-costs` : null
+  const { data, error, isLoading, mutate } = useSWR<SeedCostRow[]>(path, fetcher, {
+    revalidateOnFocus: false,
+  })
+  return { rows: data ?? [], error, isLoading, mutate }
+}
+
+/** Replace the merchant's whole seed table; returns the normalized saved table. */
+export async function saveSeedCosts(merchantId: string, rows: SeedCostRow[]) {
+  return apiPut<SeedCostRow[]>(`/merchant-account/${merchantId}/seed-costs`, { rows })
+}
+
+/** Clear the merchant's edits, reverting to the config default; returns the default table. */
+export async function resetSeedCosts(merchantId: string) {
+  return apiDelete<SeedCostRow[]>(`/merchant-account/${merchantId}/seed-costs`)
+}
+
+/** A scenario to price in the seed-cost simulation preview. */
+export interface SeedSimRequest {
+  amount: number
+  transaction_currency?: string
+  card_network?: string
+  payment_method_type?: string
+  card_type?: string
+  card_issuing_country?: string
+  /** PSPs to price; omit for every PSP in the table. */
+  psps?: string[]
+}
+
+/** One PSP's estimated cost for the simulated scenario, from the merchant's configured values. */
+export interface SeedSimRow {
+  psp: string
+  interchange_bps: number
+  scheme_bps: number
+  markup_bps: number
+  fixed: number
+  effective_pct_bps: number
+  /** All-in effective rate at this amount = pct + fixed/amount·10_000. */
+  effective_cost_bps: number
+  /** Absolute cost in the transaction currency at this amount. */
+  cost_amount: number
+}
+
+/**
+ * Price the candidate PSPs for one (currency, scenario, amount) using the merchant's configured
+ * seed table — the exact resolver the decide path uses, so the preview is faithful.
+ */
+export async function simulateSeedCost(merchantId: string, body: SeedSimRequest) {
+  return apiPost<SeedSimRow[]>(`/merchant-account/${merchantId}/seed-costs/simulate`, body)
 }
 
 /** The (connector, account) pairs a merchant has configured (no secrets). */
@@ -481,7 +701,7 @@ export async function runSampleReport(merchantId: string, connector: string) {
  * Delete (undo) an ingestion: removes its fitted snapshot + staged rows and its history row.
  * Coverage/serving revert to the previous snapshot automatically.
  */
-export async function deleteIngestion(merchantId: string, id: number) {
+export async function deleteIngestion(merchantId: string, id: string) {
   return apiDelete(`/merchant-account/${merchantId}/cost-ingestions/${id}`)
 }
 

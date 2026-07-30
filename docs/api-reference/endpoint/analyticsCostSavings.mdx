@@ -8,7 +8,7 @@ openapi: "openapi.json GET /analytics/cost-savings"
 
 ## Use case
 
-Returns a rollup of savings attributed to [multi-objective (cost-aware) routing](/api-refs/decide-gateway-multi-objective) — how much cheaper the chosen gateway was versus the plain success-rate head, trended over the window.
+Returns a rollup of savings attributed to [multi-objective (cost-aware) routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-multi-objective.mdx) — how much cheaper the chosen gateway was versus the plain success-rate head, trended over the window.
 
 ## Authentication
 
@@ -29,7 +29,7 @@ export TENANT_HEADER="x-tenant-id: public"
 
 - Method and path: `GET /analytics/cost-savings`
 - Parameters:
-  - `x-tenant-id` (header, required, string) — see [Environment setup](/api-refs/api-ref#environment-setup).
+  - `x-tenant-id` (header, required, string) — see [Environment setup](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx#environment-setup).
   - `range` (query, optional, string)
   - `start_ms` (query, optional, integer)
   - `end_ms` (query, optional, integer)
@@ -88,11 +88,11 @@ curl "$BASE_URL/analytics/cost-savings?range=1w&currency=USD" \
 - Analytics reads are ClickHouse-backed and merchant-scoped by the authenticated context.
 - Use `range=15m|1h|12h|1d|1w` or `start_ms` plus `end_ms` for a custom window.
 - `saved_value` is money saved versus the SR head's cost, in the requested (or aggregated) currency.
-- Requires [cost data ingestion](/api-refs/cost-ingestion-setup) to have fitted a cost model — otherwise `cost_won_count` stays at zero.
+- Requires [cost data ingestion](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/cost-ingestion-setup.mdx) to have fitted a cost model — otherwise `cost_won_count` stays at zero.
 
 ## Related
 
-- [Multi-Objective Routing](/api-refs/decide-gateway-multi-objective)
-- [Cost Ingestion: Fees & Coverage](/api-refs/cost-ingestion-fees)
-- [Analytics Overview](/api-reference/endpoint/analyticsOverview)
-- [Analytics Endpoints](/api-refs/analytics-endpoints)
+- [Multi-Objective Routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-multi-objective.mdx)
+- [Cost Ingestion: Fees & Coverage](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/cost-ingestion-fees.mdx)
+- [Analytics Overview](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsOverview.mdx)
+- [Analytics Endpoints](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/analytics-endpoints.mdx)

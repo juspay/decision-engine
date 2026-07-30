@@ -275,6 +275,12 @@ export function SRRoutingPage() {
   const selectedMerchantId = useMerchantStore((state) => state.merchantId)
   const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
   const merchantId = selectedMerchantId || authMerchantId
+  // When Autopilot is on, its calibration job owns bucket size + hedging % on the Auto-badged
+  // sub-level rows and overwrites human edits there on the next cycle — so those two fields are
+  // locked in the UI to match. Manual rows, defaults, and latency are never touched, so they stay
+  // editable. (See sr_auto_calibration.rs — it skips non-autopilot rows and never sets defaults.)
+  const features = useMerchantFeatures(merchantId ?? undefined)
+  const autopilotOn = features.isEnabled('autopilot')
   // Active tab is kept in the URL (?tab=…) so a reload or shared link reopens it directly.
   // Unknown/absent values fall back to Autopilot, and the default is left out of the URL.
   const [searchParams, setSearchParams] = useSearchParams()
@@ -544,7 +550,6 @@ export function SRRoutingPage() {
               <div className="min-w-0 space-y-6">
               {manualTab === 'scoring' && (
               <div className="space-y-6">
-              <ManualCostToggle merchantId={merchantId} />
               <form onSubmit={handleSubmit(onSave)} className="space-y-6">
               <Card>
                 <CardHeader>
@@ -617,9 +622,9 @@ export function SRRoutingPage() {
                             <th className="px-4 py-2">Currency</th>
                             <th className="px-4 py-2">Country</th>
                             <th className="px-4 py-2">Auth Type</th>
-                            <th className="px-4 py-2">Memory Size</th>
+                            <th className="px-4 py-2">Bucket Size</th>
                             <th className="px-4 py-2">Hedging %</th>
-                            <th className="px-4 py-2">Timeout Grace (s)</th>
+                            <th className="px-4 py-2">Latency Threshold (s)</th>
                             <th className="px-4 py-2" />
                           </tr>
                         </thead>
@@ -633,6 +638,18 @@ export function SRRoutingPage() {
                             const baseMethodOptions = PAYMENT_METHODS[methodType.toLowerCase()] || ['credit', 'debit']
                             const typeOptions = optionsWithValue(PAYMENT_METHOD_TYPES, methodType)
                             const methodOptions = optionsWithValue(baseMethodOptions, method)
+                            // An Auto row is fully owned by the calibration job while Autopilot is on
+                            // (it re-tunes bucket/hedging and matches its own rows by the dimension
+                            // keys), so the whole row is locked. Locked cells render as plain text —
+                            // not a greyed-out input — so it's obvious the row isn't editable; a hidden
+                            // input round-trips each value on save (a disabled input would submit as
+                            // undefined in react-hook-form and blank/fail-validate the row).
+                            const autopilotOwned = autopilotOn && watchedRows?.[idx]?.source === 'autopilot'
+                            const lockedTitle = autopilotOwned ? 'Managed by Autopilot — turn Autopilot off to edit' : undefined
+                            const lockedTextCls = 'text-sm text-slate-600 dark:text-slate-300'
+                            const row = watchedRows?.[idx]
+                            const dimText = (v?: string | null) => (v == null || v === '' ? 'Any' : v)
+                            const numText = (v: unknown) => (v == null || v === '' ? '—' : String(v))
                             return (
                               <tr key={field.id} className="border-b border-slate-200 dark:border-[#1c1c24] hover:bg-slate-50 dark:bg-[#0f0f16] transition-colors">
                                 <td className="px-4 py-2">
@@ -643,23 +660,40 @@ export function SRRoutingPage() {
                                     : <Badge variant="gray">Manual</Badge>}
                                 </td>
                                 <td className="px-4 py-2">
-                                  <select {...register(`subLevelInputConfig.${idx}.paymentMethodType`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg pl-2 pr-7 py-1 text-sm min-w-[6rem] focus:outline-none focus:ring-1 focus:ring-brand-500">
-                                    {typeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
-                                  </select>
+                                  {/* <select> has no readOnly, and disabling it blanks the value in
+                                      react-hook-form — so lock by rendering static text + a hidden
+                                      input that round-trips the value on save. */}
+                                  {autopilotOwned ? (
+                                    <>
+                                      <input type="hidden" {...register(`subLevelInputConfig.${idx}.paymentMethodType`)} />
+                                      <span className={lockedTextCls} title={lockedTitle}>{methodType || '—'}</span>
+                                    </>
+                                  ) : (
+                                    <select {...register(`subLevelInputConfig.${idx}.paymentMethodType`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg pl-2 pr-7 py-1 text-sm min-w-[6rem] focus:outline-none focus:ring-1 focus:ring-brand-500">
+                                      {typeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
+                                    </select>
+                                  )}
                                 </td>
                                 <td className="px-4 py-2">
-                                  <select {...register(`subLevelInputConfig.${idx}.paymentMethod`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg pl-2 pr-7 py-1 text-sm min-w-[6rem] focus:outline-none focus:ring-1 focus:ring-brand-500">
-                                    {methodOptions.map((m) => <option key={m} value={m}>{m}</option>)}
-                                  </select>
+                                  {autopilotOwned ? (
+                                    <>
+                                      <input type="hidden" {...register(`subLevelInputConfig.${idx}.paymentMethod`)} />
+                                      <span className={lockedTextCls} title={lockedTitle}>{method || '—'}</span>
+                                    </>
+                                  ) : (
+                                    <select {...register(`subLevelInputConfig.${idx}.paymentMethod`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg pl-2 pr-7 py-1 text-sm min-w-[6rem] focus:outline-none focus:ring-1 focus:ring-brand-500">
+                                      {methodOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+                                    </select>
+                                  )}
                                 </td>
-                                <td className="px-4 py-2"><input type="text" {...register(`subLevelInputConfig.${idx}.cardNetwork`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500" /></td>
-                                <td className="px-4 py-2"><input type="text" {...register(`subLevelInputConfig.${idx}.currency`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" /></td>
-                                <td className="px-4 py-2"><input type="text" {...register(`subLevelInputConfig.${idx}.country`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" /></td>
-                                <td className="px-4 py-2"><input type="text" {...register(`subLevelInputConfig.${idx}.authType`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500" /></td>
-                                <td className="px-4 py-2"><input type="number" {...register(`subLevelInputConfig.${idx}.bucketSize`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" /></td>
-                                <td className="px-4 py-2"><input type="number" step="0.1" {...register(`subLevelInputConfig.${idx}.hedgingPercent`)} placeholder="—" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" /></td>
-                                <td className="px-4 py-2"><input type="number" {...register(`subLevelInputConfig.${idx}.latencyThreshold`)} placeholder="—" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500" /></td>
-                                <td className="px-4 py-2"><button type="button" onClick={() => removeSubLevelOverride(idx)} className="text-slate-400 hover:text-red-500"><Trash2 size={14} /></button></td>
+                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.cardNetwork`)} /><span className={lockedTextCls} title={lockedTitle}>{dimText(row?.cardNetwork)}</span></>) : (<input type="text" {...register(`subLevelInputConfig.${idx}.cardNetwork`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500" />)}</td>
+                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.currency`)} /><span className={lockedTextCls} title={lockedTitle}>{dimText(row?.currency)}</span></>) : (<input type="text" {...register(`subLevelInputConfig.${idx}.currency`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" />)}</td>
+                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.country`)} /><span className={lockedTextCls} title={lockedTitle}>{dimText(row?.country)}</span></>) : (<input type="text" {...register(`subLevelInputConfig.${idx}.country`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" />)}</td>
+                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.authType`)} /><span className={lockedTextCls} title={lockedTitle}>{dimText(row?.authType)}</span></>) : (<input type="text" {...register(`subLevelInputConfig.${idx}.authType`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500" />)}</td>
+                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.bucketSize`)} /><span className={lockedTextCls} title={lockedTitle}>{numText(row?.bucketSize)}</span></>) : (<input type="number" {...register(`subLevelInputConfig.${idx}.bucketSize`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" />)}</td>
+                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.hedgingPercent`)} /><span className={lockedTextCls} title={lockedTitle}>{numText(row?.hedgingPercent)}</span></>) : (<input type="number" step="0.1" {...register(`subLevelInputConfig.${idx}.hedgingPercent`)} placeholder="—" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" />)}</td>
+                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.latencyThreshold`)} /><span className={lockedTextCls} title={lockedTitle}>{numText(row?.latencyThreshold)}</span></>) : (<input type="number" {...register(`subLevelInputConfig.${idx}.latencyThreshold`)} placeholder="—" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500" />)}</td>
+                                <td className="px-4 py-2">{autopilotOwned ? (<span className="text-slate-300 dark:text-slate-600" title="Managed by Autopilot — turn Autopilot off to remove"><Trash2 size={14} /></span>) : (<button type="button" onClick={() => removeSubLevelOverride(idx)} className="text-slate-400 hover:text-red-500"><Trash2 size={14} /></button>)}</td>
                               </tr>
                             )
                           })}
@@ -765,52 +799,12 @@ function Switch({ on, onClick, disabled }: { on: boolean; onClick: () => void; d
   )
 }
 
-// Autopilot reframes routing as a set of outcomes rather than raw flags. The master
-// toggle is the real switch: turning it OFF hard-disables every autopilot decision (their
-// backend flags are set off) so the engine falls back to the Manual configuration. SR base
-// routing ("switch PSP on low auth") is always on and shown as a status pill.
-// Cost-savings toggle for the Manual config. Cost (multi-objective routing) is a feature flag that
-// was previously only reachable from the Autopilot card (and disabled unless Autopilot was on), so a
-// manual-config merchant could never turn cost on. This surfaces the same flag here, ungated, so
-// cost-aware routing can run on the manual scoring config independently of Autopilot.
-function ManualCostToggle({ merchantId }: { merchantId: string | null }) {
-  const features = useMerchantFeatures(merchantId ?? undefined)
-  const [toggling, setToggling] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const costOn = features.isEnabled('multi-objective-routing')
-
-  async function toggle() {
-    setToggling(true)
-    setError(null)
-    try {
-      await features.setFeatureEnabled('multi-objective-routing', !costOn)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setToggling(false)
-    }
-  }
-
-  return (
-    <Card>
-      <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
-        <div className="max-w-2xl">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className="text-sm font-medium text-slate-800 dark:text-white">Optimize for economic value (cost awareness), not just approval rate</span>
-            <Badge variant="gray">Cost savings</Badge>
-            {costOn ? <Badge variant="green">On</Badge> : <Badge variant="gray">Off</Badge>}
-          </div>
-          <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
-            Multi-objective routing: picks the highest expected-value PSP inside it.
-          </p>
-          {error && <p className="mt-1 text-xs text-red-500">{error}</p>}
-        </div>
-        <Switch on={costOn} disabled={!merchantId || features.isLoading || toggling} onClick={toggle} />
-      </div>
-    </Card>
-  )
-}
-
+// Autopilot reframes routing as a set of outcomes rather than raw flags. The single master
+// toggle is the real switch: it enables self-tuning (auto-calibration) plus cost savings, and
+// turning it OFF hard-disables those backend flags so the engine falls back to the Manual
+// configuration. SR base routing ("switch PSP on low auth") is always on and shown as a status
+// pill. Cost savings (`multi-objective-routing`) is surfaced independently in the Feature Flags
+// tab so a Manual-config merchant can run cost-aware routing without Autopilot.
 function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
   const features = useMerchantFeatures(merchantId ?? undefined)
   const [toggling, setToggling] = useState<KnownFeature | 'master' | null>(null)
@@ -820,21 +814,12 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
   // clicks the info icon next to the Self-tuning badge.
   const [showTuner, setShowTuner] = useState(false)
 
-  const costOn = features.isEnabled('multi-objective-routing')
-  const autoCalibrationOn = features.isEnabled('auto-calibration')
   // Master is its own persisted backend flag (`autopilot`) so the toggle survives reloads.
+  // Autopilot subsumes self-tuning: the only thing that distinguishes it from Manual is that the
+  // engine adapts settings to your traffic, so a single toggle drives both `autopilot` and
+  // `auto-calibration` (the calibration job requires both — see sr_auto_calibration.rs). Cost
+  // savings (`multi-objective-routing`) is orthogonal and now lives in the Feature Flags tab.
   const autopilotOn = features.isEnabled('autopilot')
-
-  async function toggleFeature(feature: KnownFeature, enabled: boolean) {
-    setToggling(feature); setError(null); setMessage(null)
-    try {
-      await features.setFeatureEnabled(feature, enabled)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setToggling(null)
-    }
-  }
 
   async function toggleMaster(next: boolean) {
     setToggling('master'); setError(null); setMessage(null)
@@ -860,7 +845,7 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
         await features.setFeatureEnabled('auto-calibration', false)
       }
       setMessage(next
-        ? 'Autopilot on — cost savings and auto-calibration enabled; fine-tune the decisions below.'
+        ? 'Autopilot on — the engine self-tunes to your traffic (cost savings also enabled).'
         : 'Autopilot off — routing uses your Manual configuration.')
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
@@ -870,7 +855,6 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
   }
 
   const busy = !merchantId || features.isLoading
-  const rowDisabled = busy || !autopilotOn || toggling !== null
 
   return (
     <div className="space-y-4">
@@ -881,75 +865,16 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
         <p className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-xs text-emerald-500">{message}</p>
       )}
 
-      {/* Master toggle */}
+      {/* Master toggle — the single Autopilot input. It bundles self-tuning (auto-calibration) and,
+          for convenience, enables cost savings; cost can be turned back off independently from the
+          Feature Flags tab. Turning Autopilot off falls back to the Manual configuration. */}
       <Card>
         <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
           <div className="max-w-2xl">
             <div className="flex items-center gap-2">
               <span className={type.heading}>Autopilot mode</span>
               {autopilotOn ? <Badge variant="green">On</Badge> : <Badge variant="gray">Off</Badge>}
-            </div>
-            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
-              Let the engine adapt routing automatically. Turn off to route purely by your Manual configuration.
-            </p>
-          </div>
-          <Switch on={autopilotOn} disabled={busy || toggling !== null} onClick={() => toggleMaster(!autopilotOn)} />
-        </div>
-      </Card>
-
-      {/* Autopilot decisions */}
-      <Card className={autopilotOn ? '' : 'opacity-60'}>
-        {/* (i) SRv3 — always on, shown as status */}
-        <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
-          <div className="max-w-2xl">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-slate-800 dark:text-white">Always route to the best-performing PSP</span>
-              <Badge variant="gray">SRv3</Badge>
-              <Badge variant="green">Active</Badge>
-            </div>
-            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
-              Real-time success-rate routing. Always on — it is the base routing path.
-            </p>
-          </div>
-        </div>
-
-        {/* (ii) Elimination — hidden for now. Re-enable this row to expose the toggle;
-            the underlying `elimination` flag wiring (seeding + master-off) stays in place.
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 px-5 py-4 dark:border-[#222226]">
-          <div className="max-w-2xl">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-slate-800 dark:text-white">Disable PSP in case of sub-threshold auth rates</span>
-              <Badge variant="gray">Elimination</Badge>
-            </div>
-            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
-              Temporarily removes a PSP whose auth rate drops below the elimination threshold.
-            </p>
-          </div>
-          <Switch on={eliminationOn} disabled={rowDisabled} onClick={() => toggleFeature('elimination', !eliminationOn)} />
-        </div>
-        */}
-
-        {/* (iii) Cost savings */}
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 px-5 py-4 dark:border-[#222226]">
-          <div className="max-w-2xl">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-slate-800 dark:text-white">Optimize for economic value (cost awareness), not just approval rate</span>
-              <Badge variant="gray">Cost savings</Badge>
-            </div>
-            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
-              Multi-objective routing: picks the highest expected-value PSP inside it.
-            </p>
-          </div>
-          <Switch on={costOn} disabled={rowDisabled} onClick={() => toggleFeature('multi-objective-routing', !costOn)} />
-        </div>
-
-        {/* (iv) Auto-calibration */}
-        <div className="flex flex-wrap items-center justify-between gap-4 border-t border-slate-100 px-5 py-4 dark:border-[#222226]">
-          <div className="max-w-2xl">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-sm font-medium text-slate-800 dark:text-white">Self-tune routing settings to match your traffic patterns</span>
-              <Badge variant="gray">Self-tuning</Badge>
-              {autopilotOn && autoCalibrationOn && (
+              {autopilotOn && (
                 <button
                   type="button"
                   onClick={() => setShowTuner((s) => !s)}
@@ -962,19 +887,36 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
               )}
             </div>
             <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
-              Auto configures the Learning window and Discovery share based on your traffic volume.
+              Let the engine self-tune routing to your traffic — it auto-configures the Learning window
+              and Discovery share from your volume. Turn off to route purely by your Manual configuration.
             </p>
           </div>
-          <Switch on={autoCalibrationOn} disabled={rowDisabled} onClick={() => toggleFeature('auto-calibration', !autoCalibrationOn)} />
+          <Switch on={autopilotOn} disabled={busy || toggling !== null} onClick={() => toggleMaster(!autopilotOn)} />
         </div>
       </Card>
 
-      {autopilotOn && autoCalibrationOn && showTuner && <BucketHedgingTuner />}
+      {/* SR base routing — always on, shown as status. */}
+      <Card className={autopilotOn ? '' : 'opacity-60'}>
+        <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
+          <div className="max-w-2xl">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-sm font-medium text-slate-800 dark:text-white">Always route to the best-performing PSP</span>
+              <Badge variant="gray">SRv3</Badge>
+              <Badge variant="green">Active</Badge>
+            </div>
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
+              Real-time success-rate routing. Always on — it is the base routing path.
+            </p>
+          </div>
+        </div>
+      </Card>
+
+      {autopilotOn && showTuner && <BucketHedgingTuner />}
     </div>
   )
 }
 
-const SR_FEATURES: { feature: KnownFeature; title: string; description: string }[] = [
+const SR_FEATURES: { feature: KnownFeature; title: string; description: string; docsUrl?: string }[] = [
   {
     feature: 'gsm-scoring-filter',
     title: 'GSM scoring filter',
@@ -993,8 +935,16 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string }
     description:
       'Routes live production traffic through the active A/B test algorithm. When enabled, each payment is deterministically assigned to a control or variant arm based on its payment ID. Disable at any time to fall back to standard SR routing with no impact on in-flight payments.',
   },
-  // 'multi-objective-routing' is intentionally not listed here — it is owned by the
-  // Autopilot "Maximize economic value" decision (see AutopilotConfig).
+  {
+    // Cost savings is orthogonal to Autopilot vs Manual — it applies to either scoring config.
+    // Autopilot enables it as a convenience, but it lives here as the single, ungated source of
+    // truth so a Manual-config merchant can run cost-aware routing without Autopilot.
+    feature: 'multi-objective-routing',
+    title: 'Cost savings (optimize for economic value)',
+    description:
+      'Multi-objective routing: alongside approval rate, weighs each PSP\'s expected cost and picks the highest expected-value option. Works with either the Autopilot or Manual scoring config.',
+    docsUrl: 'https://docs.hyperswitch.io/integration-guide/workflows/intelligent-routing/routing-strategies/multi-objective-routing',
+  },
 ]
 
 function SrDimensionsConfig({ merchantId }: { merchantId: string | null }) {
@@ -1119,7 +1069,7 @@ function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
       )}
 
       <Card>
-        {SR_FEATURES.map(({ feature, title, description }, idx) => {
+        {SR_FEATURES.map(({ feature, title, description, docsUrl }, idx) => {
           const enabled = features.isEnabled(feature)
           return (
             <div
@@ -1131,6 +1081,18 @@ function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
               <div className="max-w-2xl">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="text-sm font-medium text-slate-800 dark:text-white">{title}</span>
+                  {docsUrl && (
+                    <a
+                      href={docsUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label={`${title} — documentation`}
+                      title="Learn more"
+                      className="inline-flex items-center rounded-full p-0.5 text-slate-400 transition-colors hover:text-brand-600 dark:text-slate-500 dark:hover:text-brand-400"
+                    >
+                      <Info className="h-4 w-4" />
+                    </a>
+                  )}
                   {features.isLoading ? (
                     <Badge variant="gray">Checking</Badge>
                   ) : enabled ? (

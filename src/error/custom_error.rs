@@ -348,6 +348,8 @@ pub enum UserAuthError {
     EmailSendFailed,
     #[error("Invalid or expired verification token")]
     InvalidVerificationToken,
+    #[error("Operation not supported for this session type")]
+    UnsupportedOperation,
     #[error("Invalid or expired password reset token")]
     InvalidResetToken,
 }
@@ -373,6 +375,7 @@ impl axum::response::IntoResponse for UserAuthError {
             }
             Self::EmailSendFailed => (hyper::StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             Self::InvalidVerificationToken => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
+            Self::UnsupportedOperation => (hyper::StatusCode::FORBIDDEN, self.to_string()),
             Self::InvalidResetToken => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
         };
         (

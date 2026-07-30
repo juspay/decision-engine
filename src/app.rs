@@ -521,9 +521,23 @@ where
             get(routes::cost_clusters::list_cost_clusters),
         )
         .route(
+            "/merchant-account/:merchant-id/cost-cluster-facets",
+            get(routes::cost_clusters::list_cost_cluster_facets),
+        )
+        .route(
             "/merchant-account/:merchant-id/cost-clusters/:cluster-key/fee-override",
             put(routes::cost_clusters::set_cluster_override)
                 .delete(routes::cost_clusters::delete_cluster_override),
+        )
+        .route(
+            "/merchant-account/:merchant-id/seed-costs",
+            get(routes::seed_costs::get_seed_costs)
+                .put(routes::seed_costs::set_seed_costs)
+                .delete(routes::seed_costs::delete_seed_costs),
+        )
+        .route(
+            "/merchant-account/:merchant-id/seed-costs/simulate",
+            post(routes::seed_costs::simulate_seed_costs),
         )
         .route(
             "/merchant-account/:merchant-id/cost-coverage",
@@ -632,6 +646,14 @@ where
         .route(
             "/auth/change-password",
             post(routes::user_auth::change_password),
+        )
+        .route(
+            "/auth/admin/merchant-token",
+            post(routes::user_auth::admin_merchant_token),
+        )
+        .route(
+            "/auth/admin/merchant-token/exchange",
+            post(routes::user_auth::exchange_merchant_token),
         );
 
     let router = axum::Router::new()

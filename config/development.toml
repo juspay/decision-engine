@@ -180,6 +180,38 @@ tiers = [
 
   # --- International issuer: cross-border IC++ ----------------------------------------
   { card_issuing_country = "intl", pct_bps = 239.0, fixed = 0.24 },  # ~$2.63
+
+  # --- UAE / AED market: contract rates split into interchange / scheme / markup -------
+  # Editable per merchant in the dashboard (Cost estimation → Contract rates). Effective
+  # percentage = interchange + scheme + markup; `fixed` is the flat per-txn fee.
+  { transaction_currency = "AED", card_network = "visa",   payment_method_type = "debit",  interchange_bps = 100.0, scheme_bps = 12.0, markup_bps = 15.0, fixed = 0.50, label = "UAE Visa debit", example_amount = 6500.0 },
+  { transaction_currency = "AED", card_network = "visa",   payment_method_type = "credit", interchange_bps = 165.0, scheme_bps = 13.0, markup_bps = 15.0, fixed = 0.50, label = "UAE Visa credit", example_amount = 3200.0 },
+  { transaction_currency = "AED", card_network = "jaywan", payment_method_type = "debit",  interchange_bps = 100.0, scheme_bps = 12.0, markup_bps = 15.0, fixed = 0.50, label = "Jaywan", example_amount = 1200.0 },
+  { transaction_currency = "AED", card_network = "mada",   payment_method_type = "debit",  interchange_bps = 180.0, scheme_bps = 40.0, markup_bps = 15.0, fixed = 0.50, label = "Saudi Mada", example_amount = 4500.0 },
+  { transaction_currency = "AED", card_network = "visa",   payment_method_type = "credit", card_issuing_country = "eu", interchange_bps = 30.0, scheme_bps = 45.0, markup_bps = 20.0, fixed = 0.10, label = "EU Visa credit", example_amount = 2800.0 },
+]
+
+# UAE acquirers priced only via the AED contract table above (blended `default` = UAE Visa debit).
+[[hypersense.seed_costs]]
+psp = "checkout"
+default = { interchange_bps = 100.0, scheme_bps = 12.0, markup_bps = 10.0, fixed = 0.35 }
+tiers = [
+  { transaction_currency = "AED", card_network = "visa",   payment_method_type = "debit",  interchange_bps = 100.0, scheme_bps = 12.0, markup_bps = 10.0, fixed = 0.35, label = "UAE Visa debit", example_amount = 6500.0 },
+  { transaction_currency = "AED", card_network = "visa",   payment_method_type = "credit", interchange_bps = 180.0, scheme_bps = 13.0, markup_bps = 10.0, fixed = 0.35, label = "UAE Visa credit", example_amount = 3200.0 },
+  { transaction_currency = "AED", card_network = "jaywan", payment_method_type = "debit",  interchange_bps = 50.0,  scheme_bps = 5.0,  markup_bps = 12.0, fixed = 0.40, label = "Jaywan", example_amount = 1200.0 },
+  { transaction_currency = "AED", card_network = "mada",   payment_method_type = "debit",  interchange_bps = 70.0,  scheme_bps = 8.0,  markup_bps = 20.0, fixed = 0.60, label = "Saudi Mada", example_amount = 4500.0 },
+  { transaction_currency = "AED", card_network = "visa",   payment_method_type = "credit", card_issuing_country = "eu", interchange_bps = 30.0, scheme_bps = 50.0, markup_bps = 15.0, fixed = 0.15, label = "Cross-border EU Visa credit", example_amount = 2800.0 },
+]
+
+[[hypersense.seed_costs]]
+psp = "tap"
+default = { interchange_bps = 100.0, scheme_bps = 12.0, markup_bps = 18.0, fixed = 0.30 }
+tiers = [
+  { transaction_currency = "AED", card_network = "visa",   payment_method_type = "debit",  interchange_bps = 100.0, scheme_bps = 12.0, markup_bps = 18.0, fixed = 0.30, label = "UAE Visa debit", example_amount = 6500.0 },
+  { transaction_currency = "AED", card_network = "visa",   payment_method_type = "credit", interchange_bps = 170.0, scheme_bps = 13.0, markup_bps = 22.0, fixed = 0.25, label = "UAE Visa credit", example_amount = 3200.0 },
+  { transaction_currency = "AED", card_network = "jaywan", payment_method_type = "debit",  interchange_bps = 50.0,  scheme_bps = 5.0,  markup_bps = 10.0, fixed = 0.35, label = "Jaywan", example_amount = 1200.0 },
+  { transaction_currency = "AED", card_network = "mada",   payment_method_type = "debit",  interchange_bps = 70.0,  scheme_bps = 8.0,  markup_bps = 14.0, fixed = 0.45, label = "Saudi Mada", example_amount = 4500.0 },
+  { transaction_currency = "AED", card_network = "visa",   payment_method_type = "credit", card_issuing_country = "eu", interchange_bps = 30.0, scheme_bps = 55.0, markup_bps = 25.0, fixed = 0.20, label = "Cross-border EU Visa credit", example_amount = 2800.0 },
 ]
 
 [tenant_secrets]

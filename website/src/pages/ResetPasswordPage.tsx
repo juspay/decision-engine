@@ -10,7 +10,7 @@ import {
   Sun,
   XCircle,
 } from 'lucide-react'
-import { apiFetch } from '../lib/api'
+import { apiErrorMessage, apiFetch } from '../lib/api'
 import { getResolvedThemePreference, persistThemePreference } from '../lib/theme'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
 
@@ -25,18 +25,6 @@ function getPasswordPolicyError(password: string): string | null {
   if (!/[0-9]/.test(password)) return 'Add at least one number.'
   if (!/[^A-Za-z0-9]/.test(password)) return 'Add at least one special character.'
   return null
-}
-
-function getApiErrorMessage(err: unknown): string {
-  const msg = err instanceof Error ? err.message : 'Something went wrong'
-  const match = msg.match(/API error \d+: (.+)/)
-  if (!match) return msg
-  try {
-    const parsed = JSON.parse(match[1])
-    return parsed.message ?? msg
-  } catch {
-    return match[1]
-  }
 }
 
 export function ResetPasswordPage() {
@@ -83,7 +71,7 @@ export function ResetPasswordPage() {
         state: { notice: 'Password reset! Sign in with your new password.' },
       })
     } catch (err) {
-      setError(getApiErrorMessage(err))
+      setError(apiErrorMessage(err))
     } finally {
       setLoading(false)
     }

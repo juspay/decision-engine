@@ -42,16 +42,21 @@ pub struct JwtClaims {
     pub email: String,
     pub merchant_id: String,
     pub role: String,
+    pub token_type: String,
     pub jti: String,
     pub exp: u64,
     pub iat: u64,
 }
+
+pub const TOKEN_TYPE_STANDARD: &str = "standard";
+pub const TOKEN_TYPE_HS_REDIRECT: &str = "hs_redirect";
 
 pub fn generate_jwt(
     user_id: &str,
     email: &str,
     merchant_id: &str,
     role: &str,
+    token_type: &str,
     secret: &str,
     expiry_seconds: u64,
 ) -> Result<String, Report<AuthError>> {
@@ -81,6 +86,12 @@ pub fn generate_jwt(
         .change_context(AuthError::JwtClaimError)?;
     payload
         .set_claim("role", Some(serde_json::Value::String(role.to_string())))
+        .change_context(AuthError::JwtClaimError)?;
+    payload
+        .set_claim(
+            "token_type",
+            Some(serde_json::Value::String(token_type.to_string())),
+        )
         .change_context(AuthError::JwtClaimError)?;
     payload
         .set_claim("jti", Some(serde_json::Value::String(jti)))
@@ -153,6 +164,12 @@ pub fn verify_jwt(token: &str, secret: &str) -> Result<JwtClaims, Report<AuthErr
         .claim("iat")
         .and_then(|v| v.as_u64())
         .ok_or_else(|| Report::new(AuthError::MissingClaim("iat")))?;
+    // Fall back to "standard" so existing tokens issued before this field was added remain valid.
+    let token_type = payload
+        .claim("token_type")
+        .and_then(|v| v.as_str())
+        .unwrap_or(TOKEN_TYPE_STANDARD)
+        .to_string();
 
     Ok(JwtClaims {
         sub: user_id.clone(),
@@ -160,6 +177,7 @@ pub fn verify_jwt(token: &str, secret: &str) -> Result<JwtClaims, Report<AuthErr
         email,
         merchant_id,
         role,
+        token_type,
         jti,
         exp,
         iat,
