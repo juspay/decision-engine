@@ -41,16 +41,32 @@ curl "$BASE_URL/config/routing-keys" \
 
 ## Response
 
+Returns a `keys` map of routing-key name → metadata (its type, and for enums the allowed `values` as a comma-separated string).
+
 ```json
 {
-  "routing_keys": [
-    "payment_method_type",
-    "payment_method",
-    "card_network",
-    "currency",
-    "country",
-    "auth_type"
-  ]
+  "keys": {
+    "payment_method_type": {
+      "type": "enum",
+      "values": "credit, debit, card, upi_collect, ...",
+      "min_value": null,
+      "max_value": null,
+      "min_length": null,
+      "max_length": null,
+      "exact_length": null,
+      "regex": null
+    },
+    "amount": {
+      "type": "integer",
+      "values": null,
+      "min_value": null,
+      "max_value": null,
+      "min_length": null,
+      "max_length": null,
+      "exact_length": null,
+      "regex": null
+    }
+  }
 }
 ```
 

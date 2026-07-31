@@ -12,6 +12,7 @@ curl --location "$BASE_URL/routing/create" \
   --data '{
     "name": "priority rule",
     "created_by": "merchant_demo",
+    "description": "try stripe, then adyen, then checkout",
     "algorithm_for": "payment",
     "algorithm": {
       "type": "priority",

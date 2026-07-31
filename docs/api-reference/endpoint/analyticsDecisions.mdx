@@ -75,21 +75,18 @@ curl "$BASE_URL/analytics/decisions?range=1d&exclude_routing_approach=NTW_BASED_
 
 ```json
 {
-  "series": [
-    {
-      "timestamp_ms": 1777136400000,
-      "gateway": "adyen",
-      "count": 7
-    },
-    {
-      "timestamp_ms": 1777136400000,
-      "gateway": "stripe",
-      "count": 3
-    }
+  "merchant_id": "merchant_demo",
+  "range": "1d",
+  "tiles": [
+    { "label": "Decisions", "value": "42", "subtitle": "Failures: 3" },
+    { "label": "Error rate", "value": "7.14%", "subtitle": "From recorded decision events" }
   ],
-  "totals": {
-    "SR_SELECTION_V3_ROUTING": 10
-  }
+  "series": [
+    { "bucket_ms": 1808624000000, "routing_approach": "SR_SELECTION_V3_ROUTING", "count": 10 }
+  ],
+  "approaches": [
+    { "rule_name": "SR_SELECTION_V3_ROUTING", "count": 42 }
+  ]
 }
 ```
 

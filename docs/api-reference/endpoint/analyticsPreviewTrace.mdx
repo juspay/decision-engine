@@ -73,22 +73,68 @@ curl "$BASE_URL/analytics/preview-trace?range=1d&payment_id=volume_decision_001"
 
 ## Response
 
+`/analytics/preview-trace` returns the same envelope as `/analytics/payment-audit` (a `PaymentAuditResponse`), scoped to rule/volume preview events (`route` defaults to `routing_evaluate`).
+
 ```json
 {
-  "items": [
+  "merchant_id": "merchant_demo",
+  "range": "1d",
+  "payment_id": "volume_decision_001",
+  "request_id": null,
+  "gateway": null,
+  "route": "routing_evaluate",
+  "status": null,
+  "flow_type": null,
+  "routing_approach": null,
+  "error_code": null,
+  "page": 1,
+  "page_size": 12,
+  "total_results": 1,
+  "total_success": 1,
+  "total_failure": 0,
+  "results": [
     {
+      "lookup_key": "volume_decision_001",
       "payment_id": "volume_decision_001",
-      "route": "routing_evaluate",
-      "gateway": "stripe",
-      "status": "success",
-      "events": 1
+      "request_id": null,
+      "merchant_id": "merchant_demo",
+      "first_seen_ms": 1808624000000,
+      "last_seen_ms": 1808624000000,
+      "event_count": 1,
+      "latest_status": "success",
+      "latest_gateway": "stripe",
+      "latest_stage": "rule_evaluated",
+      "gateways": ["stripe"],
+      "routes": ["routing_evaluate"]
     }
   ],
   "timeline": [
     {
+      "id": "evt_...",
+      "flow_type": "preview",
       "event_stage": "rule_evaluated",
+      "route": "routing_evaluate",
+      "merchant_id": "merchant_demo",
+      "payment_id": "volume_decision_001",
+      "request_id": null,
+      "global_request_id": null,
+      "trace_id": null,
+      "payment_method_type": "CARD",
+      "payment_method": "CREDIT",
       "gateway": "stripe",
-      "status": "success"
+      "routing_approach": null,
+      "rule_name": "priority rule",
+      "status": "success",
+      "error_code": null,
+      "error_message": null,
+      "score_value": null,
+      "sigma_factor": null,
+      "average_latency": null,
+      "tp99_latency": null,
+      "transaction_count": null,
+      "details": null,
+      "details_json": null,
+      "created_at_ms": 1808624000000
     }
   ]
 }

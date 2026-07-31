@@ -67,20 +67,37 @@ curl "$BASE_URL/analytics/log-summaries?range=1d&status=failure" \
 
 ```json
 {
+  "merchant_id": "merchant_demo",
+  "range": "1d",
+  "total_errors": 2,
   "errors": [
     {
+      "route": "decide_gateway",
       "error_code": "processor_declined",
+      "error_message": "Card declined by issuer",
       "count": 2,
-      "latest_at_ms": 1777136400000
+      "last_seen_ms": 1808624000000
     }
   ],
   "samples": [
     {
+      "route": "decide_gateway",
+      "merchant_id": "merchant_demo",
       "payment_id": "pay_001",
+      "request_id": "req_...",
+      "global_request_id": null,
+      "trace_id": null,
       "gateway": "stripe",
-      "status": "failure"
+      "routing_approach": "SR_SELECTION_V3_ROUTING",
+      "status": "failure",
+      "error_code": "processor_declined",
+      "error_message": "Card declined by issuer",
+      "flow_type": "gateway_decided",
+      "created_at_ms": 1808624000000
     }
-  ]
+  ],
+  "page": 1,
+  "page_size": 10
 }
 ```
 

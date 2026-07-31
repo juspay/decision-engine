@@ -67,26 +67,32 @@ curl "$BASE_URL/analytics/routing-stats?range=1d&payment_method_type=CARD" \
 
 ```json
 {
+  "merchant_id": "merchant_demo",
+  "range": "1d",
   "gateway_share": [
+    { "bucket_ms": 1808624000000, "gateway": "adyen", "count": 7 },
+    { "bucket_ms": 1808624000000, "gateway": "stripe", "count": 3 }
+  ],
+  "top_rules": [
+    { "rule_name": "priority rule", "count": 12 }
+  ],
+  "sr_trend": [
     {
+      "bucket_ms": 1808624000000,
+      "merchant_id": "merchant_demo",
+      "payment_method_type": "CARD",
+      "payment_method": "CREDIT",
       "gateway": "adyen",
-      "count": 7,
-      "share": 70.0
-    },
-    {
-      "gateway": "stripe",
-      "count": 3,
-      "share": 30.0
+      "score_value": 0.831
     }
   ],
-  "filter_options": {
-    "payment_method_type": [
-      "CARD"
+  "available_filters": {
+    "dimensions": [
+      { "key": "payment_method_type", "label": "Payment Method Type", "values": ["CARD"] },
+      { "key": "payment_method", "label": "Payment Method", "values": ["CREDIT", "DEBIT"] }
     ],
-    "payment_method": [
-      "CREDIT",
-      "DEBIT"
-    ]
+    "missing_dimensions": [],
+    "gateways": ["adyen", "stripe"]
   }
 }
 ```

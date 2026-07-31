@@ -18,18 +18,37 @@ curl --location "$BASE_URL/rule/create" \
         "defaultLatencyThreshold": null,
         "defaultHedgingPercent": null,
         "margin": 0.20,
-        "subLevelInputConfig": {
-          "paymentMethodType": {
-            "CARD": { "bucketSize": 30, "hedgingPercent": 0.05 }
+        "subLevelInputConfig": [
+          {
+            "paymentMethodType": "CARD",
+            "bucketSize": 30,
+            "hedgingPercent": 0.05
           }
-        }
+        ]
       }
     }
   }'
 ```
 
+`subLevelInputConfig` is an **array** of per-dimension overrides. Each entry carries the dimension keys it applies to (`paymentMethodType`, `paymentMethod`, `cardNetwork`, `cardIsIn`, `currency`, `country`, `authType`) alongside the override values (`bucketSize`, `hedgingPercent`, `latencyThreshold`, …).
+
 ```json
-{ "merchant_id": "merchant_demo", "config": { "type": "successRate" } }
+{
+  "message": "Success Rate Configuration created successfully",
+  "merchant_id": "merchant_demo",
+  "config": {
+    "type": "successRate",
+    "data": {
+      "defaultBucketSize": 20,
+      "defaultLatencyThreshold": null,
+      "defaultHedgingPercent": null,
+      "margin": 0.20,
+      "subLevelInputConfig": [
+        { "paymentMethodType": "CARD", "bucketSize": 30, "hedgingPercent": 0.05 }
+      ]
+    }
+  }
+}
 ```
 
 `margin` is the merchant margin as a fraction of ticket (e.g. `0.20` for 20%). It feeds the [multi-objective routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-multi-objective.mdx) economic-value ranking `EV = auth rate × settlement value` (settlement value = txn amount − cost of payment processing) by setting the merchant's share of the ticket, and defaults to `1.0` when unset.

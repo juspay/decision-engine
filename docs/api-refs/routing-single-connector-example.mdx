@@ -12,6 +12,7 @@ curl --location "$BASE_URL/routing/create" \
   --data '{
     "name": "single connector rule",
     "created_by": "merchant_demo",
+    "description": "always route to stripe",
     "algorithm_for": "payment",
     "algorithm": {
       "type": "single",
