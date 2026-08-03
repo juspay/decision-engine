@@ -342,6 +342,8 @@ pub enum UserAuthError {
     AlreadyMember,
     #[error("Insufficient permissions")]
     Forbidden,
+    #[error("Invalid admin secret")]
+    Unauthorized,
     #[error("Failed to send email")]
     EmailSendFailed,
     #[error("Invalid or expired verification token")]
@@ -367,6 +369,7 @@ impl axum::response::IntoResponse for UserAuthError {
             Self::MerchantNotFound => (hyper::StatusCode::NOT_FOUND, self.to_string()),
             Self::AlreadyMember => (hyper::StatusCode::CONFLICT, self.to_string()),
             Self::Forbidden => (hyper::StatusCode::FORBIDDEN, self.to_string()),
+            Self::Unauthorized => (hyper::StatusCode::UNAUTHORIZED, self.to_string()),
             Self::StorageError | Self::TokenGenerationFailed | Self::PasswordHashingFailed => {
                 (hyper::StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
             }

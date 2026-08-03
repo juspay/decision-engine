@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Command } from 'cmdk'
+import { simulatorEnabled } from '../../lib/appConfig'
 import {
   Activity,
   Ban,
@@ -47,7 +48,7 @@ interface SearchGroup {
 // Curated index of navigable destinations. Mirrors the sidebar plus the
 // in-page tabs that are worth jumping to directly. Keep in sync with the
 // route table in App.tsx and the links in Sidebar.tsx.
-const SEARCH_GROUPS: SearchGroup[] = [
+const ALL_SEARCH_GROUPS: SearchGroup[] = [
   {
     heading: 'General',
     items: [
@@ -101,6 +102,11 @@ const SEARCH_GROUPS: SearchGroup[] = [
     ],
   },
 ]
+
+
+const SEARCH_GROUPS: SearchGroup[] = simulatorEnabled
+  ? ALL_SEARCH_GROUPS
+  : ALL_SEARCH_GROUPS.filter((group) => group.heading !== 'Simulation')
 
 // cmdk's default matcher is a loose fuzzy/subsequence score that mis-ranks
 // short queries (e.g. "members" scoring "Volume Split" above "Members").

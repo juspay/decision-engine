@@ -167,6 +167,7 @@ echo ""
 echo "[ User signup ]"
 SIGNUP_RESPONSE=$(curl -s -X POST "$BASE_URL/auth/signup" \
     -H "Content-Type: application/json" \
+    -H "x-admin-secret: $ADMIN_SECRET" \
     -d "{\"email\": \"$TEST_EMAIL\", \"password\": \"$TEST_PASSWORD\"}")
 
 JWT_TOKEN=$(echo "$SIGNUP_RESPONSE" | grep -o '"token":"[^"]*"' | cut -d'"' -f4)
@@ -198,6 +199,7 @@ echo ""
 echo "[ Duplicate signup ]"
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/auth/signup" \
     -H "Content-Type: application/json" \
+    -H "x-admin-secret: $ADMIN_SECRET" \
     -d "{\"email\": \"$TEST_EMAIL\", \"password\": \"$TEST_PASSWORD\"}")
 check "Duplicate email → 409" "409" "$STATUS"
 

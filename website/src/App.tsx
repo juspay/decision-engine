@@ -22,6 +22,7 @@ import { VerifyEmailPage } from './pages/VerifyEmailPage'
 import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
 import { ResetPasswordPage } from './pages/ResetPasswordPage'
 import { AccountPage } from './pages/AccountPage'
+import { signupEnabled, simulatorEnabled } from './lib/appConfig'
 import { useAuthStore } from './store/authStore'
 import { useMerchantStore } from './store/merchantStore'
 import { apiPost } from './lib/api'
@@ -85,7 +86,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="login" element={<AuthPage />} />
-      <Route path="signup" element={<AuthPage />} />
+      {signupEnabled ? <Route path="signup" element={<AuthPage />} /> : null}
       <Route path="verify-email" element={<VerifyEmailPage />} />
       <Route path="forgot-password" element={<ForgotPasswordPage />} />
       <Route path="reset-password" element={<ResetPasswordPage />} />
@@ -103,7 +104,9 @@ export default function App() {
           <Route path="routing/cost" element={<Navigate to="/routing/sr?tab=cost" replace />} />
           <Route path="routing/ab-testing" element={<ABTestingPage />} />
           <Route path="decisions" element={<DecisionExplorerPage />} />
-          <Route path="decisions/simulator" element={<DecisionSimulatorPage />} />
+          {simulatorEnabled ? (
+            <Route path="decisions/simulator" element={<DecisionSimulatorPage />} />
+          ) : null}
           <Route path="analytics" element={<AnalyticsPage />} />
           <Route path="audit" element={<PaymentAuditPage />} />
           <Route path="events" element={<RoutingEventsPage />} />

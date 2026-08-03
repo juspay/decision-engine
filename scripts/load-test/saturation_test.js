@@ -20,6 +20,7 @@ const RAMP_DUR = __ENV.RAMP_DUR || "5s";   // ramp between levels
 
 const LOAD_TEST_EMAIL    = "loadtest@decision-engine.local";
 const LOAD_TEST_PASSWORD = "LoadTest#123456";
+const ADMIN_SECRET       = __ENV.ADMIN_SECRET || "test_admin";
 
 // VU levels to test — stop at MAX_VUS
 const _DEFAULT_STEPS = [5, 10, 20, 30, 50, 75, 100, 150, 200, 300, 400, 500];
@@ -71,7 +72,7 @@ export function setup() {
   } else {
     const signupRes = http.post(`${BASE_URL}/auth/signup`,
       JSON.stringify({ email: LOAD_TEST_EMAIL, password: LOAD_TEST_PASSWORD }),
-      { headers: json });
+      { headers: { ...json, "x-admin-secret": ADMIN_SECRET } });
     if (signupRes.status !== 200) throw new Error(`Signup failed (${signupRes.status}): ${signupRes.body}`);
     const sb = JSON.parse(signupRes.body);
     token = sb.token;

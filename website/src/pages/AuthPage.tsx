@@ -14,6 +14,7 @@ import {
 import { useAuthStore, MerchantInfo } from '../store/authStore'
 import { useMerchantStore } from '../store/merchantStore'
 import { apiErrorMessage, apiFetch } from '../lib/api'
+import { signupEnabled } from '../lib/appConfig'
 import { getResolvedThemePreference, persistThemePreference } from '../lib/theme'
 import { SurfaceLabel } from '../components/ui/Card'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
@@ -50,6 +51,7 @@ interface AuthLocationState {
 }
 
 function getTabFromPath(pathname: string): Tab {
+  if (!signupEnabled) return 'login'
   return pathname.endsWith('/signup') ? 'signup' : 'login'
 }
 
@@ -161,6 +163,7 @@ export function AuthPage() {
     try {
       const path = tab === 'login' ? '/auth/login' : '/auth/signup'
       const normalizedMerchantName = merchantName.trim()
+
       const res = await apiFetch<SignupResponse>(path, {
         method: 'POST',
         body: JSON.stringify({ email, password }),
@@ -308,9 +311,11 @@ export function AuthPage() {
                 <AuthTabButton active={tab === 'login'} onClick={() => switchTab('login')}>
                   Sign in
                 </AuthTabButton>
-                <AuthTabButton active={tab === 'signup'} onClick={() => switchTab('signup')}>
-                  Sign up
-                </AuthTabButton>
+                {signupEnabled ? (
+                  <AuthTabButton active={tab === 'signup'} onClick={() => switchTab('signup')}>
+                    Sign up
+                  </AuthTabButton>
+                ) : null}
               </div>
 
               <div className="mt-10 border-t border-slate-200 pt-10 dark:border-[#1d1d23]">

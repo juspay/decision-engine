@@ -20,6 +20,7 @@ import {
   LogOut,
 } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
+import { simulatorEnabled } from '../../lib/appConfig'
 import { apiFetch } from '../../lib/api'
 import {
   applyThemePreference,
@@ -147,14 +148,18 @@ export function Sidebar() {
         <SideLink to="/routing/debit" icon={Network} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Debit Routing</SideLink>
         <SideLink to="/routing/ab-testing" icon={FlaskConical} indent beta selectedPath={selectedPath} onNavigate={setPendingPath}>A/B Testing</SideLink>
 
-        <div className="flex items-center gap-2 px-3 pb-2 pt-5">
-          <span className="text-[12px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">
-            Simulation
-          </span>
-        </div>
+        {simulatorEnabled ? (
+          <>
+            <div className="flex items-center gap-2 px-3 pb-2 pt-5">
+              <span className="text-[12px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">
+                Simulation
+              </span>
+            </div>
 
-        {/* <SideLink to="/decisions" icon={Search} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Explorer</SideLink> */}
-        <SideLink to="/decisions/simulator" icon={FlaskConical} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Simulator</SideLink>
+            {/* <SideLink to="/decisions" icon={Search} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Explorer</SideLink> */}
+            <SideLink to="/decisions/simulator" icon={FlaskConical} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Simulator</SideLink>
+          </>
+        ) : null}
 
         <div className="flex items-center gap-2 px-3 pb-2 pt-5">
           <span className="text-[12px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">
