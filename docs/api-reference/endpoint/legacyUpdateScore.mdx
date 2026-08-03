@@ -42,6 +42,7 @@ curl --location "$BASE_URL/update-score" \
   --header "Content-Type: application/json" \
   --data '{
   "txn_detail": {
+    "id": "1",
     "txnId": "txn_001",
     "orderId": "order_001",
     "merchantId": "merchant_demo",
@@ -49,21 +50,25 @@ curl --location "$BASE_URL/update-score" \
     "type": "ORDER_PAYMENT",
     "txnUuid": "pay_001",
     "gateway": "stripe",
-    "dateCreated": "2026-03-31T00:00:00Z",
+    "dateCreated": "2026-04-30T00:00:00.000000000Z",
     "txnAmount": 1000.0,
+    "netAmount": 1000.0,
+    "currency": "USD",
     "txnObjectType": "ORDER_PAYMENT",
     "sourceObject": "CREDIT",
     "isEmi": false,
     "partitionKey": null
   },
   "txn_card_info": {
-    "id": "card_001",
+    "id": "1",
+    "txnId": "txn_001",
+    "txnDetailId": "1",
     "paymentMethodType": "CARD",
     "paymentMethod": "CREDIT",
     "authType": "THREE_DS",
     "cardIsin": "411111",
     "cardType": "CREDIT",
-    "dateCreated": "2026-03-31T00:00:00Z",
+    "dateCreated": "2026-04-30T00:00:00.000000000Z",
     "partitionKey": null
   },
   "log_message": "Transaction completed",
@@ -71,6 +76,14 @@ curl --location "$BASE_URL/update-score" \
   "txn_latency": { "gatewayLatency": 120.5 }
 }'
 ```
+
+`txn_detail.id`, `txn_card_info.id` and `txn_card_info.txnDetailId` are numeric strings — the
+server parses them as integers, so a value like `"card_001"` is rejected. `txn_detail.id` in
+particular must be present and numeric: the conversion does `.unwrap()` on the parsed value, so a
+missing or non-numeric `id` panics the handler and the connection is closed with no response
+rather than a 4xx.
+
+`txn_detail` also requires `netAmount` and `currency` alongside `txnAmount`.
 
 ## Response
 

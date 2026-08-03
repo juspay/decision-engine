@@ -69,20 +69,12 @@
       "description": "Legacy compatibility routes"
     },
     {
-      "name": "Members",
-      "description": "Merchant team membership"
-    },
-    {
       "name": "Cost & Fees",
       "description": "Connector fee models, cost clusters, seed costs, and coverage"
     },
     {
       "name": "Cost Ingestion",
       "description": "Settlement report and invoice ingestion"
-    },
-    {
-      "name": "Webhooks",
-      "description": "Inbound connector webhooks"
     }
   ],
   "paths": {
@@ -727,217 +719,6 @@
         ],
         "summary": "Overview",
         "description": "ClickHouse-backed overview read endpoint.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "x-tenant-id",
-            "in": "header",
-            "required": true,
-            "description": "Tenant to resolve. The shipped config files define only the \"public\" tenant. No fallback — omitting this fails with TE_03.",
-            "schema": {
-              "type": "string",
-              "default": "public"
-            },
-            "example": "public"
-          },
-          {
-            "name": "range",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "start_ms",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "end_ms",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "page",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "page_size",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            }
-          },
-          {
-            "name": "payment_method_type",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "payment_method",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "card_network",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "card_is_in",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "currency",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "country",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "auth_type",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "gateway",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "payment_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "request_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "route",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "status",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "flow_type",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "routing_approach",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "exclude_routing_approach",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          },
-          {
-            "name": "error_code",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Overview",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AnalyticsOverviewResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/analytics": {
-      "get": {
-        "operationId": "analyticsRoot",
-        "tags": [
-          "Analytics"
-        ],
-        "summary": "Analytics overview (alias)",
-        "description": "Alias for `GET /analytics/overview` — same handler, same parameters and response.",
         "security": [
           {
             "BearerAuth": []
@@ -1913,7 +1694,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AuthRequest"
+                "$ref": "#/components/schemas/LoginRequest"
               }
             }
           }
@@ -2043,7 +1824,7 @@
           "content": {
             "application/json": {
               "schema": {
-                "$ref": "#/components/schemas/AuthRequest"
+                "$ref": "#/components/schemas/SignupRequest"
               }
             }
           }
@@ -2494,11 +2275,11 @@
             }
           },
           "400": {
-            "description": "Bad request",
+            "description": "Request could not be parsed, or the decision could not be made.",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/DeciderErrorResponse"
                 }
               }
             }
@@ -2539,6 +2320,16 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/DecidedGateway"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Request could not be parsed, or the decision could not be made.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeciderErrorResponse"
                 }
               }
             }
@@ -2682,7 +2473,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ApiErrorResponse"
                 }
               }
             }
@@ -2776,7 +2567,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ApiErrorResponse"
                 }
               }
             }
@@ -2842,7 +2633,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ApiErrorResponse"
                 }
               }
             }
@@ -3012,7 +2803,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
+                  "$ref": "#/components/schemas/ApiErrorResponse"
                 }
               }
             }
@@ -3320,16 +3111,6 @@
                     "$ref": "#/components/schemas/JsonifiedRoutingAlgorithm"
                   },
                   "description": "Active routing algorithms. Empty array when none is active."
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "No active rule",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorResponse"
                 }
               }
             }
@@ -4149,578 +3930,6 @@
         }
       }
     },
-    "/auth/change-password": {
-      "post": {
-        "operationId": "changePassword",
-        "tags": [
-          "Auth"
-        ],
-        "summary": "Change password",
-        "description": "Change the signed-in user's password. Requires the current password.",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ChangePasswordRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Password changed",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessageResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/auth/forgot-password": {
-      "post": {
-        "operationId": "forgotPassword",
-        "tags": [
-          "Auth"
-        ],
-        "summary": "Request password reset",
-        "description": "Send a password-reset email. Always returns success so the endpoint cannot be used to probe which emails are registered.",
-        "security": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ForgotPasswordRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Reset email dispatched (if the account exists)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessageResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/auth/reset-password": {
-      "post": {
-        "operationId": "resetPassword",
-        "tags": [
-          "Auth"
-        ],
-        "summary": "Reset password with token",
-        "description": "Complete a password reset using the token from the reset email.",
-        "security": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResetPasswordRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Password reset",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessageResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/auth/verify-email": {
-      "get": {
-        "operationId": "verifyEmail",
-        "tags": [
-          "Auth"
-        ],
-        "summary": "Verify email address",
-        "description": "Confirm an email address using the token from the verification email.",
-        "security": [],
-        "parameters": [
-          {
-            "name": "token",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Token from the verification email."
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Email verified",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MessageResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/auth/admin/merchant-token": {
-      "post": {
-        "operationId": "adminMerchantToken",
-        "tags": [
-          "Auth"
-        ],
-        "summary": "Mint merchant handoff code (admin)",
-        "description": "Server-to-server. Authenticates with the deployment's admin secret and returns a short-lived, single-use handoff code for a merchant. The code — never a session token — is what travels in a redirect URL; the browser redeems it via `/auth/admin/merchant-token/exchange`.",
-        "security": [
-          {
-            "AdminSecret": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/AdminMerchantTokenRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Handoff code",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AdminMerchantCodeResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/auth/admin/merchant-token/exchange": {
-      "post": {
-        "operationId": "exchangeMerchantToken",
-        "tags": [
-          "Auth"
-        ],
-        "summary": "Exchange handoff code for a session",
-        "description": "Redeem a single-use handoff code for a JWT session. Public by design: the code itself is the credential and is consumed on first use.",
-        "security": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ExchangeMerchantTokenRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Session token",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/AuthResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/merchant/members": {
-      "get": {
-        "operationId": "listMembers",
-        "tags": [
-          "Members"
-        ],
-        "summary": "List merchant members",
-        "description": "List the users attached to the caller's current merchant.",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Members",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/MemberInfo"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/merchant/members/invite": {
-      "post": {
-        "operationId": "inviteMember",
-        "tags": [
-          "Members"
-        ],
-        "summary": "Invite a member",
-        "description": "Add a user to the caller's current merchant. If the email has no account yet, one is created and a generated password is returned once.",
-        "security": [
-          {
-            "BearerAuth": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/InviteMemberRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Member invited",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/InviteMemberResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/routing/update": {
-      "post": {
-        "operationId": "updateRoutingRule",
-        "tags": [
-          "Routing Rules"
-        ],
-        "summary": "Update routing rule",
-        "description": "Replace a routing rule's name, description, and algorithm in place. The rule id is unchanged.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateRoutingConfigRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Updated rule record",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/RoutingDictionaryRecord"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/routing/delete": {
-      "post": {
-        "operationId": "deleteRoutingRule",
-        "tags": [
-          "Routing Rules"
-        ],
-        "summary": "Delete routing rule",
-        "description": "Delete a routing rule by id.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/DeleteRoutingConfigRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Rule deleted",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "additionalProperties": true,
-                  "description": "Deletion result."
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/config-sr-dimension/{merchant_id}": {
-      "get": {
-        "operationId": "getSrDimensions",
-        "tags": [
-          "Config"
-        ],
-        "summary": "Get SR dimension config",
-        "description": "Read the merchant's configured success-rate scoring dimensions.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchant_id",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "SR dimension config",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/SrDimensionConfigRequest"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/gsm/options": {
-      "get": {
-        "operationId": "gsmOptions",
-        "tags": [
-          "Config"
-        ],
-        "summary": "List gateway status map rules",
-        "description": "List the configured gateway status map (GSM) rules — the connector error codes the router recognises and what it does with each.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "GSM rules",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/GsmOptionsResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/gateway-score/reset": {
-      "post": {
-        "operationId": "resetGatewayScores",
-        "tags": [
-          "Score Feedback"
-        ],
-        "summary": "Reset gateway scores",
-        "description": "Flush the merchant's stored success-rate scores and any score overrides. The router relearns from subsequent traffic.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ResetGatewayScoresRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Scores reset",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ResetGatewayScoresResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/merchant-account/{merchantId}/features": {
-      "get": {
-        "operationId": "getMerchantFeatures",
-        "tags": [
-          "Merchant Account"
-        ],
-        "summary": "Get merchant feature flags",
-        "description": "List every known feature flag and whether it is enabled for this merchant.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Feature flags",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MerchantFeaturesResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/merchant-account/{merchantId}/features/{feature}": {
-      "post": {
-        "operationId": "updateMerchantFeature",
-        "tags": [
-          "Merchant Account"
-        ],
-        "summary": "Toggle a merchant feature flag",
-        "description": "Enable or disable one feature flag. Returns the merchant's full flag set.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          },
-          {
-            "name": "feature",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Feature slug.",
-            "example": "multi-objective-routing"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/UpdateFeatureRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Updated feature flags",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/MerchantFeaturesResponse"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/merchant-account/{merchantId}/connectors": {
       "get": {
         "operationId": "listConnectorCredentials",
@@ -4929,7 +4138,7 @@
     },
     "/merchant-account/{merchantId}/connectors/{connector}/fee-override": {
       "put": {
-        "operationId": "setConnectorFeeOverride",
+        "operationId": "setFeeOverride",
         "tags": [
           "Cost & Fees"
         ],
@@ -4985,49 +4194,6 @@
                 }
               }
             }
-          }
-        }
-      },
-      "delete": {
-        "operationId": "deleteConnectorFeeOverride",
-        "tags": [
-          "Cost & Fees"
-        ],
-        "summary": "Delete connector fee override",
-        "description": "Remove a connector fee override so the learned model applies again.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          },
-          {
-            "name": "connector",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Connector slug.",
-            "example": "adyen"
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Override deleted (no body)"
           }
         }
       }
@@ -5131,108 +4297,9 @@
         }
       }
     },
-    "/merchant-account/{merchantId}/cost-cluster-facets": {
-      "get": {
-        "operationId": "listCostClusterFacets",
-        "tags": [
-          "Cost & Fees"
-        ],
-        "summary": "List cost cluster facets",
-        "description": "Available filter values across the merchant's cost clusters, with transaction counts.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer"
-            },
-            "description": "Top-N cluster cap."
-          },
-          {
-            "name": "connector",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Scope to one ingested snapshot. Send with `account` and `report_date`."
-          },
-          {
-            "name": "account",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Connector-side account. Send with `connector` and `report_date`."
-          },
-          {
-            "name": "report_date",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Snapshot date, `YYYY-MM-DD`. Send with `connector` and `account`."
-          },
-          {
-            "name": "ingestion_id",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Narrow to one ingestion. Required for a per-upload view: two uploads on the same day under the same account share a snapshot."
-          },
-          {
-            "name": "order",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "`txns` ranks by transaction count; anything else (default) ranks by settled GMV."
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Cluster facets",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/ApiClusterFacet"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/merchant-account/{merchantId}/cost-clusters/{cluster_key}/fee-override": {
       "put": {
-        "operationId": "setClusterFeeOverride",
+        "operationId": "setClusterOverride",
         "tags": [
           "Cost & Fees"
         ],
@@ -5289,48 +4356,6 @@
             }
           }
         }
-      },
-      "delete": {
-        "operationId": "deleteClusterFeeOverride",
-        "tags": [
-          "Cost & Fees"
-        ],
-        "summary": "Delete cluster fee override",
-        "description": "Remove a cluster fee override so the learned model applies again.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          },
-          {
-            "name": "cluster_key",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Opaque cluster key."
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Override deleted (no body)"
-          }
-        }
       }
     },
     "/merchant-account/{merchantId}/cost-coverage": {
@@ -5368,668 +4393,6 @@
               "application/json": {
                 "schema": {
                   "$ref": "#/components/schemas/CoverageSummary"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/merchant-account/{merchantId}/seed-costs": {
-      "get": {
-        "operationId": "getSeedCosts",
-        "tags": [
-          "Cost & Fees"
-        ],
-        "summary": "Get seed costs",
-        "description": "Read the merchant's manually seeded cost table, used to price connectors before enough settlement data exists to learn from.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Seed cost rows",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SeedCostRow"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "operationId": "setSeedCosts",
-        "tags": [
-          "Cost & Fees"
-        ],
-        "summary": "Replace seed costs",
-        "description": "Replace the merchant's entire seed cost table. Returns the stored rows with `effective_pct_bps` computed.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SaveSeedCostsRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Stored seed cost rows",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SeedCostRow"
-                  }
-                }
-              }
-            }
-          }
-        }
-      },
-      "delete": {
-        "operationId": "deleteSeedCosts",
-        "tags": [
-          "Cost & Fees"
-        ],
-        "summary": "Delete seed costs",
-        "description": "Clear the merchant's seed cost table.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Remaining rows (empty)",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SeedCostRow"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/merchant-account/{merchantId}/seed-costs/simulate": {
-      "post": {
-        "operationId": "simulateSeedCosts",
-        "tags": [
-          "Cost & Fees"
-        ],
-        "summary": "Simulate seed costs",
-        "description": "Price a hypothetical transaction against the seed cost table for each PSP, without storing anything.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/SimulateSeedCostsRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Per-PSP simulated cost",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/SimulateSeedCostRow"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/merchant-account/{merchantId}/connectors/{connector}/report": {
-      "post": {
-        "operationId": "uploadSettlementReport",
-        "tags": [
-          "Cost Ingestion"
-        ],
-        "summary": "Upload a settlement report",
-        "description": "Upload a connector settlement report. The body is the raw report file, streamed to disk and parsed in batches, so multi-GB uploads are supported. Returns immediately with an ingestion id; parsing and fitting happen asynchronously.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          },
-          {
-            "name": "connector",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Connector slug.",
-            "example": "adyen"
-          },
-          {
-            "name": "account",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Connector-side account the report belongs to."
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "Ingestion queued",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadAccepted"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "type": "string",
-                "format": "binary"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/merchant-account/{merchantId}/connectors/{connector}/report/validate-headers": {
-      "post": {
-        "operationId": "validateReportHeaders",
-        "tags": [
-          "Cost Ingestion"
-        ],
-        "summary": "Validate report headers",
-        "description": "Header preflight. Post only the first few KB of the merchant's file to check it parses before committing to a large upload. A file that cannot satisfy the connector is still a successful call returning `ok: false`.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          },
-          {
-            "name": "connector",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Connector slug.",
-            "example": "adyen"
-          },
-          {
-            "name": "account",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "When given, the source's saved column mapping is applied to the check."
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Preflight verdict",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PreflightReport"
-                }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "type": "string",
-                "format": "binary"
-              }
-            }
-          }
-        }
-      }
-    },
-    "/merchant-account/{merchantId}/connectors/{connector}/report/preview": {
-      "post": {
-        "operationId": "previewColumnMapping",
-        "tags": [
-          "Cost Ingestion"
-        ],
-        "summary": "Preview a column mapping",
-        "description": "Show what the merchant's rows become under a candidate column mapping, so it can be eyeballed before saving.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          },
-          {
-            "name": "connector",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Connector slug.",
-            "example": "adyen"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ColumnMappingRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "Mapping preview",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/PreviewReport"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/merchant-account/{merchantId}/connectors/{connector}/report/column-mapping": {
-      "get": {
-        "operationId": "getColumnMapping",
-        "tags": [
-          "Cost Ingestion"
-        ],
-        "summary": "Get saved column mapping",
-        "description": "Read the saved column mapping applied to every future ingestion of this settlement source.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          },
-          {
-            "name": "connector",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Connector slug.",
-            "example": "adyen"
-          },
-          {
-            "name": "account",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Connector-side account."
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Saved mapping",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ColumnMapping"
-                }
-              }
-            }
-          }
-        }
-      },
-      "put": {
-        "operationId": "setColumnMapping",
-        "tags": [
-          "Cost Ingestion"
-        ],
-        "summary": "Save column mapping",
-        "description": "Save the column mapping applied to every future ingestion of this settlement source.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          },
-          {
-            "name": "connector",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Connector slug.",
-            "example": "adyen"
-          },
-          {
-            "name": "account",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Connector-side account."
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/ColumnMappingRequest"
-              }
-            }
-          }
-        },
-        "responses": {
-          "204": {
-            "description": "Mapping saved (no body)"
-          }
-        }
-      },
-      "delete": {
-        "operationId": "deleteColumnMapping",
-        "tags": [
-          "Cost Ingestion"
-        ],
-        "summary": "Delete column mapping",
-        "description": "Remove a settlement source's saved column mapping.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          },
-          {
-            "name": "connector",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Connector slug.",
-            "example": "adyen"
-          },
-          {
-            "name": "account",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Connector-side account."
-          }
-        ],
-        "responses": {
-          "204": {
-            "description": "Mapping deleted (no body)"
-          }
-        }
-      }
-    },
-    "/merchant-account/{merchantId}/connectors/{connector}/report/sample": {
-      "post": {
-        "operationId": "runSampleReport",
-        "tags": [
-          "Cost Ingestion"
-        ],
-        "summary": "Ingest the sample report",
-        "description": "Run a curated demo report through the ingestion pipeline, so a merchant without a report file can still exercise the flow.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          },
-          {
-            "name": "connector",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Connector slug.",
-            "example": "adyen"
-          }
-        ],
-        "responses": {
-          "202": {
-            "description": "Ingestion queued",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/UploadAccepted"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/cost-ingestion/connectors": {
-      "get": {
-        "operationId": "listIngestConnectors",
-        "tags": [
-          "Cost Ingestion"
-        ],
-        "summary": "List ingest-capable connectors",
-        "description": "Which connectors support settlement report ingestion, straight off the registry.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Connectors",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/IngestConnectorInfo"
-                  }
                 }
               }
             }
@@ -6171,14 +4534,14 @@
         }
       }
     },
-    "/merchant-account/{merchantId}/connectors/{connector}/invoice": {
-      "post": {
-        "operationId": "uploadInvoice",
+    "/merchant-account/{merchantId}/invoice-addons": {
+      "get": {
+        "operationId": "listInvoiceAddons",
         "tags": [
           "Cost Ingestion"
         ],
-        "summary": "Upload a connector invoice",
-        "description": "Upload a connector invoice. Invoices are small and processed synchronously, so the computed cost add-on is returned in the response.",
+        "summary": "List invoice add-ons",
+        "description": "List the invoice-derived cost add-ons stored per connector.",
         "security": [
           {
             "BearerAuth": []
@@ -6197,55 +4560,19 @@
             },
             "description": "Merchant account id.",
             "example": "merchant_demo"
-          },
-          {
-            "name": "connector",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Connector slug.",
-            "example": "adyen"
-          },
-          {
-            "name": "account",
-            "in": "query",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Connector-side account the invoice covers."
-          },
-          {
-            "name": "invoice_ref",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Invoice number, for idempotency and audit."
           }
         ],
         "responses": {
           "200": {
-            "description": "Computed cost add-on",
+            "description": "Invoice add-ons",
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/InvoiceUploadResponse"
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/AddonDto"
+                  }
                 }
-              }
-            }
-          }
-        },
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/octet-stream": {
-              "schema": {
-                "type": "string",
-                "format": "binary"
               }
             }
           }
@@ -6297,51 +4624,6 @@
         }
       }
     },
-    "/merchant-account/{merchantId}/invoice-addons": {
-      "get": {
-        "operationId": "listInvoiceAddons",
-        "tags": [
-          "Cost Ingestion"
-        ],
-        "summary": "List invoice add-ons",
-        "description": "List the invoice-derived cost add-ons stored per connector.",
-        "security": [
-          {
-            "BearerAuth": []
-          },
-          {
-            "ApiKeyAuth": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "merchantId",
-            "in": "path",
-            "required": true,
-            "schema": {
-              "type": "string"
-            },
-            "description": "Merchant account id.",
-            "example": "merchant_demo"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "Invoice add-ons",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/components/schemas/AddonDto"
-                  }
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/merchant-account/{merchantId}/invoice-reconciliation": {
       "get": {
         "operationId": "getInvoiceReconciliation",
@@ -6387,43 +4669,186 @@
         }
       }
     },
-    "/webhooks/settlement/{connector}": {
-      "post": {
-        "operationId": "settlementWebhook",
+    "/merchant-account/{merchantId}/features": {
+      "get": {
+        "operationId": "getMerchantFeatures",
         "tags": [
-          "Webhooks"
+          "Merchant Account"
         ],
-        "summary": "Settlement report webhook",
-        "description": "Inbound connector notification that a settlement report is ready. The caller authenticates with its own signature, verified against the stored webhook secret for the resolved account — not with a Decision Engine API key. The request is acknowledged immediately and the download, parse, and fit are deferred.",
-        "security": [],
+        "summary": "Get merchant feature flags",
+        "description": "List every known feature flag and whether it is enabled for this merchant.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
         "parameters": [
           {
-            "name": "connector",
+            "name": "merchantId",
             "in": "path",
             "required": true,
             "schema": {
               "type": "string"
             },
-            "description": "Connector slug.",
-            "example": "adyen"
+            "description": "Merchant account id.",
+            "example": "merchant_demo"
           }
         ],
         "responses": {
           "200": {
-            "description": "Acknowledged"
-          },
-          "401": {
-            "description": "Signature verification failed"
+            "description": "Feature flags",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantFeaturesResponse"
+                }
+              }
+            }
           }
-        },
+        }
+      }
+    },
+    "/merchant-account/{merchantId}/features/{feature}": {
+      "post": {
+        "operationId": "updateMerchantFeature",
+        "tags": [
+          "Merchant Account"
+        ],
+        "summary": "Toggle a merchant feature flag",
+        "description": "Enable or disable one feature flag. Returns the merchant's full flag set.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "merchantId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Merchant account id.",
+            "example": "merchant_demo"
+          },
+          {
+            "name": "feature",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Feature slug.",
+            "example": "multi-objective-routing"
+          }
+        ],
         "requestBody": {
           "required": true,
-          "description": "Connector-specific notification payload, verified by signature.",
           "content": {
             "application/json": {
               "schema": {
-                "type": "object",
-                "additionalProperties": true
+                "$ref": "#/components/schemas/UpdateFeatureRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Updated feature flags",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MerchantFeaturesResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/gateway-score/reset": {
+      "post": {
+        "operationId": "resetGatewayScores",
+        "tags": [
+          "Score Feedback"
+        ],
+        "summary": "Reset gateway scores",
+        "description": "Flush the merchant's stored success-rate scores and any score overrides. The router relearns from subsequent traffic.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetGatewayScoresRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Scores reset",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetGatewayScoresResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/config-sr-dimension/{merchant_id}": {
+      "get": {
+        "operationId": "getSrDimensions",
+        "tags": [
+          "Config"
+        ],
+        "summary": "Get SR dimension config",
+        "description": "Read the merchant's configured success-rate scoring dimensions.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "merchant_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Merchant account id.",
+            "example": "merchant_demo"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "SR dimension config",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SrDimensionConfigRequest"
+                }
               }
             }
           }
@@ -6459,17 +4884,6 @@
           "message": {
             "type": "string",
             "example": "Health is good"
-          }
-        }
-      },
-      "ErrorResponse": {
-        "type": "object",
-        "properties": {
-          "error": {
-            "type": "string"
-          },
-          "message": {
-            "type": "string"
           }
         }
       },
@@ -7304,30 +5718,6 @@
           }
         }
       },
-      "AuthRequest": {
-        "type": "object",
-        "required": [
-          "email",
-          "password"
-        ],
-        "properties": {
-          "email": {
-            "type": "string",
-            "example": "operator@example.com"
-          },
-          "password": {
-            "type": "string",
-            "example": "StrongPass#123"
-          },
-          "merchant_id": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "example": "merchant_demo"
-          }
-        }
-      },
       "AuthResponse": {
         "type": "object",
         "properties": {
@@ -7842,7 +6232,10 @@
           "txn_detail": {
             "type": "object",
             "required": [
-              "partitionKey"
+              "partitionKey",
+              "id",
+              "netAmount",
+              "currency"
             ],
             "properties": {
               "partitionKey": {
@@ -7851,15 +6244,30 @@
                   "null"
                 ],
                 "description": "Required key; may be null."
+              },
+              "id": {
+                "type": "string",
+                "example": "1",
+                "description": "Numeric string. Must be present and parse as an integer — the conversion unwraps the parsed value, so a missing or non-numeric id panics the handler instead of returning a 4xx."
+              },
+              "netAmount": {
+                "type": "number",
+                "format": "double",
+                "example": 1000.0
+              },
+              "currency": {
+                "type": "string",
+                "example": "USD"
               }
             },
-            "description": "Full internal transaction object. Note: `partitionKey` must be PRESENT in this object (it may be `null`). It is an `Option` field with a custom `deserialize_with` and no `serde(default)`, so serde requires the key even though the value is nullable.",
-            "additionalProperties": true
+            "additionalProperties": true,
+            "description": "Full internal transaction object."
           },
           "txn_card_info": {
             "type": "object",
             "required": [
-              "partitionKey"
+              "partitionKey",
+              "id"
             ],
             "properties": {
               "partitionKey": {
@@ -7868,10 +6276,23 @@
                   "null"
                 ],
                 "description": "Required key; may be null."
+              },
+              "id": {
+                "type": "string",
+                "example": "1",
+                "description": "Numeric string."
+              },
+              "txnId": {
+                "type": "string"
+              },
+              "txnDetailId": {
+                "type": "string",
+                "example": "1",
+                "description": "Numeric string."
               }
             },
-            "description": "Full internal card/payment-method object. Note: `partitionKey` must be PRESENT in this object (it may be `null`). It is an `Option` field with a custom `deserialize_with` and no `serde(default)`, so serde requires the key even though the value is nullable.",
-            "additionalProperties": true
+            "additionalProperties": true,
+            "description": "Full internal card/payment-method object."
           },
           "log_message": {
             "type": "string",
@@ -7905,7 +6326,7 @@
             }
           }
         },
-        "description": "Legacy score-feedback payload built from full internal transaction objects. This is NOT the `/update-gateway-score` shape. `txn_detail` and `txn_card_info` must each carry a `partitionKey` key (value may be null)."
+        "description": "Legacy score-feedback payload built from full internal transaction objects. This is NOT the `/update-gateway-score` shape. `txn_detail` and `txn_card_info` must each carry a `partitionKey` key (value may be null), and their `id` fields are numeric strings."
       },
       "SrDimensionConfigRequest": {
         "type": "object",
@@ -9445,1577 +7866,6 @@
           }
         }
       },
-      "ChangePasswordRequest": {
-        "type": "object",
-        "required": [
-          "current_password",
-          "new_password"
-        ],
-        "properties": {
-          "current_password": {
-            "type": "string"
-          },
-          "new_password": {
-            "type": "string"
-          }
-        }
-      },
-      "ForgotPasswordRequest": {
-        "type": "object",
-        "required": [
-          "email"
-        ],
-        "properties": {
-          "email": {
-            "type": "string",
-            "example": "operator@example.com"
-          }
-        }
-      },
-      "ResetPasswordRequest": {
-        "type": "object",
-        "required": [
-          "token",
-          "new_password"
-        ],
-        "properties": {
-          "token": {
-            "type": "string",
-            "description": "Token from the password-reset email."
-          },
-          "new_password": {
-            "type": "string"
-          }
-        }
-      },
-      "AdminMerchantTokenRequest": {
-        "type": "object",
-        "required": [
-          "merchant_id"
-        ],
-        "properties": {
-          "merchant_id": {
-            "type": "string",
-            "example": "merchant_demo"
-          }
-        }
-      },
-      "AdminMerchantCodeResponse": {
-        "type": "object",
-        "properties": {
-          "code": {
-            "type": "string",
-            "description": "Single-use handoff code. Redeem via /auth/admin/merchant-token/exchange."
-          },
-          "expires_in": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Seconds until the code expires."
-          }
-        }
-      },
-      "ExchangeMerchantTokenRequest": {
-        "type": "object",
-        "required": [
-          "code"
-        ],
-        "properties": {
-          "code": {
-            "type": "string"
-          }
-        }
-      },
-      "MemberInfo": {
-        "type": "object",
-        "properties": {
-          "user_id": {
-            "type": "string"
-          },
-          "email": {
-            "type": "string"
-          },
-          "role": {
-            "type": "string",
-            "example": "admin"
-          }
-        }
-      },
-      "InviteMemberRequest": {
-        "type": "object",
-        "required": [
-          "email"
-        ],
-        "properties": {
-          "email": {
-            "type": "string"
-          },
-          "role": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "example": "member",
-            "description": "Defaults to `member`."
-          }
-        }
-      },
-      "InviteMemberResponse": {
-        "type": "object",
-        "properties": {
-          "email": {
-            "type": "string"
-          },
-          "is_new_user": {
-            "type": "boolean"
-          },
-          "password": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Generated password. Present only when a new user was created."
-          },
-          "role": {
-            "type": "string"
-          }
-        }
-      },
-      "UpdateRoutingConfigRequest": {
-        "type": "object",
-        "required": [
-          "created_by",
-          "routing_algorithm_id",
-          "name",
-          "algorithm"
-        ],
-        "properties": {
-          "created_by": {
-            "type": "string",
-            "example": "merchant_demo"
-          },
-          "routing_algorithm_id": {
-            "type": "string",
-            "example": "routing_e641380c-6f24-4405-8454-5ae6cbceb7a0"
-          },
-          "name": {
-            "type": "string",
-            "example": "priority rule"
-          },
-          "description": {
-            "type": "string",
-            "default": "",
-            "example": "try stripe before adyen"
-          },
-          "algorithm": {
-            "$ref": "#/components/schemas/RoutingAlgorithm"
-          },
-          "metadata": {
-            "type": [
-              "object",
-              "null"
-            ],
-            "description": "Free-form metadata stored with the rule."
-          }
-        }
-      },
-      "DeleteRoutingConfigRequest": {
-        "type": "object",
-        "required": [
-          "created_by",
-          "routing_algorithm_id"
-        ],
-        "properties": {
-          "created_by": {
-            "type": "string",
-            "example": "merchant_demo"
-          },
-          "routing_algorithm_id": {
-            "type": "string",
-            "example": "routing_e641380c-6f24-4405-8454-5ae6cbceb7a0"
-          }
-        }
-      },
-      "GsmOptionRow": {
-        "type": "object",
-        "properties": {
-          "connector": {
-            "type": "string",
-            "example": "stripe"
-          },
-          "flow": {
-            "type": "string",
-            "example": "authorize"
-          },
-          "subFlow": {
-            "type": "string",
-            "example": "card"
-          },
-          "errorCode": {
-            "type": "string",
-            "example": "card_declined"
-          },
-          "errorMessage": {
-            "type": "string",
-            "example": "Your card was declined."
-          },
-          "errorCategory": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "example": "soft_decline"
-          },
-          "unifiedCode": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "example": "UE_001"
-          },
-          "unifiedMessage": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "example": "Card declined by issuer"
-          },
-          "decision": {
-            "type": "string",
-            "example": "retry",
-            "description": "What the router does for this error."
-          }
-        }
-      },
-      "GsmOptionsResponse": {
-        "type": "object",
-        "properties": {
-          "rules": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/GsmOptionRow"
-            }
-          }
-        }
-      },
-      "ResetGatewayScoresRequest": {
-        "type": "object",
-        "required": [
-          "merchant_id"
-        ],
-        "properties": {
-          "merchant_id": {
-            "type": "string",
-            "example": "merchant_demo",
-            "description": "Also accepted as `merchantId`."
-          }
-        }
-      },
-      "ResetGatewayScoresResponse": {
-        "type": "object",
-        "properties": {
-          "merchant_id": {
-            "type": "string"
-          },
-          "deleted_keys": {
-            "type": "integer"
-          },
-          "removed_overrides": {
-            "type": "integer"
-          }
-        }
-      },
-      "MerchantFeatureEntry": {
-        "type": "object",
-        "properties": {
-          "feature": {
-            "type": "string",
-            "enum": [
-              "gsm-scoring-filter",
-              "explore-exploit-srv3",
-              "ab-test-real-payments",
-              "multi-objective-routing",
-              "elimination",
-              "auto-calibration",
-              "autopilot"
-            ]
-          },
-          "enabled": {
-            "type": "boolean"
-          }
-        }
-      },
-      "MerchantFeaturesResponse": {
-        "type": "object",
-        "properties": {
-          "merchant_id": {
-            "type": "string"
-          },
-          "features": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/MerchantFeatureEntry"
-            }
-          }
-        }
-      },
-      "UpdateFeatureRequest": {
-        "type": "object",
-        "required": [
-          "enabled"
-        ],
-        "properties": {
-          "enabled": {
-            "type": "boolean"
-          }
-        }
-      },
-      "MaskedSource": {
-        "type": "object",
-        "properties": {
-          "connector": {
-            "type": "string",
-            "example": "adyen"
-          },
-          "account": {
-            "type": "string",
-            "description": "Connector-side account, e.g. Adyen `merchantAccountCode`."
-          },
-          "webhook_secret_hint": {
-            "type": "string",
-            "example": "••••a3f9",
-            "description": "`—` when no credential blob is stored or decryptable."
-          },
-          "download_auth_hint": {
-            "type": "string",
-            "example": "reportuser:••••"
-          }
-        },
-        "description": "Connector credentials with secrets masked. Secrets are never returned in full."
-      },
-      "SetCredentialsRequest": {
-        "type": "object",
-        "required": [
-          "account",
-          "webhook_secret",
-          "download_auth"
-        ],
-        "properties": {
-          "account": {
-            "type": "string",
-            "description": "Connector-side account, e.g. Adyen `merchantAccountCode`."
-          },
-          "webhook_secret": {
-            "type": "string",
-            "description": "Secret used to verify inbound webhook signatures."
-          },
-          "download_auth": {
-            "type": "string",
-            "description": "Report-download credential: either Basic auth as `user:password`, or a Report Service API key on its own (sent as `X-API-Key`)."
-          }
-        }
-      },
-      "SetCredentialsResponse": {
-        "type": "object",
-        "properties": {
-          "merchant_id": {
-            "type": "string"
-          },
-          "connector": {
-            "type": "string"
-          },
-          "account": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          }
-        }
-      },
-      "ConnectorFee": {
-        "type": "object",
-        "properties": {
-          "connector": {
-            "type": "string"
-          },
-          "account": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "First configured connector-side account, when credentials are set."
-          },
-          "has_credentials": {
-            "type": "boolean"
-          },
-          "model_pct_bps": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double",
-            "description": "Model-derived blended fee, volume-weighted over GOOD clusters."
-          },
-          "model_fixed": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "good_gross": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "override_pct_bps": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double",
-            "description": "Manual override, when set."
-          },
-          "override_fixed": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "override_updated_at": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "effective_pct_bps": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double",
-            "description": "The fee actually used at decide time."
-          },
-          "effective_fixed": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "source": {
-            "type": "string",
-            "enum": [
-              "override",
-              "model",
-              "none"
-            ]
-          }
-        }
-      },
-      "SetFeeOverrideRequest": {
-        "type": "object",
-        "required": [
-          "pct_bps",
-          "fixed"
-        ],
-        "properties": {
-          "pct_bps": {
-            "type": "number",
-            "format": "double"
-          },
-          "fixed": {
-            "type": "number",
-            "format": "double"
-          }
-        }
-      },
-      "FeeOverrideResponse": {
-        "type": "object",
-        "properties": {
-          "merchant_id": {
-            "type": "string"
-          },
-          "connector": {
-            "type": "string"
-          },
-          "pct_bps": {
-            "type": "number",
-            "format": "double"
-          },
-          "fixed": {
-            "type": "number",
-            "format": "double"
-          },
-          "updated_at": {
-            "type": "string"
-          }
-        }
-      },
-      "ApiClusterSegment": {
-        "type": "object",
-        "properties": {
-          "seg_idx": {
-            "type": "integer"
-          },
-          "lo": {
-            "type": "number",
-            "format": "double",
-            "description": "Inclusive lower bound of the amount range this piece prices."
-          },
-          "hi": {
-            "type": "number",
-            "format": "double",
-            "description": "Exclusive upper bound."
-          },
-          "pct_bps": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "fixed": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "bps_rmse": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "n": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "gross_sum": {
-            "type": "number",
-            "format": "double"
-          },
-          "verdict": {
-            "type": "string",
-            "enum": [
-              "GOOD",
-              "THIN",
-              "NON_LINEAR"
-            ]
-          }
-        }
-      },
-      "ClusterFee": {
-        "type": "object",
-        "properties": {
-          "key": {
-            "type": "string",
-            "description": "Opaque cluster key, used in the override PUT/DELETE path."
-          },
-          "connector": {
-            "type": "string"
-          },
-          "card_network": {
-            "type": "string"
-          },
-          "variant": {
-            "type": "string"
-          },
-          "funding": {
-            "type": "string"
-          },
-          "issuer_country": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "ic_category": {
-            "type": "string"
-          },
-          "n": {
-            "type": "integer",
-            "format": "int64",
-            "description": "Transaction count; 0 for an override-only cluster no longer in the top set."
-          },
-          "gross_sum": {
-            "type": "number",
-            "format": "double"
-          },
-          "model_pct_bps": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "model_fixed": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "override_pct_bps": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "override_fixed": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "override_updated_at": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "effective_pct_bps": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double",
-            "description": "Null when the cluster has no usable rate at all."
-          },
-          "effective_fixed": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "source": {
-            "type": "string",
-            "enum": [
-              "override",
-              "model",
-              "segmented"
-            ]
-          },
-          "verdict": {
-            "type": "string",
-            "description": "`GOOD`, `THIN`, `NON_LINEAR`, or `\"\"` for an override-only cluster. A non-GOOD rate is shown so it can be corrected — it is not what the router trusts."
-          },
-          "card_product": {
-            "type": "string",
-            "description": "Issuer BIN's dominant interchange rate as integer bps (`\"115\"`), or `\"\"` when the report carried no PAN."
-          },
-          "segments": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ApiClusterSegment"
-            },
-            "description": "Recovered per-segment rates for a capped/tiered cluster. Empty for an ordinary GOOD cluster."
-          }
-        }
-      },
-      "ApiClusterFacet": {
-        "type": "object",
-        "properties": {
-          "dim": {
-            "type": "string"
-          },
-          "value": {
-            "type": "string"
-          },
-          "txns": {
-            "type": "integer",
-            "format": "int64"
-          }
-        }
-      },
-      "SetClusterOverrideRequest": {
-        "type": "object",
-        "required": [
-          "pct_bps",
-          "fixed"
-        ],
-        "properties": {
-          "pct_bps": {
-            "type": "number",
-            "format": "double"
-          },
-          "fixed": {
-            "type": "number",
-            "format": "double"
-          }
-        }
-      },
-      "ClusterOverride": {
-        "type": "object",
-        "properties": {
-          "connector": {
-            "type": "string"
-          },
-          "card_network": {
-            "type": "string"
-          },
-          "variant": {
-            "type": "string"
-          },
-          "funding": {
-            "type": "string"
-          },
-          "issuer_country": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "ic_category": {
-            "type": "string"
-          },
-          "pct_bps": {
-            "type": "number",
-            "format": "double"
-          },
-          "fixed": {
-            "type": "number",
-            "format": "double"
-          },
-          "updated_at": {
-            "type": "string"
-          }
-        },
-        "description": "Cluster dimensions are flattened into this object alongside the override values."
-      },
-      "CoverageSummary": {
-        "type": "object",
-        "properties": {
-          "total_clusters": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "good_clusters": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "tiered_clusters": {
-            "type": "integer",
-            "format": "int64",
-            "description": "One line can't price it, but its recovered amount tiers can."
-          },
-          "thin_clusters": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "non_linear_clusters": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "total_txns": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "good_txns": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "tiered_txns": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "thin_txns": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "non_linear_txns": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "good_txn_pct": {
-            "type": "number",
-            "format": "double",
-            "description": "Share of transactions with a trustworthy single-line model."
-          },
-          "priced_txn_pct": {
-            "type": "number",
-            "format": "double",
-            "description": "Share of transactions the router can price: GOOD plus TIERED."
-          },
-          "total_gross": {
-            "type": "number",
-            "format": "double"
-          },
-          "good_gross": {
-            "type": "number",
-            "format": "double"
-          },
-          "tiered_gross": {
-            "type": "number",
-            "format": "double"
-          },
-          "thin_gross": {
-            "type": "number",
-            "format": "double"
-          },
-          "non_linear_gross": {
-            "type": "number",
-            "format": "double"
-          },
-          "good_gross_pct": {
-            "type": "number",
-            "format": "double"
-          },
-          "priced_gross_pct": {
-            "type": "number",
-            "format": "double",
-            "description": "Share of settled volume the router can price. The real coverage headline."
-          },
-          "bps_rmse_p50": {
-            "type": "number",
-            "format": "double"
-          },
-          "bps_rmse_p90": {
-            "type": "number",
-            "format": "double"
-          },
-          "report_date": {
-            "type": "string",
-            "example": "2026-04-26",
-            "description": "Snapshot these numbers are from."
-          }
-        }
-      },
-      "SeedCostRow": {
-        "type": "object",
-        "required": [
-          "psp",
-          "interchange_bps",
-          "scheme_bps",
-          "markup_bps",
-          "fixed"
-        ],
-        "properties": {
-          "psp": {
-            "type": "string",
-            "example": "stripe"
-          },
-          "card_network": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "payment_method_type": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "card_type": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "transaction_currency": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "card_issuing_country": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "interchange_bps": {
-            "type": "number",
-            "format": "double"
-          },
-          "scheme_bps": {
-            "type": "number",
-            "format": "double"
-          },
-          "markup_bps": {
-            "type": "number",
-            "format": "double"
-          },
-          "fixed": {
-            "type": "number",
-            "format": "double"
-          },
-          "label": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "example_amount": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "is_default": {
-            "type": "boolean",
-            "description": "True for the PSP's fallback row (no matching dimensions)."
-          },
-          "effective_pct_bps": {
-            "type": "number",
-            "format": "double",
-            "description": "Output only. interchange + scheme + markup."
-          }
-        }
-      },
-      "SaveSeedCostsRequest": {
-        "type": "object",
-        "required": [
-          "rows"
-        ],
-        "properties": {
-          "rows": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/SeedCostRow"
-            }
-          }
-        }
-      },
-      "SimulateSeedCostsRequest": {
-        "type": "object",
-        "required": [
-          "amount"
-        ],
-        "properties": {
-          "amount": {
-            "type": "number",
-            "format": "double",
-            "example": 1000
-          },
-          "transaction_currency": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "card_network": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "payment_method_type": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "card_type": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "card_issuing_country": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "psps": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "PSPs to price. Empty means every PSP in the merchant's table."
-          }
-        }
-      },
-      "SimulateSeedCostRow": {
-        "type": "object",
-        "properties": {
-          "psp": {
-            "type": "string"
-          },
-          "interchange_bps": {
-            "type": "number",
-            "format": "double"
-          },
-          "scheme_bps": {
-            "type": "number",
-            "format": "double"
-          },
-          "markup_bps": {
-            "type": "number",
-            "format": "double"
-          },
-          "fixed": {
-            "type": "number",
-            "format": "double"
-          },
-          "effective_pct_bps": {
-            "type": "number",
-            "format": "double",
-            "description": "interchange + scheme + markup."
-          },
-          "effective_cost_bps": {
-            "type": "number",
-            "format": "double",
-            "description": "All-in rate at this amount = pct + fixed/amount x 10000."
-          },
-          "cost_amount": {
-            "type": "number",
-            "format": "double",
-            "description": "Absolute cost in the transaction currency at this amount."
-          }
-        }
-      },
-      "UploadAccepted": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string",
-            "example": "queued"
-          }
-        }
-      },
-      "IngestionDto": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string"
-          },
-          "connector": {
-            "type": "string"
-          },
-          "account": {
-            "type": "string"
-          },
-          "source": {
-            "type": "string"
-          },
-          "status": {
-            "type": "string"
-          },
-          "staged_rows": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "report_date": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "period_start": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "period_end": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "currency_count": {
-            "type": "integer"
-          },
-          "currencies": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "country_count": {
-            "type": "integer"
-          },
-          "countries": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "total_gross": {
-            "type": "number",
-            "format": "double"
-          },
-          "total_clusters": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "good_clusters": {
-            "type": "integer",
-            "format": "int64"
-          },
-          "last_error": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "created_at": {
-            "type": "string"
-          }
-        }
-      },
-      "PriceChange": {
-        "type": "object",
-        "properties": {
-          "connector": {
-            "type": "string"
-          },
-          "account": {
-            "type": "string"
-          },
-          "card_network": {
-            "type": "string"
-          },
-          "variant": {
-            "type": "string"
-          },
-          "funding": {
-            "type": "string"
-          },
-          "issuer_country": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "ic_category": {
-            "type": "string"
-          },
-          "old_pct_bps": {
-            "type": "number",
-            "format": "double"
-          },
-          "new_pct_bps": {
-            "type": "number",
-            "format": "double"
-          },
-          "old_fixed": {
-            "type": "number",
-            "format": "double"
-          },
-          "new_fixed": {
-            "type": "number",
-            "format": "double"
-          },
-          "changed_on": {
-            "type": "string",
-            "description": "Snapshot date the new price first appeared."
-          }
-        }
-      },
-      "IngestConnectorInfo": {
-        "type": "object",
-        "properties": {
-          "id": {
-            "type": "string",
-            "example": "adyen"
-          },
-          "pull": {
-            "type": "boolean",
-            "description": "Whether this connector supports polling its reporting API, as opposed to upload-only."
-          }
-        }
-      },
-      "PreflightSuggestion": {
-        "type": "object",
-        "properties": {
-          "connector": {
-            "type": "string"
-          },
-          "matched_required": {
-            "type": "integer"
-          }
-        }
-      },
-      "PreflightReport": {
-        "type": "object",
-        "properties": {
-          "connector": {
-            "type": "string"
-          },
-          "ok": {
-            "type": "boolean",
-            "description": "Whether the header satisfies every required column."
-          },
-          "missing": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Required labels absent from the file. Empty when `ok`."
-          },
-          "matched": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "required": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "optional": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            }
-          },
-          "optional_missing": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Optional labels the file lacks. Never fails an ingestion, but their absence silently degrades the fitted model."
-          },
-          "found": {
-            "type": "array",
-            "items": {
-              "type": "string"
-            },
-            "description": "Header labels the file actually carried."
-          },
-          "suggested_connectors": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PreflightSuggestion"
-            },
-            "description": "Better-fitting connectors, best first. Populated only when the selected one rejected the file."
-          }
-        }
-      },
-      "PreviewRow": {
-        "type": "object",
-        "properties": {
-          "card_network": {
-            "type": "string"
-          },
-          "variant": {
-            "type": "string"
-          },
-          "funding": {
-            "type": "string"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "issuer_country": {
-            "type": "string"
-          },
-          "gross": {
-            "type": "number",
-            "format": "double"
-          },
-          "total_fee": {
-            "type": "number",
-            "format": "double"
-          },
-          "effective_pct": {
-            "type": "number",
-            "format": "double",
-            "description": "`total_fee` as a percentage of `gross` — the most diagnostic number for a wrong mapping."
-          },
-          "interchange": {
-            "type": "number",
-            "format": "double"
-          },
-          "scheme_fee": {
-            "type": "number",
-            "format": "double"
-          },
-          "markup": {
-            "type": "number",
-            "format": "double"
-          },
-          "commission": {
-            "type": "number",
-            "format": "double"
-          }
-        }
-      },
-      "PreviewReport": {
-        "type": "object",
-        "properties": {
-          "rows": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/PreviewRow"
-            },
-            "description": "Rows the mapping produced. Empty means it parsed but matched no fee-bearing rows."
-          },
-          "median_effective_pct": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "warning": {
-            "type": [
-              "string",
-              "null"
-            ],
-            "description": "Advisory when the numbers do not look like card processing at all."
-          }
-        }
-      },
-      "ColumnMappingRequest": {
-        "type": "object",
-        "required": [
-          "columns"
-        ],
-        "properties": {
-          "columns": {
-            "type": "object",
-            "description": "Expected label -> the merchant's label.",
-            "additionalProperties": {
-              "type": "string"
-            }
-          },
-          "sample": {
-            "type": "string",
-            "default": "",
-            "description": "Leading bytes of the merchant's report, as text."
-          },
-          "truncated": {
-            "type": "boolean",
-            "default": false,
-            "description": "Whether `sample` is the head of a larger file rather than a whole small one."
-          }
-        }
-      },
-      "ColumnMapping": {
-        "type": "object",
-        "properties": {
-          "columns": {
-            "type": "object",
-            "additionalProperties": {
-              "type": "string"
-            }
-          }
-        },
-        "description": "A settlement source's saved column mapping."
-      },
-      "InvoiceLineDto": {
-        "type": "object",
-        "properties": {
-          "description": {
-            "type": "string"
-          },
-          "kind": {
-            "type": "string",
-            "enum": [
-              "flat_per_txn",
-              "periodic",
-              "credit",
-              "already_modeled",
-              "volume"
-            ]
-          },
-          "added": {
-            "type": "boolean",
-            "description": "Whether this fee is added to the model, as opposed to ignored because it is already modeled."
-          },
-          "amount": {
-            "type": "number",
-            "format": "double",
-            "description": "Total on the invoice for this fee type."
-          },
-          "per_txn": {
-            "type": "number",
-            "format": "double",
-            "description": "Amortized contribution per transaction. 0 for ignored lines."
-          }
-        }
-      },
-      "InvoiceUploadResponse": {
-        "type": "object",
-        "properties": {
-          "merchant_id": {
-            "type": "string"
-          },
-          "connector": {
-            "type": "string"
-          },
-          "account": {
-            "type": "string"
-          },
-          "pct_addon_bps": {
-            "type": "number",
-            "format": "double",
-            "description": "Amortized periodic-fee rate added to every learned cluster's `pct_bps`."
-          },
-          "fixed_addon": {
-            "type": "number",
-            "format": "double",
-            "description": "Flat per-transaction fee added to every learned cluster's `fixed`."
-          },
-          "total_addon_per_txn": {
-            "type": "number",
-            "format": "double",
-            "description": "Total additional fee applied per transaction for this connector account."
-          },
-          "subtotal_ex_tax": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "card_volume": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "txn_count": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "lines": {
-            "type": "integer"
-          },
-          "breakdown": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/InvoiceLineDto"
-            }
-          }
-        }
-      },
-      "StoredAddon": {
-        "type": "object",
-        "properties": {
-          "pct_addon_bps": {
-            "type": "number",
-            "format": "double"
-          },
-          "fixed_addon": {
-            "type": "number",
-            "format": "double"
-          },
-          "invoice_ref": {
-            "type": "string"
-          },
-          "subtotal_ex_tax": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "card_volume": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "format": "double"
-          },
-          "txn_count": {
-            "type": [
-              "integer",
-              "null"
-            ],
-            "format": "int64"
-          },
-          "currency": {
-            "type": "string"
-          },
-          "period_start": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "period_end": {
-            "type": [
-              "string",
-              "null"
-            ]
-          },
-          "updated_at": {
-            "type": "string"
-          }
-        }
-      },
-      "AddonDto": {
-        "allOf": [
-          {
-            "type": "object",
-            "properties": {
-              "connector": {
-                "type": "string"
-              }
-            }
-          },
-          {
-            "$ref": "#/components/schemas/StoredAddon"
-          }
-        ],
-        "description": "A connector's stored invoice add-on. The add-on fields are flattened alongside `connector`."
-      },
-      "InvoiceReconciliation": {
-        "type": "object",
-        "properties": {
-          "connector": {
-            "type": "string"
-          },
-          "invoice_subtotal": {
-            "type": "number",
-            "format": "double",
-            "description": "Invoice subtotal excluding taxes — the true all-in cost."
-          },
-          "model_captured": {
-            "type": "number",
-            "format": "double",
-            "description": "What the fit alone captured over the settled book."
-          },
-          "addon_contribution": {
-            "type": "number",
-            "format": "double"
-          },
-          "model_all_in": {
-            "type": "number",
-            "format": "double",
-            "description": "`model_captured + addon_contribution`."
-          },
-          "residual": {
-            "type": "number",
-            "format": "double",
-            "description": "`invoice_subtotal - model_all_in`. Positive means still under-counting."
-          },
-          "coverage_before": {
-            "type": "number",
-            "format": "double"
-          },
-          "coverage_after": {
-            "type": "number",
-            "format": "double"
-          }
-        }
-      },
       "AnalyticsAvailableCurrency": {
         "type": "object",
         "properties": {
@@ -11419,6 +8269,942 @@
             }
           }
         }
+      },
+      "AddonDto": {
+        "allOf": [
+          {
+            "type": "object",
+            "properties": {
+              "connector": {
+                "type": "string"
+              }
+            }
+          },
+          {
+            "$ref": "#/components/schemas/StoredAddon"
+          }
+        ],
+        "description": "A connector's stored invoice add-on. The add-on fields are flattened alongside `connector`."
+      },
+      "ApiClusterSegment": {
+        "type": "object",
+        "properties": {
+          "seg_idx": {
+            "type": "integer"
+          },
+          "lo": {
+            "type": "number",
+            "format": "double",
+            "description": "Inclusive lower bound of the amount range this piece prices."
+          },
+          "hi": {
+            "type": "number",
+            "format": "double",
+            "description": "Exclusive upper bound."
+          },
+          "pct_bps": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "fixed": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "bps_rmse": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "n": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "gross_sum": {
+            "type": "number",
+            "format": "double"
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "GOOD",
+              "THIN",
+              "NON_LINEAR"
+            ]
+          }
+        }
+      },
+      "ClusterFee": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string",
+            "description": "Opaque cluster key, used in the override PUT/DELETE path."
+          },
+          "connector": {
+            "type": "string"
+          },
+          "card_network": {
+            "type": "string"
+          },
+          "variant": {
+            "type": "string"
+          },
+          "funding": {
+            "type": "string"
+          },
+          "issuer_country": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "ic_category": {
+            "type": "string"
+          },
+          "n": {
+            "type": "integer",
+            "format": "int64",
+            "description": "Transaction count; 0 for an override-only cluster no longer in the top set."
+          },
+          "gross_sum": {
+            "type": "number",
+            "format": "double"
+          },
+          "model_pct_bps": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "model_fixed": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "override_pct_bps": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "override_fixed": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "override_updated_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "effective_pct_bps": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Null when the cluster has no usable rate at all."
+          },
+          "effective_fixed": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "override",
+              "model",
+              "segmented"
+            ]
+          },
+          "verdict": {
+            "type": "string",
+            "description": "`GOOD`, `THIN`, `NON_LINEAR`, or `\"\"` for an override-only cluster. A non-GOOD rate is shown so it can be corrected — it is not what the router trusts."
+          },
+          "card_product": {
+            "type": "string",
+            "description": "Issuer BIN's dominant interchange rate as integer bps (`\"115\"`), or `\"\"` when the report carried no PAN."
+          },
+          "segments": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ApiClusterSegment"
+            },
+            "description": "Recovered per-segment rates for a capped/tiered cluster. Empty for an ordinary GOOD cluster."
+          }
+        }
+      },
+      "ClusterOverride": {
+        "type": "object",
+        "properties": {
+          "connector": {
+            "type": "string"
+          },
+          "card_network": {
+            "type": "string"
+          },
+          "variant": {
+            "type": "string"
+          },
+          "funding": {
+            "type": "string"
+          },
+          "issuer_country": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "ic_category": {
+            "type": "string"
+          },
+          "pct_bps": {
+            "type": "number",
+            "format": "double"
+          },
+          "fixed": {
+            "type": "number",
+            "format": "double"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        },
+        "description": "Cluster dimensions are flattened into this object alongside the override values."
+      },
+      "ConnectorFee": {
+        "type": "object",
+        "properties": {
+          "connector": {
+            "type": "string"
+          },
+          "account": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "First configured connector-side account, when credentials are set."
+          },
+          "has_credentials": {
+            "type": "boolean"
+          },
+          "model_pct_bps": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Model-derived blended fee, volume-weighted over GOOD clusters."
+          },
+          "model_fixed": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "good_gross": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "override_pct_bps": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Manual override, when set."
+          },
+          "override_fixed": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "override_updated_at": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "effective_pct_bps": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "The fee actually used at decide time."
+          },
+          "effective_fixed": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "override",
+              "model",
+              "none"
+            ]
+          }
+        }
+      },
+      "CoverageSummary": {
+        "type": "object",
+        "properties": {
+          "total_clusters": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "good_clusters": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tiered_clusters": {
+            "type": "integer",
+            "format": "int64",
+            "description": "One line can't price it, but its recovered amount tiers can."
+          },
+          "thin_clusters": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "non_linear_clusters": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "total_txns": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "good_txns": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "tiered_txns": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "thin_txns": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "non_linear_txns": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "good_txn_pct": {
+            "type": "number",
+            "format": "double",
+            "description": "Share of transactions with a trustworthy single-line model."
+          },
+          "priced_txn_pct": {
+            "type": "number",
+            "format": "double",
+            "description": "Share of transactions the router can price: GOOD plus TIERED."
+          },
+          "total_gross": {
+            "type": "number",
+            "format": "double"
+          },
+          "good_gross": {
+            "type": "number",
+            "format": "double"
+          },
+          "tiered_gross": {
+            "type": "number",
+            "format": "double"
+          },
+          "thin_gross": {
+            "type": "number",
+            "format": "double"
+          },
+          "non_linear_gross": {
+            "type": "number",
+            "format": "double"
+          },
+          "good_gross_pct": {
+            "type": "number",
+            "format": "double"
+          },
+          "priced_gross_pct": {
+            "type": "number",
+            "format": "double",
+            "description": "Share of settled volume the router can price. The real coverage headline."
+          },
+          "bps_rmse_p50": {
+            "type": "number",
+            "format": "double"
+          },
+          "bps_rmse_p90": {
+            "type": "number",
+            "format": "double"
+          },
+          "report_date": {
+            "type": "string",
+            "example": "2026-04-26",
+            "description": "Snapshot these numbers are from."
+          }
+        }
+      },
+      "FeeOverrideResponse": {
+        "type": "object",
+        "properties": {
+          "merchant_id": {
+            "type": "string"
+          },
+          "connector": {
+            "type": "string"
+          },
+          "pct_bps": {
+            "type": "number",
+            "format": "double"
+          },
+          "fixed": {
+            "type": "number",
+            "format": "double"
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "IngestionDto": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "connector": {
+            "type": "string"
+          },
+          "account": {
+            "type": "string"
+          },
+          "source": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "staged_rows": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "report_date": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "period_start": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "period_end": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "currency_count": {
+            "type": "integer"
+          },
+          "currencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "country_count": {
+            "type": "integer"
+          },
+          "countries": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "total_gross": {
+            "type": "number",
+            "format": "double"
+          },
+          "total_clusters": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "good_clusters": {
+            "type": "integer",
+            "format": "int64"
+          },
+          "last_error": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "created_at": {
+            "type": "string"
+          }
+        }
+      },
+      "InvoiceReconciliation": {
+        "type": "object",
+        "properties": {
+          "connector": {
+            "type": "string"
+          },
+          "invoice_subtotal": {
+            "type": "number",
+            "format": "double",
+            "description": "Invoice subtotal excluding taxes — the true all-in cost."
+          },
+          "model_captured": {
+            "type": "number",
+            "format": "double",
+            "description": "What the fit alone captured over the settled book."
+          },
+          "addon_contribution": {
+            "type": "number",
+            "format": "double"
+          },
+          "model_all_in": {
+            "type": "number",
+            "format": "double",
+            "description": "`model_captured + addon_contribution`."
+          },
+          "residual": {
+            "type": "number",
+            "format": "double",
+            "description": "`invoice_subtotal - model_all_in`. Positive means still under-counting."
+          },
+          "coverage_before": {
+            "type": "number",
+            "format": "double"
+          },
+          "coverage_after": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "MaskedSource": {
+        "type": "object",
+        "properties": {
+          "connector": {
+            "type": "string",
+            "example": "adyen"
+          },
+          "account": {
+            "type": "string",
+            "description": "Connector-side account, e.g. Adyen `merchantAccountCode`."
+          },
+          "webhook_secret_hint": {
+            "type": "string",
+            "example": "••••a3f9",
+            "description": "`—` when no credential blob is stored or decryptable."
+          },
+          "download_auth_hint": {
+            "type": "string",
+            "example": "reportuser:••••"
+          }
+        },
+        "description": "Connector credentials with secrets masked. Secrets are never returned in full."
+      },
+      "MerchantFeatureEntry": {
+        "type": "object",
+        "properties": {
+          "feature": {
+            "type": "string",
+            "enum": [
+              "gsm-scoring-filter",
+              "explore-exploit-srv3",
+              "ab-test-real-payments",
+              "multi-objective-routing",
+              "elimination",
+              "auto-calibration",
+              "autopilot"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "MerchantFeaturesResponse": {
+        "type": "object",
+        "properties": {
+          "merchant_id": {
+            "type": "string"
+          },
+          "features": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantFeatureEntry"
+            }
+          }
+        }
+      },
+      "PriceChange": {
+        "type": "object",
+        "properties": {
+          "connector": {
+            "type": "string"
+          },
+          "account": {
+            "type": "string"
+          },
+          "card_network": {
+            "type": "string"
+          },
+          "variant": {
+            "type": "string"
+          },
+          "funding": {
+            "type": "string"
+          },
+          "issuer_country": {
+            "type": "string"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "ic_category": {
+            "type": "string"
+          },
+          "old_pct_bps": {
+            "type": "number",
+            "format": "double"
+          },
+          "new_pct_bps": {
+            "type": "number",
+            "format": "double"
+          },
+          "old_fixed": {
+            "type": "number",
+            "format": "double"
+          },
+          "new_fixed": {
+            "type": "number",
+            "format": "double"
+          },
+          "changed_on": {
+            "type": "string",
+            "description": "Snapshot date the new price first appeared."
+          }
+        }
+      },
+      "ResetGatewayScoresRequest": {
+        "type": "object",
+        "required": [
+          "merchant_id"
+        ],
+        "properties": {
+          "merchant_id": {
+            "type": "string",
+            "example": "merchant_demo",
+            "description": "Also accepted as `merchantId`."
+          }
+        }
+      },
+      "ResetGatewayScoresResponse": {
+        "type": "object",
+        "properties": {
+          "merchant_id": {
+            "type": "string"
+          },
+          "deleted_keys": {
+            "type": "integer"
+          },
+          "removed_overrides": {
+            "type": "integer"
+          }
+        }
+      },
+      "SetClusterOverrideRequest": {
+        "type": "object",
+        "required": [
+          "pct_bps",
+          "fixed"
+        ],
+        "properties": {
+          "pct_bps": {
+            "type": "number",
+            "format": "double"
+          },
+          "fixed": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "SetCredentialsRequest": {
+        "type": "object",
+        "required": [
+          "account",
+          "webhook_secret",
+          "download_auth"
+        ],
+        "properties": {
+          "account": {
+            "type": "string",
+            "description": "Connector-side account, e.g. Adyen `merchantAccountCode`."
+          },
+          "webhook_secret": {
+            "type": "string",
+            "description": "Secret used to verify inbound webhook signatures."
+          },
+          "download_auth": {
+            "type": "string",
+            "description": "Report-download credential: either Basic auth as `user:password`, or a Report Service API key on its own (sent as `X-API-Key`)."
+          }
+        }
+      },
+      "SetCredentialsResponse": {
+        "type": "object",
+        "properties": {
+          "merchant_id": {
+            "type": "string"
+          },
+          "connector": {
+            "type": "string"
+          },
+          "account": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          }
+        }
+      },
+      "SetFeeOverrideRequest": {
+        "type": "object",
+        "required": [
+          "pct_bps",
+          "fixed"
+        ],
+        "properties": {
+          "pct_bps": {
+            "type": "number",
+            "format": "double"
+          },
+          "fixed": {
+            "type": "number",
+            "format": "double"
+          }
+        }
+      },
+      "StoredAddon": {
+        "type": "object",
+        "properties": {
+          "pct_addon_bps": {
+            "type": "number",
+            "format": "double"
+          },
+          "fixed_addon": {
+            "type": "number",
+            "format": "double"
+          },
+          "invoice_ref": {
+            "type": "string"
+          },
+          "subtotal_ex_tax": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "card_volume": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          },
+          "txn_count": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "format": "int64"
+          },
+          "currency": {
+            "type": "string"
+          },
+          "period_start": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "period_end": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "updated_at": {
+            "type": "string"
+          }
+        }
+      },
+      "UpdateFeatureRequest": {
+        "type": "object",
+        "required": [
+          "enabled"
+        ],
+        "properties": {
+          "enabled": {
+            "type": "boolean"
+          }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "operator@example.com"
+          },
+          "password": {
+            "type": "string",
+            "example": "StrongPass#123"
+          }
+        }
+      },
+      "SignupRequest": {
+        "type": "object",
+        "required": [
+          "email",
+          "password"
+        ],
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "operator@example.com"
+          },
+          "password": {
+            "type": "string",
+            "example": "StrongPass#123"
+          },
+          "merchant_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "merchant_demo",
+            "description": "Attach the new user to an existing merchant."
+          }
+        }
+      },
+      "DeciderErrorResponse": {
+        "type": "object",
+        "properties": {
+          "status": {
+            "type": "string",
+            "example": "400"
+          },
+          "error_code": {
+            "type": "string",
+            "example": "DATA_NOT_FOUND"
+          },
+          "error_message": {
+            "type": "string",
+            "example": "merchant iframe preferences not found"
+          },
+          "priority_logic_tag": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "routing_approach": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "filter_wise_gateways": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "error_info": {
+            "type": "object",
+            "properties": {
+              "code": {
+                "type": "string",
+                "example": "MERCHANT_IFRAME_PREFERENCES_NOT_FOUND"
+              },
+              "user_message": {
+                "type": "string"
+              },
+              "developer_message": {
+                "type": "string"
+              }
+            }
+          },
+          "priority_logic_output": {
+            "type": [
+              "object",
+              "null"
+            ]
+          },
+          "is_dynamic_mga_enabled": {
+            "type": "boolean"
+          }
+        },
+        "description": "Error envelope returned by the gateway-decision routes."
+      },
+      "ApiErrorResponse": {
+        "type": "object",
+        "properties": {
+          "code": {
+            "type": "string",
+            "example": "TE_04"
+          },
+          "message": {
+            "type": "string",
+            "example": "MerchantId not found"
+          },
+          "data": {
+            "description": "Optional structured detail; usually null."
+          }
+        },
+        "description": "Generic API error envelope: an error code, a human-readable message, and an optional structured payload."
       }
     }
   }
