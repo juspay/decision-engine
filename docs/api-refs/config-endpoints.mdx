@@ -16,14 +16,23 @@ curl "$BASE_URL/config/routing-keys" \
 
 ## Configure SR Dimensions
 
+The dimensions are passed inside a `paymentInfo` object as `fields`. Valid dimension names are `currency`, `country`, `auth_type`, `card_is_in`, and `card_network`.
+
 ```bash
 curl --location "$BASE_URL/config-sr-dimension" \
   --header "$AUTH_HEADER" \
   --header "Content-Type: application/json" \
   --data '{
     "merchant_id": "merchant_demo",
-    "dimensions": ["payment_method_type", "payment_method", "currency"]
+    "paymentInfo": {
+      "udfs": [],
+      "fields": ["currency", "country", "auth_type"]
+    }
   }'
+```
+
+```json
+"SR Dimension configuration updated successfully"
 ```
 
 ## Get SR Dimensions
@@ -40,7 +49,7 @@ curl "$BASE_URL/config-sr-dimension/merchant_demo" \
   "merchant_id": "merchant_demo",
   "paymentInfo": {
     "udfs": [],
-    "fields": ["payment_method_type", "payment_method", "currency"]
+    "fields": ["currency", "country", "auth_type"]
   }
 }
 ```
@@ -49,7 +58,7 @@ Returns an empty default (`fields: null`) when nothing has been configured for t
 
 ## GSM Options
 
-Gateway Status Mapper rule catalog — the error-code classification options used by the `gsm-scoring-filter` merchant feature (see [Merchant Features](/api-refs/merchant-features)).
+Gateway Status Mapper rule catalog — the error-code classification options used by the `gsm-scoring-filter` merchant feature (see [Merchant Features](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/merchant-features.mdx)).
 
 ```bash
 curl "$BASE_URL/gsm/options" \

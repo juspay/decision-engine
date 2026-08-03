@@ -5,31 +5,72 @@ description: "Curl example for /routing/hybrid."
 
 # Hybrid Routing Evaluation
 
-`/routing/hybrid` evaluates the active rule path together with runtime routing context.
+`/routing/hybrid` evaluates the active rule path (`static_routing_request`) together with runtime SR/decision context (`dynamic_routing_request`) in one call. At least one of the two must be provided.
+
+- `static_routing_request` uses the same shape as [`/routing/evaluate`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-evaluate.mdx) (`created_by` + `parameters`).
+- `dynamic_routing_request` uses the same shape as [`/decide-gateway`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-sr-based.mdx) (`merchantId`, `eligibleGatewayList`, `rankingAlgorithm`, `paymentInfo`).
 
 ```bash
 curl --location "$BASE_URL/routing/hybrid" \
   --header "$AUTH_HEADER" \
   --header "Content-Type: application/json" \
   --data '{
-    "merchantId": "merchant_demo",
-    "paymentInfo": {
-      "paymentId": "hybrid_eval_001",
-      "amount": 1000,
-      "currency": "USD",
-      "paymentType": "ORDER_PAYMENT",
-      "paymentMethodType": "CARD",
-      "paymentMethod": "CREDIT"
+    "static_routing_request": {
+      "created_by": "merchant_demo",
+      "payment_id": "hybrid_eval_001",
+      "parameters": {
+        "payment_method_type": { "type": "enum_variant", "value": "credit" },
+        "payment_method": { "type": "enum_variant", "value": "card" }
+      }
     },
-    "eligibleGatewayList": ["stripe", "adyen"]
+    "dynamic_routing_request": {
+      "merchantId": "merchant_demo",
+      "eligibleGatewayList": ["stripe", "adyen"],
+      "rankingAlgorithm": "SR_BASED_ROUTING",
+      "eliminationEnabled": false,
+      "paymentInfo": {
+        "paymentId": "hybrid_eval_001",
+        "amount": 1000,
+        "currency": "USD",
+        "paymentType": "ORDER_PAYMENT",
+        "paymentMethodType": "CARD",
+        "paymentMethod": "CREDIT",
+        "authType": "THREE_DS"
+      }
+    }
   }'
 ```
 
 ```json
 {
-  "priority": [
-    { "gateway_name": "stripe", "gateway_id": "mca_111" },
-    { "gateway_name": "adyen", "gateway_id": "mca_112" }
+  "static_routing": {
+    "payment_id": "hybrid_eval_001",
+    "status": "success",
+    "output": {
+      "type": "priority",
+      "connectors": [
+        { "gateway_name": "stripe", "gateway_id": "mca_111" },
+        { "gateway_name": "adyen", "gateway_id": "mca_112" }
+      ]
+    },
+    "evaluated_output": [ { "gateway_name": "stripe", "gateway_id": "mca_111" } ],
+    "eligible_connectors": [
+      { "gateway_name": "stripe", "gateway_id": "mca_111" },
+      { "gateway_name": "adyen", "gateway_id": "mca_112" }
+    ]
+  },
+  "dynamic_routing": {
+    "status": "success",
+    "decision": {
+      "decided_gateway": "stripe",
+      "fallback_gateways": ["adyen"],
+      "gateway_priority_map": { "stripe": 0.94, "adyen": 0.91 },
+      "routing_approach": "SR_SELECTION_V3_ROUTING"
+    },
+    "fallback_connectors": null
+  },
+  "evaluated_connectors": [
+    { "gateway_name": "stripe", "gateway_id": null }
   ]
 }
 ```

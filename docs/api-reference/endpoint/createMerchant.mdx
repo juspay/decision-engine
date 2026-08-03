@@ -12,23 +12,20 @@ Creates a merchant account record used by routing, analytics, and account-level 
 
 ## Authentication
 
-Protected. Send either `Authorization: Bearer <jwt_token>` or `x-api-key: <api_key>`. In sandbox, also send `x-feature: decision-engine`.
+Admin-bootstrap route. Send the deployment's admin secret as `x-admin-secret: <admin_secret>` — **not** a JWT or API key. (The dashboard onboarding route `/onboarding/merchant` is the JWT-authenticated alternative.)
 
 For local development, start with:
 
 ```bash
 export BASE_URL=http://localhost:8080
-export AUTH_HEADER="Authorization: Bearer <jwt_token>"
-# Sandbox only:
-# export BASE_URL=https://sandbox.hyperswitch.io
-# export FEATURE_HEADER="x-feature: decision-engine"
+export ADMIN_SECRET="x-admin-secret: <admin_secret>"
 ```
 
 ## Request
 
 - Method and path: `POST /merchant-account/create`
 - Parameters: none.
-- Body: JSON body with merchant identity fields. Keep `merchant_id` stable because it scopes analytics and routing config.
+- Body: JSON body with `merchant_id` (keep it stable — it scopes analytics and routing config) and optional `gateway_success_rate_based_decider_input`.
 
 ## Example
 
@@ -36,11 +33,11 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 ```bash
 curl --location "$BASE_URL/merchant-account/create" \
-  --header "$AUTH_HEADER" \
+  --header "$ADMIN_SECRET" \
   --header "Content-Type: application/json" \
   --data '{
   "merchant_id": "merchant_demo",
-  "merchant_name": "Demo Merchant"
+  "gateway_success_rate_based_decider_input": null
 }'
 ```
 
@@ -48,9 +45,10 @@ curl --location "$BASE_URL/merchant-account/create" \
 
 ```json
 {
+  "message": "Merchant account created successfully",
   "merchant_id": "merchant_demo",
-  "merchant_name": "Demo Merchant",
-  "created_at": "2026-04-26T00:00:00Z"
+  "gateway_success_rate_based_decider_input": null,
+  "api_key": "DE_..."
 }
 ```
 
@@ -61,6 +59,6 @@ curl --location "$BASE_URL/merchant-account/create" \
 
 ## Related
 
-- [Get Merchant](/api-reference/endpoint/getMerchant)
-- [Delete Merchant](/api-reference/endpoint/deleteMerchant)
-- [Update Merchant Debit Routing](/api-reference/endpoint/updateMerchantDebitRouting)
+- [Get Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/getMerchant.mdx)
+- [Delete Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/deleteMerchant.mdx)
+- [Update Merchant Debit Routing](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/updateMerchantDebitRouting.mdx)

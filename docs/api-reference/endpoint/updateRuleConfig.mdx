@@ -43,10 +43,9 @@ curl --location "$BASE_URL/rule/update" \
   "config": {
     "type": "successRate",
     "data": {
-      "enabled": true,
-      "min_aggregates_size": 5,
-      "default_success_rate": 0.82,
-      "specificity_level": "merchant"
+      "defaultBucketSize": 30,
+      "defaultLatencyThreshold": 2500,
+      "defaultHedgingPercent": 0.1
     }
   }
 }'
@@ -63,10 +62,7 @@ curl --location "$BASE_URL/rule/update" \
   "config": {
     "type": "elimination",
     "data": {
-      "enabled": true,
-      "bucket_size": 20,
-      "threshold": 0.30,
-      "gateway_error_codes": ["processor_declined"]
+      "threshold": 0.30
     }
   }
 }'
@@ -76,9 +72,18 @@ curl --location "$BASE_URL/rule/update" \
 
 ```json
 {
+  "message": "Success Rate Configuration updated successfully",
   "merchant_id": "merchant_demo",
-  "config_type": "successRate",
-  "message": "rule config updated"
+  "config": {
+    "type": "successRate",
+    "data": {
+      "defaultBucketSize": 30,
+      "defaultLatencyThreshold": 2500.0,
+      "defaultHedgingPercent": 0.1,
+      "subLevelInputConfig": null,
+      "margin": null
+    }
+  }
 }
 ```
 
@@ -89,7 +94,7 @@ curl --location "$BASE_URL/rule/update" \
 
 ## Related
 
-- [Get Rule Config](/api-reference/endpoint/getRuleConfig)
-- [Delete Rule Config](/api-reference/endpoint/deleteRuleConfig)
-- [Update Success-Rate Config](/api-refs/success-rate-config-update)
-- [Update Elimination Config](/api-refs/elimination-config-update)
+- [Get Rule Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/getRuleConfig.mdx)
+- [Delete Rule Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/deleteRuleConfig.mdx)
+- [Update Success-Rate Config](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/success-rate-config-update.mdx)
+- [Update Elimination Config](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/elimination-config-update.mdx)

@@ -48,8 +48,13 @@ curl --location "$BASE_URL/auth/switch-merchant" \
 ```json
 {
   "token": "eyJ...",
+  "user_id": "user_123",
+  "email": "operator@example.com",
   "merchant_id": "merchant_demo",
-  "merchant_name": "Demo Merchant"
+  "role": "admin",
+  "merchants": [
+    { "merchant_id": "merchant_demo", "merchant_name": "Demo Merchant", "role": "admin" }
+  ]
 }
 ```
 
@@ -60,6 +65,6 @@ curl --location "$BASE_URL/auth/switch-merchant" \
 
 ## Related
 
-- [List User Merchants](/api-reference/endpoint/listUserMerchants)
-- [Current User](/api-reference/endpoint/me)
-- [Analytics Overview](/api-reference/endpoint/analyticsOverview)
+- [List User Merchants](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/listUserMerchants.mdx)
+- [Current User](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/me.mdx)
+- [Analytics Overview](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsOverview.mdx)

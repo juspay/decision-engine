@@ -60,8 +60,12 @@ impl IngestOutcome {
             currencies: self.currencies.clone(),
             countries: self.countries.clone(),
             total_gross: self.total_gross,
-            total_clusters: self.summary.total_clusters as i64,
-            good_clusters: self.summary.good_clusters as i64,
+            // The PER-INGESTION counts, not the snapshot-wide ones. Every other field on this record
+            // describes just this upload (rows, period, currencies, countries, volume); reporting the
+            // whole rolling window's cluster count beside them made the row read as though a 4.2k-row
+            // report had produced 1,572 clusters. Merchant-wide coverage has its own card.
+            total_clusters: self.summary.ingested_clusters as i64,
+            good_clusters: self.summary.ingested_good_clusters as i64,
         }
     }
 }
@@ -136,9 +140,15 @@ pub async fn ingest_report_reader(
     let mut period_end: Option<NaiveDate> = None;
     let mut total_gross = 0.0_f64;
 
+    // Load the global BIN → dominant-`card_product` map once, before the report streams, so the
+    // rollup can stamp each row's fan-separating cluster `card_product` from the card's BIN. Empty on
+    // a cold start (first ever ingest) or any load failure — the rollup then falls back to each row's
+    // own published rate, so the fan still splits.
+    let bin_product = sink::load_bin_product(clickhouse).await;
+
     // The report is aggregated into per-day sufficient statistics as it streams (never stored
     // row-by-row); we insert the buckets once, after the whole report is folded.
-    let mut acc = RollupAccumulator::new();
+    let mut acc = RollupAccumulator::new().with_bin_product(bin_product);
     let mut processed = 0usize;
     while let Some(batch) = rx.recv().await {
         for row in &batch {
@@ -171,6 +181,8 @@ pub async fn ingest_report_reader(
 
     // One insert of the fully-aggregated buckets, then fit from what the rollup now holds. The
     // history record reports transactions *processed* (`staged`), not bucket count.
+    // Grab the per-BIN observations first (borrows) before `into_rows` consumes the accumulator.
+    let bin_rows = acc.bin_rows();
     let rows = acc.into_rows();
     sink::insert_daily_stats(
         clickhouse,
@@ -182,8 +194,28 @@ pub async fn ingest_report_reader(
     )
     .await?;
 
-    let summary =
-        fit::fit_snapshot(clickhouse, connector, account, merchant_id, &report_date).await?;
+    // Feed the global BIN → card-product map with this report's (BIN, rate) observations, so the NEXT
+    // ingest and decide-time serving resolve each BIN to its dominant rate tier. Best-effort: the map
+    // is a refinement layered on the per-row-rate fallback, so a failure here must not fail the
+    // report's ingest/fit — log and continue.
+    if let Err(e) = sink::insert_bin_product(clickhouse, &bin_rows).await {
+        crate::logger::warn!(
+            tag = "cost_ingestion",
+            "bin_product insert failed ({} bins): {}",
+            bin_rows.len(),
+            e
+        );
+    }
+
+    let summary = fit::fit_snapshot(
+        clickhouse,
+        connector,
+        account,
+        merchant_id,
+        &report_date,
+        progress_job.unwrap_or_default(),
+    )
+    .await?;
 
     Ok(IngestOutcome {
         staged: processed,

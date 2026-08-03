@@ -227,7 +227,7 @@ export function VolumeSplitPage() {
       />
 
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Volume Split Routing</h1>
+        <h1 className="text-lg font-semibold text-slate-900 dark:text-white">Volume Split Routing</h1>
       </div>
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">

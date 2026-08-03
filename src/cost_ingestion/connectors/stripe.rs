@@ -205,6 +205,8 @@ impl SettlementReportSource for StripeReportSource {
                 issuer_country: String::new(),
                 currency,
                 ic_category: String::new(),
+                // Stripe's blended report has no interchange-rate line — one cluster.
+                ic_bps: String::new(),
                 txn_date,
                 channel,
                 gross,
@@ -216,6 +218,8 @@ impl SettlementReportSource for StripeReportSource {
                 scheme_fee: 0.0,
                 markup: 0.0,
                 commission: 0.0,
+                // Stripe's aggregated report carries no PAN, so no BIN observation.
+                bin: String::new(),
             })?;
         }
         Ok(())

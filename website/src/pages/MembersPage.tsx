@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { UserPlus, Users, Copy, Check, Loader2, Eye, EyeOff } from 'lucide-react'
-import { apiFetch } from '../lib/api'
+import { apiErrorMessage, apiFetch } from '../lib/api'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
 
 interface MemberInfo {
@@ -95,18 +95,7 @@ export function MembersPage() {
       setEmail('')
       loadMembers()
     } catch (err) {
-      const msg = err instanceof Error ? err.message : 'Something went wrong'
-      const match = msg.match(/API error \d+: (.+)/)
-      if (match) {
-        try {
-          const parsed = JSON.parse(match[1])
-          setInviteError(parsed.message ?? msg)
-        } catch {
-          setInviteError(match[1])
-        }
-      } else {
-        setInviteError(msg)
-      }
+      setInviteError(apiErrorMessage(err))
     } finally {
       setInviting(false)
     }

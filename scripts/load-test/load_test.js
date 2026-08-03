@@ -105,6 +105,7 @@ const rulePayloads = [
 
 const LOAD_TEST_EMAIL    = "loadtest@decision-engine.local";
 const LOAD_TEST_PASSWORD = "LoadTest#123456";
+const ADMIN_SECRET       = __ENV.ADMIN_SECRET || "test_admin";
 
 // Priority rule used for RULE_BASED_ROUTING: checkout > stripe > adyen
 const PRIORITY_RULE = {
@@ -162,7 +163,7 @@ export function setup() {
     const signupRes = http.post(
       `${baseUrl}/auth/signup`,
       JSON.stringify({ email: LOAD_TEST_EMAIL, password: LOAD_TEST_PASSWORD }),
-      { headers: jsonHeaders }
+      { headers: { ...jsonHeaders, "x-admin-secret": ADMIN_SECRET } }
     );
     if (signupRes.status !== 200) fail(`Signup failed (${signupRes.status}): ${signupRes.body}`);
     const sb = JSON.parse(signupRes.body);

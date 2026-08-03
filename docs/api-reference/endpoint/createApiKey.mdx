@@ -28,7 +28,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 - Method and path: `POST /api-key/create`
 - Parameters: none.
-- Body: JSON body with `merchant_id`, optional `name`, and optional expiry metadata.
+- Body: JSON body with `merchant_id` and an optional `description`.
 
 ## Example
 
@@ -40,7 +40,7 @@ curl --location "$BASE_URL/api-key/create" \
   --header "Content-Type: application/json" \
   --data '{
   "merchant_id": "merchant_demo",
-  "name": "local-smoke-key"
+  "description": "backend integration key"
 }'
 ```
 
@@ -48,10 +48,12 @@ curl --location "$BASE_URL/api-key/create" \
 
 ```json
 {
-  "key_id": "key_123",
-  "api_key": "DE_live_xxx",
+  "key_id": "018f2c1a-...",
+  "api_key": "DE_...",
+  "key_prefix": "DE_abcd1234",
   "merchant_id": "merchant_demo",
-  "name": "local-smoke-key"
+  "description": "backend integration key",
+  "created_at": "2026-04-26 10:00:00.000000"
 }
 ```
 
@@ -62,6 +64,6 @@ curl --location "$BASE_URL/api-key/create" \
 
 ## Related
 
-- [List API Keys](/api-reference/endpoint/listApiKeys)
-- [Revoke API Key](/api-reference/endpoint/revokeApiKey)
-- [Decide Gateway](/api-reference/endpoint/decideGateway)
+- [List API Keys](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/listApiKeys.mdx)
+- [Revoke API Key](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/revokeApiKey.mdx)
+- [Decide Gateway](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/decideGateway.mdx)

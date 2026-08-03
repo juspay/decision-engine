@@ -28,7 +28,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 - Method and path: `POST /rule/delete`
 - Parameters: none.
-- Body: JSON body with `merchant_id` and `config.type` to delete.
+- Body: JSON body with `merchant_id` and `algorithm` (`"successRate"` or `"elimination"`) to delete.
 
 ## Example
 
@@ -40,7 +40,7 @@ curl --location "$BASE_URL/rule/delete" \
   --header "Content-Type: application/json" \
   --data '{
   "merchant_id": "merchant_demo",
-  "config": { "type": "successRate" }
+  "algorithm": "successRate"
 }'
 ```
 
@@ -52,7 +52,7 @@ curl --location "$BASE_URL/rule/delete" \
   --header "Content-Type: application/json" \
   --data '{
   "merchant_id": "merchant_demo",
-  "config": { "type": "elimination" }
+  "algorithm": "elimination"
 }'
 ```
 
@@ -60,9 +60,8 @@ curl --location "$BASE_URL/rule/delete" \
 
 ```json
 {
-  "merchant_id": "merchant_demo",
-  "config_type": "successRate",
-  "deleted": true
+  "message": "Success Rate Configuration deleted successfully",
+  "merchant_id": "merchant_demo"
 }
 ```
 
@@ -73,7 +72,7 @@ curl --location "$BASE_URL/rule/delete" \
 
 ## Related
 
-- [Create Rule Config](/api-reference/endpoint/createRuleConfig)
-- [Get Rule Config](/api-reference/endpoint/getRuleConfig)
-- [Delete Success-Rate Config](/api-refs/success-rate-config-delete)
-- [Delete Elimination Config](/api-refs/elimination-config-delete)
+- [Create Rule Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/createRuleConfig.mdx)
+- [Get Rule Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/getRuleConfig.mdx)
+- [Delete Success-Rate Config](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/success-rate-config-delete.mdx)
+- [Delete Elimination Config](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/elimination-config-delete.mdx)

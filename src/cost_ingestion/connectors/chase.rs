@@ -372,6 +372,8 @@ impl SettlementReportSource for ChaseReportSource {
                     issuer_country: row.get(c.issuer).trim().to_string(),
                     currency: row.get(c.currency).trim().to_string(),
                     ic_category: row.get(c.ic_code).trim().to_string(),
+                    // Chase report carries no published interchange-rate bps — one cluster.
+                    ic_bps: String::new(),
                     txn_date,
                     channel,
                     gross,
@@ -380,6 +382,8 @@ impl SettlementReportSource for ChaseReportSource {
                     scheme_fee,
                     markup,
                     commission,
+                    // Chase's report carries no PAN here, so no BIN observation.
+                    bin: String::new(),
                 }))
             },
             on_row,

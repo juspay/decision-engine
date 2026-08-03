@@ -266,8 +266,8 @@ curl --user decision_engine:decision_engine \
 
 ## Related Docs
 
-- [Installation](/installation)
-- [PostgreSQL Setup](/setup-guide-postgres)
-- [MySQL Setup](/setup-guide-mysql)
-- [Configuration](/configuration)
-- [API Guide](/api-refs/api-ref)
+- [Installation](https://github.com/juspay/decision-engine/blob/main/docs/installation.md)
+- [PostgreSQL Setup](https://github.com/juspay/decision-engine/blob/main/docs/setup-guide-postgres.md)
+- [MySQL Setup](https://github.com/juspay/decision-engine/blob/main/docs/setup-guide-mysql.md)
+- [Configuration](https://github.com/juspay/decision-engine/blob/main/docs/configuration.md)
+- [API Guide](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx)

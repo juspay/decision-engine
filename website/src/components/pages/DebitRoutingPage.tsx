@@ -47,7 +47,7 @@ export function DebitRoutingPage() {
   return (
     <div className="max-w-3xl space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900 dark:text-white">Network / Debit Routing</h1>
+        <h1 className="text-lg font-semibold text-slate-900 dark:text-white">Network / Debit Routing</h1>
       </div>
 
       <Card>
@@ -76,13 +76,13 @@ export function DebitRoutingPage() {
             <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5 dark:border-[#232833] dark:bg-[#0b1017]">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 dark:text-[#6d768a]">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400 dark:text-[#6d768a]">
                     Current state
                   </p>
-                  <p className="mt-2 text-2xl font-semibold text-slate-900 dark:text-white">
+                  <p className="mt-1 text-lg font-semibold text-slate-900 dark:text-white">
                     {isEnabled ? 'Enabled' : 'Disabled'}
                   </p>
-                  <p className="mt-1 text-sm text-slate-500 dark:text-[#9ca7ba]">
+                  <p className="mt-0.5 text-[13px] text-slate-500 dark:text-[#9ca7ba]">
                     {data?.merchant_id || merchantId || 'No merchant selected'}
                   </p>
                 </div>

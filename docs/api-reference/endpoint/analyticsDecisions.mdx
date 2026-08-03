@@ -29,7 +29,7 @@ export TENANT_HEADER="x-tenant-id: public"
 
 - Method and path: `GET /analytics/decisions`
 - Parameters:
-  - `x-tenant-id` (header, required, string) — see [Environment setup](/api-refs/api-ref#environment-setup).
+  - `x-tenant-id` (header, required, string) — see [Environment setup](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx#environment-setup).
   - `range` (query, optional, string)
   - `start_ms` (query, optional, integer)
   - `end_ms` (query, optional, integer)
@@ -75,21 +75,18 @@ curl "$BASE_URL/analytics/decisions?range=1d&exclude_routing_approach=NTW_BASED_
 
 ```json
 {
-  "series": [
-    {
-      "timestamp_ms": 1777136400000,
-      "gateway": "adyen",
-      "count": 7
-    },
-    {
-      "timestamp_ms": 1777136400000,
-      "gateway": "stripe",
-      "count": 3
-    }
+  "merchant_id": "merchant_demo",
+  "range": "1d",
+  "tiles": [
+    { "label": "Decisions", "value": "42", "subtitle": "Failures: 3" },
+    { "label": "Error rate", "value": "7.14%", "subtitle": "From recorded decision events" }
   ],
-  "totals": {
-    "SR_SELECTION_V3_ROUTING": 10
-  }
+  "series": [
+    { "bucket_ms": 1808624000000, "routing_approach": "SR_SELECTION_V3_ROUTING", "count": 10 }
+  ],
+  "approaches": [
+    { "rule_name": "SR_SELECTION_V3_ROUTING", "count": 42 }
+  ]
 }
 ```
 
@@ -101,6 +98,6 @@ curl "$BASE_URL/analytics/decisions?range=1d&exclude_routing_approach=NTW_BASED_
 
 ## Related
 
-- [Analytics Routing Stats](/api-reference/endpoint/analyticsRoutingStats)
-- [Payment Audit](/api-reference/endpoint/analyticsPaymentAudit)
-- [Analytics Endpoints](/api-refs/analytics-endpoints)
+- [Analytics Routing Stats](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsRoutingStats.mdx)
+- [Payment Audit](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsPaymentAudit.mdx)
+- [Analytics Endpoints](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/analytics-endpoints.mdx)

@@ -42,12 +42,7 @@ curl "$BASE_URL/health/ready"
 
 ```json
 {
-  "ready": true,
-  "checks": {
-    "database": "ok",
-    "redis": "ok",
-    "clickhouse": "ok"
-  }
+  "message": "Up"
 }
 ```
 
@@ -58,5 +53,5 @@ curl "$BASE_URL/health/ready"
 
 ## Related
 
-- [Health Check](/api-reference/endpoint/healthCheck)
-- [Health Diagnostics](/api-reference/endpoint/healthDiagnostics)
+- [Health Check](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/healthCheck.mdx)
+- [Health Diagnostics](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/healthDiagnostics.mdx)

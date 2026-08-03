@@ -11,15 +11,32 @@
 //! So `parse_rows` **groups by `Payment ID`** (an in-memory accumulator, O(distinct payments) —
 //! fine for a daily report) and emits one aggregated row per captured payment after the scan.
 //!
-//! Fee model. This report carries **no interchange line item** — Checkout merchants on
-//! blended/premium pricing have the processor take bundled into `Premium*` / `Blended*` / auth fee
-//! rows, mirroring Braintree's bundled model:
+//! Fee model. Checkout runs both pricing models through the same report, distinguished by whether
+//! `Interchange *` rows are present: interchange++ merchants get the pass-through itemized, blended
+//! /premium merchants have it bundled into `Premium*` / `Blended*` rows. Both map cleanly:
+//!   * `interchange` ← `Interchange *` (absent on blended pricing, and on three-party networks —
+//!     Amex bills its acceptance cost as `AMEX DISCOUNT RATE`, a `Scheme Variable Fee`)
 //!   * `scheme_fee`  ← `Scheme Fixed Fee` + `Scheme Variable Fee`
 //!   * `commission`  ← every other fee breakdown (`Premium*`, `Blended*`, `Authorization Fixed Fee`,
 //!     `Authentication Fixed Fee`, `Card Verification Fixed Fee`)
-//!   * `interchange` ← 0.0, `markup` ← 0.0
+//!   * `markup` ← 0.0 (Checkout doesn't itemize one)
 //!
-//! and `total_fee = scheme_fee + commission`.
+//! and `total_fee = interchange + scheme_fee + commission`.
+//!
+//! Fee-completeness filter. A payment's interchange is billed when it **clears**, which is often a
+//! day or two after its capture — so in a date-ranged report the payments near each edge have their
+//! capture and their interchange in *different* files. A captured payment whose interchange hasn't
+//! landed yet reads ~45% cheaper than it truly is (observed: 228 bps vs 417 bps on the same
+//! merchant), and feeding both states into one `fee ~ gross` regression is far worse than feeding it
+//! less data — the fitted line is then a slope between two different fee-completeness states, not a
+//! price. So [`parse_rows`] drops a captured payment that is missing interchange **when this report
+//! proves that network carries interchange for this merchant** (some other payment on the same
+//! network has an `Interchange *` row). That evidence test is what keeps the filter from firing on
+//! blended-pricing merchants (no interchange anywhere → nothing dropped) and on Amex (no interchange
+//! on a three-party network → its payments are already complete).
+//!
+//! The mirror case — fee rows for a payment whose capture fell in an *earlier* window — is dropped
+//! by the no-capture rule below; there is no gross to regress against.
 //!
 //! Gross and every fee are read from the **Holding Currency Amount** column. Checkout mixes
 //! currencies within one payment (gross in the processing currency, fixed fees in the holding
@@ -41,7 +58,7 @@
 //!
 //! [`report_generated`]: https://www.checkout.com/docs/developer-resources/event-notifications/event-types/report_generated
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -158,7 +175,9 @@ struct PaymentAcc {
     issuer_country: String,
     currency: String,
     txn_date: Option<NaiveDate>,
+    ic_category: String,
     gross: f64,
+    interchange: f64,
     scheme_fee: f64,
     commission: f64,
     has_capture: bool,
@@ -171,9 +190,9 @@ impl PaymentAcc {
         if !self.has_capture {
             return None;
         }
-        // Blended pricing: no interchange line, no separate markup. `total_fee` is the report's own
-        // sum of the scheme + processor-take rows for this payment.
-        let total_fee = self.scheme_fee + self.commission;
+        // `total_fee` is the report's own sum of this payment's fee rows. Interchange is itemized on
+        // interchange++ pricing and simply 0 on blended, where it's already inside the bundled rows.
+        let total_fee = self.interchange + self.scheme_fee + self.commission;
         Some(SettledFeeRow {
             txn_ref: self.txn_ref,
             card_network: self.card_network,
@@ -181,18 +200,26 @@ impl PaymentAcc {
             funding: self.funding,
             issuer_country: self.issuer_country,
             currency: self.currency,
-            // No single interchange category exists for blended pricing (`Fee Detail` is per-line
-            // and noisy), so leave it empty — the rollup buckets all blended volume together.
-            ic_category: String::new(),
+            // `Card Category` — "Consumer" / "Commercial". Coarse next to Adyen's full label
+            // ("Visa UAE Consumer Credit Platinum") but it is the single biggest interchange split
+            // there is: commercial cards are exempt from the EU/UK consumer caps and price far
+            // higher, so averaging them into one cluster with consumer cards understates one and
+            // overstates the other. `""` when the report omits the column.
+            ic_category: self.ic_category,
+            // An amount, not a published rate; deriving a rate from it would be a per-txn effective
+            // rate, not the scheme's rate card, so it can't train the per-BIN product map.
+            ic_bps: String::new(),
             txn_date: self.txn_date,
             // Checkout is card-not-present online acceptance; no terminal id in the report.
             channel: "ecom".to_string(),
             gross: self.gross,
             total_fee,
-            interchange: 0.0,
+            interchange: self.interchange,
             scheme_fee: self.scheme_fee,
             markup: 0.0,
             commission: self.commission,
+            // Checkout's blended report carries no PAN, so no BIN observation.
+            bin: String::new(),
         })
     }
 }
@@ -396,6 +423,9 @@ impl SettlementReportSource for CheckoutReportSource {
             holding_amount: usize,
             payment_method: usize,
             card_type: usize,
+            /// Optional: older report versions may omit it, and a merchant on a mapping that
+            /// doesn't name it must keep ingesting rather than fail on a column we can live without.
+            card_category: Option<usize>,
             issuer_country: usize,
             processed_on: usize,
         }
@@ -419,6 +449,7 @@ impl SettlementReportSource for CheckoutReportSource {
                     holding_amount: h.require("Holding Currency Amount")?,
                     payment_method: h.require("Payment Method")?,
                     card_type: h.require("Card Type")?,
+                    card_category: h.index("Card Category"),
                     issuer_country: h.require("Issuer Country")?,
                     processed_on: h.require("Processed On")?,
                 })
@@ -452,7 +483,13 @@ impl SettlementReportSource for CheckoutReportSource {
                     entry.funding = funding;
                     entry.issuer_country = row.get(c.issuer_country).trim().to_string();
                     entry.currency = row.get(c.holding_currency).trim().to_string();
+                    entry.ic_category = normalize_card_category(row.get_opt(c.card_category));
                     entry.txn_date = parse_date(row.get(c.processed_on));
+                } else if breakdown.starts_with("interchange") {
+                    // `Interchange Fixed Fee` — the issuer pass-through, itemized on interchange++
+                    // pricing. Kept separate from `commission` (Checkout's own take) so the
+                    // shared-interchange vs per-connector-markup model stays computable.
+                    entry.interchange += -amount;
                 } else if breakdown.starts_with("scheme ") {
                     // `Scheme Fixed Fee` / `Scheme Variable Fee` — the card-scheme pass-through.
                     entry.scheme_fee += -amount;
@@ -466,11 +503,39 @@ impl SettlementReportSource for CheckoutReportSource {
             &mut discard,
         )?;
 
-        // Flush: one aggregated row per captured payment.
+        // Networks this report PROVES carry itemized interchange for this merchant — some captured
+        // payment on the network has an `Interchange *` row. Only these are held to the completeness
+        // test below, so blended pricing (no interchange anywhere) and three-party networks (Amex,
+        // whose acceptance cost is a scheme-fee discount rate) are exempt without a hardcoded list.
+        // Owned, so the flush below can consume `acc`.
+        let interchange_networks: HashSet<String> = acc
+            .values()
+            .filter(|p| p.has_capture && p.interchange > 0.0 && !p.card_network.is_empty())
+            .map(|p| p.card_network.clone())
+            .collect();
+
+        // Flush: one aggregated row per captured payment, minus the fee-incomplete ones.
+        let mut incomplete = 0usize;
         for (_pid, payment) in acc {
+            if payment.has_capture
+                && payment.interchange <= 0.0
+                && interchange_networks.contains(&payment.card_network)
+            {
+                incomplete += 1;
+                continue;
+            }
             if let Some(row) = payment.into_row() {
                 on_row(row)?;
             }
+        }
+        if incomplete > 0 {
+            // Not an error: it's the expected shape of a date-ranged report's edges. Logged because
+            // it's otherwise invisible — the ingestion's staged-row count just comes out lower.
+            crate::logger::warn!(
+                tag = "cost_ingest",
+                "checkout: dropped {incomplete} captured payment(s) whose interchange has not been \
+                 billed yet (clearing falls outside this report window); their cost would read low"
+            );
         }
         Ok(())
     }
@@ -565,8 +630,31 @@ fn normalize_network(raw: &str) -> String {
 
 /// Synthesize a `variant` cluster key. Checkout's report carries no scheme tier, so use
 /// `{network}{funding}` (e.g. `visacredit`); mirrors Braintree's card path.
+///
+/// `Card Category` is deliberately NOT folded in here, even though `{network}{program}{funding}` is
+/// the shape Adyen produces. `variant` is reconstructed at decide time by
+/// [`crate::cost_ingestion::serving::reconstruct_variant`] from the live card's `card_program`, so a
+/// fitted variant only matches if the two vocabularies agree. Putting the category in `ic_category`
+/// instead splits the clusters just the same, but that field is *predicted* at serving time from the
+/// merchant's own history rather than read off the transaction — no vocabulary to keep in step.
 fn build_variant(network: &str, funding: &str) -> String {
     format!("{network}{funding}")
+}
+
+/// Canonicalize `Card Category` ("Consumer" / "Commercial", occasionally blank) into the
+/// `ic_category` cluster field. Title-cased so it reads as a label next to Adyen's
+/// ("Visa UAE Consumer Credit Platinum"), and because the cluster key is compared lowercased anyway.
+fn normalize_card_category(raw: &str) -> String {
+    let t = raw.trim();
+    if t.is_empty() {
+        return String::new();
+    }
+    let lower = t.to_lowercase();
+    let mut c = lower.chars();
+    match c.next() {
+        Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
+        None => String::new(),
+    }
 }
 
 /// Parse a money cell; blanks/garbage become `0.0` (mirrors the other connectors' `to_float`).
@@ -689,6 +777,105 @@ pay_4,Partial Capture,Partial Capture,AMEX,Credit,GB,GBP,20.00,2026-07-09T12:00:
         assert_eq!(p4.card_network, "amex");
         assert_eq!(p4.variant, "amexcredit");
         assert!((p4.gross - 50.00).abs() < 1e-9, "30 + 20 partial captures");
+    }
+
+    /// An interchange++ report spanning a window edge — the shape that exposed both bugs. `ic_1` and
+    /// `ic_2` cleared inside the window and carry `Interchange Fixed Fee`; `ic_late` was captured at
+    /// the window's end and its interchange bills in the next report; `amex_1` is a three-party
+    /// payment that has no interchange by construction (its cost is `AMEX DISCOUNT RATE`, a scheme
+    /// fee); `ic_orphan` cleared here but was captured in the *previous* window, so it has an
+    /// interchange row and no capture line.
+    const IC_REPORT: &str = "\
+Payment ID,Action Type,Breakdown Type,Payment Method,Card Type,Card Category,Issuer Country,Holding Currency,Holding Currency Amount,Processed On\n\
+ic_1,Capture,Capture,VISA,Credit,Consumer,AE,USD,1000.00,2026-07-24T10:00:00.000\n\
+ic_1,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,AE,USD,-20.00,2026-07-24T10:00:00.000\n\
+ic_1,Capture,Scheme Variable Fee,VISA,Credit,Consumer,AE,USD,-8.00,2026-07-24T10:00:00.000\n\
+ic_1,Capture,Premium Variable Fee,VISA,Credit,Consumer,AE,USD,-12.00,2026-07-24T10:00:00.000\n\
+ic_2,Capture,Capture,MASTERCARD,Credit,Commercial,GB,USD,2000.00,2026-07-25T10:00:00.000\n\
+ic_2,Capture,Interchange Fixed Fee,MASTERCARD,Credit,Commercial,GB,USD,-40.00,2026-07-25T10:00:00.000\n\
+ic_2,Capture,Scheme Fixed Fee,MASTERCARD,Credit,Commercial,GB,USD,-1.00,2026-07-25T10:00:00.000\n\
+ic_late,Capture,Capture,VISA,Credit,Consumer,FI,USD,1500.00,2026-07-26T23:00:00.000\n\
+ic_late,Capture,Scheme Variable Fee,VISA,Credit,Consumer,FI,USD,-12.00,2026-07-26T23:00:00.000\n\
+ic_late,Authorization,Authorization Fixed Fee,VISA,Credit,Consumer,FI,USD,-0.08,2026-07-26T23:00:00.000\n\
+amex_1,Capture,Capture,AMEX,Credit,Consumer,US,USD,1725.20,2026-07-25T10:00:00.000\n\
+amex_1,Capture,Scheme Variable Fee,AMEX,Credit,Consumer,US,USD,-37.95,2026-07-25T10:00:00.000\n\
+amex_1,Capture,Premium Variable Fee,AMEX,Credit,Consumer,US,USD,-4.49,2026-07-25T10:00:00.000\n\
+ic_orphan,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,SA,USD,-102.29,2026-07-24T00:30:00.000\n";
+
+    #[test]
+    fn interchange_is_its_own_component_not_commission() {
+        let rows = CheckoutReportSource::new()
+            .parse_report(IC_REPORT.as_bytes())
+            .unwrap();
+        let p = by_ref(&rows, "ic_1");
+        assert!((p.interchange - 20.00).abs() < 1e-9, "issuer pass-through");
+        assert!((p.scheme_fee - 8.00).abs() < 1e-9);
+        assert!(
+            (p.commission - 12.00).abs() < 1e-9,
+            "only Checkout's own take — interchange must not land here"
+        );
+        assert!(
+            (p.total_fee - 40.00).abs() < 1e-9,
+            "total spans all three components"
+        );
+    }
+
+    #[test]
+    fn payment_missing_not_yet_billed_interchange_is_dropped() {
+        let rows = CheckoutReportSource::new()
+            .parse_report(IC_REPORT.as_bytes())
+            .unwrap();
+        // `ic_late` is a VISA payment, and this report proves VISA carries interchange here (ic_1),
+        // so its 80 bps reading is incomplete, not cheap — it must not train the fit.
+        assert!(
+            rows.iter().all(|r| r.txn_ref != "ic_late"),
+            "captured payment with unbilled interchange is dropped"
+        );
+        // The orphan has no capture at all: fees but no gross to regress against.
+        assert!(rows.iter().all(|r| r.txn_ref != "ic_orphan"));
+        assert_eq!(rows.len(), 3, "ic_1, ic_2, amex_1 survive");
+    }
+
+    #[test]
+    fn three_party_network_is_exempt_from_the_interchange_test() {
+        let rows = CheckoutReportSource::new()
+            .parse_report(IC_REPORT.as_bytes())
+            .unwrap();
+        // Amex bills acceptance as a discount rate (a scheme fee) and never shows interchange, so
+        // the completeness test must not fire on it — no AMEX payment in the report has one.
+        let p = by_ref(&rows, "amex_1");
+        assert_eq!(p.interchange, 0.0);
+        assert!((p.scheme_fee - 37.95).abs() < 1e-9, "the discount rate");
+        assert!((p.total_fee - 42.44).abs() < 1e-9);
+    }
+
+    #[test]
+    fn card_category_splits_consumer_from_commercial() {
+        let rows = CheckoutReportSource::new()
+            .parse_report(IC_REPORT.as_bytes())
+            .unwrap();
+        // Commercial cards are exempt from the consumer interchange caps and price far higher, so
+        // they must land in their own cluster rather than averaging with consumer volume.
+        assert_eq!(by_ref(&rows, "ic_1").ic_category, "Consumer");
+        assert_eq!(by_ref(&rows, "ic_2").ic_category, "Commercial");
+    }
+
+    #[test]
+    fn report_without_the_category_column_still_parses() {
+        // `Card Category` is optional: the blended fixture omits it entirely, and every payment must
+        // still ingest — with a blank category, exactly as before.
+        let rows = parse();
+        assert_eq!(rows.len(), 3);
+        assert!(rows.iter().all(|r| r.ic_category.is_empty()));
+    }
+
+    #[test]
+    fn blended_report_keeps_every_payment() {
+        // No `Interchange *` row anywhere → no network is held to the test → the original blended
+        // behaviour is untouched (pay_1/pay_2/pay_4 all survive, as before).
+        let rows = parse();
+        assert_eq!(rows.len(), 3);
+        assert!(rows.iter().all(|r| r.interchange == 0.0));
     }
 
     #[test]

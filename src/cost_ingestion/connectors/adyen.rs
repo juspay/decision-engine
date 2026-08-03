@@ -23,7 +23,23 @@ use crate::cost_ingestion::types::{
 
 /// Adyen record types that actually carry settlement fees; everything else (Authorised,
 /// Received, Refused, …) has empty fee columns and would pollute the fit.
-const FEE_RECORD_TYPES: [&str; 2] = ["SentForSettle", "Settled"];
+///
+/// **`Settled` ONLY — deliberately not `SentForSettle` too.** The Payments Accounting Report is an
+/// accounting *journal*, not a transaction list: one payment writes a line per lifecycle stage, and
+/// the `SentForSettle` and `Settled` lines carry byte-identical money columns (measured over a real
+/// 924k-row export: 172,908 paired references, **0** with any difference in gross, total fee,
+/// interchange, scheme fee or markup). Accepting both folded every transaction into the rollup twice.
+///
+/// Duplication leaves the OLS slope and intercept untouched (the normal equations scale on both
+/// sides) and `bps_rmse` is an RMS, so this was never a *mispricing* — it inflated `n` and
+/// `gross_sum` 2× in the dashboard, and shrank the slope CI by ~√2, which let the `MIN_N` / `SEG_FLOOR`
+/// gates and the L2 `ci_bps` promotion pass on samples that did not exist.
+///
+/// Trade-off accepted: a transaction captured but not yet settled at the report cutoff (~3.9% of
+/// references in that export) contributes nothing until it settles. It returns in a later report's
+/// `Settled` rows, and `cost_daily_stats` is a `ReplacingMergeTree` keyed on the transaction day, so
+/// the newer report supersedes that day cleanly.
+const FEE_RECORD_TYPES: [&str; 1] = ["Settled"];
 
 const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
@@ -181,6 +197,7 @@ impl SettlementReportSource for AdyenReportSource {
             icsf: usize,
             booking: Option<usize>,
             terminal: Option<usize>,
+            card_number: Option<usize>,
         }
 
         csv_reader::parse(
@@ -205,6 +222,9 @@ impl SettlementReportSource for AdyenReportSource {
                     // Optional: a terminal id marks in-person (POS) acceptance; absence ⇒ online (ecom).
                     // Drives the channel feature of the category predictor.
                     terminal: h.index("Unique Terminal ID"),
+                    // Optional: the (masked) PAN — its leading digits are the issuer BIN that seeds
+                    // the global card-product map. Absent in trimmed/tokenized exports ⇒ no BIN.
+                    card_number: h.index("Card Number"),
                 })
             },
             |c, row| {
@@ -221,7 +241,10 @@ impl SettlementReportSource for AdyenReportSource {
                 let gross = to_float(row.get(c.payable)) + total_fee;
 
                 let variant = row.get(c.variant).to_lowercase();
-                let funding = SettledFeeRow::funding_from_variant(&variant);
+                // Resolve funding from the variant, falling back to the interchange rate for
+                // co-badge cards whose variant is silent (separates the 20/30/90 fan).
+                let interchange_bps = ic_bps(row.get(c.icsf));
+                let funding = SettledFeeRow::resolve_funding(&variant, interchange_bps);
                 let txn_date = c.booking.and_then(|i| parse_booking_date(row.get(i)));
                 // POS when a terminal id is present, else online. Absent column ⇒ unknown ⇒ ecom.
                 let channel = match c.terminal {
@@ -230,6 +253,12 @@ impl SettlementReportSource for AdyenReportSource {
                 }
                 .to_string();
 
+                let icsf = row.get(c.icsf);
+                let bin = c
+                    .card_number
+                    .map(|i| SettledFeeRow::bin_from_pan(row.get(i)))
+                    .unwrap_or_default();
+
                 Ok(Some(SettledFeeRow {
                     txn_ref: row.get(c.psp).to_string(),
                     card_network: row.get(c.brand).to_lowercase(),
@@ -237,7 +266,8 @@ impl SettlementReportSource for AdyenReportSource {
                     funding,
                     issuer_country: row.get(c.issuer).to_string(),
                     currency: row.get(c.ccy).to_string(),
-                    ic_category: ic_category(row.get(c.icsf)),
+                    ic_category: ic_category(icsf),
+                    ic_bps: SettledFeeRow::ic_bps_key(interchange_bps),
                     txn_date,
                     channel,
                     gross,
@@ -246,6 +276,7 @@ impl SettlementReportSource for AdyenReportSource {
                     scheme_fee,
                     markup,
                     commission,
+                    bin,
                 }))
             },
             on_row,
@@ -398,6 +429,21 @@ fn ic_category(raw: &str) -> String {
         .to_string()
 }
 
+/// Pull the stated interchange rate (bps) out of the `ICSF details` JSON — the `bps` field on the
+/// `"t":"ic"` line item. `None` when the report omits it (trimmed exports carry the `ic` name but
+/// no `bps`). This is recorded per-BIN only; it never enters the cluster key.
+fn ic_bps(raw: &str) -> Option<f64> {
+    if raw.is_empty() {
+        return None;
+    }
+    let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(raw) else {
+        return None;
+    };
+    arr.iter()
+        .find(|e| e.get("t").and_then(Value::as_str) == Some("ic"))
+        .and_then(|e| e.get("bps").and_then(Value::as_f64))
+}
+
 /// Parse a money cell; blanks/garbage become `0.0` (mirrors `par_extract.to_float`).
 fn to_float(s: &str) -> f64 {
     s.trim().parse::<f64>().unwrap_or(0.0)
@@ -413,6 +459,30 @@ fn parse_booking_date(s: &str) -> Option<chrono::NaiveDate> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// One payment writes a journal line per lifecycle stage, and its `SentForSettle` and `Settled`
+    /// lines carry identical money columns. Only the `Settled` leg may reach the rollup — counting
+    /// both folded every transaction in twice, inflating `n`/`gross_sum` 2× and shrinking the slope
+    /// CI by ~√2 (see [`FEE_RECORD_TYPES`]).
+    #[test]
+    fn duplicate_sent_for_settle_leg_is_dropped() {
+        let csv = "\
+Psp Reference,Record Type,Payment Method Variant,Global Card Brand,Issuer Country,Settlement Currency,Payable (SC),Commission (SC),Markup (SC),Scheme Fees (SC),Interchange (SC),ICSF details\n\
+ref1,SentForSettle,visastandarddebit,visa,FR,EUR,40.01,0.00,0.04,0.06,0.08,\n\
+ref1,Settled,visastandarddebit,visa,FR,EUR,40.01,0.00,0.04,0.06,0.08,\n";
+        let rows = AdyenReportSource::new()
+            .parse_report(csv.as_bytes())
+            .unwrap();
+        assert_eq!(
+            rows.len(),
+            1,
+            "the same payment must be counted once, not once per leg"
+        );
+        assert!(
+            (rows[0].gross - 40.19).abs() < 1e-9,
+            "40.01 payable + 0.18 fee"
+        );
+    }
 
     #[test]
     fn parses_settled_rows_and_skips_non_fee_records() {
@@ -452,6 +522,22 @@ ref2,Settled,visastandarddebit,visa,FR,EUR,100.00,0.05,0.00,0.02,0.20,\"[{\"\"t\
     }
 
     #[test]
+    fn bin_and_rate_extraction() {
+        // Masked PAN → leading run of digits, capped at 8; empty/tokenized ⇒ "".
+        assert_eq!(SettledFeeRow::bin_from_pan("489678****4354"), "489678");
+        assert_eq!(SettledFeeRow::bin_from_pan("48967812****4354"), "48967812");
+        assert_eq!(SettledFeeRow::bin_from_pan(""), "");
+        assert_eq!(SettledFeeRow::bin_from_pan("****1234"), "");
+        // Stated interchange rate from the ICSF `ic` line; absent (trimmed export) ⇒ None.
+        assert_eq!(
+            ic_bps("[{\"t\":\"ic\",\"n\":\"X\",\"bps\":20.0}]"),
+            Some(20.0)
+        );
+        assert_eq!(ic_bps("[{\"t\":\"ic\",\"n\":\"X\"}]"), None);
+        assert_eq!(ic_bps(""), None);
+    }
+
+    #[test]
     fn funding_derivation() {
         assert_eq!(
             SettledFeeRow::funding_from_variant("visastandarddebit"),
@@ -462,6 +548,36 @@ ref2,Settled,visastandarddebit,visa,FR,EUR,100.00,0.05,0.00,0.02,0.20,\"[{\"\"t\
             "credit"
         );
         assert_eq!(SettledFeeRow::funding_from_variant("ideal"), "");
+    }
+
+    #[test]
+    fn cobadge_funding_resolves_from_rate() {
+        // mc/visa: the variant wins; the rate is ignored even if present.
+        assert_eq!(
+            SettledFeeRow::resolve_funding("visastandarddebit", Some(90.0)),
+            "debit"
+        );
+        // co-badge (blank variant): fall back to the interchange rate → separates the fan on the
+        // EU IFR caps: 20 bps debit, 30 bps credit, ~90 bps (cap-exempt) commercial.
+        assert_eq!(
+            SettledFeeRow::resolve_funding("cartebancaire", Some(20.0)),
+            "debit"
+        );
+        assert_eq!(
+            SettledFeeRow::resolve_funding("cartebancaire", Some(30.0)),
+            "credit"
+        );
+        assert_eq!(
+            SettledFeeRow::resolve_funding("cartebancaire", Some(90.0)),
+            "commercial"
+        );
+        // 0 (rate present but zero) is unknown, not debit ⇒ abstains.
+        assert_eq!(
+            SettledFeeRow::resolve_funding("cartebancaire", Some(0.0)),
+            ""
+        );
+        // no rate (trimmed export): unresolved ⇒ abstains, exactly as today.
+        assert_eq!(SettledFeeRow::resolve_funding("cartebancaire", None), "");
     }
 
     #[test]

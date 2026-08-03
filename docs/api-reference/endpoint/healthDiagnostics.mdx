@@ -44,11 +44,13 @@ curl "$BASE_URL/health/diagnostics" \
 
 ```json
 {
-  "service": "decision-engine",
-  "database": "ok",
-  "redis": "ok",
-  "clickhouse": "ok",
-  "version": "v1.4"
+  "key_custodian_locked": false,
+  "database": {
+    "database_connection": "Working",
+    "database_read": "Working",
+    "database_write": "Working",
+    "database_delete": "Working"
+  }
 }
 ```
 
@@ -59,5 +61,5 @@ curl "$BASE_URL/health/diagnostics" \
 
 ## Related
 
-- [Health Check](/api-reference/endpoint/healthCheck)
-- [Health Ready](/api-reference/endpoint/healthReady)
+- [Health Check](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/healthCheck.mdx)
+- [Health Ready](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/healthReady.mdx)

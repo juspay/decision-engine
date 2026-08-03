@@ -34,23 +34,6 @@ export function CoverageBreakdown({ merchantId }: { merchantId?: string }) {
   return (
     <div className="space-y-4">
       <VerdictTable coverage={coverage} />
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-slate-500 dark:text-[#9ca7ba]">
-        <span>
-          Model accuracy:{' '}
-          <span className="font-semibold text-slate-700 dark:text-[#c7cfdd]">
-            ±{coverage.bps_rmse_p50.toFixed(1)} bps
-          </span>{' '}
-          median · ±{coverage.bps_rmse_p90.toFixed(1)} bps p90
-        </span>
-        <span aria-hidden>·</span>
-        <span>{coverage.good_clusters.toLocaleString()} active cost models</span>
-        {coverage.report_date && (
-          <>
-            <span aria-hidden>·</span>
-            <span>as of {coverage.report_date}</span>
-          </>
-        )}
-      </div>
     </div>
   )
 }
@@ -64,6 +47,21 @@ function VerdictTable({ coverage }: { coverage: CoverageSummary }) {
       txns: coverage.good_txns,
       gross: coverage.good_gross,
     },
+    // Tiered sits next to GOOD because it is equally USABLE: the router prices these by amount tier
+    // (see `serving::SegmentedCost`). They were previously counted as "Poor fit", which understated
+    // coverage badly — a capped-interchange cluster grades NON_LINEAR by construction.
+    {
+      verdict: 'Tiered',
+      note: 'priced per amount tier — capped or tiered interchange',
+      dot: 'bg-sky-500',
+      txns: coverage.tiered_txns,
+      gross: coverage.tiered_gross,
+      // Tiered and Poor fit are exceptional outcomes, not baseline ones: most merchants have neither.
+      // An all-zero row is pure noise in a four-row table, and worse, an empty "Poor fit" line reads
+      // as a warning that isn't there. GOOD and THIN always render — every fit produces some of both,
+      // and a genuine zero on either is itself worth seeing.
+      hideWhenEmpty: true,
+    },
     {
       verdict: 'THIN',
       note: 'too few txns — safe fallback',
@@ -73,12 +71,13 @@ function VerdictTable({ coverage }: { coverage: CoverageSummary }) {
     },
     {
       verdict: 'Poor fit',
-      note: 'model failed to converge',
+      note: 'no single rate and no clean tiers — set a contract rate',
       dot: 'bg-amber-500',
       txns: coverage.non_linear_txns,
       gross: coverage.non_linear_gross,
+      hideWhenEmpty: true,
     },
-  ]
+  ].filter((r) => !r.hideWhenEmpty || r.txns > 0 || r.gross > 0)
   const txnPct = (n: number) => (coverage.total_txns > 0 ? (n / coverage.total_txns) * 100 : 0)
   const volPct = (v: number) => (coverage.total_gross > 0 ? (v / coverage.total_gross) * 100 : 0)
 
@@ -86,7 +85,7 @@ function VerdictTable({ coverage }: { coverage: CoverageSummary }) {
     <div className="overflow-x-auto">
       <table className="w-full min-w-[520px] text-left text-sm">
         <thead>
-          <tr className="border-b border-slate-200 text-xs uppercase tracking-[0.14em] text-slate-400 dark:border-[#232833]">
+          <tr className="border-b border-slate-200 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] dark:border-[#232833]">
             <th className="py-2 pr-3 font-semibold">Verdict</th>
             <th className="py-2 pr-3 text-right font-semibold">Txns</th>
             <th className="py-2 pr-3 text-right font-semibold">Txn %</th>

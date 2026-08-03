@@ -42,18 +42,18 @@ curl "$BASE_URL/auth/merchants" \
 ## Response
 
 ```json
-{
-  "merchants": [
-    {
-      "merchant_id": "merchant_demo",
-      "merchant_name": "Demo Merchant"
-    },
-    {
-      "merchant_id": "merchant_sbx",
-      "merchant_name": "Sandbox Merchant"
-    }
-  ]
-}
+[
+  {
+    "merchant_id": "merchant_demo",
+    "merchant_name": "Demo Merchant",
+    "role": "admin"
+  },
+  {
+    "merchant_id": "merchant_sbx",
+    "merchant_name": "Sandbox Merchant",
+    "role": "member"
+  }
+]
 ```
 
 ## Notes
@@ -63,6 +63,6 @@ curl "$BASE_URL/auth/merchants" \
 
 ## Related
 
-- [Switch Merchant](/api-reference/endpoint/switchMerchant)
-- [Onboard Merchant](/api-reference/endpoint/onboardMerchant)
-- [Current User](/api-reference/endpoint/me)
+- [Switch Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/switchMerchant.mdx)
+- [Onboard Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/onboardMerchant.mdx)
+- [Current User](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/me.mdx)

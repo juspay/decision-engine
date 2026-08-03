@@ -28,7 +28,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 - Method and path: `POST /rule/get`
 - Parameters: none.
-- Body: JSON body with `merchant_id` and `config.type`.
+- Body: JSON body with `merchant_id` and `algorithm` (`"successRate"` or `"elimination"`).
 
 ## Example
 
@@ -40,7 +40,7 @@ curl --location "$BASE_URL/rule/get" \
   --header "Content-Type: application/json" \
   --data '{
   "merchant_id": "merchant_demo",
-  "config": { "type": "successRate" }
+  "algorithm": "successRate"
 }'
 ```
 
@@ -52,7 +52,7 @@ curl --location "$BASE_URL/rule/get" \
   --header "Content-Type: application/json" \
   --data '{
   "merchant_id": "merchant_demo",
-  "config": { "type": "elimination" }
+  "algorithm": "elimination"
 }'
 ```
 
@@ -64,8 +64,13 @@ curl --location "$BASE_URL/rule/get" \
   "config": {
     "type": "successRate",
     "data": {
-      "enabled": true,
-      "default_success_rate": 0.8
+      "defaultLatencyThreshold": null,
+      "defaultBucketSize": 20,
+      "defaultHedgingPercent": null,
+      "margin": 0.2,
+      "subLevelInputConfig": [
+        { "paymentMethodType": "CARD", "bucketSize": 30, "hedgingPercent": 0.05 }
+      ]
     }
   }
 }
@@ -78,7 +83,7 @@ curl --location "$BASE_URL/rule/get" \
 
 ## Related
 
-- [Create Rule Config](/api-reference/endpoint/createRuleConfig)
-- [Update Rule Config](/api-reference/endpoint/updateRuleConfig)
-- [Get Success-Rate Config](/api-refs/success-rate-config-get)
-- [Get Elimination Config](/api-refs/elimination-config-get)
+- [Create Rule Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/createRuleConfig.mdx)
+- [Update Rule Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/updateRuleConfig.mdx)
+- [Get Success-Rate Config](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/success-rate-config-get.mdx)
+- [Get Elimination Config](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/elimination-config-get.mdx)

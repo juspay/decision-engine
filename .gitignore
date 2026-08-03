@@ -5,6 +5,8 @@ routing-config/output.sql
 dump.rdb
 .vscode
 **/node_modules
+**/.env.local
+**/.env.*.local
 cypress/screenshots
 cypress/videos
 cypress/fixtures

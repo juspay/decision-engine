@@ -28,7 +28,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 - Method and path: `POST /decision_gateway`
 - Parameters: none.
-- Body: Uses the same decision request shape as `/decide-gateway`.
+- Body: The legacy decider payload built from full internal transaction objects (`orderReference`, `txnDetail`, `txnCardInfo`, `merchantAccount`). This is **not** the `/decide-gateway` shape.
 
 ## Example
 
@@ -39,21 +39,43 @@ curl --location "$BASE_URL/decision_gateway" \
   --header "$AUTH_HEADER" \
   --header "Content-Type: application/json" \
   --data '{
-  "merchantId": "merchant_demo",
-  "eligibleGatewayList": ["stripe", "adyen", "checkout"],
-  "rankingAlgorithm": "SR_BASED_ROUTING",
-  "eliminationEnabled": true,
-  "paymentInfo": {
-    "paymentId": "pay_legacy_001",
-    "amount": 1000,
+  "orderReference": {
+    "orderId": "order_001",
+    "amount": 1000.0,
     "currency": "USD",
-    "country": "US",
-    "paymentType": "ORDER_PAYMENT",
+    "merchantId": "merchant_demo",
+    "status": "NEW",
+    "orderType": "ORDER_PAYMENT",
+    "customerId": "cust_123",
+    "preferredGateway": null,
+    "metadata": null,
+    "udfs": {}
+  },
+  "txnDetail": {
+    "txnId": "txn_001",
+    "orderId": "order_001",
+    "merchantId": "merchant_demo",
+    "status": "PENDING_VBV",
+    "type": "ORDER_PAYMENT",
+    "txnUuid": "pay_001",
+    "gateway": "stripe"
+  },
+  "txnCardInfo": {
+    "id": "card_001",
     "paymentMethodType": "CARD",
     "paymentMethod": "CREDIT",
     "authType": "THREE_DS",
-    "cardIsin": "424242"
-  }
+    "cardIsin": "411111",
+    "cardType": "CREDIT",
+    "dateCreated": "2026-03-31T00:00:00Z"
+  },
+  "merchantAccount": {
+    "merchantId": "merchant_demo",
+    "gatewaySuccessRateBasedDeciderInput": null
+  },
+  "enforceGatewayList": ["stripe", "adyen", "checkout"],
+  "priorityLogicScript": null,
+  "priorityLogicOutput": null
 }'
 ```
 
@@ -77,5 +99,5 @@ curl --location "$BASE_URL/decision_gateway" \
 
 ## Related
 
-- [Decide Gateway](/api-reference/endpoint/decideGateway)
-- [Legacy Decision Gateway](/api-refs/decision-gateway-legacy)
+- [Decide Gateway](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/decideGateway.mdx)
+- [Legacy Decision Gateway](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decision-gateway-legacy.mdx)

@@ -342,10 +342,16 @@ pub enum UserAuthError {
     AlreadyMember,
     #[error("Insufficient permissions")]
     Forbidden,
+    #[error("Invalid admin secret")]
+    Unauthorized,
     #[error("Failed to send email")]
     EmailSendFailed,
     #[error("Invalid or expired verification token")]
     InvalidVerificationToken,
+    #[error("Operation not supported for this session type")]
+    UnsupportedOperation,
+    #[error("Invalid or expired password reset token")]
+    InvalidResetToken,
 }
 
 impl axum::response::IntoResponse for UserAuthError {
@@ -363,11 +369,14 @@ impl axum::response::IntoResponse for UserAuthError {
             Self::MerchantNotFound => (hyper::StatusCode::NOT_FOUND, self.to_string()),
             Self::AlreadyMember => (hyper::StatusCode::CONFLICT, self.to_string()),
             Self::Forbidden => (hyper::StatusCode::FORBIDDEN, self.to_string()),
+            Self::Unauthorized => (hyper::StatusCode::UNAUTHORIZED, self.to_string()),
             Self::StorageError | Self::TokenGenerationFailed | Self::PasswordHashingFailed => {
                 (hyper::StatusCode::INTERNAL_SERVER_ERROR, self.to_string())
             }
             Self::EmailSendFailed => (hyper::StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
             Self::InvalidVerificationToken => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
+            Self::UnsupportedOperation => (hyper::StatusCode::FORBIDDEN, self.to_string()),
+            Self::InvalidResetToken => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
         };
         (
             status,

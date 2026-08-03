@@ -5,19 +5,19 @@ description: "Curl examples for /routing/create."
 
 # Create Routing Algorithm
 
-Use `/routing/create` to persist a merchant-scoped routing algorithm. Creating an algorithm does not make it active; call [`/routing/activate`](/api-refs/routing-algorithm-activate) after creation.
+Use `/routing/create` to persist a merchant-scoped routing algorithm. Creating an algorithm does not make it active; call [`/routing/activate`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-activate.mdx) after creation.
 
 Supported `algorithm.type` values:
 
 | Type | Use case | Full example |
 | --- | --- | --- |
-| `single` | Always return one connector. | [Single connector](/api-refs/routing-single-connector-example) |
-| `priority` | Return connectors in the configured order. | [Priority routing](/api-refs/routing-priority-example) |
-| `volume_split` | Split decisions by percentage. | [Volume split](/api-refs/routing-volume-split-example) |
-| `advanced` | Evaluate AND/OR/nested conditions before returning an output. | [Advanced routing](/api-refs/routing-advanced-example) |
-| `ab_test` | Split traffic between a control and variant strategy with guardrails and significance testing. | [A/B testing](/api-refs/ab-testing-create) |
+| `single` | Always return one connector. | [Single connector](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-single-connector-example.mdx) |
+| `priority` | Return connectors in the configured order. | [Priority routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-priority-example.mdx) |
+| `volume_split` | Split decisions by percentage. | [Volume split](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-volume-split-example.mdx) |
+| `advanced` | Evaluate AND/OR/nested conditions before returning an output. | [Advanced routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-advanced-example.mdx) |
+| `ab_test` | Split traffic between a control and variant strategy with guardrails and significance testing. | [A/B testing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-create.mdx) |
 
-Use [`/routing/deactivate`](/api-refs/routing-algorithm-deactivate) to deactivate the currently active algorithm without deleting it, and [update or delete](/api-refs/routing-algorithm-update-delete) an inactive algorithm in place.
+Use [`/routing/deactivate`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-deactivate.mdx) to deactivate the currently active algorithm without deleting it, and [update or delete](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-update-delete.mdx) an inactive algorithm in place.
 
 ## Priority Rule
 
@@ -87,7 +87,7 @@ curl --location "$BASE_URL/routing/create" \
 
 ## Advanced Rule
 
-Use `advanced` for conditional routing. The complete AND/OR/nested reference is in [Advanced Routing Example](/api-refs/routing-advanced-example).
+Use `advanced` for conditional routing. The complete AND/OR/nested reference is in [Advanced Routing Example](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-advanced-example.mdx).
 
 ```bash
 curl --location "$BASE_URL/routing/create" \
@@ -149,9 +149,9 @@ curl --location "$BASE_URL/routing/create" \
 
 ## Related
 
-- [Activate Routing Algorithm](/api-refs/routing-algorithm-activate)
-- [Update & Delete Routing Algorithm](/api-refs/routing-algorithm-update-delete)
-- [List Routing Algorithms](/api-refs/routing-algorithm-list)
-- [Evaluate Routing Algorithm](/api-refs/routing-algorithm-evaluate)
-- [Advanced Routing Example](/api-refs/routing-advanced-example)
-- [A/B Testing: Create An Experiment](/api-refs/ab-testing-create)
+- [Activate Routing Algorithm](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-activate.mdx)
+- [Update & Delete Routing Algorithm](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-update-delete.mdx)
+- [List Routing Algorithms](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-list.mdx)
+- [Evaluate Routing Algorithm](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-evaluate.mdx)
+- [Advanced Routing Example](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-advanced-example.mdx)
+- [A/B Testing: Create An Experiment](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-create.mdx)

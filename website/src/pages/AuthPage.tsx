@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
   Building2,
@@ -13,7 +13,8 @@ import {
 } from 'lucide-react'
 import { useAuthStore, MerchantInfo } from '../store/authStore'
 import { useMerchantStore } from '../store/merchantStore'
-import { apiFetch } from '../lib/api'
+import { apiErrorMessage, apiFetch } from '../lib/api'
+import { signupEnabled } from '../lib/appConfig'
 import { getResolvedThemePreference, persistThemePreference } from '../lib/theme'
 import { SurfaceLabel } from '../components/ui/Card'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
@@ -50,6 +51,7 @@ interface AuthLocationState {
 }
 
 function getTabFromPath(pathname: string): Tab {
+  if (!signupEnabled) return 'login'
   return pathname.endsWith('/signup') ? 'signup' : 'login'
 }
 
@@ -75,20 +77,6 @@ function getPasswordPolicyError(password: string): string | null {
   }
 
   return null
-}
-
-function getApiErrorMessage(err: unknown): string {
-  const msg = err instanceof Error ? err.message : 'Something went wrong'
-  const match = msg.match(/API error \d+: (.+)/)
-
-  if (!match) return msg
-
-  try {
-    const parsed = JSON.parse(match[1])
-    return parsed.message ?? msg
-  } catch {
-    return match[1]
-  }
 }
 
 function isDuplicateEmailError(message: string): boolean {
@@ -175,6 +163,7 @@ export function AuthPage() {
     try {
       const path = tab === 'login' ? '/auth/login' : '/auth/signup'
       const normalizedMerchantName = merchantName.trim()
+
       const res = await apiFetch<SignupResponse>(path, {
         method: 'POST',
         body: JSON.stringify({ email, password }),
@@ -199,7 +188,7 @@ export function AuthPage() {
       const authRes = res as AuthResponse
       setAuth(
         authRes.token,
-        { userId: authRes.user_id, email: authRes.email, merchantId: authRes.merchant_id, role: authRes.role },
+        { userId: authRes.user_id, email: authRes.email, merchantId: authRes.merchant_id, role: authRes.role, isRedirectSession: false },
         authRes.merchants,
       )
       if (authRes.merchant_id) setMerchantId(authRes.merchant_id)
@@ -230,7 +219,7 @@ export function AuthPage() {
         navigate('/', { replace: true })
       }
     } catch (err) {
-      const msg = getApiErrorMessage(err)
+      const msg = apiErrorMessage(err)
 
       if (tab === 'signup' && isDuplicateEmailError(msg)) {
         setTab('login')
@@ -322,9 +311,11 @@ export function AuthPage() {
                 <AuthTabButton active={tab === 'login'} onClick={() => switchTab('login')}>
                   Sign in
                 </AuthTabButton>
-                <AuthTabButton active={tab === 'signup'} onClick={() => switchTab('signup')}>
-                  Sign up
-                </AuthTabButton>
+                {signupEnabled ? (
+                  <AuthTabButton active={tab === 'signup'} onClick={() => switchTab('signup')}>
+                    Sign up
+                  </AuthTabButton>
+                ) : null}
               </div>
 
               <div className="mt-10 border-t border-slate-200 pt-10 dark:border-[#1d1d23]">
@@ -360,7 +351,7 @@ export function AuthPage() {
                     label="Password"
                     footer={
                       tab === 'login'
-                        ? 'Password reset is managed by your account admin.'
+                        ? undefined
                         : 'Use at least 10 characters with uppercase, lowercase, number, and special character.'
                     }
                   >
@@ -385,6 +376,18 @@ export function AuthPage() {
                       </button>
                     </div>
                   </Field>
+
+                  {tab === 'login' ? (
+                    <div className="-mt-1 flex justify-end">
+                      <Link
+                        to="/forgot-password"
+                        state={{ email }}
+                        className="text-sm font-medium text-brand-600 transition-colors hover:text-brand-700 dark:text-brand-500 dark:hover:text-brand-100"
+                      >
+                        Forgot password?
+                      </Link>
+                    </div>
+                  ) : null}
 
                   {tab === 'signup' ? (
                     <p className="text-xs leading-5 text-slate-500 dark:text-[#7b8496]">

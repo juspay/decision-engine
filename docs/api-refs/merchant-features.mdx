@@ -46,8 +46,8 @@ Response is the same shape as the list call, re-read after the change so you alw
 | --- | --- |
 | `gsm-scoring-filter` | Filters gateway scoring using Gateway Status Mapper error-code classification. |
 | `explore-exploit-srv3` | Explore/exploit hedging on the SRv3 scoring path. |
-| `ab-test-real-payments` | Whether active A/B test experiments intercept real `/decide-gateway` traffic — see [A/B Testing: Results](/api-refs/ab-testing-results). |
-| `multi-objective-routing` | Merchant-wide default for the cost-aware post-step — see [Multi-Objective Routing](/api-refs/decide-gateway-multi-objective). Per-request `enableMultiObjective` overrides this. |
+| `ab-test-real-payments` | Whether active A/B test experiments intercept real `/decide-gateway` traffic — see [A/B Testing: Results](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-results.mdx). |
+| `multi-objective-routing` | Merchant-wide default for the cost-aware post-step — see [Multi-Objective Routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-multi-objective.mdx). Per-request `enableMultiObjective` overrides this. |
 | `elimination` | Gateway-level SR-based elimination (excluding gateways in downtime). |
 | `auto-calibration` | Enables the self-tuning background job (see below). Must be on **together with** `autopilot` for the job to actually write changes. |
 | `autopilot` | Master write-permission switch for the self-tuning job. With `auto-calibration` off, this alone does nothing. |
@@ -62,15 +62,15 @@ Every polling interval (default 900s, configurable via `[sr_auto_calibration]` i
 2. Derives two SRv3 knobs purely from observed data — no merchant input:
    - **Bucket size** — clamped between 100 and 2000, only rewritten on a meaningful (25-step) change.
    - **Hedging %** — capped at 30%, with a 1.0pp minimum move before it updates.
-3. Writes the result back into the merchant's SR config (readable via [`GET /config/routing-keys`](/api-refs/config-endpoints) and [`GET /config-sr-dimension/:merchant_id`](/api-refs/config-endpoints#get-sr-dimensions)), stamped with `"source": "autopilot"` so autopilot-written values are distinguishable from human-authored overrides.
+3. Writes the result back into the merchant's SR config (readable via [`GET /config/routing-keys`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/config-endpoints.mdx) and [`GET /config-sr-dimension/:merchant_id`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/config-endpoints.mdx#get-sr-dimensions)), stamped with `"source": "autopilot"` so autopilot-written values are distinguishable from human-authored overrides.
 
-Every calibration run also emits an analytics event (`flow_type: autopilot_calibration`) — this is what powers the "Autopilot Actions" panel in the simulation UI, and is queryable via [Routing Events](/api-refs/analytics-endpoints#routing-events).
+Every calibration run also emits an analytics event (`flow_type: autopilot_calibration`) — this is what powers the "Autopilot Actions" panel in the simulation UI, and is queryable via [Routing Events](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/analytics-endpoints.mdx#routing-events).
 
 ## Reset Gateway Scores
 
 Flushes all SR v2/v3 score and queue keys for a merchant from Redis, and strips any autopilot-written (`source: "autopilot"`) sub-level config overrides — human-authored overrides are preserved. Used by the simulator's "Hard refresh" so a new simulation run starts from a clean slate.
 
-Unlike the feature-flag calls above, this route requires `$TENANT_HEADER` in addition to `$AUTH_HEADER` — see [Environment setup](/api-refs/api-ref#environment-setup).
+Unlike the feature-flag calls above, this route requires `$TENANT_HEADER` in addition to `$AUTH_HEADER` — see [Environment setup](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx#environment-setup).
 
 ```bash
 curl --location "$BASE_URL/gateway-score/reset" \
@@ -92,7 +92,7 @@ This does not disable routing or delete configuration — it only clears live sc
 
 ## Related
 
-- [A/B Testing: Create An Experiment](/api-refs/ab-testing-create)
-- [Multi-Objective Routing](/api-refs/decide-gateway-multi-objective)
-- [Routing Config Endpoints](/api-refs/config-endpoints)
-- [Analytics Endpoints](/api-refs/analytics-endpoints)
+- [A/B Testing: Create An Experiment](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-create.mdx)
+- [Multi-Objective Routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-multi-objective.mdx)
+- [Routing Config Endpoints](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/config-endpoints.mdx)
+- [Analytics Endpoints](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/analytics-endpoints.mdx)

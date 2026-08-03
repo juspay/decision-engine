@@ -47,9 +47,13 @@ curl --location "$BASE_URL/onboarding/merchant" \
 
 ```json
 {
-  "merchant_id": "merchant_demo",
+  "token": "eyJ...",
+  "merchant_id": "merchant_9f21a6c0",
   "merchant_name": "Demo Merchant",
-  "created": true
+  "merchants": [
+    { "merchant_id": "merchant_demo", "merchant_name": "Demo Merchant", "role": "admin" },
+    { "merchant_id": "merchant_9f21a6c0", "merchant_name": "Demo Merchant", "role": "admin" }
+  ]
 }
 ```
 
@@ -60,6 +64,6 @@ curl --location "$BASE_URL/onboarding/merchant" \
 
 ## Related
 
-- [Switch Merchant](/api-reference/endpoint/switchMerchant)
-- [Create Merchant](/api-reference/endpoint/createMerchant)
-- [Get Merchant](/api-reference/endpoint/getMerchant)
+- [Switch Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/switchMerchant.mdx)
+- [Create Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/createMerchant.mdx)
+- [Get Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/getMerchant.mdx)

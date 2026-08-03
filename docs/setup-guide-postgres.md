@@ -5,7 +5,7 @@ description: "Set up Decision Engine with a PostgreSQL database."
 
 # PostgreSQL Setup Guide
 
-This page provides PostgreSQL-focused commands. For the full end-to-end setup — CLI, Docker, Compose, Helm — see the [Local Setup Guide](/local-setup).
+This page provides PostgreSQL-focused commands. For the full end-to-end setup — CLI, Docker, Compose, Helm — see the [Local Setup Guide](https://github.com/juspay/decision-engine/blob/main/docs/local-setup.md).
 
 ## Docker Compose (GHCR track)
 
@@ -53,7 +53,7 @@ Expected response:
 
 ## Related Docs
 
-- [Installation](/installation)
-- [Local Setup Guide](/local-setup)
-- [MySQL Setup](/setup-guide-mysql)
-- [Configuration](/configuration)
+- [Installation](https://github.com/juspay/decision-engine/blob/main/docs/installation.md)
+- [Local Setup Guide](https://github.com/juspay/decision-engine/blob/main/docs/local-setup.md)
+- [MySQL Setup](https://github.com/juspay/decision-engine/blob/main/docs/setup-guide-mysql.md)
+- [Configuration](https://github.com/juspay/decision-engine/blob/main/docs/configuration.md)

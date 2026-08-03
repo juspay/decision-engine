@@ -43,16 +43,16 @@ curl "$BASE_URL/api-key/list/merchant_demo" \
 ## Response
 
 ```json
-{
-  "keys": [
-    {
-      "key_id": "key_123",
-      "merchant_id": "merchant_demo",
-      "name": "local-smoke-key",
-      "created_at": "2026-04-26T00:00:00Z"
-    }
-  ]
-}
+[
+  {
+    "key_id": "018f2c1a-...",
+    "key_prefix": "DE_abcd1234",
+    "merchant_id": "merchant_demo",
+    "description": "backend integration key",
+    "is_active": true,
+    "created_at": "2026-04-26 10:00:00.000000"
+  }
+]
 ```
 
 ## Notes
@@ -62,5 +62,5 @@ curl "$BASE_URL/api-key/list/merchant_demo" \
 
 ## Related
 
-- [Create API Key](/api-reference/endpoint/createApiKey)
-- [Revoke API Key](/api-reference/endpoint/revokeApiKey)
+- [Create API Key](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/createApiKey.mdx)
+- [Revoke API Key](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/revokeApiKey.mdx)

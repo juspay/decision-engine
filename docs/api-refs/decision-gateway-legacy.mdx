@@ -5,23 +5,55 @@ description: "Compatibility example for the legacy /decision_gateway route."
 
 # Legacy Decision Gateway
 
-`/decision_gateway` is retained for compatibility with older integrations. New integrations should use [`/decide-gateway`](/api-refs/decide-gateway-sr-based).
+`/decision_gateway` is retained for compatibility with older integrations. It does **not** use the modern `/decide-gateway` body — it expects the legacy decider payload built from full internal transaction objects (`orderReference`, `txnDetail`, `txnCardInfo`, `merchantAccount`). New integrations should use [`/decide-gateway`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-sr-based.mdx), whose request is far simpler.
 
 ```bash
 curl --location "$BASE_URL/decision_gateway" \
   --header "$AUTH_HEADER" \
   --header "Content-Type: application/json" \
   --data '{
-    "merchantId": "merchant_demo",
-    "eligibleGatewayList": ["stripe", "adyen"],
-    "rankingAlgorithm": "SR_BASED_ROUTING",
-    "paymentInfo": {
-      "paymentId": "legacy_001",
-      "amount": 1000,
+    "orderReference": {
+      "orderId": "order_001",
+      "amount": 1000.0,
       "currency": "USD",
-      "paymentType": "ORDER_PAYMENT",
+      "merchantId": "merchant_demo",
+      "status": "NEW",
+      "orderType": "ORDER_PAYMENT",
+      "customerId": "cust_123",
+      "preferredGateway": null,
+      "metadata": null,
+      "udfs": {}
+    },
+    "txnDetail": {
+      "txnId": "txn_001",
+      "orderId": "order_001",
+      "merchantId": "merchant_demo",
+      "status": "PENDING_VBV",
+      "type": "ORDER_PAYMENT",
+      "txnUuid": "pay_001",
+      "gateway": "stripe"
+    },
+    "txnCardInfo": {
+      "id": "card_001",
       "paymentMethodType": "CARD",
-      "paymentMethod": "CREDIT"
-    }
+      "paymentMethod": "CREDIT",
+      "authType": "THREE_DS",
+      "cardIsin": "411111",
+      "cardType": "CREDIT",
+      "dateCreated": "2026-03-31T00:00:00Z"
+    },
+    "merchantAccount": {
+      "merchantId": "merchant_demo",
+      "gatewaySuccessRateBasedDeciderInput": null
+    },
+    "enforceGatewayList": ["stripe", "adyen"],
+    "priorityLogicScript": null,
+    "priorityLogicOutput": null
   }'
 ```
+
+<Note>
+  This is the legacy Groovy-era decider schema. The internal `txnDetail` / `txnCardInfo` /
+  `orderReference` objects carry many fields; the shape above shows the top-level structure. Prefer
+  `/decide-gateway` for all new work.
+</Note>

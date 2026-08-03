@@ -1,5 +1,6 @@
 import { TrendingUp } from 'lucide-react'
-import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
+import { Card, CardBody, CardHeader } from '../ui/Card'
+import * as type from '../ui/typography'
 import { usePriceChanges, type PriceChange } from '../../hooks/useCostRouting'
 
 /**
@@ -17,10 +18,7 @@ export function PriceChanges({ merchantId }: { merchantId?: string }) {
         <div className="flex items-center gap-2">
           <TrendingUp size={16} className="text-amber-500" />
           <div>
-            <SurfaceLabel>Fee changes detected</SurfaceLabel>
-            <h2 className="mt-2 font-medium text-slate-800 dark:text-white">
-              Clusters whose price moved
-            </h2>
+            <h2 className={type.heading}>Clusters whose price moved</h2>
           </div>
         </div>
       </CardHeader>
@@ -28,7 +26,7 @@ export function PriceChanges({ merchantId }: { merchantId?: string }) {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] text-left text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-xs uppercase tracking-[0.14em] text-slate-400 dark:border-[#232833]">
+              <tr className="border-b border-slate-200 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] dark:border-[#232833]">
                 <th className="py-2 pr-3 font-semibold">Cluster</th>
                 <th className="py-2 pr-3 text-right font-semibold">Percentage</th>
                 <th className="py-2 pr-3 text-right font-semibold">Flat fee</th>
