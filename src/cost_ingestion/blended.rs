@@ -308,8 +308,8 @@ impl ClusterOrder {
     /// The `ORDER BY` expression — a fixed SELECT-alias, so it's safe to interpolate into the SQL.
     fn column(self) -> &'static str {
         match self {
-            ClusterOrder::Gross => "total_gross",
-            ClusterOrder::Txns => "txns",
+            Self::Gross => "total_gross",
+            Self::Txns => "txns",
         }
     }
 }
@@ -455,8 +455,8 @@ fn client() -> &'static reqwest::Client {
 
 /// The merchant's top segments ranked by `order` (settled GMV by default, or transaction count),
 /// narrowed by `scope` (empty = merchant-wide; connector/account = that connector's latest snapshot;
-/// + report_date = one exact ingested snapshot). Every grade is returned — read `TopCluster::verdict`
-/// before treating a rate as trustworthy.
+/// plus report_date = one exact ingested snapshot). Every grade is returned — read
+/// `TopCluster::verdict` before treating a rate as trustworthy.
 pub async fn top_clusters(
     cfg: &ClickHouseAnalyticsConfig,
     merchant_id: &str,

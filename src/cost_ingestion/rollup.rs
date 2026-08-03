@@ -369,7 +369,7 @@ mod tests {
         acc.add_row(&card_row(120.0, "535563", "135"), d);
         acc.add_row(&card_row(200.0, "535563", "180"), d);
         let mut rows = acc.bin_rows();
-        rows.sort_by(|a, b| b.support_n.cmp(&a.support_n));
+        rows.sort_by_key(|r| std::cmp::Reverse(r.support_n));
         assert_eq!(rows.len(), 2, "one row per distinct (bin, rate) tier");
         assert_eq!(rows[0].bin, "535563");
         assert_eq!((&*rows[0].card_product, rows[0].support_n), ("135", 3));

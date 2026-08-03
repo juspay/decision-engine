@@ -6,6 +6,7 @@ use crate::types::service_configuration;
 use crate::{error, logger};
 use axum::{extract::Path, http::HeaderMap, Json};
 use error_stack::ResultExt;
+use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -301,7 +302,7 @@ pub async fn create_merchant_config(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    if provided != global_config.admin_secret.secret {
+    if provided != global_config.admin_secret.secret.peek().as_str() {
         return Err(error::MerchantAccountConfigurationError::Unauthorized.into());
     }
     // Record total request count and start timer

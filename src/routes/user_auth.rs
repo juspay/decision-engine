@@ -13,6 +13,7 @@ use axum::Json;
 use diesel::associations::HasTable;
 use diesel::{BoolExpressionMethods, ExpressionMethods};
 use error_stack::ResultExt;
+use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
 
 #[cfg(feature = "mysql")]
@@ -113,7 +114,7 @@ pub async fn signup(
             .get("x-admin-secret")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
-        if provided_admin_secret != global_config.admin_secret.secret {
+        if provided_admin_secret != global_config.admin_secret.secret.peek().as_str() {
             return Err(error::ContainerError::from(UserAuthError::Unauthorized));
         }
     }
@@ -323,7 +324,7 @@ pub async fn signup(
         requested_merchant_id.as_deref().unwrap_or(""),
         "admin",
         TOKEN_TYPE_STANDARD,
-        &global_config.user_auth.jwt_secret,
+        global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
     )
     .change_context(UserAuthError::TokenGenerationFailed)?;
@@ -407,7 +408,7 @@ pub async fn login(
         &active_merchant_id,
         &user.role,
         TOKEN_TYPE_STANDARD,
-        &global_config.user_auth.jwt_secret,
+        global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
     )
     .change_context(UserAuthError::TokenGenerationFailed)?;
@@ -433,7 +434,7 @@ pub async fn create_merchant(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
 
     // HS-redirect sessions are scoped to the routing view — they have no real user row, so
     // creating a merchant would attach it to a phantom user. Refuse.
@@ -511,7 +512,7 @@ pub async fn create_merchant(
         &merchant_id,
         &claims.role,
         TOKEN_TYPE_STANDARD,
-        &global_config.user_auth.jwt_secret,
+        global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
     )
     .change_context(UserAuthError::TokenGenerationFailed)?;
@@ -534,7 +535,7 @@ pub async fn list_merchants(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
     let app_state = get_tenant_app_state().await;
 
     let merchants = fetch_user_merchants(&app_state, &claims.user_id).await?;
@@ -552,7 +553,7 @@ pub async fn switch_merchant(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
 
     if claims.token_type == TOKEN_TYPE_HS_REDIRECT {
         return Err(error::ContainerError::from(
@@ -574,7 +575,7 @@ pub async fn switch_merchant(
         &target.merchant_id,
         &target.role,
         TOKEN_TYPE_STANDARD,
-        &global_config.user_auth.jwt_secret,
+        global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
     )
     .change_context(UserAuthError::TokenGenerationFailed)?;
@@ -611,7 +612,7 @@ pub async fn change_password(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
 
     if claims.token_type == TOKEN_TYPE_HS_REDIRECT {
         return Err(error::ContainerError::from(
@@ -719,7 +720,7 @@ pub async fn invite_member(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
 
     // HS-redirect sessions must not manage identity — otherwise a leaked short-lived token
     // could mint persistent real user accounts.
@@ -924,7 +925,7 @@ pub async fn list_members(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
     let app_state = get_tenant_app_state().await;
 
     let memberships =
@@ -1006,7 +1007,7 @@ pub async fn logout(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let claims = auth::verify_jwt(token, &global_config.user_auth.jwt_secret)
+    let claims = auth::verify_jwt(token, global_config.user_auth.jwt_secret.peek())
         .change_context(UserAuthError::InvalidToken)?;
 
     let app_state = get_tenant_app_state().await;
@@ -1039,7 +1040,7 @@ pub async fn me(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let claims = verify_jwt_not_revoked(token, &global_config.user_auth.jwt_secret).await?;
+    let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
 
     if claims.token_type == TOKEN_TYPE_HS_REDIRECT {
         return Ok(Json(MeResponse {
@@ -1408,7 +1409,7 @@ pub async fn admin_merchant_token(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    if provided != global_config.admin_secret.secret {
+    if provided != global_config.admin_secret.secret.peek().as_str() {
         return Err(error::ContainerError::from(UserAuthError::InvalidToken));
     }
 
@@ -1483,7 +1484,7 @@ pub async fn exchange_merchant_token(
         &merchant_id,
         "admin",
         TOKEN_TYPE_HS_REDIRECT,
-        &global_config.user_auth.jwt_secret,
+        global_config.user_auth.jwt_secret.peek().as_str(),
         global_config.user_auth.hs_redirect_jwt_expiry_seconds,
     )
     .change_context(UserAuthError::TokenGenerationFailed)?;
