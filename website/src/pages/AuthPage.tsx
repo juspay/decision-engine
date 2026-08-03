@@ -163,9 +163,7 @@ export function AuthPage() {
     try {
       const path = tab === 'login' ? '/auth/login' : '/auth/signup'
       const normalizedMerchantName = merchantName.trim()
-      // Signup is open self-service in sandbox/dev; in production the signup page is not
-      // shown at all (account creation is backend-only via the admin secret), so the
-      // dashboard never needs to send `x-admin-secret`.
+
       const res = await apiFetch<SignupResponse>(path, {
         method: 'POST',
         body: JSON.stringify({ email, password }),

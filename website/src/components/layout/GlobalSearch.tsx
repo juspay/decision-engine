@@ -103,7 +103,7 @@ const ALL_SEARCH_GROUPS: SearchGroup[] = [
   },
 ]
 
-// The Decision Simulator is hidden in production builds, so drop its search group too.
+
 const SEARCH_GROUPS: SearchGroup[] = simulatorEnabled
   ? ALL_SEARCH_GROUPS
   : ALL_SEARCH_GROUPS.filter((group) => group.heading !== 'Simulation')
