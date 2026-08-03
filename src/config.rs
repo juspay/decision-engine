@@ -932,25 +932,39 @@ impl GlobalConfig {
                 ))?;
         }
 
-        if let Some(password) = self.analytics.clickhouse.password.clone() {
-            self.analytics.clickhouse.password = Some(
-                secret_management_client
-                    .get_secret(password)
-                    .await
-                    .change_context(error::ConfigurationError::KmsDecryptError(
-                        "analytics_clickhouse_password",
-                    ))?,
+        if self.analytics.clickhouse.enabled {
+            if let Some(password) = self.analytics.clickhouse.password.clone() {
+                self.analytics.clickhouse.password = Some(
+                    secret_management_client
+                        .get_secret(password)
+                        .await
+                        .change_context(error::ConfigurationError::KmsDecryptError(
+                            "analytics_clickhouse_password",
+                        ))?,
+                );
+            }
+        } else if self.analytics.clickhouse.password.is_some() {
+            crate::logger::warn!(
+                "Skipping ClickHouse password decryption: analytics.clickhouse.enabled is false. \
+                 A password is configured but will not be used."
             );
         }
 
-        if let Some(password) = self.analytics.kafka.sasl_password.clone() {
-            self.analytics.kafka.sasl_password = Some(
-                secret_management_client
-                    .get_secret(password)
-                    .await
-                    .change_context(error::ConfigurationError::KmsDecryptError(
-                        "analytics_kafka_sasl_password",
-                    ))?,
+        if self.analytics.kafka.enabled {
+            if let Some(password) = self.analytics.kafka.sasl_password.clone() {
+                self.analytics.kafka.sasl_password = Some(
+                    secret_management_client
+                        .get_secret(password)
+                        .await
+                        .change_context(error::ConfigurationError::KmsDecryptError(
+                            "analytics_kafka_sasl_password",
+                        ))?,
+                );
+            }
+        } else if self.analytics.kafka.sasl_password.is_some() {
+            crate::logger::warn!(
+                "Skipping Kafka SASL password decryption: analytics.kafka.enabled is false. \
+                 A password is configured but will not be used."
             );
         }
 
