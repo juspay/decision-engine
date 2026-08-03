@@ -28,7 +28,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 - Method and path: `POST /routing/evaluate`
 - Parameters: none.
-- Body: JSON body with `merchantId` and `paymentInfo`.
+- Body: JSON body with `created_by`, optional `payment_id`, and `parameters` — a map of rule-builder key → typed value (`{ "type": "enum_variant", "value": "..." }` for enum keys, `{ "type": "number", "value": ... }` for numeric keys). Discover valid keys/values with `GET /config/routing-keys`.
 
 ## Example
 
@@ -39,17 +39,13 @@ curl --location "$BASE_URL/routing/evaluate" \
   --header "$AUTH_HEADER" \
   --header "Content-Type: application/json" \
   --data '{
-  "merchantId": "merchant_demo",
-  "paymentInfo": {
-    "paymentId": "rule_decision_001",
-    "amount": 1000,
-    "currency": "USD",
-    "country": "US",
-    "paymentType": "ORDER_PAYMENT",
-    "paymentMethodType": "CARD",
-    "paymentMethod": "CREDIT",
-    "authType": "THREE_DS",
-    "cardIsin": "424242"
+  "created_by": "merchant_demo",
+  "payment_id": "rule_decision_001",
+  "parameters": {
+    "payment_method_type": { "type": "enum_variant", "value": "credit" },
+    "payment_method": { "type": "enum_variant", "value": "card" },
+    "currency": { "type": "enum_variant", "value": "USD" },
+    "amount": { "type": "number", "value": 1000 }
   }
 }'
 ```
@@ -58,13 +54,22 @@ curl --location "$BASE_URL/routing/evaluate" \
 
 ```json
 {
-  "gateway": "stripe",
-  "gateways": [
-    "stripe",
-    "adyen"
+  "payment_id": "rule_decision_001",
+  "status": "success",
+  "output": {
+    "type": "priority",
+    "connectors": [
+      { "gateway_name": "stripe", "gateway_id": "mca_111" },
+      { "gateway_name": "adyen", "gateway_id": "mca_112" }
+    ]
+  },
+  "evaluated_output": [
+    { "gateway_name": "stripe", "gateway_id": "mca_111" }
   ],
-  "routing_approach": "RULE_EVALUATE_DECISION",
-  "rule_name": "volume_split_rule"
+  "eligible_connectors": [
+    { "gateway_name": "stripe", "gateway_id": "mca_111" },
+    { "gateway_name": "adyen", "gateway_id": "mca_112" }
+  ]
 }
 ```
 

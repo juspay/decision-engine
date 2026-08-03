@@ -44,11 +44,13 @@ curl "$BASE_URL/health/diagnostics" \
 
 ```json
 {
-  "service": "decision-engine",
-  "database": "ok",
-  "redis": "ok",
-  "clickhouse": "ok",
-  "version": "v1.4"
+  "key_custodian_locked": false,
+  "database": {
+    "database_connection": "Working",
+    "database_read": "Working",
+    "database_write": "Working",
+    "database_delete": "Working"
+  }
 }
 ```
 

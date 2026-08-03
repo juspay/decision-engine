@@ -46,7 +46,15 @@ curl "$BASE_URL/auth/me" \
   "user_id": "user_123",
   "email": "operator@example.com",
   "merchant_id": "merchant_demo",
-  "role": "admin"
+  "role": "admin",
+  "email_verified": true,
+  "merchants": [
+    {
+      "merchant_id": "merchant_demo",
+      "merchant_name": "Demo Merchant",
+      "role": "admin"
+    }
+  ]
 }
 ```
 

@@ -67,16 +67,47 @@ curl "$BASE_URL/analytics/overview?range=1d" \
 
 ```json
 {
-  "range": "1d",
-  "request_count": 42,
-  "top_gateway": "adyen",
-  "gateway_share": [
+  "merchant_id": "merchant_demo",
+  "kpis": [
+    { "label": "Decision events / 1d", "value": "42", "subtitle": "Counts decision events, not unique payments" },
+    { "label": "Score snapshots", "value": "18", "subtitle": "Latest gateway score updates" },
+    { "label": "Rule hits", "value": "12", "subtitle": "Priority-logic hits" },
+    { "label": "Errors", "value": "3", "subtitle": "Recorded error events" }
+  ],
+  "route_hits": [
+    { "route": "decide_gateway", "count": 42 },
+    { "route": "update_gateway_score", "count": 40 }
+  ],
+  "top_scores": [
     {
+      "merchant_id": "merchant_demo",
+      "payment_method_type": "CARD",
+      "payment_method": "CREDIT",
       "gateway": "adyen",
-      "count": 22,
-      "share": 52.4
+      "score_value": 0.831,
+      "sigma_factor": null,
+      "average_latency": null,
+      "tp99_latency": null,
+      "transaction_count": 214,
+      "last_updated_ms": 1808624000000
     }
-  ]
+  ],
+  "top_errors": [
+    { "route": "decide_gateway", "error_code": "processor_declined", "error_message": "Card declined by issuer", "count": 3, "last_seen_ms": 1808624000000 }
+  ],
+  "top_rules": [
+    { "rule_name": "priority rule", "count": 12 }
+  ],
+  "smart_retry_stats": {
+    "retried_count": 8,
+    "recovered_count": 5,
+    "by_trigger": [
+      { "gateway": "stripe", "error_code": "processor_declined", "count": 3 }
+    ],
+    "by_fallback": [
+      { "gateway": "adyen", "retried": 8, "recovered": 5 }
+    ]
+  }
 }
 ```
 

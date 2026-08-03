@@ -12,6 +12,7 @@ curl --location "$BASE_URL/routing/create" \
   --data '{
     "name": "volume split rule",
     "created_by": "merchant_demo",
+    "description": "split traffic 70/30 between stripe and adyen",
     "algorithm_for": "payment",
     "algorithm": {
       "type": "volume_split",

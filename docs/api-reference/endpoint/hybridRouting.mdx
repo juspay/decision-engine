@@ -28,7 +28,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 - Method and path: `POST /routing/hybrid`
 - Parameters: none.
-- Body: JSON body with merchant/payment context and the routing inputs required by the hybrid route.
+- Body: JSON body with `static_routing_request` and/or `dynamic_routing_request` (at least one required). `static_routing_request` uses the `/routing/evaluate` shape (`created_by` + `parameters`); `dynamic_routing_request` uses the `/decide-gateway` shape (`merchantId`, `eligibleGatewayList`, `rankingAlgorithm`, `paymentInfo`).
 
 ## Example
 
@@ -39,16 +39,29 @@ curl --location "$BASE_URL/routing/hybrid" \
   --header "$AUTH_HEADER" \
   --header "Content-Type: application/json" \
   --data '{
-  "merchantId": "merchant_demo",
-  "paymentInfo": {
-    "paymentId": "hybrid_rule_001",
-    "amount": 1000,
-    "currency": "USD",
-    "paymentType": "ORDER_PAYMENT",
-    "paymentMethodType": "CARD",
-    "paymentMethod": "CREDIT"
+  "static_routing_request": {
+    "created_by": "merchant_demo",
+    "payment_id": "hybrid_rule_001",
+    "parameters": {
+      "payment_method_type": { "type": "enum_variant", "value": "credit" },
+      "payment_method": { "type": "enum_variant", "value": "card" }
+    }
   },
-  "eligibleGatewayList": ["stripe", "adyen"]
+  "dynamic_routing_request": {
+    "merchantId": "merchant_demo",
+    "eligibleGatewayList": ["stripe", "adyen"],
+    "rankingAlgorithm": "SR_BASED_ROUTING",
+    "eliminationEnabled": false,
+    "paymentInfo": {
+      "paymentId": "hybrid_rule_001",
+      "amount": 1000,
+      "currency": "USD",
+      "paymentType": "ORDER_PAYMENT",
+      "paymentMethodType": "CARD",
+      "paymentMethod": "CREDIT",
+      "authType": "THREE_DS"
+    }
+  }
 }'
 ```
 
@@ -56,12 +69,35 @@ curl --location "$BASE_URL/routing/hybrid" \
 
 ```json
 {
-  "decided_gateway": "stripe",
-  "rule_gateway": "stripe",
-  "score_context": {
-    "stripe": 0.94,
-    "adyen": 0.91
-  }
+  "static_routing": {
+    "payment_id": "hybrid_rule_001",
+    "status": "success",
+    "output": {
+      "type": "priority",
+      "connectors": [
+        { "gateway_name": "stripe", "gateway_id": "mca_111" },
+        { "gateway_name": "adyen", "gateway_id": "mca_112" }
+      ]
+    },
+    "evaluated_output": [ { "gateway_name": "stripe", "gateway_id": "mca_111" } ],
+    "eligible_connectors": [
+      { "gateway_name": "stripe", "gateway_id": "mca_111" },
+      { "gateway_name": "adyen", "gateway_id": "mca_112" }
+    ]
+  },
+  "dynamic_routing": {
+    "status": "success",
+    "decision": {
+      "decided_gateway": "stripe",
+      "fallback_gateways": ["adyen"],
+      "gateway_priority_map": { "stripe": 0.94, "adyen": 0.91 },
+      "routing_approach": "SR_SELECTION_V3_ROUTING"
+    },
+    "fallback_connectors": null
+  },
+  "evaluated_connectors": [
+    { "gateway_name": "stripe", "gateway_id": null }
+  ]
 }
 ```
 

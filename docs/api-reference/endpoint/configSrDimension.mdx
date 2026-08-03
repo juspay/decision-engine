@@ -28,7 +28,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 - Method and path: `POST /config-sr-dimension`
 - Parameters: none.
-- Body: JSON body with merchant and selected dimension levels.
+- Body: JSON body with `merchant_id` and a `paymentInfo` object holding `udfs` and `fields`. Valid `fields` values are `currency`, `country`, `auth_type`, `card_is_in`, and `card_network`.
 
 ## Example
 
@@ -40,19 +40,17 @@ curl --location "$BASE_URL/config-sr-dimension" \
   --header "Content-Type: application/json" \
   --data '{
   "merchant_id": "merchant_demo",
-  "payment_method_type": "CARD",
-  "payment_method": "CREDIT",
-  "auth_type": "THREE_DS"
+  "paymentInfo": {
+    "udfs": [],
+    "fields": ["currency", "country", "auth_type"]
+  }
 }'
 ```
 
 ## Response
 
 ```json
-{
-  "merchant_id": "merchant_demo",
-  "message": "SR dimension configured"
-}
+"SR Dimension configuration updated successfully"
 ```
 
 ## Notes
