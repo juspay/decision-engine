@@ -16,5 +16,19 @@ curl --location "$BASE_URL/rule/get" \
 ```
 
 ```json
-{ "merchant_id": "merchant_demo", "config": { "type": "successRate" } }
+{
+  "merchant_id": "merchant_demo",
+  "config": {
+    "type": "successRate",
+    "data": {
+      "defaultLatencyThreshold": null,
+      "defaultBucketSize": 20,
+      "defaultHedgingPercent": null,
+      "margin": 0.2,
+      "subLevelInputConfig": [
+        { "paymentMethodType": "CARD", "bucketSize": 30, "hedgingPercent": 0.05 }
+      ]
+    }
+  }
+}
 ```

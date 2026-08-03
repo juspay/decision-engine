@@ -30,6 +30,8 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 - Parameters: none.
 - Body: The legacy feedback payload built from full internal transaction objects (`txn_detail`, `txn_card_info`, plus `log_message`). This is **not** the `/update-gateway-score` shape.
 
+`txn_detail` and `txn_card_info` must each carry a `partitionKey` **key**. The value may be `null`, but omitting the key fails with `missing field \`partitionKey\`` — it is an `Option` field with a custom deserializer and no `serde(default)`, so serde requires the key to be present even though the value is nullable.
+
 ## Example
 
 ### Legacy update score
@@ -51,7 +53,8 @@ curl --location "$BASE_URL/update-score" \
     "txnAmount": 1000.0,
     "txnObjectType": "ORDER_PAYMENT",
     "sourceObject": "CREDIT",
-    "isEmi": false
+    "isEmi": false,
+    "partitionKey": null
   },
   "txn_card_info": {
     "id": "card_001",
@@ -60,7 +63,8 @@ curl --location "$BASE_URL/update-score" \
     "authType": "THREE_DS",
     "cardIsin": "411111",
     "cardType": "CREDIT",
-    "dateCreated": "2026-03-31T00:00:00Z"
+    "dateCreated": "2026-03-31T00:00:00Z",
+    "partitionKey": null
   },
   "log_message": "Transaction completed",
   "enforce_dynaic_routing_failure": false,

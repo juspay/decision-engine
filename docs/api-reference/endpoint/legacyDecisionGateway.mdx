@@ -28,7 +28,15 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 - Method and path: `POST /decision_gateway`
 - Parameters: none.
-- Body: The legacy decider payload built from full internal transaction objects (`orderReference`, `txnDetail`, `txnCardInfo`, `merchantAccount`). This is **not** the `/decide-gateway` shape.
+- Body: The legacy decider payload built from full internal transaction objects (`orderReference`, `orderMetadata`, `txnDetail`, `txnCardInfo`, `merchantAccount`). This is **not** the `/decide-gateway` shape — the endpoint rejects the `/decide-gateway` body with a 400.
+
+All five objects are required and each has its own required fields. Note in particular:
+
+- `orderReference.udfs` is an **array** of strings (indexed positionally), not an object.
+- The `id` fields (`orderReference.id`, `orderMetadata.id`, `txnDetail.id`, `txnCardInfo.id`, `txnCardInfo.txnDetailId`, `merchantAccount.id`) are integers, not strings.
+- `merchantAccount.gatewaySuccessRateBasedDeciderInput` is a required string; `null` is rejected.
+- `orderMetadata`, `txnDetail` and `txnCardInfo` must each carry a `partitionKey` **key**. The value may be `null`, but omitting the key fails with `missing field \`partitionKey\``. These are `Option` fields with a custom deserializer and no `serde(default)`, so serde requires the key to be present even though the value is nullable.
+- Timestamps are ISO 8601.
 
 ## Example
 
@@ -40,38 +48,61 @@ curl --location "$BASE_URL/decision_gateway" \
   --header "Content-Type: application/json" \
   --data '{
   "orderReference": {
+    "id": 1,
     "orderId": "order_001",
     "amount": 1000.0,
     "currency": "USD",
+    "dateCreated": "2026-04-30T00:00:00.000000000Z",
     "merchantId": "merchant_demo",
     "status": "NEW",
     "orderType": "ORDER_PAYMENT",
+    "udfs": [],
     "customerId": "cust_123",
     "preferredGateway": null,
-    "metadata": null,
-    "udfs": {}
+    "metadata": null
+  },
+  "orderMetadata": {
+    "id": 1,
+    "dateCreated": "2026-04-30T00:00:00.000000000Z",
+    "lastUpdated": "2026-04-30T00:00:00.000000000Z",
+    "orderReferenceId": 1,
+    "partitionKey": null
   },
   "txnDetail": {
-    "txnId": "txn_001",
+    "id": 1,
+    "dateCreated": "2026-04-30T00:00:00.000000000Z",
     "orderId": "order_001",
-    "merchantId": "merchant_demo",
     "status": "PENDING_VBV",
-    "type": "ORDER_PAYMENT",
+    "txnId": "txn_001",
+    "merchantId": "merchant_demo",
     "txnUuid": "pay_001",
-    "gateway": "stripe"
+    "currency": "USD",
+    "txnAmount": 1000.0,
+    "txnObjectType": "ORDER_PAYMENT",
+    "txnType": "ORDER_PAYMENT",
+    "gateway": "stripe",
+    "sourceObject": "CREDIT",
+    "isEmi": false,
+    "partitionKey": null
   },
   "txnCardInfo": {
-    "id": "card_001",
+    "id": 1,
+    "txnId": "txn_001",
+    "txnDetailId": 1,
+    "dateCreated": "2026-04-30T00:00:00.000000000Z",
     "paymentMethodType": "CARD",
     "paymentMethod": "CREDIT",
     "authType": "THREE_DS",
     "cardIsin": "411111",
     "cardType": "CREDIT",
-    "dateCreated": "2026-03-31T00:00:00Z"
+    "partitionKey": null
   },
   "merchantAccount": {
+    "id": 1,
     "merchantId": "merchant_demo",
-    "gatewaySuccessRateBasedDeciderInput": null
+    "gatewayPriorityLogic": "",
+    "useCodeForGatewayPriority": true,
+    "gatewaySuccessRateBasedDeciderInput": "{}"
   },
   "enforceGatewayList": ["stripe", "adyen", "checkout"],
   "priorityLogicScript": null,
