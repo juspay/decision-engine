@@ -114,7 +114,7 @@ pub async fn signup(
             .get("x-admin-secret")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
-        if provided_admin_secret != global_config.admin_secret.secret {
+        if provided_admin_secret != global_config.admin_secret.secret.peek().as_str() {
             return Err(error::ContainerError::from(UserAuthError::Unauthorized));
         }
     }
@@ -1409,7 +1409,7 @@ pub async fn admin_merchant_token(
         .and_then(|v| v.to_str().ok())
         .unwrap_or("");
 
-    if provided != global_config.admin_secret.secret {
+    if provided != global_config.admin_secret.secret.peek().as_str() {
         return Err(error::ContainerError::from(UserAuthError::InvalidToken));
     }
 
@@ -1484,7 +1484,7 @@ pub async fn exchange_merchant_token(
         &merchant_id,
         "admin",
         TOKEN_TYPE_HS_REDIRECT,
-        &global_config.user_auth.jwt_secret,
+        global_config.user_auth.jwt_secret.peek().as_str(),
         global_config.user_auth.hs_redirect_jwt_expiry_seconds,
     )
     .change_context(UserAuthError::TokenGenerationFailed)?;
