@@ -7,12 +7,15 @@ description: "Compatibility example for the legacy /update-score route."
 
 `/update-score` is retained for compatibility. It does **not** use the modern `/update-gateway-score` body — it expects the legacy feedback payload built from full internal transaction objects (`txn_detail`, `txn_card_info`). New integrations should use [`/update-gateway-score`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/update-gateway-score.mdx), whose request is far simpler.
 
+`txn_detail` and `txn_card_info` must each carry a `partitionKey` **key**. The value may be `null`, but omitting the key fails with `missing field partitionKey`. The `id` fields are numeric strings, and `txn_detail` needs `netAmount` and `currency` as well as `txnAmount`.
+
 ```bash
 curl --location "$BASE_URL/update-score" \
   --header "$AUTH_HEADER" \
   --header "Content-Type: application/json" \
   --data '{
     "txn_detail": {
+      "id": "1",
       "txnId": "txn_001",
       "orderId": "order_001",
       "merchantId": "merchant_demo",
@@ -20,26 +23,38 @@ curl --location "$BASE_URL/update-score" \
       "type": "ORDER_PAYMENT",
       "txnUuid": "pay_001",
       "gateway": "stripe",
-      "dateCreated": "2026-03-31T00:00:00Z",
+      "dateCreated": "2026-04-30T00:00:00.000000000Z",
       "txnAmount": 1000.0,
+      "netAmount": 1000.0,
+      "currency": "USD",
       "txnObjectType": "ORDER_PAYMENT",
       "sourceObject": "CREDIT",
-      "isEmi": false
+      "isEmi": false,
+      "partitionKey": null
     },
     "txn_card_info": {
-      "id": "card_001",
+      "id": "1",
+      "txnId": "txn_001",
+      "txnDetailId": "1",
       "paymentMethodType": "CARD",
       "paymentMethod": "CREDIT",
       "authType": "THREE_DS",
       "cardIsin": "411111",
       "cardType": "CREDIT",
-      "dateCreated": "2026-03-31T00:00:00Z"
+      "dateCreated": "2026-04-30T00:00:00.000000000Z",
+      "partitionKey": null
     },
     "log_message": "Transaction completed",
     "enforce_dynaic_routing_failure": false,
     "txn_latency": { "gatewayLatency": 120.5 }
   }'
 ```
+
+<Warning>
+  `txn_detail.id` must be present and parse as an integer. The conversion calls `.unwrap()` on the
+  parsed value, so a missing or non-numeric `id` panics the handler - the connection is closed with
+  no response instead of returning a 4xx.
+</Warning>
 
 <Note>
   This is the legacy Groovy-era feedback schema. The internal `txn_detail` / `txn_card_info` objects

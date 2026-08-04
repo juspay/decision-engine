@@ -16,5 +16,14 @@ curl --location "$BASE_URL/rule/get" \
 ```
 
 ```json
-{ "merchant_id": "merchant_demo", "config": { "type": "elimination" } }
+{
+  "merchant_id": "merchant_demo",
+  "config": {
+    "type": "elimination",
+    "data": {
+      "threshold": 0.25,
+      "txnLatency": null
+    }
+  }
+}
 ```

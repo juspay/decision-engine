@@ -23,5 +23,18 @@ curl --location "$BASE_URL/rule/update" \
 ```
 
 ```json
-{ "merchant_id": "merchant_demo", "config": { "type": "successRate" } }
+{
+  "message": "Success Rate Configuration updated successfully",
+  "merchant_id": "merchant_demo",
+  "config": {
+    "type": "successRate",
+    "data": {
+      "defaultBucketSize": 30,
+      "defaultLatencyThreshold": 2500.0,
+      "defaultHedgingPercent": 0.1,
+      "subLevelInputConfig": null,
+      "margin": null
+    }
+  }
+}
 ```

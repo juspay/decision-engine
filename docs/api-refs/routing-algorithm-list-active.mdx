@@ -18,9 +18,22 @@ curl --location --request POST "$BASE_URL/routing/list/active/merchant_demo" \
 ```json
 [
   {
-    "rule_id": "routing_e641380c-6f24-4405-8454-5ae6cbceb7a0",
+    "id": "routing_e641380c-6f24-4405-8454-5ae6cbceb7a0",
+    "created_by": "merchant_demo",
     "name": "priority rule",
-    "algorithm_for": "payment"
+    "description": "try stripe before adyen",
+    "algorithm_data": {
+      "type": "priority",
+      "data": [
+        { "gateway_name": "stripe", "gateway_id": "mca_111" },
+        { "gateway_name": "adyen", "gateway_id": "mca_112" }
+      ]
+    },
+    "algorithm_for": "payment",
+    "created_at": "2026-04-26 10:00:00.000000",
+    "modified_at": "2026-04-26 10:00:00.000000"
   }
 ]
 ```
+
+Returns an empty array `[]` when no rule is active.
