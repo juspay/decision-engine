@@ -52,7 +52,7 @@ curl --location "$BASE_URL/update-score" \
 
 <Warning>
   `txn_detail.id` must be present and parse as an integer. The conversion calls `.unwrap()` on the
-  parsed value, so a missing or non-numeric `id` panics the handler — the connection is closed with
+  parsed value, so a missing or non-numeric `id` panics the handler - the connection is closed with
   no response instead of returning a 4xx.
 </Warning>
 

@@ -30,7 +30,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 - Parameters: none.
 - Body: The legacy feedback payload built from full internal transaction objects (`txn_detail`, `txn_card_info`, plus `log_message`). This is **not** the `/update-gateway-score` shape.
 
-`txn_detail` and `txn_card_info` must each carry a `partitionKey` **key**. The value may be `null`, but omitting the key fails with `missing field \`partitionKey\`` — it is an `Option` field with a custom deserializer and no `serde(default)`, so serde requires the key to be present even though the value is nullable.
+`txn_detail` and `txn_card_info` must each carry a `partitionKey` **key**. The value may be `null`, but omitting the key fails with `missing field \`partitionKey\`` - it is an `Option` field with a custom deserializer and no `serde(default)`, so serde requires the key to be present even though the value is nullable.
 
 ## Example
 
@@ -77,7 +77,7 @@ curl --location "$BASE_URL/update-score" \
 }'
 ```
 
-`txn_detail.id`, `txn_card_info.id` and `txn_card_info.txnDetailId` are numeric strings — the
+`txn_detail.id`, `txn_card_info.id` and `txn_card_info.txnDetailId` are numeric strings - the
 server parses them as integers, so a value like `"card_001"` is rejected. `txn_detail.id` in
 particular must be present and numeric: the conversion does `.unwrap()` on the parsed value, so a
 missing or non-numeric `id` panics the handler and the connection is closed with no response

@@ -28,7 +28,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 - Method and path: `POST /decision_gateway`
 - Parameters: none.
-- Body: The legacy decider payload built from full internal transaction objects (`orderReference`, `orderMetadata`, `txnDetail`, `txnCardInfo`, `merchantAccount`). This is **not** the `/decide-gateway` shape — the endpoint rejects the `/decide-gateway` body with a 400.
+- Body: The legacy decider payload built from full internal transaction objects (`orderReference`, `orderMetadata`, `txnDetail`, `txnCardInfo`, `merchantAccount`). This is **not** the `/decide-gateway` shape - the endpoint rejects the `/decide-gateway` body with a 400.
 
 All five objects are required and each has its own required fields. Note in particular:
 

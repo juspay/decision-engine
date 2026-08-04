@@ -1765,7 +1765,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/MeResponse"
+                  "$ref": "#/components/schemas/CurrentUserResponse"
                 }
               }
             }
@@ -6861,7 +6861,7 @@
           }
         }
       },
-      "MeResponse": {
+      "CurrentUserResponse": {
         "type": "object",
         "properties": {
           "user_id": {

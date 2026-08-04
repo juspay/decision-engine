@@ -35,6 +35,27 @@ docker pull ghcr.io/juspay/decision-engine/postgres:nightly-latest
 docker pull ghcr.io/juspay/decision-engine/groovy-runner:nightly-latest
 ```
 
+### Flat alias tags (for single-repository registries)
+
+The sub-images are additionally tagged on the **root** image with the sub-image
+name folded into the tag:
+
+```bash
+docker pull ghcr.io/juspay/decision-engine:postgres-nightly-2026.07.21
+docker pull ghcr.io/juspay/decision-engine:groovy-runner-nightly-2026.07.21
+```
+
+These exist for mirroring nightlies into registries that keep everything in a
+single repository (e.g. a central ECR repo). The source and destination
+`repo:tag` are then identical, so an image-copy job needs no name rewriting:
+
+```
+ghcr.io/juspay/decision-engine:postgres-nightly-2026.07.21  <registry>/decision-engine:postgres-nightly-2026.07.21
+```
+
+Note: a tag can never contain `:` — a destination like
+`decision-engine:postgres:nightly-2026.07.21` is an invalid Docker reference.
+
 ## Manual Trigger
 
 You can manually trigger a nightly build from the GitHub Actions UI:

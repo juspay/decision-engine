@@ -5,7 +5,7 @@ description: "Compatibility example for the legacy /decision_gateway route."
 
 # Legacy Decision Gateway
 
-`/decision_gateway` is retained for compatibility with older integrations. It does **not** use the modern `/decide-gateway` body — it expects the legacy decider payload built from full internal transaction objects (`orderReference`, `orderMetadata`, `txnDetail`, `txnCardInfo`, `merchantAccount`). Posting a `/decide-gateway` body here is rejected with a 400. New integrations should use [`/decide-gateway`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-sr-based.mdx), whose request is far simpler.
+`/decision_gateway` is retained for compatibility with older integrations. It does **not** use the modern `/decide-gateway` body - it expects the legacy decider payload built from full internal transaction objects (`orderReference`, `orderMetadata`, `txnDetail`, `txnCardInfo`, `merchantAccount`). Posting a `/decide-gateway` body here is rejected with a 400. New integrations should use [`/decide-gateway`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-sr-based.mdx), whose request is far simpler.
 
 ```bash
 curl --location "$BASE_URL/decision_gateway" \
@@ -75,7 +75,7 @@ curl --location "$BASE_URL/decision_gateway" \
 
 <Note>
   This is the legacy Groovy-era decider schema. All five objects are required, and each has its own
-  required fields — the payload above is the minimum that deserializes. Watch for four things that
+  required fields - the payload above is the minimum that deserializes. Watch for four things that
   commonly trip people up. `orderReference.udfs` is an **array**, not an object. Every `id` is an
   integer, not a string. `merchantAccount.gatewaySuccessRateBasedDeciderInput` is a required
   string, so `null` is rejected. And `orderMetadata`, `txnDetail` and `txnCardInfo` must each carry
