@@ -58,6 +58,23 @@ pub async fn authenticate(
         }
     }
 
+    // Accept the shared admin secret (service-to-service callers such as Hyperswitch, which
+    // has no merchant api-key or dashboard session). Checked before the api-key compat mode so
+    // a wrong secret is always rejected. No AuthContext is inserted — like compat mode, these
+    // callers scope requests off the body/path, and extractors that require an AuthContext
+    // (e.g. analytics) keep rejecting them.
+    if let Some(provided) = req
+        .headers()
+        .get("x-admin-secret")
+        .and_then(|v| v.to_str().ok())
+    {
+        let expected = app_state.global_config.admin_secret.secret.peek();
+        if !expected.is_empty() && provided == expected {
+            return Ok(next.run(req).await);
+        }
+        return Ok((StatusCode::UNAUTHORIZED, "Invalid admin secret").into_response());
+    }
+
     if !app_state.global_config.api_key_auth_enabled {
         return Ok(next.run(req).await);
     }
