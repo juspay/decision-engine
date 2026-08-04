@@ -7,3 +7,5 @@ export const isProduction = APP_ENV === 'production'
 export const signupEnabled = !isProduction
 
 export const simulatorEnabled = !isProduction
+
+export const sampleReportEnabled = !isProduction
