@@ -76,9 +76,9 @@ curl --location "$BASE_URL/decision_gateway" \
 <Note>
   This is the legacy Groovy-era decider schema. All five objects are required, and each has its own
   required fields — the payload above is the minimum that deserializes. Watch for four things that
-  commonly trip people up: `orderReference.udfs` is an **array**, not an object; every `id` is an
-  integer, not a string; `merchantAccount.gatewaySuccessRateBasedDeciderInput` is a required
-  string, so `null` is rejected; and `orderMetadata`, `txnDetail` and `txnCardInfo` must each carry
+  commonly trip people up. `orderReference.udfs` is an **array**, not an object. Every `id` is an
+  integer, not a string. `merchantAccount.gatewaySuccessRateBasedDeciderInput` is a required
+  string, so `null` is rejected. And `orderMetadata`, `txnDetail` and `txnCardInfo` must each carry
   a `partitionKey` **key** (the value may be `null`, but omitting the key fails with
   `missing field partitionKey`). Prefer `/decide-gateway` for all new work.
 </Note>

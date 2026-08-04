@@ -34,7 +34,7 @@ All five objects are required and each has its own required fields. Note in part
 
 - `orderReference.udfs` is an **array** of strings (indexed positionally), not an object.
 - The `id` fields (`orderReference.id`, `orderMetadata.id`, `txnDetail.id`, `txnCardInfo.id`, `txnCardInfo.txnDetailId`, `merchantAccount.id`) are integers, not strings.
-- `merchantAccount.gatewaySuccessRateBasedDeciderInput` is a required string; `null` is rejected.
+- `merchantAccount.gatewaySuccessRateBasedDeciderInput` is a required string, so `null` is rejected.
 - `orderMetadata`, `txnDetail` and `txnCardInfo` must each carry a `partitionKey` **key**. The value may be `null`, but omitting the key fails with `missing field \`partitionKey\``. These are `Option` fields with a custom deserializer and no `serde(default)`, so serde requires the key to be present even though the value is nullable.
 - Timestamps are ISO 8601.
 

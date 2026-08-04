@@ -7,7 +7,7 @@ description: "Compatibility example for the legacy /update-score route."
 
 `/update-score` is retained for compatibility. It does **not** use the modern `/update-gateway-score` body — it expects the legacy feedback payload built from full internal transaction objects (`txn_detail`, `txn_card_info`). New integrations should use [`/update-gateway-score`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/update-gateway-score.mdx), whose request is far simpler.
 
-`txn_detail` and `txn_card_info` must each carry a `partitionKey` **key**; the value may be `null`, but omitting the key fails with `missing field partitionKey`. The `id` fields are numeric strings, and `txn_detail` needs `netAmount` and `currency` as well as `txnAmount`.
+`txn_detail` and `txn_card_info` must each carry a `partitionKey` **key**. The value may be `null`, but omitting the key fails with `missing field partitionKey`. The `id` fields are numeric strings, and `txn_detail` needs `netAmount` and `currency` as well as `txnAmount`.
 
 ```bash
 curl --location "$BASE_URL/update-score" \

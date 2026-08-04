@@ -4277,7 +4277,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "`txns` ranks by transaction count; anything else (default) ranks by settled GMV."
+            "description": "`txns` ranks by transaction count. Anything else (default) ranks by settled GMV."
           }
         ],
         "responses": {
@@ -4496,7 +4496,7 @@
           "Cost & Fees"
         ],
         "summary": "List detected price changes",
-        "description": "Clusters whose learned price moved between snapshots — a connector repricing, surfaced from the merchant's own settlement data.",
+        "description": "Clusters whose learned price moved between snapshots - a connector repricing, surfaced from the merchant's own settlement data.",
         "security": [
           {
             "BearerAuth": []
@@ -5372,7 +5372,7 @@
               "DECLINED"
             ],
             "example": "CHARGED",
-            "description": "Transaction status. Must be a TxnStatus value — lowercase values such as `success` are rejected."
+            "description": "Transaction status. Must be a TxnStatus value - lowercase values such as `success` are rejected."
           },
           "gatewayReferenceId": {
             "type": [
@@ -5563,7 +5563,7 @@
             "example": "priority"
           },
           "data": {
-            "description": "Depends on type: array of ConnectorInfo ({gateway_name, gateway_id}) for `priority`; single ConnectorInfo for `single`; array of {split, connectors} for `volume_split`; Euclid AST Program for `advanced`; A/B experiment config for `ab_test`."
+            "description": "Depends on type: array of ConnectorInfo ({gateway_name, gateway_id}) for `priority`, single ConnectorInfo for `single`, array of {split, connectors} for `volume_split`, Euclid AST Program for `advanced`, A/B experiment config for `ab_test`."
           }
         }
       },
@@ -6108,7 +6108,7 @@
                   "string",
                   "null"
                 ],
-                "description": "Required key; may be null."
+                "description": "Required key. May be null."
               }
             },
             "description": "Full internal order-metadata object. Required. Note: `partitionKey` must be PRESENT in this object (it may be `null`). It is an `Option` field with a custom `deserialize_with` and no `serde(default)`, so serde requires the key even though the value is nullable.",
@@ -6125,7 +6125,7 @@
                   "string",
                   "null"
                 ],
-                "description": "Required key; may be null."
+                "description": "Required key. May be null."
               }
             },
             "description": "Full internal transaction object. Note: `partitionKey` must be PRESENT in this object (it may be `null`). It is an `Option` field with a custom `deserialize_with` and no `serde(default)`, so serde requires the key even though the value is nullable.",
@@ -6142,7 +6142,7 @@
                   "string",
                   "null"
                 ],
-                "description": "Required key; may be null."
+                "description": "Required key. May be null."
               }
             },
             "description": "Full internal card/payment-method object. Note: `partitionKey` must be PRESENT in this object (it may be `null`). It is an `Option` field with a custom `deserialize_with` and no `serde(default)`, so serde requires the key even though the value is nullable.",
@@ -6219,7 +6219,7 @@
             ]
           }
         },
-        "description": "Legacy decider payload built from full internal transaction objects. This is NOT the `/decide-gateway` shape; the endpoint rejects the `/decide-gateway` body with a 400. `orderMetadata`, `txnDetail` and `txnCardInfo` must each carry a `partitionKey` key (value may be null)."
+        "description": "Legacy decider payload built from full internal transaction objects. This is NOT the `/decide-gateway` shape. The endpoint rejects the `/decide-gateway` body with a 400. `orderMetadata`, `txnDetail` and `txnCardInfo` must each carry a `partitionKey` key (value may be null)."
       },
       "LegacyUpdateScoreRequest": {
         "type": "object",
@@ -6243,12 +6243,12 @@
                   "string",
                   "null"
                 ],
-                "description": "Required key; may be null."
+                "description": "Required key. May be null."
               },
               "id": {
                 "type": "string",
                 "example": "1",
-                "description": "Numeric string. Must be present and parse as an integer — the conversion unwraps the parsed value, so a missing or non-numeric id panics the handler instead of returning a 4xx."
+                "description": "Numeric string. Must be present and parse as an integer - the conversion unwraps the parsed value, so a missing or non-numeric id panics the handler instead of returning a 4xx."
               },
               "netAmount": {
                 "type": "number",
@@ -6275,7 +6275,7 @@
                   "string",
                   "null"
                 ],
-                "description": "Required key; may be null."
+                "description": "Required key. May be null."
               },
               "id": {
                 "type": "string",
@@ -6473,7 +6473,7 @@
               "string",
               "null"
             ],
-            "description": "`autopilot` for entries managed by the auto-calibrator; absent for human-authored ones."
+            "description": "`autopilot` for entries managed by the auto-calibrator. Absent for human-authored ones."
           },
           "latencyThreshold": {
             "type": [
@@ -8372,7 +8372,7 @@
           "n": {
             "type": "integer",
             "format": "int64",
-            "description": "Transaction count; 0 for an override-only cluster no longer in the top set."
+            "description": "Transaction count. 0 for an override-only cluster no longer in the top set."
           },
           "gross_sum": {
             "type": "number",
@@ -8437,7 +8437,7 @@
           },
           "verdict": {
             "type": "string",
-            "description": "`GOOD`, `THIN`, `NON_LINEAR`, or `\"\"` for an override-only cluster. A non-GOOD rate is shown so it can be corrected — it is not what the router trusts."
+            "description": "`GOOD`, `THIN`, `NON_LINEAR`, or `\"\"` for an override-only cluster. A non-GOOD rate is shown so it can be corrected - it is not what the router trusts."
           },
           "card_product": {
             "type": "string",
@@ -8784,7 +8784,7 @@
           "invoice_subtotal": {
             "type": "number",
             "format": "double",
-            "description": "Invoice subtotal excluding taxes — the true all-in cost."
+            "description": "Invoice subtotal excluding taxes - the true all-in cost."
           },
           "model_captured": {
             "type": "number",
@@ -9201,7 +9201,7 @@
             "example": "MerchantId not found"
           },
           "data": {
-            "description": "Optional structured detail; usually null."
+            "description": "Optional structured detail, usually null."
           }
         },
         "description": "Generic API error envelope: an error code, a human-readable message, and an optional structured payload."
