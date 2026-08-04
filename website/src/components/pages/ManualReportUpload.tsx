@@ -17,6 +17,7 @@ import {
 } from '../../hooks/useCostRouting'
 import { Field, UPLOAD_CONNECTORS, inputClass } from './CostRoutingShared'
 import { ColumnMappingPanel } from './ColumnMappingPanel'
+import { sampleReportEnabled } from '../../lib/appConfig'
 
 type IngestMode = 'upload' | 'sample'
 
@@ -34,7 +35,7 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
   const fileRef = useRef<HTMLInputElement>(null)
   // Sample-first: a merchant landing here usually has no report file to hand, so the default is the
   // path that works with nothing — run a curated sample end to end, then switch to a real upload.
-  const [mode, setMode] = useState<IngestMode>('sample')
+  const [mode, setMode] = useState<IngestMode>(sampleReportEnabled ? 'sample' : 'upload')
   const [connector, setConnector] = useState('adyen')
   const [account, setAccount] = useState('')
   const [file, setFile] = useState<File | null>(null)
@@ -207,34 +208,36 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
       </CardHeader>
       <CardBody className="space-y-4">
         {/* Choose between a real file upload and a curated sample, for merchants without a report. */}
-        <div className="inline-flex rounded-lg border border-slate-200 p-0.5 dark:border-[#2a3344]">
-          {(
-            [
-              ['sample', 'Use a sample file'],
-              ['upload', 'Upload a file'],
-            ] as [IngestMode, string][]
-          ).map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => {
-                setMode(value)
-                setError(null)
-              }}
-              className={
-                'rounded-md px-3 py-1.5 text-sm font-medium transition-colors ' +
-                (mode === value
-                  ? 'bg-brand-500 text-white'
-                  : 'text-slate-500 hover:text-slate-700 dark:text-[#9ca7ba] dark:hover:text-white')
-              }
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        {sampleReportEnabled && (
+          <div className="inline-flex rounded-lg border border-slate-200 p-0.5 dark:border-[#2a3344]">
+            {(
+              [
+                ['sample', 'Use a sample file'],
+                ['upload', 'Upload a file'],
+              ] as [IngestMode, string][]
+            ).map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => {
+                  setMode(value)
+                  setError(null)
+                }}
+                className={
+                  'rounded-md px-3 py-1.5 text-sm font-medium transition-colors ' +
+                  (mode === value
+                    ? 'bg-brand-500 text-white'
+                    : 'text-slate-500 hover:text-slate-700 dark:text-[#9ca7ba] dark:hover:text-white')
+                }
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        )}
         <p className="text-sm text-slate-500 dark:text-[#9ca7ba]">
           {mode === 'upload'
-            ? "Upload a settlement report file directly — no webhook needed. Processing runs in the background (the upload won't hang on large files); watch progress below and in the history."
+            ? "Upload a settlement report file directly - no webhook needed. Processing runs in the background (the upload won't hang on large files). Watch progress below and in the history."
             : `No report file? Run a curated ${connectorLabel} sample report through the exact same fit, so you can see the ingest → cost-coverage flow end to end. Progress shows below and in the history.`}
         </p>
         <Field label="Connector">
