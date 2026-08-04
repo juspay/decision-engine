@@ -64,7 +64,7 @@ impl SuffStats {
         self.syyuu += y * y * u * u;
     }
 
-    fn add_assign(&mut self, o: &SuffStats) {
+    fn add_assign(&mut self, o: &Self) {
         self.n += o.n;
         self.sx += o.sx;
         self.sy += o.sy;
@@ -78,8 +78,8 @@ impl SuffStats {
         self.syyuu += o.syyuu;
     }
 
-    fn sub(&self, o: &SuffStats) -> SuffStats {
-        SuffStats {
+    fn sub(&self, o: &Self) -> Self {
+        Self {
             n: self.n - o.n,
             sx: self.sx - o.sx,
             sy: self.sy - o.sy,
@@ -109,9 +109,9 @@ pub enum Verdict {
 impl Verdict {
     pub fn as_str(self) -> &'static str {
         match self {
-            Verdict::Good => "GOOD",
-            Verdict::Thin => "THIN",
-            Verdict::NonLinear => "NON_LINEAR",
+            Self::Good => "GOOD",
+            Self::Thin => "THIN",
+            Self::NonLinear => "NON_LINEAR",
         }
     }
 }
@@ -331,8 +331,8 @@ fn segment_partitions(bands: &[(i64, SuffStats)]) -> Vec<(usize, usize)> {
 
     let mut best: Option<Vec<(usize, usize)>> = None;
     let mut best_key: Option<(f64, i64)> = None;
-    for k in 1..=MAX_SEGMENTS {
-        if dp[k][m] == inf {
+    for (k, dp_k) in dp.iter().enumerate().take(MAX_SEGMENTS + 1).skip(1) {
+        if dp_k[m] == inf {
             continue;
         }
         let Some(parts) = rebuild(k) else { continue };

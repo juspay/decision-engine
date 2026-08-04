@@ -2275,7 +2275,7 @@
             }
           },
           "400": {
-            "description": "Request could not be parsed, or the decision could not be made.",
+            "description": "Bad request",
             "content": {
               "application/json": {
                 "schema": {
@@ -2325,7 +2325,7 @@
             }
           },
           "400": {
-            "description": "Request could not be parsed, or the decision could not be made.",
+            "description": "Bad request",
             "content": {
               "application/json": {
                 "schema": {

@@ -1,5 +1,6 @@
 #![allow(clippy::unwrap_in_result)]
 
+use masking::PeekInterface;
 use open_router::{logger, tenant::GlobalAppState};
 
 #[allow(clippy::expect_used)]
@@ -59,7 +60,7 @@ fn log_startup_configuration(global_config: &open_router::config::GlobalConfig) 
              Set `admin_secret.secret` in your config to a strong secret before exposing this server."
         );
     }
-    if global_config.user_auth.jwt_secret == "change_me_in_production_use_32chars!!" {
+    if global_config.user_auth.jwt_secret.peek() == "change_me_in_production_use_32chars!!" {
         logger::warn!(
             "SECURITY WARNING: user_auth.jwt_secret is set to the default value. \
              Set it to a strong random secret in production."
