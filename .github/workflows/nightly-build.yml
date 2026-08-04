@@ -221,14 +221,21 @@ jobs:
       - name: Create multi-arch manifest
         run: |
           TAG_NAME="${{ needs.create-tag.outputs.tag_name }}"
-          
+
           # Create manifest for nightly tag
           docker buildx imagetools create --tag ghcr.io/${{ github.repository }}/postgres:${TAG_NAME} \
             ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-amd64 \
             ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-arm64
-          
+
           # Create manifest for nightly-latest
           docker buildx imagetools create --tag ghcr.io/${{ github.repository }}/postgres:nightly-latest \
+            ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-amd64 \
+            ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-arm64
+
+          # Flat alias on the root image for single-repository registries
+          # (e.g. a central ECR repo), where the sub-image name has to be
+          # folded into the tag: decision-engine:postgres-<tag>
+          docker buildx imagetools create --tag ghcr.io/${{ github.repository }}:postgres-${TAG_NAME} \
             ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-amd64 \
             ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-arm64
 
@@ -309,6 +316,16 @@ jobs:
           cache-from: type=gha,scope=nightly-groovy
           cache-to: type=gha,scope=nightly-groovy,mode=max
 
+      - name: Create flat alias tag
+        run: |
+          TAG_NAME="${{ needs.create-tag.outputs.tag_name }}"
+
+          # Flat alias on the root image for single-repository registries
+          # (e.g. a central ECR repo), where the sub-image name has to be
+          # folded into the tag: decision-engine:groovy-runner-<tag>
+          docker buildx imagetools create --tag ghcr.io/${{ github.repository }}:groovy-runner-${TAG_NAME} \
+            ghcr.io/${{ github.repository }}/groovy-runner:${TAG_NAME}
+
   create-release:
     needs: [create-tag, create-postgres-manifest, create-mysql-manifest, build-groovy-image]
     runs-on: ubuntu-latest
@@ -334,8 +351,12 @@ jobs:
             - `ghcr.io/${{ github.repository }}/postgres:${{ needs.create-tag.outputs.tag_name }}`
             - `ghcr.io/${{ github.repository }}:${{ needs.create-tag.outputs.tag_name }}`
             - `ghcr.io/${{ github.repository }}/groovy-runner:${{ needs.create-tag.outputs.tag_name }}`
-            
+
             All images are also available with the `nightly-latest` tag.
+
+            Flat aliases on the root image (for copying into single-repository registries such as ECR, where source and destination `repo:tag` can then be identical):
+            - `ghcr.io/${{ github.repository }}:postgres-${{ needs.create-tag.outputs.tag_name }}`
+            - `ghcr.io/${{ github.repository }}:groovy-runner-${{ needs.create-tag.outputs.tag_name }}`
             
             ### Usage
             ```bash
