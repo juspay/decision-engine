@@ -148,3 +148,57 @@ jobs:
           helm dependency update helm-charts/
           helm lint helm-charts/
           helm template test helm-charts/ > /dev/null
+
+  e2e-playwright:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Install native deps for rdkafka
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libcurl4-openssl-dev \
+            libsasl2-dev \
+            zlib1g-dev
+
+      - uses: Swatinem/rust-cache@v2.7.7
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install e2e dependencies
+        run: npm ci
+
+      - name: Type check e2e suite
+        run: npm run typecheck
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Run Playwright e2e (source mode)
+        run: E2E_RUNNER=playwright node cypress/scripts/run-e2e.js source
+        env:
+          CI: 'true'
+
+      - name: Upload Playwright report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore

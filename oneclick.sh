@@ -65,7 +65,6 @@ EXPECTED_CLICKHOUSE_TABLES=(
     cost_fee_model
     cost_fee_model_segment
     cost_bin_product
-    connector_markup_overlay
 )
 
 check_and_kill_ports() {
@@ -560,8 +559,8 @@ run_infra_checklist
 if ! check_clickhouse_schema; then
     echo ""
     echo "ClickHouse schema is incomplete — attempting to (re)create cost-ingestion tables..."
-    # The cost tables (cost_daily_stats / cost_fee_model / connector_markup_overlay from
-    # 035_cost_model.sh, cost_bin_product from 036, the piecewise cost_fee_model_segment from 037,
+    # The cost tables (cost_daily_stats / cost_fee_model from 035_cost_model.sh,
+    # cost_bin_product from 036, the piecewise cost_fee_model_segment from 037,
     # and the card_product ALTER migration in 038) are only auto-run by the container on a fresh
     # clickhouse-data volume. Every one is idempotent and non-destructive — the CREATEs are
     # IF NOT EXISTS, and 038 is ADD COLUMN IF NOT EXISTS + a same-key MODIFY ORDER BY (a metadata-only

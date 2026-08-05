@@ -13,10 +13,17 @@
     "test:e2e": "node cypress/scripts/run-e2e.js all",
     "test:e2e:source": "node cypress/scripts/run-e2e.js source",
     "test:e2e:docker": "node cypress/scripts/run-e2e.js docker",
-    "test": "npm run test:all"
+    "test": "npm run test:all",
+    "e2e": "node cypress/scripts/run-e2e.js source",
+    "e2e:docker": "node cypress/scripts/run-e2e.js docker",
+    "typecheck": "tsc --noEmit",
+    "e2e:pw": "playwright test",
+    "e2e:pw:api": "playwright test --project=api",
+    "e2e:pw:ui": "playwright test --project=ui"
   },
   "devDependencies": {
     "@cypress/grep": "^4.0.1",
+    "@playwright/test": "^1.48.0",
     "cypress": "^13.6.0"
   },
   "dependencies": {
