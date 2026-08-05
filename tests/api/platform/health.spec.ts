@@ -28,7 +28,6 @@ test.describe('Health (API smoke)', () => {
 
     expect(r.status).toBe(200)
     expect(r.body.key_custodian_locked).toBe(false)
-    // Each of these is a real connect/read/write/delete round-trip against the database.
     for (const check of ['database_connection', 'database_read', 'database_write', 'database_delete']) {
       expect(r.body.database[check], `${check} should be Working`).toBe('Working')
     }

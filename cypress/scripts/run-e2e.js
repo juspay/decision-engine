@@ -7,7 +7,7 @@ const path = require('path')
 const ROOT = path.resolve(__dirname, '../..')
 const VALID_MODES = new Set(['source', 'docker', 'all'])
 const DEFAULT_SPEC = 'cypress/e2e/**/*.cy.js'
-const READINESS_TIMEOUT_MS = 180000
+const READINESS_TIMEOUT_MS = Number(process.env.E2E_READINESS_TIMEOUT_MS) || 180000
 const READINESS_INTERVAL_MS = 2000
 const KNOWN_COMPOSE_PROJECTS = [
   'decision-engine',
@@ -274,6 +274,8 @@ async function runPlaywright(runtime) {
     {
       env: {
         // playwright.config.ts reads these plain env vars (no CYPRESS_ prefix).
+        // This script already booted the API and dashboard, so tell Playwright not to start its own.
+        PW_NO_WEBSERVER: '1',
         RUNTIME_MODE: runtime.mode,
         API_BASE_URL: runtime.apiBaseUrl,
         UI_BASE_URL: runtime.uiBaseUrl,

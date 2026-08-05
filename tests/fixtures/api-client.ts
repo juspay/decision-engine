@@ -42,6 +42,12 @@ export class ApiClient {
   readonly request: APIRequestContext
   /** Bearer token for the active session; auto-attached to every request once set. */
   token: string | null = null
+  /**
+   * Whether to send `x-admin-secret`. Since #345 that header is accepted as service-to-service auth on
+   * protected routes, so an "anonymous" client must drop it too — otherwise it is still authenticated
+   * and every auth-guard assertion silently passes for the wrong reason.
+   */
+  sendAdminSecret = true
 
   constructor(request: APIRequestContext) {
     this.request = request
@@ -55,7 +61,9 @@ export class ApiClient {
    * dropped.
    */
   anonymous(): ApiClient {
-    return new ApiClient(this.request)
+    const client = new ApiClient(this.request)
+    client.sendAdminSecret = false
+    return client
   }
 
   /** Core request primitive — mirrors Cypress `requestApi`. */
@@ -64,7 +72,7 @@ export class ApiClient {
     const requestHeaders: Record<string, string> = {
       'Content-Type': 'application/json',
       'x-tenant-id': 'public',
-      'x-admin-secret': ADMIN_SECRET,
+      ...(this.sendAdminSecret ? { 'x-admin-secret': ADMIN_SECRET } : {}),
       // Explicit Authorization always wins over the session token.
       ...(this.token && !headers.Authorization ? { Authorization: `Bearer ${this.token}` } : {}),
       ...headers,

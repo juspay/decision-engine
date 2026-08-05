@@ -109,18 +109,26 @@ test.describe('Auth guards (API)', () => {
     expect(ready.status).toBe(200)
   })
 
-  // `merchant` is pulled in only so `api` carries a token for the authenticated cleanup DELETE.
-  test('merchant-account create stays public (it is the bootstrap route)', async ({ api, merchant }) => {
-    const id = factory.merchantId('guard_public')
+  // merchant-account/create sits on the PUBLIC router (no auth middleware), but the handler itself
+  // validates x-admin-secret — so merchant creation is admin-gated even though it bypasses the
+  // middleware. A caller with no credentials at all must be refused.
+  test('merchant-account create requires the admin secret', async ({ api, merchant }) => {
+    const id = factory.merchantId('guard_admin')
     const anon = api.anonymous()
 
-    const r = await anon.raw('POST', '/merchant-account/create', {
+    const withoutSecret = await anon.raw('POST', '/merchant-account/create', {
       failOnStatusCode: false,
       body: { merchant_id: id, gateway_success_rate_based_decider_input: null },
     })
+    expect(withoutSecret.status).toBeGreaterThanOrEqual(400)
 
-    // A merchant has to be creatable before any credential for it can exist.
-    expect(r.status).toBe(200)
+    // The same call succeeds once the admin secret is supplied — this is how the suite bootstraps
+    // every merchant it needs.
+    const withSecret = await api.raw('POST', '/merchant-account/create', {
+      failOnStatusCode: false,
+      body: { merchant_id: id, gateway_success_rate_based_decider_input: null },
+    })
+    expect(withSecret.status).toBe(200)
 
     await api.cleanupTestData(id)
   })

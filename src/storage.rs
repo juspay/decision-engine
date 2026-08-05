@@ -75,7 +75,7 @@ impl Storage {
         schema: &str,
     ) -> error_stack::Result<Self, error::StorageError> {
         let database_url = format!(
-            "postgres://{}:{}@{}:{}/{}?application_name={}&options=-c search_path%3D{}",
+            "postgres://{}:{}@{}:{}/{}?application_name={}&options=-c%20search_path%3D{}",
             database.pg_username,
             database.pg_password.peek(),
             database.pg_host,
@@ -116,7 +116,7 @@ impl Storage {
         schema: &str,
     ) -> error_stack::Result<Self, error::StorageError> {
         let database_url = format!(
-            "mysql://{}:{}@{}:{}/{}?application_name={}&options=-c search_path%3D{}",
+            "mysql://{}:{}@{}:{}/{}?application_name={}&options=-c%20search_path%3D{}",
             database.username,
             database.password.peek(),
             database.host,
@@ -186,8 +186,11 @@ pub async fn diesel_make_pg_pool(
     schema: &str,
     _test_transaction: bool,
 ) -> error_stack::Result<PgPool, error::StorageError> {
+    // The space between `-c` and `search_path` must stay percent-encoded. libpq 14 tolerates a raw
+    // space here; libpq 16 rejects the whole URI ("unexpected spaces found in ..."), so a build
+    // linked against the newer client cannot open a single connection.
     let database_url = format!(
-        "postgres://{}:{}@{}:{}/{}?application_name={}&options=-c search_path%3D{}",
+        "postgres://{}:{}@{}:{}/{}?application_name={}&options=-c%20search_path%3D{}",
         database.pg_username,
         database.pg_password.peek(),
         database.pg_host,
@@ -214,7 +217,7 @@ pub async fn diesel_make_mysql_pool(
     _test_transaction: bool,
 ) -> error_stack::Result<MysqlPool, error::StorageError> {
     let database_url = format!(
-        "mysql://{}:{}@{}:{}/{}?application_name={}&options=-c search_path%3D{}",
+        "mysql://{}:{}@{}:{}/{}?application_name={}&options=-c%20search_path%3D{}",
         database.username,
         database.password.peek(),
         database.host,

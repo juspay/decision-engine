@@ -3,9 +3,13 @@ import { defineConfig, devices } from '@playwright/test'
 /**
  * Playwright config for Decision Engine e2e.
  *
- * The runtime stack (API, dashboard UI, Postgres/Redis/Kafka/ClickHouse) is booted
- * OUT of band by `cypress/scripts/run-e2e.js` (source or docker mode), which passes the
- * resolved URLs in as plain env vars. There is deliberately no `webServer` block here.
+ * Datastores (Postgres/Redis/Kafka/ClickHouse) are brought up out of band — by `docker compose` in
+ * CI, or by `cypress/scripts/run-e2e.js` locally. The two APPLICATION processes are started by the
+ * `webServer` block below, so Playwright owns their readiness and teardown.
+ *
+ * `reuseExistingServer` is on outside CI: if you already have the API and dashboard running, Playwright
+ * attaches to them instead of starting its own. Set PW_NO_WEBSERVER=1 to opt out entirely (e.g. when
+ * run-e2e.js has already booted everything).
  *
  * Two projects:
  *   - `api` — no browser; API-contract specs in tests/api (baseURL = decision-engine API).
@@ -18,18 +22,42 @@ import { defineConfig, devices } from '@playwright/test'
 const API_BASE_URL = process.env.API_BASE_URL || 'http://localhost:8080'
 const UI_BASE_URL = process.env.UI_BASE_URL || 'http://localhost:5173'
 
+/**
+ * Start the app processes ourselves unless something else already owns them — `run-e2e.js` boots the
+ * whole stack via oneclick.sh, so it sets PW_NO_WEBSERVER to stay in charge.
+ */
+const webServer = process.env.PW_NO_WEBSERVER
+  ? undefined
+  : [
+      {
+        // Built by CI's `cargo build --no-default-features --features postgres` step.
+        command: './target/debug/open_router',
+        url: `${API_BASE_URL}/health`,
+        reuseExistingServer: !process.env.CI,
+        // A debug build on a loaded runner needs well over the 60s default to finish booting.
+        timeout: 180_000,
+        stdout: 'pipe' as const,
+        stderr: 'pipe' as const,
+      },
+      {
+        command: 'npm --prefix website run dev',
+        url: UI_BASE_URL,
+        reuseExistingServer: !process.env.CI,
+        timeout: 180_000,
+        stdout: 'pipe' as const,
+        stderr: 'pipe' as const,
+      },
+    ]
+
 export default defineConfig({
   testDir: 'tests',
   testMatch: '**/*.spec.ts',
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
-  // Cap workers in CI so the shared runtime stack isn't overwhelmed; unbounded locally.
-  // The CI runner hosts the API, dashboard, Postgres, Redis, Kafka and ClickHouse alongside the tests
-  // on the same few vCPUs, so this is conservative by default. Override with PW_WORKERS once a full
-  // run has been timed — tune from the measurement, not a guess.
-  workers: Number(process.env.PW_WORKERS) || (process.env.CI ? 2 : undefined),
+  workers: Number(process.env.PW_WORKERS) || (process.env.CI ? 1 : undefined),
   reporter: [['list'], ['html', { open: 'never' }]],
+  webServer,
   timeout: 60_000,
   expect: { timeout: 10_000 },
   use: {

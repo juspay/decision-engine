@@ -93,7 +93,7 @@ test.describe('Rule Builder — UI interactions', () => {
   })
 
   test.describe('Condition editing', () => {
-    test.beforeEach(async () => {
+    test.beforeEach(async ({ sharedPage }) => {
       await euclid.addRuleBlock()
     })
 
@@ -193,7 +193,7 @@ test.describe('Rule Builder — UI interactions', () => {
   })
 
   test.describe('OR group management', () => {
-    test.beforeEach(async () => {
+    test.beforeEach(async ({ sharedPage }) => {
       await euclid.addRuleBlock()
     })
 
@@ -247,7 +247,7 @@ test.describe('Rule Builder — UI interactions', () => {
   })
 
   test.describe('Gateway output', () => {
-    test.beforeEach(async () => {
+    test.beforeEach(async ({ sharedPage }) => {
       await euclid.addRuleBlock()
     })
 
