@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { AnalyticsPage } from './components/pages/AnalyticsPage'
 import { DecisionExplorerPage } from './components/pages/DecisionExplorerPage'
 import { DecisionSimulatorPage } from './components/pages/DecisionSimulatorPage'
@@ -42,11 +42,20 @@ let hsSsoExchangeStarted = false
 export default function App() {
   const setAuth = useAuthStore((s) => s.setAuth)
   const setMerchantId = useMerchantStore((s) => s.setMerchantId)
+  // Hold the app on a loader while an SSO `?code=` is being exchanged. Without this, <Routes>
+  // (and AuthGuard) render immediately; AuthGuard's child effect navigates to /login and strips
+  // the code from the URL before this parent effect can read it, so the exchange never fires.
+  const [exchangingCode, setExchangingCode] = useState(
+    () => new URLSearchParams(window.location.search).has('code'),
+  )
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search)
     const code = params.get('code')
-    if (!code || hsSsoExchangeStarted) return
+    if (!code || hsSsoExchangeStarted) {
+      setExchangingCode(false)
+      return
+    }
     hsSsoExchangeStarted = true
 
     const stripCode = () => {
@@ -79,9 +88,18 @@ export default function App() {
         // AuthGuard redirect to login.
       } finally {
         stripCode()
+        setExchangingCode(false)
       }
     })()
   }, [setAuth, setMerchantId])
+
+  if (exchangingCode) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-white text-sm text-slate-600 dark:bg-[#030507] dark:text-[#c7cfdb]">
+        Signing you in…
+      </div>
+    )
+  }
 
   return (
     <Routes>
