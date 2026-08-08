@@ -209,3 +209,35 @@ Define the MySQL hostname
 {{- .Values.mysql.hostname | default (printf "%s-mysql" .Release.Name) }}
 {{- end }}
 {{- end }}
+
+{{/*
+Create the name for the Hypersense Backend
+*/}}
+{{- define "decision-engine.hypersenseBackendName" -}}
+{{- printf "%s-hypersense-backend" (include "decision-engine.fullname" .) }}
+{{- end }}
+
+{{/*
+Create the name for the Hypersense ETL
+*/}}
+{{- define "decision-engine.hypersenseEtlName" -}}
+{{- printf "%s-hypersense-etl" (include "decision-engine.fullname" .) }}
+{{- end }}
+
+{{/*
+Name of the shared Hypersense ConfigMap (DB/Redis connection coordinates).
+Mirrors hypersense-main's configMapName: referenced by backend + etl via configMapKeyRef.
+Override hypersenseShared.configMapName to point at a pre-existing (external) ConfigMap.
+*/}}
+{{- define "decision-engine.hypersenseConfigMapName" -}}
+{{- .Values.hypersenseShared.configMapName | default (printf "%s-hypersense-config" (include "decision-engine.fullname" .)) }}
+{{- end }}
+
+{{/*
+Name of the shared Hypersense Secret (DB password).
+Mirrors hypersense-main's secretsName: referenced by backend + etl via secretKeyRef.
+Override hypersenseShared.secretName to point at a pre-existing (external) Secret.
+*/}}
+{{- define "decision-engine.hypersenseSecretName" -}}
+{{- .Values.hypersenseShared.secretName | default (printf "%s-hypersense-secret" (include "decision-engine.fullname" .)) }}
+{{- end }}

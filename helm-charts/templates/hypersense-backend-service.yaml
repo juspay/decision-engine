@@ -1,0 +1,19 @@
+{{- if .Values.hypersenseBackend.enabled -}}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "decision-engine.hypersenseBackendName" . }}
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ .Values.hypersenseBackend.metadata.labels.component }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 80
+      targetPort: {{ .Values.hypersenseBackend.service.port }}
+      protocol: TCP
+  selector:
+    {{- include "decision-engine.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ .Values.hypersenseBackend.metadata.labels.component }}
+{{- end }}
