@@ -186,9 +186,8 @@ pub async fn diesel_make_pg_pool(
     schema: &str,
     _test_transaction: bool,
 ) -> error_stack::Result<PgPool, error::StorageError> {
-    // The space between `-c` and `search_path` must stay percent-encoded. libpq 14 tolerates a raw
-    // space here; libpq 16 rejects the whole URI ("unexpected spaces found in ..."), so a build
-    // linked against the newer client cannot open a single connection.
+    // Keep the space percent-encoded: libpq 16 rejects a raw one ("unexpected spaces found in ...")
+    // and no connection can be opened at all. libpq 14 tolerated it, which is why it went unnoticed.
     let database_url = format!(
         "postgres://{}:{}@{}:{}/{}?application_name={}&options=-c%20search_path%3D{}",
         database.pg_username,

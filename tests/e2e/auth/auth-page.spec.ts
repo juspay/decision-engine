@@ -57,10 +57,12 @@ test.describe('Auth UI', () => {
     const duplicateEmail = 'duplicate-user@example.com'
 
     // Register the stub BEFORE navigating, or the route handler misses the request.
-    await stubApi(page, '**/auth/signup', {
-      status: 409,
-      body: { message: 'Email already registered' },
-    })
+    await stubApi(
+      page,
+      '**/auth/signup',
+      { status: 409, body: { message: 'Email already registered' } },
+      'POST',
+    )
 
     await page.goto('/login')
     await page.getByRole('button', { name: 'Sign up' }).click()
