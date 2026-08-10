@@ -10,6 +10,12 @@ dump.rdb
 cypress/screenshots
 cypress/videos
 cypress/fixtures
+
+# Playwright generated artifacts (HTML report, traces, screenshots)
+playwright-report/
+test-results/
+blob-report/
+.playwright/
 .mintlify-dev.log
 **/gsm.csv
 **/scratch

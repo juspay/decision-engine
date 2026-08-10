@@ -4,6 +4,9 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+permissions:
+  contents: read
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -59,6 +62,9 @@ jobs:
   ci-hack:
     name: Cargo Hack
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
@@ -148,3 +154,98 @@ jobs:
           helm dependency update helm-charts/
           helm lint helm-charts/
           helm template test helm-charts/ > /dev/null
+
+  e2e-playwright:
+    name: E2E (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+
+      - name: Install native deps for rdkafka
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libcurl4-openssl-dev \
+            libsasl2-dev \
+            zlib1g-dev \
+            libpq-dev
+
+      - uses: Swatinem/rust-cache@v2.7.7
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+          checksum: true
+
+      - name: Install diesel CLI
+        run: cargo install diesel_cli --no-default-features --features postgres --locked
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install e2e dependencies
+        run: npm ci
+
+      - name: Type check e2e suite
+        run: npm run typecheck
+
+      - name: Install dashboard dependencies
+        run: npm ci
+        working-directory: website
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Build decision-engine
+        run: cargo build --no-default-features --features postgres
+
+      - name: Start datastores
+        run: |
+          COMPOSE_PROFILES= docker compose --profile postgres-ghcr --profile analytics-clickhouse \
+            up -d postgresql redis kafka kafka-init clickhouse mailpit
+          COMPOSE_PROFILES= docker compose --profile postgres-ghcr --profile analytics-clickhouse \
+            up -d --wait postgresql redis kafka clickhouse mailpit
+
+      - name: Apply database schema
+        run: just migrate-pg
+
+      - name: Seed global service configs
+        run: |
+          COMPOSE_PROFILES= docker compose --profile postgres-ghcr exec -T postgresql \
+            psql -v ON_ERROR_STOP=1 -U db_user -d decision_engine_db -c "
+              INSERT INTO service_configuration (name, value)
+              SELECT v.name, v.value
+              FROM (VALUES
+                  ('ENABLE_MERCHANT_ON_VOLUME_DISTRIBUTION_FEATURE_SR_V3', '{\"enableAll\":true,\"enableAllRollout\":100}'),
+                  ('merchants_enabled_for_score_keys_unification',         '{\"enableAll\":true,\"enableAllRollout\":100}'),
+                  ('SR_V3_INPUT_CONFIG_DEFAULT',                           '{\"defaultLatencyThreshold\":90,\"defaultBucketSize\":125,\"defaultHedgingPercent\":5}')
+              ) AS v(name, value)
+              WHERE NOT EXISTS (
+                  SELECT 1 FROM service_configuration sc WHERE sc.name = v.name
+              );"
+
+      - name: Run Playwright e2e
+        run: npx playwright test
+        env:
+          CI: 'true'
+          DECISION_ENGINE__LOG__CONSOLE__LEVEL: WARN
+
+      - name: Upload Playwright report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore

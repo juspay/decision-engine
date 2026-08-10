@@ -7,7 +7,7 @@ const path = require('path')
 const ROOT = path.resolve(__dirname, '../..')
 const VALID_MODES = new Set(['source', 'docker', 'all'])
 const DEFAULT_SPEC = 'cypress/e2e/**/*.cy.js'
-const READINESS_TIMEOUT_MS = 180000
+const READINESS_TIMEOUT_MS = Number(process.env.E2E_READINESS_TIMEOUT_MS) || 180000
 const READINESS_INTERVAL_MS = 2000
 const KNOWN_COMPOSE_PROJECTS = [
   'decision-engine',
@@ -24,16 +24,25 @@ const EXPECTED_CLICKHOUSE_TABLES = [
   'analytics_payment_audit_lookup_summaries',
 ]
 
+const VALID_RUNNERS = new Set(['playwright', 'cypress'])
+
 function parseArgs() {
   const args = process.argv.slice(2)
   const mode = args[0] || 'all'
   const keepAlive = args.includes('--keep-alive')
+  const runnerArg = args.find((a) => a.startsWith('--runner='))
+  // Playwright is the default runner; Cypress (frozen) is still selectable via --runner=cypress
+  // or E2E_RUNNER=cypress for the legacy suite.
+  const runner = (runnerArg ? runnerArg.split('=')[1] : process.env.E2E_RUNNER) || 'playwright'
 
   if (!VALID_MODES.has(mode)) {
     throw new Error(`Unsupported E2E mode '${mode}'. Use source, docker, or all.`)
   }
+  if (!VALID_RUNNERS.has(runner)) {
+    throw new Error(`Unsupported E2E runner '${runner}'. Use playwright or cypress.`)
+  }
 
-  return { mode, keepAlive }
+  return { mode, keepAlive, runner }
 }
 
 function sleep(ms) {
@@ -250,6 +259,43 @@ async function runCypress(runtime) {
   )
 }
 
+async function runPlaywright(runtime) {
+  console.log(`\n[${runtime.mode}] Running Playwright suite...`)
+
+  // Pass-through for extra CLI flags (e.g. sharding in CI): PLAYWRIGHT_ARGS="--shard=1/4".
+  const extraArgs = process.env.PLAYWRIGHT_ARGS
+    ? process.env.PLAYWRIGHT_ARGS.split(' ').filter(Boolean)
+    : []
+
+  await runCommand(
+    `playwright-${runtime.mode}`,
+    'npx',
+    ['playwright', 'test', ...extraArgs],
+    {
+      env: {
+        // playwright.config.ts reads these plain env vars (no CYPRESS_ prefix).
+        // This script already booted the API and dashboard, so tell Playwright not to start its own.
+        PW_NO_WEBSERVER: '1',
+        RUNTIME_MODE: runtime.mode,
+        API_BASE_URL: runtime.apiBaseUrl,
+        UI_BASE_URL: runtime.uiBaseUrl,
+        DOCS_BASE_URL: runtime.docsBaseUrl,
+        CLICKHOUSE_HTTP_URL: runtime.clickhouseHttpUrl,
+        CLICKHOUSE_DATABASE: runtime.clickhouseDatabase,
+        CLICKHOUSE_USER: runtime.clickhouseUser,
+        CLICKHOUSE_PASSWORD: runtime.clickhousePassword,
+      },
+    },
+  )
+}
+
+async function runTests(runtime, runner) {
+  if (runner === 'cypress') {
+    return runCypress(runtime)
+  }
+  return runPlaywright(runtime)
+}
+
 async function stopDockerServices(profile) {
   await runCommand(
     `docker-down-${profile}`,
@@ -301,7 +347,7 @@ async function killProcessGroup(child) {
   }
 }
 
-async function runSourceMode(keepAlive) {
+async function runSourceMode(keepAlive, runner) {
   const runtime = {
     mode: 'source',
     apiBaseUrl: 'http://localhost:8080',
@@ -330,13 +376,13 @@ async function runSourceMode(keepAlive) {
 
   try {
     await waitForRuntime(runtime, sourceProcess)
-    await runCypress(runtime)
+    await runTests(runtime, runner)
   } finally {
     await cleanup()
   }
 }
 
-async function runDockerMode(keepAlive) {
+async function runDockerMode(keepAlive, runner) {
   const runtime = {
     mode: 'docker',
     apiBaseUrl: 'http://localhost:8080',
@@ -365,21 +411,23 @@ async function runDockerMode(keepAlive) {
 
   try {
     await waitForRuntime(runtime)
-    await runCypress(runtime)
+    await runTests(runtime, runner)
   } finally {
     await cleanup()
   }
 }
 
 async function main() {
-  const { mode, keepAlive } = parseArgs()
+  const { mode, keepAlive, runner } = parseArgs()
   const modes = mode === 'all' ? ['source', 'docker'] : [mode]
+
+  console.log(`[E2E] runner=${runner} mode=${mode}`)
 
   for (const selectedMode of modes) {
     if (selectedMode === 'source') {
-      await runSourceMode(keepAlive)
+      await runSourceMode(keepAlive, runner)
     } else {
-      await runDockerMode(keepAlive)
+      await runDockerMode(keepAlive, runner)
     }
   }
 }
