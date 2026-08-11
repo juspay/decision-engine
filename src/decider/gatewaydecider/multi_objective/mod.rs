@@ -21,18 +21,14 @@ pub struct MultiObjectiveInfo {
     pub outcome: MultiObjectiveOutcome,
     /// Human-readable explanation of the decision.
     pub reason: String,
-    /// The PSP the SR scorer would have picked (head of score map before reorder).
-    pub sr_head: Option<PspSummary>,
-    /// The PSP the post-step actually chose. Equals `sr_head` when auth won.
-    pub chosen: Option<PspSummary>,
-    /// Cost saved in bps when outcome == CostWon (== sr_head.cost_bps - chosen.cost_bps).
+    /// Cost saved in bps when outcome == CostWon: the SR head's cost minus the chosen PSP's cost
+    /// (both are rows in `ranked`, flagged `isSrHead` / `isChosen`).
     pub cost_saved_bps: Option<f64>,
     /// Number of PSPs ranked on expected value (i.e. those that had cost data).
     pub qualified_count: usize,
-    /// Merchant margin (fraction of ticket) the decider applied for this txn. Lets
-    /// callers value the auth-rate tradeoff a cost override accepted —
-    /// `(sr_head.auth − chosen.auth) × ticket × margin` — and net it against the fee
-    /// saved, rather than reading the fee saving in isolation.
+    /// Merchant margin (fraction of ticket) the decider applied for this txn. Lets callers value the
+    /// auth-rate tradeoff a cost override accepted — `(srHead.auth − chosen.auth) × ticket × margin`,
+    /// reading those two `ranked` rows — and net it against the fee saved.
     pub margin: f64,
     /// Expected-value gap between the top-two EV-ranked PSPs (every PSP that had cost
     /// data is ranked), as a fraction of
@@ -42,6 +38,28 @@ pub struct MultiObjectiveInfo {
     /// (Serializes as `evGapTop2`.)
     #[serde(default)]
     pub ev_gap_top2: Option<f64>,
+    /// Every candidate PSP the decider ranked on expected value, ordered best-EV first, each with
+    /// its auth, cost, EV, and role flags. This is the "show your work" behind the pick: it surfaces
+    /// the *losing* candidates' costs too, so an `AUTH_WON` decision still explains why the runner-up
+    /// lost. The SR head and the chosen PSP are the rows flagged `isSrHead` / `isChosen` (the same
+    /// row on `AUTH_WON`). Empty when no PSP had the cost data needed to rank on EV.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ranked: Vec<RankedPsp>,
+}
+
+/// One EV-ranked candidate: a `PspSummary`, the expected value it was ranked by, and flags marking
+/// whether it is the SR/auth head and/or the PSP actually chosen.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct RankedPsp {
+    #[serde(flatten)]
+    pub summary: PspSummary,
+    /// Expected value used for ranking: `auth·(margin − cost_bps/10_000)`.
+    pub ev: f64,
+    /// The PSP pure success-rate routing would have picked (highest auth, deterministic tie-break).
+    pub is_sr_head: bool,
+    /// The PSP actually chosen — equals `decided_gateway`. Same row as `isSrHead` on `AUTH_WON`.
+    pub is_chosen: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

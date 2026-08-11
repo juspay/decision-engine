@@ -204,6 +204,87 @@ tiers = [
 ]
 
 [[hypersense.seed_costs]]
+psp = "dlocal"                                 # Country-specific blended MDR 
+                                              # Varies by Local vs Cross-Border (FX)
+default = { pct_bps = 450.0, fixed = 0.30 }    # fallback = LATAM Local Credit Card 
+                                            # standard (4.50% + $0.30)
+tiers = [
+  # ====================================================================================
+  # LATIN AMERICA (LATAM) - Blended Country Card Footprints
+  # ====================================================================================
+
+  # --- BRAZIL (BR) --------------------------------------------------------------------
+  { card_issuing_country = "br", card_network = "visa",       payment_method_type = "debit",  pct_bps = 490.0, fixed = 0.00, label = "BR Domestic Visa Debit" },
+  { card_issuing_country = "br", card_network = "visa",       payment_method_type = "credit", pct_bps = 490.0, fixed = 0.00, label = "BR Domestic Visa Credit" },
+  { card_issuing_country = "br", card_network = "mastercard", payment_method_type = "debit",  pct_bps = 490.0, fixed = 0.00, label = "BR Domestic MC Debit" },
+  { card_issuing_country = "br", card_network = "mastercard", payment_method_type = "credit", pct_bps = 490.0, fixed = 0.00, label = "BR Domestic MC Credit" },
+  { card_issuing_country = "br", card_network = "elo",        payment_method_type = "credit", pct_bps = 490.0, fixed = 0.00, label = "BR Domestic Elo Card" },
+  { card_issuing_country = "br", card_network = "hipercard",  payment_method_type = "credit", pct_bps = 490.0, fixed = 0.00, label = "BR Domestic Hipercard" },
+
+  # --- ARGENTINA (AR) -----------------------------------------------------------------
+  { card_issuing_country = "ar", card_network = "visa",       payment_method_type = "credit", pct_bps = 650.0, fixed = 0.00, label = "AR Domestic Visa" },
+  { card_issuing_country = "ar", card_network = "mastercard", payment_method_type = "credit", pct_bps = 650.0, fixed = 0.00, label = "AR Domestic MC" },
+
+  # --- CHILE (CL) ---------------------------------------------------------------------
+  { card_issuing_country = "cl", card_network = "visa",       payment_method_type = "credit", pct_bps = 490.0, fixed = 0.00, label = "CL Domestic Visa" },
+  { card_issuing_country = "cl", card_network = "mastercard", payment_method_type = "credit", pct_bps = 490.0, fixed = 0.00, label = "CL Domestic MC" },
+
+  # --- COLOMBIA (CO) ------------------------------------------------------------------
+  { card_issuing_country = "co", card_network = "visa",       payment_method_type = "credit", pct_bps = 650.0, fixed = 0.00, label = "CO Domestic Visa" },
+  { card_issuing_country = "co", card_network = "mastercard", payment_method_type = "credit", pct_bps = 650.0, fixed = 0.00, label = "CO Domestic MC" },
+
+  # --- ECUADOR (EC) - Highest baseline card ceiling in LATAM --------------------------
+  { card_issuing_country = "ec", card_network = "visa",       payment_method_type = "credit", pct_bps = 1200.0, fixed = 0.00, label = "EC Domestic Visa" },
+  { card_issuing_country = "ec", card_network = "mastercard", payment_method_type = "credit", pct_bps = 1200.0, fixed = 0.00, label = "EC Domestic MC" },
+
+
+
+  # --- Mexico (MX) Domestic Cards using your exact Adyen parameters ------------------
+  { transaction_currency = "MXN", card_network = "visa",       payment_method_type = "debit",  pct_bps = 420.0, fixed = 0.00, label = "MX Domestic Visa Debit" },
+  { transaction_currency = "MXN", card_network = "visa",       payment_method_type = "credit", pct_bps = 420.0, fixed = 0.00, label = "MX Domestic Visa Credit" },
+  { transaction_currency = "MXN", card_network = "mastercard", payment_method_type = "debit",  pct_bps = 420.0, fixed = 0.00, label = "MX Domestic MC Debit" },
+  { transaction_currency = "MXN", card_network = "mastercard", payment_method_type = "credit", pct_bps = 420.0, fixed = 0.00, label = "MX Domestic MC Credit" },
+  { transaction_currency = "MXN", card_network = "carnet",    payment_method_type = "debit",  pct_bps = 420.0, fixed = 0.00, label = "MX Carnet Debit" },
+
+
+  # ====================================================================================
+  # ASIA PACIFIC (APAC) - Highly Competitive Dynamic High-Volume Rails
+  # ====================================================================================
+
+  # --- INDIA (IN) ---------------------------------------------------------------------
+  { card_issuing_country = "in", card_network = "rupay",      payment_method_type = "debit",  pct_bps = 90.0,  fixed = 0.00, label = "IN RuPay Local Debit" },
+  { card_issuing_country = "in", card_network = "visa",       payment_method_type = "debit",  pct_bps = 120.0, fixed = 0.00, label = "IN Visa Local Debit" },
+  { card_issuing_country = "in", card_network = "visa",       payment_method_type = "credit", pct_bps = 250.0, fixed = 0.00, label = "IN Visa Local Credit" },
+  { card_issuing_country = "in", card_network = "mastercard", payment_method_type = "credit", pct_bps = 250.0, fixed = 0.00, label = "IN MC Local Credit" },
+
+  # --- INDONESIA (ID) & MALAYSIA (MY) -------------------------------------------------
+  { card_issuing_country = "id", card_network = "visa",       payment_method_type = "credit", pct_bps = 450.0, fixed = 0.00, label = "ID Local Cards" },
+  { card_issuing_country = "my", card_network = "visa",       payment_method_type = "credit", pct_bps = 450.0, fixed = 0.00, label = "MY Local Cards" },
+
+
+  # ====================================================================================
+  # MIDDLE EAST & AFRICA (MEA)
+  # ====================================================================================
+
+  # --- NIGERIA (NG) -------------------------------------------------------------------
+  { card_issuing_country = "ng", card_network = "verve",      payment_method_type = "debit",  pct_bps = 250.0, fixed = 0.00, label = "NG Verve Local Card" },
+  { card_issuing_country = "ng", card_network = "visa",       payment_method_type = "credit", pct_bps = 390.0, fixed = 0.00, label = "NG Domestic Visa" },
+  { card_issuing_country = "ng", card_network = "mastercard", payment_method_type = "credit", pct_bps = 390.0, fixed = 0.00, label = "NG Domestic MC" },
+
+  # --- SOUTH AFRICA (ZA) --------------------------------------------------------------
+  { card_issuing_country = "za", card_network = "visa",       payment_method_type = "credit", pct_bps = 350.0, fixed = 0.00, label = "ZA Domestic Visa" },
+
+  # ====================================================================================
+  # CROSS-BORDER INTERNATIONAL FALLBACK
+  # ====================================================================================
+  # Triggers if a merchant processes inside an emerging market but the shopper uses a 
+  # foreign international card (e.g., US traveler using an American Visa card inside Peru).
+  { card_issuing_country = "intl", card_network = "visa",       payment_method_type = "credit", pct_bps = 650.0, fixed = 0.50, label = "Cross-Border Visa Pay-in" },
+  { card_issuing_country = "intl", card_network = "mastercard", payment_method_type = "credit", pct_bps = 650.0, fixed = 0.50, label = "Cross-Border MC Pay-in" }
+]
+
+
+[[hypersense.seed_costs]]
 psp = "tap"
 default = { interchange_bps = 100.0, scheme_bps = 12.0, markup_bps = 18.0, fixed = 0.30 }
 tiers = [

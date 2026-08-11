@@ -16,7 +16,7 @@ import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { useAuthStore } from '../../store/authStore'
 import { apiErrorStatus, apiPost, fetcher } from '../../lib/api'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
-import { DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
+import { DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RankedPsp, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
@@ -2437,8 +2437,8 @@ export function DecisionSimulatorPage() {
         costSavedBps: mo?.costSavedBps ?? null,
         costWon: mo?.outcome === 'COST_WON',
         authWon: mo?.outcome === 'AUTH_WON',
-        headAuthRate: mo?.srHead?.authRate ?? null,
-        chosenAuthRate: mo?.chosen?.authRate ?? null,
+        headAuthRate: mo?.ranked?.find((r) => r.isSrHead)?.authRate ?? null,
+        chosenAuthRate: mo?.ranked?.find((r) => r.isChosen)?.authRate ?? null,
         margin: mo?.margin ?? null,
         evGapTop2: mo?.evGapTop2 ?? null,
         amount,
@@ -6236,21 +6236,15 @@ function MultiObjectiveDecisionPanel({ info }: { info: MultiObjectiveInfo }) {
             </div>
           )}
 
-          {(info.srHead || info.chosen) && (
+          {info.ranked && info.ranked.length > 0 && (
             <div className="mt-4 grid gap-3 sm:grid-cols-2">
-              {info.srHead && (
+              {info.ranked.map((candidate) => (
                 <MultiObjectivePspCard
-                  label={isCostWin ? 'SR head (would have picked)' : 'SR head (kept)'}
-                  summary={info.srHead}
+                  key={candidate.psp}
+                  candidate={candidate}
+                  emphasis={candidate.isChosen}
                 />
-              )}
-              {info.chosen && (
-                <MultiObjectivePspCard
-                  label={isCostWin ? 'Chosen by EV' : 'Final pick'}
-                  summary={info.chosen}
-                  emphasis={isCostWin}
-                />
-              )}
+              ))}
             </div>
           )}
 
@@ -6264,12 +6258,10 @@ function MultiObjectiveDecisionPanel({ info }: { info: MultiObjectiveInfo }) {
 }
 
 function MultiObjectivePspCard({
-  label,
-  summary,
+  candidate,
   emphasis = false,
 }: {
-  label: string
-  summary: { psp: string; authRate: number; costBps: number | null }
+  candidate: RankedPsp
   emphasis?: boolean
 }) {
   const borderTone = emphasis
@@ -6277,22 +6269,35 @@ function MultiObjectivePspCard({
     : 'border-slate-200 bg-white dark:border-[#1c1c24] dark:bg-[#0d0d13]'
   return (
     <div className={`rounded-xl border px-3 py-2 ${borderTone}`}>
-      <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-slate-400">
-        {label}
-      </p>
+      <div className="flex min-h-[16px] flex-wrap items-center gap-1.5">
+        {candidate.isSrHead && (
+          <span className="inline-flex items-center rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-700 dark:bg-[#1f1f29] dark:text-slate-200">
+            SR head
+          </span>
+        )}
+        {candidate.isChosen && (
+          <span className="inline-flex items-center rounded bg-cyan-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-200">
+            Chosen
+          </span>
+        )}
+      </div>
       <p className="mt-1 font-mono text-sm font-semibold text-slate-900 dark:text-white">
-        {summary.psp}
+        {candidate.psp}
       </p>
-      <div className="mt-1.5 flex gap-3 text-xs text-slate-600 dark:text-slate-300">
+      <div className="mt-1.5 flex flex-wrap gap-3 text-xs text-slate-600 dark:text-slate-300">
         <span>
           <span className="text-slate-400">auth</span>{' '}
-          <span className="font-mono">{(summary.authRate * 100).toFixed(2)}%</span>
+          <span className="font-mono">{(candidate.authRate * 100).toFixed(2)}%</span>
         </span>
         <span>
           <span className="text-slate-400">cost</span>{' '}
           <span className="font-mono">
-            {summary.costBps != null ? `${summary.costBps.toFixed(2)} bps` : '—'}
+            {candidate.costBps != null ? `${candidate.costBps.toFixed(2)} bps` : '—'}
           </span>
+        </span>
+        <span>
+          <span className="text-slate-400">EV</span>{' '}
+          <span className="font-mono">{candidate.ev.toFixed(4)}</span>
         </span>
       </div>
     </div>

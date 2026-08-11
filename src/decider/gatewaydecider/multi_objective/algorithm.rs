@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use super::cluster_key::derive_cluster_key;
 use super::hypersense_client;
 use super::hypersense_client::PspCost;
-use super::{MultiObjectiveInfo, MultiObjectiveOutcome, PspSummary};
+use super::{MultiObjectiveInfo, MultiObjectiveOutcome, PspSummary, RankedPsp};
 use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::txn_details::types::TxnDetail;
 
@@ -26,10 +26,7 @@ pub async fn try_apply_multi_objective_post_step(
     margin: f64,
 ) -> ReorderOutcome {
     if score_map.len() < 2 {
-        let sr_head = current_head(score_map);
         return auth_won(
-            sr_head,
-            &HashMap::new(),
             score_map.len(),
             margin,
             "Only one PSP available; nothing to reorder.".to_string(),
@@ -50,14 +47,10 @@ pub fn reorder_for_cost(
     margin: f64,
     costs: &HashMap<String, PspCost>,
 ) -> ReorderOutcome {
-    let sr_head = current_head(score_map);
-
-    let best_auth = match sr_head.as_ref().map(|(_, a)| *a) {
+    let best_auth = match current_head(score_map).map(|(_, a)| a) {
         Some(a) if a.is_finite() => a,
         _ => {
             return auth_won(
-                sr_head,
-                costs,
                 score_map.len(),
                 margin,
                 "SR head has no finite score; cannot evaluate cost.".to_string(),
@@ -83,8 +76,6 @@ pub fn reorder_for_cost(
     // Cost is needed to place the head in the EV ranking; without it we keep the head.
     if !head_cost.is_finite() {
         return auth_won(
-            sr_head,
-            costs,
             score_map.len(),
             margin,
             "No cost data for the SR head; cannot rank it on expected value.".to_string(),
@@ -128,12 +119,24 @@ pub fn reorder_for_cost(
 
     let ev_gap_top2 = top2_gap(ranked_evs);
 
-    let head_summary = head_psp
-        .as_ref()
-        .map(|psp| make_summary(psp.clone(), best_auth, Some(head_cost), costs));
+    // Every EV-rankable candidate (best-EV first), each flagged as the SR head / chosen PSP —
+    // surfaced so callers can see the losing PSPs' auth/cost/EV, not just the head and the pick.
+    let ranked = build_ranked(
+        score_map,
+        &ev,
+        &cost_bps,
+        costs,
+        head_psp.as_deref(),
+        chosen_psp.as_deref(),
+    );
 
-    // Head still wins: it was already the highest-EV PSP.
+    // Head still wins: it was already the highest-EV PSP. Return it as an explicit decision anyway,
+    // so the caller adopts the EV-best PSP deterministically. Otherwise, when SR scores tie, an
+    // earlier arbitrary tie-break can leave a costlier equally-ranked PSP selected while this info
+    // block reports the cheaper head — decided_gateway and multi_objective_info then disagree.
     if chosen_psp == head_psp {
+        let head_name = head_psp.clone().unwrap_or_default();
+        let fallbacks = build_ev_ordered_fallbacks(score_map, &head_name, &ev, &cost_bps);
         return ReorderOutcome {
             head_moved: false,
             info: MultiObjectiveInfo {
@@ -142,14 +145,16 @@ pub fn reorder_for_cost(
                     "SR head retained — it is the highest expected-value PSP ({} ranked on EV).",
                     ranked_count
                 ),
-                sr_head: head_summary.clone(),
-                chosen: head_summary,
                 cost_saved_bps: None,
                 qualified_count: ranked_count,
                 margin,
                 ev_gap_top2,
+                ranked,
             },
-            cost_decision: None,
+            cost_decision: Some(CostDecision {
+                chosen: head_name,
+                fallbacks,
+            }),
         };
     }
 
@@ -170,17 +175,11 @@ pub fn reorder_for_cost(
         info: MultiObjectiveInfo {
             outcome: MultiObjectiveOutcome::CostWon,
             reason,
-            sr_head: head_summary,
-            chosen: Some(make_summary(
-                chosen_name.clone(),
-                chosen_score,
-                Some(chosen_cost),
-                costs,
-            )),
             cost_saved_bps: Some(cost_saved_bps),
             qualified_count: ranked_count,
             margin,
             ev_gap_top2,
+            ranked,
         },
         cost_decision: Some(CostDecision {
             chosen: chosen_name,
@@ -228,39 +227,50 @@ fn current_head(score_map: &HashMap<String, f64>) -> Option<(String, f64)> {
         })
 }
 
-fn auth_won(
-    sr_head: Option<(String, f64)>,
-    costs: &HashMap<String, PspCost>,
-    qualified_count: usize,
-    margin: f64,
-    reason: String,
-) -> ReorderOutcome {
-    let summary = sr_head.map(|(psp, auth_rate)| {
-        let cost_bps = costs.get(&psp).and_then(|c| {
-            if c.available {
-                Some(c.effective_cost_bps)
-            } else {
-                None
-            }
-        });
-        make_summary(psp, auth_rate, cost_bps, costs)
-    });
+fn auth_won(qualified_count: usize, margin: f64, reason: String) -> ReorderOutcome {
     ReorderOutcome {
         head_moved: false,
         info: MultiObjectiveInfo {
             outcome: MultiObjectiveOutcome::AuthWon,
             reason,
-            sr_head: summary.clone(),
-            chosen: summary,
             cost_saved_bps: None,
             qualified_count,
             margin,
-            // These paths bail before any EV ranking (head has no finite score, or no
-            // cost data for the head), so there is no top-two EV gap to report.
+            // These paths bail before any EV ranking (head has no finite score, or no cost data for
+            // the head), so there is no top-two EV gap or ranked list to report. The head PSP is
+            // still derivable by the caller from the gateway_priority_map / decided_gateway.
             ev_gap_top2: None,
+            ranked: Vec::new(),
         },
         cost_decision: None,
     }
+}
+
+/// Every candidate with cost data, as EV-ranked summaries ordered best-EV first, each flagged as
+/// the SR/auth head and/or the chosen PSP.
+fn build_ranked(
+    score_map: &HashMap<String, f64>,
+    ev: &dyn Fn(f64, f64) -> f64,
+    cost_bps: &dyn Fn(&str) -> f64,
+    costs: &HashMap<String, PspCost>,
+    head_psp: Option<&str>,
+    chosen_psp: Option<&str>,
+) -> Vec<RankedPsp> {
+    let mut ranked: Vec<RankedPsp> = score_map
+        .iter()
+        .filter(|(gw, _)| cost_bps(gw).is_finite())
+        .map(|(gw, &score)| {
+            let c = cost_bps(gw);
+            RankedPsp {
+                summary: make_summary(gw.clone(), score, Some(c), costs),
+                ev: ev(score, c),
+                is_sr_head: head_psp == Some(gw.as_str()),
+                is_chosen: chosen_psp == Some(gw.as_str()),
+            }
+        })
+        .collect();
+    ranked.sort_by(|a, b| b.ev.partial_cmp(&a.ev).unwrap_or(std::cmp::Ordering::Equal));
+    ranked
 }
 
 /// Build a `PspSummary`, pulling the cost source and fitted breakdown (pct/fixed/ic_category) from
@@ -355,6 +365,42 @@ mod tests {
         let c = costs(&[("A", 100.0), ("B", 130.0)]); // B pricier -> EV lower
         let out = reorder_for_cost(&s, 0.20, &c);
         assert_eq!(out.info.outcome, MultiObjectiveOutcome::AuthWon);
+    }
+
+    // Tied SR scores: the auth-won head must still be returned as an explicit, deterministic decision
+    // (the cheaper PSP), so the caller doesn't fall back to an arbitrary same-score tie-break.
+    #[test]
+    fn auth_won_returns_deterministic_cheaper_head_on_tie() {
+        // "dlocal" and "adyen" tie on auth; adyen is cheaper -> EV-best. Head = min name = adyen.
+        let s = scores(&[("dlocal", 0.995), ("adyen", 0.995)]);
+        let c = costs(&[("dlocal", 420.0), ("adyen", 194.0)]);
+        let out = reorder_for_cost(&s, 1.0, &c);
+        assert_eq!(out.info.outcome, MultiObjectiveOutcome::AuthWon);
+        let decision = out
+            .cost_decision
+            .expect("auth-won must still return the EV-best head as the decision");
+        assert_eq!(decision.chosen, "adyen", "tie must resolve to the cheaper PSP");
+        assert_eq!(decision.fallbacks, vec!["dlocal".to_string()]);
+    }
+
+    // The ranked list must surface every candidate's cost/EV — including the loser — even on
+    // AUTH_WON, so a decision where sr_head == chosen still explains why the runner-up lost.
+    #[test]
+    fn ranked_lists_every_candidate_best_ev_first() {
+        // dlocal wins on auth+EV; adyen loses despite being cheaper. Its cost must still appear.
+        let s = scores(&[("dlocal", 0.99), ("adyen", 0.97)]);
+        let c = costs(&[("dlocal", 420.0), ("adyen", 234.0)]);
+        let out = reorder_for_cost(&s, 1.0, &c);
+        assert_eq!(out.info.outcome, MultiObjectiveOutcome::AuthWon);
+        assert_eq!(out.info.ranked.len(), 2, "both candidates ranked");
+        assert_eq!(out.info.ranked[0].summary.psp, "dlocal", "best EV first");
+        assert_eq!(out.info.ranked[1].summary.psp, "adyen");
+        // The loser's cost is now visible.
+        assert_eq!(out.info.ranked[1].summary.cost_bps, Some(234.0));
+        assert!(
+            out.info.ranked[0].ev > out.info.ranked[1].ev,
+            "ranked strictly by descending EV"
+        );
     }
 
     // ev_gap_top2 = EV(#1) − EV(#2) over every PSP ranked on EV, reported on both
