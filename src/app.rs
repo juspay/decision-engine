@@ -613,7 +613,7 @@ where
             post(routes::merchant_account_config::create_merchant_config),
         )
         .route(
-            "/webhooks/settlement/:connector",
+            "/webhooks/settlement/:merchant_id/:connector",
             post(routes::settlement_webhook::settlement_webhook),
         )
         .route("/auth/signup", post(routes::user_auth::signup))
