@@ -16,6 +16,19 @@ function resolveApiPath(path: string) {
   return `${API_BASE_PATH}${normalizedPath}`
 }
 
+/**
+ * Absolute URL for a backend path, for showing a caller-facing endpoint (a connector webhook, say)
+ * that someone will paste elsewhere. Deliberately not `API_BASE_PATH`: that is *this browser's*
+ * route to the API — a Vite proxy prefix in dev — which means nothing to a connector calling in
+ * from outside. Callers show these on the hosted dashboard only, so the default is the gateway's
+ * prefix; set `VITE_PUBLIC_API_BASE_URL` when a deployment answers external callers elsewhere.
+ */
+export function publicApiUrl(path: string) {
+  const override = import.meta.env.VITE_PUBLIC_API_BASE_URL?.trim()
+  const base = (override || `${window.location.origin}/decision-engine/api`).replace(/\/$/, '')
+  return `${base}${path.startsWith('/') ? path : `/${path}`}`
+}
+
 // function logRequest(method: string, path: string, body?: unknown) {
 //   if (!DEBUG_API) return
 //   console.log('\n' + '='.repeat(80))
