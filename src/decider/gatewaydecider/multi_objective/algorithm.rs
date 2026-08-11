@@ -270,8 +270,7 @@ fn build_ranked(
     // Descending EV, with a PSP-name tie-break so equal-EV candidates order deterministically
     // (HashMap iteration order is not stable across runs).
     ranked.sort_by(|a, b| {
-        b.ev
-            .partial_cmp(&a.ev)
+        b.ev.partial_cmp(&a.ev)
             .unwrap_or(std::cmp::Ordering::Equal)
             .then_with(|| a.summary.psp.cmp(&b.summary.psp))
     });
