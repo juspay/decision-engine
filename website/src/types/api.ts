@@ -50,7 +50,8 @@ export interface MultiObjectiveInfo {
   /// PSPs had the cost data needed to rank on EV.
   evGapTop2?: number | null
   /// Every candidate ranked on EV (best first), each with auth/cost/EV and role flags. Omitted when
-  /// no PSP had the cost data needed to rank. srHead/chosen live here as the flagged rows.
+  /// EV ranking wasn't performed (fewer than two PSPs, or the SR head had no finite score / no cost
+  /// data). srHead/chosen live here as the flagged isSrHead/isChosen rows.
   ranked?: RankedPsp[]
 }
 

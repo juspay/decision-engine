@@ -193,7 +193,7 @@ fn pg_database_url(database: &PgDatabase, schema: &str) -> String {
     );
     if let Some(sslmode) = database.pg_sslmode.as_deref().filter(|s| !s.is_empty()) {
         url.push_str("&sslmode=");
-        url.push_str(sslmode);
+        url.push_str(&encode_query_value(sslmode));
     }
     if let Some(cert) = database
         .pg_ssl_root_cert
@@ -201,9 +201,26 @@ fn pg_database_url(database: &PgDatabase, schema: &str) -> String {
         .filter(|s| !s.is_empty())
     {
         url.push_str("&sslrootcert=");
-        url.push_str(cert);
+        url.push_str(&encode_query_value(cert));
     }
     url
+}
+
+/// Percent-encode a connection-URL query value (RFC 3986 unreserved set kept, everything else
+/// escaped). An sslrootcert path can contain spaces or reserved characters (`&`, `?`, …) that would
+/// otherwise break the query string — libpq rejects a raw space outright.
+#[cfg(feature = "postgres")]
+fn encode_query_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for &byte in value.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
 }
 
 #[cfg(feature = "postgres")]

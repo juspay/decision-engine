@@ -42,7 +42,8 @@ pub struct MultiObjectiveInfo {
     /// its auth, cost, EV, and role flags. This is the "show your work" behind the pick: it surfaces
     /// the *losing* candidates' costs too, so an `AUTH_WON` decision still explains why the runner-up
     /// lost. The SR head and the chosen PSP are the rows flagged `isSrHead` / `isChosen` (the same
-    /// row on `AUTH_WON`). Empty when no PSP had the cost data needed to rank on EV.
+    /// row on `AUTH_WON`). Empty when EV ranking was not performed at all — fewer than two PSPs, or
+    /// the SR head had no finite score or no cost data.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ranked: Vec<RankedPsp>,
 }
