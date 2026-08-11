@@ -195,7 +195,11 @@ fn pg_database_url(database: &PgDatabase, schema: &str) -> String {
         url.push_str("&sslmode=");
         url.push_str(sslmode);
     }
-    if let Some(cert) = database.pg_ssl_root_cert.as_deref().filter(|s| !s.is_empty()) {
+    if let Some(cert) = database
+        .pg_ssl_root_cert
+        .as_deref()
+        .filter(|s| !s.is_empty())
+    {
         url.push_str("&sslrootcert=");
         url.push_str(cert);
     }

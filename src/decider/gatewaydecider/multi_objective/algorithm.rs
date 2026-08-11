@@ -379,7 +379,10 @@ mod tests {
         let decision = out
             .cost_decision
             .expect("auth-won must still return the EV-best head as the decision");
-        assert_eq!(decision.chosen, "adyen", "tie must resolve to the cheaper PSP");
+        assert_eq!(
+            decision.chosen, "adyen",
+            "tie must resolve to the cheaper PSP"
+        );
         assert_eq!(decision.fallbacks, vec!["dlocal".to_string()]);
     }
 
