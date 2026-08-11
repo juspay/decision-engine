@@ -27,7 +27,6 @@ pub async fn try_apply_multi_objective_post_step(
 ) -> ReorderOutcome {
     if score_map.len() < 2 {
         return auth_won(
-            score_map.len(),
             margin,
             "Only one PSP available; nothing to reorder.".to_string(),
         );
@@ -51,7 +50,6 @@ pub fn reorder_for_cost(
         Some(a) if a.is_finite() => a,
         _ => {
             return auth_won(
-                score_map.len(),
                 margin,
                 "SR head has no finite score; cannot evaluate cost.".to_string(),
             );
@@ -76,7 +74,6 @@ pub fn reorder_for_cost(
     // Cost is needed to place the head in the EV ranking; without it we keep the head.
     if !head_cost.is_finite() {
         return auth_won(
-            score_map.len(),
             margin,
             "No cost data for the SR head; cannot rank it on expected value.".to_string(),
         );
@@ -227,18 +224,19 @@ fn current_head(score_map: &HashMap<String, f64>) -> Option<(String, f64)> {
         })
 }
 
-fn auth_won(qualified_count: usize, margin: f64, reason: String) -> ReorderOutcome {
+fn auth_won(margin: f64, reason: String) -> ReorderOutcome {
     ReorderOutcome {
         head_moved: false,
         info: MultiObjectiveInfo {
             outcome: MultiObjectiveOutcome::AuthWon,
             reason,
             cost_saved_bps: None,
-            qualified_count,
+            // These paths bail before any EV ranking (fewer than two PSPs, head has no finite score,
+            // or no cost data for the head), so nothing was ranked on EV and there is no top-two EV
+            // gap or ranked list to report. The head PSP is still derivable by the caller from the
+            // gateway_priority_map / decided_gateway.
+            qualified_count: 0,
             margin,
-            // These paths bail before any EV ranking (head has no finite score, or no cost data for
-            // the head), so there is no top-two EV gap or ranked list to report. The head PSP is
-            // still derivable by the caller from the gateway_priority_map / decided_gateway.
             ev_gap_top2: None,
             ranked: Vec::new(),
         },
@@ -269,7 +267,14 @@ fn build_ranked(
             }
         })
         .collect();
-    ranked.sort_by(|a, b| b.ev.partial_cmp(&a.ev).unwrap_or(std::cmp::Ordering::Equal));
+    // Descending EV, with a PSP-name tie-break so equal-EV candidates order deterministically
+    // (HashMap iteration order is not stable across runs).
+    ranked.sort_by(|a, b| {
+        b.ev
+            .partial_cmp(&a.ev)
+            .unwrap_or(std::cmp::Ordering::Equal)
+            .then_with(|| a.summary.psp.cmp(&b.summary.psp))
+    });
     ranked
 }
 
