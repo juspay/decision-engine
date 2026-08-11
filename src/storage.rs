@@ -74,16 +74,7 @@ impl Storage {
         database: &PgDatabase,
         schema: &str,
     ) -> error_stack::Result<Self, error::StorageError> {
-        let database_url = format!(
-            "postgres://{}:{}@{}:{}/{}?application_name={}&options=-c%20search_path%3D{}",
-            database.pg_username,
-            database.pg_password.peek(),
-            database.pg_host,
-            database.pg_port,
-            database.pg_dbname,
-            schema,
-            schema
-        );
+        let database_url = pg_database_url(database, schema);
 
         let config =
             pooled_connection::AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
@@ -180,15 +171,17 @@ pub(crate) trait TestInterface {
     async fn test(&self) -> Result<(), ContainerError<Self::Error>>;
 }
 
+/// Build the `postgres://` connection URL shared by every PostgreSQL pool.
+///
+/// CockroachDB speaks the PostgreSQL wire protocol, so the same URL, `search_path` option, and
+/// Diesel `postgres` backend drive it unchanged. `sslmode`/`sslrootcert` are appended only when
+/// configured — a secure CockroachDB cluster (e.g. CockroachDB Cloud) needs `sslmode=verify-full`,
+/// while a plain PostgreSQL or insecure local CockroachDB node connects with libpq's default.
 #[cfg(feature = "postgres")]
-pub async fn diesel_make_pg_pool(
-    database: &PgDatabase,
-    schema: &str,
-    _test_transaction: bool,
-) -> error_stack::Result<PgPool, error::StorageError> {
+fn pg_database_url(database: &PgDatabase, schema: &str) -> String {
     // Keep the space percent-encoded: libpq 16 rejects a raw one ("unexpected spaces found in ...")
     // and no connection can be opened at all. libpq 14 tolerated it, which is why it went unnoticed.
-    let database_url = format!(
+    let mut url = format!(
         "postgres://{}:{}@{}:{}/{}?application_name={}&options=-c%20search_path%3D{}",
         database.pg_username,
         database.pg_password.peek(),
@@ -198,6 +191,24 @@ pub async fn diesel_make_pg_pool(
         schema,
         schema
     );
+    if let Some(sslmode) = database.pg_sslmode.as_deref().filter(|s| !s.is_empty()) {
+        url.push_str("&sslmode=");
+        url.push_str(sslmode);
+    }
+    if let Some(cert) = database.pg_ssl_root_cert.as_deref().filter(|s| !s.is_empty()) {
+        url.push_str("&sslrootcert=");
+        url.push_str(cert);
+    }
+    url
+}
+
+#[cfg(feature = "postgres")]
+pub async fn diesel_make_pg_pool(
+    database: &PgDatabase,
+    schema: &str,
+    _test_transaction: bool,
+) -> error_stack::Result<PgPool, error::StorageError> {
+    let database_url = pg_database_url(database, schema);
     let manager = async_bb8_diesel::ConnectionManager::<PgConnection>::new(database_url);
     let pool = bb8::Pool::builder()
         .max_size(50)

@@ -18,18 +18,39 @@ ONECLICK_AUTO_CONFIRM="${ONECLICK_AUTO_CONFIRM:-0}"
 # parsing is ~10x slower, so large settlement uploads crawl. Pass `--release` (or ONECLICK_RELEASE=1)
 # to compile optimized: slower first build, dramatically faster ingestion/decide at runtime.
 ONECLICK_RELEASE="${ONECLICK_RELEASE:-0}"
+# Database engine for the postgres build. Both use the `postgres` feature and migrations_pg —
+# `cockroach` just swaps the dockerized DB (via the docker-compose.cockroach.yml overlay) for a
+# CockroachDB node, since CockroachDB is PostgreSQL wire-protocol compatible.
+ONECLICK_DB="${ONECLICK_DB:-postgres}"
 for arg in "$@"; do
     case "$arg" in
         --release) ONECLICK_RELEASE=1 ;;
         --debug) ONECLICK_RELEASE=0 ;;
+        --cockroach|--crdb) ONECLICK_DB=cockroach ;;
+        --postgres|--pg) ONECLICK_DB=postgres ;;
         -h|--help)
-            echo "Usage: ./oneclick.sh [--release|--debug]"
-            echo "  --release   build the backend optimized (fast runtime; e.g. ~10x faster report parsing)"
-            echo "  --debug     build the backend unoptimized (default; faster compile)"
+            echo "Usage: ./oneclick.sh [--release|--debug] [--cockroach|--postgres]"
+            echo "  --release     build the backend optimized (fast runtime; e.g. ~10x faster report parsing)"
+            echo "  --debug       build the backend unoptimized (default; faster compile)"
+            echo "  --cockroach   use CockroachDB instead of PostgreSQL (same postgres build + migrations)"
+            echo "  --postgres    use PostgreSQL (default)"
             exit 0
             ;;
     esac
 done
+
+# CockroachDB reuses everything (same postgres build, migrations_pg, db_user/db_pass/decision_engine_db);
+# COMPOSE_FILE makes every `docker compose` call below swap the `postgresql` service for CockroachDB.
+# Keep docker-compose.override.yml in the list so its (unrelated) tweaks still apply. The DB is
+# published on host 26257 (its native port) to coexist with a local PostgreSQL on 5432, so the
+# host-side tooling — migrate (DB_PORT), seed (POSTGRES_PORT), backend (pg_database.pg_port) — is
+# pointed there; inside the container CockroachDB still listens on 5432.
+if [ "${ONECLICK_DB}" = "cockroach" ]; then
+    export COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yaml:${SCRIPT_DIR}/docker-compose.override.yml:${SCRIPT_DIR}/docker-compose.cockroach.yml"
+    POSTGRES_PORT="${POSTGRES_PORT:-26257}"
+    export DB_PORT="${DB_PORT:-26257}"
+    export DECISION_ENGINE__PG_DATABASE__PG_PORT="${DECISION_ENGINE__PG_DATABASE__PG_PORT:-26257}"
+fi
 
 if [ "${ONECLICK_RELEASE}" -eq 1 ]; then
     CARGO_PROFILE_FLAG="--release"
@@ -286,8 +307,15 @@ SQL
     fi
 
     if docker compose ps -q postgresql >/dev/null 2>&1; then
+        # The CockroachDB container ships `cockroach sql`, not `psql`.
+        local db_cli
+        if [ "$ONECLICK_DB" = "cockroach" ]; then
+            db_cli=(cockroach sql --insecure --database="$POSTGRES_DB")
+        else
+            db_cli=(psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1)
+        fi
         if echo "$sql" | docker compose exec -T postgresql \
-            psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 >/dev/null 2>&1; then
+            "${db_cli[@]}" >/dev/null 2>&1; then
             echo "Global SR V3 configs seeded."
             echo ""
             return 0
@@ -296,6 +324,39 @@ SQL
 
     echo "  [warn] Could not seed global SR V3 configs (no psql and postgresql container unreachable)."
     echo "         Hedging will not work until these service_configuration rows exist."
+    echo ""
+    return 1
+}
+
+# Create the role + database the migrator/backend connect as. CockroachDB in insecure mode accepts
+# any password but the role must exist, and `public` schema privileges are no longer implicit.
+# Idempotent (IF NOT EXISTS), so it is safe to run on every bring-up.
+ensure_cockroach_db() {
+    echo "Ensuring CockroachDB database and role exist..."
+    if ! docker compose ps -q postgresql >/dev/null 2>&1; then
+        echo "  [warn] postgresql (CockroachDB) container not found — skipping. If a plain Postgres"
+        echo "         is already running on ${POSTGRES_PORT}, stop it and rerun with --cockroach."
+        echo ""
+        return 1
+    fi
+    # default_int_size=4 + serial_normalization='sql_sequence' make CockroachDB's integer typing match
+    # PostgreSQL/schema_pg.rs (INTEGER->INT4, SERIAL->INT4 sequence), so the backend decodes columns
+    # correctly. Set before migrations so tables get the right widths.
+    if docker compose exec -T postgresql cockroach sql --insecure -e "
+        CREATE DATABASE IF NOT EXISTS ${POSTGRES_DB};
+        CREATE USER IF NOT EXISTS ${POSTGRES_USER};
+        GRANT ALL ON DATABASE ${POSTGRES_DB} TO ${POSTGRES_USER};
+        ALTER ROLE ${POSTGRES_USER} SET default_int_size = 4;
+        ALTER ROLE ${POSTGRES_USER} SET serial_normalization = 'sql_sequence';
+    " >/dev/null 2>&1 &&
+       docker compose exec -T postgresql cockroach sql --insecure --database="${POSTGRES_DB}" -e "
+        GRANT ALL ON SCHEMA public TO ${POSTGRES_USER};
+    " >/dev/null 2>&1; then
+        echo "CockroachDB database and role ready."
+        echo ""
+        return 0
+    fi
+    echo "  [warn] Could not initialize CockroachDB (is the container CockroachDB, not Postgres?)."
     echo ""
     return 1
 }
@@ -585,7 +646,17 @@ if ! check_clickhouse_schema; then
 fi
 
 echo "Running Postgres migrations..."
-just migrate-pg
+if [ "${ONECLICK_DB}" = "cockroach" ]; then
+    ensure_cockroach_db
+    # Use the CockroachDB diesel config (no [print_schema]); diesel_cli's schema regeneration reads
+    # information_schema in a way CockroachDB returns as INT8-not-i32 and would fail post-migration.
+    diesel migration run \
+        --database-url "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
+        --migration-dir "${SCRIPT_DIR}/migrations_pg" \
+        --config-file "${SCRIPT_DIR}/diesel_pg_cockroach.toml"
+else
+    just migrate-pg
+fi
 
 seed_global_configs
 
@@ -642,6 +713,11 @@ echo "=========================================="
 echo "  Decision Engine is starting up!"
 echo "=========================================="
 echo ""
+if [ "${ONECLICK_DB}" = "cockroach" ]; then
+    echo "  Database:     CockroachDB (localhost:${POSTGRES_PORT})  Console: http://localhost:8090"
+else
+    echo "  Database:     PostgreSQL (localhost:${POSTGRES_PORT})"
+fi
 echo "  Server:       http://localhost:8080"
 echo "  Dashboard:    http://localhost:5173/"
 echo "  Docs:         $DOCS_HOME_URL"
