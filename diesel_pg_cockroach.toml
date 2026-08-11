@@ -1,0 +1,10 @@
+# Diesel CLI config for running the PostgreSQL migrations against CockroachDB.
+#
+# Identical to diesel_pg.toml but WITHOUT the [print_schema] section: after applying migrations,
+# diesel_cli regenerates the schema by reading information_schema, where CockroachDB returns
+# `character_maximum_length` as INT8 while diesel decodes it as i32 — so `diesel migration run`
+# fails with "Received more than 4 bytes while decoding an i32" even though the migrations applied.
+# The committed src/storage/schema_pg.rs (generated from PostgreSQL) is already correct for
+# CockroachDB, so schema regeneration is intentionally skipped here.
+[migrations_directory]
+dir = "migrations_pg"

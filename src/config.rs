@@ -561,6 +561,13 @@ pub struct PgDatabase {
     pub pg_port: u16,
     pub pg_dbname: String,
     pub pg_pool_size: Option<usize>,
+    /// libpq `sslmode` (e.g. `verify-full`). Leave unset for a plain PostgreSQL / insecure
+    /// CockroachDB node; a secure CockroachDB cluster (CockroachDB Cloud) requires `verify-full`.
+    #[serde(default)]
+    pub pg_sslmode: Option<String>,
+    /// Path to the CA certificate used to verify the server when `pg_sslmode` demands it.
+    #[serde(default)]
+    pub pg_ssl_root_cert: Option<String>,
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]

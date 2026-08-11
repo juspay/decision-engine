@@ -110,6 +110,70 @@ pub fn payment_audit_raw_filters(
     filters
 }
 
+/// Filters for a single selected transaction's event timeline.
+///
+/// Unlike [`payment_audit_raw_filters`], this deliberately omits the per-event dimension filters
+/// (status, gateway, route, routing_approach/exclusion, error_code, specific flow_type). Those exist
+/// to *find* matching transactions in the summary list; applied to a single transaction's trace they
+/// fragment it — e.g. a `status=failure` filter drops the `decide_gateway` events (whose status is
+/// `received`/`success`) and leaves only the `update_gateway_score` failure event. Once a transaction
+/// is selected (via `lookup_key`, added by the caller), its full trace should be returned. Only the
+/// scope needed to identify that trace is kept: time window, merchant, and the preview/live flow-type
+/// category (plus the preview route for preview traces).
+pub fn payment_audit_timeline_filters(
+    query: &PaymentAuditQuery,
+    preview_only: bool,
+) -> Vec<FilterClause> {
+    let (start_ms, end_ms) = effective_payment_audit_window_bounds(query);
+    let mut filters = base_window_filters(start_ms, end_ms);
+
+    filters.extend(merchant_filter(&query.merchant_id));
+
+    if preview_only {
+        filters.push(FilterClause::raw(format!(
+            "route = '{}'",
+            AnalyticsRoute::RoutingEvaluate.as_str()
+        )));
+        filters.push(FilterClause::raw(format!(
+            "flow_type IN {}",
+            static_flow_type_in_sql(PAYMENT_AUDIT_PREVIEW_FLOW_TYPES)
+        )));
+    } else {
+        filters.push(FilterClause::raw(format!(
+            "flow_type IN {}",
+            static_flow_type_in_sql(PAYMENT_AUDIT_DYNAMIC_FLOW_TYPES)
+        )));
+    }
+
+    filters
+}
+
+/// Filters for the raw (non-materialized) summary aggregation.
+///
+/// Mirrors the pre-aggregated `finalized_summary_fragment` path: the per-transaction aggregates
+/// (`event_count`, `gateways`, `latest_status`, …) must reflect the transaction's full curated
+/// trace, not just the events matching the list's dimension filters. Applying `status`/`gateway`/etc
+/// inside the aggregation shrinks the count (e.g. a two-event trace shows `1 event` under
+/// `status=failure`). Which transactions appear is instead decided by the outer `has(...)` filters
+/// in `outer_summary_filters`, exactly as the materialized path does. Only scope (window, merchant,
+/// flow-type category) and the routing_approach include/exclude — the reason this raw path is used
+/// at all, since the summary table carries no routing_approach — are applied here.
+pub fn payment_audit_summary_scope_filters(
+    query: &PaymentAuditQuery,
+    preview_only: bool,
+) -> Vec<FilterClause> {
+    let mut filters = payment_audit_timeline_filters(query, preview_only);
+
+    if let Some(routing_approach) = &query.routing_approach {
+        filters.push(routing_approach_match_filter(routing_approach));
+    }
+    if let Some(routing_approach) = &query.exclude_routing_approach {
+        filters.push(routing_approach_exclusion_filter(routing_approach));
+    }
+
+    filters
+}
+
 pub fn payment_audit_summary_bucket_filters(
     query: &PaymentAuditQuery,
     preview_only: bool,
@@ -162,7 +226,7 @@ mod tests {
 
     use super::{
         analytics_dimension_filters, merchant_filter, payment_audit_raw_filters,
-        payment_audit_summary_bucket_filters,
+        payment_audit_summary_bucket_filters, payment_audit_timeline_filters,
     };
 
     fn analytics_query() -> AnalyticsQuery {
@@ -288,6 +352,32 @@ mod tests {
                 && predicate.contains("rankingAlgorithm")
                 && predicate.contains("NTW_BASED_ROUTING")
         }));
+    }
+
+    #[test]
+    fn payment_audit_timeline_filters_omit_per_event_dimension_filters() {
+        // A selected transaction's timeline must show its full trace (decide_gateway +
+        // update_gateway_score), so the list-level dimension filters must NOT be applied per event.
+        let mut query = payment_audit_query();
+        query.status = Some("FAILURE".to_string());
+        query.exclude_routing_approach = Some("NTW_BASED_ROUTING".to_string());
+        query.gateway = Some("adyen".to_string());
+        query.error_code = Some("DECLINED".to_string());
+
+        let predicates = payment_audit_timeline_filters(&query, false)
+            .iter()
+            .map(|filter| filter.predicate().to_string())
+            .collect::<Vec<_>>();
+
+        // Scope filters are kept.
+        assert!(predicates.iter().any(|p| p == "merchant_id = ?"));
+        assert!(predicates.iter().any(|p| p.contains("flow_type IN")));
+        // Per-event dimension filters are dropped. (Check exact predicates, not substrings — the
+        // flow_type IN clause contains gateway/route flow-type names like "decide_gateway_decision".)
+        assert!(!predicates.iter().any(|p| p == "status = ?"));
+        assert!(!predicates.iter().any(|p| p == "gateway = ?"));
+        assert!(!predicates.iter().any(|p| p == "error_code = ?"));
+        assert!(!predicates.iter().any(|p| p.contains("routing_approach")));
     }
 
     #[test]
