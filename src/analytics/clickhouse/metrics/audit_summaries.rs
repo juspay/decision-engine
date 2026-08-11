@@ -8,7 +8,7 @@ use super::super::common::{
     fetch_all, fetch_one, payment_audit_route_label, payment_audit_stage_label,
     payment_audit_summary_kind, DOMAIN_TABLE, PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE,
 };
-use super::super::filters::payment_audit_raw_filters;
+use super::super::filters::{payment_audit_summary_scope_filters, payment_audit_timeline_filters};
 use super::super::query::{BindArg, BoundQueryBuilder, FilterClause, OrderClause, SqlFragment};
 use super::super::time::effective_payment_audit_window_bounds;
 
@@ -83,7 +83,7 @@ fn raw_summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFra
         "flow_type".to_string(),
         "error_code".to_string(),
     ]);
-    source.extend_filters(payment_audit_raw_filters(query, preview_only));
+    source.extend_filters(payment_audit_summary_scope_filters(query, preview_only));
     source.add_filter(FilterClause::raw("lookup_key IS NOT NULL"));
     source.add_filter(FilterClause::raw("lookup_key != ''"));
 
@@ -296,7 +296,9 @@ pub async fn load_exact(
         "event_stage".to_string(),
         "route".to_string(),
     ]);
-    source.extend_filters(payment_audit_raw_filters(&exact_query, preview_only));
+    // A specific transaction's summary should report its full curated trace (like the timeline),
+    // not just events matching the list's dimension filters.
+    source.extend_filters(payment_audit_timeline_filters(&exact_query, preview_only));
     source.add_filter(exact_lookup_filter(lookup_key));
 
     let source = source.into_fragment();
