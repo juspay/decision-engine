@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test'
+import { SUPER_ADMIN_EMAIL } from './tests/fixtures/super-admin'
 
 /**
  * Playwright config for Decision Engine e2e.
@@ -38,6 +39,14 @@ const webServer = process.env.PW_NO_WEBSERVER
         timeout: 180_000,
         stdout: 'pipe' as const,
         stderr: 'pipe' as const,
+        // Inject the super-admin roster for the super-admin-view spec, so the test identity lives
+        // with the tests instead of in shipped config. Config parses this comma-separated list via
+        // `.with_list_parse_key("user_auth.super_admin_emails")` (src/config.rs). Merged over
+        // process.env, so CI's other DECISION_ENGINE__ overrides still apply.
+        env: {
+          ...(process.env as Record<string, string>),
+          DECISION_ENGINE__USER_AUTH__SUPER_ADMIN_EMAILS: SUPER_ADMIN_EMAIL,
+        },
       },
       {
         command: 'npm --prefix website run dev',

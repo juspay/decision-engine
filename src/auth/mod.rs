@@ -50,6 +50,10 @@ pub struct JwtClaims {
 
 pub const TOKEN_TYPE_STANDARD: &str = "standard";
 pub const TOKEN_TYPE_HS_REDIRECT: &str = "hs_redirect";
+/// A platform super-admin viewing another merchant's dashboard. Carries the real admin's identity
+/// (`user_id`/`email`) with `merchant_id` pointing at the target, so actions stay attributable. It
+/// is a cross-merchant session, not a full account session — identity/account operations reject it.
+pub const TOKEN_TYPE_SUPER_ADMIN_VIEW: &str = "super_admin_view";
 
 pub fn generate_jwt(
     user_id: &str,

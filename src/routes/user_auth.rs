@@ -1,5 +1,5 @@
 use crate::app::{get_tenant_app_state, APP_STATE};
-use crate::auth::{self, TOKEN_TYPE_HS_REDIRECT, TOKEN_TYPE_STANDARD};
+use crate::auth::{self, TOKEN_TYPE_HS_REDIRECT, TOKEN_TYPE_STANDARD, TOKEN_TYPE_SUPER_ADMIN_VIEW};
 use crate::error::{self, ContainerError, ResultContainerExt, UserAuthError};
 use crate::storage::types::{
     MerchantAccountNew, NewUser, NewUserMerchant, User, UserEmailVerifiedUpdate, UserMerchant,
@@ -81,6 +81,11 @@ pub struct MeResponse {
     pub role: String,
     pub email_verified: bool,
     pub merchants: Vec<MerchantInfo>,
+    /// This user's email is on the platform super-admin roster, so the dashboard should offer the
+    /// "enter any merchant" control. UX hint only — the backend re-authorizes on every action.
+    pub is_super_admin: bool,
+    /// The current session is a super-admin viewing another merchant (drives the banner + Exit).
+    pub is_super_admin_view: bool,
 }
 
 #[derive(Debug, Serialize)]
@@ -436,9 +441,10 @@ pub async fn create_merchant(
 
     let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
 
-    // HS-redirect sessions are scoped to the routing view — they have no real user row, so
-    // creating a merchant would attach it to a phantom user. Refuse.
-    if claims.token_type == TOKEN_TYPE_HS_REDIRECT {
+    // Only a full standard account session may create a merchant. HS-redirect sessions have no
+    // real user row (would attach to a phantom user); super-admin-view sessions are scoped to
+    // viewing someone else's merchant and must not mint merchants under the admin's own account.
+    if claims.token_type != TOKEN_TYPE_STANDARD {
         return Err(error::ContainerError::from(
             UserAuthError::UnsupportedOperation,
         ));
@@ -555,7 +561,10 @@ pub async fn switch_merchant(
 
     let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
 
-    if claims.token_type == TOKEN_TYPE_HS_REDIRECT {
+    // switch-merchant is membership-scoped and only valid for a full standard session. A
+    // super-admin-view session must Exit back to its own session before switching, so its
+    // single-level return token isn't overwritten.
+    if claims.token_type != TOKEN_TYPE_STANDARD {
         return Err(error::ContainerError::from(
             UserAuthError::UnsupportedOperation,
         ));
@@ -614,7 +623,9 @@ pub async fn change_password(
 
     let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
 
-    if claims.token_type == TOKEN_TYPE_HS_REDIRECT {
+    // Account management requires a full standard session. A super-admin-view session acts on
+    // another merchant's dashboard and must never touch the admin's own credentials from there.
+    if claims.token_type != TOKEN_TYPE_STANDARD {
         return Err(error::ContainerError::from(
             UserAuthError::UnsupportedOperation,
         ));
@@ -722,9 +733,10 @@ pub async fn invite_member(
 
     let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
 
-    // HS-redirect sessions must not manage identity — otherwise a leaked short-lived token
-    // could mint persistent real user accounts.
-    if claims.token_type == TOKEN_TYPE_HS_REDIRECT {
+    // Only a full standard session may manage identity. HS-redirect tokens could otherwise mint
+    // persistent real accounts from a leaked short-lived token; a super-admin-view session must not
+    // add members to a merchant it is merely inspecting.
+    if claims.token_type != TOKEN_TYPE_STANDARD {
         return Err(error::ContainerError::from(
             UserAuthError::UnsupportedOperation,
         ));
@@ -1050,6 +1062,8 @@ pub async fn me(
             role: claims.role,
             email_verified: true,
             merchants: vec![],
+            is_super_admin: false,
+            is_super_admin_view: false,
         }));
     }
 
@@ -1067,6 +1081,10 @@ pub async fn me(
 
     Ok(Json(MeResponse {
         user_id: user.user_id,
+        // Roster is keyed off the signed `email` claim, not the DB row, so the check matches the
+        // identity the rest of this session authorizes against.
+        is_super_admin: is_super_admin(&global_config, &claims.email),
+        is_super_admin_view: claims.token_type == TOKEN_TYPE_SUPER_ADMIN_VIEW,
         email: user.email,
         merchant_id: claims.merchant_id,
         role: user.role,
@@ -1076,6 +1094,18 @@ pub async fn me(
         email_verified: user.email_verified,
         merchants,
     }))
+}
+
+/// Whether `email` is on the platform super-admin roster. Compared case-insensitively (emails are
+/// not case-sensitive) and empty emails never match — so HS-redirect sessions, which carry an empty
+/// email, can never be mistaken for a super admin.
+fn is_super_admin(global_config: &crate::config::GlobalConfig, email: &str) -> bool {
+    !email.is_empty()
+        && global_config
+            .user_auth
+            .super_admin_emails
+            .iter()
+            .any(|allowed| allowed.eq_ignore_ascii_case(email))
 }
 
 async fn fetch_user_merchants(
@@ -1497,4 +1527,351 @@ pub async fn exchange_merchant_token(
         role: "admin".to_string(),
         merchants: vec![],
     }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct EnterMerchantRequest {
+    pub merchant_id: String,
+}
+
+/// Platform super-admin → view any merchant's dashboard by pasting its ID. The caller must present a
+/// full standard session whose email is on the config roster. Mints a `super_admin_view` token
+/// scoped to the target merchant while keeping the admin's own identity, so actions stay
+/// attributable and the roster check on later actions still matches this admin.
+#[axum::debug_handler]
+pub async fn enter_merchant(
+    headers: HeaderMap,
+    Json(payload): Json<EnterMerchantRequest>,
+) -> Result<Json<AuthResponse>, error::ContainerError<UserAuthError>> {
+    let token = extract_bearer_token(&headers)?;
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
+
+    // Entry is only from a full standard session. A view session must Exit first — re-entering from
+    // one would strand the admin with no way back to their own session.
+    if claims.token_type != TOKEN_TYPE_STANDARD {
+        return Err(error::ContainerError::from(
+            UserAuthError::UnsupportedOperation,
+        ));
+    }
+
+    // Authorize live against the config roster (the source of truth), by email.
+    if !is_super_admin(&global_config, &claims.email) {
+        return Err(error::ContainerError::from(UserAuthError::Forbidden));
+    }
+
+    // A typo'd or unknown ID is a clean 404, not a token scoped to a merchant that isn't there.
+    load_merchant_by_merchant_id(payload.merchant_id.clone())
+        .await
+        .ok_or_else(|| error::ContainerError::from(UserAuthError::MerchantNotFound))?;
+
+    let new_token = auth::generate_jwt(
+        &claims.user_id,
+        &claims.email,
+        &payload.merchant_id,
+        "admin",
+        TOKEN_TYPE_SUPER_ADMIN_VIEW,
+        global_config.user_auth.jwt_secret.peek(),
+        global_config.user_auth.jwt_expiry_seconds,
+    )
+    .change_context(UserAuthError::TokenGenerationFailed)?;
+
+    Ok(Json(AuthResponse {
+        token: new_token,
+        user_id: claims.user_id,
+        email: claims.email,
+        merchant_id: payload.merchant_id,
+        role: "admin".to_string(),
+        merchants: vec![],
+    }))
+}
+
+/// Ends a super-admin-view session and returns the admin to their own standard session. Obtainable
+/// only from a valid `super_admin_view` token — itself minted from a rostered standard session — and
+/// the roster is re-checked so a since-revoked admin can't mint a fresh standard session from it.
+/// This grants nothing the admin couldn't get by logging in again; it just avoids a re-login.
+#[axum::debug_handler]
+pub async fn exit_merchant(
+    headers: HeaderMap,
+) -> Result<Json<AuthResponse>, error::ContainerError<UserAuthError>> {
+    let token = extract_bearer_token(&headers)?;
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
+
+    if claims.token_type != TOKEN_TYPE_SUPER_ADMIN_VIEW {
+        return Err(error::ContainerError::from(
+            UserAuthError::UnsupportedOperation,
+        ));
+    }
+    if !is_super_admin(&global_config, &claims.email) {
+        return Err(error::ContainerError::from(UserAuthError::Forbidden));
+    }
+
+    let app_state = get_tenant_app_state().await;
+
+    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+        &app_state.db,
+        dsl::user_id.eq(claims.user_id.clone()),
+    )
+    .await
+    .change_error(UserAuthError::StorageError)?;
+    let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
+
+    let merchants = fetch_user_merchants(&app_state, &user.user_id).await?;
+    let home_merchant_id = user.merchant_id.clone().unwrap_or_else(|| {
+        merchants
+            .first()
+            .map(|m| m.merchant_id.clone())
+            .unwrap_or_default()
+    });
+
+    let new_token = auth::generate_jwt(
+        &user.user_id,
+        &user.email,
+        &home_merchant_id,
+        &user.role,
+        TOKEN_TYPE_STANDARD,
+        global_config.user_auth.jwt_secret.peek(),
+        global_config.user_auth.jwt_expiry_seconds,
+    )
+    .change_context(UserAuthError::TokenGenerationFailed)?;
+
+    Ok(Json(AuthResponse {
+        token: new_token,
+        user_id: user.user_id,
+        email: user.email,
+        merchant_id: home_merchant_id,
+        role: user.role,
+        merchants,
+    }))
+}
+
+#[derive(Debug, Deserialize)]
+pub struct LookupRequest {
+    pub query: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MerchantMember {
+    pub email: String,
+    pub role: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct MerchantLookupResult {
+    pub merchant_id: String,
+    pub merchant_name: String,
+    pub members: Vec<MerchantMember>,
+}
+
+/// Cap on lookup results — this is a "find the ID to enter" helper, not a full directory dump.
+const MERCHANT_LOOKUP_LIMIT: usize = 25;
+
+/// Escape the LIKE/ILIKE wildcards so a user's `%` or `_` is matched literally rather than acting as
+/// a wildcard. The default escape character is `\` on both MySQL and Postgres.
+fn escape_like(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+}
+
+/// Super-admin merchant lookup: one query string matched (case-insensitively, substring) against
+/// both user email and merchant name, plus an exact merchant-id match. Returns the matching
+/// merchants with their members so a super-admin can find the ID to enter from a person or company
+/// name. Same gate as `enter_merchant` — a rostered standard session.
+#[axum::debug_handler]
+pub async fn lookup_merchants(
+    headers: HeaderMap,
+    Json(payload): Json<LookupRequest>,
+) -> Result<Json<Vec<MerchantLookupResult>>, error::ContainerError<UserAuthError>> {
+    let token = extract_bearer_token(&headers)?;
+    let global_config = APP_STATE
+        .get()
+        .map(|s| s.global_config.clone())
+        .ok_or(UserAuthError::StorageError)?;
+
+    let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
+
+    if claims.token_type != TOKEN_TYPE_STANDARD {
+        return Err(error::ContainerError::from(
+            UserAuthError::UnsupportedOperation,
+        ));
+    }
+    if !is_super_admin(&global_config, &claims.email) {
+        return Err(error::ContainerError::from(UserAuthError::Forbidden));
+    }
+
+    let query = payload.query.trim().to_string();
+    if query.is_empty() {
+        return Ok(Json(vec![]));
+    }
+
+    #[cfg(feature = "mysql")]
+    use crate::storage::schema::merchant_account::dsl as ma_dsl;
+    #[cfg(feature = "postgres")]
+    use crate::storage::schema_pg::merchant_account::dsl as ma_dsl;
+
+    // `.like`/`.ilike` live on different traits and only one backend has ILIKE, so the substring
+    // predicates below are cfg-split; everything else is shared.
+    #[cfg(feature = "mysql")]
+    use diesel::TextExpressionMethods;
+    #[cfg(feature = "postgres")]
+    use diesel::PgTextExpressionMethods;
+
+    use crate::storage::types::MerchantAccount;
+
+    let app_state = get_tenant_app_state().await;
+    let pattern = format!("%{}%", escape_like(&query));
+
+    // 1. Users whose email matches → the merchants they belong to.
+    #[cfg(feature = "mysql")]
+    let matched_users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+        &app_state.db,
+        dsl::email.like(pattern.clone()),
+    )
+    .await
+    .change_error(UserAuthError::StorageError)?;
+    #[cfg(feature = "postgres")]
+    let matched_users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+        &app_state.db,
+        dsl::email.ilike(pattern.clone()),
+    )
+    .await
+    .change_error(UserAuthError::StorageError)?;
+
+    let matched_user_ids: Vec<String> = matched_users.into_iter().map(|u| u.user_id).collect();
+
+    let people_memberships = if matched_user_ids.is_empty() {
+        Vec::new()
+    } else {
+        crate::generics::generic_find_all::<<UserMerchant as HasTable>::Table, _, UserMerchant>(
+            &app_state.db,
+            um_dsl::user_id.eq_any(matched_user_ids),
+        )
+        .await
+        .change_error(UserAuthError::StorageError)?
+    };
+
+    // 2. Merchants whose name matches, or whose ID is exactly the query.
+    #[cfg(feature = "mysql")]
+    let matched_merchants = crate::generics::generic_find_all::<
+        <MerchantAccount as HasTable>::Table,
+        _,
+        MerchantAccount,
+    >(
+        &app_state.db,
+        ma_dsl::merchant_name
+            .like(pattern.clone())
+            .or(ma_dsl::merchant_id.eq(Some(query.clone()))),
+    )
+    .await
+    .change_error(UserAuthError::StorageError)?;
+    #[cfg(feature = "postgres")]
+    let matched_merchants = crate::generics::generic_find_all::<
+        <MerchantAccount as HasTable>::Table,
+        _,
+        MerchantAccount,
+    >(
+        &app_state.db,
+        ma_dsl::merchant_name
+            .ilike(pattern.clone())
+            .or(ma_dsl::merchant_id.eq(Some(query.clone()))),
+    )
+    .await
+    .change_error(UserAuthError::StorageError)?;
+
+    // Merge into an order-preserving, deduped id list: direct merchant matches first, then merchants
+    // reached via a matching person. Capped so a broad query can't return an unbounded set.
+    let mut ordered_ids: Vec<String> = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for merchant_id in matched_merchants
+        .into_iter()
+        .filter_map(|m| m.merchant_id)
+        .chain(people_memberships.iter().map(|m| m.merchant_id.clone()))
+    {
+        if seen.insert(merchant_id.clone()) {
+            ordered_ids.push(merchant_id);
+            if ordered_ids.len() >= MERCHANT_LOOKUP_LIMIT {
+                break;
+            }
+        }
+    }
+
+    if ordered_ids.is_empty() {
+        return Ok(Json(vec![]));
+    }
+
+    // 3. Names for the result merchants, and the full membership of each (not just the matched
+    // person) so the super-admin can confirm the target.
+    let name_rows = crate::generics::generic_find_all::<
+        <MerchantAccount as HasTable>::Table,
+        _,
+        MerchantAccount,
+    >(
+        &app_state.db,
+        ma_dsl::merchant_id.eq_any(ordered_ids.iter().cloned().map(Some).collect::<Vec<_>>()),
+    )
+    .await
+    .change_error(UserAuthError::StorageError)?;
+    let name_by_id: std::collections::HashMap<String, String> = name_rows
+        .into_iter()
+        .filter_map(|m| m.merchant_id.clone().map(|id| (id, m.merchant_name.unwrap_or_default())))
+        .collect();
+
+    let memberships =
+        crate::generics::generic_find_all::<<UserMerchant as HasTable>::Table, _, UserMerchant>(
+            &app_state.db,
+            um_dsl::merchant_id.eq_any(ordered_ids.clone()),
+        )
+        .await
+        .change_error(UserAuthError::StorageError)?;
+
+    let member_user_ids: Vec<String> =
+        memberships.iter().map(|m| m.user_id.clone()).collect::<std::collections::HashSet<_>>().into_iter().collect();
+    let member_users = if member_user_ids.is_empty() {
+        Vec::new()
+    } else {
+        crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
+            &app_state.db,
+            dsl::user_id.eq_any(member_user_ids),
+        )
+        .await
+        .change_error(UserAuthError::StorageError)?
+    };
+    let email_by_user_id: std::collections::HashMap<String, String> =
+        member_users.into_iter().map(|u| (u.user_id, u.email)).collect();
+
+    let results = ordered_ids
+        .into_iter()
+        .map(|merchant_id| {
+            let members = memberships
+                .iter()
+                .filter(|m| m.merchant_id == merchant_id)
+                .filter_map(|m| {
+                    email_by_user_id.get(&m.user_id).map(|email| MerchantMember {
+                        email: email.clone(),
+                        role: m.role.clone(),
+                    })
+                })
+                .collect();
+            let merchant_name = name_by_id
+                .get(&merchant_id)
+                .cloned()
+                .filter(|n| !n.is_empty())
+                .unwrap_or_else(|| merchant_id.clone());
+            MerchantLookupResult {
+                merchant_id,
+                merchant_name,
+                members,
+            }
+        })
+        .collect();
+
+    Ok(Json(results))
 }
