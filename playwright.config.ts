@@ -40,9 +40,9 @@ const webServer = process.env.PW_NO_WEBSERVER
         stdout: 'pipe' as const,
         stderr: 'pipe' as const,
         // Inject the super-admin roster for the super-admin-view spec, so the test identity lives
-        // with the tests instead of in shipped config. Config parses this comma-separated list via
-        // `.with_list_parse_key("user_auth.super_admin_emails")` (src/config.rs). Merged over
-        // process.env, so CI's other DECISION_ENGINE__ overrides still apply.
+        // with the tests instead of in shipped config. A custom serde deserializer on
+        // UserAuthConfig.super_admin_emails (src/config.rs) accepts this comma-separated string.
+        // Merged over process.env, so CI's other DECISION_ENGINE__ overrides still apply.
         env: {
           ...(process.env as Record<string, string>),
           DECISION_ENGINE__USER_AUTH__SUPER_ADMIN_EMAILS: SUPER_ADMIN_EMAIL,

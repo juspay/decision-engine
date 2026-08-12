@@ -1675,6 +1675,11 @@ pub struct MerchantLookupResult {
 /// Cap on lookup results — this is a "find the ID to enter" helper, not a full directory dump.
 const MERCHANT_LOOKUP_LIMIT: usize = 25;
 
+/// Minimum query length. A 1-character substring (e.g. "a" or "@") matches nearly every user and
+/// merchant, and `generic_find_all` has no DB-side LIMIT — so require a couple of characters to keep
+/// a broad match from loading a huge row set. (Pushing a SQL LIMIT down is a follow-up.)
+const MERCHANT_LOOKUP_MIN_QUERY_LEN: usize = 2;
+
 /// Escape the LIKE/ILIKE wildcards so a user's `%` or `_` is matched literally rather than acting as
 /// a wildcard. The default escape character is `\` on both MySQL and Postgres.
 fn escape_like(s: &str) -> String {
@@ -1710,7 +1715,7 @@ pub async fn lookup_merchants(
     }
 
     let query = payload.query.trim().to_string();
-    if query.is_empty() {
+    if query.chars().count() < MERCHANT_LOOKUP_MIN_QUERY_LEN {
         return Ok(Json(vec![]));
     }
 
