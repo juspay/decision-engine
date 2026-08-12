@@ -925,8 +925,8 @@ mod tests {
 
         use crate::euclid::{
             ast::{
-                Comparison, ComparisonType, ConnectorInfo, MetadataValue, Output, Program, Rule,
-                RoutingType, ValueType,
+                Comparison, ComparisonType, ConnectorInfo, MetadataValue, Output, Program,
+                RoutingType, Rule, ValueType,
             },
             interpreter::InterpreterBackend,
             types::Context,
@@ -1002,8 +1002,6 @@ mod tests {
 
         #[test]
         fn resolves_every_field_when_several_are_sent() {
-            // The aggregate key can only carry one pair; the per-field entries make the
-            // rest addressable. Each field must be matchable on its own.
             let ctx = Context::new(HashMap::from([
                 (
                     "metadata".to_string(),
@@ -1036,7 +1034,10 @@ mod tests {
                 Some(metadata_value("customer_id", "99999999")),
             )]));
 
-            assert_eq!(matched_rule(&program_matching("customer_id", "16530688"), &ctx), None);
+            assert_eq!(
+                matched_rule(&program_matching("customer_id", "16530688"), &ctx),
+                None
+            );
         }
 
         #[test]
@@ -1046,7 +1047,58 @@ mod tests {
                 Some(ValueType::EnumVariant("Canada".to_string())),
             )]));
 
-            assert_eq!(matched_rule(&program_matching("customer_id", "16530688"), &ctx), None);
+            assert_eq!(
+                matched_rule(&program_matching("customer_id", "16530688"), &ctx),
+                None
+            );
+        }
+
+        #[test]
+        fn falls_back_to_the_aggregate_key_when_the_field_is_null() {
+            let ctx = Context::new(HashMap::from([
+                ("customer_id".to_string(), None),
+                (
+                    "metadata".to_string(),
+                    Some(metadata_value("customer_id", "16530688")),
+                ),
+            ]));
+
+            assert_eq!(
+                matched_rule(&program_matching("customer_id", "16530688"), &ctx),
+                Some("metadata_rule".to_string())
+            );
+        }
+
+        #[test]
+        fn falls_back_when_the_field_name_collides_with_a_standard_parameter() {
+            let ctx = Context::new(HashMap::from([
+                (
+                    "currency".to_string(),
+                    Some(ValueType::EnumVariant("INR".to_string())),
+                ),
+                (
+                    "metadata".to_string(),
+                    Some(metadata_value("currency", "INR")),
+                ),
+            ]));
+
+            assert_eq!(
+                matched_rule(&program_matching("currency", "INR"), &ctx),
+                Some("metadata_rule".to_string())
+            );
+        }
+
+        #[test]
+        fn skips_the_rule_when_a_colliding_parameter_has_no_metadata_to_fall_back_to() {
+            let ctx = Context::new(HashMap::from([(
+                "currency".to_string(),
+                Some(ValueType::EnumVariant("INR".to_string())),
+            )]));
+
+            assert_eq!(
+                matched_rule(&program_matching("currency", "INR"), &ctx),
+                None
+            );
         }
     }
 }

@@ -41,14 +41,15 @@ impl InterpreterBackend {
     ) -> Result<bool, types::InterpreterError> {
         use ast::{ComparisonType::*, ValueType::*};
 
-        let lookup_key = match &comparison.value {
-            MetadataVariant(metadata) => &metadata.key,
-            _ => &comparison.lhs,
+        let (lookup_key, ctx_value) = match &comparison.value {
+            MetadataVariant(metadata) => (
+                &metadata.key,
+                ctx.get(&metadata.key)
+                    .filter(|value| value.as_ref().is_some_and(ast::ValueType::is_metadata))
+                    .or_else(|| ctx.get(&comparison.lhs)),
+            ),
+            _ => (&comparison.lhs, ctx.get(&comparison.lhs)),
         };
-
-        let ctx_value = ctx
-            .get(lookup_key)
-            .or_else(|| ctx.get(&comparison.lhs));
 
         if ctx_value.is_none() {
             crate::logger::debug!(
