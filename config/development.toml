@@ -961,6 +961,7 @@ jwt_secret = "change_me_in_production_use_32chars!!"
 jwt_expiry_seconds = 86400
 email_verification_enabled = false
 signup_requires_admin_secret = false
+super_admin_emails = []
 
 [admin_secret]
 secret = "test_admin"

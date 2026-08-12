@@ -1883,6 +1883,110 @@
         }
       }
     },
+    "/auth/super-admin/enter-merchant": {
+      "post": {
+        "operationId": "superAdminEnterMerchant",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Super-admin: enter a merchant",
+        "description": "Platform super-admin only (email on `user_auth.super_admin_emails`). From a standard session, mint a `super_admin_view` token scoped to any existing merchant — regardless of membership — while keeping the caller's own identity. Returns 403 if the caller is not a rostered super-admin, 404 if the merchant does not exist.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EnterMerchantRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Session scoped to the target merchant",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/super-admin/exit": {
+      "post": {
+        "operationId": "superAdminExit",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Super-admin: exit merchant view",
+        "description": "Ends a `super_admin_view` session and returns the admin to their own standard session. Requires a valid super-admin-view token; the roster is re-checked.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The admin's own standard session",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/auth/super-admin/lookup": {
+      "post": {
+        "operationId": "superAdminLookupMerchants",
+        "tags": [
+          "Auth"
+        ],
+        "summary": "Super-admin: look up merchants",
+        "description": "Platform super-admin only. Find merchants by a single query matched (case-insensitive substring) against member email and merchant name, plus an exact merchant-id match. Capped at 25 results; a query shorter than 2 characters returns an empty list.",
+        "security": [
+          {
+            "BearerAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MerchantLookupRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Matching merchants with their members",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/MerchantLookupResult"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/config-sr-dimension": {
       "post": {
         "operationId": "configSrDimension",
@@ -5782,6 +5886,64 @@
           }
         }
       },
+      "EnterMerchantRequest": {
+        "type": "object",
+        "required": [
+          "merchant_id"
+        ],
+        "properties": {
+          "merchant_id": {
+            "type": "string",
+            "example": "merchant_demo",
+            "description": "The merchant whose dashboard to enter."
+          }
+        }
+      },
+      "MerchantLookupRequest": {
+        "type": "object",
+        "required": [
+          "query"
+        ],
+        "properties": {
+          "query": {
+            "type": "string",
+            "example": "acme",
+            "description": "Matched against member email and merchant name (substring, case-insensitive) or an exact merchant id. Minimum 2 characters."
+          }
+        }
+      },
+      "MerchantMember": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "example": "operator@example.com"
+          },
+          "role": {
+            "type": "string",
+            "example": "admin"
+          }
+        }
+      },
+      "MerchantLookupResult": {
+        "type": "object",
+        "properties": {
+          "merchant_id": {
+            "type": "string",
+            "example": "merchant_demo"
+          },
+          "merchant_name": {
+            "type": "string",
+            "example": "Acme Inc"
+          },
+          "members": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/MerchantMember"
+            }
+          }
+        }
+      },
       "CreateApiKeyRequest": {
         "type": "object",
         "required": [
@@ -6883,6 +7045,16 @@
           "email_verified": {
             "type": "boolean",
             "example": true
+          },
+          "is_super_admin": {
+            "type": "boolean",
+            "example": false,
+            "description": "This user's email is on the platform super-admin roster (may enter any merchant by ID)."
+          },
+          "is_super_admin_view": {
+            "type": "boolean",
+            "example": false,
+            "description": "The current session is a super-admin viewing another merchant's dashboard."
           },
           "merchants": {
             "type": "array",
