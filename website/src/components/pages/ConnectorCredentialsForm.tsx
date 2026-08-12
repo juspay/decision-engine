@@ -7,7 +7,6 @@ import { CopyButton } from '../ui/CopyButton'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { publicApiUrl } from '../../lib/api'
-import { isProduction } from '../../lib/appConfig'
 import {
   deleteConnectorCredentials,
   setConnectorCredentials,
@@ -52,12 +51,9 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
 
   // The endpoint this merchant registers at the connector. Merchant-scoped, because a notification
   // names only the connector-side account — the path is what picks whose secret verifies it.
-  // Production-only: anywhere else the host isn't one a connector can deliver to, so showing an
-  // address that quietly doesn't work is worse than showing none.
-  const webhookUrl =
-    merchantId && isProduction
-      ? publicApiUrl(`/webhooks/settlement/${encodeURIComponent(merchantId)}/${connector}`)
-      : null
+  const webhookUrl = merchantId
+    ? publicApiUrl(`/webhooks/settlement/${encodeURIComponent(merchantId)}/${connector}`)
+    : null
 
   async function handleSave() {
     if (!merchantId) {
