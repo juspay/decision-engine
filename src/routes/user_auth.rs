@@ -1678,7 +1678,9 @@ const MERCHANT_LOOKUP_LIMIT: usize = 25;
 /// Escape the LIKE/ILIKE wildcards so a user's `%` or `_` is matched literally rather than acting as
 /// a wildcard. The default escape character is `\` on both MySQL and Postgres.
 fn escape_like(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('%', "\\%").replace('_', "\\_")
+    s.replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_")
 }
 
 /// Super-admin merchant lookup: one query string matched (case-insensitively, substring) against
@@ -1719,10 +1721,10 @@ pub async fn lookup_merchants(
 
     // `.like`/`.ilike` live on different traits and only one backend has ILIKE, so the substring
     // predicates below are cfg-split; everything else is shared.
-    #[cfg(feature = "mysql")]
-    use diesel::TextExpressionMethods;
     #[cfg(feature = "postgres")]
     use diesel::PgTextExpressionMethods;
+    #[cfg(feature = "mysql")]
+    use diesel::TextExpressionMethods;
 
     use crate::storage::types::MerchantAccount;
 
@@ -1821,7 +1823,11 @@ pub async fn lookup_merchants(
     .change_error(UserAuthError::StorageError)?;
     let name_by_id: std::collections::HashMap<String, String> = name_rows
         .into_iter()
-        .filter_map(|m| m.merchant_id.clone().map(|id| (id, m.merchant_name.unwrap_or_default())))
+        .filter_map(|m| {
+            m.merchant_id
+                .clone()
+                .map(|id| (id, m.merchant_name.unwrap_or_default()))
+        })
         .collect();
 
     let memberships =
@@ -1832,8 +1838,12 @@ pub async fn lookup_merchants(
         .await
         .change_error(UserAuthError::StorageError)?;
 
-    let member_user_ids: Vec<String> =
-        memberships.iter().map(|m| m.user_id.clone()).collect::<std::collections::HashSet<_>>().into_iter().collect();
+    let member_user_ids: Vec<String> = memberships
+        .iter()
+        .map(|m| m.user_id.clone())
+        .collect::<std::collections::HashSet<_>>()
+        .into_iter()
+        .collect();
     let member_users = if member_user_ids.is_empty() {
         Vec::new()
     } else {
@@ -1844,8 +1854,10 @@ pub async fn lookup_merchants(
         .await
         .change_error(UserAuthError::StorageError)?
     };
-    let email_by_user_id: std::collections::HashMap<String, String> =
-        member_users.into_iter().map(|u| (u.user_id, u.email)).collect();
+    let email_by_user_id: std::collections::HashMap<String, String> = member_users
+        .into_iter()
+        .map(|u| (u.user_id, u.email))
+        .collect();
 
     let results = ordered_ids
         .into_iter()
@@ -1854,10 +1866,12 @@ pub async fn lookup_merchants(
                 .iter()
                 .filter(|m| m.merchant_id == merchant_id)
                 .filter_map(|m| {
-                    email_by_user_id.get(&m.user_id).map(|email| MerchantMember {
-                        email: email.clone(),
-                        role: m.role.clone(),
-                    })
+                    email_by_user_id
+                        .get(&m.user_id)
+                        .map(|email| MerchantMember {
+                            email: email.clone(),
+                            role: m.role.clone(),
+                        })
                 })
                 .collect();
             let merchant_name = name_by_id
