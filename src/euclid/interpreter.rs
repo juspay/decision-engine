@@ -41,10 +41,20 @@ impl InterpreterBackend {
     ) -> Result<bool, types::InterpreterError> {
         use ast::{ComparisonType::*, ValueType::*};
 
-        let ctx_value = ctx.get(&comparison.lhs);
+        let (lookup_key, ctx_value) = match &comparison.value {
+            MetadataVariant(metadata) => (
+                &metadata.key,
+                ctx.get(&metadata.key)
+                    .filter(|value| value.as_ref().is_some_and(ast::ValueType::is_metadata))
+                    .or_else(|| ctx.get(&comparison.lhs)),
+            ),
+            _ => (&comparison.lhs, ctx.get(&comparison.lhs)),
+        };
+
         if ctx_value.is_none() {
             crate::logger::debug!(
-                missing_context_key = %comparison.lhs,
+                missing_context_key = %lookup_key,
+                condition_lhs = %comparison.lhs,
                 "Context key not found while evaluating condition, skipping rule"
             );
             return Ok(false);

@@ -919,4 +919,186 @@ mod tests {
             );
         }
     }
+
+    mod metadata_conditions {
+        use std::collections::HashMap;
+
+        use crate::euclid::{
+            ast::{
+                Comparison, ComparisonType, ConnectorInfo, MetadataValue, Output, Program,
+                RoutingType, Rule, ValueType,
+            },
+            interpreter::InterpreterBackend,
+            types::Context,
+        };
+
+        fn metadata_value(key: &str, value: &str) -> ValueType {
+            ValueType::MetadataVariant(MetadataValue {
+                key: key.to_string(),
+                value: value.to_string(),
+            })
+        }
+
+        fn gateway(name: &str) -> ConnectorInfo {
+            ConnectorInfo {
+                gateway_name: name.to_string(),
+                gateway_id: None,
+            }
+        }
+
+        fn program_matching(key: &str, value: &str) -> Program {
+            Program {
+                globals: HashMap::new(),
+                default_selection: Output::Priority(vec![gateway("fallback")]),
+                rules: vec![Rule {
+                    name: "metadata_rule".to_string(),
+                    routing_type: RoutingType::Priority,
+                    output: Output::Priority(vec![gateway("matched")]),
+                    statements: vec![crate::euclid::ast::IfStatement {
+                        condition: vec![Comparison {
+                            lhs: "metadata".to_string(),
+                            comparison: ComparisonType::Equal,
+                            value: metadata_value(key, value),
+                            metadata: HashMap::new(),
+                        }],
+                        nested: None,
+                    }],
+                }],
+                metadata: None,
+            }
+        }
+
+        fn matched_rule(program: &Program, ctx: &Context) -> Option<String> {
+            InterpreterBackend::eval_program(program, ctx)
+                .expect("program evaluation failed")
+                .rule_name
+        }
+
+        #[test]
+        fn resolves_field_sent_under_its_own_key() {
+            let ctx = Context::new(HashMap::from([(
+                "customer_id".to_string(),
+                Some(metadata_value("customer_id", "16530688")),
+            )]));
+
+            assert_eq!(
+                matched_rule(&program_matching("customer_id", "16530688"), &ctx),
+                Some("metadata_rule".to_string())
+            );
+        }
+
+        #[test]
+        fn resolves_field_sent_under_the_aggregate_key() {
+            let ctx = Context::new(HashMap::from([(
+                "metadata".to_string(),
+                Some(metadata_value("customer_id", "16530688")),
+            )]));
+
+            assert_eq!(
+                matched_rule(&program_matching("customer_id", "16530688"), &ctx),
+                Some("metadata_rule".to_string())
+            );
+        }
+
+        #[test]
+        fn resolves_every_field_when_several_are_sent() {
+            let ctx = Context::new(HashMap::from([
+                (
+                    "metadata".to_string(),
+                    Some(metadata_value("cohort", "eu-west")),
+                ),
+                (
+                    "cohort".to_string(),
+                    Some(metadata_value("cohort", "eu-west")),
+                ),
+                (
+                    "customer_id".to_string(),
+                    Some(metadata_value("customer_id", "16530688")),
+                ),
+            ]));
+
+            assert_eq!(
+                matched_rule(&program_matching("cohort", "eu-west"), &ctx),
+                Some("metadata_rule".to_string())
+            );
+            assert_eq!(
+                matched_rule(&program_matching("customer_id", "16530688"), &ctx),
+                Some("metadata_rule".to_string())
+            );
+        }
+
+        #[test]
+        fn does_not_match_on_value_mismatch() {
+            let ctx = Context::new(HashMap::from([(
+                "customer_id".to_string(),
+                Some(metadata_value("customer_id", "99999999")),
+            )]));
+
+            assert_eq!(
+                matched_rule(&program_matching("customer_id", "16530688"), &ctx),
+                None
+            );
+        }
+
+        #[test]
+        fn does_not_match_when_field_absent() {
+            let ctx = Context::new(HashMap::from([(
+                "billing_country".to_string(),
+                Some(ValueType::EnumVariant("Canada".to_string())),
+            )]));
+
+            assert_eq!(
+                matched_rule(&program_matching("customer_id", "16530688"), &ctx),
+                None
+            );
+        }
+
+        #[test]
+        fn falls_back_to_the_aggregate_key_when_the_field_is_null() {
+            let ctx = Context::new(HashMap::from([
+                ("customer_id".to_string(), None),
+                (
+                    "metadata".to_string(),
+                    Some(metadata_value("customer_id", "16530688")),
+                ),
+            ]));
+
+            assert_eq!(
+                matched_rule(&program_matching("customer_id", "16530688"), &ctx),
+                Some("metadata_rule".to_string())
+            );
+        }
+
+        #[test]
+        fn falls_back_when_the_field_name_collides_with_a_standard_parameter() {
+            let ctx = Context::new(HashMap::from([
+                (
+                    "currency".to_string(),
+                    Some(ValueType::EnumVariant("INR".to_string())),
+                ),
+                (
+                    "metadata".to_string(),
+                    Some(metadata_value("currency", "INR")),
+                ),
+            ]));
+
+            assert_eq!(
+                matched_rule(&program_matching("currency", "INR"), &ctx),
+                Some("metadata_rule".to_string())
+            );
+        }
+
+        #[test]
+        fn skips_the_rule_when_a_colliding_parameter_has_no_metadata_to_fall_back_to() {
+            let ctx = Context::new(HashMap::from([(
+                "currency".to_string(),
+                Some(ValueType::EnumVariant("INR".to_string())),
+            )]));
+
+            assert_eq!(
+                matched_rule(&program_matching("currency", "INR"), &ctx),
+                None
+            );
+        }
+    }
 }
