@@ -626,6 +626,18 @@ where
             post(routes::user_auth::switch_merchant),
         )
         .route(
+            "/auth/super-admin/enter-merchant",
+            post(routes::user_auth::enter_merchant),
+        )
+        .route(
+            "/auth/super-admin/exit",
+            post(routes::user_auth::exit_merchant),
+        )
+        .route(
+            "/auth/super-admin/lookup",
+            post(routes::user_auth::lookup_merchants),
+        )
+        .route(
             "/onboarding/merchant",
             post(routes::user_auth::create_merchant),
         )

@@ -267,7 +267,12 @@ pub async fn decider_full_payload_hs_function(
                 variant_arm,
                 Some(decided.decided_gateway.as_str()),
                 mo.and_then(|m| m.cost_saved_bps),
-                mo.and_then(|m| m.chosen.as_ref().and_then(|c| c.cost_bps)),
+                mo.and_then(|m| {
+                    m.ranked
+                        .iter()
+                        .find(|r| r.is_chosen)
+                        .and_then(|r| r.summary.cost_bps)
+                }),
                 mo.map(|m| m.margin),
                 Some(dreq_.payment_info.amount),
             )
@@ -697,13 +702,19 @@ pub async fn run_decider_flow(
                                 margin,
                             )
                             .await;
+                        // Only a cost-driven promotion relabels the approach as multi-objective.
                         if outcome.info.outcome == multi_objective::MultiObjectiveOutcome::CostWon {
                             decider_flow.writer.gwDeciderApproach =
                                 T::GatewayDeciderApproach::SrSelectionMultiObjective;
-                            if let Some(decision) = outcome.cost_decision {
-                                decidedGateway = Some(decision.chosen);
-                                cost_fallbacks_override = Some(decision.fallbacks);
-                            }
+                        }
+                        // Adopt the multi-objective pick whenever it produced one — including
+                        // AUTH_WON, where the chosen PSP is the EV-best SR head. This keeps
+                        // decidedGateway consistent with multi_objective_info and makes tied-score
+                        // selection deterministic and cost-optimal, instead of leaving the earlier
+                        // arbitrary same-score tie-break in place.
+                        if let Some(decision) = outcome.cost_decision {
+                            decidedGateway = Some(decision.chosen);
+                            cost_fallbacks_override = Some(decision.fallbacks);
                         }
                         decider_flow.writer.multi_objective_info = Some(outcome.info);
                     }

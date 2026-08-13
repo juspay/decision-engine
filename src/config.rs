@@ -139,6 +139,63 @@ pub struct UserAuthConfig {
     pub email_verification_enabled: bool,
     #[serde(default = "default_true")]
     pub signup_requires_admin_secret: bool,
+    /// Emails granted platform super-admin: they may enter any merchant's dashboard by pasting its
+    /// ID. Compared case-insensitively against the JWT's `email` claim at the moment of the action,
+    /// so config is the single source of truth — a grant/revoke takes effect on redeploy. Kept in
+    /// config (not the DB) on purpose: the roster is small, rarely changes, and every change goes
+    /// through code review + the deploy pipeline. Relies on `users.email` being immutable — there is
+    /// no change-email flow today; revisit this key if one is ever added.
+    ///
+    /// Accepts either a TOML array or a comma-separated string, so it can be set from a config file
+    /// (`["a@x.com", "b@x.com"]`) or the environment
+    /// (`DECISION_ENGINE__USER_AUTH__SUPER_ADMIN_EMAILS=a@x.com,b@x.com`) — env values arrive as a
+    /// single string, which the config crate won't split into a sequence on its own.
+    #[serde(default, deserialize_with = "deserialize_comma_separated_or_seq")]
+    pub super_admin_emails: Vec<String>,
+}
+
+/// Deserialize a `Vec<String>` from either a sequence (TOML array) or a single comma-separated
+/// string (how an environment override arrives). Blank entries are dropped and whitespace trimmed.
+fn deserialize_comma_separated_or_seq<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct StringOrSeq;
+
+    impl<'de> serde::de::Visitor<'de> for StringOrSeq {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+            formatter.write_str("a list of strings or a comma-separated string")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(value
+                .split(',')
+                .map(|entry| entry.trim().to_string())
+                .filter(|entry| !entry.is_empty())
+                .collect())
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            let mut out = Vec::new();
+            while let Some(entry) = seq.next_element::<String>()? {
+                let entry = entry.trim().to_string();
+                if !entry.is_empty() {
+                    out.push(entry);
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    deserializer.deserialize_any(StringOrSeq)
 }
 
 fn default_true() -> bool {
@@ -183,6 +240,7 @@ impl Default for UserAuthConfig {
             hs_redirect_jwt_expiry_seconds: default_hs_redirect_jwt_expiry(),
             email_verification_enabled: false,
             signup_requires_admin_secret: true,
+            super_admin_emails: Vec::new(),
         }
     }
 }
@@ -561,6 +619,13 @@ pub struct PgDatabase {
     pub pg_port: u16,
     pub pg_dbname: String,
     pub pg_pool_size: Option<usize>,
+    /// libpq `sslmode` (e.g. `verify-full`). Leave unset for a plain PostgreSQL / insecure
+    /// CockroachDB node; a secure CockroachDB cluster (CockroachDB Cloud) requires `verify-full`.
+    #[serde(default)]
+    pub pg_sslmode: Option<String>,
+    /// Path to the CA certificate used to verify the server when `pg_sslmode` demands it.
+    #[serde(default)]
+    pub pg_ssl_root_cert: Option<String>,
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]

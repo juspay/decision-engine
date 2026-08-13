@@ -28,11 +28,17 @@ export interface PspSummary {
   costSource: CostSource | null
 }
 
+// One EV-ranked candidate: a PspSummary plus its EV and role flags. The SR head and the chosen PSP
+// are the rows flagged isSrHead / isChosen (the same row on AUTH_WON).
+export interface RankedPsp extends PspSummary {
+  ev: number
+  isSrHead: boolean
+  isChosen: boolean
+}
+
 export interface MultiObjectiveInfo {
   outcome: MultiObjectiveOutcome
   reason: string
-  srHead: PspSummary | null
-  chosen: PspSummary | null
   costSavedBps: number | null
   /// Number of PSPs ranked on expected value (i.e. those that had cost data).
   qualifiedCount: number
@@ -43,6 +49,10 @@ export interface MultiObjectiveInfo {
   /// ticket) — the margin of victory of the winning pick. Null when fewer than two
   /// PSPs had the cost data needed to rank on EV.
   evGapTop2?: number | null
+  /// Every candidate ranked on EV (best first), each with auth/cost/EV and role flags. Omitted when
+  /// EV ranking wasn't performed (fewer than two PSPs, or the SR head had no finite score / no cost
+  /// data). srHead/chosen live here as the flagged isSrHead/isChosen rows.
+  ranked?: RankedPsp[]
 }
 
 export type RoutingAlgorithmName =

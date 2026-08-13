@@ -165,79 +165,6 @@ interface EliminationConfigResponse {
   }
 }
 
-function CurrentConfigDetails({ config }: { config: SRConfigResponse['config'] }) {
-  return (
-    <div className="text-xs text-slate-600 dark:text-[#b2bdd1] space-y-4">
-      <div className="border-b border-slate-200 pb-3 dark:border-[#222226]">
-        <h3 className="font-medium text-slate-700 mb-2 dark:text-slate-200">Default settings</h3>
-        <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
-          <div>
-            <span className="text-slate-500">Bucket size</span>
-            <p className="font-medium">{config.data.defaultBucketSize}</p>
-          </div>
-          <div>
-            <span className="text-slate-500">Success rate</span>
-            <p className="font-medium">{config.data.defaultSuccessRate ?? 'Not set'}</p>
-          </div>
-          <div>
-            <span className="text-slate-500">Hedging %</span>
-            <p className="font-medium">{config.data.defaultHedgingPercent ?? 'Not set'}</p>
-          </div>
-          <div>
-            <span className="text-slate-500">Feedback latency window</span>
-            <p className="font-medium">{config.data.defaultLatencyThreshold ?? 'Not set'} s</p>
-          </div>
-          <div>
-            <span className="text-slate-500">Margin</span>
-            <p className="font-medium">{config.data.margin != null ? `${config.data.margin * 100}%` : 'Not set (100%)'}</p>
-          </div>
-        </div>
-      </div>
-
-      {config.data.subLevelInputConfig && config.data.subLevelInputConfig.length > 0 ? (
-        <div>
-          <h3 className="font-medium text-slate-700 mb-2 dark:text-slate-200">Sub-level configurations</h3>
-          <div className="space-y-2">
-            {config.data.subLevelInputConfig.map((subConfig, idx) => (
-              <div key={idx} className="bg-slate-50 dark:bg-[#151518] rounded-lg p-3">
-                <div className="grid grid-cols-2 gap-2 text-xs md:grid-cols-5">
-                  <div>
-                    <span className="text-slate-500">Payment Type:</span>
-                    <p className="font-medium capitalize">{subConfig.paymentMethodType}</p>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Payment Method:</span>
-                    <p className="font-medium">{subConfig.paymentMethod}</p>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Bucket size</span>
-                    <p className="font-medium">{subConfig.bucketSize}</p>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Hedging %</span>
-                    <p className="font-medium">{subConfig.hedgingPercent ?? 'Default'}</p>
-                  </div>
-                  <div>
-                    <span className="text-slate-500">Feedback latency window</span>
-                    <p className="font-medium">{subConfig.latencyThreshold ?? 'Default'} s</p>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-
-      <div className="border-t border-slate-200 pt-3 dark:border-[#222226]">
-        <h3 className="font-medium text-slate-700 mb-2 dark:text-slate-200">Raw Configuration (JSON)</h3>
-        <pre className="max-h-64 overflow-auto rounded-lg border border-slate-200/80 bg-slate-50/90 p-3 font-mono text-xs leading-6 text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_16px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#0b1017] dark:text-[#d8e1ef] dark:shadow-none">
-          {JSON.stringify(config, null, 2)}
-        </pre>
-      </div>
-    </div>
-  )
-}
-
 type SRTab = 'autopilot' | 'manual' | 'flags' | 'cost'
 const SR_TABS: readonly SRTab[] = ['autopilot', 'manual', 'flags', 'cost']
 /** Tabs laid out as a left rail + content pane, which need the full page width to breathe. */
@@ -327,11 +254,7 @@ export function SRRoutingPage() {
   const [saving, setSaving] = useState(false)
   const [saveError, setSaveError] = useState<string | null>(null)
   const [saveSuccess, setSaveSuccess] = useState(false)
-  const [showCurrentConfig, setShowCurrentConfig] = useState(false)
   const [showSubLevelOverrides, setShowSubLevelOverrides] = useState(false)
-  const [deleting, setDeleting] = useState(false)
-  const [deleteError, setDeleteError] = useState<string | null>(null)
-  const [lastSavedAt, setLastSavedAt] = useState<string | null>(null)
 
   // Shares the SWR key used by OverviewPage/RoutingHubPage so all three surfaces
   // read (and invalidate) the same cached config.
@@ -440,7 +363,6 @@ export function SRRoutingPage() {
           },
         },
       })
-      setLastSavedAt(new Date().toISOString())
       setSaveSuccess(true)
       mutate()
     } catch (err: unknown) {
@@ -449,24 +371,6 @@ export function SRRoutingPage() {
       setSaving(false)
     }
   }
-
-  async function handleDelete() {
-    if (!merchantId) return
-    setDeleting(true); setDeleteError(null)
-    try {
-      await apiPost('/rule/delete', { merchant_id: merchantId, algorithm: 'successRate' })
-      setLastSavedAt(null)
-      mutate(undefined, { revalidate: false })
-    } catch (err: unknown) {
-      setDeleteError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setDeleting(false)
-    }
-  }
-
-  const lastModifiedAt = existing?.modified_at ?? lastSavedAt
-  const lastModifiedDate = lastModifiedAt ? new Date(lastModifiedAt) : null
-  const hasLastModified = Boolean(lastModifiedDate && !Number.isNaN(lastModifiedDate.getTime()))
 
   const tabClass = (tab: SRTab) =>
     `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
@@ -481,32 +385,11 @@ export function SRRoutingPage() {
     // single-column tabs (Autopilot, Flags) still read better constrained.
     <div className={`space-y-6 ${WIDE_TABS.includes(activeTab) ? 'w-full' : 'max-w-4xl'}`}>
       {/* Page header */}
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h1 className="text-lg font-semibold text-slate-900 dark:text-white">Multi Objective Routing</h1>
-          <p className="mt-0.5 text-[13px] leading-relaxed text-slate-500 dark:text-slate-400">
-            Dynamic gateway scoring based on real-time success rates.
-          </p>
-        </div>
-        {merchantId && !isLoading && existing?.config?.data && (
-          <div className="flex items-center gap-2">
-            <Badge variant="green">Active</Badge>
-            {hasLastModified && lastModifiedDate && (
-              <span className="text-xs text-slate-400">
-                Saved {lastModifiedDate.toLocaleString()}
-              </span>
-            )}
-            <Button type="button" variant="ghost" size="sm" onClick={() => setShowCurrentConfig(v => !v)}>
-              <Eye size={14} className="mr-1" />{showCurrentConfig ? 'Hide config' : 'View config'}
-            </Button>
-            <Button
-              type="button" variant="secondary" size="sm" disabled={deleting}
-              onClick={() => { if (confirm('Clear the Success Rate configuration? This disables SR-based routing.')) handleDelete() }}
-            >
-              <Trash2 size={14} className="mr-1" />{deleting ? 'Clearing…' : 'Clear'}
-            </Button>
-          </div>
-        )}
+      <div>
+        <h1 className="text-lg font-semibold text-slate-900 dark:text-white">Multi Objective Routing</h1>
+        <p className="mt-0.5 text-[13px] leading-relaxed text-slate-500 dark:text-slate-400">
+          Dynamic gateway scoring based on real-time success rates.
+        </p>
       </div>
 
       {!merchantId && (
@@ -514,16 +397,6 @@ export function SRRoutingPage() {
           Set a Merchant ID in the top bar to load and save configuration.
         </div>
       )}
-
-      {/* Expanded config view */}
-      {showCurrentConfig && existing?.config?.data && (
-        <Card>
-          <CardBody>
-            <CurrentConfigDetails config={existing.config} />
-          </CardBody>
-        </Card>
-      )}
-      {deleteError && <p className="text-xs text-red-500">{deleteError}</p>}
 
       {/* Tab navigation */}
       <div className="border-b border-slate-200 dark:border-[#1c1c23]">

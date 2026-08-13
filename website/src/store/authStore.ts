@@ -14,6 +14,10 @@ export interface AuthUser {
   merchantId: string
   role: string
   isRedirectSession: boolean
+  // This user's email is on the platform super-admin roster (may enter any merchant by ID).
+  isSuperAdmin?: boolean
+  // The current session is a super-admin viewing another merchant's dashboard.
+  isSuperAdminView?: boolean
 }
 
 interface AuthStore {

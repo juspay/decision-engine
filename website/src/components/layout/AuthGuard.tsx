@@ -13,6 +13,8 @@ interface MeResponse {
   merchant_id: string
   role: string
   email_verified: boolean
+  is_super_admin: boolean
+  is_super_admin_view: boolean
   merchants: Array<{
     merchant_id: string
     merchant_name: string
@@ -81,7 +83,7 @@ export function AuthGuard() {
   useEffect(() => {
     if (!me || !token) return
     const activeMerchantId = me.merchant_id || me.merchants[0]?.merchant_id || ''
-    setAuth(token, { userId: me.user_id, email: me.email, merchantId: activeMerchantId, role: me.role, isRedirectSession: me.user_id.startsWith('hs_') }, me.merchants)
+    setAuth(token, { userId: me.user_id, email: me.email, merchantId: activeMerchantId, role: me.role, isRedirectSession: me.user_id.startsWith('hs_'), isSuperAdmin: me.is_super_admin, isSuperAdminView: me.is_super_admin_view }, me.merchants)
     setMerchantId(activeMerchantId)
   }, [me, token, setAuth, setMerchantId])
 

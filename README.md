@@ -85,6 +85,31 @@ Open:
 
 For deployed docs or dashboard environments, use the same paths under your deployed host, e.g. `https://<docs-host>/api-refs/api-ref`.
 
+### CockroachDB
+
+CockroachDB is PostgreSQL wire-protocol compatible, so it runs on the existing `postgres` build,
+`migrations_pg`, and `pg_database` config — no separate feature or backend. The
+`docker-compose.cockroach.yml` overlay swaps the `postgresql` service for a single-node CockroachDB.
+
+Full local dev (the `oneclick.sh` flow), with CockroachDB instead of PostgreSQL:
+
+```bash
+./oneclick.sh --cockroach
+```
+
+The DB is published on host **26257** (CockroachDB's native port) so it coexists with a local
+PostgreSQL on 5432; `--cockroach` points the migrator, seed, and backend there automatically.
+
+Docker-only (app runs in-container against the CockroachDB service):
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose.cockroach.yml --profile postgres-local up -d
+```
+
+API stays on `http://localhost:8080`; the CockroachDB DB Console is at `http://localhost:8090`. For a
+secure cluster (e.g. CockroachDB Cloud), set `pg_sslmode` (and `pg_ssl_root_cert`) under
+`[pg_database]` in your config.
+
 ### From Source
 
 Prerequisites: Rust 1.85+, MySQL or PostgreSQL, Redis, [`just`](https://just.systems)
