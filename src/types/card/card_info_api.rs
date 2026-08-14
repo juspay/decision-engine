@@ -113,14 +113,11 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
     };
 
     if !response.status().is_success() {
-        let status = response.status();
-        let body = response.text().await.unwrap_or_default();
         logger::warn!(
             tag = "cardInfoApi",
-            "non-2xx for bin {}: {} - {}",
+            "non-2xx for bin {}: {}",
             bin,
-            status,
-            body
+            response.status()
         );
         return None;
     }
