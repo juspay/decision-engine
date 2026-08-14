@@ -94,6 +94,7 @@ zstd_compression_filepath = "/tmp/extra-paths/redis-zstd-dictionaries/sbx"
 base_url = "https://integ.hyperswitch.io/api/cards"
 api_key = "hyperswitch_api_key"
 timeout_ms = 2000
+tenant_id = "public"
 
 [cost_ingestion]
 # Drain webhook-enqueued jobs in this process. Off by default so only a dedicated ingest
