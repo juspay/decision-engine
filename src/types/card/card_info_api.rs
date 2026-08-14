@@ -87,6 +87,7 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
     let fut = client()
         .get(&url)
         .header("api-key", cfg.api_key.peek().as_str())
+        .header("x-tenant-id", cfg.tenant_id.as_str())
         .send();
 
     let response = match tokio::time::timeout(Duration::from_millis(cfg.timeout_ms), fut).await {
@@ -112,11 +113,14 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
     };
 
     if !response.status().is_success() {
+        let status = response.status();
+        let body = response.text().await.unwrap_or_default();
         logger::warn!(
             tag = "cardInfoApi",
-            "non-2xx for bin {}: {}",
+            "non-2xx for bin {}: {} - {}",
             bin,
-            response.status()
+            status,
+            body
         );
         return None;
     }

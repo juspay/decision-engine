@@ -78,6 +78,7 @@ pub struct CardInfoServiceConfig {
     pub base_url: String,
     pub api_key: masking::Secret<String>,
     pub timeout_ms: u64,
+    pub tenant_id: String,
 }
 
 impl Default for CardInfoServiceConfig {
@@ -86,6 +87,7 @@ impl Default for CardInfoServiceConfig {
             base_url: "https://integ.hyperswitch.io/api/cards".to_string(),
             api_key: masking::Secret::new(String::new()),
             timeout_ms: 2_000,
+            tenant_id: "public".to_string(),
         }
     }
 }
@@ -165,7 +167,7 @@ where
     impl<'de> serde::de::Visitor<'de> for StringOrSeq {
         type Value = Vec<String>;
 
-        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             formatter.write_str("a list of strings or a comma-separated string")
         }
 
