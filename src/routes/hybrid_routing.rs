@@ -63,7 +63,21 @@ fn log_serializable_response<T: Serialize>(label: &str, value: &T) {
 fn extract_static_eligible_gateways(
     response: &crate::euclid::types::RoutingEvaluateResponse,
 ) -> Vec<ConnectorInfo> {
-    response.eligible_connectors.clone()
+    let eligible = &response.eligible_connectors;
+    let mut ordered = Vec::with_capacity(eligible.len());
+
+    for connector in response
+        .evaluated_output
+        .iter()
+        .filter(|evaluated| eligible.contains(evaluated))
+        .chain(eligible)
+    {
+        if !ordered.contains(connector) {
+            ordered.push(connector.clone());
+        }
+    }
+
+    ordered
 }
 
 fn extract_gateway_names(connectors: &[ConnectorInfo]) -> Vec<String> {
