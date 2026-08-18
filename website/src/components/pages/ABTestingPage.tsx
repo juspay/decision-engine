@@ -9,6 +9,7 @@ import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { useMerchantStore } from '../../store/merchantStore'
+import { useCanEditRouting } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
 import {
   RoutingAlgorithm,
@@ -686,6 +687,8 @@ function ExperimentDetailPanel({
   onClone,
   realPaymentsOn,
 }: DetailPanelProps) {
+  // Read-only sessions still see everything; the controls that would change it are inert.
+  const canEditRouting = useCanEditRouting()
   const abData = (algorithm.algorithm_data || algorithm.algorithm)?.data as ABTestAlgorithmData | undefined
   const kind = abExperimentKind(abData)
   const isTuning = kind === 'sr_config_tuning'
@@ -823,18 +826,18 @@ function ExperimentDetailPanel({
                     the "not collecting" drift banner (with recovery) rather than a pause control. */}
                 {/* Duplicate is safe on a running experiment — it only reads the config into a new
                     create form, never touching this one's traffic or results. */}
-                <Button size="sm" variant="secondary" onClick={onClone}><Copy size={13} /> Duplicate</Button>
-                <Button size="sm" variant="danger" onClick={onStop}><PowerOff size={13} /> Stop</Button>
+                <Button size="sm" variant="secondary" onClick={onClone} disabled={!canEditRouting}><Copy size={13} /> Duplicate</Button>
+                <Button size="sm" variant="danger" onClick={onStop} disabled={!canEditRouting}><PowerOff size={13} /> Stop</Button>
               </>
             ) : (
               <>
                 {/* Edit / Delete are only offered while inactive — a running experiment must be
                     stopped first to avoid corrupting its collected results (enforced server-side too).
                     Duplicate, being read-only on this experiment, is offered in every state. */}
-                <Button size="sm" variant="secondary" onClick={onClone}><Copy size={13} /> Duplicate</Button>
-                <Button size="sm" variant="secondary" onClick={onEdit}><Pencil size={13} /> Edit</Button>
-                <Button size="sm" variant="secondary" onClick={onDelete}><Trash2 size={13} /> Delete</Button>
-                <Button size="sm" variant="primary" onClick={onActivate}>Activate</Button>
+                <Button size="sm" variant="secondary" onClick={onClone} disabled={!canEditRouting}><Copy size={13} /> Duplicate</Button>
+                <Button size="sm" variant="secondary" onClick={onEdit} disabled={!canEditRouting}><Pencil size={13} /> Edit</Button>
+                <Button size="sm" variant="secondary" onClick={onDelete} disabled={!canEditRouting}><Trash2 size={13} /> Delete</Button>
+                <Button size="sm" variant="primary" onClick={onActivate} disabled={!canEditRouting}>Activate</Button>
               </>
             )}
           </div>
@@ -1134,6 +1137,8 @@ function CreateForm({
   form, setForm, eligibleAlgorithms, saving, error, success, createdId,
   merchantId, isEditing, onCreate, onActivateCreated, onCancel,
 }: CreateFormProps) {
+  // Read-only sessions still see everything; the controls that would change it are inert.
+  const canEditRouting = useCanEditRouting()
   // Only offer the Multi-Objective SR strategies when the merchant has the backing features on:
   //  - MO manual needs cost-aware (multi-objective) routing enabled
   //  - MO autopilot additionally needs autopilot self-tuning (auto-calibration) enabled, otherwise
@@ -1393,7 +1398,7 @@ function CreateForm({
           <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-5 py-4 text-base text-emerald-800 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200">
             <span>{success}</span>
             {createdId && (
-              <Button size="sm" variant="primary" onClick={() => onActivateCreated(createdId)}>
+              <Button size="sm" variant="primary" onClick={() => onActivateCreated(createdId)} disabled={!canEditRouting}>
                 Activate now
               </Button>
             )}
@@ -1406,7 +1411,7 @@ function CreateForm({
           {onCancel && (
             <Button variant="secondary" onClick={onCancel} disabled={saving}>Cancel</Button>
           )}
-          <Button variant="primary" onClick={onCreate} disabled={saving || !merchantId}>
+          <Button variant="primary" onClick={onCreate} disabled={saving || !merchantId || !canEditRouting}>
             {saving ? <><Spinner size={14} /> {isEditing ? 'Saving…' : 'Creating…'}</> : isEditing ? 'Save changes' : 'Create experiment'}
           </Button>
         </div>
@@ -1429,6 +1434,8 @@ const DEFAULT_FORM: ABTestFormValues = {
 }
 
 export function ABTestingPage() {
+  // Read-only sessions still see everything; the controls that would change it are inert.
+  const canEditRouting = useCanEditRouting()
   const { merchantId } = useMerchantStore()
   const { mutate: mutateCache } = useSWRConfig()
 
@@ -1669,7 +1676,7 @@ export function ABTestingPage() {
         {/* Only offer "New experiment" when the form isn't already open — otherwise it's a third
             door to an action the on-screen form already is (see the empty-state copy below). */}
         {rightPanelContent !== 'create' && (
-          <Button variant="secondary" size="sm" onClick={openCreate}>
+          <Button variant="secondary" size="sm" onClick={openCreate} disabled={!canEditRouting}>
             <Plus size={14} /> New experiment
           </Button>
         )}

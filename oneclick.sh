@@ -236,7 +236,9 @@ check_kafka() {
 }
 
 check_mailpit() {
-    curl -fsS "http://${MAILPIT_HOST}:${MAILPIT_UI_PORT}/api/v1/info" >/dev/null 2>&1
+    # `/api/v1/messages` is the message-listing endpoint — it confirms the API is serving, not
+    # just that the web UI's index renders.
+    curl -fsS "http://${MAILPIT_HOST}:${MAILPIT_UI_PORT}/api/v1/messages" >/dev/null 2>&1
 }
 
 check_clickhouse_schema() {

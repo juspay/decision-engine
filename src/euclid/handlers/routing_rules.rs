@@ -298,8 +298,13 @@ pub async fn routing_create(
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
-    let config: RoutingRule = serde_json::from_value(payload.clone())
-        .change_context(EuclidErrors::InvalidRuleConfiguration)?;
+    // The serde message names the field that did not parse. Dropping it leaves the caller with a
+    // bare 400 and nothing to act on.
+    let config: RoutingRule = serde_json::from_value(payload.clone()).map_err(|error| {
+        error_stack::report!(EuclidErrors::InvalidRequest(format!(
+            "could not parse routing rule: {error}"
+        )))
+    })?;
     let create_flow_type = crate::analytics::refine_routing_create_flow_type(&config.algorithm);
     let analytics_created_by = config.created_by.clone();
     let analytics_config_name = config.name.clone();
@@ -358,7 +363,7 @@ pub async fn routing_create(
         id: algorithm_id.clone(),
         created_by: config.created_by,
         name: config.name.clone(),
-        description: config.description,
+        description: config.description.unwrap_or_default(),
         #[cfg(feature = "mysql")]
         metadata: Some(
             serde_json::to_string(&config.metadata)

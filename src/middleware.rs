@@ -48,8 +48,34 @@ pub async fn authenticate(
             .await
         {
             Ok(claims) => {
-                req.extensions_mut()
-                    .insert(auth::AuthContext::from_jwt(&claims));
+                let context = auth::AuthContext::from_jwt(
+                    &claims,
+                    app_state
+                        .global_config
+                        .user_auth
+                        .require_explicit_permissions,
+                );
+
+                // Enforced here rather than per handler, so every route is covered at once. The
+                // routed pattern is what gets classified — `MatchedPath` is set during routing, and
+                // this layer runs after it — so a path parameter cannot be shaped to resemble a
+                // route that needs less.
+                let matched_path = req
+                    .extensions()
+                    .get::<axum::extract::MatchedPath>()
+                    .map(|matched| matched.as_str().to_owned());
+                let required =
+                    auth::access::required_permission(req.method(), matched_path.as_deref());
+
+                if !context.allows(&required) {
+                    return Ok((
+                        StatusCode::FORBIDDEN,
+                        format!("This session does not have {}", required.as_str()),
+                    )
+                        .into_response());
+                }
+
+                req.extensions_mut().insert(context);
                 return Ok(next.run(req).await);
             }
             Err(_) => {

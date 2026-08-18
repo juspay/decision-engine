@@ -238,11 +238,21 @@ test.describe('Rule Builder — UI interactions', () => {
       const block = euclid.ruleBlock(0)
       await block.getByRole('button', { name: 'Add OR group' }).click()
 
+      // Compared against what the second group actually started as, rather than against a field
+      // name it is assumed not to hold. Both groups open on the same default, so asserting the
+      // second is merely *something else* passes whenever that default happens not to be the value
+      // set below — which is luck, not the property under test.
+      const secondGroupLhs = block.locator('[data-cy="cond-lhs"] button.cond-select').nth(1)
+      const before = await secondGroupLhs.getAttribute('data-value')
+
       // Setting the first group's field must not propagate to the second.
       await euclid.selectCondLhs(0, 'currency')
 
-      const secondGroupLhs = block.locator('[data-cy="cond-lhs"] button.cond-select').nth(1)
-      await expect(secondGroupLhs).not.toHaveAttribute('data-value', 'currency')
+      await expect(block.locator('[data-cy="cond-lhs"] button.cond-select').first()).toHaveAttribute(
+        'data-value',
+        'currency'
+      )
+      await expect(secondGroupLhs).toHaveAttribute('data-value', before ?? '')
     })
   })
 

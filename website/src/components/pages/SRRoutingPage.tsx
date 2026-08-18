@@ -11,6 +11,7 @@ import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
+import { useCanEditRouting } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
 import { PAYMENT_METHOD_TYPES, PAYMENT_METHODS } from '../../lib/constants'
 import {
@@ -821,6 +822,8 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string; 
 ]
 
 function SrDimensionsConfig({ merchantId }: { merchantId: string | null }) {
+  // Read-only sessions still see everything; the controls that would change it are inert.
+  const canEditRouting = useCanEditRouting()
   const { data, mutate } = useSWR<SrDimensionResponse>(
     merchantId ? `/config-sr-dimension/${merchantId}` : null,
     fetcher,
@@ -897,7 +900,7 @@ function SrDimensionsConfig({ merchantId }: { merchantId: string | null }) {
           SR dimensions saved.
         </div>
       )}
-      <Button onClick={onSave} disabled={saving || !merchantId || selected == null}>
+      <Button onClick={onSave} disabled={saving || !merchantId || selected == null || !canEditRouting}>
         {saving ? <><Spinner size={14} /> Saving…</> : 'Save SR Dimensions'}
       </Button>
     </div>
@@ -1007,6 +1010,8 @@ function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
 }
 
 function EliminationConfig({ merchantId }: { merchantId: string | null }) {
+  // Read-only sessions still see everything; the controls that would change it are inert.
+  const canEditRouting = useCanEditRouting()
   const [threshold, setThreshold] = useState<string>('')
   const [gatewayLatency, setGatewayLatency] = useState<string>('')
   const [saving, setSaving] = useState(false)
@@ -1093,7 +1098,7 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
                 <Eye size={14} className="mr-1" />{showCurrentConfig ? 'Hide' : 'View'}
               </Button>
               <Button
-                type="button" variant="secondary" size="sm" disabled={deleting}
+                type="button" variant="secondary" size="sm" disabled={deleting || !canEditRouting}
                 onClick={() => { if (confirm('Clear the Elimination configuration?')) onDelete() }}
               >
                 <Trash2 size={14} className="mr-1" />{deleting ? 'Clearing…' : 'Clear'}
@@ -1154,7 +1159,7 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
           Elimination configuration saved successfully.
         </div>
       )}
-      <Button onClick={onSave} disabled={saving || !merchantId || threshold === ''}>
+      <Button onClick={onSave} disabled={saving || !merchantId || threshold === '' || !canEditRouting}>
         {saving ? <><Spinner size={14} /> Saving…</> : 'Save Elimination Config'}
       </Button>
     </div>

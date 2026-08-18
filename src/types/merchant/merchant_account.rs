@@ -138,6 +138,11 @@ impl TryFrom<MerchantAccountCreateRequest> for MerchantAccountNew {
 pub struct MerchantAccountResponse {
     pub merchant_id: String,
     pub gateway_success_rate_based_decider_input: Option<String>,
+    /// Where this scope sits in the Hyperswitch account tree, when it came from one. Absent for
+    /// scopes created directly in Decision Engine, and for Hyperswitch profiles that have not
+    /// been synced yet — so consumers must treat it as optional rather than assume a parent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hierarchy: Option<super::hierarchy::Hierarchy>,
 }
 
 impl From<MerchantAccount> for MerchantAccountResponse {
@@ -145,8 +150,9 @@ impl From<MerchantAccount> for MerchantAccountResponse {
         Self {
             merchant_id: value.merchantId.0.clone(),
             gateway_success_rate_based_decider_input: Some(
-                value.gatewaySuccessRateBasedDeciderInput,
+                value.gatewaySuccessRateBasedDeciderInput.clone(),
             ),
+            hierarchy: super::hierarchy::of_account(&value),
         }
     }
 }
@@ -280,6 +286,66 @@ pub async fn delete_merchant_account(
         conn,
         dsl::merchant_id.eq(merchant_id.clone()),
     )
+    .await?;
+
+    let _ = GLOBAL_CACHE.remove(&format!("merchant_acct_{}", merchant_id));
+    Ok(())
+}
+
+/// Every merchant account in the tenant. Used by the hierarchy reconcile report, which must
+/// classify existing rows — including ones HS has never heard of — before any sync writes.
+/// Not for request paths: this is a full read of the table.
+pub async fn load_all_merchant_accounts() -> Result<Vec<MerchantAccount>, crate::generics::MeshError>
+{
+    let app_state = get_tenant_app_state().await;
+
+    let db_results = crate::generics::generic_find_all::<
+        <DBMerchantAccount as HasTable>::Table,
+        _,
+        DBMerchantAccount,
+    >(&app_state.db, dsl::merchant_id.is_not_null())
+    .await?;
+
+    Ok(db_results
+        .into_iter()
+        .filter_map(|db_merchant| MerchantAccount::try_from(db_merchant).ok())
+        .collect())
+}
+
+/// Writes ancestry onto a scope, preserving any other `internal_metadata` keys and evicting the
+/// cached row so the next read serves the new tree. Touches no routing configuration.
+pub async fn update_merchant_hierarchy(
+    merchant_id: String,
+    hierarchy: &super::hierarchy::Hierarchy,
+) -> error_stack::Result<(), crate::generics::MeshError> {
+    let app_state = get_tenant_app_state().await;
+
+    // Read-modify-write so a sibling key written by another consumer survives the write.
+    let existing = crate::generics::generic_find_all::<
+        <DBMerchantAccount as HasTable>::Table,
+        _,
+        DBMerchantAccount,
+    >(&app_state.db, dsl::merchant_id.eq(merchant_id.clone()))
+    .await?
+    .pop();
+
+    let existing_metadata = existing.and_then(|account| account.internal_metadata);
+
+    let internal_metadata =
+        super::hierarchy::merge_into_metadata(existing_metadata.as_deref(), hierarchy)
+            .map_err(|_| crate::generics::MeshError::Others)?;
+
+    let values = crate::storage::types::MerchantAccountHierarchyUpdate {
+        internal_metadata: Some(internal_metadata),
+        merchant_name: hierarchy.profile_name.clone(),
+    };
+
+    let conn = &app_state.db.get_conn().await?;
+    crate::generics::generic_update::<
+        <DBMerchantAccount as HasTable>::Table,
+        crate::storage::types::MerchantAccountHierarchyUpdate,
+        _,
+    >(conn, dsl::merchant_id.eq(merchant_id.clone()), values)
     .await?;
 
     let _ = GLOBAL_CACHE.remove(&format!("merchant_acct_{}", merchant_id));

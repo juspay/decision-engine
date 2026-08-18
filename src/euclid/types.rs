@@ -9,7 +9,11 @@ use diesel::Identifiable;
 use diesel::Insertable;
 use diesel::{Queryable, Selectable};
 use serde::{Deserialize, Serialize};
-use std::{collections::HashMap, fmt, ops::Deref};
+use std::{
+    collections::{BTreeMap, HashMap},
+    fmt,
+    ops::Deref,
+};
 use time::PrimitiveDateTime;
 
 pub type Metadata = HashMap<String, serde_json::Value>;
@@ -29,7 +33,10 @@ pub enum DataType {
 pub struct RoutingRule {
     pub rule_id: Option<String>,
     pub name: String,
-    pub description: String,
+    /// Optional, and null on the wire: Hyperswitch's own column is nullable. Stored as an empty
+    /// string, which is what the column requires.
+    #[serde(default)]
+    pub description: Option<String>,
     pub created_by: String,
     pub algorithm: StaticRoutingAlgorithm,
     #[serde(default)]
@@ -440,8 +447,12 @@ pub struct FieldValidationRules {
 /// Structure for the [keys] section in the TOML
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct KeysConfig {
+    /// Ordered, because this map is served verbatim by `/config/routing-keys` and the dashboard
+    /// takes the first entry as the default field of a new rule condition. A `HashMap` iterates in
+    /// an order that its per-process random seed decides, so both that default and the order of the
+    /// field dropdown changed on every restart.
     #[serde(flatten)]
-    pub keys: HashMap<String, KeyConfig>,
+    pub keys: BTreeMap<String, KeyConfig>,
 }
 
 /// The complete TOML configuration structure

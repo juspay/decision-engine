@@ -1,6 +1,8 @@
 use aws_config::BehaviorVersion;
+use aws_sdk_sesv2::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_sesv2::types::{Body, Content, Destination, EmailContent, Message};
 use aws_smithy_runtime::client::http::hyper_014::HyperClientBuilder;
+use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
 use error_stack::ResultExt;
 use hyper_proxy::{Intercept, Proxy, ProxyConnector};
 
@@ -83,6 +85,52 @@ fn build_proxied_http_client(
     Ok(HyperClientBuilder::new().build(connector))
 }
 
+/// `SdkError`'s own `Display` renders as just "service error" or "dispatch failure",
+/// which hides everything needed to act on the failure. The SES error code and message,
+/// the HTTP status, the response body and the transport-level cause are all reachable
+/// only through the error metadata and the `source()` chain, so they are flattened into
+/// a single printable line here.
+fn describe_sdk_error<E>(err: &SdkError<E, HttpResponse>) -> String
+where
+    E: ProvideErrorMetadata + std::error::Error + Send + Sync + 'static,
+{
+    let kind = match err {
+        SdkError::ConstructionFailure(_) => "construction_failure",
+        SdkError::TimeoutError(_) => "timeout",
+        SdkError::DispatchFailure(_) => "dispatch_failure",
+        SdkError::ResponseError(_) => "response_error",
+        SdkError::ServiceError(_) => "service_error",
+        _ => "unknown",
+    };
+
+    let meta = err.meta();
+    let mut detail = format!(
+        "kind={kind} code={} message={}",
+        meta.code().unwrap_or("<none>"),
+        meta.message().unwrap_or("<none>"),
+    );
+
+    // A non-AWS intermediary (proxy, load balancer) answers with a body that does not
+    // deserialize into a modeled error, leaving the metadata empty — the raw response is
+    // the only place its reason appears.
+    if let SdkError::ServiceError(context) = err {
+        let raw = context.raw();
+        detail.push_str(&format!(" http_status={}", raw.status().as_u16()));
+        if let Some(bytes) = raw.body().bytes() {
+            let truncated = &bytes[..bytes.len().min(512)];
+            detail.push_str(&format!(" body={}", String::from_utf8_lossy(truncated)));
+        }
+    }
+
+    let mut source = std::error::Error::source(err);
+    while let Some(cause) = source {
+        detail.push_str(&format!(" | caused_by: {cause}"));
+        source = cause.source();
+    }
+
+    detail
+}
+
 #[async_trait::async_trait]
 impl EmailClient for AwsSesEmailClient {
     async fn health_check(&self) -> error_stack::Result<(), EmailError> {
@@ -94,7 +142,12 @@ impl EmailClient for AwsSesEmailClient {
             .email_identity(&self.sender_email)
             .send()
             .await
-            .change_context(EmailError::SendFailed)?;
+            .map_err(|err| {
+                let detail = describe_sdk_error(&err);
+                error_stack::Report::new(err).attach_printable(detail)
+            })
+            .change_context(EmailError::SendFailed)
+            .attach_printable_lazy(|| format!("sender_email={}", self.sender_email))?;
         Ok(())
     }
 
@@ -126,7 +179,12 @@ impl EmailClient for AwsSesEmailClient {
             .content(email_content)
             .send()
             .await
-            .change_context(EmailError::SendFailed)?;
+            .map_err(|err| {
+                let detail = describe_sdk_error(&err);
+                error_stack::Report::new(err).attach_printable(detail)
+            })
+            .change_context(EmailError::SendFailed)
+            .attach_printable_lazy(|| format!("sender_email={}", self.sender_email))?;
 
         Ok(())
     }
