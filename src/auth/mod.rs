@@ -60,27 +60,33 @@ pub struct JwtClaims {
 
 impl JwtClaims {
     /// Whether this session holds `permission`.
-    ///
-    /// A token naming no permissions predates the field, or comes from a caller that does not send
-    /// them yet. While `require_explicit_permissions` is off that is read as holding everything, so
-    /// a Decision Engine deployed ahead of Hyperswitch keeps working; turning the flag on inverts
-    /// it, once a caller that sends nothing is a bug rather than an old build.
     pub fn allows(&self, permission: &Permission, require_explicit_permissions: bool) -> bool {
-        match &self.perms {
-            Some(held) => held.contains(permission),
-            None => !require_explicit_permissions,
-        }
+        self.permissions(require_explicit_permissions)
+            .contains(permission)
     }
 
-    /// The permissions this session effectively holds, for describing it to the dashboard.
+    /// The permissions this session effectively holds — what the middleware enforces, and what
+    /// `/auth/me` reports, so the controls the dashboard offers and the requests it would be
+    /// refused on cannot disagree.
     ///
-    /// A session that named its own is reported verbatim, unknown entries included — a dashboard
+    /// A session that named its own is taken at its word, unknown entries included: a dashboard
     /// newer than this build may understand one that this build does not.
+    ///
+    /// Naming none is resolved by who issued the token. Decision Engine mints its own sessions
+    /// with an explicit list, so a standard or super-admin-view session without one predates that
+    /// and belongs to a user whose authority comes from Decision Engine rather than Hyperswitch —
+    /// it holds everything, and `require_explicit_permissions` does not apply. The flag governs
+    /// handed-over sessions, which is where a caller can omit permissions: while it is off they
+    /// hold everything, so a Decision Engine deployed ahead of a Hyperswitch that does not send
+    /// them keeps working, and turning it on inverts that once omitting them is a bug rather than
+    /// an old build.
     pub fn permissions(&self, require_explicit_permissions: bool) -> Vec<Permission> {
-        match (&self.perms, require_explicit_permissions) {
-            (Some(held), _) => held.clone(),
-            (None, true) => Vec::new(),
-            (None, false) => KNOWN_PERMISSIONS.to_vec(),
+        match &self.perms {
+            Some(held) => held.clone(),
+            None if require_explicit_permissions && self.token_type == TOKEN_TYPE_HS_REDIRECT => {
+                Vec::new()
+            }
+            None => KNOWN_PERMISSIONS.to_vec(),
         }
     }
 }
@@ -170,7 +176,9 @@ pub fn generate_jwt(
         role,
         token_type,
         None,
-        None,
+        // Named rather than left absent, so enabling `require_explicit_permissions` — which is
+        // about Hyperswitch callers — cannot strand a session Decision Engine issued itself.
+        Some(KNOWN_PERMISSIONS),
         secret,
         expiry_seconds,
     )
@@ -447,13 +455,15 @@ mod tests {
     }
 
     #[test]
-    fn a_session_naming_no_permissions_follows_the_rollout_flag() {
-        let token = generate_jwt(
-            "user_1",
-            "a@b.com",
-            "merc_1",
+    fn a_handed_over_session_naming_no_permissions_follows_the_rollout_flag() {
+        let token = generate_scoped_jwt(
+            "hs_pro_1",
+            "",
+            "pro_1",
             "admin",
-            TOKEN_TYPE_STANDARD,
+            TOKEN_TYPE_HS_REDIRECT,
+            None,
+            None,
             TEST_SECRET,
             60,
         )
@@ -464,9 +474,61 @@ mod tests {
         assert!(claims.allows(&Permission::RoutingWrite, false));
         assert_eq!(claims.permissions(false), KNOWN_PERMISSIONS.to_vec());
 
-        // Phase two: once every caller sends them, silence grants nothing.
+        // Phase two: once every Hyperswitch sends them, silence grants nothing.
         assert!(!claims.allows(&Permission::RoutingWrite, true));
         assert!(claims.permissions(true).is_empty());
+    }
+
+    #[test]
+    fn the_rollout_flag_never_strands_a_session_decision_engine_issued() {
+        // The flag is about Hyperswitch callers. A dashboard user signing in to Decision Engine
+        // itself has no Hyperswitch in the picture, so turning it on must not lock them out —
+        // which is what would happen if these tokens were minted without a list.
+        for token_type in [TOKEN_TYPE_STANDARD, TOKEN_TYPE_SUPER_ADMIN_VIEW] {
+            let token = generate_jwt(
+                "user_1",
+                "a@b.com",
+                "merc_1",
+                "admin",
+                token_type,
+                TEST_SECRET,
+                60,
+            )
+            .expect("signs");
+            let claims = verify_jwt(&token, TEST_SECRET).expect("verifies");
+
+            // Named on the token, so the reading never depends on the flag at all.
+            assert_eq!(claims.perms.as_deref(), Some(KNOWN_PERMISSIONS));
+            for require_explicit in [false, true] {
+                assert!(
+                    claims.allows(&Permission::RoutingWrite, require_explicit),
+                    "{token_type} must keep write with require_explicit={require_explicit}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_decision_engine_session_predating_permissions_still_works() {
+        // Tokens already in a user's browser when this ships carry no list, and stay valid for the
+        // rest of their lifetime. Turning the flag on must not log them out mid-session.
+        let claims = JwtClaims {
+            sub: "user_1".to_string(),
+            user_id: "user_1".to_string(),
+            email: "a@b.com".to_string(),
+            merchant_id: "merc_1".to_string(),
+            role: "admin".to_string(),
+            token_type: TOKEN_TYPE_STANDARD.to_string(),
+            jti: "jti".to_string(),
+            exp: 0,
+            iat: 0,
+            grant: None,
+            perms: None,
+        };
+
+        for require_explicit in [false, true] {
+            assert!(claims.allows(&Permission::RoutingWrite, require_explicit));
+        }
     }
 
     #[test]

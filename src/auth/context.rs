@@ -11,8 +11,8 @@ pub struct AuthContext {
     pub user_id: Option<String>,
     pub email: Option<String>,
     pub role: Option<String>,
-    /// What this session may do. `None` means unrestricted — a service credential, or a caller that
-    /// names no permissions while the deployment still allows that.
+    /// What this session may do. `None` means unrestricted — a service credential, which has no
+    /// dashboard role to limit. A session carries the resolved list, never `None`.
     ///
     /// Checked in the authenticate middleware, so every route is covered at once rather than
     /// depending on each handler to remember. Handlers may consult it for finer decisions.
@@ -27,11 +27,9 @@ impl AuthContext {
             user_id: Some(claims.user_id.clone()),
             email: Some(claims.email.clone()),
             role: Some(claims.role.clone()),
-            permissions: if require_explicit_permissions {
-                Some(claims.perms.clone().unwrap_or_default())
-            } else {
-                claims.perms.clone()
-            },
+            // Resolved by the claims themselves rather than re-derived here, so the middleware
+            // enforces exactly what `/auth/me` reports.
+            permissions: Some(claims.permissions(require_explicit_permissions)),
         }
     }
 

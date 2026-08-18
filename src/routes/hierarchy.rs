@@ -487,9 +487,14 @@ async fn write_reverse_indexes(
 
 /// Appends the IDs `existing` does not already hold, preserving order so a re-sync of an unchanged
 /// tree writes back exactly what it read.
+///
+/// Membership is tracked in a set rather than scanned per candidate. The org index is the list that
+/// motivates it: it holds every org in the deployment, and a full-tree sync merges all of them into
+/// it at once, so a linear scan per ID would grow quadratically in the size of the estate.
 fn merge_ids<'a>(existing: &mut Vec<String>, incoming: impl Iterator<Item = &'a String>) {
+    let mut seen: HashSet<String> = existing.iter().cloned().collect();
     for id in incoming {
-        if !existing.contains(id) {
+        if seen.insert(id.clone()) {
             existing.push(id.clone());
         }
     }
