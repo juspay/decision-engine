@@ -53,6 +53,10 @@ Vas = "Vas"
 # JWT library API term
 encrypter = "encrypter"
 
+# Hyperswitch payment method value. Misspelled in Hyperswitch's API contract and allowlisted
+# there too, so spelling it correctly here would stop it matching what Hyperswitch sends.
+sepa_guarenteed_debit = "sepa_guarenteed_debit"
+
 [default.extend-words]
 # Project-specific terms that are valid
 incase = "incase"
