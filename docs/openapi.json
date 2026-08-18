@@ -3026,16 +3026,19 @@
                         "schema_version": 1,
                         "routing_mode": "pace_guarded",
                         "tolerance": "5pp",
+                        "metric": "gmv",
+                        "currency": {
+                          "denomination": "USD",
+                          "amount_units": "major"
+                        },
+                        "expected_daily_traffic": 800000,
+                        "forecast_interval_secs": 86400,
+                        "steering_interval_secs": 3600,
                         "volume_contracts": [
                           {
                             "id": "adyen_2026_lumpsum",
                             "connector": "adyen",
                             "status": "active",
-                            "metric": "gmv",
-                            "currency": {
-                              "denomination": "USD",
-                              "amount_units": "major"
-                            },
                             "billing_cycle": {
                               "type": "calendar_month",
                               "anchor": 1,
@@ -3056,9 +3059,6 @@
                           {
                             "id": "stripe_2026_tiered",
                             "connector": "stripe",
-                            "currency": {
-                              "denomination": "USD"
-                            },
                             "billing_cycle": {
                               "type": "calendar_month",
                               "anchor": 1,
@@ -3072,14 +3072,15 @@
                                   "rate": {
                                     "rebate_bps": 20
                                   },
-                                  "threshold": 800000000
+                                  "threshold": 8000000,
+                                  "targeted": true
                                 },
                                 {
                                   "kind": "retroactive",
                                   "rate": {
                                     "rebate_bps": 25
                                   },
-                                  "threshold": 1000000000,
+                                  "threshold": 10000000,
                                   "rebate_lag_days": 30,
                                   "rebate_settlement": "credit_note"
                                 }
@@ -5748,7 +5749,7 @@
             "example": "priority"
           },
           "data": {
-            "description": "Depends on type: array of ConnectorInfo ({gateway_name, gateway_id}) for `priority`, single ConnectorInfo for `single`, array of {split, connectors} for `volume_split`, Euclid AST Program for `advanced`, A/B experiment config for `ab_test`, VolumeContractConfig document for `volume_contract` (requires `algorithm_for: volume_commitment`; amounts are canonicalized to integer minor currency units and tolerance to basis points on write)."
+            "description": "Depends on type: array of ConnectorInfo ({gateway_name, gateway_id}) for `priority`, single ConnectorInfo for `single`, array of {split, connectors} for `volume_split`, Euclid AST Program for `advanced`, A/B experiment config for `ab_test`, VolumeContractConfig document for `volume_contract` (requires `algorithm_for: volume_commitment`). The document declares one metric (gmv|volume) and one currency; merchant-level fields expected_daily_traffic (required) and forecast/steering_interval_secs (optional overrides) sit beside the per-PSP contracts; a tiered contract marks exactly one retroactive tier `targeted: true`. Amounts are canonicalized to integer minor currency units and tolerance to basis points on write; no derived values are stored — goal/reward/period-end resolution is the consumer's job."
           }
         }
       },

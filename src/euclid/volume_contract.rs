@@ -13,12 +13,16 @@
 //! rejected by validation until the terms are finalized.
 //!
 //! # Canonical form
-//! Amounts are accepted as JSON integers or decimal strings, in the units declared by
-//! `currency.amount_units` (`major` or `minor`, default `minor`). [`canonicalize`] converts every
-//! amount to an integer in *minor* currency units (or a plain count for `metric: volume`) and
-//! rewrites `amount_units` to `minor` before the document is stored, so every future consumer
-//! reads exactly one representation. Tolerance is likewise accepted as `"5pp"` / `"550bps"` /
-//! plain basis points and stored as integer basis points.
+//! The document declares one `metric` (gmv or transaction count) and one `currency` — the
+//! consuming engine has no concept of currencies or mixed units, so `expected_daily_traffic`
+//! and every per-PSP goal must be comparable numbers. Amounts are accepted as JSON integers or
+//! decimal strings, in the units declared by `currency.amount_units` (`major` or `minor`,
+//! default `minor`). [`canonicalize`] converts every amount to an integer in *minor* currency
+//! units (or a plain count for `metric: volume`) and rewrites `amount_units` to `minor` before
+//! the document is stored, so every consumer reads exactly one representation. Tolerance is
+//! likewise accepted as `"5pp"` / `"550bps"` / plain basis points and stored as integer basis
+//! points. The DSL stores contract facts only — deriving goals/rewards from tiers, fractions
+//! from bps, or period-end dates from billing cycles is deliberately left to the consumer.
 //!
 //! # Schema evolution
 //! Documents carry `schema_version`; writes accept only `SCHEMA_VERSION_MIN..=SCHEMA_VERSION_MAX`.
@@ -46,6 +50,8 @@ const MAX_TIERS: usize = 20;
 const MAX_TOLERANCE_BPS: u16 = 2000;
 const MAX_RATE_BPS: u32 = 10_000;
 const MAX_REBATE_LAG_DAYS: u16 = 365;
+const MIN_INTERVAL_SECS: u32 = 60;
+const MAX_INTERVAL_SECS: u32 = 604_800; // one week
 
 // ── Document root ─────────────────────────────────────────────────────────────
 
@@ -59,6 +65,23 @@ pub struct VolumeContractConfig {
     /// `"500bps"` on input; stored as basis points.
     #[serde(alias = "tolerance")]
     pub tolerance_bps: ToleranceBps,
+    /// What every amount in this document counts — money processed or transactions. One metric
+    /// per merchant: the consumer compares `expected_daily_traffic` against per-PSP goals, so
+    /// they must all be in the same unit.
+    #[serde(default)]
+    pub metric: CommitmentMetric,
+    /// The single currency every amount in this document is denominated in (informational for
+    /// `metric: volume`, where amounts are plain counts).
+    pub currency: CurrencySpec,
+    /// Expected total volume per day across all PSPs, in the document's metric/currency unit.
+    /// Seeds the consumer's day-0 pace forecast.
+    pub expected_daily_traffic: Amount,
+    /// Per-merchant override of the forecast cadence; omit to use the engine's global default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub forecast_interval_secs: Option<u32>,
+    /// Per-merchant override of the steering cadence; omit to use the engine's global default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steering_interval_secs: Option<u32>,
     pub volume_contracts: Vec<VolumeContract>,
 }
 
@@ -88,9 +111,6 @@ pub struct VolumeContract {
     pub connector: String,
     #[serde(default)]
     pub status: ContractStatus,
-    #[serde(default)]
-    pub metric: CommitmentMetric,
-    pub currency: CurrencySpec,
     pub billing_cycle: BillingCycle,
     /// Archetype discriminator plus the matching terms block, adjacently tagged and flattened —
     /// the archetype↔block pairing is enforced by the type system, not by validation.
@@ -106,8 +126,6 @@ const VOLUME_CONTRACT_KEYS: &[&str] = &[
     "id",
     "connector",
     "status",
-    "metric",
-    "currency",
     "billing_cycle",
     "archetype",
     "terms",
@@ -120,9 +138,6 @@ struct VolumeContractDe {
     connector: String,
     #[serde(default)]
     status: ContractStatus,
-    #[serde(default)]
-    metric: CommitmentMetric,
-    currency: CurrencySpec,
     billing_cycle: BillingCycle,
     #[serde(flatten)]
     terms: ContractTerms,
@@ -144,8 +159,6 @@ impl<'de> Deserialize<'de> for VolumeContract {
             id: de.id,
             connector: de.connector,
             status: de.status,
-            metric: de.metric,
-            currency: de.currency,
             billing_cycle: de.billing_cycle,
             terms: de.terms,
             scope: de.scope,
@@ -326,6 +339,11 @@ pub struct Tier {
     #[serde(flatten)]
     pub rate: TierRate,
     pub threshold: Amount,
+    /// The tier the merchant is steering for. Exactly one tier per contract must carry this
+    /// (validated); the consumer reads that tier's threshold as the PSP's goal and its rebate as
+    /// the reward, without interpreting the rest of the ladder.
+    #[serde(default)]
+    pub targeted: bool,
     /// Days after cycle close until the reward lands.
     #[serde(default)]
     pub rebate_lag_days: u16,
@@ -337,6 +355,7 @@ const TIER_KEYS: &[&str] = &[
     "kind",
     "rate",
     "threshold",
+    "targeted",
     "rebate_lag_days",
     "rebate_settlement",
 ];
@@ -346,6 +365,8 @@ struct TierDe {
     #[serde(flatten)]
     rate: TierRate,
     threshold: Amount,
+    #[serde(default)]
+    targeted: bool,
     #[serde(default)]
     rebate_lag_days: u16,
     #[serde(default)]
@@ -365,6 +386,7 @@ impl<'de> Deserialize<'de> for Tier {
         Ok(Self {
             rate: de.rate,
             threshold: de.threshold,
+            targeted: de.targeted,
             rebate_lag_days: de.rebate_lag_days,
             rebate_settlement: de.rebate_settlement,
         })
@@ -482,20 +504,32 @@ pub fn minor_unit_exponent(currency: &Currency) -> u32 {
 
 /// Rewrites every amount in the document to its canonical integer form — minor currency units
 /// for `metric: gmv`, a plain count for `metric: volume` — and sets `amount_units` to `minor`.
-/// Runs before validation on both create and update; a document is never stored un-canonicalized.
+/// The document declares one metric and one currency, so a single unit applies everywhere,
+/// `expected_daily_traffic` included. Runs before validation on both create and update; a
+/// document is never stored un-canonicalized.
 pub fn canonicalize(config: &mut VolumeContractConfig) -> Result<(), Vec<ValidationErrorDetails>> {
     let mut errors = Vec::new();
+
+    // For transaction counts the currency exponent is meaningless: treat every amount as an
+    // already-minor integer and reject fractions.
+    let exponent = match config.metric {
+        CommitmentMetric::Gmv => minor_unit_exponent(&config.currency.denomination),
+        CommitmentMetric::Volume => 0,
+    };
+    let units = match config.metric {
+        CommitmentMetric::Gmv => config.currency.amount_units,
+        CommitmentMetric::Volume => AmountUnits::Minor,
+    };
+
+    canonicalize_amount(
+        &mut config.expected_daily_traffic,
+        units,
+        exponent,
+        "expected_daily_traffic",
+        &mut errors,
+    );
+
     for (idx, contract) in config.volume_contracts.iter_mut().enumerate() {
-        // For transaction counts the currency exponent is meaningless: treat every amount as an
-        // already-minor integer and reject fractions.
-        let exponent = match contract.metric {
-            CommitmentMetric::Gmv => minor_unit_exponent(&contract.currency.denomination),
-            CommitmentMetric::Volume => 0,
-        };
-        let units = match contract.metric {
-            CommitmentMetric::Gmv => contract.currency.amount_units,
-            CommitmentMetric::Volume => AmountUnits::Minor,
-        };
         let path = |field: &str| format!("volume_contracts[{idx}].{field}");
 
         match &mut contract.terms {
@@ -543,8 +577,8 @@ pub fn canonicalize(config: &mut VolumeContractConfig) -> Result<(), Vec<Validat
                 }
             }
         }
-        contract.currency.amount_units = AmountUnits::Minor;
     }
+    config.currency.amount_units = AmountUnits::Minor;
     if errors.is_empty() {
         Ok(())
     } else {
@@ -686,6 +720,29 @@ pub fn validate_volume_contract_config(
         ));
     }
 
+    validate_positive_amount(
+        &config.expected_daily_traffic,
+        "expected_daily_traffic",
+        &mut errors,
+    );
+
+    for (field, interval) in [
+        ("forecast_interval_secs", config.forecast_interval_secs),
+        ("steering_interval_secs", config.steering_interval_secs),
+    ] {
+        if let Some(secs) = interval {
+            if !(MIN_INTERVAL_SECS..=MAX_INTERVAL_SECS).contains(&secs) {
+                errors.push(ValidationErrorDetails::new(
+                    field,
+                    "out_of_range",
+                    format!(
+                        "{field} must be within {MIN_INTERVAL_SECS}..={MAX_INTERVAL_SECS} seconds"
+                    ),
+                ));
+            }
+        }
+    }
+
     if config.volume_contracts.is_empty() {
         errors.push(ValidationErrorDetails::new(
             "volume_contracts",
@@ -701,7 +758,7 @@ pub fn validate_volume_contract_config(
     }
 
     let mut seen_ids = std::collections::HashSet::new();
-    let mut seen_active_connector_metric = std::collections::HashSet::new();
+    let mut seen_active_connectors = std::collections::HashSet::new();
 
     for (idx, contract) in config.volume_contracts.iter().enumerate() {
         let path = |field: &str| format!("volume_contracts[{idx}].{field}");
@@ -735,17 +792,17 @@ pub fn validate_volume_contract_config(
             ));
         }
 
-        // Two active contracts on the same connector for the same metric would compete for the
-        // same traffic; a GMV and a txn-count contract with the same PSP are legitimate.
+        // Two active contracts on the same connector would compete for the same traffic — the
+        // document has one metric, so there is one commitment per PSP.
         if contract.status == ContractStatus::Active
-            && !seen_active_connector_metric.insert((contract.connector.clone(), contract.metric))
+            && !seen_active_connectors.insert(contract.connector.clone())
         {
             errors.push(ValidationErrorDetails::new(
                 path("connector"),
                 "duplicate",
                 format!(
-                    "more than one active contract for connector '{}' with metric '{}'",
-                    contract.connector, contract.metric
+                    "more than one active contract for connector '{}'",
+                    contract.connector
                 ),
             ));
         }
@@ -828,6 +885,17 @@ fn validate_terms(terms: &ContractTerms, path: &str, errors: &mut Vec<Validation
                     format!("at most {MAX_TIERS} tiers are supported"),
                 ));
             }
+            // The consumer takes one (goal, reward) per PSP: exactly one tier is the target.
+            // A marginal tier cannot be the target — its rate applies only above the
+            // threshold, so "reward at the goal" would be zero.
+            let targeted = tiered.tiers.iter().filter(|t| t.targeted).count();
+            if targeted != 1 {
+                errors.push(ValidationErrorDetails::new(
+                    format!("{path}.tiers"),
+                    "invalid_target",
+                    format!("exactly one tier must set targeted: true (found {targeted})"),
+                ));
+            }
             let mut prev_threshold: Option<u64> = None;
             for (idx, tier) in tiered.tiers.iter().enumerate() {
                 let tier_path = format!("{path}.tiers[{idx}]");
@@ -847,6 +915,13 @@ fn validate_terms(terms: &ContractTerms, path: &str, errors: &mut Vec<Validation
                     }
                 }
                 prev_threshold = tier.threshold.as_canonical().or(prev_threshold);
+                if tier.targeted && matches!(tier.rate, TierRate::Marginal(_)) {
+                    errors.push(ValidationErrorDetails::new(
+                        format!("{tier_path}.targeted"),
+                        "invalid_target",
+                        "the targeted tier must be 'retroactive'",
+                    ));
+                }
                 let rate_bps = match &tier.rate {
                     TierRate::Retroactive(rate) => rate.rebate_bps,
                     TierRate::Marginal(rate) => rate.rate_bps,
@@ -920,10 +995,11 @@ mod tests {
         serde_json::json!({
             "routing_mode": "pace_guarded",
             "tolerance_bps": 500,
+            "currency": { "denomination": "USD" },
+            "expected_daily_traffic": 80000000u64,
             "volume_contracts": [{
                 "id": "adyen_2026_lumpsum",
                 "connector": "adyen",
-                "currency": { "denomination": "USD" },
                 "billing_cycle": { "type": "calendar_month", "anchor": 1, "timezone": "America/New_York" },
                 "archetype": "lumpsum",
                 "terms": { "target": 600000000u64, "reward": { "kind": "flat", "value": { "flat_amount": 1500000u64 } } }
@@ -943,10 +1019,12 @@ mod tests {
     fn defaults_are_applied_and_round_trip() {
         let config = parse_ok(lumpsum_doc());
         assert_eq!(config.schema_version, SCHEMA_VERSION_MAX);
+        assert_eq!(config.metric, CommitmentMetric::Gmv);
+        assert_eq!(config.currency.amount_units, AmountUnits::Minor);
+        assert_eq!(config.forecast_interval_secs, None);
+        assert_eq!(config.steering_interval_secs, None);
         let contract = &config.volume_contracts[0];
         assert_eq!(contract.status, ContractStatus::Active);
-        assert_eq!(contract.metric, CommitmentMetric::Gmv);
-        assert_eq!(contract.currency.amount_units, AmountUnits::Minor);
         assert_eq!(contract.billing_cycle.proration, Proration::FullPeriod);
         assert!(contract.scope.is_none());
 
@@ -960,7 +1038,7 @@ mod tests {
         doc["volume_contracts"][0]["archetype"] = "tiered".into();
         doc["volume_contracts"][0]["terms"] = serde_json::json!({
             "tiers": [
-                { "kind": "retroactive", "rate": { "rebate_bps": 20 }, "threshold": 800000000u64 },
+                { "kind": "retroactive", "rate": { "rebate_bps": 20 }, "threshold": 800000000u64, "targeted": true },
                 { "kind": "marginal", "rate": { "rate_bps": 60 }, "threshold": 1000000000u64,
                   "rebate_lag_days": 30, "rebate_settlement": "credit_note" }
             ]
@@ -970,6 +1048,8 @@ mod tests {
             panic!("expected tiered terms");
         };
         assert_eq!(tiered.tiers.len(), 2);
+        assert!(tiered.tiers[0].targeted);
+        assert!(!tiered.tiers[1].targeted);
         assert_eq!(tiered.tiers[0].rebate_lag_days, 0);
         assert_eq!(tiered.tiers[0].rebate_settlement, RebateSettlement::Cash);
         assert_eq!(
@@ -1063,14 +1143,15 @@ mod tests {
     #[test]
     fn canonicalize_converts_major_and_decimal_amounts() {
         let mut doc = lumpsum_doc();
-        doc["volume_contracts"][0]["currency"]["amount_units"] = "major".into();
+        doc["currency"]["amount_units"] = "major".into();
+        doc["expected_daily_traffic"] = 800000u64.into();
         doc["volume_contracts"][0]["terms"]["target"] = 6000000u64.into();
         doc["volume_contracts"][0]["terms"]["reward"]["value"]["flat_amount"] = "15000.50".into();
         let mut config = parse_ok(doc);
         canonicalize(&mut config).expect("canonicalization should succeed");
-        let contract = &config.volume_contracts[0];
-        assert_eq!(contract.currency.amount_units, AmountUnits::Minor);
-        let ContractTerms::Lumpsum(flat) = &contract.terms else {
+        assert_eq!(config.currency.amount_units, AmountUnits::Minor);
+        assert_eq!(config.expected_daily_traffic, Amount::Int(80000000));
+        let ContractTerms::Lumpsum(flat) = &config.volume_contracts[0].terms else {
             panic!()
         };
         assert_eq!(flat.target, Amount::Int(600000000));
@@ -1084,8 +1165,7 @@ mod tests {
     fn canonicalize_respects_currency_exponent() {
         // JPY: zero-decimal — major and minor coincide.
         let mut doc = lumpsum_doc();
-        doc["volume_contracts"][0]["currency"] =
-            serde_json::json!({ "denomination": "JPY", "amount_units": "major" });
+        doc["currency"] = serde_json::json!({ "denomination": "JPY", "amount_units": "major" });
         doc["volume_contracts"][0]["terms"]["target"] = 1000u64.into();
         let mut config = parse_ok(doc);
         canonicalize(&mut config).unwrap();
@@ -1096,8 +1176,7 @@ mod tests {
 
         // BHD: three-decimal.
         let mut doc = lumpsum_doc();
-        doc["volume_contracts"][0]["currency"] =
-            serde_json::json!({ "denomination": "BHD", "amount_units": "major" });
+        doc["currency"] = serde_json::json!({ "denomination": "BHD", "amount_units": "major" });
         doc["volume_contracts"][0]["terms"]["target"] = "1.234".into();
         let mut config = parse_ok(doc);
         canonicalize(&mut config).unwrap();
@@ -1117,7 +1196,7 @@ mod tests {
 
         // Too many decimal places for the currency.
         let mut doc = lumpsum_doc();
-        doc["volume_contracts"][0]["currency"]["amount_units"] = "major".into();
+        doc["currency"]["amount_units"] = "major".into();
         doc["volume_contracts"][0]["terms"]["target"] = "1.001".into();
         let mut config = parse_ok(doc);
         assert!(canonicalize(&mut config).is_err());
@@ -1130,7 +1209,7 @@ mod tests {
 
         // Fractional transaction count.
         let mut doc = lumpsum_doc();
-        doc["volume_contracts"][0]["metric"] = "volume".into();
+        doc["metric"] = "volume".into();
         doc["volume_contracts"][0]["terms"]["target"] = "10.5".into();
         let mut config = parse_ok(doc);
         assert!(canonicalize(&mut config).is_err());
@@ -1175,21 +1254,25 @@ mod tests {
         config.volume_contracts.push(dup);
         assert_single_error(&config, "duplicate", "id");
 
-        // Two active contracts on the same (connector, metric).
+        // Two active contracts on the same connector.
         let mut config = parse_ok(lumpsum_doc());
         let mut dup = config.volume_contracts[0].clone();
         dup.id = "another".into();
         config.volume_contracts.push(dup);
         assert_single_error(&config, "duplicate", "connector");
 
-        // ...but the same connector with a different metric is fine.
+        // Zero expected traffic.
         let mut config = parse_ok(lumpsum_doc());
-        let mut dup = config.volume_contracts[0].clone();
-        dup.id = "another".into();
-        dup.metric = CommitmentMetric::Volume;
-        config.volume_contracts.push(dup);
-        canonicalize(&mut config).unwrap();
-        assert!(validate_volume_contract_config(&config).is_empty());
+        config.expected_daily_traffic = Amount::Int(0);
+        assert_single_error(&config, "out_of_range", "expected_daily_traffic");
+
+        // Interval overrides must be sane.
+        let mut config = parse_ok(lumpsum_doc());
+        config.forecast_interval_secs = Some(1);
+        assert_single_error(&config, "out_of_range", "forecast_interval_secs");
+        let mut config = parse_ok(lumpsum_doc());
+        config.steering_interval_secs = Some(10_000_000);
+        assert_single_error(&config, "out_of_range", "steering_interval_secs");
 
         // Bad id / connector.
         let mut config = parse_ok(lumpsum_doc());
@@ -1232,13 +1315,55 @@ mod tests {
         doc["volume_contracts"][0]["archetype"] = "tiered".into();
         doc["volume_contracts"][0]["terms"] = serde_json::json!({
             "tiers": [
-                { "kind": "retroactive", "rate": { "rebate_bps": 20 }, "threshold": 1000u64 },
+                { "kind": "retroactive", "rate": { "rebate_bps": 20 }, "threshold": 1000u64, "targeted": true },
                 { "kind": "retroactive", "rate": { "rebate_bps": 25 }, "threshold": 1000u64 }
             ]
         });
         let mut config = parse_ok(doc);
         canonicalize(&mut config).unwrap();
         assert_single_error(&config, "not_increasing", "threshold");
+    }
+
+    #[test]
+    fn exactly_one_retroactive_tier_must_be_targeted() {
+        let tiered_doc = |tiers: serde_json::Value| {
+            let mut doc = lumpsum_doc();
+            doc["volume_contracts"][0]["archetype"] = "tiered".into();
+            doc["volume_contracts"][0]["terms"] = serde_json::json!({ "tiers": tiers });
+            let mut config = parse_ok(doc);
+            canonicalize(&mut config).unwrap();
+            config
+        };
+
+        // No targeted tier.
+        let config = tiered_doc(serde_json::json!([
+            { "kind": "retroactive", "rate": { "rebate_bps": 20 }, "threshold": 1000u64 }
+        ]));
+        assert_single_error(&config, "invalid_target", "tiers");
+
+        // More than one targeted tier.
+        let config = tiered_doc(serde_json::json!([
+            { "kind": "retroactive", "rate": { "rebate_bps": 20 }, "threshold": 1000u64, "targeted": true },
+            { "kind": "retroactive", "rate": { "rebate_bps": 25 }, "threshold": 2000u64, "targeted": true }
+        ]));
+        assert_single_error(&config, "invalid_target", "tiers");
+
+        // A marginal tier cannot be the target.
+        let config = tiered_doc(serde_json::json!([
+            { "kind": "marginal", "rate": { "rate_bps": 60 }, "threshold": 1000u64, "targeted": true }
+        ]));
+        assert_single_error(&config, "invalid_target", "targeted");
+
+        // One retroactive target passes.
+        let config = tiered_doc(serde_json::json!([
+            { "kind": "retroactive", "rate": { "rebate_bps": 20 }, "threshold": 1000u64, "targeted": true },
+            { "kind": "marginal", "rate": { "rate_bps": 60 }, "threshold": 2000u64 }
+        ]));
+        assert!(
+            validate_volume_contract_config(&config).is_empty(),
+            "errors: {:?}",
+            validate_volume_contract_config(&config)
+        );
     }
 
     #[test]

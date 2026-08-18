@@ -1169,10 +1169,11 @@ mod tests {
                 "data": {
                     "routing_mode": "pace_guarded",
                     "tolerance": "5pp",
+                    "currency": { "denomination": "USD" },
+                    "expected_daily_traffic": 80000000u64,
                     "volume_contracts": [{
                         "id": "adyen_2026_lumpsum",
                         "connector": "adyen",
-                        "currency": { "denomination": "USD" },
                         "billing_cycle": { "type": "calendar_month", "anchor": 1, "timezone": "America/New_York" },
                         "archetype": "lumpsum",
                         "terms": { "target": 600000000u64, "reward": { "kind": "flat", "value": { "flat_amount": 1500000u64 } } }

@@ -13,14 +13,17 @@ import { test, expect, factory } from '../../fixtures/test'
  */
 
 function volumeContractPayload(createdBy: string, overrides: Record<string, any> = {}) {
+  // Amounts below are in MAJOR units ($6M target, $800k/day traffic); the server stores them
+  // canonicalized to minor units. One metric + one currency per document, per the engine model.
   const data = {
     routing_mode: 'pace_guarded',
     tolerance: '5pp',
+    currency: { denomination: 'USD', amount_units: 'major' },
+    expected_daily_traffic: 800_000,
     volume_contracts: [
       {
         id: 'adyen_lumpsum',
         connector: 'adyen',
-        currency: { denomination: 'USD', amount_units: 'major' },
         billing_cycle: { type: 'calendar_month', anchor: 1, timezone: 'America/New_York' },
         archetype: 'lumpsum',
         terms: { target: 6_000_000, reward: { kind: 'flat', value: { flat_amount: 15_000 } } },
@@ -28,16 +31,15 @@ function volumeContractPayload(createdBy: string, overrides: Record<string, any>
       {
         id: 'stripe_tiered',
         connector: 'stripe',
-        currency: { denomination: 'USD' },
         billing_cycle: { type: 'calendar_month', anchor: 1, timezone: 'UTC' },
         archetype: 'tiered',
         terms: {
           tiers: [
-            { kind: 'retroactive', rate: { rebate_bps: 20 }, threshold: 800_000_000 },
+            { kind: 'retroactive', rate: { rebate_bps: 20 }, threshold: 8_000_000, targeted: true },
             {
               kind: 'retroactive',
               rate: { rebate_bps: 25 },
-              threshold: 1_000_000_000,
+              threshold: 10_000_000,
               rebate_lag_days: 30,
               rebate_settlement: 'credit_note',
             },
@@ -75,16 +77,20 @@ test.describe('Volume contracts (API)', () => {
     expect(doc.algorithm_data.type).toBe('volume_contract')
 
     const stored = doc.algorithm_data.data
-    // "5pp" tolerance and $6M/$15k major-unit amounts are canonicalized on write.
+    // "5pp" tolerance and major-unit amounts are canonicalized on write.
     expect(stored.tolerance_bps).toBe(500)
     expect(stored.schema_version).toBe(1)
+    expect(stored.currency.amount_units).toBe('minor')
+    expect(stored.metric).toBe('gmv')
+    expect(stored.expected_daily_traffic).toBe(80_000_000)
     const lumpsum = stored.volume_contracts.find((c: any) => c.id === 'adyen_lumpsum')
-    expect(lumpsum.currency.amount_units).toBe('minor')
     expect(lumpsum.terms.target).toBe(600_000_000)
     expect(lumpsum.terms.reward.value.flat_amount).toBe(1_500_000)
+    const tiered = stored.volume_contracts.find((c: any) => c.id === 'stripe_tiered')
+    expect(tiered.terms.tiers[0].targeted).toBe(true)
+    expect(tiered.terms.tiers[0].threshold).toBe(800_000_000)
     // Defaults materialize in the stored document.
     expect(lumpsum.status).toBe('active')
-    expect(lumpsum.metric).toBe('gmv')
     expect(lumpsum.billing_cycle.proration).toBe('full_period')
   })
 
@@ -108,10 +114,9 @@ test.describe('Volume contracts (API)', () => {
       {
         id: 'wp_floor',
         connector: 'worldpay',
-        currency: { denomination: 'USD' },
         billing_cycle: { type: 'calendar_month', anchor: 1, timezone: 'UTC' },
         archetype: 'min_commitment',
-        terms: { floor: 600_000_000, reward: { kind: 'flat', value: { flat_amount: 12_000_000 } } },
+        terms: { floor: 6_000_000, reward: { kind: 'flat', value: { flat_amount: 120_000 } } },
       },
     ]
     const gated = await createContract(api, minCommitment)
@@ -120,9 +125,21 @@ test.describe('Volume contracts (API)', () => {
 
     // Tier thresholds must strictly increase.
     const badTiers = volumeContractPayload(m)
-    badTiers.algorithm.data.volume_contracts[1].terms.tiers[1].threshold = 800_000_000
+    badTiers.algorithm.data.volume_contracts[1].terms.tiers[1].threshold = 8_000_000
     const tiers = await createContract(api, badTiers)
     expect(tiers.status).toBe(400)
+
+    // Exactly one tier must be targeted — the consumer reads one (goal, reward) per PSP.
+    const noTarget = volumeContractPayload(m)
+    delete (noTarget.algorithm.data.volume_contracts[1].terms.tiers[0] as any).targeted
+    const untargeted = await createContract(api, noTarget)
+    expect(untargeted.status).toBe(400)
+
+    // Missing merchant-level traffic figure.
+    const noTraffic = volumeContractPayload(m)
+    delete (noTraffic.algorithm.data as any).expected_daily_traffic
+    const traffic = await createContract(api, noTraffic)
+    expect(traffic.status).toBe(400)
 
     // Unknown fields are rejected, not silently dropped.
     const typo = volumeContractPayload(m)
