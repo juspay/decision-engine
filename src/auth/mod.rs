@@ -1,3 +1,4 @@
+pub mod access;
 pub mod context;
 
 use error_stack::{Report, ResultExt};
@@ -46,6 +47,104 @@ pub struct JwtClaims {
     pub jti: String,
     pub exp: u64,
     pub iat: u64,
+    /// How far a handed-over session may move within the Hyperswitch tree. Absent on standard
+    /// sessions, which are scoped by DE membership instead, and on handoff tokens minted before
+    /// grants existed — both read as covering `merchant_id` alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grant: Option<crate::types::merchant::hierarchy::ScopeGrant>,
+    /// What this session may do. Absent on tokens minted before permissions existed and on callers
+    /// that do not send them; [`JwtClaims::permissions`] decides what that means.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub perms: Option<Vec<Permission>>,
+}
+
+impl JwtClaims {
+    /// Whether this session holds `permission`.
+    ///
+    /// A token naming no permissions predates the field, or comes from a caller that does not send
+    /// them yet. While `require_explicit_permissions` is off that is read as holding everything, so
+    /// a Decision Engine deployed ahead of Hyperswitch keeps working; turning the flag on inverts
+    /// it, once a caller that sends nothing is a bug rather than an old build.
+    pub fn allows(&self, permission: &Permission, require_explicit_permissions: bool) -> bool {
+        match &self.perms {
+            Some(held) => held.contains(permission),
+            None => !require_explicit_permissions,
+        }
+    }
+
+    /// The permissions this session effectively holds, for describing it to the dashboard.
+    ///
+    /// A session that named its own is reported verbatim, unknown entries included — a dashboard
+    /// newer than this build may understand one that this build does not.
+    pub fn permissions(&self, require_explicit_permissions: bool) -> Vec<Permission> {
+        match (&self.perms, require_explicit_permissions) {
+            (Some(held), _) => held.clone(),
+            (None, true) => Vec::new(),
+            (None, false) => KNOWN_PERMISSIONS.to_vec(),
+        }
+    }
+}
+
+/// One thing a session is allowed to do.
+///
+/// Orthogonal to `ScopeGrant`, which decides *which* scopes a session can reach: the grant comes
+/// from the user's place in the tree, permissions from what their role lets them do there. A
+/// session can hold read over a whole org, or read and write over a single profile.
+///
+/// Grows by adding a variant here and pointing the routes that need it at the new value in
+/// [`access::required_permission`] — nothing in the token, the middleware, or the dashboard
+/// contract changes shape when a new one appears.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum Permission {
+    RoutingRead,
+    RoutingWrite,
+    /// A permission this build has never heard of, kept verbatim.
+    ///
+    /// A newer Hyperswitch may grant permissions added after this Decision Engine was built. Failing
+    /// the token over one would log the user out of a dashboard they are entitled to — over a
+    /// permission they may not even need. Kept as it arrived, it matches none of the variants above,
+    /// so it denies rather than grants, and it survives being re-signed when a session switches
+    /// scope, instead of being quietly dropped on the way through.
+    Unknown(String),
+}
+
+/// Every permission this build understands. A session naming none is described with these.
+pub static KNOWN_PERMISSIONS: &[Permission] = &[Permission::RoutingRead, Permission::RoutingWrite];
+
+impl Permission {
+    /// The wire spelling, which is what Hyperswitch sends and what the token carries. Namespaced by
+    /// area so a later permission over something other than routing reads naturally.
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::RoutingRead => "routing:read",
+            Self::RoutingWrite => "routing:write",
+            Self::Unknown(raw) => raw,
+        }
+    }
+}
+
+impl From<&str> for Permission {
+    fn from(raw: &str) -> Self {
+        match raw {
+            "routing:read" => Self::RoutingRead,
+            "routing:write" => Self::RoutingWrite,
+            other => Self::Unknown(other.to_owned()),
+        }
+    }
+}
+
+// Written by hand rather than derived: the wire form is a flat string, and an unrecognised one has
+// to land in `Unknown` instead of failing the token.
+impl serde::Serialize for Permission {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+impl<'de> serde::Deserialize<'de> for Permission {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        Ok(Self::from(String::deserialize(deserializer)?.as_str()))
+    }
 }
 
 pub const TOKEN_TYPE_STANDARD: &str = "standard";
@@ -61,6 +160,33 @@ pub fn generate_jwt(
     merchant_id: &str,
     role: &str,
     token_type: &str,
+    secret: &str,
+    expiry_seconds: u64,
+) -> Result<String, Report<AuthError>> {
+    generate_scoped_jwt(
+        user_id,
+        email,
+        merchant_id,
+        role,
+        token_type,
+        None,
+        None,
+        secret,
+        expiry_seconds,
+    )
+}
+
+/// As [`generate_jwt`], plus the Hyperswitch node a handed-over session may move within and what it
+/// may do there.
+#[allow(clippy::too_many_arguments)]
+pub fn generate_scoped_jwt(
+    user_id: &str,
+    email: &str,
+    merchant_id: &str,
+    role: &str,
+    token_type: &str,
+    grant: Option<&crate::types::merchant::hierarchy::ScopeGrant>,
+    perms: Option<&[Permission]>,
     secret: &str,
     expiry_seconds: u64,
 ) -> Result<String, Report<AuthError>> {
@@ -100,6 +226,22 @@ pub fn generate_jwt(
     payload
         .set_claim("jti", Some(serde_json::Value::String(jti)))
         .change_context(AuthError::JwtClaimError)?;
+    if let Some(grant) = grant {
+        payload
+            .set_claim(
+                "grant",
+                Some(serde_json::to_value(grant).change_context(AuthError::JwtClaimError)?),
+            )
+            .change_context(AuthError::JwtClaimError)?;
+    }
+    if let Some(perms) = perms {
+        payload
+            .set_claim(
+                "perms",
+                Some(serde_json::to_value(perms).change_context(AuthError::JwtClaimError)?),
+            )
+            .change_context(AuthError::JwtClaimError)?;
+    }
     payload
         .set_claim("iat", Some(serde_json::Value::Number(now.into())))
         .change_context(AuthError::JwtClaimError)?;
@@ -174,6 +316,16 @@ pub fn verify_jwt(token: &str, secret: &str) -> Result<JwtClaims, Report<AuthErr
         .and_then(|v| v.as_str())
         .unwrap_or(TOKEN_TYPE_STANDARD)
         .to_string();
+    // An unreadable grant reads as absent, which callers treat as covering `merchant_id` alone —
+    // the narrowest access, and the same as a token minted before grants existed.
+    let grant = payload
+        .claim("grant")
+        .and_then(|value| serde_json::from_value(value.clone()).ok());
+    // Unreadable permissions read as absent, resolved the same way as a caller that never sent
+    // any — so a malformed claim is never itself the reason a session gains something.
+    let perms = payload
+        .claim("perms")
+        .and_then(|value| serde_json::from_value(value.clone()).ok());
 
     Ok(JwtClaims {
         sub: user_id.clone(),
@@ -185,6 +337,8 @@ pub fn verify_jwt(token: &str, secret: &str) -> Result<JwtClaims, Report<AuthErr
         jti,
         exp,
         iat,
+        grant,
+        perms,
     })
 }
 
@@ -236,6 +390,176 @@ pub fn extract_key_prefix(key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use crate::types::merchant::hierarchy::{GrantLevel, ScopeGrant};
+
+    /// HS256 rejects keys under 32 bytes, so this is padded past that.
+    const TEST_SECRET: &str = "test-jwt-secret-padded-to-32-bytes-min";
+
+    #[test]
+    fn a_permission_this_build_does_not_know_survives_the_token() {
+        // The reason `Unknown` exists: a newer Hyperswitch grants something added after this build.
+        // Failing the token would log the user out over a permission they may not even need.
+        let perms = vec![Permission::RoutingRead, Permission::from("analytics:read")];
+        let token = generate_scoped_jwt(
+            "hs_pro_1",
+            "",
+            "pro_1",
+            "admin",
+            TOKEN_TYPE_HS_REDIRECT,
+            None,
+            Some(&perms),
+            TEST_SECRET,
+            60,
+        )
+        .expect("signs");
+
+        let claims = verify_jwt(&token, TEST_SECRET).expect("verifies");
+        assert_eq!(claims.perms, Some(perms));
+
+        // It grants nothing here, and does not become a write.
+        assert!(claims.allows(&Permission::RoutingRead, true));
+        assert!(!claims.allows(&Permission::RoutingWrite, true));
+    }
+
+    #[test]
+    fn a_read_only_session_does_not_hold_write() {
+        let perms = vec![Permission::RoutingRead];
+        let token = generate_scoped_jwt(
+            "hs_pro_1",
+            "",
+            "pro_1",
+            "admin",
+            TOKEN_TYPE_HS_REDIRECT,
+            None,
+            Some(&perms),
+            TEST_SECRET,
+            60,
+        )
+        .expect("signs");
+
+        let claims = verify_jwt(&token, TEST_SECRET).expect("verifies");
+        // Independent of the rollout flag: an explicit list is honoured either way.
+        for require_explicit in [false, true] {
+            assert!(claims.allows(&Permission::RoutingRead, require_explicit));
+            assert!(!claims.allows(&Permission::RoutingWrite, require_explicit));
+        }
+    }
+
+    #[test]
+    fn a_session_naming_no_permissions_follows_the_rollout_flag() {
+        let token = generate_jwt(
+            "user_1",
+            "a@b.com",
+            "merc_1",
+            "admin",
+            TOKEN_TYPE_STANDARD,
+            TEST_SECRET,
+            60,
+        )
+        .expect("signs");
+        let claims = verify_jwt(&token, TEST_SECRET).expect("verifies");
+
+        // Phase one: a Decision Engine ahead of Hyperswitch keeps working.
+        assert!(claims.allows(&Permission::RoutingWrite, false));
+        assert_eq!(claims.permissions(false), KNOWN_PERMISSIONS.to_vec());
+
+        // Phase two: once every caller sends them, silence grants nothing.
+        assert!(!claims.allows(&Permission::RoutingWrite, true));
+        assert!(claims.permissions(true).is_empty());
+    }
+
+    #[test]
+    fn permissions_travel_as_plain_strings() {
+        // Hyperswitch writes this list, so the wire form is part of the contract.
+        assert_eq!(
+            serde_json::to_string(&vec![Permission::RoutingRead, Permission::RoutingWrite])
+                .expect("serializes"),
+            r#"["routing:read","routing:write"]"#
+        );
+    }
+
+    #[test]
+    fn grant_round_trips_through_the_token() {
+        let grant = ScopeGrant {
+            level: GrantLevel::Org,
+            id: "org_abc".to_string(),
+        };
+        let token = generate_scoped_jwt(
+            "hs_pro_1",
+            "",
+            "pro_1",
+            "admin",
+            TOKEN_TYPE_HS_REDIRECT,
+            Some(&grant),
+            None,
+            TEST_SECRET,
+            60,
+        )
+        .expect("signs");
+
+        let claims = verify_jwt(&token, TEST_SECRET).expect("verifies");
+        assert_eq!(claims.grant, Some(grant));
+    }
+
+    #[test]
+    fn a_token_without_a_grant_still_verifies() {
+        // Every standard session, and every handoff minted before grants existed.
+        let token = generate_jwt(
+            "user_1",
+            "a@b.com",
+            "merc_1",
+            "admin",
+            TOKEN_TYPE_STANDARD,
+            TEST_SECRET,
+            60,
+        )
+        .expect("signs");
+
+        let claims = verify_jwt(&token, TEST_SECRET).expect("verifies");
+        assert_eq!(claims.grant, None);
+    }
+
+    #[test]
+    fn an_unreadable_grant_reads_as_absent() {
+        // Degrading to "no grant" narrows access to the token's own scope; failing the whole
+        // token would instead lock a live session out of the dashboard.
+        let mut payload = JwtPayload::new();
+        payload.set_subject("hs_pro_1");
+        for (claim, value) in [
+            ("user_id", "hs_pro_1"),
+            ("email", ""),
+            ("merchant_id", "pro_1"),
+            ("role", "admin"),
+            ("token_type", TOKEN_TYPE_HS_REDIRECT),
+            ("jti", "some-jti"),
+        ] {
+            payload
+                .set_claim(claim, Some(serde_json::Value::String(value.to_string())))
+                .expect("sets claim");
+        }
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_secs();
+        payload
+            .set_claim("iat", Some(serde_json::Value::Number(now.into())))
+            .expect("sets iat");
+        payload
+            .set_claim("exp", Some(serde_json::Value::Number((now + 60).into())))
+            .expect("sets exp");
+        payload
+            .set_claim("grant", Some(serde_json::json!({"level": "galaxy"})))
+            .expect("sets grant");
+
+        let signer = josekit::jws::HS256
+            .signer_from_bytes(TEST_SECRET.as_bytes())
+            .expect("signer");
+        let token = jwt::encode_with_signer(&payload, &JwsHeader::new(), &signer).expect("signs");
+
+        let claims = verify_jwt(&token, TEST_SECRET).expect("verifies");
+        assert_eq!(claims.grant, None);
+    }
 
     #[test]
     fn generated_key_has_correct_prefix() {

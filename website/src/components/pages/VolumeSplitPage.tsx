@@ -6,6 +6,7 @@ import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
+import { useCanEditRouting } from '../../store/authStore'
 import { apiPost } from '../../lib/api'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import { RoutingAlgorithm } from '../../types/api'
@@ -57,6 +58,8 @@ function withInferredSplit(entries: VolumeSplitGatewayFormEntry[]) {
 }
 
 export function VolumeSplitPage() {
+  // Read-only sessions still see everything; the controls that would change it are inert.
+  const canEditRouting = useCanEditRouting()
   const { merchantId } = useMerchantStore()
   const { mutate: mutateCache } = useSWRConfig()
 
@@ -255,7 +258,7 @@ export function VolumeSplitPage() {
                 {createdId ? <>Rule created: <span className="font-mono">{createdId}</span></> : success}
               </span>
               {createdId ? (
-                <Button type="button" size="sm" onClick={() => handleActivate(createdId)}>
+                <Button type="button" size="sm" onClick={() => handleActivate(createdId)} disabled={!canEditRouting}>
                   Activate Now
                 </Button>
               ) : null}
@@ -358,7 +361,7 @@ export function VolumeSplitPage() {
                 </div>
               </div>
 
-              <Button onClick={handleCreate} disabled={saving || !merchantId}>
+              <Button onClick={handleCreate} disabled={saving || !merchantId || !canEditRouting}>
                 {saving ? <><Spinner size={14} /> Creating…</> : 'Create Rule'}
               </Button>
             </CardBody>
@@ -387,6 +390,8 @@ function SavedRulesList({
   expandedRuleIds: Set<string>
   onToggleExpand: (id: string) => void
 }) {
+  // Read-only sessions still see everything; the controls that would change it are inert.
+  const canEditRouting = useCanEditRouting()
   const { data: rules, isLoading } = useSWR<RoutingAlgorithm[]>(
     merchantId ? ['routing-list', merchantId] : null,
     () => apiPost(`/routing/list/${merchantId}`)
@@ -475,6 +480,7 @@ function SavedRulesList({
                           <button
                             type="button"
                             onClick={() => onActivate(r.id)}
+                            disabled={!canEditRouting}
                             className="inline-flex min-w-[68px] items-center justify-center rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-500 transition-colors duration-150 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-600 dark:border-[#2a3040] dark:bg-[#1a1f2a] dark:text-[#8090a8] dark:hover:border-brand-800 dark:hover:bg-brand-900/20 dark:hover:text-brand-400"
                           >
                             Activate

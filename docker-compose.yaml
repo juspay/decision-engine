@@ -387,7 +387,9 @@ services:
   # SMTP:    localhost:1025  (no auth)
   # ==========================================
   mailpit:
-    image: axllent/mailpit:latest
+    # Pinned: on `latest`, an upstream release silently changes the API surface the oneclick
+    # health probe depends on, and bring-up fails on a machine that pulled a newer image.
+    image: axllent/mailpit:v1.30
     profiles:
       - postgres-ghcr
       - dashboard-postgres-ghcr

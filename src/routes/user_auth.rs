@@ -5,6 +5,7 @@ use crate::storage::types::{
     MerchantAccountNew, NewUser, NewUserMerchant, User, UserEmailVerifiedUpdate, UserMerchant,
     UserMerchantIdUpdate,
 };
+use crate::types::merchant::hierarchy::{self, GrantLevel, ScopeGrant};
 use crate::types::merchant::merchant_account::load_merchant_by_merchant_id;
 use crate::utils::date_time;
 use axum::extract::Query;
@@ -86,6 +87,14 @@ pub struct MeResponse {
     pub is_super_admin: bool,
     /// The current session is a super-admin viewing another merchant (drives the banner + Exit).
     pub is_super_admin_view: bool,
+    /// What this session may do. Drives which controls the dashboard offers — the middleware is
+    /// what actually refuses a request, so this is presentation, never the guard.
+    pub permissions: Vec<auth::Permission>,
+    /// Where `merchant_id` sits in the Hyperswitch account tree, when it came from one, so the
+    /// dashboard can show org → merchant → profile instead of a bare scope id. Absent for
+    /// DE-native merchants and for profiles that have not been synced.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hierarchy: Option<crate::types::merchant::hierarchy::Hierarchy>,
 }
 
 #[derive(Debug, Serialize)]
@@ -561,15 +570,23 @@ pub async fn switch_merchant(
 
     let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
 
-    // switch-merchant is membership-scoped and only valid for a full standard session. A
-    // super-admin-view session must Exit back to its own session before switching, so its
-    // single-level return token isn't overwritten.
-    if claims.token_type != TOKEN_TYPE_STANDARD {
-        return Err(error::ContainerError::from(
+    // A standard session moves within its DE memberships; a handed-over one moves within the
+    // Hyperswitch node it was granted. A super-admin-view session must Exit back to its own session
+    // before switching, so its single-level return token isn't overwritten.
+    match claims.token_type.as_str() {
+        TOKEN_TYPE_STANDARD => switch_within_memberships(claims, payload, &global_config).await,
+        TOKEN_TYPE_HS_REDIRECT => switch_within_grant(claims, payload, &global_config).await,
+        _ => Err(error::ContainerError::from(
             UserAuthError::UnsupportedOperation,
-        ));
+        )),
     }
+}
 
+async fn switch_within_memberships(
+    claims: auth::JwtClaims,
+    payload: SwitchMerchantRequest,
+    global_config: &crate::config::GlobalConfig,
+) -> Result<Json<AuthResponse>, error::ContainerError<UserAuthError>> {
     let app_state = get_tenant_app_state().await;
 
     let merchants = fetch_user_merchants(&app_state, &claims.user_id).await?;
@@ -597,6 +614,60 @@ pub async fn switch_merchant(
         role: target.role.clone(),
         merchants,
     }))
+}
+
+/// Moves a handed-over session to another scope under the node Hyperswitch granted it.
+async fn switch_within_grant(
+    claims: auth::JwtClaims,
+    payload: SwitchMerchantRequest,
+    global_config: &crate::config::GlobalConfig,
+) -> Result<Json<AuthResponse>, error::ContainerError<UserAuthError>> {
+    let grant = grant_of(&claims);
+
+    // Re-resolved against the tree on every switch rather than trusted from the token, so a scope
+    // moved out from under the granted node stops being reachable at the next attempt.
+    if !hierarchy::grant_covers(&grant, &payload.merchant_id).await {
+        return Err(error::ContainerError::from(UserAuthError::Forbidden));
+    }
+
+    // Carry the original expiry instead of restarting the clock, so switching cannot extend a
+    // handed-over session past the lifetime Hyperswitch gave it. The token verified above, so this
+    // is always positive.
+    let remaining = claims.exp.saturating_sub(unix_now());
+
+    let new_token = auth::generate_scoped_jwt(
+        &claims.user_id,
+        &claims.email,
+        &payload.merchant_id,
+        &claims.role,
+        TOKEN_TYPE_HS_REDIRECT,
+        Some(&grant),
+        // Carried forward, so a limited session cannot switch its way into more.
+        claims.perms.as_deref(),
+        global_config.user_auth.jwt_secret.peek(),
+        remaining,
+    )
+    .change_context(UserAuthError::TokenGenerationFailed)?;
+
+    let merchants = granted_merchants(&grant, &claims.role).await;
+
+    Ok(Json(AuthResponse {
+        token: new_token,
+        user_id: claims.user_id,
+        email: claims.email,
+        merchant_id: payload.merchant_id,
+        role: claims.role,
+        merchants,
+    }))
+}
+
+/// Seconds since the Unix epoch. A clock before the epoch reads as 0, which only ever shortens a
+/// derived expiry.
+fn unix_now() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs())
+        .unwrap_or(0)
 }
 
 #[derive(Debug, Deserialize)]
@@ -1053,17 +1124,28 @@ pub async fn me(
         .ok_or(UserAuthError::StorageError)?;
 
     let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
+    // Resolved exactly as the middleware resolves it, so the controls the dashboard offers and the
+    // requests it would actually be refused on never disagree.
+    let permissions = claims.permissions(global_config.user_auth.require_explicit_permissions);
 
     if claims.token_type == TOKEN_TYPE_HS_REDIRECT {
+        // A session handed over from Hyperswitch has no DE user behind it, so both the account
+        // context and the switcher come from the tree: the scope's own ancestry, and the scopes
+        // under the node the handoff granted. A profile grant yields the one scope it already sits
+        // on, which is the pre-grant behaviour.
+        let hierarchy = hierarchy_of_scope(&claims.merchant_id).await;
+        let merchants = granted_merchants(&grant_of(&claims), &claims.role).await;
         return Ok(Json(MeResponse {
             user_id: claims.user_id,
             email: claims.email,
             merchant_id: claims.merchant_id,
             role: claims.role,
             email_verified: true,
-            merchants: vec![],
+            merchants,
             is_super_admin: false,
             is_super_admin_view: false,
+            permissions,
+            hierarchy,
         }));
     }
 
@@ -1078,13 +1160,15 @@ pub async fn me(
 
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
     let merchants = fetch_user_merchants(&app_state, &user.user_id).await?;
+    let hierarchy = hierarchy_of_scope(&claims.merchant_id).await;
 
     Ok(Json(MeResponse {
         user_id: user.user_id,
         // Roster is keyed off the signed `email` claim, not the DB row, so the check matches the
         // identity the rest of this session authorizes against.
-        is_super_admin: is_super_admin(&global_config, &claims.email),
+        is_super_admin: is_super_admin(&global_config, &claims),
         is_super_admin_view: claims.token_type == TOKEN_TYPE_SUPER_ADMIN_VIEW,
+        permissions,
         email: user.email,
         merchant_id: claims.merchant_id,
         role: user.role,
@@ -1093,19 +1177,51 @@ pub async fn me(
         #[cfg(feature = "postgres")]
         email_verified: user.email_verified,
         merchants,
+        hierarchy,
     }))
 }
 
-/// Whether `email` is on the platform super-admin roster. Compared case-insensitively (emails are
-/// not case-sensitive) and empty emails never match — so HS-redirect sessions, which carry an empty
-/// email, can never be mistaken for a super admin.
-fn is_super_admin(global_config: &crate::config::GlobalConfig, email: &str) -> bool {
-    !email.is_empty()
-        && global_config
-            .user_auth
-            .super_admin_emails
+/// The Hyperswitch ancestry stored on `scope_id`, or `None` when it has none.
+///
+/// Never fails the caller: a scope that does not exist, or one whose metadata cannot be parsed,
+/// is reported as having no ancestry. This sits on the session path, where losing the whole
+/// response over a display-only field would be a poor trade.
+async fn hierarchy_of_scope(
+    scope_id: &str,
+) -> Option<crate::types::merchant::hierarchy::Hierarchy> {
+    let account =
+        crate::types::merchant::merchant_account::load_merchant_by_merchant_id(scope_id.to_owned())
+            .await?;
+    crate::types::merchant::hierarchy::of_account(&account)
+}
+
+/// Whether `claims` belongs to a platform super admin.
+///
+/// Two conditions, both checked here rather than at the call sites. The session must be one DE
+/// issued against a real account — a standard session, or the view session a super admin is
+/// already inside — and its email must be on the roster (compared case-insensitively; emails are
+/// not).
+///
+/// The session-type half is the important one, and it lives here so a later caller cannot omit it.
+/// A session handed over from Hyperswitch carries that user's real email, which may well be on the
+/// roster: platform super admins tend to hold Hyperswitch logins too. Such a session must never be
+/// able to enter another merchant, and the only thing standing between it and the roster is this
+/// check — so it belongs at the one point every caller goes through, not repeated at each of them.
+fn is_super_admin(global_config: &crate::config::GlobalConfig, claims: &auth::JwtClaims) -> bool {
+    roster_admits(&global_config.user_auth.super_admin_emails, claims)
+}
+
+/// The roster decision itself, taking the list rather than the whole config so it can be tested.
+fn roster_admits(roster: &[String], claims: &auth::JwtClaims) -> bool {
+    if claims.token_type != TOKEN_TYPE_STANDARD && claims.token_type != TOKEN_TYPE_SUPER_ADMIN_VIEW
+    {
+        return false;
+    }
+
+    !claims.email.is_empty()
+        && roster
             .iter()
-            .any(|allowed| allowed.eq_ignore_ascii_case(email))
+            .any(|allowed| allowed.eq_ignore_ascii_case(&claims.email))
 }
 
 async fn fetch_user_merchants(
@@ -1411,6 +1527,106 @@ pub async fn verify_jwt_not_revoked(
 #[derive(Debug, Deserialize)]
 pub struct AdminMerchantTokenRequest {
     pub merchant_id: String,
+    /// How far the handed-over session may move, in Hyperswitch's terms — set from the entity type
+    /// of the user who opened the handoff. Absent means profile-only, which is what every caller
+    /// predating this field gets.
+    #[serde(default)]
+    pub grant_level: Option<GrantLevel>,
+    /// The org or merchant ID `grant_level` names. Required for a merchant or org grant; a profile
+    /// grant's node is `merchant_id`, so this is ignored there.
+    #[serde(default)]
+    pub grant_id: Option<String>,
+    /// What the user may do — Hyperswitch sets these from its own routing permissions. Absent is
+    /// resolved by `require_explicit_permissions`, so a Hyperswitch that does not send them yet
+    /// keeps working.
+    #[serde(default)]
+    pub permissions: Option<Vec<auth::Permission>>,
+    /// Who is being handed over, so the dashboard can name them rather than showing the scope id
+    /// as the signed-in user. Display only: the session is authorized by its grant and
+    /// permissions, and the super-admin roster is never consulted for a handed-over session.
+    #[serde(default)]
+    pub email: Option<String>,
+}
+
+/// What a one-time handoff code resolves to.
+///
+/// The bare-string form is what codes minted before grants existed carry; keeping it readable means
+/// a deploy landing mid-handoff does not reject codes already in flight.
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(untagged)]
+enum HandoffCode {
+    Scoped {
+        merchant_id: String,
+        grant: ScopeGrant,
+        /// Absent on codes minted before permissions existed, and whenever the caller sends none.
+        #[serde(default)]
+        perms: Option<Vec<auth::Permission>>,
+        #[serde(default)]
+        email: Option<String>,
+    },
+    ProfileOnly(String),
+}
+
+impl HandoffCode {
+    /// The scope the session lands on, the node it may move within, what it may do there, and
+    /// who it belongs to.
+    fn resolve(
+        self,
+    ) -> (
+        String,
+        ScopeGrant,
+        Option<Vec<auth::Permission>>,
+        Option<String>,
+    ) {
+        match self {
+            Self::Scoped {
+                merchant_id,
+                grant,
+                perms,
+                email,
+            } => (merchant_id, grant, perms, email),
+            Self::ProfileOnly(merchant_id) => {
+                let grant = ScopeGrant::profile(merchant_id.clone());
+                (merchant_id, grant, None, None)
+            }
+        }
+    }
+}
+
+/// The grant a session is operating under. Falls back to the scope it is already on, so a token
+/// without one keeps exactly the access it has today.
+fn grant_of(claims: &auth::JwtClaims) -> ScopeGrant {
+    claims
+        .grant
+        .clone()
+        .unwrap_or_else(|| ScopeGrant::profile(claims.merchant_id.clone()))
+}
+
+/// The scopes a grant covers, as switcher entries.
+async fn granted_merchants(grant: &ScopeGrant, role: &str) -> Vec<MerchantInfo> {
+    hierarchy::scopes_for_grant(grant)
+        .await
+        .into_iter()
+        .map(|scope| MerchantInfo {
+            merchant_name: switcher_label(&scope),
+            merchant_id: scope.profile_id,
+            role: role.to_string(),
+        })
+        .collect()
+}
+
+/// A picker label for one granted scope.
+///
+/// An org grant spans merchants, where profile names repeat — "default" under two merchants is the
+/// common case — so the merchant name is carried alongside to keep the entries distinguishable.
+/// An unsynced scope falls back to its ID rather than rendering as an empty row.
+fn switcher_label(scope: &hierarchy::GrantedScope) -> String {
+    match (&scope.hs_merchant_name, &scope.profile_name) {
+        (Some(merchant), Some(profile)) => format!("{merchant} / {profile}"),
+        (Some(merchant), None) => format!("{merchant} / {}", scope.profile_id),
+        (None, Some(profile)) => profile.clone(),
+        (None, None) => scope.profile_id.clone(),
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -1448,15 +1664,39 @@ pub async fn admin_merchant_token(
         .await
         .ok_or_else(|| error::ContainerError::from(UserAuthError::MerchantNotFound))?;
 
+    // A merchant or org grant names a node above the landing scope, so it needs its own ID. Without
+    // one there is nothing to expand, and silently narrowing to profile-only would hide the
+    // caller's mistake behind a session that simply cannot switch.
+    let grant = match payload.grant_level.unwrap_or(GrantLevel::Profile) {
+        GrantLevel::Profile => ScopeGrant::profile(payload.merchant_id.clone()),
+        level => {
+            let id = payload
+                .grant_id
+                .clone()
+                .filter(|id| !id.is_empty())
+                .ok_or_else(|| error::ContainerError::from(UserAuthError::Forbidden))?;
+            ScopeGrant { level, id }
+        }
+    };
+
     let app_state = get_tenant_app_state().await;
 
-    // Opaque, single-use code stored against the merchant. The JWT is *not* minted here — it is
-    // minted only on redemption, so no session token is ever placed in a URL.
+    // Opaque, single-use code stored against the merchant and its grant. The JWT is *not* minted
+    // here — it is minted only on redemption, so no session token is ever placed in a URL.
     let code = auth::generate_api_key();
     let code_key = format!("{}{}", HS_SSO_CODE_PREFIX, code);
     app_state
         .redis_conn
-        .set_key_with_ttl(&code_key, &payload.merchant_id, HS_SSO_CODE_TTL_SECONDS)
+        .set_key_with_ttl(
+            &code_key,
+            HandoffCode::Scoped {
+                merchant_id: payload.merchant_id.clone(),
+                grant,
+                perms: payload.permissions.clone(),
+                email: payload.email.clone(),
+            },
+            HS_SSO_CODE_TTL_SECONDS,
+        )
         .await
         .change_context(UserAuthError::StorageError)?;
 
@@ -1485,11 +1725,15 @@ pub async fn exchange_merchant_token(
     let app_state = get_tenant_app_state().await;
     let code_key = format!("{}{}", HS_SSO_CODE_PREFIX, payload.code);
 
-    // Read the merchant behind the code. A missing/expired/unknown code reads as NotFound —
+    // Read the scope and grant behind the code. A missing/expired/unknown code reads as NotFound —
     // treat any failure to read it as an invalid code (401), not a server error (500).
-    let merchant_id = match app_state.redis_conn.get_key_string(&code_key).await {
-        Ok(merchant_id) if !merchant_id.is_empty() => merchant_id,
-        _ => return Err(error::ContainerError::from(UserAuthError::InvalidToken)),
+    let (merchant_id, grant, perms, email) = match app_state
+        .redis_conn
+        .get_key::<HandoffCode>(&code_key, "HandoffCode")
+        .await
+    {
+        Ok(entry) => entry.resolve(),
+        Err(_) => return Err(error::ContainerError::from(UserAuthError::InvalidToken)),
     };
 
     // Atomically claim the code by deleting it. `DEL` is atomic and reports whether *this* call
@@ -1508,24 +1752,29 @@ pub async fn exchange_merchant_token(
 
     let synthetic_user_id = format!("hs_{}", merchant_id);
 
-    let token = auth::generate_jwt(
+    let email = email.unwrap_or_default();
+    let token = auth::generate_scoped_jwt(
         &synthetic_user_id,
-        "",
+        &email,
         &merchant_id,
         "admin",
         TOKEN_TYPE_HS_REDIRECT,
+        Some(&grant),
+        perms.as_deref(),
         global_config.user_auth.jwt_secret.peek().as_str(),
         global_config.user_auth.hs_redirect_jwt_expiry_seconds,
     )
     .change_context(UserAuthError::TokenGenerationFailed)?;
 
+    let merchants = granted_merchants(&grant, "admin").await;
+
     Ok(Json(AuthResponse {
         token,
         user_id: synthetic_user_id,
-        email: String::new(),
+        email,
         merchant_id,
         role: "admin".to_string(),
-        merchants: vec![],
+        merchants,
     }))
 }
 
@@ -1560,7 +1809,7 @@ pub async fn enter_merchant(
     }
 
     // Authorize live against the config roster (the source of truth), by email.
-    if !is_super_admin(&global_config, &claims.email) {
+    if !is_super_admin(&global_config, &claims) {
         return Err(error::ContainerError::from(UserAuthError::Forbidden));
     }
 
@@ -1611,7 +1860,7 @@ pub async fn exit_merchant(
             UserAuthError::UnsupportedOperation,
         ));
     }
-    if !is_super_admin(&global_config, &claims.email) {
+    if !is_super_admin(&global_config, &claims) {
         return Err(error::ContainerError::from(UserAuthError::Forbidden));
     }
 
@@ -1710,7 +1959,7 @@ pub async fn lookup_merchants(
             UserAuthError::UnsupportedOperation,
         ));
     }
-    if !is_super_admin(&global_config, &claims.email) {
+    if !is_super_admin(&global_config, &claims) {
         return Err(error::ContainerError::from(UserAuthError::Forbidden));
     }
 
@@ -1893,4 +2142,150 @@ pub async fn lookup_merchants(
         .collect();
 
     Ok(Json(results))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn scope(
+        profile_id: &str,
+        profile_name: Option<&str>,
+        merchant_name: Option<&str>,
+    ) -> hierarchy::GrantedScope {
+        hierarchy::GrantedScope {
+            profile_id: profile_id.to_string(),
+            profile_name: profile_name.map(str::to_string),
+            hs_merchant_id: Some("merchant_id_1".to_string()),
+            hs_merchant_name: merchant_name.map(str::to_string),
+        }
+    }
+
+    fn claims_for(token_type: &str, email: &str) -> auth::JwtClaims {
+        auth::JwtClaims {
+            sub: "u1".to_string(),
+            user_id: "u1".to_string(),
+            email: email.to_string(),
+            merchant_id: "pro_1".to_string(),
+            role: "admin".to_string(),
+            token_type: token_type.to_string(),
+            jti: "jti".to_string(),
+            exp: 0,
+            iat: 0,
+            grant: None,
+            perms: None,
+        }
+    }
+
+    #[test]
+    fn a_handed_over_session_is_never_a_super_admin() {
+        // The invariant this centralisation exists to hold. A session handed over from Hyperswitch
+        // carries that user's real email, and a platform super admin may well also hold a
+        // Hyperswitch login — so the roster would match. The session type is what refuses it.
+        let roster = vec!["admin@example.com".to_string()];
+        assert!(!roster_admits(
+            &roster,
+            &claims_for(TOKEN_TYPE_HS_REDIRECT, "admin@example.com")
+        ));
+    }
+
+    #[test]
+    fn a_real_session_on_the_roster_is_a_super_admin() {
+        let roster = vec!["admin@example.com".to_string()];
+        assert!(roster_admits(
+            &roster,
+            &claims_for(TOKEN_TYPE_STANDARD, "admin@example.com")
+        ));
+        // A view session is already inside the feature and needs the roster re-checked to Exit.
+        assert!(roster_admits(
+            &roster,
+            &claims_for(TOKEN_TYPE_SUPER_ADMIN_VIEW, "admin@example.com")
+        ));
+        // Emails are not case-sensitive.
+        assert!(roster_admits(
+            &roster,
+            &claims_for(TOKEN_TYPE_STANDARD, "Admin@Example.COM")
+        ));
+    }
+
+    #[test]
+    fn an_off_roster_or_empty_email_is_never_a_super_admin() {
+        let roster = vec!["admin@example.com".to_string()];
+        assert!(!roster_admits(
+            &roster,
+            &claims_for(TOKEN_TYPE_STANDARD, "someone@example.com")
+        ));
+        assert!(!roster_admits(
+            &roster,
+            &claims_for(TOKEN_TYPE_STANDARD, "")
+        ));
+        // An empty roster admits nobody, however the session was issued.
+        assert!(!roster_admits(
+            &[],
+            &claims_for(TOKEN_TYPE_STANDARD, "admin@example.com")
+        ));
+    }
+
+    #[test]
+    fn a_bare_code_still_resolves_to_a_profile_grant() {
+        // Codes minted before grants existed carry only the scope. They must stay redeemable, and
+        // must land on exactly the access they had — the one profile, with no ability to switch.
+        let entry: HandoffCode = serde_json::from_str(r#""pro_abc""#).expect("deserializes");
+        let (merchant_id, grant, perms, email) = entry.resolve();
+
+        assert_eq!(merchant_id, "pro_abc");
+        assert_eq!(grant, ScopeGrant::profile("pro_abc"));
+        assert_eq!(perms, None, "an old code names no permissions");
+        assert_eq!(email, None, "an old code names no user");
+    }
+
+    #[test]
+    fn a_scoped_code_round_trips() {
+        let original = HandoffCode::Scoped {
+            merchant_id: "pro_abc".to_string(),
+            grant: ScopeGrant {
+                level: GrantLevel::Org,
+                id: "org_abc".to_string(),
+            },
+            perms: Some(vec![auth::Permission::RoutingRead]),
+            email: Some("someone@example.com".to_string()),
+        };
+
+        let encoded = serde_json::to_string(&original).expect("serializes");
+        let decoded: HandoffCode = serde_json::from_str(&encoded).expect("deserializes");
+        let (merchant_id, grant, perms, email) = decoded.resolve();
+
+        assert_eq!(merchant_id, "pro_abc");
+        assert_eq!(grant.level, GrantLevel::Org);
+        assert_eq!(grant.id, "org_abc");
+        assert_eq!(perms, Some(vec![auth::Permission::RoutingRead]));
+        assert_eq!(email, Some("someone@example.com".to_string()));
+    }
+
+    #[test]
+    fn switcher_labels_keep_same_named_profiles_apart() {
+        // The case an org grant creates: "default" under two different merchants.
+        assert_eq!(
+            switcher_label(&scope("pro_1", Some("default"), Some("Clothing"))),
+            "Clothing / default"
+        );
+        assert_eq!(
+            switcher_label(&scope("pro_2", Some("default"), Some("Grocery"))),
+            "Grocery / default"
+        );
+    }
+
+    #[test]
+    fn switcher_labels_fall_back_to_the_scope_id() {
+        // An unsynced or partly-synced scope must still render as a selectable row.
+        assert_eq!(switcher_label(&scope("pro_3", None, None)), "pro_3");
+        assert_eq!(
+            switcher_label(&scope("pro_4", None, Some("Clothing"))),
+            "Clothing / pro_4"
+        );
+        assert_eq!(
+            switcher_label(&scope("pro_5", Some("default"), None)),
+            "default"
+        );
+    }
 }

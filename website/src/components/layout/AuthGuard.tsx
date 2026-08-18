@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Navigate, Outlet } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import useSWR from 'swr'
-import { useAuthStore } from '../../store/authStore'
+import { useAuthStore, type AccountHierarchy, type Permission } from '../../store/authStore'
 import { useMerchantStore } from '../../store/merchantStore'
 import { fetcher } from '../../lib/api'
 import { refreshSessionScopedSWRCache } from '../../lib/swrCache'
@@ -20,6 +20,8 @@ interface MeResponse {
     merchant_name: string
     role: string
   }>
+  permissions?: Permission[]
+  hierarchy?: AccountHierarchy
 }
 
 function SessionSpinner({ label }: { label: string }) {
@@ -83,7 +85,7 @@ export function AuthGuard() {
   useEffect(() => {
     if (!me || !token) return
     const activeMerchantId = me.merchant_id || me.merchants[0]?.merchant_id || ''
-    setAuth(token, { userId: me.user_id, email: me.email, merchantId: activeMerchantId, role: me.role, isRedirectSession: me.user_id.startsWith('hs_'), isSuperAdmin: me.is_super_admin, isSuperAdminView: me.is_super_admin_view }, me.merchants)
+    setAuth(token, { userId: me.user_id, email: me.email, merchantId: activeMerchantId, role: me.role, isRedirectSession: me.user_id.startsWith('hs_'), isSuperAdmin: me.is_super_admin, isSuperAdminView: me.is_super_admin_view, permissions: me.permissions, hierarchy: me.hierarchy }, me.merchants)
     setMerchantId(activeMerchantId)
   }, [me, token, setAuth, setMerchantId])
 

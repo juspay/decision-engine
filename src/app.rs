@@ -613,6 +613,14 @@ where
             post(routes::merchant_account_config::create_merchant_config),
         )
         .route(
+            "/admin/hierarchy/reconcile",
+            post(routes::hierarchy::reconcile_hierarchy),
+        )
+        .route(
+            "/admin/hierarchy/sync",
+            post(routes::hierarchy::sync_hierarchy),
+        )
+        .route(
             "/webhooks/settlement/:connector",
             post(routes::settlement_webhook::settlement_webhook),
         )

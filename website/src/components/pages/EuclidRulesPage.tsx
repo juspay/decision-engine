@@ -23,6 +23,7 @@ import { ErrorMessage } from '../ui/ErrorMessage'
 import { SearchableSelect } from '../ui/SearchableSelect'
 import { SearchableMultiSelect } from '../ui/SearchableMultiSelect'
 import { useMerchantStore } from '../../store/merchantStore'
+import { useCanEditRouting } from '../../store/authStore'
 import { apiPost } from '../../lib/api'
 import { RoutingAlgorithm } from '../../types/api'
 import { useDynamicRoutingConfig, RoutingKeyConfig } from '../../hooks/useDynamicRoutingConfig'
@@ -1068,6 +1069,8 @@ function parseAlgorithmToRuleBlocks(algo: RoutingAlgorithm): { ruleBlocks: RuleB
 
 // ---- Main Page ----
 export function EuclidRulesPage() {
+  // Read-only sessions still see everything; the controls that would change it are inert.
+  const canEditRouting = useCanEditRouting()
   const { merchantId } = useMerchantStore()
   const { routingKeysConfig, isLoading: routingKeysLoading, error: routingKeysError } = useDynamicRoutingConfig()
   const routingKeys = routingKeysConfig
@@ -1390,7 +1393,7 @@ function switchToCode() {
                                 <button
                                   type="button"
                                   onClick={() => handleActivate(algo.id)}
-                                  disabled={activating}
+                                  disabled={activating || !canEditRouting}
                                   className="group/badge relative inline-flex items-center justify-center min-w-[68px] px-2.5 py-0.5 rounded-full text-xs font-medium border transition-colors duration-150
                                     bg-slate-100 text-slate-500 border-slate-200 hover:bg-brand-50 hover:text-brand-600 hover:border-brand-200
                                     dark:bg-[#1a1f2a] dark:text-[#8090a8] dark:border-[#2a3040] dark:hover:bg-brand-900/20 dark:hover:text-brand-400 dark:hover:border-brand-800
@@ -1601,7 +1604,7 @@ function switchToCode() {
                     <span className="min-w-0">
                       Rule created: <span className="font-mono">{createdId}</span>
                     </span>
-                    <Button type="button" size="sm" onClick={() => handleActivate(createdId)} disabled={activating}>
+                    <Button type="button" size="sm" onClick={() => handleActivate(createdId)} disabled={activating || !canEditRouting}>
                       Activate Now
                     </Button>
                   </div>

@@ -29,7 +29,10 @@ pub enum DataType {
 pub struct RoutingRule {
     pub rule_id: Option<String>,
     pub name: String,
-    pub description: String,
+    /// Optional, and null on the wire: Hyperswitch's own column is nullable. Stored as an empty
+    /// string, which is what the column requires.
+    #[serde(default)]
+    pub description: Option<String>,
     pub created_by: String,
     pub algorithm: StaticRoutingAlgorithm,
     #[serde(default)]

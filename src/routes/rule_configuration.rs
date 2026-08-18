@@ -236,9 +236,20 @@ pub async fn get_rule_config(
 
     let mid = payload.merchant_id.clone();
     let analytics_mid = mid.clone();
-    let merchant_account = ETM::merchant_account::load_merchant_by_merchant_id(mid.clone())
-        .await
-        .ok_or(error::RuleConfigurationError::MerchantNotFound);
+    // Resolve the scope before dispatching on algorithm. Only the elimination config lives on the
+    // merchant row; the others are looked up by a name derived from the merchant id, so without
+    // this an unknown merchant is indistinguishable from one that simply has no config yet.
+    let merchant_account =
+        match ETM::merchant_account::load_merchant_by_merchant_id(mid.clone()).await {
+            Some(account) => account,
+            None => {
+                API_REQUEST_COUNTER
+                    .with_label_values(&["get_rule_config", "failure"])
+                    .inc();
+                timer.observe_duration();
+                return Err(error::RuleConfigurationError::MerchantNotFound.into());
+            }
+        };
 
     let result = match payload.algorithm {
         types::routing_configuration::AlgorithmType::SuccessRate => {
@@ -277,15 +288,13 @@ pub async fn get_rule_config(
             }
         }
         types::routing_configuration::AlgorithmType::Elimination => {
-            let result = merchant_account.and_then(|account| {
-                serde_json::from_str::<
-                    types::gateway_routing_input::GatewaySuccessRateBasedRoutingInput,
-                >(&account.gatewaySuccessRateBasedDeciderInput)
-                .map_err(|_| error::RuleConfigurationError::ConfigurationNotFound)
-                .map(|config| types::routing_configuration::EliminationData {
-                    threshold: config.defaultEliminationThreshold,
-                    txnLatency: config.txnLatency,
-                })
+            let result = serde_json::from_str::<
+                types::gateway_routing_input::GatewaySuccessRateBasedRoutingInput,
+            >(&merchant_account.gatewaySuccessRateBasedDeciderInput)
+            .map_err(|_| error::RuleConfigurationError::ConfigurationNotFound)
+            .map(|config| types::routing_configuration::EliminationData {
+                threshold: config.defaultEliminationThreshold,
+                txnLatency: config.txnLatency,
             });
 
             match result {

@@ -3,6 +3,7 @@ import { RoutingEventsProvider } from '../../hooks/useRoutingEvents'
 import { Sidebar } from './Sidebar'
 import { TopBar } from './TopBar'
 import { SuperAdminBanner } from './SuperAdminBanner'
+import { ReadOnlyBanner } from './ReadOnlyBanner'
 
 export function AppShell() {
   return (
@@ -13,6 +14,7 @@ export function AppShell() {
         <Sidebar />
         <div className="flex-1 flex flex-col overflow-hidden relative z-10">
           <SuperAdminBanner />
+          <ReadOnlyBanner />
           <TopBar />
           <main className="relative flex-1 overflow-y-auto px-4 py-5 sm:px-5 sm:py-6 lg:px-6 lg:py-7 xl:px-8">
             {/* No horizontal padding here — `main` already owns the page gutter, and padding both
