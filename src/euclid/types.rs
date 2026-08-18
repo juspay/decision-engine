@@ -53,6 +53,10 @@ pub enum StaticRoutingAlgorithm {
     VolumeSplit(Vec<super::ast::VolumeSplit<ConnectorInfo>>),
     Advanced(Program),
     AbTest(ABTestData),
+    /// Volume-commitment contract configuration — a stored document, not an evaluable
+    /// algorithm. Must ride the `algorithm_for = "volume_commitment"` slot (validated), so the
+    /// payment/payout/3DS evaluate paths never see it.
+    VolumeContract(Box<super::volume_contract::VolumeContractConfig>),
 }
 
 /// Per-arm routing overrides for A/B experiments. Applied inside scoring_flow / the
@@ -107,7 +111,17 @@ pub struct ABTestData {
     pub control_sr_config: Option<SrConfigOverride>,
 }
 
-#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize, strum::Display)]
+#[derive(
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Default,
+    serde::Serialize,
+    serde::Deserialize,
+    strum::Display,
+    strum::EnumString,
+)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum AlgorithmType {
@@ -115,6 +129,9 @@ pub enum AlgorithmType {
     Payment,
     Payout,
     ThreeDsAuthentication,
+    /// Activation slot for the merchant's volume-commitment contract document. Not an
+    /// evaluable routing flow.
+    VolumeCommitment,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]

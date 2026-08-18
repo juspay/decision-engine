@@ -9,7 +9,7 @@ use crate::{
         interpreter::{evaluate_output, InterpreterBackend},
         pm_filter_graph,
         types::{
-            ActivateRoutingConfigRequest, Context, DeactivateRoutingConfigRequest,
+            ActivateRoutingConfigRequest, AlgorithmType, Context, DeactivateRoutingConfigRequest,
             JsonifiedRoutingAlgorithm, KeyDataType, RoutingAlgorithmMapperNew,
             RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest, RoutingRule,
             SrDimensionConfig, StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
@@ -61,6 +61,12 @@ async fn cache_routing_algorithm(
     merchant_id: &str,
     algorithm: &RoutingAlgorithm,
 ) {
+    // Only the merchant's *payment* algorithm may occupy this key: /routing/evaluate is a
+    // payment-flow read that parses whatever is cached here as its active algorithm. Activating
+    // a payout/3DS/volume-commitment entry must not overwrite it.
+    if algorithm.algorithm_for != AlgorithmType::Payment.to_string() {
+        return;
+    }
     let key = routing_algo_cache_key(merchant_id);
     let value = CachedRoutingAlgorithm {
         id: algorithm.id.clone(),
@@ -164,6 +170,28 @@ fn validation_errors_payload(
     validation_errors: &[ValidationErrorDetails],
 ) -> Option<serde_json::Value> {
     serde_json::to_value(ValidationErrorsPayload { validation_errors }).ok()
+}
+
+/// The FIELD_VALIDATION_FAILED response shape of `routing_create`, for reuse by the other
+/// write paths (canonicalization failures, update validation).
+fn field_validation_failure(
+    context: &str,
+    validation_errors: &[ValidationErrorDetails],
+) -> ContainerError<EuclidErrors> {
+    let detailed_error = validation_errors
+        .iter()
+        .map(|e| e.message.clone())
+        .collect::<Vec<_>>()
+        .join("; ");
+    ContainerError::new_with_status_code_and_payload(
+        EuclidErrors::FieldValidationFailed(detailed_error.clone()),
+        axum::http::StatusCode::BAD_REQUEST,
+        ApiErrorResponse::new(
+            "FIELD_VALIDATION_FAILED",
+            format!("{context}: {detailed_error}"),
+            validation_errors_payload(validation_errors),
+        ),
+    )
 }
 
 pub async fn config_sr_dimensions(
@@ -298,13 +326,30 @@ pub async fn routing_create(
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
-    // The serde message names the field that did not parse. Dropping it leaves the caller with a
-    // bare 400 and nothing to act on.
-    let config: RoutingRule = serde_json::from_value(payload.clone()).map_err(|error| {
-        error_stack::report!(EuclidErrors::InvalidRequest(format!(
-            "could not parse routing rule: {error}"
-        )))
-    })?;
+    // The serde message names the field that did not parse — and serde_path_to_error prefixes
+    // the JSON path to it, which matters for nested documents (volume contracts especially).
+    // Dropping either leaves the caller with a bare 400 and nothing to act on.
+    let mut config: RoutingRule =
+        serde_path_to_error::deserialize(payload.clone()).map_err(|error| {
+            error_stack::report!(EuclidErrors::InvalidRequest(format!(
+                "could not parse routing rule: {error}"
+            )))
+        })?;
+
+    // Volume contracts are stored canonicalized (integer minor-unit amounts, tolerance in bps)
+    // so every future consumer reads one representation.
+    if let StaticRoutingAlgorithm::VolumeContract(contract_config) = &mut config.algorithm {
+        if let Err(errors) = crate::euclid::volume_contract::canonicalize(contract_config) {
+            metrics::API_REQUEST_COUNTER
+                .with_label_values(&["routing_create", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(field_validation_failure(
+                "Volume contract amounts are invalid",
+                &errors,
+            ));
+        }
+    }
     let create_flow_type = crate::analytics::refine_routing_create_flow_type(&config.algorithm);
     let analytics_created_by = config.created_by.clone();
     let analytics_config_name = config.name.clone();
@@ -433,7 +478,11 @@ async fn fetch_algorithm_from_db_and_cache(
         RoutingAlgorithmMapper,
     >(
         &state.db,
-        db_mapper_dsl::created_by.eq(merchant_id.to_string()),
+        // The merchant can hold one mapper row per algorithm_for slot (payment, payout, 3DS,
+        // volume_commitment); evaluate is a payment flow and must only ever see the payment row.
+        db_mapper_dsl::created_by
+            .eq(merchant_id.to_string())
+            .and(db_mapper_dsl::algorithm_for.eq(AlgorithmType::Payment.to_string())),
     )
     .await
     .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
@@ -705,6 +754,17 @@ pub async fn routing_evaluate(
                     }
                     Err(e) => return fail_preview(e.into(), "preview_interpreter_failed"),
                 }
+            }
+
+            // Unreachable while the active-algorithm lookup is payment-scoped; kept as a guard
+            // so a mis-slotted document degrades to a clean 400 instead of a parse panic.
+            StaticRoutingAlgorithm::VolumeContract(_) => {
+                return fail_preview(
+                    ContainerError::from(EuclidErrors::InvalidRequest(
+                        "the resolved algorithm is a volume-commitment configuration; it cannot be evaluated for routing".to_string(),
+                    )),
+                    "volume_contract_not_evaluable",
+                )
             }
 
             StaticRoutingAlgorithm::AbTest(ab_data) => {
@@ -1197,9 +1257,43 @@ pub async fn update_routing_rule(
             )));
         }
 
+        // Update must not be able to store a definition create would reject: canonicalize
+        // volume contracts and re-run the same write-time validation against the slot this row
+        // already occupies (algorithm_for is preserved by this handler).
+        let mut algorithm = payload.algorithm.clone();
+        if let StaticRoutingAlgorithm::VolumeContract(contract_config) = &mut algorithm {
+            if let Err(errors) = crate::euclid::volume_contract::canonicalize(contract_config) {
+                return Err(field_validation_failure(
+                    "Volume contract amounts are invalid",
+                    &errors,
+                ));
+            }
+        }
+        // Legacy rows can hold non-canonical algorithm_for strings (pre-backfill ''); treat
+        // them as the payment default rather than bricking their edits. They can never be
+        // volume-commitment rows — that slot postdates canonical writes — so the pairing
+        // validation below stays sound.
+        let algorithm_for: AlgorithmType = existing.algorithm_for.parse().unwrap_or_default();
+        let rule_for_validation = RoutingRule {
+            rule_id: Some(payload.routing_algorithm_id.clone()),
+            name: payload.name.clone(),
+            description: Some(payload.description.clone()),
+            created_by: payload.created_by.clone(),
+            algorithm,
+            algorithm_for,
+            metadata: None,
+        };
+        let validation = validate_routing_rule(&rule_for_validation, &state.config.routing_config)?;
+        if !validation.is_valid {
+            return Err(field_validation_failure(
+                "Routing rule validation failed",
+                &validation.errors,
+            ));
+        }
+
         let utc_date_time = time::OffsetDateTime::now_utc();
         let timestamp = time::PrimitiveDateTime::new(utc_date_time.date(), utc_date_time.time());
-        let algorithm_data = serde_json::to_string(&payload.algorithm)
+        let algorithm_data = serde_json::to_string(&rule_for_validation.algorithm)
             .change_context(EuclidErrors::FailedToSerializeJsonToString)?;
 
         crate::generics::generic_update::<<RoutingAlgorithm as HasTable>::Table, _, _>(

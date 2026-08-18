@@ -46,11 +46,16 @@ pub async fn is_enabled(merchant_id: &str) -> bool {
 pub async fn load_active_ab_test(merchant_id: &str) -> Option<AbTestConfig> {
     let state = get_tenant_app_state().await;
 
-    // Load the active routing algorithm mapper for this merchant
+    // Load the active *payment* routing algorithm mapper for this merchant. The merchant can
+    // hold one mapper row per algorithm_for slot (payout, 3DS, volume_commitment as well) and an
+    // A/B experiment only ever lives in the payment slot.
     let mapper =
         generic_find_one::<<RoutingAlgorithmMapper as HasTable>::Table, _, RoutingAlgorithmMapper>(
             &state.db,
-            mapper_dsl::created_by.eq(merchant_id.to_string()),
+            mapper_dsl::created_by.eq(merchant_id.to_string()).and(
+                mapper_dsl::algorithm_for
+                    .eq(crate::euclid::types::AlgorithmType::Payment.to_string()),
+            ),
         )
         .await
         .ok()?;

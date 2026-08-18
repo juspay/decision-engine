@@ -1155,4 +1155,101 @@ mod tests {
             "served key order must not depend on hashing"
         );
     }
+
+    // ── Volume-commitment contracts riding the euclid machinery ──────────────
+
+    fn volume_contract_rule_json(algorithm_for: &str) -> serde_json::Value {
+        serde_json::json!({
+            "name": "q3_volume_contracts",
+            "description": "Q3 PSP volume commitments",
+            "created_by": "acme_corp",
+            "algorithm_for": algorithm_for,
+            "algorithm": {
+                "type": "volume_contract",
+                "data": {
+                    "routing_mode": "pace_guarded",
+                    "tolerance": "5pp",
+                    "volume_contracts": [{
+                        "id": "adyen_2026_lumpsum",
+                        "connector": "adyen",
+                        "currency": { "denomination": "USD" },
+                        "billing_cycle": { "type": "calendar_month", "anchor": 1, "timezone": "America/New_York" },
+                        "archetype": "lumpsum",
+                        "terms": { "target": 600000000u64, "reward": { "kind": "flat", "value": { "flat_amount": 1500000u64 } } }
+                    }]
+                }
+            }
+        })
+    }
+
+    #[test]
+    fn volume_contract_round_trips_through_static_routing_algorithm() {
+        use crate::euclid::types::{AlgorithmType, RoutingRule, StaticRoutingAlgorithm};
+
+        let rule: RoutingRule =
+            serde_json::from_value(volume_contract_rule_json("volume_commitment"))
+                .expect("rule should parse");
+        assert!(matches!(
+            rule.algorithm_for,
+            AlgorithmType::VolumeCommitment
+        ));
+
+        // The exact storage round-trip of routing_create: serialize the algorithm to the
+        // algorithm_data string, then parse it back.
+        let stored = serde_json::to_string(&rule.algorithm).expect("serializes");
+        let parsed: StaticRoutingAlgorithm = serde_json::from_str(&stored).expect("parses back");
+        let StaticRoutingAlgorithm::VolumeContract(config) = parsed else {
+            panic!("expected the volume_contract variant, got: {stored}");
+        };
+        assert_eq!(config.tolerance_bps.0, 500, "'5pp' normalizes to 500 bps");
+        assert_eq!(config.volume_contracts.len(), 1);
+    }
+
+    #[test]
+    fn volume_contract_and_volume_commitment_slot_imply_each_other() {
+        use crate::euclid::types::RoutingRule;
+        use crate::euclid::utils::validate_routing_rule;
+
+        let config = Some(routing_config_for_tests());
+
+        // Contract document in the payment slot: rejected — it would reach /routing/evaluate.
+        let rule: RoutingRule =
+            serde_json::from_value(volume_contract_rule_json("payment")).expect("parses");
+        let result = validate_routing_rule(&rule, &config).expect("validation should run");
+        assert!(!result.is_valid);
+
+        // Routing algorithm in the volume_commitment slot: rejected — it would be dead weight.
+        let mut rule_json = volume_contract_rule_json("volume_commitment");
+        rule_json["algorithm"] = serde_json::json!({
+            "type": "single",
+            "data": { "gateway_name": "stripe", "gateway_id": null }
+        });
+        let rule: RoutingRule = serde_json::from_value(rule_json).expect("parses");
+        let result = validate_routing_rule(&rule, &config).expect("validation should run");
+        assert!(!result.is_valid);
+
+        // The matched pair passes.
+        let rule: RoutingRule =
+            serde_json::from_value(volume_contract_rule_json("volume_commitment")).expect("parses");
+        let result = validate_routing_rule(&rule, &config).expect("validation should run");
+        assert!(result.is_valid, "errors: {:?}", result.errors);
+    }
+
+    #[test]
+    fn volume_contract_semantic_errors_surface_through_validate_routing_rule() {
+        use crate::euclid::types::RoutingRule;
+        use crate::euclid::utils::validate_routing_rule;
+
+        let mut rule_json = volume_contract_rule_json("volume_commitment");
+        rule_json["algorithm"]["data"]["volume_contracts"][0]["billing_cycle"]["timezone"] =
+            "Mars/Olympus_Mons".into();
+        let rule: RoutingRule = serde_json::from_value(rule_json).expect("parses");
+        let result = validate_routing_rule(&rule, &Some(routing_config_for_tests())).expect("runs");
+        assert!(!result.is_valid);
+        assert!(
+            result.errors.iter().any(|e| e.field.contains("timezone")),
+            "errors: {:?}",
+            result.errors
+        );
+    }
 }
