@@ -534,7 +534,7 @@ mod tests {
         // The per-profile sync from HS's profile-create path carries one merchant. Replacing here
         // would drop the org's other merchants and narrow every org-level grant over it.
         let mut existing = vec!["merchant_1786625341".to_string()];
-        let incoming = vec!["merchant_1786625390".to_string()];
+        let incoming = ["merchant_1786625390".to_string()];
         merge_ids(&mut existing, incoming.iter());
 
         assert_eq!(existing, ["merchant_1786625341", "merchant_1786625390"]);
