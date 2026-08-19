@@ -621,14 +621,6 @@ where
             post(routes::hierarchy::sync_hierarchy),
         )
         .route(
-            "/admin/hierarchy/reconcile",
-            post(routes::hierarchy::reconcile_hierarchy),
-        )
-        .route(
-            "/admin/hierarchy/sync",
-            post(routes::hierarchy::sync_hierarchy),
-        )
-        .route(
             "/webhooks/settlement/:merchant_id/:connector",
             post(routes::settlement_webhook::settlement_webhook),
         )
