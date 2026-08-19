@@ -94,6 +94,7 @@ zstd_compression_filepath = "/tmp/extra-paths/redis-zstd-dictionaries/sbx"
 base_url = "https://integ.hyperswitch.io/api/cards"
 api_key = "hyperswitch_api_key"
 timeout_ms = 2000
+tenant_id = "public"
 
 [cost_ingestion]
 # Drain webhook-enqueued jobs in this process. Off by default so only a dedicated ingest
@@ -301,7 +302,7 @@ public = { schema = "public" }
 [routing_config.keys]
 amount = { type = "integer", min = 0 }
 authentication_type = { type = "enum", values = "three_ds, no_three_ds" }
-bank_debit = { type = "enum", values = "ach, sepa, bacs, becs" }
+bank_debit = { type = "enum", values = "ach, sepa, sepa_guarenteed_debit, eft_debit_order, bacs, becs" }
 bank_redirect = { type = "enum", values = "giropay, ideal, sofort, eft, eps, bancontact_card, blik, local_bank_redirect, online_banking_thailand, online_banking_czech_republic, online_banking_finland, online_banking_fpx, online_banking_poland, online_banking_slovakia, przelewy24, trustly, bizum, interac, open_banking_uk, open_banking_pis" }
 bank_transfer = { type = "enum", values = "ach, sepa, sepa_bank_transfer, bacs, multibanco, pix, pse, permata_bank_transfer, bca_bank_transfer, bni_va, bri_va, cimb_va, danamon_va, mandiri_va, local_bank_transfer, instant_bank_transfer" }
 billing_country = { type = "enum", values = "Afghanistan, AlandIslands, Albania, Algeria, AmericanSamoa, Andorra, Angola, Anguilla, Antarctica, AntiguaAndBarbuda, Argentina, Armenia, Aruba, Australia, Austria, Azerbaijan, Bahamas, Bahrain, Bangladesh, Barbados, Belarus, Belgium, Belize, Benin, Bermuda, Bhutan, BoliviaPlurinationalState, BonaireSintEustatiusAndSaba, BosniaAndHerzegovina, Botswana, BouvetIsland, Brazil, BritishIndianOceanTerritory, BruneiDarussalam, Bulgaria, BurkinaFaso, Burundi, CaboVerde, Cambodia, Cameroon, Canada, CaymanIslands, CentralAfricanRepublic, Chad, Chile, China, ChristmasIsland, CocosKeelingIslands, Colombia, Comoros, Congo, CongoDemocraticRepublic, CookIslands, CostaRica, CotedIvoire, Croatia, Cuba, Curacao, Cyprus, Czechia, Denmark, Djibouti, Dominica, DominicanRepublic, Ecuador, Egypt, ElSalvador, EquatorialGuinea, Eritrea, Estonia, Ethiopia, FalklandIslandsMalvinas, FaroeIslands, Fiji, Finland, France, FrenchGuiana, FrenchPolynesia, FrenchSouthernTerritories, Gabon, Gambia, Georgia, Germany, Ghana, Gibraltar, Greece, Greenland, Grenada, Guadeloupe, Guam, Guatemala, Guernsey, Guinea, GuineaBissau, Guyana, Haiti, HeardIslandAndMcDonaldIslands, HolySee, Honduras, HongKong, Hungary, Iceland, India, Indonesia, IranIslamicRepublic, Iraq, Ireland, IsleOfMan, Israel, Italy, Jamaica, Japan, Jersey, Jordan, Kazakhstan, Kenya, Kiribati, KoreaDemocraticPeoplesRepublic, KoreaRepublic, Kuwait, Kyrgyzstan, LaoPeoplesDemocraticRepublic, Latvia, Lebanon, Lesotho, Liberia, Libya, Liechtenstein, Lithuania, Luxembourg, Macao, MacedoniaTheFormerYugoslavRepublic, Madagascar, Malawi, Malaysia, Maldives, Mali, Malta, MarshallIslands, Martinique, Mauritania, Mauritius, Mayotte, Mexico, MicronesiaFederatedStates, MoldovaRepublic, Monaco, Mongolia, Montenegro, Montserrat, Morocco, Mozambique, Myanmar, Namibia, Nauru, Nepal, Netherlands, NewCaledonia, NewZealand, Nicaragua, Niger, Nigeria, Niue, NorfolkIsland, NorthernMarianaIslands, Norway, Oman, Pakistan, Palau, PalestineState, Panama, PapuaNewGuinea, Paraguay, Peru, Philippines, Pitcairn, Poland, Portugal, PuertoRico, Qatar, Reunion, Romania, RussianFederation, Rwanda, SaintBarthelemy, SaintHelenaAscensionAndTristandaCunha, SaintKittsAndNevis, SaintLucia, SaintMartinFrenchpart, SaintPierreAndMiquelon, SaintVincentAndTheGrenadines, Samoa, SanMarino, SaoTomeAndPrincipe, SaudiArabia, Senegal, Serbia, Seychelles, SierraLeone, Singapore, SintMaartenDutchpart, Slovakia, Slovenia, SolomonIslands, Somalia, SouthAfrica, SouthGeorgiaAndTheSouthSandwichIslands, SouthSudan, Spain, SriLanka, Sudan, Suriname, SvalbardAndJanMayen, Swaziland, Sweden, Switzerland, SyrianArabRepublic, TaiwanProvinceOfChina, Tajikistan, TanzaniaUnitedRepublic, Thailand, TimorLeste, Togo, Tokelau, Tonga, TrinidadAndTobago, Tunisia, Turkey, Turkmenistan, TurksAndCaicosIslands, Tuvalu, Uganda, Ukraine, UnitedArabEmirates, UnitedKingdomOfGreatBritainAndNorthernIreland, UnitedStatesOfAmerica, UnitedStatesMinorOutlyingIslands, Uruguay, Uzbekistan, Vanuatu, VenezuelaBolivarianRepublic, Vietnam, VirginIslandsBritish, VirginIslandsUS, WallisAndFutuna, WesternSahara, Yemen, Zambia, Zimbabwe" }
@@ -322,19 +323,24 @@ issuer_country = { type = "enum", values = "Afghanistan, AlandIslands, Albania, 
 issuer_name = { type = "str_value", min_length = 1 }
 mandate_acceptance_type = { type = "enum", values = "online, offline" }
 mandate_type = { type = "enum", values = "single_use, multi_use" }
+customer_device_display_size = { type = "enum", values = "size320x568, size375x667, size390x844, size414x896, size428x926, size768x1024, size834x1112, size834x1194, size1024x1366, size1280x720, size1366x768, size1440x900, size1920x1080, size2560x1440, size3840x2160, size500x600, size600x400, size360x640, size412x915, size800x1280" }
+customer_device_platform = { type = "enum", values = "web, android, ios" }
+customer_device_type = { type = "enum", values = "mobile, tablet, desktop, gaming_console" }
 metadata = { type = "udf" }
 mobile_payment = { type = "enum", values = "direct_carrier_billing" }
 network_token = { type = "enum", values = "network_token" }
 open_banking = { type = "enum", values = "open_banking_pis" }
 pay_later = { type = "enum", values = "affirm, alma, afterpay_clearpay, klarna, pay_bright, atome, walley" }
-payment_method = { type = "enum", values = "card, card_redirect, pay_later, wallet, bank_redirect, bank_transfer, crypto, bank_debit, reward, real_time_payment, upi, voucher, gift_card, open_banking, mobile_payment" }
+payment_method = { type = "enum", values = "card, card_redirect, pay_later, wallet, bank_redirect, bank_transfer, crypto, bank_debit, reward, real_time_payment, upi, voucher, gift_card, open_banking, mobile_payment, network_token" }
+payment_amount = { type = "integer", min = 0 }
 payment_method_type = { type = "enum", values = "ach, affirm, afterpay_clearpay, alfamart, ali_pay, ali_pay_hk, alma, amazon_pay, apple_pay, atome, bacs, bancontact_card, becs, benefit, bizum, blik, boleto, bca_bank_transfer, bni_va, bri_va, card, card_redirect, cimb_va, classic_reward, credit, crypto_currency, cashapp, dana, danamon_va, debit, duit_now, efecty, eft, eps, fps, evoucher, giropay, givex, google_pay, go_pay, gcash, ideal, interac, indomaret, klarna, kakao_pay, local_bank_redirect, mandiri_va, knet, mb_way, mobile_pay, momo, momo_atm, multibanco, online_banking_thailand, online_banking_czech_republic, online_banking_finland, online_banking_fpx, online_banking_poland, online_banking_slovakia, oxxo, pago_efectivo, permata_bank_transfer, open_banking_uk, pay_bright, paypal, paze, pix, pay_safe_card, przelewy24, prompt_pay, pse, red_compra, red_pagos, samsung_pay, sepa, sepa_bank_transfer, sofort, swish, touch_n_go, trustly, twint, upi_collect, upi_intent, vipps, viet_qr, venmo, walley, we_chat_pay, seven_eleven, lawson, mini_stop, family_mart, seicomart, pay_easy, local_bank_transfer, mifinity, open_banking_pis, direct_carrier_billing, instant_bank_transfer" }
-payment_type = { type = "enum", values = "normal, new_mandate, setup_mandate, recurring_mandate, non_mandate" }
+payment_type = { type = "enum", values = "normal, new_mandate, update_mandate, setup_mandate, recurring_mandate, non_mandate, ppt_mandate" }
 real_time_payment = { type = "enum", values = "fps, duit_now, prompt_pay, viet_qr" }
 reward = { type = "enum", values = "evoucher, classic_reward" }
 setup_future_usage = { type = "enum", values = "on_session, off_session" }
+surcharge_amount = { type = "integer", min = 0 }
 transaction_initiator = { type = "enum", values = "customer, merchant" }
-upi = { type = "enum", values = "upi_collect, upi_intent" }
+upi = { type = "enum", values = "upi_collect, upi_intent, upi_qr" }
 voucher = { type = "enum", values = "boleto, efecty, pago_efectivo, red_compra, red_pagos, indomaret, alfamart, oxxo, seven_eleven, lawson, mini_stop, family_mart, seicomart, pay_easy" }
 wallet = { type = "enum", values = "amazon_pay, apple_pay, google_pay, paypal, ali_pay, ali_pay_hk, dana, mb_way, mobile_pay, samsung_pay, twint, vipps, touch_n_go, swish, we_chat_pay, go_pay, gcash, momo, kakao_pay, cashapp, mifinity, paze" }
 
@@ -959,6 +965,11 @@ payjustnow = { country = "ZA", currency = "ZAR" }
 [user_auth]
 jwt_secret = "change_me_in_production_use_32chars!!"
 jwt_expiry_seconds = 86400
+# Local-only. Sessions handed over from Hyperswitch default to 20 minutes so a leaked one caps its
+# own blast radius, and they cannot be renewed from the DE login page — the synthetic user has no
+# password, so an expiry means going back to Hyperswitch to re-enter. Held at 8 hours here to keep
+# migration testing off that loop. Staging and production keep the default.
+hs_redirect_jwt_expiry_seconds = 28800
 email_verification_enabled = false
 signup_requires_admin_secret = false
 super_admin_emails = []

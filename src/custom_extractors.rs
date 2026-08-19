@@ -97,6 +97,7 @@ mod tests {
             user_id: Some("user_123".to_string()),
             email: Some("user@example.com".to_string()),
             role: Some("admin".to_string()),
+            permissions: None,
         };
         let (mut parts, _) = Request::builder()
             .uri("/analytics/overview")

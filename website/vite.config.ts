@@ -4,7 +4,9 @@ import react from '@vitejs/plugin-react'
 export default defineConfig(({ command }) => {
   const isDevServer = command === 'serve'
   const publicBaseUrl = isDevServer ? '/' : '/decision-engine/'
-  const backendTarget = 'http://127.0.0.1:8080'
+  // Overridable because Hyperswitch's own server also defaults to 8080, so running both locally
+  // means moving one of them. Unset, this stays on the port `config/development.toml` declares.
+  const backendTarget = process.env.DE_BACKEND_URL ?? 'http://127.0.0.1:8080'
   const apiProxyPrefix = '/decision-engine-api'
   const hostedApiProxyPrefix = '/decision-engine/api'
 

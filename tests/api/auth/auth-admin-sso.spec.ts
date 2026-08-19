@@ -83,7 +83,10 @@ test.describe('Admin merchant-token SSO (API)', () => {
     expect(r.status).toBe(404)
   })
 
-  test('a redirect session can read its own identity but not switch merchant', async ({ api, merchant }) => {
+  test('a redirect session can read its own identity and switch only within its grant', async ({
+    api,
+    merchant,
+  }) => {
     const minted = await api.raw('POST', '/auth/admin/merchant-token', {
       body: { merchant_id: merchant.id },
     })
@@ -99,12 +102,23 @@ test.describe('Admin merchant-token SSO (API)', () => {
     expect(me.status).toBe(200)
     expect(me.body.merchant_id).toBe(merchant.id)
 
-    // A redirect session is deliberately restricted — it is not a full user account.
-    const switched = await api.raw('POST', '/auth/switch-merchant', {
+    // No grant_level was sent, so the handoff is profile-only and the node it may move within is
+    // the single scope it already sits on. A redirect session is still not a full user account:
+    // it moves within what Hyperswitch granted it, never across DE memberships.
+    const outside = await api.raw('POST', '/auth/switch-merchant', {
+      failOnStatusCode: false,
+      headers: { Authorization: `Bearer ${redirectToken}` },
+      body: { merchant_id: factory.merchantId('sso_outside_grant') },
+    })
+    expect(outside.status).toBe(403)
+
+    // Its own scope is inside the grant, so this re-mints rather than refusing.
+    const own = await api.raw('POST', '/auth/switch-merchant', {
       failOnStatusCode: false,
       headers: { Authorization: `Bearer ${redirectToken}` },
       body: { merchant_id: merchant.id },
     })
-    expect(switched.status).toBe(403)
+    expect(own.status).toBe(200)
+    expect(own.body.merchant_id).toBe(merchant.id)
   })
 })

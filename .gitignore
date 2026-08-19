@@ -27,3 +27,7 @@ scripts/load-test/load_test_report_*.html
 scripts/load-test/profile_results/
 scripts/load-test/profile.json.gz
 scripts/load-test/k6_timeseries.json
+
+# Python bytecode from scripts/
+__pycache__/
+*.pyc

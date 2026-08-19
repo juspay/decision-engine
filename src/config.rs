@@ -78,6 +78,7 @@ pub struct CardInfoServiceConfig {
     pub base_url: String,
     pub api_key: masking::Secret<String>,
     pub timeout_ms: u64,
+    pub tenant_id: String,
 }
 
 impl Default for CardInfoServiceConfig {
@@ -86,6 +87,7 @@ impl Default for CardInfoServiceConfig {
             base_url: "https://integ.hyperswitch.io/api/cards".to_string(),
             api_key: masking::Secret::new(String::new()),
             timeout_ms: 2_000,
+            tenant_id: "public".to_string(),
         }
     }
 }
@@ -152,6 +154,14 @@ pub struct UserAuthConfig {
     /// single string, which the config crate won't split into a sequence on its own.
     #[serde(default, deserialize_with = "deserialize_comma_separated_or_seq")]
     pub super_admin_emails: Vec<String>,
+    /// Treat a session that names no permissions as holding none.
+    ///
+    /// Phase two of the permissions rollout. While false, such a session keeps full access, so a
+    /// Decision Engine deployed ahead of a Hyperswitch that does not send permissions yet behaves
+    /// exactly as before. Turn it on once every Hyperswitch in front of this deployment sends them,
+    /// and a caller that omits them is a bug rather than an old build.
+    #[serde(default)]
+    pub require_explicit_permissions: bool,
 }
 
 /// Deserialize a `Vec<String>` from either a sequence (TOML array) or a single comma-separated
@@ -165,7 +175,7 @@ where
     impl<'de> serde::de::Visitor<'de> for StringOrSeq {
         type Value = Vec<String>;
 
-        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             formatter.write_str("a list of strings or a comma-separated string")
         }
 
@@ -241,6 +251,7 @@ impl Default for UserAuthConfig {
             email_verification_enabled: false,
             signup_requires_admin_secret: true,
             super_admin_emails: Vec::new(),
+            require_explicit_permissions: false,
         }
     }
 }

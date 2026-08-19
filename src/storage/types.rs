@@ -308,6 +308,18 @@ pub struct MerchantAccountUpdate {
     pub gateway_success_rate_based_decider_input: Option<String>,
 }
 
+/// Writes the account-hierarchy ancestry blob (and the profile name it travels with) onto an
+/// existing merchant account. Separate from [`MerchantAccountUpdate`] so a hierarchy sync
+/// cannot touch routing configuration. `AsChangeset` skips `None` fields, so a sync that
+/// carries no profile name leaves the stored one alone.
+#[derive(AsChangeset, Debug, Clone)]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_account))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_account))]
+pub struct MerchantAccountHierarchyUpdate {
+    pub internal_metadata: Option<String>,
+    pub merchant_name: Option<String>,
+}
+
 /// One settlement-report ingestion — the unified queue + progress + history row (`cost_ingestion`).
 /// Field order matches the schema column order (diesel `Queryable` maps by position).
 #[derive(Debug, Clone, Identifiable, Queryable)]

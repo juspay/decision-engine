@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::{BTreeMap, HashMap, HashSet};
 
     use crate::{
         config::{
@@ -32,7 +32,7 @@ mod tests {
     }
 
     fn routing_config_for_tests() -> TomlConfig {
-        let mut keys = HashMap::new();
+        let mut keys = BTreeMap::new();
         keys.insert(
             "billing_country".to_string(),
             KeyConfig {
@@ -210,7 +210,7 @@ mod tests {
     }
 
     fn pm_filter_test_routing_config() -> TomlConfig {
-        let mut keys = HashMap::new();
+        let mut keys = BTreeMap::new();
         keys.insert(
             "billing_country".to_string(),
             KeyConfig {
@@ -1100,5 +1100,59 @@ mod tests {
                 None
             );
         }
+    }
+
+    /// `/config/routing-keys` serves this map verbatim, and the dashboard takes its first entry as
+    /// the default field of a new rule condition. A `HashMap` here iterates in whatever order its
+    /// per-process random seed produces, which moved that default — and the order of the field
+    /// dropdown — on every restart.
+    #[test]
+    fn routing_keys_are_served_in_a_stable_order() {
+        // Inserted in reverse, and enough of them that an unordered map happening to serialize
+        // ascending is vanishingly unlikely — otherwise this passes whether or not the order holds.
+        let names = [
+            "surcharge_amount",
+            "payment_type",
+            "payment_method",
+            "metadata",
+            "currency",
+            "card_bin",
+            "capture_method",
+            "bank_debit",
+            "authentication_type",
+            "amount",
+        ];
+
+        let mut keys = BTreeMap::new();
+        for name in names {
+            keys.insert(
+                name.to_string(),
+                KeyConfig {
+                    data_type: KeyDataType::Enum,
+                    values: None,
+                    min_value: None,
+                    max_value: None,
+                    min_length: None,
+                    max_length: None,
+                    exact_length: None,
+                    regex: None,
+                },
+            );
+        }
+
+        let json = serde_json::to_string(&KeysConfig { keys }).expect("serializes");
+        let served: Vec<String> =
+            serde_json::from_str::<serde_json::Map<String, serde_json::Value>>(&json)
+                .expect("is an object")
+                .keys()
+                .cloned()
+                .collect();
+
+        let mut ascending = served.clone();
+        ascending.sort();
+        assert_eq!(
+            served, ascending,
+            "served key order must not depend on hashing"
+        );
     }
 }

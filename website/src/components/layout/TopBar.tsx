@@ -142,6 +142,14 @@ export function TopBar() {
 
   const currentMerchant = merchants.find((m) => m.merchant_id === user?.merchantId)
 
+  // A handed-over session's list is the scopes Hyperswitch granted it, which always includes the
+  // one it is already on. A single entry therefore means there is nothing to switch between, and
+  // the read-only context chip is the honest control; a DE session's list works the other way,
+  // where one membership is still a switcher.
+  const canSwitchMerchant =
+    !user?.isSuperAdminView && merchants.length > (user?.isRedirectSession ? 1 : 0)
+  const showAccountContext = !!user?.hierarchy && !canSwitchMerchant
+
   return (
     <header className="flex h-[78px] shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-6 transition-colors duration-300 dark:border-[#22262f] dark:bg-[#06080d] relative z-10">
       <div className="flex-1" />
@@ -239,8 +247,31 @@ export function TopBar() {
           </div>
         )}
 
+        {/* Account context for a scope that came from Hyperswitch, shown wherever there is no
+            switcher to carry it. Read-only: Hyperswitch owns this tree, and it is changed there,
+            not here. */}
+        {showAccountContext && user?.hierarchy && (
+          <div
+            className="flex items-center gap-2 h-8 px-3 rounded-lg border border-[#e6e6ee] dark:border-[#1a1a24] bg-white dark:bg-[#121218] text-slate-700 dark:text-slate-300"
+            title={`Organization ${user.hierarchy.hs_org_name ?? user.hierarchy.hs_org_id}\nMerchant ${user.hierarchy.hs_merchant_id}\nProfile ${user.merchantId}`}
+          >
+            <Building2 size={13} className="text-slate-400 shrink-0" />
+            <span className="text-[12px] font-medium max-w-[160px] truncate">
+              {user.hierarchy.hs_merchant_name ?? user.hierarchy.hs_merchant_id}
+            </span>
+            {user.hierarchy.profile_name && (
+              <>
+                <span className="text-slate-300 dark:text-slate-600">/</span>
+                <span className="text-[12px] max-w-[120px] truncate text-slate-500 dark:text-slate-400">
+                  {user.hierarchy.profile_name}
+                </span>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Merchant switcher */}
-        {!user?.isSuperAdminView && merchants.length > 0 && (
+        {canSwitchMerchant && (
           <div className="relative" ref={dropdownRef}>
             <button
               onClick={() => setMerchantOpen((v) => !v)}
@@ -256,7 +287,7 @@ export function TopBar() {
             {merchantOpen && (
               <div className="absolute right-0 top-10 w-60 bg-white dark:bg-[#0c0c10] border border-[#e6e6ee] dark:border-[#1a1a24] rounded-lg shadow-lg py-1 z-50">
                 <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                  Merchants
+                  {user?.isRedirectSession ? 'Profiles' : 'Merchants'}
                 </p>
                 {merchants.map((m) => (
                   <button
@@ -279,15 +310,19 @@ export function TopBar() {
                     )}
                   </button>
                 ))}
-                <div className="border-t border-[#e6e6ee] dark:border-[#1a1a24] mt-1 pt-1">
-                  <button
-                    onClick={() => { setMerchantOpen(false); navigate('/onboarding') }}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 dark:hover:bg-[#13131a] transition-colors text-left text-brand-600"
-                  >
-                    <Plus size={13} />
-                    <span className="text-[13px] font-medium">Add merchant</span>
-                  </button>
-                </div>
+                {/* Hyperswitch creates the profiles a handed-over session can reach, so onboarding
+                    one here would produce a scope its own account tree does not know about. */}
+                {!user?.isRedirectSession && (
+                  <div className="border-t border-[#e6e6ee] dark:border-[#1a1a24] mt-1 pt-1">
+                    <button
+                      onClick={() => { setMerchantOpen(false); navigate('/onboarding') }}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 dark:hover:bg-[#13131a] transition-colors text-left text-brand-600"
+                    >
+                      <Plus size={13} />
+                      <span className="text-[13px] font-medium">Add merchant</span>
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
