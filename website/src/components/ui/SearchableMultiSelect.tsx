@@ -59,13 +59,26 @@ export function SearchableMultiSelect({
     function onOutside(e: MouseEvent) {
       const target = e.target as Node
       if (!triggerRef.current?.contains(target) && !dropdownRef.current?.contains(target)) {
-        setOpen(false)
-        setQuery('')
+        close()
       }
     }
+    // Listens on the document rather than the search input: focus moves to an option button as soon
+    // as one is toggled, and Escape has to close the list from there too.
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') close()
+    }
     document.addEventListener('mousedown', onOutside)
-    return () => document.removeEventListener('mousedown', onOutside)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onOutside)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [open])
+
+  function close() {
+    setOpen(false)
+    setQuery('')
+  }
 
   function toggle(val: string) {
     onChange(values.includes(val) ? values.filter(v => v !== val) : [...values, val])
@@ -80,8 +93,8 @@ export function SearchableMultiSelect({
     <div className={`relative ${className}`}>
       <div
         ref={triggerRef}
-        onClick={() => open ? (setOpen(false), setQuery('')) : openDropdown()}
-        className="flex min-w-[8rem] cursor-pointer flex-wrap items-center gap-1 rounded-lg border border-slate-200 dark:border-[#222226] bg-transparent px-2 py-1 text-xs"
+        onClick={() => (open ? close() : openDropdown())}
+        className="flex w-full min-w-0 cursor-pointer flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm dark:border-[#222226]"
       >
         {values.length === 0 && (
           <span className="text-slate-400">{placeholder}</span>
@@ -114,7 +127,7 @@ export function SearchableMultiSelect({
         <div
           ref={dropdownRef}
           style={dropdownStyle}
-          className="w-max max-w-[240px] rounded-lg border border-slate-200 dark:border-[#222226] bg-white dark:bg-[#111118] shadow-lg"
+          className="w-max min-w-[13rem] max-w-[320px] rounded-lg border border-slate-200 dark:border-[#222226] bg-white dark:bg-[#111118] shadow-lg"
         >
           <div className="border-b border-slate-100 dark:border-[#1c1c24] p-1.5">
             <input
@@ -122,14 +135,13 @@ export function SearchableMultiSelect({
               type="text"
               value={query}
               onChange={e => setQuery(e.target.value)}
-              onKeyDown={e => e.key === 'Escape' && (setOpen(false), setQuery(''))}
               placeholder="Search…"
-              className="w-full rounded bg-slate-50 dark:bg-[#0f0f11] border border-slate-200 dark:border-[#222226] px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="w-full rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0f0f11]"
             />
           </div>
           <div className="max-h-52 overflow-y-auto py-0.5">
             {filtered.length === 0 ? (
-              <p className="px-3 py-2 text-xs text-slate-400">No matches</p>
+              <p className="px-3 py-2.5 text-sm text-slate-400">No matches</p>
             ) : (
               filtered.map(o => {
                 const checked = values.includes(o.value)
@@ -139,7 +151,7 @@ export function SearchableMultiSelect({
                     type="button"
                     data-value={o.value}
                     onClick={() => toggle(o.value)}
-                    className={`flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-slate-50 dark:hover:bg-[#1c1c24] ${checked ? 'text-brand-600 dark:text-brand-400' : 'text-slate-700 dark:text-[#c8d0de]'}`}
+                    className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm transition-colors hover:bg-slate-50 dark:hover:bg-[#1c1c24] ${checked ? 'text-brand-600 dark:text-brand-400' : 'text-slate-700 dark:text-[#c8d0de]'}`}
                   >
                     <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${checked ? 'border-brand-500 bg-brand-500 text-white' : 'border-slate-300 dark:border-[#3a4258]'}`}>
                       {checked && (

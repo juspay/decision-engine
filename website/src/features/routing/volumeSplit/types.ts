@@ -6,6 +6,7 @@ export interface VolumeSplitGatewayFormEntry {
 }
 
 export interface VolumeSplitRuleFormValues {
+  description?: string
   ruleName: string
   gateways: VolumeSplitGatewayFormEntry[]
 }

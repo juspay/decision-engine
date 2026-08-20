@@ -8,8 +8,9 @@ import { SUPER_ADMIN_EMAIL, SUPER_ADMIN_PASSWORD } from '../../fixtures/super-ad
  * Shape: a super-admin is a real (standard-session) user whose email is on the config roster
  * (`user_auth.super_admin_emails`). From that session they can mint a `super_admin_view` token for
  * any merchant — regardless of membership — that keeps their own identity, and later `exit` back to a
- * normal session. A view session is deliberately NOT a full account session (it cannot switch/create
- * merchants). Lookup lets them find a merchant id from an email or merchant name.
+ * normal session. The view token carries a scope grant — the entered scope's organization when
+ * Hyperswitch has synced its ancestry, otherwise the scope alone — and switching moves within that
+ * grant. Lookup lets them find a merchant id from an email or merchant name.
  *
  * Roster dependency: the API under test must have SUPER_ADMIN_EMAIL on its super-admin roster.
  * playwright.config.ts injects it via DECISION_ENGINE__USER_AUTH__SUPER_ADMIN_EMAILS into the API
@@ -92,7 +93,7 @@ test.describe('Super-admin merchant view (API)', () => {
     expect(r.status).toBe(404)
   })
 
-  test('a view session cannot switch merchant, and exit returns a full session', async ({ api, merchant }) => {
+  test('a view session switches within its grant, and exit returns a full session', async ({ api, merchant }) => {
     const superToken = await superAdminToken(api)
     const entered = await api.raw('POST', '/auth/super-admin/enter-merchant', {
       ...bearer(superToken),
@@ -100,16 +101,34 @@ test.describe('Super-admin merchant view (API)', () => {
     })
     const viewToken = entered.body.token
 
-    // A view session is scoped to viewing — not a full account session.
+    // The fixture merchant is DE-native, so it has no synced ancestry and the grant is the scope
+    // itself — switching reaches that one scope and stays a view session.
     const switched = await api.raw('POST', '/auth/switch-merchant', {
       failOnStatusCode: false,
       ...bearer(viewToken),
       body: { merchant_id: merchant.id },
     })
-    expect(switched.status).toBe(403)
+    expect(switched.status).toBe(200)
+    expect(typeof switched.body.token).toBe('string')
 
-    // Exit re-mints a standard session for the same admin.
-    const exited = await api.raw('POST', '/auth/super-admin/exit', { failOnStatusCode: false, ...bearer(viewToken) })
+    const inView = await api.raw('GET', '/auth/me', { failOnStatusCode: false, ...bearer(switched.body.token) })
+    expect(inView.status).toBe(200)
+    expect(inView.body.is_super_admin_view).toBe(true)
+
+    // A scope the grant does not cover stays out of reach — entry is by roster, movement is not.
+    const outside = await api.raw('POST', '/auth/switch-merchant', {
+      failOnStatusCode: false,
+      ...bearer(viewToken),
+      body: { merchant_id: factory.merchantId('sa_outside') },
+    })
+    expect(outside.status).toBe(403)
+
+    // Switching does not cost the session its way back: exit re-mints a standard session for the
+    // same admin from the post-switch token.
+    const exited = await api.raw('POST', '/auth/super-admin/exit', {
+      failOnStatusCode: false,
+      ...bearer(switched.body.token),
+    })
     expect(exited.status).toBe(200)
     expect(typeof exited.body.token).toBe('string')
 

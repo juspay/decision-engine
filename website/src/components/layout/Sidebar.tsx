@@ -175,7 +175,7 @@ export function Sidebar() {
         {accountOpen ? (
           <div className="absolute bottom-full left-4 right-4 mb-3 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_-36px_rgba(15,23,42,0.35)] dark:border-[#2a303a] dark:bg-[#0d1118]">
             <div className="border-b border-slate-200 px-3 py-3 dark:border-[#242b36]">
-              <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+              <p className="break-all text-sm font-semibold text-slate-900 dark:text-white">
                 {user?.email || 'Signed-in user'}
               </p>
               {user?.merchantId ? (
@@ -211,24 +211,25 @@ export function Sidebar() {
           </div>
         ) : null}
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => setAccountOpen((value) => !value)}
             aria-haspopup="menu"
             aria-expanded={accountOpen}
-            className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl px-2 py-2 text-left transition-colors hover:bg-slate-100 dark:hover:bg-[#151b24]"
+            title={user?.email || 'Account'}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl px-1.5 py-2 text-left transition-colors hover:bg-slate-100 dark:hover:bg-[#151b24]"
           >
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-600 text-[11px] font-semibold text-white">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-600 text-[10px] font-semibold text-white">
               {initials}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-semibold text-slate-900 dark:text-white">
+              <span className="block truncate text-xs font-semibold text-slate-900 dark:text-white">
                 {user?.email || 'Account'}
               </span>
             </span>
             <ChevronDown
-              size={15}
+              size={13}
               className={`shrink-0 text-slate-400 transition-transform ${accountOpen ? 'rotate-180' : ''}`}
             />
           </button>
@@ -236,11 +237,11 @@ export function Sidebar() {
           <button
             type="button"
             onClick={handleThemeToggle}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-[#1a1f2a] dark:hover:text-white"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-[#1a1f2a] dark:hover:text-white"
             aria-label="Toggle theme"
             title="Toggle theme"
           >
-            {isDark ? <Sun size={18} /> : <Moon size={18} />}
+            {isDark ? <Sun size={15} /> : <Moon size={15} />}
           </button>
         </div>
       </div>

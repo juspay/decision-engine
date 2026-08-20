@@ -4526,7 +4526,7 @@ export function DecisionSimulatorPage() {
                         inputMode="numeric"
                         value={volumePayments}
                         onChange={e => setVolumePayments(e.target.value)}
-                        className="min-w-0 flex-1 bg-transparent text-xl font-semibold text-slate-950 outline-none dark:text-white"
+                        className="input-bare min-w-0 flex-1 text-xl font-semibold text-slate-950 outline-none dark:text-white"
                       />
                       <span className="shrink-0 rounded-full bg-slate-100 px-2.5 py-1 text-xs font-semibold text-slate-500 dark:bg-[#1d2633] dark:text-[#91a0b8]">
                         runs

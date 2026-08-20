@@ -20,7 +20,7 @@ import {
 } from '../../types/api'
 import { ShieldAlert, PowerOff, Plus, FlaskConical, CheckCircle2, XCircle, Clock, AlertTriangle, Sliders, Pencil, Trash2, Info, GitCompare, Copy } from 'lucide-react'
 import * as type from '../ui/typography'
-import { RuleBreakdown } from './EuclidRulesPage'
+import { RuleBreakdown } from '../routing/euclid/RuleBreakdown'
 import { validateABTestForm } from '../../features/routing/abTesting/schema'
 import { toABTestCreatePayload } from '../../features/routing/abTesting/payload'
 import { toABTestFormValues } from '../../features/routing/abTesting/state'

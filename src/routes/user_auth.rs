@@ -570,12 +570,14 @@ pub async fn switch_merchant(
 
     let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
 
-    // A standard session moves within its DE memberships; a handed-over one moves within the
-    // Hyperswitch node it was granted. A super-admin-view session must Exit back to its own session
-    // before switching, so its single-level return token isn't overwritten.
+    // A standard session moves within its DE memberships; a handed-over or super-admin-view one
+    // moves within the node it was granted. Exit is unaffected by switching: it rebuilds the
+    // admin's own session from the user id and the roster, neither of which a switch changes.
     match claims.token_type.as_str() {
         TOKEN_TYPE_STANDARD => switch_within_memberships(claims, payload, &global_config).await,
-        TOKEN_TYPE_HS_REDIRECT => switch_within_grant(claims, payload, &global_config).await,
+        TOKEN_TYPE_HS_REDIRECT | TOKEN_TYPE_SUPER_ADMIN_VIEW => {
+            switch_within_grant(claims, payload, &global_config).await
+        }
         _ => Err(error::ContainerError::from(
             UserAuthError::UnsupportedOperation,
         )),
@@ -640,7 +642,9 @@ async fn switch_within_grant(
         &claims.email,
         &payload.merchant_id,
         &claims.role,
-        TOKEN_TYPE_HS_REDIRECT,
+        // Kept as it was, so a super-admin view stays one — and stays able to Exit — rather than
+        // turning into a handed-over session by moving inside itself.
+        &claims.token_type,
         Some(&grant),
         // Carried forward, so a limited session cannot switch its way into more.
         claims.perms.as_deref(),
@@ -1159,7 +1163,13 @@ pub async fn me(
     .change_error(UserAuthError::StorageError)?;
 
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
-    let merchants = fetch_user_merchants(&app_state, &user.user_id).await?;
+    // A session carrying a grant lists what that grant reaches; one without lists the user's own
+    // memberships. A super-admin view is the first case — its own memberships are the admin's
+    // home account, which is not where the session is and not what it can move between.
+    let merchants = match claims.grant.as_ref() {
+        Some(grant) => granted_merchants(grant, &user.role).await,
+        None => fetch_user_merchants(&app_state, &user.user_id).await?,
+    };
     let hierarchy = hierarchy_of_scope(&claims.merchant_id).await;
 
     Ok(Json(MeResponse {
@@ -1193,6 +1203,29 @@ async fn hierarchy_of_scope(
         crate::types::merchant::merchant_account::load_merchant_by_merchant_id(scope_id.to_owned())
             .await?;
     crate::types::merchant::hierarchy::of_account(&account)
+}
+
+/// What a super-admin view session may move between, once inside.
+///
+/// The organization of the scope entered, so the admin can reach its sibling profiles without
+/// returning to look each one up by ID. This widens the session rather than narrowing it: entry
+/// is authorized by the roster and reaches any merchant at all, and lookup still does, so the
+/// grant decides only what the switcher offers from here — not what the admin can enter.
+///
+/// A scope with no ancestry has no organization to name. That is every DE-native merchant, and
+/// every scope Hyperswitch has not synced yet, so it is the ordinary case rather than an error:
+/// the session stays on the one scope, which is what a view session was before grants existed.
+fn view_grant(
+    scope_id: &str,
+    hierarchy: Option<&crate::types::merchant::hierarchy::Hierarchy>,
+) -> ScopeGrant {
+    match hierarchy {
+        Some(hierarchy) => ScopeGrant {
+            level: GrantLevel::Org,
+            id: hierarchy.hs_org_id.clone(),
+        },
+        None => ScopeGrant::profile(scope_id),
+    }
 }
 
 /// Whether `claims` belongs to a platform super admin.
@@ -1818,12 +1851,21 @@ pub async fn enter_merchant(
         .await
         .ok_or_else(|| error::ContainerError::from(UserAuthError::MerchantNotFound))?;
 
-    let new_token = auth::generate_jwt(
+    let grant = view_grant(
+        &payload.merchant_id,
+        hierarchy_of_scope(&payload.merchant_id).await.as_ref(),
+    );
+
+    let new_token = auth::generate_scoped_jwt(
         &claims.user_id,
         &claims.email,
         &payload.merchant_id,
         "admin",
         TOKEN_TYPE_SUPER_ADMIN_VIEW,
+        Some(&grant),
+        // Named rather than left absent, exactly as `generate_jwt` does, so the reading never
+        // depends on the explicit-permissions flag for a session Decision Engine issued.
+        Some(auth::KNOWN_PERMISSIONS),
         global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
     )
@@ -2237,6 +2279,34 @@ mod tests {
         assert_eq!(grant, ScopeGrant::profile("pro_abc"));
         assert_eq!(perms, None, "an old code names no permissions");
         assert_eq!(email, None, "an old code names no user");
+    }
+
+    #[test]
+    fn entering_a_synced_scope_grants_its_organization() {
+        // The point of the grant: an admin who entered one profile can reach the others beside it
+        // without going back to look each one up.
+        let hierarchy = crate::types::merchant::hierarchy::Hierarchy {
+            v: 1,
+            hs_org_id: "org_N1B6LBS3ufzHriAwZSAmd".to_string(),
+            hs_org_name: None,
+            hs_merchant_id: "merchant_1681193734270".to_string(),
+            hs_merchant_name: Some("Test".to_string()),
+            profile_name: None,
+            synced_at: None,
+        };
+        let grant = view_grant("pro_E7pM8kGERopEKEhqwfWQ", Some(&hierarchy));
+        assert_eq!(grant.level, GrantLevel::Org);
+        assert_eq!(grant.id, "org_N1B6LBS3ufzHriAwZSAmd");
+    }
+
+    #[test]
+    fn entering_a_scope_with_no_ancestry_stays_on_that_scope() {
+        // A DE-native merchant, or one Hyperswitch has not synced. There is no organization to
+        // name, and inventing one would let the switcher offer scopes the tree never placed
+        // together — so the session stays where it is, as it did before grants existed.
+        let grant = view_grant("merchant_385bd763d034", None);
+        assert_eq!(grant.level, GrantLevel::Profile);
+        assert_eq!(grant.id, "merchant_385bd763d034");
     }
 
     #[test]
