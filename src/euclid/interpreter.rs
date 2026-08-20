@@ -245,15 +245,15 @@ pub fn perform_volume_split(
 pub fn perform_volume_split_priority(
     splits: Vec<VolumeSplit<Vec<ConnectorInfo>>>,
 ) -> RoutingResult<Vec<ConnectorInfo>> {
-    let mut ordered: Vec<ConnectorInfo> = Vec::new();
-    for connectors in sample_split_winner_first(splits)? {
-        for connector in connectors {
+    Ok(sample_split_winner_first(splits)?
+        .into_iter()
+        .flatten()
+        .fold(Vec::new(), |mut ordered, connector| {
             if !ordered.contains(&connector) {
                 ordered.push(connector);
             }
-        }
-    }
-    Ok(ordered)
+            ordered
+        }))
 }
 
 pub fn evaluate_output(output: &Output) -> RoutingResult<Vec<ConnectorInfo>> {
