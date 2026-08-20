@@ -220,9 +220,7 @@ impl fmt::Display for RoutingError {
 impl Error for RoutingError {}
 type RoutingResult<T> = Result<T, RoutingError>;
 
-pub fn perform_volume_split(
-    mut splits: Vec<VolumeSplit<ConnectorInfo>>,
-) -> RoutingResult<Vec<ConnectorInfo>> {
+fn sample_split_winner_first<T>(mut splits: Vec<VolumeSplit<T>>) -> RoutingResult<Vec<T>> {
     let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
     let weighted_index =
         WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
@@ -238,24 +236,18 @@ pub fn perform_volume_split(
     Ok(splits.into_iter().map(|split| split.output).collect())
 }
 
-pub fn perform_volume_split_priority(
-    mut splits: Vec<VolumeSplit<Vec<ConnectorInfo>>>,
+pub fn perform_volume_split(
+    splits: Vec<VolumeSplit<ConnectorInfo>>,
 ) -> RoutingResult<Vec<ConnectorInfo>> {
-    let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
-    let weighted_index =
-        WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
-    let mut rng = rand::thread_rng();
-    let idx = weighted_index.sample(&mut rng);
+    sample_split_winner_first(splits)
+}
 
-    if idx >= splits.len() {
-        return Err(RoutingError::VolumeSplitFailed);
-    }
-    let winner = splits.remove(idx);
-    splits.insert(0, winner);
-
+pub fn perform_volume_split_priority(
+    splits: Vec<VolumeSplit<Vec<ConnectorInfo>>>,
+) -> RoutingResult<Vec<ConnectorInfo>> {
     let mut ordered: Vec<ConnectorInfo> = Vec::new();
-    for split in splits {
-        for connector in split.output {
+    for connectors in sample_split_winner_first(splits)? {
+        for connector in connectors {
             if !ordered.contains(&connector) {
                 ordered.push(connector);
             }
