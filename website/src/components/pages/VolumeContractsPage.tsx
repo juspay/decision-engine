@@ -500,6 +500,7 @@ export function VolumeContractsPage() {
                   <div>
                     {fieldLabel('Routing mode')}
                     <SearchableSelect
+                      triggerClassName={inputClass}
                       value={routingMode}
                       onChange={(v) => setRoutingMode(v as typeof routingMode)}
                       options={[
@@ -523,6 +524,7 @@ export function VolumeContractsPage() {
                   <div>
                     {fieldLabel('Metric')}
                     <SearchableSelect
+                      triggerClassName={inputClass}
                       value={metric}
                       onChange={(v) => setMetric(v as typeof metric)}
                       options={[
@@ -534,6 +536,7 @@ export function VolumeContractsPage() {
                   <div>
                     {fieldLabel('Currency')}
                     <Combobox
+                      className={inputClass}
                       value={currency}
                       onChange={setCurrency}
                       options={CURRENCY_SUGGESTIONS}
@@ -543,6 +546,7 @@ export function VolumeContractsPage() {
                   <div>
                     {fieldLabel('Amount units')}
                     <SearchableSelect
+                      triggerClassName={inputClass}
                       value={amountUnits}
                       onChange={(v) => setAmountUnits(v as typeof amountUnits)}
                       options={[
@@ -616,6 +620,7 @@ export function VolumeContractsPage() {
                       <div>
                         {fieldLabel('Connector', 'exact gateway name')}
                         <Combobox
+                          className={inputClass}
                           value={contract.connector}
                           onChange={(v) => patchContract(contract.key, { connector: v })}
                           options={CONNECTOR_SUGGESTIONS}
@@ -625,6 +630,7 @@ export function VolumeContractsPage() {
                       <div>
                         {fieldLabel('Status')}
                         <SearchableSelect
+                      triggerClassName={inputClass}
                           value={contract.status}
                           onChange={(v) => patchContract(contract.key, { status: v as 'active' | 'inactive' })}
                           options={[
@@ -636,6 +642,7 @@ export function VolumeContractsPage() {
                       <div>
                         {fieldLabel('Billing cycle')}
                         <SearchableSelect
+                      triggerClassName={inputClass}
                           value={contract.cycleType}
                           onChange={(v) => patchContract(contract.key, { cycleType: v as ContractForm['cycleType'] })}
                           options={[
@@ -658,6 +665,7 @@ export function VolumeContractsPage() {
                       <div>
                         {fieldLabel('Timezone', 'IANA')}
                         <Combobox
+                          className={inputClass}
                           value={contract.timezone}
                           onChange={(v) => patchContract(contract.key, { timezone: v })}
                           options={TIMEZONE_SUGGESTIONS}
@@ -705,6 +713,7 @@ export function VolumeContractsPage() {
                         <div>
                           {fieldLabel('Reward kind')}
                           <SearchableSelect
+                      triggerClassName={inputClass}
                             value={contract.rewardKind}
                             onChange={(v) => patchContract(contract.key, { rewardKind: v as 'flat' | 'percentage' })}
                             options={[
@@ -775,6 +784,7 @@ export function VolumeContractsPage() {
                               <div>
                                 {fieldLabel('Kind')}
                                 <SearchableSelect
+                      triggerClassName={inputClass}
                                   value={tier.kind}
                                   onChange={(v) =>
                                     patchTier(contract.key, tierIdx, {
@@ -823,6 +833,7 @@ export function VolumeContractsPage() {
                               <div>
                                 {fieldLabel('Settlement')}
                                 <SearchableSelect
+                      triggerClassName={inputClass}
                                   value={tier.rebateSettlement}
                                   onChange={(v) =>
                                     patchTier(contract.key, tierIdx, { rebateSettlement: v as 'cash' | 'credit_note' })

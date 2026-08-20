@@ -12,6 +12,13 @@ interface SearchableSelectProps {
   onChange: (value: string) => void
   options: Option[]
   className?: string
+  /**
+   * Replaces the compact `cond-select` trigger styling entirely — pass a full
+   * input-style class set (padding, border, text size) to render the trigger
+   * like a regular form field. The trigger becomes block-level full-width and
+   * the label no longer truncates at 10rem.
+   */
+  triggerClassName?: string
   disabled?: boolean
   dataCy?: string
 }
@@ -21,6 +28,7 @@ export function SearchableSelect({
   onChange,
   options,
   className = '',
+  triggerClassName,
   disabled = false,
   dataCy,
 }: SearchableSelectProps) {
@@ -84,17 +92,21 @@ export function SearchableSelect({
   }
 
   return (
-    <div className={`relative inline-block ${className}`} data-cy={dataCy}>
+    <div className={`relative ${triggerClassName ? 'block' : 'inline-block'} ${className}`} data-cy={dataCy}>
       <button
         ref={triggerRef}
         type="button"
         disabled={disabled}
         onClick={() => open ? close() : openDropdown()}
-        className="cond-select flex items-center gap-1 pr-2"
+        className={
+          triggerClassName
+            ? `flex w-full items-center justify-between gap-2 text-left ${triggerClassName}`
+            : 'cond-select flex items-center gap-1 pr-2'
+        }
         style={{ backgroundImage: 'none', display: 'flex', alignItems: 'center' }}
         data-value={value}
       >
-        <span className="truncate max-w-[10rem]">{selectedLabel || <span className="text-slate-400">select...</span>}</span>
+        <span className={`truncate ${triggerClassName ? '' : 'max-w-[10rem]'}`}>{selectedLabel || <span className="text-slate-400">select...</span>}</span>
         <ChevronDown
           size={11}
           className={`shrink-0 text-slate-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
