@@ -146,9 +146,7 @@ test.describe('Rule Builder — UI interactions', () => {
       await block.getByRole('button', { name: 'Add condition' }).click()
 
       await expect(block.getByText('AND', { exact: true }).first()).toBeVisible()
-      await expect(
-        block.locator('.rounded-lg.border').first().locator('[class*="divide-y"] > div'),
-      ).toHaveCount(3)
+      await expect(block.locator('[data-testid="condition-row"]')).toHaveCount(3)
     })
 
     test('removes a condition when there are multiple', async () => {
@@ -190,7 +188,7 @@ test.describe('Rule Builder — UI interactions', () => {
         expect(label.trim(), 'field labels should be humanised, not raw snake_case').not.toMatch(/_/)
       }
 
-      await sharedPage.locator('body').click({ force: true })
+      await euclid.dismissDropdown()
     })
 
     test('shows human-readable labels in the enum value dropdown', async ({ sharedPage }) => {
@@ -203,7 +201,7 @@ test.describe('Rule Builder — UI interactions', () => {
         expect(label.trim(), 'enum labels should be humanised').not.toMatch(/_/)
       }
 
-      await sharedPage.locator('body').click({ force: true })
+      await euclid.dismissDropdown()
     })
 
     test('can select a different field and choose a value', async ({ sharedPage }) => {
@@ -217,7 +215,7 @@ test.describe('Rule Builder — UI interactions', () => {
         await sharedPage.locator('button[data-value]:not(.cond-select)').count(),
       ).toBeGreaterThan(1)
 
-      await sharedPage.locator('body').click({ force: true })
+      await euclid.dismissDropdown()
     })
   })
 

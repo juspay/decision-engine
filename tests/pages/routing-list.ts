@@ -1,4 +1,4 @@
-import { type Page, type Locator } from '@playwright/test'
+import { expect, type Page, type Locator } from '@playwright/test'
 
 /**
  * Shared behaviour of the routing list tables (`/routing/rules`, `/routing/volume`).
@@ -16,7 +16,13 @@ export class RoutingListPage {
 
   /** Open a row's action menu. The panel is portalled to <body>, so it is NOT inside the row. */
   async openRuleMenu(name: string): Promise<void> {
-    await this.ruleRow(name).getByRole('button', { name: 'Rule actions' }).click()
+    const trigger = this.ruleRow(name).getByRole('button', { name: 'Rule actions' })
+    // The menu is anchored to the trigger's rect and closes itself on any scroll or resize, so a
+    // list re-render arriving just after the click can dismiss it. Re-open until it stays up.
+    await expect(async () => {
+      await trigger.click()
+      await expect(this.page.getByRole('menu')).toBeVisible({ timeout: 1_000 })
+    }).toPass({ timeout: 15_000 })
   }
 
   /**
@@ -29,7 +35,12 @@ export class RoutingListPage {
 
   /** Open a row's menu and run one action. */
   async ruleAction(name: string, action: string): Promise<void> {
-    await this.openRuleMenu(name)
-    await this.menuItem(action).click()
+    const item = this.menuItem(action)
+    // Same reason as openRuleMenu: if the menu is dismissed between opening it and clicking the
+    // item, re-open and try again rather than waiting out the action timeout on a gone element.
+    await expect(async () => {
+      if (!(await item.isVisible())) await this.openRuleMenu(name)
+      await item.click({ timeout: 2_000 })
+    }).toPass({ timeout: 20_000 })
   }
 }

@@ -69,8 +69,17 @@ export function SearchableSelect({
         close()
       }
     }
+    // Listens on the document rather than the search input, so Escape still closes the list once
+    // focus has moved off the input.
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') close()
+    }
     document.addEventListener('mousedown', onOutside)
-    return () => document.removeEventListener('mousedown', onOutside)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onOutside)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [open])
 
   function close() {
@@ -113,7 +122,6 @@ export function SearchableSelect({
               type="text"
               value={query}
               onChange={e => setQuery(e.target.value)}
-              onKeyDown={e => e.key === 'Escape' && close()}
               placeholder="Search…"
               className="w-full rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0f0f11]"
             />

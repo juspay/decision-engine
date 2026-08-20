@@ -153,7 +153,17 @@ export class EuclidRuleBuilder extends RoutingListPage {
       if (!cls.includes('text-brand-600')) await opt.click({ force: true })
       await search.focus()
     }
-    await this.page.locator('body').click({ force: true })
+    await this.dismissDropdown()
+  }
+
+  /**
+   * Close an open SearchableSelect / SearchableMultiSelect.
+   *
+   * Not a body click: the dropdown is portalled to <body>, so a click at the body's centre lands on
+   * whichever option happens to sit under that point and silently toggles it.
+   */
+  async dismissDropdown(): Promise<void> {
+    await this.page.keyboard.press('Escape')
   }
 
   private async selectFromPortal(value: string): Promise<void> {

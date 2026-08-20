@@ -142,12 +142,13 @@ export function TopBar() {
 
   const currentMerchant = merchants.find((m) => m.merchant_id === user?.merchantId)
 
-  // A handed-over session's list is the scopes Hyperswitch granted it, which always includes the
-  // one it is already on. A single entry therefore means there is nothing to switch between, and
-  // the read-only context chip is the honest control; a DE session's list works the other way,
-  // where one membership is still a switcher.
-  const canSwitchMerchant =
-    !user?.isSuperAdminView && merchants.length > (user?.isRedirectSession ? 1 : 0)
+  // A granted session's list is the scopes it was handed — a handed-over one from Hyperswitch, a
+  // super-admin view from the organization it entered — and always includes the one it is already
+  // on. A single entry therefore means there is nothing to switch between, and the read-only
+  // context chip is the honest control; a DE session's list works the other way, where one
+  // membership is still a switcher.
+  const isGranted = Boolean(user?.isRedirectSession || user?.isSuperAdminView)
+  const canSwitchMerchant = merchants.length > (isGranted ? 1 : 0)
   const showAccountContext = !!user?.hierarchy && !canSwitchMerchant
 
   return (
@@ -287,7 +288,7 @@ export function TopBar() {
             {merchantOpen && (
               <div className="absolute right-0 top-10 w-60 bg-white dark:bg-[#0c0c10] border border-[#e6e6ee] dark:border-[#1a1a24] rounded-lg shadow-lg py-1 z-50">
                 <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                  {user?.isRedirectSession ? 'Profiles' : 'Merchants'}
+                  {isGranted ? 'Profiles' : 'Merchants'}
                 </p>
                 {merchants.map((m) => (
                   <button

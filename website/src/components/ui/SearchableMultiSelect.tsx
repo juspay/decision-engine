@@ -59,13 +59,26 @@ export function SearchableMultiSelect({
     function onOutside(e: MouseEvent) {
       const target = e.target as Node
       if (!triggerRef.current?.contains(target) && !dropdownRef.current?.contains(target)) {
-        setOpen(false)
-        setQuery('')
+        close()
       }
     }
+    // Listens on the document rather than the search input: focus moves to an option button as soon
+    // as one is toggled, and Escape has to close the list from there too.
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') close()
+    }
     document.addEventListener('mousedown', onOutside)
-    return () => document.removeEventListener('mousedown', onOutside)
+    document.addEventListener('keydown', onKey)
+    return () => {
+      document.removeEventListener('mousedown', onOutside)
+      document.removeEventListener('keydown', onKey)
+    }
   }, [open])
+
+  function close() {
+    setOpen(false)
+    setQuery('')
+  }
 
   function toggle(val: string) {
     onChange(values.includes(val) ? values.filter(v => v !== val) : [...values, val])
@@ -80,7 +93,7 @@ export function SearchableMultiSelect({
     <div className={`relative ${className}`}>
       <div
         ref={triggerRef}
-        onClick={() => open ? (setOpen(false), setQuery('')) : openDropdown()}
+        onClick={() => (open ? close() : openDropdown())}
         className="flex w-full min-w-0 cursor-pointer flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm dark:border-[#222226]"
       >
         {values.length === 0 && (
@@ -122,7 +135,6 @@ export function SearchableMultiSelect({
               type="text"
               value={query}
               onChange={e => setQuery(e.target.value)}
-              onKeyDown={e => e.key === 'Escape' && (setOpen(false), setQuery(''))}
               placeholder="Search…"
               className="w-full rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0f0f11]"
             />

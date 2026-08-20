@@ -469,7 +469,7 @@ export function ConditionGroupEditor({
     <div className="rounded-lg border border-slate-200 dark:border-[#222733] bg-white dark:bg-[#0f141d]">
       <div className="space-y-0 divide-y divide-slate-100 dark:divide-[#1c1c24]">
         {group.conditions.map((cond, idx) => (
-          <div key={cond.id} className="flex items-center gap-3 px-4 py-3">
+          <div key={cond.id} data-testid="condition-row" className="flex items-center gap-3 px-4 py-3">
             {group.conditions.length > 1 && (
               <span className="w-10 shrink-0 text-[11px] font-bold uppercase tracking-widest text-sky-500 select-none">
                 {idx === 0 ? 'IF' : 'AND'}

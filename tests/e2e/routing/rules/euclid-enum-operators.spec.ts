@@ -69,13 +69,13 @@ test.describe('"is one of" / "is not one of" operator', () => {
     const options = sharedPage.locator('button[data-value]:not(.cond-select)')
     const chosen = await options.first().getAttribute('data-value')
     await options.first().click({ force: true })
-    await sharedPage.locator('body').click({ force: true })
+    await euclid.dismissDropdown()
     await expect(value.locator(PILL)).toHaveCount(1)
 
     // Re-open and click the same option to deselect it.
     await value.click()
     await sharedPage.locator(`button[data-value="${chosen}"]:not(.cond-select)`).click({ force: true })
-    await sharedPage.locator('body').click({ force: true })
+    await euclid.dismissDropdown()
 
     await expect(value.locator(PILL)).toHaveCount(0)
   })
@@ -93,7 +93,7 @@ test.describe('"is one of" / "is not one of" operator', () => {
     const second = await options.nth(1).getAttribute('data-value')
     await sharedPage.locator(`button[data-value="${first}"]:not(.cond-select)`).click({ force: true })
     await sharedPage.locator(`button[data-value="${second}"]:not(.cond-select)`).click({ force: true })
-    await sharedPage.locator('body').click({ force: true })
+    await euclid.dismissDropdown()
 
     await expect(value.locator(PILL)).toHaveCount(2)
   })
