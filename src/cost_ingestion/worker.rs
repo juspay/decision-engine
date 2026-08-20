@@ -111,7 +111,8 @@ async fn process(
     let registry = ConnectorRegistry::with_builtins();
     let source = registry.get(&job.connector)?;
 
-    // Credentials for this (connector, account).
+    // Credentials for this (merchant, connector, account) — the download auth is the job owner's,
+    // not the account's, since two merchants may share one connector account.
     let store_ = ConnectorCredsStore::from_keyring(
         &cfg.creds_encryption_current,
         &cfg.creds_encryption_keys,
@@ -120,12 +121,12 @@ async fn process(
         IngestError::Storage("credential encryption keyring not configured".to_string())
     })?;
     let resolved = store_
-        .get(&job.connector, &job.account)
+        .get(&job.merchant_id, &job.connector, &job.account)
         .await?
         .ok_or_else(|| {
             IngestError::Storage(format!(
-                "no credentials for {}/{}",
-                job.connector, job.account
+                "no credentials for {}/{}/{}",
+                job.merchant_id, job.connector, job.account
             ))
         })?;
 

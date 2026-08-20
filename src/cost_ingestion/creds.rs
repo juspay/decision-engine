@@ -1,10 +1,18 @@
 //! Encrypted storage for per-settlement-source ingestion credentials.
 //!
-//! A settlement source is `(connector, account)` — e.g. one Adyen `merchantAccountCode`. A single
-//! merchant may own several accounts (each with its own HMAC key, report-user auth, region, and
-//! markup), so the account is the real unit, and it carries *our* `merchant_id`. Keying on
-//! `(connector, account)` also resolves the webhook chicken-and-egg: the handler reads the
-//! account from the unverified body, then loads that account's secret *and* merchant id to verify.
+//! A settlement source is `(merchant_id, connector, account)` — one of *our* merchants plus e.g. one
+//! Adyen `merchantAccountCode`. A single merchant may own several accounts (each with its own HMAC
+//! key, report-user auth, region, and markup), so the account is the unit *within* a merchant.
+//!
+//! The merchant is part of the key rather than just the payload because one connector account can
+//! be shared by two of our merchants, each having registered their own webhook endpoint (with its
+//! own HMAC key) at the connector. Keyed on `(connector, account)` alone there is room for exactly
+//! one secret, so the second merchant to configure would overwrite the first's key and the first's
+//! deliveries would start failing signature verification.
+//!
+//! That is also why the webhook carries the merchant in its path
+//! (`/webhooks/settlement/:merchant_id/:connector`): the handler must build this key *before* it can
+//! verify anything, and the connector's payload names only its own account, never our merchant.
 //!
 //! Credentials must be *decryptable* (we use them to download reports), so they are encrypted at
 //! rest with AES-256-GCM ([`GcmAes256`]) rather than hashed, and persisted as a base64 blob in the
@@ -30,9 +38,22 @@ pub struct ResolvedCreds {
     pub creds: ConnectorCreds,
 }
 
-/// A `(connector, account)` a merchant has configured — the non-secret half, safe to list.
+/// A `(connector, account)` a merchant has configured — the non-secret half, safe to list. The
+/// merchant is the index's own key (`cost_ingest_sources::{merchant_id}`), so it isn't repeated here.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct SourceRef {
+    pub connector: String,
+    pub account: String,
+}
+
+/// One entry of a pull connector's poll index. Unlike [`SourceRef`] this is a cross-merchant list,
+/// so it must name the merchant to reach its credentials.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PollSource {
+    /// Empty only when read back from an index written before the merchant joined the credential
+    /// key; [`list_poll_sources`] filters those out.
+    #[serde(default)]
+    pub merchant_id: String,
     pub connector: String,
     pub account: String,
 }
@@ -140,24 +161,30 @@ async fn remove_source(
 }
 
 /// Delete a settlement source: its encrypted credentials *and* its entry in the merchant's source
-/// index, so it disappears from the configured list. Idempotent — deleting an absent source is not
-/// an error. No keyring needed (we're removing, not decrypting), so this is a free function.
+/// index, so it disappears from the configured list. Pull connectors are dropped from the poll index
+/// too, or the poller would keep sweeping a source whose credentials are gone. Idempotent —
+/// deleting an absent source is not an error. No keyring needed (we're removing, not decrypting),
+/// so this is a free function.
 pub async fn delete_source(
     connector: &str,
     account: &str,
     merchant_id: &str,
 ) -> Result<(), IngestError> {
-    service_configuration::delete_config(config_name(connector, account))
+    service_configuration::delete_config(config_name(merchant_id, connector, account))
         .await
         .map_err(|e| IngestError::Storage(e.to_string()))?;
+    if is_pull_connector(connector) {
+        remove_poll_source(merchant_id, connector, account).await?;
+    }
     remove_source(merchant_id, connector, account).await
 }
 
-/// `service_configuration.name` under which a `(connector, account)`'s encrypted creds live.
-/// The account (e.g. Adyen `merchantAccountCode`) is unique within a connector, so this key is
-/// stable even when one merchant owns several accounts.
-fn config_name(connector: &str, account: &str) -> String {
-    format!("cost_ingest_creds::{connector}::{account}")
+/// `service_configuration.name` under which a `(merchant_id, connector, account)`'s encrypted creds
+/// live. The merchant leads the key so two of our merchants can share one connector account, each
+/// with their own webhook secret and download auth; the account keeps one merchant's several
+/// accounts apart.
+fn config_name(merchant_id: &str, connector: &str, account: &str) -> String {
+    format!("cost_ingest_creds::{merchant_id}::{connector}::{account}")
 }
 
 /// Whether a connector is *pulled* (we poll its API for ready reports) rather than *pushed* (it
@@ -171,29 +198,42 @@ pub fn is_pull_connector(connector: &str) -> bool {
         .unwrap_or(false)
 }
 
-/// Per-connector index name holding every `(connector, account)` the poller must sweep. The KV
-/// store has no prefix/list-all query, so a pull connector's sources are enumerated from here
-/// rather than by scanning `cost_ingest_creds::{connector}::*`.
+/// Per-connector index name holding every `(merchant_id, connector, account)` the poller must
+/// sweep. The KV store has no prefix/list-all query, so a pull connector's sources are enumerated
+/// from here rather than by scanning `cost_ingest_creds::*::{connector}::*`.
 fn poll_index_name(connector: &str) -> String {
     format!("cost_ingest_poll::{connector}")
 }
 
-/// List all `(connector, account)` sources the poller should sweep for `connector`, across every
-/// merchant. Empty when none are configured.
-pub async fn list_poll_sources(connector: &str) -> Result<Vec<SourceRef>, IngestError> {
+/// List all sources the poller should sweep for `connector`, across every merchant. Empty when none
+/// are configured. Carries `merchant_id` because that is now part of the credential key — the
+/// poller has no webhook payload to recover it from.
+pub async fn list_poll_sources(connector: &str) -> Result<Vec<PollSource>, IngestError> {
     let stored = service_configuration::find_config_by_name(poll_index_name(connector))
         .await
         .map_err(|e| IngestError::Storage(e.to_string()))?;
-    match stored.and_then(|c| c.value) {
-        Some(v) => serde_json::from_str(&v).map_err(|e| IngestError::Storage(e.to_string())),
-        None => Ok(Vec::new()),
-    }
+    let sources: Vec<PollSource> = match stored.and_then(|c| c.value) {
+        Some(v) => serde_json::from_str(&v).map_err(|e| IngestError::Storage(e.to_string()))?,
+        None => return Ok(Vec::new()),
+    };
+    // Entries written before the merchant became part of the key deserialize with an empty
+    // `merchant_id` (see `PollSource::merchant_id`). Their credentials are unreachable under the
+    // current key anyway, so drop them here rather than letting one stale entry fail the sweep.
+    Ok(sources
+        .into_iter()
+        .filter(|s| !s.merchant_id.is_empty())
+        .collect())
 }
 
-/// Record a pull connector's `(connector, account)` in its poll index (idempotent).
-async fn add_poll_source(connector: &str, account: &str) -> Result<(), IngestError> {
+/// Record a pull connector's `(merchant_id, connector, account)` in its poll index (idempotent).
+async fn add_poll_source(
+    merchant_id: &str,
+    connector: &str,
+    account: &str,
+) -> Result<(), IngestError> {
     let mut sources = list_poll_sources(connector).await?;
-    let entry = SourceRef {
+    let entry = PollSource {
+        merchant_id: merchant_id.to_string(),
         connector: connector.to_string(),
         account: account.to_string(),
     };
@@ -201,7 +241,36 @@ async fn add_poll_source(connector: &str, account: &str) -> Result<(), IngestErr
         return Ok(());
     }
     sources.push(entry);
-    let value = serde_json::to_string(&sources).map_err(|e| IngestError::Storage(e.to_string()))?;
+    write_poll_index(connector, &sources).await
+}
+
+/// Drop a `(merchant_id, connector, account)` from the poll index (idempotent). Without this a
+/// deleted source would be swept forever, failing on missing credentials every cycle.
+async fn remove_poll_source(
+    merchant_id: &str,
+    connector: &str,
+    account: &str,
+) -> Result<(), IngestError> {
+    let mut sources = list_poll_sources(connector).await?;
+    let before = sources.len();
+    sources.retain(|s| {
+        !(s.merchant_id == merchant_id && s.connector == connector && s.account == account)
+    });
+    if sources.len() == before {
+        return Ok(()); // nothing was registered for this triple
+    }
+    let name = poll_index_name(connector);
+    if sources.is_empty() {
+        return service_configuration::delete_config(name)
+            .await
+            .map_err(|e| IngestError::Storage(e.to_string()));
+    }
+    write_poll_index(connector, &sources).await
+}
+
+/// Upsert the poll index for `connector` with `sources`.
+async fn write_poll_index(connector: &str, sources: &[PollSource]) -> Result<(), IngestError> {
+    let value = serde_json::to_string(sources).map_err(|e| IngestError::Storage(e.to_string()))?;
     let name = poll_index_name(connector);
     let exists = service_configuration::find_config_by_name(name.clone())
         .await
@@ -312,7 +381,7 @@ impl ConnectorCredsStore {
         merchant_id: &str,
         creds: &ConnectorCreds,
     ) -> Result<(), IngestError> {
-        let name = config_name(connector, account);
+        let name = config_name(merchant_id, connector, account);
         let value = self.seal(merchant_id, creds)?;
         let exists = service_configuration::find_config_by_name(name.clone())
             .await
@@ -331,7 +400,7 @@ impl ConnectorCredsStore {
         // Pull connectors also go in a per-connector poll index so the background poller can find
         // every source to sweep, across merchants, without a prefix scan.
         if is_pull_connector(connector) {
-            add_poll_source(connector, account).await?;
+            add_poll_source(merchant_id, connector, account).await?;
         }
         Ok(())
     }
@@ -344,7 +413,7 @@ impl ConnectorCredsStore {
         for s in sources {
             // A missing/undecryptable blob still lists the source, just without hints.
             let (webhook_secret_hint, download_auth_hint) =
-                match self.get(&s.connector, &s.account).await {
+                match self.get(merchant_id, &s.connector, &s.account).await {
                     Ok(Some(r)) => (
                         mask_secret(r.creds.webhook_secret.peek()),
                         mask_download_auth(r.creds.download_auth.peek()),
@@ -361,13 +430,16 @@ impl ConnectorCredsStore {
         Ok(out)
     }
 
-    /// Load and decrypt a settlement source's credentials, or `None` if none are stored.
+    /// Load and decrypt a settlement source's credentials, or `None` if none are stored. Scoped to
+    /// `merchant_id`: another merchant's credentials for the same connector account are a different
+    /// key and are never returned here.
     pub async fn get(
         &self,
+        merchant_id: &str,
         connector: &str,
         account: &str,
     ) -> Result<Option<ResolvedCreds>, IngestError> {
-        let name = config_name(connector, account);
+        let name = config_name(merchant_id, connector, account);
         let stored = service_configuration::find_config_by_name(name)
             .await
             .map_err(|e| IngestError::Storage(e.to_string()))?;
@@ -442,13 +514,57 @@ mod tests {
     fn two_accounts_key_independently() {
         // Same merchant, two Adyen accounts -> distinct config keys, no collision.
         assert_eq!(
-            config_name("adyen", "AcmeEU"),
-            "cost_ingest_creds::adyen::AcmeEU"
+            config_name("merchant_A", "adyen", "AcmeEU"),
+            "cost_ingest_creds::merchant_A::adyen::AcmeEU"
         );
         assert_ne!(
-            config_name("adyen", "AcmeEU"),
-            config_name("adyen", "AcmeUS")
+            config_name("merchant_A", "adyen", "AcmeEU"),
+            config_name("merchant_A", "adyen", "AcmeUS")
         );
+    }
+
+    #[test]
+    fn two_merchants_sharing_one_account_key_independently() {
+        // The shared-account case: one Adyen merchantAccountCode, two of our merchants, each with
+        // their own webhook endpoint and HMAC key. Distinct keys, so neither overwrites the other.
+        assert_ne!(
+            config_name("merchant_A", "adyen", "AcmeEU"),
+            config_name("merchant_B", "adyen", "AcmeEU")
+        );
+    }
+
+    #[test]
+    fn shared_account_stores_a_distinct_secret_per_merchant() {
+        let s = store();
+        let a = ConnectorCreds {
+            webhook_secret: Secret::new("hmac-A".to_string()),
+            download_auth: Secret::new("reportuser_a:pass".to_string()),
+        };
+        let b = ConnectorCreds {
+            webhook_secret: Secret::new("hmac-B".to_string()),
+            download_auth: Secret::new("reportuser_b:pass".to_string()),
+        };
+        // Same connector account, sealed under each merchant: each blob opens to its own secret.
+        let opened_a = s.open(&s.seal("merchant_A", &a).unwrap()).unwrap();
+        let opened_b = s.open(&s.seal("merchant_B", &b).unwrap()).unwrap();
+        assert_eq!(opened_a.creds.webhook_secret.peek(), "hmac-A");
+        assert_eq!(opened_b.creds.webhook_secret.peek(), "hmac-B");
+        assert_eq!(opened_a.merchant_id, "merchant_A");
+        assert_eq!(opened_b.merchant_id, "merchant_B");
+    }
+
+    #[test]
+    fn poll_index_entries_carry_the_merchant() {
+        // The poller has no webhook payload to recover the merchant from, so the index must name it.
+        let json = r#"[{"merchant_id":"merchant_A","connector":"chase","account":"acct1"}]"#;
+        let parsed: Vec<PollSource> = serde_json::from_str(json).unwrap();
+        assert_eq!(parsed[0].merchant_id, "merchant_A");
+
+        // A pre-merchant-key entry still parses (empty merchant) so one stale row can't fail the
+        // whole sweep; `list_poll_sources` is what drops it.
+        let legacy: Vec<PollSource> =
+            serde_json::from_str(r#"[{"connector":"chase","account":"acct1"}]"#).unwrap();
+        assert!(legacy[0].merchant_id.is_empty());
     }
 
     #[test]

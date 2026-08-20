@@ -43,8 +43,14 @@ pub struct Completion {
 
 /// Enqueue a report discovered automatically — either pushed by a connector webhook (`source =
 /// "webhook"`) or found by polling a connector's API (`source = "poll"`). **Idempotent** on
-/// `(connector, notification_id)`: a re-delivered/re-listed report is a no-op. Returns `true` when a
-/// new job was created.
+/// `(merchant_id, connector, notification_id)`: a re-delivered/re-listed report is a no-op. Returns
+/// `true` when a new job was created.
+///
+/// The merchant is part of that key because two of our merchants can share one connector account
+/// and each register their own webhook endpoint. The connector then delivers the *same* event —
+/// same notification id — to both, and each delivery is a genuine job for a different merchant.
+/// Keyed on `(connector, notification_id)` alone the second one would be silently swallowed as a
+/// replay.
 pub async fn enqueue_pending(
     connector: &str,
     account: &str,
@@ -55,16 +61,17 @@ pub async fn enqueue_pending(
 ) -> Result<bool, IngestError> {
     let app_state = get_tenant_app_state().await;
 
-    // The UNIQUE (connector, notification_id) constraint is the real guard; this check keeps a
-    // duplicate delivery from erroring in the common case.
+    // The UNIQUE (merchant_id, connector, notification_id) constraint is the real guard; this check
+    // keeps a duplicate delivery from erroring in the common case.
     let existing = generics::generic_find_one_optional::<
         <CostIngestion as HasTable>::Table,
         _,
         CostIngestion,
     >(
         &app_state.db,
-        dsl::connector
-            .eq(connector.to_string())
+        dsl::merchant_id
+            .eq(merchant_id.to_string())
+            .and(dsl::connector.eq(connector.to_string()))
             .and(dsl::notification_id.eq(Some(notification_id.to_string()))),
     )
     .await

@@ -82,18 +82,35 @@ Returns `204 No Content`. Deleting a source that isn't configured also returns s
 Once credentials are registered, point the connector's settlement-report notification at:
 
 ```
-POST /webhooks/settlement/:connector
+POST /webhooks/settlement/:merchant_id/:connector
 ```
 
-This route is **public** (no `AUTH_HEADER`) — the connector authenticates itself via its own signature, which Decision Engine verifies against the `webhook_secret` stored for that `(connector, account)` pair. Adyen is the first supported connector (`:connector = adyen`).
+This route is **public** (no `AUTH_HEADER`) — the connector authenticates itself via its own signature, which Decision Engine verifies against the `webhook_secret` stored for that `(merchant_id, connector, account)` triple. Adyen is the first supported connector (`:connector = adyen`).
 
 ```bash
-curl --location "$BASE_URL/webhooks/settlement/adyen" \
+curl --location "$BASE_URL/webhooks/settlement/merchant_demo/adyen" \
   --header "Content-Type: application/json" \
   --data @adyen-settlement-notification.json
 ```
 
 The handler ACKs immediately and enqueues the report for background processing — download, parse, and re-fit all happen asynchronously in the ingest worker, so the connector always gets a fast response. A bad signature returns `401`; an unrecognized connector or malformed payload returns `400`.
+
+<Note>
+  The URL carries your `merchant_id` because a connector's notification names only its own account (for Adyen, the `merchantAccountCode`) — never your Decision Engine merchant. Registering another merchant's id gets a caller nowhere without that merchant's signing secret, since the path only selects which stored `webhook_secret` the signature is checked against.
+</Note>
+
+### Sharing one connector account between two merchants
+
+Two Decision Engine merchants can ingest from the **same** connector account — a shared platform account, for example. Register a separate webhook endpoint at the connector for each merchant, pointing at that merchant's own URL:
+
+```
+POST /webhooks/settlement/merchant_a/adyen
+POST /webhooks/settlement/merchant_b/adyen
+```
+
+Each merchant stores their own credentials for the shared account, so the endpoints may use different HMAC keys and different report-download users (the same key on both also works). The connector delivers its report-ready event to both endpoints and each merchant gets their own ingestion job.
+
+One endpoint cannot serve two merchants: it points at a single URL naming a single merchant, so only that merchant receives deliveries. The other will show its source as configured with no ingested data.
 
 ## Notes
 

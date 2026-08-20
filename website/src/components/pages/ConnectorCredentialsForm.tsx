@@ -3,8 +3,10 @@ import { Pencil, ShieldCheck, Trash2 } from 'lucide-react'
 import { Card, CardBody, CardHeader } from '../ui/Card'
 import * as type from '../ui/typography'
 import { Button } from '../ui/Button'
+import { CopyButton } from '../ui/CopyButton'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
+import { publicApiUrl } from '../../lib/api'
 import {
   deleteConnectorCredentials,
   setConnectorCredentials,
@@ -45,6 +47,13 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
   }
 
   const isCheckout = connector === 'checkout'
+  const connectorLabel = isCheckout ? 'Checkout' : 'Adyen'
+
+  // The endpoint this merchant registers at the connector. Merchant-scoped, because a notification
+  // names only the connector-side account — the path is what picks whose secret verifies it.
+  const webhookUrl = merchantId
+    ? publicApiUrl(`/webhooks/settlement/${encodeURIComponent(merchantId)}/${connector}`)
+    : null
 
   async function handleSave() {
     if (!merchantId) {
@@ -128,6 +137,23 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
             <option value="checkout">Checkout</option>
           </select>
         </Field>
+
+        {webhookUrl && (
+          <div className="space-y-1.5">
+            <span className={`block ${type.label}`}>Webhook URL</span>
+            <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-[#232833] dark:bg-[#0b1017]">
+              <code className="min-w-0 flex-1 break-all font-mono text-[13px] text-slate-700 dark:text-[#c7cfdd]">
+                {webhookUrl}
+              </code>
+              <CopyButton text={webhookUrl} size={14} label="Copy webhook URL" className="mt-0.5" />
+            </div>
+            <span className={`block ${type.hint}`}>
+              Register this in your {connectorLabel} dashboard as the settlement-report notification
+              endpoint. It's public - deliveries are authenticated by the webhook secret below.
+            </span>
+          </div>
+        )}
+
         <Field
           label="Account"
           hint={
