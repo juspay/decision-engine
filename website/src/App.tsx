@@ -5,6 +5,7 @@ import { DecisionExplorerPage } from './components/pages/DecisionExplorerPage'
 import { DecisionSimulatorPage } from './components/pages/DecisionSimulatorPage'
 import { DebitRoutingPage } from './components/pages/DebitRoutingPage'
 import { EuclidRulesPage } from './components/pages/EuclidRulesPage'
+import { VolumeContractsPage } from './components/pages/VolumeContractsPage'
 import { OverviewPage } from './components/pages/OverviewPage'
 import { PaymentAuditPage } from './components/pages/PaymentAuditPage'
 import { RoutingEventsPage } from './components/pages/RoutingEventsPage'
@@ -117,6 +118,7 @@ export default function App() {
           <Route path="routing/rules" element={<EuclidRulesPage />} />
           <Route path="routing/volume" element={<VolumeSplitPage />} />
           <Route path="routing/debit" element={<DebitRoutingPage />} />
+          <Route path="routing/volume-contracts" element={<VolumeContractsPage />} />
           {/* Cost Estimation moved into the Multi Objective page as a tab; keep the
               old path working for bookmarks/links. */}
           <Route path="routing/cost" element={<Navigate to="/routing/sr?tab=cost" replace />} />

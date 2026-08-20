@@ -1139,7 +1139,7 @@ export function EuclidRulesPage() {
   const ruleAlgorithms = (allAlgorithms || [])
     .filter((algo) => {
       const algorithm = algo.algorithm_data || algo.algorithm
-      return algorithm?.type !== 'volume_split' && algorithm?.type !== 'ab_test'
+      return algorithm?.type !== 'volume_split' && algorithm?.type !== 'ab_test' && algorithm?.type !== 'volume_contract'
     })
     .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime())
 

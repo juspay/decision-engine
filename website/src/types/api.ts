@@ -108,6 +108,56 @@ export type RoutingAlgorithmData =
   | GatewayConnector               // single
   | EuclidAlgorithmData            // advanced
   | ABTestAlgorithmData            // ab_test
+  | VolumeContractConfig           // volume_contract
+
+// ── Volume-commitment contracts (algorithm_for: 'volume_commitment') ──────────
+// Amounts are sent as integers or decimal strings; the backend canonicalizes to
+// integer minor currency units (and tolerance to basis points) on write.
+export type VolumeContractAmount = number | string
+
+export interface VolumeContractTier {
+  kind: 'retroactive' | 'marginal'
+  rate: { rebate_bps: number } | { rate_bps: number }
+  threshold: VolumeContractAmount
+  targeted?: boolean
+  rebate_lag_days?: number
+  rebate_settlement?: 'cash' | 'credit_note'
+}
+
+export type VolumeContractReward =
+  | { kind: 'flat'; value: { flat_amount: VolumeContractAmount } }
+  | { kind: 'percentage'; value: { rebate_bps: number } }
+
+export type VolumeContractTerms =
+  | { archetype: 'lumpsum'; terms: { target: VolumeContractAmount; reward: VolumeContractReward } }
+  | { archetype: 'min_commitment'; terms: { floor: VolumeContractAmount; reward: VolumeContractReward; overage_rate_bps?: number } }
+  | { archetype: 'tiered'; terms: { tiers: VolumeContractTier[] } }
+
+export type VolumeContract = {
+  id: string
+  connector: string
+  status?: 'active' | 'inactive'
+  billing_cycle: {
+    type: 'calendar_month' | 'calendar_quarter' | 'calendar_year'
+    anchor: number
+    timezone: string
+    proration?: 'full_period'
+  }
+} & VolumeContractTerms
+
+export interface VolumeContractConfig {
+  schema_version?: number
+  routing_mode: 'pace_guarded' | 'volume_commitment'
+  /** Write accepts "5pp" / "550bps" / plain bps; stored documents read back as tolerance_bps. */
+  tolerance_bps?: number
+  tolerance?: string
+  metric?: 'gmv' | 'volume'
+  currency: { denomination: string; amount_units?: 'major' | 'minor' }
+  expected_daily_traffic: VolumeContractAmount
+  forecast_interval_secs?: number
+  steering_interval_secs?: number
+  volume_contracts: VolumeContract[]
+}
 
 export interface EuclidRule {
   name: string
@@ -151,12 +201,12 @@ export interface RoutingAlgorithm {
   modified_at?: string
   // Backend returns algorithm_data, not algorithm
   algorithm_data?: {
-    type: 'priority' | 'volume_split' | 'single' | 'advanced' | 'ab_test'
+    type: 'priority' | 'volume_split' | 'single' | 'advanced' | 'ab_test' | 'volume_contract'
     data: RoutingAlgorithmData
   }
   // For convenience, map algorithm_data to algorithm in the component
   algorithm?: {
-    type: 'priority' | 'volume_split' | 'single' | 'advanced' | 'ab_test'
+    type: 'priority' | 'volume_split' | 'single' | 'advanced' | 'ab_test' | 'volume_contract'
     data: RoutingAlgorithmData
   }
 }
