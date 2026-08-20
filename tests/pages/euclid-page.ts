@@ -1,4 +1,5 @@
 import { expect, type Page, type Locator } from '@playwright/test'
+import { RoutingListPage } from './routing-list'
 
 /**
  * Page object for the Euclid rule builder — Playwright port of cypress/support/euclid-helpers.js.
@@ -7,14 +8,22 @@ import { expect, type Page, type Locator } from '@playwright/test'
  * `.within()` scoping becomes chained locators, and the `{withinSubject: null}` portal trick becomes
  * a plain page-level locator (the dropdown renders at the document root).
  */
-export class EuclidRuleBuilder {
-  constructor(private readonly page: Page) {}
+export class EuclidRuleBuilder extends RoutingListPage {
+  constructor(page: Page) {
+    super(page)
+  }
 
   /** Navigate to the rule builder and wait for the routing-key fetch to settle. */
-  async goto(path = '/routing/rules'): Promise<void> {
+  async goto(path = '/routing/rules/new'): Promise<void> {
     await this.page.goto(path)
     await this.waitUntilReady()
   }
+
+  /** Navigate to the rules list (the table of saved rules), which has no routing-key gate. */
+  async gotoList(): Promise<void> {
+    await this.page.goto('/routing/rules')
+  }
+
 
   /**
    * The builder renders a "Loading routing keys from backend..." placeholder until GET
@@ -55,9 +64,7 @@ export class EuclidRuleBuilder {
 
   /** THEN section of the nth rule block, regardless of current output type. */
   thenSection(blockIndex = 0): Locator {
-    return this.ruleBlock(blockIndex)
-      .locator('div[class*="py-4"]')
-      .filter({ has: this.page.locator('p', { hasText: 'Then route' }) })
+    return this.ruleBlock(blockIndex).locator('[data-cy="then-section"]')
   }
 
   async setRuleName(index: number, name: string): Promise<void> {

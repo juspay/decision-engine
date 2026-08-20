@@ -5,6 +5,8 @@ import { DecisionExplorerPage } from './components/pages/DecisionExplorerPage'
 import { DecisionSimulatorPage } from './components/pages/DecisionSimulatorPage'
 import { DebitRoutingPage } from './components/pages/DebitRoutingPage'
 import { EuclidRulesPage } from './components/pages/EuclidRulesPage'
+import { EuclidRuleBuilderPage } from './components/pages/EuclidRuleBuilderPage'
+import { VolumeSplitBuilderPage } from './components/pages/VolumeSplitBuilderPage'
 import { OverviewPage } from './components/pages/OverviewPage'
 import { PaymentAuditPage } from './components/pages/PaymentAuditPage'
 import { RoutingEventsPage } from './components/pages/RoutingEventsPage'
@@ -115,7 +117,11 @@ export default function App() {
           <Route path="routing" element={<RoutingHubPage />} />
           <Route path="routing/sr" element={<SRRoutingPage />} />
           <Route path="routing/rules" element={<EuclidRulesPage />} />
+          <Route path="routing/rules/new" element={<EuclidRuleBuilderPage />} />
+          <Route path="routing/rules/:id/edit" element={<EuclidRuleBuilderPage />} />
           <Route path="routing/volume" element={<VolumeSplitPage />} />
+          <Route path="routing/volume/new" element={<VolumeSplitBuilderPage />} />
+          <Route path="routing/volume/:id/edit" element={<VolumeSplitBuilderPage />} />
           <Route path="routing/debit" element={<DebitRoutingPage />} />
           {/* Cost Estimation moved into the Multi Objective page as a tab; keep the
               old path working for bookmarks/links. */}

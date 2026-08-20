@@ -84,17 +84,17 @@ export function SearchableSelect({
   }
 
   return (
-    <div className={`relative inline-block ${className}`} data-cy={dataCy}>
+    <div className={`relative ${className || 'inline-block'}`} data-cy={dataCy}>
       <button
         ref={triggerRef}
         type="button"
         disabled={disabled}
         onClick={() => open ? close() : openDropdown()}
-        className="cond-select flex items-center gap-1 pr-2"
+        className="cond-select flex w-full items-center justify-between gap-1 pr-2"
         style={{ backgroundImage: 'none', display: 'flex', alignItems: 'center' }}
         data-value={value}
       >
-        <span className="truncate max-w-[10rem]">{selectedLabel || <span className="text-slate-400">select...</span>}</span>
+        <span className="min-w-0 truncate text-left">{selectedLabel || <span className="text-slate-400">select...</span>}</span>
         <ChevronDown
           size={11}
           className={`shrink-0 text-slate-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
@@ -105,7 +105,7 @@ export function SearchableSelect({
         <div
           ref={dropdownRef}
           style={dropdownStyle}
-          className="w-max max-w-[240px] rounded-lg border border-slate-200 dark:border-[#222226] bg-white dark:bg-[#111118] shadow-lg"
+          className="w-max min-w-[13rem] max-w-[320px] rounded-lg border border-slate-200 dark:border-[#222226] bg-white dark:bg-[#111118] shadow-lg"
         >
           <div className="p-1.5 border-b border-slate-100 dark:border-[#1c1c24]">
             <input
@@ -115,7 +115,7 @@ export function SearchableSelect({
               onChange={e => setQuery(e.target.value)}
               onKeyDown={e => e.key === 'Escape' && close()}
               placeholder="Search…"
-              className="w-full rounded px-2 py-1 text-xs bg-slate-50 dark:bg-[#0f0f11] border border-slate-200 dark:border-[#222226] focus:outline-none focus:ring-1 focus:ring-brand-500"
+              className="w-full rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0f0f11]"
             />
           </div>
           <div
@@ -123,7 +123,7 @@ export function SearchableSelect({
             style={{ maxHeight: `${Math.min(filtered.length * 32 + 8, 272)}px` }}
           >
             {filtered.length === 0 ? (
-              <p className="px-3 py-2 text-xs text-slate-400">No matches</p>
+              <p className="px-3 py-2.5 text-sm text-slate-400">No matches</p>
             ) : (
               filtered.map(o => (
                 <button
@@ -131,7 +131,7 @@ export function SearchableSelect({
                   type="button"
                   data-value={o.value}
                   onClick={() => select(o.value)}
-                  className={`w-full text-left px-3 py-2 text-xs transition-colors hover:bg-slate-50 dark:hover:bg-[#1c1c24] ${
+                  className={`w-full px-3 py-2.5 text-left text-sm transition-colors hover:bg-slate-50 dark:hover:bg-[#1c1c24] ${
                     o.value === value
                       ? 'text-brand-600 dark:text-brand-400 font-medium bg-brand-50/50 dark:bg-brand-900/10'
                       : ''

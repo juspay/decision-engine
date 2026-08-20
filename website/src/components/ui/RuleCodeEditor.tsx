@@ -98,6 +98,16 @@ function condToDSL(c: ConditionRow): string {
   return `${lhsPart} ${DSL_OP_TO_SYM[c.operator] ?? c.operator} ${c.value}`
 }
 
+/**
+ * One nested branch. Its conditions are ANDed together and the branches are ORed, so a branch with
+ * more than one condition gets its own brackets — `a and b or c` would otherwise read as a
+ * different rule than the interpreter evaluates.
+ */
+function nestedToDSL(n: StatementGroup): string {
+  const text = n.conditions.map(condToDSL).join(' and ')
+  return n.conditions.length > 1 ? `(${text})` : text
+}
+
 function stmtToDSLLines(stmt: StatementGroup): string[] {
   const lines: string[] = []
   if (stmt.conditions.length === 0 && stmt.nested.length > 0) {
@@ -107,14 +117,13 @@ function stmtToDSLLines(stmt: StatementGroup): string[] {
       : promoted.length === 1 ? condToDSL(promoted[0]) : '')
     const remaining = stmt.nested.slice(1)
     if (remaining.length > 0) {
-      lines.push(`and (${remaining.map(n => n.conditions.map(condToDSL).join(' and ')).join(' or ')})`)
+      lines.push(`and (${remaining.map(nestedToDSL).join(' or ')})`)
     }
     return lines.filter(Boolean)
   }
   stmt.conditions.forEach((c, i) => lines.push(i === 0 ? condToDSL(c) : `and ${condToDSL(c)}`))
   if (stmt.nested.length > 0) {
-    const inner = stmt.nested.map(n => n.conditions.map(condToDSL).join(' and ')).join(' or ')
-    lines.push(`and (${inner})`)
+    lines.push(`and (${stmt.nested.map(nestedToDSL).join(' or ')})`)
   }
   return lines
 }

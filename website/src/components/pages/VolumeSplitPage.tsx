@@ -1,206 +1,92 @@
 import { useState } from 'react'
-import useSWR, { useSWRConfig } from 'swr'
-import { PieChart, Pie, Cell, Tooltip, ResponsiveContainer } from 'recharts'
-import { Card, CardBody, CardHeader } from '../ui/Card'
+import { useNavigate } from 'react-router-dom'
+import useSWR from 'swr'
+import { Plus, ChevronDown, ChevronRight, Zap, PowerOff, Pencil, Copy, Trash2 } from 'lucide-react'
+import { Card } from '../ui/Card'
 import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
-import { Spinner } from '../ui/Spinner'
+import { ConfirmDialog } from '../ui/ConfirmDialog'
+import { HeaderFilter, HeaderSearch, RowMenu } from '../ui/TableControls'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useCanEditRouting } from '../../store/authStore'
 import { apiPost } from '../../lib/api'
-import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import { RoutingAlgorithm } from '../../types/api'
-import { Plus, Trash2, PowerOff, ChevronDown, ChevronUp } from 'lucide-react'
-import { ConfirmDialog } from '../ui/ConfirmDialog'
-import { validateVolumeSplitRule } from '../../features/routing/volumeSplit/schema'
-import { toVolumeSplitCreatePayload } from '../../features/routing/volumeSplit/payload'
 import { toVolumeSplitRuleDetailsState } from '../../features/routing/volumeSplit/state'
-import { VolumeSplitGatewayFormEntry } from '../../features/routing/volumeSplit/types'
+import { SplitBreakdown } from '../routing/volumeSplit/SplitBreakdown'
 
-const COLORS = ['#0069ED', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899']
+type StatusFilter = 'all' | 'active' | 'inactive'
 
-function makeId() { return Math.random().toString(36).slice(2) }
-
-function createInitialGateways(): VolumeSplitGatewayFormEntry[] {
-  return [
-    { id: makeId(), gatewayName: '', gatewayId: '', split: 50 },
-    { id: makeId(), gatewayName: '', gatewayId: '', split: 50 },
-  ]
+/** "stripe 50% / adyen 50%" — the row's one-line view of where traffic goes. */
+function describeSplit(algo: RoutingAlgorithm): string {
+  const gateways = toVolumeSplitRuleDetailsState(algo)?.gateways ?? []
+  const named = gateways.filter((g) => g.gatewayName.trim())
+  if (named.length === 0) return 'No gateways configured'
+  return named.map((g) => `${g.gatewayName} ${g.split}%`).join(' / ')
 }
 
-function clampSplit(value: number) {
-  if (!Number.isFinite(value)) return 0
-  return Math.min(100, Math.max(0, Math.round(value)))
-}
-
-function withInferredSplit(entries: VolumeSplitGatewayFormEntry[]) {
-  if (!entries.length) return entries
-
-  const normalized = entries.map(entry => ({
-    ...entry,
-    split: clampSplit(entry.split),
-  }))
-
-  if (normalized.length === 1) {
-    return [{ ...normalized[0], split: 100 }]
-  }
-
-  const inferredIndex = normalized.length - 1
-  const fixedTotal = normalized
-    .slice(0, inferredIndex)
-    .reduce((sum, gateway) => sum + gateway.split, 0)
-
-  return normalized.map((entry, index) =>
-    index === inferredIndex
-      ? { ...entry, split: Math.max(0, 100 - fixedTotal) }
-      : entry,
-  )
+function splitGateways(algo: RoutingAlgorithm): string[] {
+  return (toVolumeSplitRuleDetailsState(algo)?.gateways ?? [])
+    .map((g) => g.gatewayName.trim())
+    .filter(Boolean)
 }
 
 export function VolumeSplitPage() {
   // Read-only sessions still see everything; the controls that would change it are inert.
   const canEditRouting = useCanEditRouting()
+  const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
-  const { mutate: mutateCache } = useSWRConfig()
 
-  const { data: active, mutate: mutateActive } = useSWR<RoutingAlgorithm[]>(
-    merchantId ? ['active-routing', merchantId] : null,
-    () => apiPost(`/routing/list/active/${merchantId}`)
+  const [expandedRuleIds, setExpandedRuleIds] = useState<Set<string>>(new Set())
+  const [pendingActivateId, setPendingActivateId] = useState<string | null>(null)
+  const [pendingDeactivateId, setPendingDeactivateId] = useState<string | null>(null)
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null)
+  const [activating, setActivating] = useState(false)
+  const [deactivatingId, setDeactivatingId] = useState<string | null>(null)
+  const [actionError, setActionError] = useState<string | null>(null)
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null)
+
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
+  const [gatewayFilter, setGatewayFilter] = useState('all')
+  const [nameFilter, setNameFilter] = useState('')
+
+  // Same SWR keys as the rule-based pages, so activating here invalidates their view too — the
+  // backend deactivates the other mode's rule, and a separate cache entry would go stale.
+  const { data: allRules, mutate: mutateRules } = useSWR<RoutingAlgorithm[]>(
+    merchantId ? `/routing/list/${merchantId}` : null,
+    () => apiPost<RoutingAlgorithm[]>(`/routing/list/${merchantId}`)
+  )
+  const { data: activeRules, mutate: mutateActive } = useSWR<RoutingAlgorithm[]>(
+    merchantId ? `/routing/list/active/${merchantId}` : null,
+    () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`)
   )
 
-  const activeVol = active?.find(r => (r.algorithm_data || r.algorithm)?.type === 'volume_split')
-  const activeRuleBased = active?.find(r => {
+  const activeIds = new Set((activeRules || []).map((r) => r.id))
+  const activeRuleBased = (activeRules || []).find((r) => {
     const t = (r.algorithm_data || r.algorithm)?.type
     return t && t !== 'volume_split'
   })
 
-  const [gateways, setGateways] = useState<VolumeSplitGatewayFormEntry[]>(() => createInitialGateways())
-  const [ruleName, setRuleName] = useState('')
-  const [saving, setSaving] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [success, setSuccess] = useState<string | null>(null)
-  const [createdId, setCreatedId] = useState<string | null>(null)
-  const [expandedRuleIds, setExpandedRuleIds] = useState<Set<string>>(new Set())
-  const [deactivatingRuleId, setDeactivatingRuleId] = useState<string | null>(null)
-  const [pendingActivateId, setPendingActivateId] = useState<string | null>(null)
-  const [pendingDeactivateId, setPendingDeactivateId] = useState<string | null>(null)
+  const volumeRules = (allRules || [])
+    .filter((r) => (r.algorithm_data || r.algorithm)?.type === 'volume_split')
+    .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime())
 
-  const inferredGatewayId = gateways[gateways.length - 1]?.id ?? null
-  const fixedTotal = inferredGatewayId
-    ? gateways
-        .filter(gateway => gateway.id !== inferredGatewayId)
-        .reduce((sum, gateway) => sum + gateway.split, 0)
-    : 0
-  const overAllocated = Math.max(0, fixedTotal - 100)
-  const total = gateways.reduce((s, g) => s + g.split, 0)
+  const gatewayOptions = Array.from(new Set(volumeRules.flatMap(splitGateways))).sort()
 
-  function updateGateway(id: string, field: 'gatewayName' | 'gatewayId' | 'split', val: string | number) {
-    setGateways(gs =>
-      withInferredSplit(
-        gs.map(g => {
-          if (g.id !== id) return g
-          if (field === 'split') {
-            return { ...g, split: clampSplit(Number(val)) }
-          }
-          return { ...g, [field]: val }
-        }),
-      ),
-    )
-  }
-
-  function addGateway() {
-    setGateways(gs => withInferredSplit([...gs, { id: makeId(), gatewayName: '', gatewayId: '', split: 0 }]))
-  }
-
-  function removeGateway(id: string) {
-    setGateways(gs => {
-      const remaining = gs.filter(g => g.id !== id)
-      return withInferredSplit(
-        remaining.length
-          ? remaining
-          : [{ id: makeId(), gatewayName: '', gatewayId: '', split: 100 }],
-      )
-    })
-  }
-
-  async function handleCreate() {
-    if (!merchantId) return setError('Set a merchant ID first')
-    const validationError = validateVolumeSplitRule({ ruleName, gateways })
-    if (validationError) return setError(validationError)
-
-    setSaving(true); setError(null); setSuccess(null); setCreatedId(null)
-    try {
-      const nextRuleName = ruleName.trim()
-      const payload = toVolumeSplitCreatePayload({ ruleName, gateways }, merchantId)
-      const result = await apiPost<RoutingAlgorithm>('/routing/create', payload)
-      await Promise.all([
-        mutateActive(),
-        mutateCache(['routing-list', merchantId]),
-      ])
-      setCreatedId(result.rule_id ?? result.id)
-      setSuccess(`Rule "${nextRuleName}" created successfully. Configurator reset.`)
-      setRuleName('')
-      setGateways(createInitialGateways())
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to create rule')
-    } finally {
-      setSaving(false)
+  const visibleRules = volumeRules.filter((algo) => {
+    if (statusFilter === 'active' && !activeIds.has(algo.id)) return false
+    if (statusFilter === 'inactive' && activeIds.has(algo.id)) return false
+    if (gatewayFilter !== 'all' && !splitGateways(algo).includes(gatewayFilter)) return false
+    if (nameFilter.trim()) {
+      const needle = nameFilter.trim().toLowerCase()
+      if (!algo.name.toLowerCase().includes(needle) && !algo.id.toLowerCase().includes(needle)) {
+        return false
+      }
     }
-  }
-
-  async function handleActivate(ruleId: string) {
-    if (!merchantId) return
-    setSuccess(null)
-    setCreatedId(null)
-    if (activeRuleBased) {
-      setPendingActivateId(ruleId)
-      return
-    }
-    await doActivate(ruleId)
-  }
-
-  async function doActivate(ruleId: string) {
-    try {
-      setError(null)
-      setSuccess(null)
-      setCreatedId(null)
-      await apiPost('/routing/activate', { created_by: merchantId, routing_algorithm_id: ruleId })
-      await Promise.all([
-        mutateActive(),
-        mutateCache(['routing-list', merchantId]),
-      ])
-      setSuccess('Rule activated.')
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to activate')
-    }
-  }
-
-  async function handleDeactivate(ruleId: string) {
-    if (!merchantId) return
-    setPendingDeactivateId(ruleId)
-  }
-
-  async function doDeactivate(ruleId: string) {
-    setDeactivatingRuleId(ruleId)
-    setError(null)
-    setSuccess(null)
-    setCreatedId(null)
-    try {
-      await apiPost('/routing/deactivate', { created_by: merchantId, routing_algorithm_id: ruleId })
-      await Promise.all([
-        mutateActive(),
-        mutateCache(['routing-list', merchantId]),
-      ])
-      setSuccess('Rule deactivated.')
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to deactivate')
-    } finally {
-      setDeactivatingRuleId(null)
-    }
-  }
+    return true
+  })
 
   function toggleRuleExpand(id: string) {
-    setExpandedRuleIds(prev => {
+    setExpandedRuleIds((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
@@ -208,12 +94,68 @@ export function VolumeSplitPage() {
     })
   }
 
+  async function handleActivate(id: string) {
+    if (!merchantId) return
+    if (activeRuleBased) {
+      setPendingActivateId(id)
+      return
+    }
+    await doActivate(id)
+  }
+
+  async function doActivate(id: string) {
+    setActivating(true)
+    setActionError(null)
+    setActionSuccess(null)
+    try {
+      await apiPost('/routing/activate', { created_by: merchantId, routing_algorithm_id: id })
+      setActionSuccess('Rule activated.')
+      await Promise.all([mutateRules(), mutateActive()])
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Failed to activate')
+    } finally {
+      setActivating(false)
+    }
+  }
+
+  async function doDeactivate(id: string) {
+    setDeactivatingId(id)
+    setActionError(null)
+    setActionSuccess(null)
+    try {
+      await apiPost('/routing/deactivate', { created_by: merchantId, routing_algorithm_id: id })
+      setActionSuccess('Rule deactivated.')
+      await Promise.all([mutateRules(), mutateActive()])
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Failed to deactivate')
+    } finally {
+      setDeactivatingId(null)
+    }
+  }
+
+  async function doDelete(id: string) {
+    if (!merchantId) return
+    setActionError(null)
+    setActionSuccess(null)
+    try {
+      await apiPost('/routing/delete', { created_by: merchantId, routing_algorithm_id: id })
+      setActionSuccess('Rule deleted.')
+      await Promise.all([mutateRules(), mutateActive()])
+    } catch (err: unknown) {
+      setActionError(err instanceof Error ? err.message : 'Failed to delete')
+    } finally {
+      setPendingDeleteId(null)
+    }
+  }
+
+  const pendingDeleteRule = volumeRules.find((r) => r.id === pendingDeleteId)
+
   return (
     <div className="space-y-6">
       <ConfirmDialog
         open={pendingActivateId !== null}
         title="Switch to Volume Split Routing?"
-        description={`"${activeRuleBased?.name}" (Rule-Based) is currently active. Activating this rule will replace it.`}
+        description={`"${activeRuleBased?.name}" is currently active. Activating this rule will replace it.`}
         confirmLabel="Yes, activate"
         variant="primary"
         onConfirm={() => { const id = pendingActivateId!; setPendingActivateId(null); doActivate(id) }}
@@ -228,311 +170,222 @@ export function VolumeSplitPage() {
         onConfirm={() => { const id = pendingDeactivateId!; setPendingDeactivateId(null); doDeactivate(id) }}
         onCancel={() => setPendingDeactivateId(null)}
       />
+      <ConfirmDialog
+        open={pendingDeleteId !== null}
+        title="Delete this rule?"
+        description={`"${pendingDeleteRule?.name}" will be permanently deleted. This cannot be undone.`}
+        confirmLabel="Delete"
+        variant="danger"
+        onConfirm={() => doDelete(pendingDeleteId!)}
+        onCancel={() => setPendingDeleteId(null)}
+      />
 
-      <div>
-        <h1 className="text-lg font-semibold text-slate-900 dark:text-white">Volume Split Routing</h1>
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Volume Split Routing</h1>
+          <p className="mt-1 text-sm text-slate-500 dark:text-[#8d96a8]">
+            Divide payment traffic across gateways by fixed percentages, independent of transaction
+            attributes.
+          </p>
+        </div>
+        <Button onClick={() => navigate('/routing/volume/new')} disabled={!canEditRouting}>
+          <Plus size={15} /> Create Rule
+        </Button>
       </div>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-
-        {/* ── Left: saved rules list ───────────────────────────── */}
-        <div className="space-y-3 lg:col-span-1">
-          <SavedRulesList
-            merchantId={merchantId}
-            activeRuleId={activeVol?.id}
-            onActivate={handleActivate}
-            onDeactivate={handleDeactivate}
-            deactivatingRuleId={deactivatingRuleId}
-            expandedRuleIds={expandedRuleIds}
-            onToggleExpand={toggleRuleExpand}
-          />
-          {activeRuleBased && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-              <strong>Rule-Based routing is active</strong> — activating a volume split rule will automatically deactivate it.
-            </div>
-          )}
-          {error && <ErrorMessage error={error} />}
-          {success && (
-            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-200">
-              <span className="min-w-0">
-                {createdId ? <>Rule created: <span className="font-mono">{createdId}</span></> : success}
-              </span>
-              {createdId ? (
-                <Button type="button" size="sm" onClick={() => handleActivate(createdId)} disabled={!canEditRouting}>
-                  Activate Now
-                </Button>
-              ) : null}
-            </div>
-          )}
+      {actionError && <ErrorMessage error={actionError} />}
+      {actionSuccess && (
+        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-sm text-emerald-600 dark:text-emerald-400">
+          {actionSuccess}
         </div>
+      )}
 
-        {/* ── Right: create form ───────────────────────────────── */}
-        <div className="space-y-4 lg:col-span-2">
-          <Card>
-            <CardHeader>
-              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Create Volume Split Rule</h2>
-            </CardHeader>
-            <CardBody className="space-y-4">
-              <div>
-                <label className="mb-1 block text-xs text-slate-500 dark:text-[#8a8a93]">Rule Name *</label>
-                <input
-                  value={ruleName}
-                  onChange={e => setRuleName(e.target.value)}
-                  placeholder="e.g. ab-test-split"
-                  className="w-64 rounded-lg border border-slate-200 bg-transparent px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
-                />
-              </div>
-
-              <div className="space-y-2">
-                <div className="hidden grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(260px,320px)_32px] gap-2 px-1 text-xs font-medium text-slate-500 md:grid">
-                  <span>Gateway Name</span>
-                  <span>Gateway ID</span>
-                  <span>Split %</span>
-                  <span />
-                </div>
-                {gateways.map((g, index) => {
-                  const isInferred = g.id === inferredGatewayId
-                  const label = g.gatewayName.trim() || `Gateway ${index + 1}`
-                  return (
-                    <div key={g.id} className="grid grid-cols-1 gap-2 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(260px,320px)_32px] md:items-center">
-                      <input
-                        value={g.gatewayName}
-                        onChange={e => updateGateway(g.id, 'gatewayName', e.target.value)}
-                        placeholder="e.g. stripe"
-                        className="rounded-lg border border-slate-200 bg-transparent px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
-                      />
-                      <input
-                        value={g.gatewayId}
-                        onChange={e => updateGateway(g.id, 'gatewayId', e.target.value)}
-                        placeholder="optional gateway_id"
-                        className="rounded-lg border border-slate-200 bg-transparent px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
-                      />
-                      <div className="flex min-w-0 items-center gap-2 rounded-lg border border-slate-200 bg-transparent px-2 py-1.5 focus-within:ring-1 focus-within:ring-brand-500 dark:border-[#222226]">
-                        <span
-                          className="h-2.5 w-2.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                        />
-                        <input
-                          type="range"
-                          min={0}
-                          max={100}
-                          value={g.split}
-                          disabled={isInferred}
-                          onChange={e => updateGateway(g.id, 'split', Number(e.target.value))}
-                          aria-label={`${label} allocation slider`}
-                          className="h-2 min-w-0 flex-1 cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
-                          style={{ accentColor: COLORS[index % COLORS.length] }}
-                        />
-                        <input
-                          type="number"
-                          min={0}
-                          max={100}
-                          value={g.split}
-                          onChange={e => updateGateway(g.id, 'split', Number(e.target.value))}
-                          disabled={isInferred}
-                          aria-label={`${label} split percentage`}
-                          className="w-12 border-0 bg-transparent p-0 text-right text-sm tabular-nums focus:outline-none disabled:cursor-not-allowed disabled:opacity-70"
-                        />
-                        <span className="text-xs text-slate-500">%</span>
-                        {isInferred && gateways.length > 1 && (
-                          <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600 dark:bg-[#1a1a22] dark:text-slate-300">
-                            Auto
-                          </span>
-                        )}
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => removeGateway(g.id)}
-                        disabled={gateways.length === 1}
-                        className="text-slate-400 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40"
-                      >
-                        <Trash2 size={15} />
-                      </button>
-                    </div>
-                  )
-                })}
-                <div className="flex items-center gap-3">
-                  <button type="button" onClick={addGateway} className="flex items-center gap-1 text-sm text-brand-500 hover:text-brand-600">
-                    <Plus size={14} /> Add Gateway
-                  </button>
-                  <span className={`text-xs font-medium ${total === 100 ? 'text-emerald-400' : 'text-red-400'}`}>
-                    Total: {total}%{overAllocated ? ` (reduce fixed splits by ${overAllocated}%)` : total !== 100 ? ' (must be 100)' : ''}
-                  </span>
-                </div>
-              </div>
-
-              <Button onClick={handleCreate} disabled={saving || !merchantId || !canEditRouting}>
-                {saving ? <><Spinner size={14} /> Creating…</> : 'Create Rule'}
-              </Button>
-            </CardBody>
-          </Card>
-        </div>
-
-      </div>
-    </div>
-  )
-}
-
-function SavedRulesList({
-  merchantId,
-  activeRuleId,
-  onActivate,
-  onDeactivate,
-  deactivatingRuleId,
-  expandedRuleIds,
-  onToggleExpand,
-}: {
-  merchantId: string
-  activeRuleId?: string
-  onActivate: (id: string) => void
-  onDeactivate: (id: string) => void
-  deactivatingRuleId: string | null
-  expandedRuleIds: Set<string>
-  onToggleExpand: (id: string) => void
-}) {
-  // Read-only sessions still see everything; the controls that would change it are inert.
-  const canEditRouting = useCanEditRouting()
-  const { data: rules, isLoading } = useSWR<RoutingAlgorithm[]>(
-    merchantId ? ['routing-list', merchantId] : null,
-    () => apiPost(`/routing/list/${merchantId}`)
-  )
-
-  const volRules = rules?.filter(r => (r.algorithm_data || r.algorithm)?.type === 'volume_split') ?? []
-
-  return (
-    <Card>
-      <CardHeader>
-        <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Saved Rules</h2>
-      </CardHeader>
-      <div>
+      <Card className="!rounded-[18px]">
         {!merchantId ? (
-          <p className="px-6 py-3 text-sm text-slate-400">Set merchant ID to load rules.</p>
-        ) : isLoading ? (
-          <div className="flex justify-center py-4"><Spinner /></div>
-        ) : volRules.length === 0 ? (
-          <p className="px-6 py-3 text-sm text-slate-400">No volume split rules yet.</p>
+          <p className="px-4 py-6 text-sm text-slate-400">Set merchant ID to load rules.</p>
+        ) : !allRules ? (
+          <p className="px-4 py-6 text-sm text-slate-400">Loading...</p>
+        ) : volumeRules.length === 0 ? (
+          <p className="px-4 py-6 text-sm text-slate-400">No volume split rules yet.</p>
         ) : (
-          <div>
-            {volRules.map((r) => {
-              const isActive = activeRuleId === r.id
-              const isExpanded = expandedRuleIds.has(r.id)
-              const details = toVolumeSplitRuleDetailsState(r)
-              const splitText = details?.gateways
-                .map(g => `${g.gatewayName}: ${g.split}%`)
-                .join(' · ')
-
-              return (
-                <div
-                  key={r.id}
-                  className={`border-b border-slate-100 dark:border-[#1e2330] last:border-b-0 transition-colors ${
-                    isActive ? 'bg-emerald-50/50 dark:bg-emerald-900/10' : ''
-                  }`}
-                >
-                  <div className="px-6 pt-3 pb-2">
-                    <div className="flex items-center justify-between gap-2">
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[880px] text-left">
+              <thead>
+                <tr className="border-b border-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-[#1e2330] dark:text-[#6d7a8d]">
+                  <th className="px-5 py-3.5">
+                    <HeaderSearch
+                      label="Rule Name & ID"
+                      value={nameFilter}
+                      onChange={setNameFilter}
+                      ariaLabel="Filter rules by name"
+                    />
+                  </th>
+                  <th className="px-5 py-3.5">
+                    <HeaderFilter
+                      label="Status"
+                      value={statusFilter}
+                      options={[
+                        { value: 'all', label: 'All statuses' },
+                        { value: 'active', label: 'Active' },
+                        { value: 'inactive', label: 'Inactive' },
+                      ]}
+                      onChange={(v) => setStatusFilter(v as StatusFilter)}
+                      ariaLabel="Filter by status"
+                    />
+                  </th>
+                  <th className="px-5 py-3.5">
+                    <HeaderFilter
+                      label="Distribution"
+                      value={gatewayFilter}
+                      options={[
+                        { value: 'all', label: 'All gateways' },
+                        ...gatewayOptions.map((g) => ({ value: g, label: g })),
+                      ]}
+                      onChange={setGatewayFilter}
+                      ariaLabel="Filter by gateway"
+                    />
+                  </th>
+                  <th className="px-5 py-3.5">Last Modified</th>
+                  <th className="px-5 py-3.5 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleRules.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-center">
+                      <p className="text-sm text-slate-400">No rules match these filters.</p>
                       <button
                         type="button"
-                        onClick={() => onToggleExpand(r.id)}
-                        className="group min-w-0 flex-1 text-left"
+                        onClick={() => { setStatusFilter('all'); setGatewayFilter('all'); setNameFilter('') }}
+                        className="mt-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400"
                       >
-                        <div className="flex items-center gap-1.5">
-                          <p className={`truncate font-medium transition-colors group-hover:text-brand-600 dark:group-hover:text-brand-400 ${
-                            isActive ? 'text-emerald-900 dark:text-emerald-100' : 'text-slate-900 dark:text-white'
-                          }`}>
-                            {r.name}
-                          </p>
-                          {isActive && (
-                            <span className="inline-flex shrink-0 items-center gap-0.5 rounded-full bg-emerald-100 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
-                              ● Active
-                            </span>
-                          )}
-                          {isExpanded
-                            ? <ChevronUp size={12} className="ml-auto shrink-0 text-slate-400" />
-                            : <ChevronDown size={12} className="ml-auto shrink-0 text-slate-400" />
-                          }
-                        </div>
-                        <div className="mt-0.5 flex items-center gap-2">
-                          {splitText && (
-                            <p className="min-w-0 truncate text-[11px] text-slate-500 dark:text-[#6d7a8d]">
-                              {splitText}
-                            </p>
-                          )}
-                          {r.created_at && (
-                            <span className="ml-auto shrink-0 text-[10px] text-slate-400 dark:text-[#4e5870]">
-                              {new Date(r.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}
-                            </span>
-                          )}
-                        </div>
+                        Clear filters
                       </button>
+                    </td>
+                  </tr>
+                )}
+                {visibleRules.map((algo) => {
+                  const isActive = activeIds.has(algo.id)
+                  const isExpanded = expandedRuleIds.has(algo.id)
+                  const distribution = describeSplit(algo)
+                  // Both /routing/update and /routing/delete reject an active algorithm.
+                  const lockedReason = isActive
+                    ? 'Deactivate this rule first'
+                    : !canEditRouting
+                    ? 'You do not have permission to change routing'
+                    : undefined
 
-                      <div className="flex shrink-0 items-center gap-1.5">
-                        {isActive ? (
-                          <Button
-                            size="sm"
-                            variant="danger"
-                            onClick={() => onDeactivate(r.id)}
-                            disabled={deactivatingRuleId === r.id}
-                          >
-                            <PowerOff size={13} />
-                            {deactivatingRuleId === r.id ? 'Deactivating' : 'Deactivate'}
-                          </Button>
-                        ) : (
-                          <button
-                            type="button"
-                            onClick={() => onActivate(r.id)}
-                            disabled={!canEditRouting}
-                            className="inline-flex min-w-[68px] items-center justify-center rounded-full border border-slate-200 bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-500 transition-colors duration-150 hover:border-brand-200 hover:bg-brand-50 hover:text-brand-600 dark:border-[#2a3040] dark:bg-[#1a1f2a] dark:text-[#8090a8] dark:hover:border-brand-800 dark:hover:bg-brand-900/20 dark:hover:text-brand-400"
-                          >
-                            Activate
-                          </button>
-                        )}
-                      </div>
-                    </div>
-                  </div>
-
-                  {isExpanded && (() => {
-                    const pieData = details?.gateways.map(g => ({
-                      name: g.gatewayName + (g.gatewayId ? ` (${g.gatewayId})` : ''),
-                      value: g.split,
-                    })) ?? []
-                    return (
-                      <div className="border-t border-slate-100 bg-slate-50/60 px-6 py-4 dark:border-[#1e2330] dark:bg-[#0c0f17]">
-                        {pieData.length > 0 && (
-                          <ResponsiveContainer width="100%" height={200}>
-                            <PieChart>
-                              <Pie
-                                data={pieData}
-                                dataKey="value"
-                                nameKey="name"
-                                cx="50%"
-                                cy="50%"
-                                outerRadius={72}
-                                isAnimationActive={false}
-                                label={({ name, value }) => `${name}: ${value}%`}
-                                labelLine={{ stroke: '#45454f' }}
-                              >
-                                {pieData.map((_, i) => (
-                                  <Cell key={i} fill={COLORS[i % COLORS.length]} />
-                                ))}
-                              </Pie>
-                              <Tooltip
-                                formatter={(v) => `${v}%`}
-                                contentStyle={CHART_TOOLTIP_STYLE}
-                                labelStyle={CHART_TOOLTIP_LABEL_STYLE}
-                                itemStyle={CHART_TOOLTIP_ITEM_STYLE}
-                              />
-                            </PieChart>
-                          </ResponsiveContainer>
-                        )}
-                      </div>
-                    )
-                  })()}
-                </div>
-              )
-            })}
+                  return [
+                    <tr
+                      key={algo.id}
+                      data-testid="rule-row"
+                      data-rule-name={algo.name}
+                      onClick={() => toggleRuleExpand(algo.id)}
+                      className={`cursor-pointer border-b border-slate-100 align-middle transition-colors hover:bg-slate-50 dark:border-[#1e2330] dark:hover:bg-[#11151d] ${
+                        isActive ? 'bg-emerald-50/50 dark:bg-emerald-900/10' : ''
+                      }`}
+                    >
+                      <td className="px-5 py-4">
+                        <div className="flex items-start gap-2">
+                          {isExpanded
+                            ? <ChevronDown size={14} className="mt-1 shrink-0 text-slate-400" />
+                            : <ChevronRight size={14} className="mt-1 shrink-0 text-slate-400" />
+                          }
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+                              {algo.name}
+                            </p>
+                            <p className="mt-0.5 truncate font-mono text-xs text-slate-400 dark:text-[#6d7a8d]">
+                              {algo.id}
+                            </p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-5 py-4">
+                        <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                          isActive
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400'
+                            : 'bg-slate-100 text-slate-500 dark:bg-[#1a1f2a] dark:text-[#8090a8]'
+                        }`}>
+                          {isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td className="max-w-[320px] px-5 py-4">
+                        <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-200" title={distribution}>
+                          {distribution}
+                        </p>
+                      </td>
+                      <td className="whitespace-nowrap px-5 py-4 text-[13px] text-slate-500 dark:text-[#6d7a8d]">
+                        {algo.created_at
+                          ? new Date(algo.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
+                          : '—'}
+                      </td>
+                      <td className="px-5 py-4" onClick={(e) => e.stopPropagation()}>
+                        <RowMenu
+                          items={[
+                            isActive
+                              ? {
+                                  label: deactivatingId === algo.id ? 'Deactivating…' : 'Deactivate',
+                                  icon: PowerOff,
+                                  onSelect: () => setPendingDeactivateId(algo.id),
+                                  disabled: deactivatingId === algo.id || !canEditRouting,
+                                }
+                              : {
+                                  label: 'Activate',
+                                  icon: Zap,
+                                  tone: 'positive',
+                                  onSelect: () => handleActivate(algo.id),
+                                  disabled: activating || !canEditRouting,
+                                },
+                            {
+                              label: 'Edit',
+                              icon: Pencil,
+                              onSelect: () => navigate(`/routing/volume/${algo.id}/edit`),
+                              disabled: Boolean(lockedReason),
+                              hint: lockedReason,
+                            },
+                            {
+                              label: 'Duplicate',
+                              icon: Copy,
+                              onSelect: () => navigate(`/routing/volume/new?cloneFrom=${algo.id}`),
+                              disabled: !canEditRouting,
+                            },
+                            {
+                              label: 'Delete',
+                              icon: Trash2,
+                              tone: 'danger',
+                              onSelect: () => setPendingDeleteId(algo.id),
+                              disabled: Boolean(lockedReason),
+                              hint: lockedReason,
+                            },
+                          ]}
+                        />
+                      </td>
+                    </tr>,
+                    isExpanded ? (
+                      <tr key={`${algo.id}-detail`} className="border-b border-slate-100 dark:border-[#1e2330]">
+                        <td colSpan={5} className="bg-slate-50/60 px-6 py-5 dark:bg-[#0c0f17]">
+                          {algo.description && algo.description !== 'N/A' && (
+                            <p className="mb-3 text-sm text-slate-500 dark:text-[#6d7a8d]">{algo.description}</p>
+                          )}
+                          <SplitBreakdown gateways={toVolumeSplitRuleDetailsState(algo)?.gateways ?? []} />
+                        </td>
+                      </tr>
+                    ) : null,
+                  ]
+                })}
+              </tbody>
+            </table>
           </div>
         )}
-      </div>
-    </Card>
+      </Card>
+
+      {activeRuleBased && (
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+          <strong>"{activeRuleBased.name}" is active</strong> — activating a volume split rule will
+          automatically deactivate it.
+        </div>
+      )}
+    </div>
   )
 }

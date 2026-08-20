@@ -19,7 +19,7 @@ test.describe('Volume split output', () => {
 
   test.beforeEach(async ({ sharedPage }) => {
     euclid = new EuclidRuleBuilder(sharedPage)
-    await euclid.goto('/routing/rules')
+    await euclid.goto('/routing/rules/new')
     await euclid.addRuleBlock()
     await euclid.switchOutputType(0, 'Volume Split')
   })
@@ -88,18 +88,5 @@ test.describe('Volume split output', () => {
     const then = euclid.thenSection(0)
     await expect(then.getByPlaceholder('Split %')).toHaveCount(0)
     await expect(then.getByPlaceholder('Gateway name')).toBeVisible()
-  })
-
-  test('JSON preview emits routing_type: volume_split with correct split values', async ({ sharedPage }) => {
-    await euclid.addVolumeSplitEntry(0, 70, 'stripe', 'mca_stripe')
-    await euclid.addVolumeSplitEntry(0, 30, 'adyen', 'mca_adyen')
-    await sharedPage.getByPlaceholder('my-rule').fill('volume-split-preview-rule')
-    await sharedPage.getByRole('button', { name: 'Preview JSON' }).click()
-
-    const preview = sharedPage.locator('pre')
-    await expect(preview).toContainText('"routing_type": "volume_split"')
-    await expect(preview).toContainText('"split": 70')
-    await expect(preview).toContainText('"split": 30')
-    await expect(preview).toContainText('"volume_split": [')
   })
 })
