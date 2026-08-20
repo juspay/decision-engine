@@ -99,7 +99,7 @@ function condToDSL(c: ConditionRow): string {
 }
 
 /**
- * One nested branch. Its conditions are ANDed together and the branches are ORed, so a branch with
+ * One nested branch. Its conditions are joined with AND and the branches with OR, so a branch with
  * more than one condition gets its own brackets — `a and b or c` would otherwise read as a
  * different rule than the interpreter evaluates.
  */

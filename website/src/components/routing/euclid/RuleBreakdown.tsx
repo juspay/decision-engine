@@ -134,10 +134,10 @@ function ConditionChip({ cond, op }: { cond: EuclidCondition; op: string }) {
 }
 
 /**
- * A statement, drawn the way the interpreter reads it: the `condition` list is ANDed, and when
- * `nested` is present at least one nested branch must also match. Flattening the branches into the
- * same list — as this panel used to — turns `A and B and ((C and D) or E)` into
- * `A and B and C and D or E`, which is a different rule.
+ * A statement, drawn the way the interpreter reads it: the `condition` list is joined with AND,
+ * and when `nested` is present at least one nested branch must also match. Flattening the branches
+ * into the same list would turn `A and B and ((C and D) or E)` into `A and B and C and D or E`,
+ * which is a different rule.
  */
 function StatementView({ statement }: { statement: EuclidStatement }) {
   const conditions = statement.condition ?? []
