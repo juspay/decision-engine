@@ -123,6 +123,10 @@ pub struct RoutingRequest {
     pub created_by: String,
     pub fallback_output: Option<Vec<ConnectorInfo>>,
     pub parameters: HashMap<String, Option<ValueType>>,
+    /// Transaction type whose active rule should be evaluated; absent keeps the
+    /// legacy type-blind lookup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub algorithm_for: Option<String>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]

@@ -40,11 +40,41 @@ use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOT
 // every /routing/evaluate call. Written on activate, deleted on deactivate,
 // read-with-fallback on evaluate.
 //
-// Key  : DE_routing_algo_eval:{merchant_id}
+// Key  : DE_routing_algo_eval:{merchant_id}:{algorithm_for} — one entry per transaction
+//        type. The legacy type-blind key (no suffix) still serves callers that omit
+//        `algorithm_for` and is dropped on activate/deactivate (type-ambiguous content).
 // Value: JSON { id, algorithm_data }
 // TTL  : cache_config.service_config_ttl (default 300s)
 
 const ROUTING_ALGO_CACHE_PREFIX: &str = "DE_routing_algo_eval:";
+
+/// Kept in sync with AlgorithmType (enforced by the test below).
+const ALGORITHM_FOR_VALUES: [&str; 3] = ["payment", "payout", "three_ds_authentication"];
+
+#[cfg(test)]
+mod cache_key_tests {
+    use super::ALGORITHM_FOR_VALUES;
+    use crate::euclid::types::AlgorithmType;
+
+    #[test]
+    fn algorithm_for_values_cover_algorithm_type() {
+        // Exhaustive match forces revisiting this test when a variant is added.
+        let all = [
+            AlgorithmType::Payment,
+            AlgorithmType::Payout,
+            AlgorithmType::ThreeDsAuthentication,
+        ];
+        for variant in &all {
+            match variant {
+                AlgorithmType::Payment
+                | AlgorithmType::Payout
+                | AlgorithmType::ThreeDsAuthentication => {}
+            }
+            assert!(ALGORITHM_FOR_VALUES.contains(&variant.to_string().as_str()));
+        }
+        assert_eq!(ALGORITHM_FOR_VALUES.len(), all.len());
+    }
+}
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct CachedRoutingAlgorithm {
@@ -52,8 +82,26 @@ struct CachedRoutingAlgorithm {
     algorithm_data: String,
 }
 
-fn routing_algo_cache_key(merchant_id: &str) -> String {
-    format!("{}{}", ROUTING_ALGO_CACHE_PREFIX, merchant_id)
+fn routing_algo_cache_key(merchant_id: &str, algorithm_for: Option<&str>) -> String {
+    match algorithm_for {
+        Some(algorithm_for) => format!("{ROUTING_ALGO_CACHE_PREFIX}{merchant_id}:{algorithm_for}"),
+        None => format!("{ROUTING_ALGO_CACHE_PREFIX}{merchant_id}"),
+    }
+}
+
+async fn cache_routing_algorithm_under_key(
+    state: &crate::app::TenantAppState,
+    key: String,
+    algorithm: &RoutingAlgorithm,
+) {
+    let value = CachedRoutingAlgorithm {
+        id: algorithm.id.clone(),
+        algorithm_data: algorithm.algorithm_data.clone(),
+    };
+    let ttl = state.config.cache_config.service_config_ttl;
+    if let Err(e) = state.redis_conn.set_key_with_ttl(&key, value, ttl).await {
+        logger::warn!(error = ?e, cache_key = %key, "Failed to cache routing algorithm in Redis — falling back to DB on next evaluate");
+    }
 }
 
 async fn cache_routing_algorithm(
@@ -61,21 +109,28 @@ async fn cache_routing_algorithm(
     merchant_id: &str,
     algorithm: &RoutingAlgorithm,
 ) {
-    let key = routing_algo_cache_key(merchant_id);
-    let value = CachedRoutingAlgorithm {
-        id: algorithm.id.clone(),
-        algorithm_data: algorithm.algorithm_data.clone(),
-    };
-    let ttl = state.config.cache_config.service_config_ttl;
-    if let Err(e) = state.redis_conn.set_key_with_ttl(&key, value, ttl).await {
-        logger::warn!(error = ?e, merchant_id = %merchant_id, "Failed to cache routing algorithm in Redis — falling back to DB on next evaluate");
+    cache_routing_algorithm_under_key(
+        state,
+        routing_algo_cache_key(merchant_id, Some(algorithm.algorithm_for.as_str())),
+        algorithm,
+    )
+    .await;
+    // Drop the type-ambiguous legacy key so legacy evaluates never serve a stale entry.
+    let legacy_key = routing_algo_cache_key(merchant_id, None);
+    if let Err(e) = state.redis_conn.delete_key(&legacy_key).await {
+        logger::warn!(error = ?e, merchant_id = %merchant_id, "Failed to drop legacy routing algorithm cache key");
     }
 }
 
 async fn invalidate_routing_algorithm_cache(state: &crate::app::TenantAppState, merchant_id: &str) {
-    let key = routing_algo_cache_key(merchant_id);
-    if let Err(e) = state.redis_conn.delete_key(&key).await {
-        logger::warn!(error = ?e, merchant_id = %merchant_id, "Failed to invalidate routing algorithm cache");
+    let keys = ALGORITHM_FOR_VALUES
+        .iter()
+        .map(|algorithm_for| routing_algo_cache_key(merchant_id, Some(algorithm_for)))
+        .chain(std::iter::once(routing_algo_cache_key(merchant_id, None)));
+    for key in keys {
+        if let Err(e) = state.redis_conn.delete_key(&key).await {
+            logger::warn!(error = ?e, merchant_id = %merchant_id, cache_key = %key, "Failed to invalidate routing algorithm cache");
+        }
     }
 }
 use serde::Serialize;
@@ -416,31 +471,51 @@ pub async fn routing_create(
     Ok(Json(response))
 }
 
-// Fetches the active routing algorithm from DB (2 queries) and back-fills Redis cache.
-// Extracted to keep `routing_evaluate` readable and to reuse on cache miss / parse error.
+// Fetches the active routing algorithm from DB and back-fills the Redis cache. With
+// `algorithm_for` the mapper lookup is type-scoped; without it the legacy lookup applies.
 async fn fetch_algorithm_from_db_and_cache(
     state: &crate::app::TenantAppState,
     merchant_id: &str,
+    algorithm_for: Option<&str>,
 ) -> Result<RoutingAlgorithm, ContainerError<EuclidErrors>> {
     #[cfg(feature = "mysql")]
     use crate::storage::schema::routing_algorithm_mapper::dsl as db_mapper_dsl;
     #[cfg(feature = "postgres")]
     use crate::storage::schema_pg::routing_algorithm_mapper::dsl as db_mapper_dsl;
 
-    let active_routing_algorithm_id = crate::generics::generic_find_one::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(
-        &state.db,
-        db_mapper_dsl::created_by.eq(merchant_id.to_string()),
-    )
-    .await
-    .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
-        merchant_id.to_string(),
-    ))
-    .map_err(ContainerError::from)?
-    .routing_algorithm_id;
+    let mapper_result = match algorithm_for {
+        Some(algorithm_for) => {
+            crate::generics::generic_find_one::<
+                <RoutingAlgorithmMapper as HasTable>::Table,
+                _,
+                RoutingAlgorithmMapper,
+            >(
+                &state.db,
+                db_mapper_dsl::created_by
+                    .eq(merchant_id.to_string())
+                    .and(db_mapper_dsl::algorithm_for.eq(algorithm_for.to_string())),
+            )
+            .await
+        }
+        None => {
+            crate::generics::generic_find_one::<
+                <RoutingAlgorithmMapper as HasTable>::Table,
+                _,
+                RoutingAlgorithmMapper,
+            >(
+                &state.db,
+                db_mapper_dsl::created_by.eq(merchant_id.to_string()),
+            )
+            .await
+        }
+    };
+
+    let active_routing_algorithm_id = mapper_result
+        .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
+            merchant_id.to_string(),
+        ))
+        .map_err(ContainerError::from)?
+        .routing_algorithm_id;
 
     let algorithm = crate::generics::generic_find_one::<
         <RoutingAlgorithm as HasTable>::Table,
@@ -458,8 +533,13 @@ async fn fetch_algorithm_from_db_and_cache(
     .change_context(EuclidErrors::StorageError)
     .map_err(ContainerError::from)?;
 
-    // Back-fill cache so subsequent requests hit Redis
-    cache_routing_algorithm(state, merchant_id, &algorithm).await;
+    // Back-fill only the key shape this caller reads; never evict the legacy key here.
+    cache_routing_algorithm_under_key(
+        state,
+        routing_algo_cache_key(merchant_id, algorithm_for),
+        &algorithm,
+    )
+    .await;
     Ok(algorithm)
 }
 
@@ -584,7 +664,8 @@ pub async fn routing_evaluate(
     //
     // Cache hit  : skip both DB queries entirely.
     // Cache miss : run the original 2-query DB path and back-fill the cache.
-    let cache_key = routing_algo_cache_key(&payload.created_by);
+    let algorithm_for = payload.algorithm_for.as_deref();
+    let cache_key = routing_algo_cache_key(&payload.created_by, algorithm_for);
 
     let algorithm: RoutingAlgorithm = match state
         .redis_conn
@@ -611,7 +692,9 @@ pub async fn routing_evaluate(
         }
         Err(_) => {
             // Cache miss or stale entry — fetch from DB and back-fill
-            match fetch_algorithm_from_db_and_cache(&state, &payload.created_by).await {
+            match fetch_algorithm_from_db_and_cache(&state, &payload.created_by, algorithm_for)
+                .await
+            {
                 Ok(algo) => algo,
                 Err(e) => return fail_preview(e, "active_routing_lookup_failed"),
             }
