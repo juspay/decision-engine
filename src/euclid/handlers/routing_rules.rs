@@ -648,7 +648,7 @@ pub async fn routing_evaluate(
                         StaticRoutingAlgorithm::Single(conn.clone())
                     ))
                 }) {
-                    Ok((_, eval)) => (out_enum, eval, Some("straight_through_rule".into())),
+                    Ok(eval) => (out_enum, eval, Some("straight_through_rule".into())),
                     Err(e) => return fail_preview(e.into(), "preview_output_evaluation_failed"),
                 }
             }
@@ -661,7 +661,7 @@ pub async fn routing_evaluate(
                         StaticRoutingAlgorithm::Priority(connectors.clone())
                     ))
                 }) {
-                    Ok((_, eval)) => (out_enum, eval, Some("priority_rule".into())),
+                    Ok(eval) => (out_enum, eval, Some("priority_rule".into())),
                     Err(e) => return fail_preview(e.into(), "preview_output_evaluation_failed"),
                 }
             }
@@ -674,7 +674,7 @@ pub async fn routing_evaluate(
                         StaticRoutingAlgorithm::VolumeSplit(splits.clone())
                     ))
                 }) {
-                    Ok((_, eval)) => (out_enum, eval, Some("volume_split_rule".into())),
+                    Ok(eval) => (out_enum, eval, Some("volume_split_rule".into())),
                     Err(e) => return fail_preview(e.into(), "preview_output_evaluation_failed"),
                 }
             }
@@ -697,8 +697,7 @@ pub async fn routing_evaluate(
                             if let Some(fallback_connector) = payload.fallback_output.clone() {
                                 ir.rule_name = Some("default_fallback".to_string());
                                 ir.output = Output::Priority(fallback_connector.clone());
-                                ir.evaluated_output =
-                                    vec![fallback_connector.first().cloned().unwrap_or_default()];
+                                ir.evaluated_output = fallback_connector;
                             }
                         }
                         (ir.output, ir.evaluated_output, ir.rule_name)
@@ -757,6 +756,9 @@ pub async fn routing_evaluate(
         &parameters,
         &connectors_for_eligibility,
     );
+
+    let evaluated_output =
+        narrow_evaluated_output_to_eligible(evaluated_output, &eligible_connectors);
 
     let response = RoutingEvaluateResponse {
         payment_id: payload.payment_id.clone(),
@@ -1503,6 +1505,16 @@ pub(crate) fn apply_pm_filter_eligibility(
     };
 
     pm_filter_graph::filter_eligible_connectors(bundle, parameters, eligible_connectors)
+}
+
+pub(crate) fn narrow_evaluated_output_to_eligible(
+    evaluated_output: Vec<ConnectorInfo>,
+    eligible_connectors: &[ConnectorInfo],
+) -> Vec<ConnectorInfo> {
+    evaluated_output
+        .into_iter()
+        .filter(|connector| eligible_connectors.contains(connector))
+        .collect()
 }
 
 pub(crate) fn extract_connectors_for_eligibility(output: &Output) -> Vec<ConnectorInfo> {
