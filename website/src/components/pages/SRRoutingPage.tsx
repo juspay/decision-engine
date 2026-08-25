@@ -819,6 +819,12 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string; 
       'Multi-objective routing: alongside approval rate, weighs each PSP\'s expected cost and picks the highest expected-value option. Works with either the Autopilot or Manual scoring config.',
     docsUrl: 'https://docs.hyperswitch.io/integration-guide/workflows/intelligent-routing/routing-strategies/multi-objective-routing',
   },
+  {
+    feature: 'volume-contracts',
+    title: 'Volume contracts (meet PSP commitments)',
+    description:
+      'Multi-objective routing: keeps approval-rate routing in charge, but when a contracted volume commitment is drifting behind pace, steers a little extra volume to that PSP — only onto payments where it approves about as well, so approvals barely move. Runs alongside Cost savings; when both are on, a behind-pace commitment takes priority for eligible payments.',
+  },
 ]
 
 function SrDimensionsConfig({ merchantId }: { merchantId: string | null }) {

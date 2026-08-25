@@ -53,6 +53,8 @@ pub enum KnownFeature {
     #[serde(rename = "auto-calibration")]
     SrAutoCalibration,
     Autopilot,
+    /// Volume-commitment steering — a secondary objective that runs alongside cost savings.
+    VolumeContracts,
 }
 
 impl KnownFeature {
@@ -65,6 +67,7 @@ impl KnownFeature {
             Self::Elimination,
             Self::SrAutoCalibration,
             Self::Autopilot,
+            Self::VolumeContracts,
         ]
     }
 
@@ -77,6 +80,7 @@ impl KnownFeature {
             "elimination" => Some(Self::Elimination),
             "auto-calibration" => Some(Self::SrAutoCalibration),
             "autopilot" => Some(Self::Autopilot),
+            "volume-contracts" => Some(Self::VolumeContracts),
             _ => None,
         }
     }
@@ -92,6 +96,9 @@ impl KnownFeature {
             Self::Elimination => "enable_gateway_level_sr_elimination",
             Self::SrAutoCalibration => "sr_auto_calibration_enabled",
             Self::Autopilot => "autopilot_enabled",
+            // Exactly the key `flow_new` checks via `is_feature_enabled`, so this toggle drives the
+            // routing gate directly.
+            Self::VolumeContracts => "volume_commitment_routing_enabled",
         }
     }
 

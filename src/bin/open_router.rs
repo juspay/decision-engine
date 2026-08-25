@@ -1,6 +1,7 @@
 #![allow(clippy::unwrap_in_result)]
 
 use masking::PeekInterface;
+use open_router::decider::gatewaydecider::volume_commitment;
 use open_router::{logger, tenant::GlobalAppState};
 
 #[allow(clippy::expect_used)]
@@ -32,7 +33,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .expect("Failed while configuring global application state");
 
-    // Run both servers concurrently using tokio::spawn
+    // Volume commitment routing: install the shared dependencies before anything binds, so the
+    // routing path and the controller's own port see the same plan and the same counters.
+    let volume_commitment_admin_secret = global_config.admin_secret.secret.peek().clone();
+    let volume_commitment_deps = std::sync::Arc::new(
+        volume_commitment::build_deps(
+            &global_config.volume_commitment,
+            &global_config.analytics.clickhouse,
+        )
+        .await,
+    );
+    volume_commitment::init_deps(volume_commitment_deps.clone());
+
+    // Run the servers concurrently using tokio::spawn
     let main_server_handle = tokio::spawn(async move {
         open_router::app::server_builder(global_app_state)
             .await
@@ -45,8 +58,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("Failed while building the metrics server")
     });
 
-    // Wait for both servers to complete (they should run indefinitely)
-    tokio::try_join!(main_server_handle, metrics_server_handle)?;
+    // The pacing scheduler, on a port of its own. It owns the clock: when a merchant's forecast
+    // comes due it calls the main server, which does the work.
+    let volume_commitment_server_handle = tokio::spawn(async move {
+        volume_commitment::server::volume_commitment_server_builder(
+            volume_commitment_deps,
+            volume_commitment_admin_secret,
+        )
+        .await
+        .expect("Failed while building the volume commitment scheduler server")
+    });
+
+    // Wait for the servers to complete (they should run indefinitely)
+    tokio::try_join!(
+        main_server_handle,
+        metrics_server_handle,
+        volume_commitment_server_handle
+    )?;
 
     Ok(())
 }

@@ -50,7 +50,9 @@ const MAX_TIERS: usize = 20;
 const MAX_TOLERANCE_BPS: u16 = 2000;
 const MAX_RATE_BPS: u32 = 10_000;
 const MAX_REBATE_LAG_DAYS: u16 = 365;
-const MIN_INTERVAL_SECS: u32 = 60;
+/// Low enough that a `test_minutes` cycle can still forecast and release in chunks; production
+/// contracts simply set sane values.
+const MIN_INTERVAL_SECS: u32 = 5;
 const MAX_INTERVAL_SECS: u32 = 604_800; // one week
 
 // ── Document root ─────────────────────────────────────────────────────────────
@@ -79,9 +81,6 @@ pub struct VolumeContractConfig {
     /// Per-merchant override of the forecast cadence; omit to use the engine's global default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forecast_interval_secs: Option<u32>,
-    /// Per-merchant override of the steering cadence; omit to use the engine's global default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub steering_interval_secs: Option<u32>,
     pub volume_contracts: Vec<VolumeContract>,
 }
 
@@ -240,7 +239,8 @@ pub struct BillingCycle {
     #[serde(rename = "type")]
     pub cycle_type: BillingCycleType,
     /// `calendar_month`: day-of-month 1–30; `calendar_quarter`: month-in-quarter 1–3;
-    /// `calendar_year`: start month 1–12. Range-validated per cycle type on write.
+    /// `calendar_year`: start month 1–12; `test_minutes`: cycle length in minutes 2–240.
+    /// Range-validated per cycle type on write.
     pub anchor: u8,
     /// IANA zone name, e.g. `"America/New_York"`. Validated against the tz database on write.
     pub timezone: String,
@@ -255,6 +255,10 @@ pub enum BillingCycleType {
     CalendarMonth,
     CalendarQuarter,
     CalendarYear,
+    /// TESTING: the cycle lasts `anchor` minutes and repeats from the Unix epoch, so a whole
+    /// period plays out while you watch. Each minute counts as one contract "day", so pacing,
+    /// elimination and steering behave exactly as on a calendar cycle — only faster.
+    TestMinutes,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -728,7 +732,6 @@ pub fn validate_volume_contract_config(
 
     for (field, interval) in [
         ("forecast_interval_secs", config.forecast_interval_secs),
-        ("steering_interval_secs", config.steering_interval_secs),
     ] {
         if let Some(secs) = interval {
             if !(MIN_INTERVAL_SECS..=MAX_INTERVAL_SECS).contains(&secs) {
@@ -832,6 +835,8 @@ fn validate_billing_cycle(
         BillingCycleType::CalendarMonth => 1..=30u8,
         BillingCycleType::CalendarQuarter => 1..=3u8,
         BillingCycleType::CalendarYear => 1..=12u8,
+        // At least two minutes, so the cycle spans more than a single contract day to pace across.
+        BillingCycleType::TestMinutes => 2..=240u8,
     };
     if !anchor_range.contains(&cycle.anchor) {
         errors.push(ValidationErrorDetails::new(
@@ -1022,7 +1027,6 @@ mod tests {
         assert_eq!(config.metric, CommitmentMetric::Gmv);
         assert_eq!(config.currency.amount_units, AmountUnits::Minor);
         assert_eq!(config.forecast_interval_secs, None);
-        assert_eq!(config.steering_interval_secs, None);
         let contract = &config.volume_contracts[0];
         assert_eq!(contract.status, ContractStatus::Active);
         assert_eq!(contract.billing_cycle.proration, Proration::FullPeriod);
@@ -1270,9 +1274,6 @@ mod tests {
         let mut config = parse_ok(lumpsum_doc());
         config.forecast_interval_secs = Some(1);
         assert_single_error(&config, "out_of_range", "forecast_interval_secs");
-        let mut config = parse_ok(lumpsum_doc());
-        config.steering_interval_secs = Some(10_000_000);
-        assert_single_error(&config, "out_of_range", "steering_interval_secs");
 
         // Bad id / connector.
         let mut config = parse_ok(lumpsum_doc());

@@ -52,6 +52,7 @@ const ANCHOR_HELP: Record<string, string> = {
   calendar_month: 'Day of month the cycle starts (1–30)',
   calendar_quarter: 'Month within the quarter the cycle starts (1–3)',
   calendar_year: 'Month the cycle starts (1–12)',
+  test_minutes: 'Cycle length in minutes (2–240) — one minute per contract day',
 }
 
 interface TierForm {
@@ -68,7 +69,7 @@ interface ContractForm {
   id: string
   connector: string
   status: 'active' | 'inactive'
-  cycleType: 'calendar_month' | 'calendar_quarter' | 'calendar_year'
+  cycleType: 'calendar_month' | 'calendar_quarter' | 'calendar_year' | 'test_minutes'
   anchor: string
   timezone: string
   archetype: 'lumpsum' | 'tiered'
@@ -155,7 +156,6 @@ export function VolumeContractsPage() {
   const [amountUnits, setAmountUnits] = useState<'major' | 'minor'>('major')
   const [expectedDailyTraffic, setExpectedDailyTraffic] = useState('')
   const [forecastInterval, setForecastInterval] = useState('')
-  const [steeringInterval, setSteeringInterval] = useState('')
   const [contracts, setContracts] = useState<ContractForm[]>([emptyContract()])
 
   const [submitting, setSubmitting] = useState(false)
@@ -244,7 +244,6 @@ export function VolumeContractsPage() {
       }),
     }
     if (forecastInterval.trim()) config.forecast_interval_secs = parseInt(forecastInterval, 10)
-    if (steeringInterval.trim()) config.steering_interval_secs = parseInt(steeringInterval, 10)
     return config
   }
 
@@ -258,7 +257,6 @@ export function VolumeContractsPage() {
     setAmountUnits('major')
     setExpectedDailyTraffic('')
     setForecastInterval('')
-    setSteeringInterval('')
     setContracts([emptyContract()])
   }
 
@@ -575,17 +573,6 @@ export function VolumeContractsPage() {
                       onChange={(e) => setForecastInterval(e.target.value)}
                     />
                   </div>
-                  <div>
-                    {fieldLabel('Steering interval', 'seconds, optional')}
-                    <input
-                      className={inputClass}
-                      type="number"
-                      min={60}
-                      placeholder="engine default"
-                      value={steeringInterval}
-                      onChange={(e) => setSteeringInterval(e.target.value)}
-                    />
-                  </div>
                 </div>
               </InsetPanel>
 
@@ -649,6 +636,7 @@ export function VolumeContractsPage() {
                             { value: 'calendar_month', label: 'Calendar month' },
                             { value: 'calendar_quarter', label: 'Calendar quarter' },
                             { value: 'calendar_year', label: 'Calendar year' },
+                            { value: 'test_minutes', label: 'Test cycle (minutes)' },
                           ]}
                         />
                       </div>
@@ -662,6 +650,16 @@ export function VolumeContractsPage() {
                           onChange={(e) => patchContract(contract.key, { anchor: e.target.value })}
                         />
                       </div>
+                      {contract.cycleType === 'test_minutes' && (
+                        <div className="sm:col-span-3">
+                          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">
+                            Testing only. The cycle lasts {contract.anchor || '?'} minutes and each
+                            minute counts as one contract day, so a full period — pacing,
+                            elimination, steering — plays out while you watch. Drive traffic at it
+                            from the Decision Simulator; timezone is ignored.
+                          </p>
+                        </div>
+                      )}
                       <div>
                         {fieldLabel('Timezone', 'IANA')}
                         <Combobox

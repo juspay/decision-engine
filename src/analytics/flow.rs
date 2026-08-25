@@ -91,6 +91,8 @@ pub enum FlowType {
     RoutingCreateVolumeContract,
     RoutingEvaluateVolumeContract,
     AutopilotCalibration,
+    /// A volume-commitment forecast run: the plan snapshot, including eliminations.
+    VolumeCommitmentForecast,
 }
 
 impl FlowType {
@@ -160,6 +162,7 @@ impl FlowType {
             Self::RoutingCreateVolumeContract => "routing_create_volume_contract",
             Self::RoutingEvaluateVolumeContract => "routing_evaluate_volume_contract",
             Self::AutopilotCalibration => "autopilot_calibration",
+            Self::VolumeCommitmentForecast => "volume_commitment_forecast",
         }
     }
 }

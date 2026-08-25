@@ -15,6 +15,7 @@ import { useMerchantStore } from '../../store/merchantStore'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { useAuthStore } from '../../store/authStore'
 import { apiErrorStatus, apiPost, fetcher } from '../../lib/api'
+import { ContractSimulationPanel } from './ContractSimulationPanel'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import { DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RankedPsp, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
@@ -422,6 +423,42 @@ type VolumePaymentEntry = {
 
 const EXPLORER_STORAGE_KEY_PREFIX = 'decision-explorer-state-v2'
 const EXPLORER_RESULT_TTL_MS = 10 * 60 * 1000
+
+/**
+ * Run control and the committed rows, held outside the component tree.
+ *
+ * The traffic loop is plain async work against the API — navigating away only destroys the React
+ * state it writes to, not the work itself. Keeping these here lets a run keep driving traffic
+ * while you watch it land on Analytics, and lets the page reattach to a run still in flight when
+ * you come back. `useRef` already handed out `{ current }` objects, so these are drop-in.
+ */
+const simulationAbortRef = { current: false }
+const runGenerationRef = { current: 0 }
+const simulationPausedRef = { current: false }
+const runProgressRef = { current: 0 }
+
+/**
+ * What a run in flight has produced so far, plus whoever is currently displaying it.
+ *
+ * The loop's `setState` calls belong to the component instance that started it; navigating away
+ * destroys that instance, so its writes go nowhere and a remounted page would sit frozen on the
+ * last rows it happened to see. Publishing here and letting the mounted page subscribe keeps the
+ * display attached to the run rather than to the instance that launched it.
+ */
+const liveRun: {
+  running: boolean
+  results: SimulationResult[]
+  subscribers: Set<() => void>
+} = {
+  running: false,
+  results: [],
+  subscribers: new Set(),
+}
+
+/** Tell whichever page is mounted that the run moved. */
+function publishLiveRun() {
+  liveRun.subscribers.forEach(notify => notify())
+}
 
 const DEFAULT_FORM: FormState = {
   amount: '1000',
@@ -1188,12 +1225,20 @@ export function DecisionSimulatorPage() {
     amountRangeRef.current = { min: simulationConfig.minAmount, max: simulationConfig.maxAmount }
   }, [simulationConfig.minAmount, simulationConfig.maxAmount])
   const [errorInfo, setErrorInfo] = useState<ErrorInfoState>(initialState.errorInfo)
+  /**
+   * Milliseconds between dispatches, and only ever set by loading a volume contract.
+   *
+   * A contract states volume *per contract day*, so its run has to be spread across that day
+   * rather than delivered in one burst — the pacing controller measures a rate, and a burst reads
+   * as a day's traffic arriving in five seconds. Every other run wants full speed, so this is kept
+   * out of `SimulationConfig` (which is persisted) and cleared whenever the contract goes away or
+   * the tab is reset: loading a contract once must never leave later simulations throttled.
+   */
+  const [contractPaceMs, setContractPaceMs] = useState(0)
   const [gatewaySimConfigs, setGatewaySimConfigs] = useState<Record<string, GatewaySimConfig>>(initialState.gatewaySimConfigs)
   const gatewaySimConfigsRef = useRef(gatewaySimConfigs)
   useEffect(() => { gatewaySimConfigsRef.current = gatewaySimConfigs }, [gatewaySimConfigs])
   const eliminationEnabled = Object.values(gatewaySimConfigs).some(c => c.failureMode === 'timeout')
-  const simulationAbortRef = useRef(false)
-  useEffect(() => () => { simulationAbortRef.current = true }, [])
   /**
    * Bumped on every run start, and by anything that discards a run outright (Clear results, a
    * merchant-scope switch). A run captures the value at entry and only touches shared state while it
@@ -1203,7 +1248,6 @@ export function DecisionSimulatorPage() {
    * the engine. The token can only move forward, so a superseded run can never mistake itself for
    * the current one.
    */
-  const runGenerationRef = useRef(0)
 
   const [debitForm, setDebitForm] = useState<DebitRoutingFormState>(initialState.debitForm)
 
@@ -1234,10 +1278,8 @@ export function DecisionSimulatorPage() {
   // aborted, so position, outcome accumulators, the feed, and backend scores are
   // all preserved across a pause.
   const [isPaused, setIsPaused] = useState(false)
-  const simulationPausedRef = useRef(false)
   // Batch index (loop `start`) the run should continue from. The pause-idle block
   // writes the next-unrun index here so it survives leaving and returning to the page.
-  const runProgressRef = useRef(0)
   // A paused run that outlived an unmount (e.g. the user paused, opened Multi-Objective
   // config, then came back). Persisted so returning offers "Resume" — which continues
   // from runProgressRef's saved index instead of restarting — rather than a fresh run.
@@ -1678,6 +1720,7 @@ export function DecisionSimulatorPage() {
     setVolumeDistribution(defaults.volumeDistribution)
     setVolumeEvaluationLog(defaults.volumeEvaluationLog)
     setVolumeProgress(defaults.volumeProgress)
+    liveRun.results = defaults.simulationResults
     setSimulationResults(defaults.simulationResults)
     setSimulationStartedAtMs(null)
     setResponseOpen(defaults.responseOpen)
@@ -1727,6 +1770,9 @@ export function DecisionSimulatorPage() {
     setVolumeDistribution(nextState.volumeDistribution)
     setVolumeEvaluationLog(nextState.volumeEvaluationLog)
     setVolumeProgress(nextState.volumeProgress)
+    liveRun.results = nextState.simulationResults
+    liveRun.running = false
+    setContractPaceMs(0)
     setSimulationResults(nextState.simulationResults)
     setSimulationStartedAtMs(null)
     setResponseOpen(nextState.responseOpen)
@@ -1754,6 +1800,25 @@ export function DecisionSimulatorPage() {
     runGenerationRef.current++
     setIsSimulating(false)
   }
+
+  // Follow the run for as long as this page is mounted — on first mount to reattach to one
+  // already in flight, and on every tick thereafter, since the loop publishes rather than calling
+  // this instance's setters directly.
+  useEffect(() => {
+    const sync = () => {
+      setSimulationResults(liveRun.results)
+      setIsSimulating(liveRun.running)
+      setIsPaused(liveRun.running && simulationPausedRef.current)
+    }
+    liveRun.subscribers.add(sync)
+    // Adopt straight away rather than waiting for the next flush (which may be a second or more
+    // out) — both for a run still going and for one that finished while the page was away, whose
+    // closing rows were never written to any mounted instance.
+    if (liveRun.running || liveRun.results.length > 0) sync()
+    return () => {
+      liveRun.subscribers.delete(sync)
+    }
+  }, [])
 
   useEffect(() => {
     if (stateScopeKey === currentScopeKey) return
@@ -2246,6 +2311,7 @@ export function DecisionSimulatorPage() {
         merchantId: effectiveMerchantId,
       })
       // Clear local state so the UI reflects the fresh-scores starting point.
+      liveRun.results = []
       setSimulationResults([])
       setTxFilters({})
       routingEvents.refresh()
@@ -2273,13 +2339,17 @@ export function DecisionSimulatorPage() {
     const isResume = resumeFrom > 0
 
     setIsSimulating(true)
+    liveRun.running = true
     setIsPaused(false)
     simulationPausedRef.current = false
     setResumableRun(null)
     setSimulationStartedAtMs(Date.now())
     setError(null)
     setSetupPrompt(null)
-    if (!isResume) setSimulationResults([])
+    if (!isResume) {
+      liveRun.results = []
+      setSimulationResults([])
+    }
     simulationAbortRef.current = false
     // Claim ownership of the shared run state. Any earlier run still unwinding is now superseded and
     // will drop out of its loop without writing.
@@ -2322,6 +2392,7 @@ export function DecisionSimulatorPage() {
     // pool size below). Read once here so a mid-run slider change can't reshape an in-flight run.
     // 1 reproduces the original strictly-sequential loop.
     const concurrency = Math.max(1, Math.min(MAX_SIMULATION_TPS, Math.round(simulationConfig.tps) || 1))
+    const paceMs = Math.max(0, Math.round(contractPaceMs))
 
     // One full transaction (decide → score → optional smart retry). Returns the row to
     // append; throws on a backend error so the batch can tally it. `drawSuccess` mutates
@@ -2468,7 +2539,8 @@ export function DecisionSimulatorPage() {
         if (!isCurrentRun()) return
         const now = Date.now()
         if (force || now - lastUIUpdate > 150) {
-          setSimulationResults([...results])
+          liveRun.results = [...results]
+          publishLiveRun()
           markExplorerRunDataUpdated()
           lastUIUpdate = now
         }
@@ -2522,6 +2594,12 @@ export function DecisionSimulatorPage() {
           // Record the resume point as the committed count and flush on the shared throttle.
           runProgressRef.current = results.length
           flushResults(false)
+
+          // Hold the configured rate. Each of the `concurrency` workers waits its own share, so
+          // the run as a whole dispatches one payment every `paceMs`.
+          if (paceMs > 0) {
+            await new Promise(resolve => setTimeout(resolve, paceMs * concurrency))
+          }
         }
       }
 
@@ -2540,10 +2618,10 @@ export function DecisionSimulatorPage() {
       // `isPaused` now describe the run that replaced it — flipping them here is what let the old
       // run hide a live run's Stop button and re-offer Run simulation.
       if (isCurrentRun()) {
-        setSimulationResults([...results])
-        setIsSimulating(false)
-        setIsPaused(false)
+        liveRun.running = false
+        liveRun.results = [...results]
         simulationPausedRef.current = false
+        publishLiveRun()
       }
       // Events from the last txns can land just after the loop ends. Safe either way — it only
       // refetches the feed.
@@ -3342,6 +3420,7 @@ export function DecisionSimulatorPage() {
   /** Everything below the control bar — the charts, the summary column and the transaction log. */
   function clearBatchResults() {
     const defaults = getDefaultExplorerState()
+    liveRun.results = defaults.simulationResults
     setSimulationResults(defaults.simulationResults)
     setResumableRun(defaults.resumableRun)
     // Abort any in-flight run and drop the run-start timestamp so the
@@ -3375,6 +3454,8 @@ export function DecisionSimulatorPage() {
       // The batch tab's own bar exposes these two separately; "reset the tab" is just both.
       resetBatchInputs()
       clearBatchResults()
+      // A pace only belongs to a loaded contract; resetting the tab drops it with everything else.
+      setContractPaceMs(0)
     } else if (activeTab === 'rule') {
       setRuleResetSignal(n => n + 1)
     } else if (activeTab === 'volume') {
@@ -3852,6 +3933,32 @@ export function DecisionSimulatorPage() {
         style={activeTab === 'rule' ? { display: 'none' } : undefined}
       >
         <div className={`flex flex-col gap-6 min-w-0 ${activeTab === 'batch' ? 'lg:min-h-0' : 'self-start'}`}>
+        {activeTab === 'batch' && (
+          <ContractSimulationPanel
+            merchantId={effectiveMerchantId}
+            isSimulating={isSimulating}
+            tps={simulationConfig.tps}
+            onContractGone={() => setContractPaceMs(0)}
+            onCycleEnded={() => {
+              // Volume sent past the cycle end lands in the next period, against goals that have
+              // just reset — stop rather than quietly mis-attribute it.
+              simulationAbortRef.current = true
+              setContractPaceMs(0)
+            }}
+            onLoad={({ gateways, amount, totalPayments, paceMs }) => {
+              setContractPaceMs(paceMs)
+              // `form.amount` drives the fixed-amount path and the min/max pair drives the
+              // multi-objective one; setting both keeps the ticket exact either way.
+              setForm(f => ({ ...f, eligible_gateways: gateways.join(', '), amount: String(amount) }))
+              setSimulationConfig(c => ({
+                ...c,
+                minAmount: amount,
+                maxAmount: amount,
+                totalPayments: String(totalPayments),
+              }))
+            }}
+          />
+        )}
         {activeTab === 'batch' && (
                 <Card className="flex-1">
                   <CardBody className="!pt-4 flex flex-1 flex-col">

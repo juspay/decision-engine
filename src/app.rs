@@ -544,6 +544,25 @@ where
             get(routes::cost_coverage::get_cost_coverage),
         )
         .route(
+            "/merchant-account/:merchant-id/volume-commitment",
+            get(routes::volume_commitment::get_volume_commitment),
+        )
+        .route(
+            "/merchant-account/:merchant-id/volume-commitment/series",
+            get(routes::volume_commitment::get_series),
+        )
+        .route(
+            "/merchant-account/:merchant-id/volume-commitment/audit",
+            get(routes::volume_commitment::get_audit),
+        )
+        // Called by the volume-commitment scheduler when a merchant's forecast comes due. Behind
+        // the same auth as any other write; the scheduler presents the admin secret like any
+        // service-to-service caller.
+        .route(
+            "/volume-commitment/run-forecast",
+            post(routes::volume_commitment::run_forecast),
+        )
+        .route(
             "/merchant-account/:merchant-id/cost-ingestions",
             get(routes::report_upload::list_ingestions),
         )

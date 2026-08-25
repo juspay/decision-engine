@@ -932,6 +932,28 @@ use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
 
+/// Rebuild the merchant's volume-commitment plan right after a contract is activated.
+///
+/// The scheduler would get to it on its next tick, but until then the store still holds the plan
+/// built from the *previous* contract — so a freshly activated contract appears to arrive with the
+/// old one's eliminations already applied. Spawned, so activation does not wait on ClickHouse.
+fn refresh_volume_commitment_plan(algorithm_for: &str, merchant_id: &str) {
+    if algorithm_for != AlgorithmType::VolumeCommitment.to_string() {
+        return;
+    }
+    let merchant_id = merchant_id.to_string();
+    tokio::spawn(async move {
+        let Some(deps) = crate::decider::gatewaydecider::volume_commitment::deps() else {
+            return;
+        };
+        crate::decider::gatewaydecider::volume_commitment::controller::run_for_merchant(
+            deps,
+            &merchant_id,
+        )
+        .await;
+    });
+}
+
 pub async fn activate_routing_rule(
     Json(payload): Json<ActivateRoutingConfigRequest>,
 ) -> Result<(), ContainerError<EuclidErrors>> {
@@ -1019,6 +1041,7 @@ pub async fn activate_routing_rule(
             {
                 Ok(_) => {
                     cache_routing_algorithm(&state, &payload.created_by, &algorithm).await;
+                    refresh_volume_commitment_plan(&algorithm.algorithm_for, &payload.created_by);
                     API_REQUEST_COUNTER
                         .with_label_values(&["activate_routing_rule", "success"])
                         .inc();
@@ -1034,6 +1057,7 @@ pub async fn activate_routing_rule(
         }
         // Already active with the same algorithm — refresh the cache TTL
         cache_routing_algorithm(&state, &payload.created_by, &algorithm).await;
+        refresh_volume_commitment_plan(&algorithm.algorithm_for, &payload.created_by);
         API_REQUEST_COUNTER
             .with_label_values(&["activate_routing_rule", "success"])
             .inc();
@@ -1055,6 +1079,7 @@ pub async fn activate_routing_rule(
     {
         Ok(_) => {
             cache_routing_algorithm(&state, &merchant_id_for_cache, &algorithm).await;
+            refresh_volume_commitment_plan(&algorithm.algorithm_for, &merchant_id_for_cache);
             API_REQUEST_COUNTER
                 .with_label_values(&["activate_routing_rule", "success"])
                 .inc();

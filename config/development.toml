@@ -119,6 +119,21 @@ aws_region = ""
 # `openssl rand -hex 32`. On rotation add e.g. `v2 = "..."` and set current = "v2" above.
 v1 = "0000000000000000000000000000000000000000000000000000000000000000"
 
+[volume_commitment]
+# Expose the scheduler on its own port in this process. Prod: only the deployment that owns it.
+enabled = true
+# How often a merchant's plan is rebuilt — the only scheduled job. prod default: 3600 (1 h)
+default_forecast_interval_secs = 60
+# Where the scheduler calls when a forecast comes due. Normally this same process's [server].
+main_server_url = "http://127.0.0.1:8080"
+# How often the scheduler wakes. Keep well under the shortest cadence above.
+tick_secs = 10
+
+# The scheduler's own listener. GET /schedule shows the timing; GET /health is a liveness probe.
+[volume_commitment.server]
+host = "127.0.0.1"
+port = 9095
+
 [hypersense]
 base_url = "https://eu.hyperswitch.io/cost-observability/router"
 username = "hypersense_user"

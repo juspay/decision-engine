@@ -20,6 +20,7 @@ use super::runner::handle_fallback_logic;
 use super::types as T;
 use super::types::PriorityLogicFailure;
 use super::utils as Utils;
+use super::volume_commitment;
 // use optics_core::{preview, review};
 use crate::decider::gatewaydecider::constants as C;
 use crate::feedback::constants::kvRedis;
@@ -457,6 +458,7 @@ pub async fn run_decider_flow(
                     is_rust_based_decider: true,
                     latency: Some(cpu_time),
                     multi_objective_info: None,
+                    volume_steer_info: None,
                 })
             } else {
                 decider_flow
@@ -719,6 +721,40 @@ pub async fn run_decider_flow(
                         decider_flow.writer.multi_objective_info = Some(outcome.info);
                     }
 
+                    // Volume commitment steering (pace-guarded, Mode 1). Runs last, on its own
+                    // flag: a behind-pace PSP can take the payment off the cost pick, but the
+                    // concession is still measured against the SR head. Fails open — no flag,
+                    // deps or plan leaves routing alone.
+                    let volume_commitment_on = is_feature_enabled(
+                        "volume_commitment_routing_enabled".to_string(),
+                        merchant_id_text.clone(),
+                        kvRedis(),
+                    )
+                    .await;
+                    if volume_commitment_on && !hedging_on {
+                        if let Some(vc_deps) = volume_commitment::deps() {
+                            if let Some(plan) = vc_deps.state.load_plan(&merchant_id_text).await {
+                                // Sampling, not counting: the forecast already decided each PSP's
+                                // share of the eligible flow, so this payment only has to roll.
+                                let mut roll = || rand::random::<f64>();
+                                let outcome = volume_commitment::nudge::choose(
+                                    &currentGatewayScoreMap,
+                                    &plan,
+                                    chrono::Utc::now(),
+                                    &mut roll,
+                                );
+                                // Only an actual diversion relabels the approach.
+                                if let Some(chosen) = outcome.chosen {
+                                    decidedGateway = Some(chosen);
+                                    cost_fallbacks_override = Some(outcome.fallbacks);
+                                    decider_flow.writer.gwDeciderApproach =
+                                        T::GatewayDeciderApproach::SrSelectionVolumeCommitment;
+                                }
+                                decider_flow.writer.volume_steer_info = Some(outcome.info);
+                            }
+                        }
+                    }
+
                     let stateBindings = (
                         decider_flow.writer.srElminiationApproachInfo.clone(),
                         decider_flow.writer.isOptimizedBasedOnSRMetricEnabled,
@@ -864,6 +900,7 @@ pub async fn run_decider_flow(
                                     .writer
                                     .multi_objective_info
                                     .clone(),
+                                volume_steer_info: decider_flow.writer.volume_steer_info.clone(),
                             })
                         }
                         None => Err((
