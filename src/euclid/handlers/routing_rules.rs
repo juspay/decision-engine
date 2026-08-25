@@ -14,7 +14,10 @@ use crate::{
             RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest, RoutingRule,
             SrDimensionConfig, StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
         },
-        utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
+        utils::{
+            generate_random_id, is_valid_enum_value, normalize_rule_value_types,
+            validate_routing_rule,
+        },
     },
     types::service_configuration::{find_config_by_name, insert_config, update_config},
 };
@@ -300,7 +303,7 @@ pub async fn routing_create(
 
     // The serde message names the field that did not parse. Dropping it leaves the caller with a
     // bare 400 and nothing to act on.
-    let config: RoutingRule = serde_json::from_value(payload.clone()).map_err(|error| {
+    let mut config: RoutingRule = serde_json::from_value(payload.clone()).map_err(|error| {
         error_stack::report!(EuclidErrors::InvalidRequest(format!(
             "could not parse routing rule: {error}"
         )))
@@ -310,6 +313,10 @@ pub async fn routing_create(
     let analytics_config_name = config.name.clone();
 
     logger::debug!("Received routing config: {:?}", config);
+
+    if let Some(routing_config) = state.config.routing_config.as_ref() {
+        normalize_rule_value_types(&mut config.algorithm, routing_config);
+    }
 
     match validate_routing_rule(&config, &state.config.routing_config) {
         Ok(validation_result) => {
@@ -1152,7 +1159,7 @@ async fn ensure_routing_algorithm_inactive(
 /// Edit an existing inactive routing algorithm in place (name/description/definition). Used by the
 /// A/B Testing dashboard's Edit action. Keeps the same id so history/links remain valid.
 pub async fn update_routing_rule(
-    Json(payload): Json<crate::euclid::types::UpdateRoutingConfigRequest>,
+    Json(mut payload): Json<crate::euclid::types::UpdateRoutingConfigRequest>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["update_routing_rule"])
@@ -1197,6 +1204,10 @@ pub async fn update_routing_rule(
             return Err(ContainerError::from(EuclidErrors::InvalidRequest(
                 "Routing algorithm does not belong to this merchant".to_string(),
             )));
+        }
+
+        if let Some(routing_config) = state.config.routing_config.as_ref() {
+            normalize_rule_value_types(&mut payload.algorithm, routing_config);
         }
 
         let utc_date_time = time::OffsetDateTime::now_utc();
