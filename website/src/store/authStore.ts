@@ -2,10 +2,23 @@ import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import { tokenRef } from '../lib/tokenRef'
 
+/**
+ * One scope this session can switch to.
+ *
+ * `merchant_id` is the routing scope and `merchant_name` its flat one-line label; the `hs_*` and
+ * `profile_name` fields are the same scope split into account-tree levels, which is what the
+ * switcher groups and searches on. All of them are absent for a scope with no Hyperswitch
+ * ancestry — every DE-native merchant — so each consumer falls back to the flat label.
+ */
 export interface MerchantInfo {
   merchant_id: string
   merchant_name: string
   role: string
+  profile_name?: string
+  hs_merchant_id?: string
+  hs_merchant_name?: string
+  hs_org_id?: string
+  hs_org_name?: string
 }
 
 /**
