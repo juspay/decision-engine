@@ -320,12 +320,23 @@ test.describe('Rule Builder — UI interactions', () => {
       await expect(block.getByText('1. adyen')).toBeVisible()
     })
 
-    test('shows gateway name suggestions from other entries', async ({ sharedPage }) => {
+    test('ranks gateway names used elsewhere above the connector list', async ({ sharedPage }) => {
       await euclid.addFallbackGateway('stripe', 'mca_stripe')
 
-      const input = euclid.ruleBlock(0).getByPlaceholder('Gateway name')
-      const listId = await input.getAttribute('list')
-      await expect(sharedPage.locator(`datalist#${listId} option[value="stripe"]`)).toHaveCount(1)
+      await euclid.openGatewayDropdown(0)
+      const options = sharedPage.locator('button[data-value]:not(.cond-select)')
+      await expect(options.first()).toHaveAttribute('data-value', 'stripe')
+      await expect(options.filter({ hasText: /^stripe$/ })).toHaveCount(1)
+      await euclid.dismissDropdown()
+    })
+
+    test('offers hyperswitch routable connectors that were never typed', async ({ sharedPage }) => {
+      await euclid.openGatewayDropdown(0)
+      await expect(sharedPage.locator('button[data-value="cybersource"]:not(.cond-select)')).toBeVisible()
+      await euclid.dismissDropdown()
+
+      await euclid.pickGatewayForBlock(0, 'cybersource')
+      await expect(euclid.ruleBlock(0).getByText('1. cybersource')).toBeVisible()
     })
   })
 

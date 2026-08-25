@@ -107,6 +107,18 @@ export class EuclidRuleBuilder extends RoutingListPage {
     await row.getByRole('button', { name: 'Add', exact: true }).click()
   }
 
+  /** Open the gateway-name dropdown of a rule block's THEN section without typing anything. */
+  async openGatewayDropdown(blockIndex: number): Promise<void> {
+    await this.thenSection(blockIndex).getByRole('button', { name: 'Show gateway list' }).click()
+  }
+
+  /** Pick a gateway from the dropdown (rather than typing it) and commit the row. */
+  async pickGatewayForBlock(blockIndex: number, gatewayName: string): Promise<void> {
+    await this.openGatewayDropdown(blockIndex)
+    await this.page.locator(`button[data-value="${gatewayName}"]:not(.cond-select)`).first().click()
+    await this.thenSection(blockIndex).getByRole('button', { name: 'Add', exact: true }).click()
+  }
+
   async addFallbackGateway(gatewayName: string, gatewayId = ''): Promise<void> {
     const section = this.page
       .locator('.rounded-xl')
