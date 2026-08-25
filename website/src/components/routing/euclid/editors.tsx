@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react'
+import { useState } from 'react'
 import {
   DndContext,
   closestCenter,
@@ -20,6 +20,8 @@ import { Plus, Trash2, GripVertical, CornerDownRight, ChevronDown, ChevronUp } f
 import { Button } from '../../ui/Button'
 import { SearchableSelect } from '../../ui/SearchableSelect'
 import { SearchableMultiSelect } from '../../ui/SearchableMultiSelect'
+import { GatewaySelect } from '../../ui/GatewaySelect'
+import { gatewayOptions } from '../../../lib/connectors'
 import { RoutingKeyConfig } from '../../../hooks/useDynamicRoutingConfig'
 import type {
   RuleBlock, StatementGroup, ConditionRow,
@@ -70,7 +72,6 @@ export function PriorityEditor({
 }) {
   const [newGatewayName, setNewGatewayName] = useState('')
   const [newGatewayId, setNewGatewayId] = useState('')
-  const listId = useRef(`gateway-suggestions-${Math.random().toString(36).slice(2)}`).current
   const sensors = useSensors(
     useSensor(PointerSensor),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
@@ -95,7 +96,7 @@ export function PriorityEditor({
     setNewGatewayId('')
   }
 
-  const unusedSuggestions = suggestions.filter((s) => !gateways.some((g) => g.gatewayName === s))
+  const options = gatewayOptions(suggestions, gateways.map((g) => g.gatewayName))
 
   return (
     <div className="space-y-2">
@@ -111,9 +112,6 @@ export function PriorityEditor({
           ))}
         </SortableContext>
       </DndContext>
-      <datalist id={listId}>
-        {unusedSuggestions.map((s) => <option key={s} value={s} />)}
-      </datalist>
       {/* Enter and the Add button are shortcuts, not requirements: whatever has been typed is
           committed as soon as focus leaves the row, so a gateway typed but never explicitly added
           is not silently dropped on save. Tabbing between fields inside the row does not commit,
@@ -121,13 +119,12 @@ export function PriorityEditor({
       <div className="flex gap-2"
         onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) add() }}
       >
-        <input
+        <GatewaySelect
           value={newGatewayName}
-          onChange={(e) => setNewGatewayName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
-          list={listId}
-          placeholder="Gateway name"
-          className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
+          onChange={setNewGatewayName}
+          onEnter={add}
+          options={options}
+          className="flex-1"
         />
         <input
           value={newGatewayId}
@@ -157,7 +154,6 @@ export function VolumeSplitEditor({
   const [newSplit, setNewSplit] = useState('')
   const [newName, setNewName] = useState('')
   const [newId, setNewId] = useState('')
-  const listId = `vs-suggestions-${Math.random().toString(36).slice(2)}`
 
   const total = entries.reduce((s, e) => s + e.split, 0)
 
@@ -172,7 +168,7 @@ export function VolumeSplitEditor({
     setNewId('')
   }
 
-  const unusedSuggestions = suggestions.filter((s) => !entries.some((e) => e.gatewayName === s))
+  const options = gatewayOptions(suggestions, entries.map((e) => e.gatewayName))
 
   return (
     <div className="space-y-2">
@@ -195,9 +191,6 @@ export function VolumeSplitEditor({
           Total: {total}%{total !== 100 ? ' (must equal 100%)' : ' ✓'}
         </p>
       )}
-      <datalist id={listId}>
-        {unusedSuggestions.map((s) => <option key={s} value={s} />)}
-      </datalist>
       {/* Same commit-on-leave behaviour as the priority editor above. */}
       <div
         className="flex gap-2"
@@ -210,13 +203,12 @@ export function VolumeSplitEditor({
           placeholder="Split %"
           className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
         />
-        <input
+        <GatewaySelect
           value={newName}
-          onChange={(e) => setNewName(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
-          list={listId}
-          placeholder="Gateway name"
-          className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
+          onChange={setNewName}
+          onEnter={add}
+          options={options}
+          className="flex-1"
         />
         <input
           value={newId}

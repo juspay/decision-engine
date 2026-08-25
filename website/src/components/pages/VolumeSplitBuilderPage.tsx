@@ -15,6 +15,8 @@ import { toVolumeSplitCreatePayload, toVolumeSplitAlgorithm } from '../../featur
 import { toVolumeSplitRuleDetailsState } from '../../features/routing/volumeSplit/state'
 import { validateVolumeSplitRule } from '../../features/routing/volumeSplit/schema'
 import { SplitBreakdown, SPLIT_COLORS } from '../routing/volumeSplit/SplitBreakdown'
+import { GatewaySelect } from '../ui/GatewaySelect'
+import { gatewayOptions } from '../../lib/connectors'
 
 function makeId() { return Math.random().toString(36).slice(2) }
 
@@ -239,11 +241,15 @@ export function VolumeSplitBuilderPage() {
                       key={g.id}
                       className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(260px,320px)_32px] md:items-center"
                     >
-                      <input
+                      <GatewaySelect
                         value={g.gatewayName}
-                        onChange={(e) => updateGateway(g.id, 'gatewayName', e.target.value)}
+                        onChange={(val) => updateGateway(g.id, 'gatewayName', val)}
                         placeholder="e.g. stripe"
-                        className="rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
+                        options={gatewayOptions(
+                          [],
+                          gateways.filter((other) => other.id !== g.id).map((other) => other.gatewayName)
+                        )}
+                        className="min-w-0"
                       />
                       <input
                         value={g.gatewayId}

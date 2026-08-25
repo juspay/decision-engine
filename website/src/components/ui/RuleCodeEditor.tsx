@@ -7,6 +7,7 @@ import { placeholder as cmPlaceholder } from '@codemirror/view'
 import { githubLightInit, githubDarkInit } from '@uiw/codemirror-theme-github'
 import { tags as t } from '@lezer/highlight'
 import { RoutingKeyConfig } from '../../hooks/useDynamicRoutingConfig'
+import { gatewayOptions } from '../../lib/connectors'
 
 // ---- Shared types ----
 export interface GatewayEntry {
@@ -471,7 +472,9 @@ function getSuggestions(
 
   if (/=>\s*(?:priority|volume_split(?:_priority)?):/.test(line)) {
     const gwPfxM = /(\w*)$/.exec(line)
-    return fuzzyFilter(gwPfxM?.[1] ?? '', gatewaySuggestions).slice(0, 10)
+    // Gateways already named in the rule rank first; the routable connector list backs them up so
+    // Code mode offers the same choices the visual builder's dropdown does.
+    return fuzzyFilter(gwPfxM?.[1] ?? '', gatewayOptions(gatewaySuggestions)).slice(0, 10)
   }
 
   const inValM = /(\w+)\s+(?:in|not\s+in)\s*\[(?:[^\]]*,\s*)?(\w*)$/.exec(trimmed)
