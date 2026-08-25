@@ -2229,7 +2229,9 @@ pub async fn lookup_merchants(
                 merchant_name,
                 members,
                 hs_merchant_name: ancestry.and_then(|h| {
-                    h.hs_merchant_name.clone().or(Some(h.hs_merchant_id.clone()))
+                    h.hs_merchant_name
+                        .clone()
+                        .or(Some(h.hs_merchant_id.clone()))
                 }),
                 hs_org_name: ancestry
                     .and_then(|h| h.hs_org_name.clone().or(Some(h.hs_org_id.clone()))),
