@@ -56,6 +56,10 @@ named environment or preset its fields:
 scripts/migration-dashboard/server.py --env production-eu
 ```
 
+It listens on loopback only. This server authenticates nobody and holds the admin credentials,
+so whoever reaches the port is the operator — a non-loopback `--host` is refused unless
+`--allow-remote` is given with it. Forward the port over SSH rather than binding wide.
+
 **Production.** An environment of kind *production* is marked wherever it is named, and the
 first migration, cutover or scope run of a session asks for its name to be typed back — once per
 session, checked by the server too, so a page left open cannot write on a click alone. Nothing

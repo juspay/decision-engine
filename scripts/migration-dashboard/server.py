@@ -41,8 +41,10 @@ from __future__ import annotations
 import argparse
 import copy
 import enum
+import ipaddress
 import json
 import os
+import socket
 import threading
 import time
 import urllib.error
@@ -63,6 +65,10 @@ CONFIG_FILE = (
 # by `x-feature`, so the header travels with every call rather than only the first.
 DEFAULT_HS_URL = "https://sandbox.hyperswitch.io"
 DEFAULT_HEADERS = {"x-feature": "sandbox-custom-c2"}
+
+# The domain the hosted product is served from, used to offer a kind for an address that was
+# just typed. Only this name and hosts under it; see `guess_kind`.
+PRODUCTION_DOMAIN = "hyperswitch.io"
 
 # The saved file holds every environment; older files held the one that was in use.
 CONFIG_VERSION = 2
@@ -368,12 +374,15 @@ def guess_kind(url: str) -> EnvKind:
     for a config saved before environments said what they were. It is a first answer and not a
     finding: an environment carries its own kind, and a production deployment on a domain this
     does not recognise has to be marked as one in the panel."""
-    host = host_of(url).lower()
-    if not host or host.split(":")[0] in ("localhost", "127.0.0.1", "[::1]"):
+    host = hostname_of(url)
+    if not host or host in ("localhost", "127.0.0.1", "::1"):
         return EnvKind.LOCAL
     if "sandbox" in host or "integ" in host:
         return EnvKind.SANDBOX
-    if host.endswith("hyperswitch.io"):
+    # The domain, or something under it — matched label by label rather than as a suffix of the
+    # text, so `nothyperswitch.io` is not read as the hosted product, and a port or a userinfo
+    # prefix does not stop a production address from being recognised as one.
+    if host == PRODUCTION_DOMAIN or host.endswith("." + PRODUCTION_DOMAIN):
         return EnvKind.PRODUCTION
     return EnvKind.OTHER
 
@@ -479,6 +488,41 @@ def alternate_key(key: str) -> str:
 
 def host_of(url: str) -> str:
     return urllib.parse.urlparse(url).netloc or url
+
+
+def hostname_of(url: str) -> str:
+    """The host on its own, lowercased, with any userinfo, port and IPv6 brackets taken off, so
+    an address is compared by the name it resolves to rather than by the text it was typed as."""
+    try:
+        host = urllib.parse.urlparse(url).hostname
+    except ValueError:  # a malformed netloc, e.g. an unclosed bracket or a non-numeric port
+        host = None
+    if host:
+        return host.lower()
+    # Not a URL: what was typed may still be a bare host, with or without the parts above.
+    text = (url or "").strip().lower().rsplit("@", 1)[-1]
+    if text.startswith("["):
+        return text[1:].split("]", 1)[0]
+    return text.split("/", 1)[0].split(":", 1)[0]
+
+
+def is_loopback(host: str) -> bool:
+    """Whether an address to listen on reaches this machine only. An empty host and `0.0.0.0`
+    are every interface, and a name that does not resolve is not taken on trust."""
+    name = (host or "").strip().strip("[]")
+    if not name:
+        return False
+    try:
+        return ipaddress.ip_address(name).is_loopback
+    except ValueError:
+        pass
+    try:
+        infos = socket.getaddrinfo(name, None)
+    except OSError:
+        return False
+    return bool(infos) and all(
+        ipaddress.ip_address(info[4][0]).is_loopback for info in infos
+    )
 
 
 def load_saved():
@@ -1383,8 +1427,22 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         path = urllib.parse.urlparse(self.path).path
-        length = int(self.headers.get("Content-Length") or 0)
-        payload = json.loads(self.rfile.read(length) or b"{}") if length else {}
+        # A body that is not a JSON object is answered with a 400 rather than raised: the
+        # handler would otherwise die mid-request and the caller would see a dropped connection
+        # instead of a reason.
+        try:
+            length = int(self.headers.get("Content-Length") or 0)
+        except ValueError:
+            self.send_json({"error": "malformed Content-Length"}, status=400)
+            return
+        try:
+            payload = json.loads(self.rfile.read(length) or b"{}") if length else {}
+        except (ValueError, UnicodeDecodeError) as err:
+            self.send_json({"error": f"malformed JSON body: {err}"}, status=400)
+            return
+        if not isinstance(payload, dict):
+            self.send_json({"error": "body must be a JSON object"}, status=400)
+            return
         board = self.dashboard
 
         if path == "/api/config":
@@ -1397,8 +1455,11 @@ class Handler(BaseHTTPRequestHandler):
             if board.migrate_job.running or board.cutover_job.running or board.scope_job.running:
                 self.send_json({"error": "a run is in flight, it refreshes the scan when it finishes"}, status=409)
                 return
-            pages = payload.get("pages", SCAN_PAGES_DEFAULT)
-            pages = max(0, min(int(pages), 200))
+            try:
+                pages = max(0, min(int(payload.get("pages", SCAN_PAGES_DEFAULT)), 200))
+            except (TypeError, ValueError):
+                self.send_json({"error": "pages must be a number"}, status=400)
+                return
             restart = bool(payload.get("restart"))
             if not board.scan_job.start(board.run_scan, pages, restart):
                 self.send_json({"error": "a scan is already running"}, status=409)
@@ -1411,9 +1472,16 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if self.stopped_by_live_guard(payload, "writing rules"):
                 return
-            batch_size = int(payload.get("batch_size") or MIGRATE_BATCH_SIZE)
-            if board.scan_job.running or board.scope_job.running:
-                self.send_json({"error": "a scan is running, try again once it finishes"}, status=409)
+            try:
+                batch_size = int(payload.get("batch_size") or MIGRATE_BATCH_SIZE)
+            except (TypeError, ValueError):
+                self.send_json({"error": "batch_size must be a number"}, status=400)
+                return
+            # One run at a time against an environment, the same way the other three answer: a
+            # migration alongside a cutover would move traffic to a profile whose rules are
+            # still being written.
+            if board.scan_job.running or board.scope_job.running or board.cutover_job.running:
+                self.send_json({"error": "a run is in flight, try again once it finishes"}, status=409)
                 return
             started = board.migrate_job.start(
                 board.run_migrate, profile_ids, max(1, min(batch_size, 1000))
@@ -1678,8 +1746,30 @@ def main():
         "whichever one was last in use",
     )
     parser.add_argument("--port", type=int, default=int(os.environ.get("PORT", "8090")))
-    parser.add_argument("--host", default=os.environ.get("HOST", "127.0.0.1"))
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("HOST", "127.0.0.1"),
+        help="interface to listen on. Loopback only unless --allow-remote is given as well",
+    )
+    parser.add_argument(
+        "--allow-remote",
+        action="store_true",
+        default=os.environ.get("ALLOW_REMOTE", "") not in ("", "0", "false", "no"),
+        help="permit a non-loopback --host. This server has no authentication of its own and "
+        "holds the admin credentials, so anyone who can reach it can migrate and cut over",
+    )
     args = parser.parse_args()
+
+    # The endpoints this serves write to live merchants and it authenticates nobody: whoever
+    # reaches the port is the operator. Loopback is the boundary that stands in for a login, so
+    # binding wider is refused unless it is asked for outright.
+    if not args.allow_remote and not is_loopback(args.host):
+        parser.error(
+            f"--host {args.host} is not loopback, and this server has no authentication: anyone "
+            "who can reach it could migrate rules or cut production traffic over. Pass "
+            "--allow-remote if that is intended, or leave --host at 127.0.0.1 and forward the "
+            "port over SSH."
+        )
 
     saved = load_saved() or {}
     environments = Environments(saved.get("environments") or [])

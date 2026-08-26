@@ -1454,11 +1454,26 @@ function openEnv(blank) {
 // The environment's kind follows the address while it is being typed, so a production URL is
 // marked as one before it is saved. It stops following as soon as the kind is set by hand.
 let kindTouched = false;
+const PRODUCTION_DOMAIN = "hyperswitch.io";
+
+// The host on its own: userinfo, port and IPv6 brackets off, so an address is read by the name
+// it resolves to rather than by the text it was typed as.
+function hostnameOf(url) {
+  let text = String(url || "").trim().toLowerCase();
+  text = text.replace(/^[a-z][a-z0-9+.-]*:\/\//, "");
+  text = text.split("/")[0].split("?")[0].split("#")[0];
+  text = text.slice(text.lastIndexOf("@") + 1);
+  if (text.startsWith("[")) return text.slice(1).split("]")[0];
+  return text.split(":")[0];
+}
+
 function guessKind(url) {
-  const host = (url.match(/^https?:\/\/([^/]*)/) || ["", ""])[1].toLowerCase();
-  if (!host || /^(localhost|127\.0\.0\.1|\[::1\])(:|$)/.test(host)) return "local";
+  const host = hostnameOf(url);
+  if (!host || host === "localhost" || host === "127.0.0.1" || host === "::1") return "local";
   if (host.includes("sandbox") || host.includes("integ")) return "sandbox";
-  if (host.endsWith("hyperswitch.io")) return "production";
+  // The domain, or something under it — matched label by label, so `nothyperswitch.io` is not
+  // read as the hosted product. Mirrors `guess_kind` in server.py.
+  if (host === PRODUCTION_DOMAIN || host.endsWith("." + PRODUCTION_DOMAIN)) return "production";
   return "other";
 }
 
