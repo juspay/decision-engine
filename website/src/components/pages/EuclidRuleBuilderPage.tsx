@@ -5,6 +5,7 @@ import { Plus, ArrowLeft } from 'lucide-react'
 import { Card, CardBody } from '../ui/Card'
 import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
+import { FieldError, invalidFieldClass } from '../ui/FieldError'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useCanEditRouting } from '../../store/authStore'
 import { apiPost } from '../../lib/api'
@@ -43,7 +44,12 @@ export function EuclidRuleBuilderPage() {
   const [codeText, setCodeText] = useState('')
   const [codeParseError, setCodeParseError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
+  // Field-level problems render at their own control; `submitError` is only for things with no
+  // field to point at — a missing merchant, unreachable routing keys, a failed request.
   const [submitError, setSubmitError] = useState<string | null>(null)
+  const [nameError, setNameError] = useState<string | null>(null)
+  const [blockErrors, setBlockErrors] = useState<Record<string, string>>({})
+  const ruleNameRef = useRef<HTMLInputElement | null>(null)
 
   const { data: allAlgorithms, mutate: mutateAlgorithms } = useSWR<RoutingAlgorithm[]>(
     merchantId ? `/routing/list/${merchantId}` : null,
@@ -94,6 +100,8 @@ export function EuclidRuleBuilderPage() {
     setCodeText('')
     setCodeParseError(null)
     setSubmitError(null)
+    setNameError(null)
+    setBlockErrors({})
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -103,13 +111,33 @@ export function EuclidRuleBuilderPage() {
       setSubmitError('Routing key config is unavailable. Ensure backend /config/routing-keys is reachable and valid.')
       return
     }
-    if (!ruleName.trim()) { setSubmitError('Rule name is required.'); return }
-    if (ruleBlocks.some(b =>
-      (b.outputType === 'priority' && b.priorityGateways.length === 0) ||
-      (b.outputType === 'volume_split' && b.volumeSplitEntries.length === 0) ||
-      (b.outputType === 'volume_split_priority' && b.volumeSplitPriorityEntries.length === 0)
-    )) { setSubmitError('Every rule needs at least one destination gateway in its THEN section.'); return }
-    if (codeParseError) { setSubmitError(`Fix syntax error: ${codeParseError}`); return }
+
+    // Collect every problem before returning, so one save reports all of them rather than making
+    // the reader rediscover the next one on each attempt.
+    const nextNameError = ruleName.trim() ? null : 'Rule name is required.'
+    const nextBlockErrors: Record<string, string> = {}
+    ruleBlocks.forEach((block) => {
+      const empty =
+        (block.outputType === 'priority' && block.priorityGateways.length === 0) ||
+        (block.outputType === 'volume_split' && block.volumeSplitEntries.length === 0) ||
+        (block.outputType === 'volume_split_priority' && block.volumeSplitPriorityEntries.length === 0)
+      if (empty) {
+        nextBlockErrors[block.id] = 'Add at least one destination gateway to route to.'
+      }
+    })
+
+    setNameError(nextNameError)
+    setBlockErrors(nextBlockErrors)
+
+    if (nextNameError || Object.keys(nextBlockErrors).length || codeParseError) {
+      setSubmitError(
+        codeParseError && !nextNameError && !Object.keys(nextBlockErrors).length
+          ? 'Fix the syntax error in the code editor before saving.'
+          : 'Fix the highlighted fields before saving.',
+      )
+      if (nextNameError) ruleNameRef.current?.focus()
+      return
+    }
 
     setSubmitting(true)
     setSubmitError(null)
@@ -235,20 +263,25 @@ export function EuclidRuleBuilderPage() {
           <CardBody className="space-y-5">
             {/* Inline labels share a fixed column so the two fields line up with each other. */}
             <div className="grid grid-cols-1 gap-x-12 gap-y-4 md:grid-cols-2">
-              <div className="flex items-center gap-2">
+              <div className="flex items-start gap-2">
                 <label
                   htmlFor="rule-name"
-                  className="shrink-0 whitespace-nowrap text-[13px] font-semibold text-slate-700 dark:text-slate-300"
+                  className="shrink-0 whitespace-nowrap py-2.5 text-[13px] font-semibold text-slate-700 dark:text-slate-300"
                 >
                   Rule Name *
                 </label>
-                <input
-                  id="rule-name"
-                  value={ruleName}
-                  onChange={(e) => setRuleName(e.target.value)}
-                  placeholder="my-rule"
-                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-transparent px-3.5 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
-                />
+                <div className="min-w-0 flex-1">
+                  <input
+                    id="rule-name"
+                    ref={ruleNameRef}
+                    value={ruleName}
+                    onChange={(e) => { setRuleName(e.target.value); if (nameError) setNameError(null) }}
+                    placeholder="my-rule"
+                    aria-invalid={Boolean(nameError)}
+                    className={`w-full rounded-lg border border-slate-200 bg-transparent px-3.5 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] ${invalidFieldClass(Boolean(nameError))}`}
+                  />
+                  <FieldError message={nameError} />
+                </div>
               </div>
               <div className="flex items-center gap-2">
                 <label
@@ -286,12 +319,17 @@ export function EuclidRuleBuilderPage() {
                       index={i}
                       routingKeys={routingKeys}
                       gatewaySuggestions={gatewaySuggestions}
-                      onChange={(updated) =>
+                      error={blockErrors[block.id]}
+                      onChange={(updated) => {
                         setRuleBlocks((prev) => prev.map((b) => (b.id === block.id ? updated : b)))
-                      }
-                      onRemove={() =>
+                        if (blockErrors[block.id]) {
+                          setBlockErrors(({ [block.id]: _removed, ...rest }) => rest)
+                        }
+                      }}
+                      onRemove={() => {
                         setRuleBlocks((prev) => prev.filter((b) => b.id !== block.id))
-                      }
+                        setBlockErrors(({ [block.id]: _removed, ...rest }) => rest)
+                      }}
                     />
                   ))}
                   <Button
@@ -328,9 +366,10 @@ export function EuclidRuleBuilderPage() {
               />
             </div>
 
-            <ErrorMessage error={submitError} />
           </CardBody>
         </Card>
+
+        <ErrorMessage error={submitError} />
 
         <div className="flex flex-wrap items-center gap-4">
           <Button

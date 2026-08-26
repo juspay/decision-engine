@@ -6,13 +6,22 @@ export default {
   theme: {
     extend: {
       colors: {
+        // A full 50–950 ramp: `dark:` variants across the app reach for brand-300/400/800/900, and
+        // a missing key makes Tailwind emit nothing at all, so the light utility beside it survives
+        // into dark mode. 50–100 and 500–700 keep the values the palette already shipped.
         brand: {
           DEFAULT: '#0c69ee',
           50: '#eef5ff',
           100: '#d9eaff',
+          200: '#bfdbfe',
+          300: '#93c5fd',
+          400: '#60a5fa',
           500: '#3b82f6',
           600: '#0c69ee',
           700: '#0954be',
+          800: '#073f8f',
+          900: '#062d66',
+          950: '#041c3d',
         },
       },
       fontFamily: {

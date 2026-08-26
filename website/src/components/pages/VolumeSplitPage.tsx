@@ -10,6 +10,7 @@ import { HeaderFilter, HeaderSearch, RowMenu } from '../ui/TableControls'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useCanEditRouting } from '../../store/authStore'
 import { apiPost } from '../../lib/api'
+import { formatLastModified, lastModifiedMs } from '../../lib/routingRuleTimestamps'
 import { RoutingAlgorithm } from '../../types/api'
 import { toVolumeSplitRuleDetailsState } from '../../features/routing/volumeSplit/state'
 import { SplitBreakdown } from '../routing/volumeSplit/SplitBreakdown'
@@ -68,7 +69,8 @@ export function VolumeSplitPage() {
 
   const volumeRules = (allRules || [])
     .filter((r) => (r.algorithm_data || r.algorithm)?.type === 'volume_split')
-    .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime())
+    // Sorted by the same stamp the Last Modified column shows, so the order matches what is read.
+    .sort((a, b) => lastModifiedMs(b) - lastModifiedMs(a))
 
   const gatewayOptions = Array.from(new Set(volumeRules.flatMap(splitGateways))).sort()
 
@@ -316,9 +318,16 @@ export function VolumeSplitPage() {
                         </p>
                       </td>
                       <td className="whitespace-nowrap px-5 py-4 text-[13px] text-slate-500 dark:text-[#6d7a8d]">
-                        {algo.created_at
-                          ? new Date(algo.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-                          : '—'}
+                        {(() => {
+                          const stamp = formatLastModified(algo)
+                          if (!stamp) return '—'
+                          return (
+                            <span title={stamp.full}>
+                              {stamp.date}
+                              <span className="block text-[12px] text-slate-400 dark:text-[#55627a]">{stamp.time}</span>
+                            </span>
+                          )
+                        })()}
                       </td>
                       <td className="px-5 py-4" onClick={(e) => e.stopPropagation()}>
                         <RowMenu
