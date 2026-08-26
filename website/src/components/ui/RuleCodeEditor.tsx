@@ -680,8 +680,8 @@ export function RuleCodeEditor({ value, onChange, parseError, routingKeys, gatew
         }`}
       />
       {parseError
-        ? <p className="mt-1.5 text-xs text-red-500 font-medium">{parseError}</p>
-        : <p className="mt-1.5 text-[11px] text-slate-400">Tab / Enter to complete · ↑↓ navigate · <code className="font-mono">or</code> on its own line starts an OR group</p>
+        ? <p className="mt-1.5 text-xs text-red-600 font-medium">{parseError}</p>
+        : <p className="mt-1.5 text-[11px] text-slate-500 leading-4">Tab / Enter to complete · ↑↓ navigate · <code className="font-mono">or</code> on its own line starts an OR group</p>
       }
     </div>
   )

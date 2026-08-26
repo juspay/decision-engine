@@ -148,12 +148,12 @@ const PILL_TONES: Record<PillTone, string> = {
   indigo: 'bg-indigo-50 text-indigo-600 dark:bg-indigo-500/12 dark:text-indigo-300',
   violet: 'bg-violet-50 text-violet-600 dark:bg-violet-500/12 dark:text-violet-300',
   slate: 'bg-slate-100 text-slate-500 dark:bg-white/[0.06] dark:text-slate-300',
-  green: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/12 dark:text-emerald-300',
+  green: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/12 dark:text-emerald-300',
 }
 function Pill({ tone, children }: { tone: PillTone; children: ReactNode }) {
   return (
     <span
-      className={`inline-flex shrink-0 items-center rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${PILL_TONES[tone]}`}
+      className={`inline-flex shrink-0 items-center rounded-md px-2 py-1 text-[11px] font-semibold uppercase tracking-wide ${PILL_TONES[tone]} leading-4`}
     >
       {children}
     </span>
@@ -363,7 +363,7 @@ export function CostsPanel({ merchantId }: { merchantId?: string }) {
         </div>
       ) : cardConnectors.length === 0 ? (
         <Card>
-          <p className="px-5 py-4 text-sm text-slate-500">
+          <p className="px-5 py-4 text-sm text-slate-500 max-w-[57ch]">
             No connectors yet. Add one to set its fee or contract baseline, or configure ingestion
             below to learn fees from settlement reports.
           </p>
@@ -416,7 +416,7 @@ export function CostsPanel({ merchantId }: { merchantId?: string }) {
         </>
       )}
 
-      <p className="px-1 text-xs text-slate-400">
+      <p className="px-1 text-xs text-slate-500 max-w-[57ch]">
         bps = basis points (100 bps = 1%). Contract-baseline rates are the last-resort fallback used
         when a connector has no learned or overridden fee.
       </p>
@@ -471,7 +471,7 @@ function PrecedenceLegend() {
   const ladder: FeeSource[] = ['override', 'reports', 'contract']
   return (
     <div className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-2.5 dark:border-[#232833] dark:bg-[#0b0e14]">
-      <span className="text-xs font-semibold uppercase tracking-wide text-slate-400 dark:text-[#8d96aa]">
+      <span className="text-xs font-semibold uppercase tracking-wide text-slate-500 dark:text-[#8d96aa]">
         Active fee
       </span>
       {ladder.map((s, i) => (
@@ -480,7 +480,7 @@ function PrecedenceLegend() {
           <Pill tone={SOURCE_TONES[s]}>{SOURCE_LABELS[s]}</Pill>
         </Fragment>
       ))}
-      <span className="text-xs text-slate-400 dark:text-[#8d96aa]">— the first one set wins.</span>
+      <span className="text-xs text-slate-500 dark:text-[#8d96aa]">— the first one set wins.</span>
     </div>
   )
 }
@@ -544,10 +544,10 @@ function ConnectorTile({
       <div className="px-4 pb-4 pt-5">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <p className="truncate text-[15px] font-semibold text-slate-900 dark:text-white">
+            <p className="truncate text-[15px] font-semibold text-slate-900 dark:text-white leading-[22px]">
               {titleCase(connector)}
             </p>
-            <p className="mt-0.5 truncate text-xs text-slate-400 dark:text-[#8d96aa]">
+            <p className="mt-0.5 truncate text-xs text-slate-500 dark:text-[#8d96aa]">
               {fee?.account ? `Account ${fee.account}` : 'No account'}
             </p>
           </div>
@@ -571,7 +571,7 @@ function ConnectorTile({
             }}
             title="Set a manual override for this connector"
             aria-label="Set a manual override for this connector"
-            className="shrink-0 rounded-md p-1 text-slate-300 transition-colors hover:bg-brand-500/10 hover:text-brand-600 dark:text-[#5b6577] dark:hover:text-brand-400"
+            className="shrink-0 rounded-md p-1 text-slate-300 transition-colors hover:bg-brand-500/10 hover:text-brand-600 dark:text-[#78849a] dark:hover:text-brand-400"
           >
             <Pencil size={14} />
           </button>
@@ -585,7 +585,7 @@ function ConnectorTile({
 function Stat({ label, value, large = false }: { label: string; value: string; large?: boolean }) {
   return (
     <div className="min-w-0">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-[#8d96aa]">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#8d96aa] leading-4">
         {label}
       </p>
       <p
@@ -712,7 +712,7 @@ function ConnectorDetail({
                   narrows rows the same way every other column does, and a page of results reads as
                   one list instead of a run of one-row sections. */}
               <thead>
-                <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-[#232833] dark:bg-[#0e131b] dark:text-[#8d96aa]">
+                <tr className="border-b border-slate-200 bg-slate-50 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-[#232833] dark:bg-[#0e131b] dark:text-[#8d96aa] leading-4">
                   <th className="w-[52px] px-5 py-2" />
                   <th className="w-28 py-2 pr-3 text-left font-semibold">Network</th>
                   <th className="w-24 py-2 pr-3 text-left font-semibold">Type</th>
@@ -762,10 +762,10 @@ function ConnectorDetail({
 
       {/* Panel footer: what's on screen, and paging when there's more of it. */}
       <div className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 px-5 py-3 dark:border-[#232833]">
-        <p className="text-[13px] text-slate-500 dark:text-[#8d96aa]">{showing}</p>
+        <p className="text-[13px] text-slate-500 dark:text-[#8d96aa] leading-[18px]">{showing}</p>
         {pageCount > 1 && (
           <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-400 dark:text-[#8d96aa]">
+            <span className="text-xs text-slate-500 dark:text-[#8d96aa]">
               Page {safePage + 1} of {pageCount}
             </span>
             <Button
@@ -810,7 +810,7 @@ function LayerTab({
         active
           ? 'bg-white text-brand-600 shadow-sm dark:bg-[#161c26] dark:text-brand-400'
           : 'text-slate-500 hover:text-slate-700 dark:text-[#8d96aa] dark:hover:text-white'
-      }`}
+      } leading-[18px]`}
     >
       {children}
     </button>
@@ -832,7 +832,7 @@ function ContractBaselineTable({
   return (
     <div className="border-t border-slate-200 dark:border-[#232833]">
       <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-2.5">
-        <p className="text-[12px] text-slate-500 dark:text-[#8d96aa]">
+        <p className="text-[12px] text-slate-500 dark:text-[#8d96aa] max-w-[57ch] leading-4">
           Your contract rate per card scenario — the last-resort fallback when {titleCase(connector)}{' '}
           has no learned or overridden fee. A blank dimension matches any card.
         </p>
@@ -844,7 +844,7 @@ function ContractBaselineTable({
         <div className="overflow-x-auto border-t border-slate-200 dark:border-[#232833]">
           <table className="w-full min-w-[900px] text-left text-sm">
             <thead>
-              <tr className="border-b border-slate-200 bg-slate-50 text-[12px] font-semibold text-slate-500 dark:border-[#232833] dark:bg-[#0b0e14] dark:text-[#8d96aa]">
+              <tr className="border-b border-slate-200 bg-slate-50 text-[12px] font-semibold text-slate-500 dark:border-[#232833] dark:bg-[#0b0e14] dark:text-[#8d96aa] leading-4">
                 <th className="px-5 py-3">Scenario</th>
                 <th className="py-3 pr-3">PSP</th>
                 <th className="py-3 pr-3">Network</th>
@@ -1003,7 +1003,7 @@ function SegmentRow({
           ) : (
             <div className="flex items-center justify-end gap-2">
               {hasSegments && (
-                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+                <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-amber-700 dark:bg-amber-500/15 dark:text-amber-400 leading-4">
                   {c.segments!.length} tiers
                 </span>
               )}
@@ -1017,7 +1017,7 @@ function SegmentRow({
                   {formatFee(c.effective_pct_bps, c.effective_fixed)}
                 </span>
                 {isOverride && c.model_pct_bps != null && (
-                  <span className="block text-[11px] tabular-nums text-slate-400 line-through">
+                  <span className="block text-[11px] tabular-nums text-slate-500 line-through leading-4">
                     {formatFee(c.model_pct_bps, c.model_fixed)}
                   </span>
                 )}
@@ -1045,7 +1045,7 @@ function SegmentRow({
                   disabled={busy !== null}
                   title="Remove override"
                   aria-label="Remove override"
-                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40 dark:hover:bg-rose-500/10"
+                  className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-rose-50 hover:text-rose-600 disabled:opacity-40 dark:hover:bg-rose-500/10"
                 >
                   {busy === 'clear' ? <Spinner size={13} /> : <X size={14} />}
                 </button>
@@ -1084,9 +1084,9 @@ function SegmentRow({
                   onClick={() => setShowTiers((v) => !v)}
                   icon={
                     showTiers ? (
-                      <ChevronDown size={16} className="text-brand-500 dark:text-brand-400" />
+                      <ChevronDown size={16} className="text-brand-600 dark:text-brand-400" />
                     ) : (
-                      <ChevronRight size={16} className="text-brand-500 dark:text-brand-400" />
+                      <ChevronRight size={16} className="text-brand-600 dark:text-brand-400" />
                     )
                   }
                 />
@@ -1111,14 +1111,14 @@ function SegmentRow({
               <Fact label="Volume" value={formatCompact(c.gross_sum)} />
               <Fact label="Program" value={c.card_product ? `${c.card_product} bps` : '—'} />
               <div className="min-w-0">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-[#8d96aa]">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#8d96aa] leading-4">
                   Fit
                 </p>
                 <div className="mt-1">
                   {c.verdict ? (
                     <Badge variant={verdictVariant(c.verdict)}>{c.verdict}</Badge>
                   ) : (
-                    <span className="text-[13px] text-slate-400">no fitted rate</span>
+                    <span className="text-[13px] text-slate-500 leading-[18px]">no fitted rate</span>
                   )}
                 </div>
               </div>
@@ -1133,14 +1133,14 @@ function SegmentRow({
             <p className="mb-0.5 text-sm font-semibold text-slate-700 dark:text-[#c7cfdd]">
               Per-segment rates
             </p>
-            <p className="mb-2 text-[12px] text-slate-500 dark:text-[#8d96aa]">
+            <p className="mb-2 text-[12px] text-slate-500 dark:text-[#8d96aa] max-w-[57ch] leading-4">
               Optimized tiers dynamically calculated based on historical card activity and fit-error
               thresholds.
             </p>
             <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white dark:border-[#232833] dark:bg-[#0b0e14]">
-              <table className="w-full min-w-[560px] text-[12px]">
+              <table className="w-full min-w-[560px] text-[12px] leading-4">
                 <thead>
-                  <tr className="border-b border-slate-200 text-left uppercase tracking-wide text-slate-400 dark:border-[#232833] dark:text-[#6b7280]">
+                  <tr className="border-b border-slate-200 text-left uppercase tracking-wide text-slate-500 dark:border-[#232833] dark:text-[#78849a]">
                     <th className="px-3 py-2 font-medium">Amount range</th>
                     <th className="py-2 pr-3 text-right font-medium">Rate</th>
                     <th className="py-2 pr-3 text-right font-medium">Fixed</th>
@@ -1215,7 +1215,7 @@ function RowAction({
       title={title}
       aria-label={title}
       aria-expanded={expanded}
-      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40 dark:hover:bg-[#121214] dark:hover:text-white"
+      className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-700 disabled:opacity-40 dark:hover:bg-[#121214] dark:hover:text-white"
     >
       {icon}
     </button>
@@ -1226,10 +1226,10 @@ function RowAction({
 function Fact({ label, value }: { label: string; value: string }) {
   return (
     <div className="min-w-0">
-      <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 dark:text-[#8d96aa]">
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:text-[#8d96aa] leading-4">
         {label}
       </p>
-      <p className="mt-1 truncate text-[13px] tabular-nums font-medium text-slate-700 dark:text-[#c7cfdd]">
+      <p className="mt-1 truncate text-[13px] tabular-nums font-medium text-slate-700 dark:text-[#c7cfdd] leading-[18px]">
         {value}
       </p>
     </div>
@@ -1327,7 +1327,7 @@ function FeeModal({
             onClick={onClose}
             disabled={busy !== null}
             aria-label="Close"
-            className="text-slate-400 transition-colors hover:text-slate-700 disabled:opacity-40 dark:hover:text-white"
+            className="text-slate-500 transition-colors hover:text-slate-700 disabled:opacity-40 dark:hover:text-white"
           >
             <X size={16} />
           </button>
@@ -1374,7 +1374,7 @@ function FeeModal({
               />
             </label>
           </div>
-          <p className="text-xs text-slate-400">
+          <p className="text-xs text-slate-500 max-w-[57ch]">
             Applied to every economic-value calculation for {titleCase(connector)} from now on,
             overriding the learned model and contract baseline for this connector.
           </p>

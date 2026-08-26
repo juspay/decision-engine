@@ -31,6 +31,8 @@ import { describeRoutingEvent, useRoutingEvents } from '../../hooks/useRoutingEv
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { Play, Pause, RefreshCw, ChevronDown, ChevronUp, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings, ArrowRightLeft, Target, TrendingDown, Flag, SlidersHorizontal } from 'lucide-react'
 
+import { PageHeading } from '../ui/PageHeading'
+import { Notice } from '../ui/Notice'
 // UI-local algorithm tokens for the simulation dropdown. Both map to
 // { rankingAlgorithm: 'SR_BASED_ROUTING' } on the backend /decide-gateway request;
 // the dropdown no longer forces multi-objective. Whether cost-savings (multi-objective)
@@ -327,7 +329,7 @@ function StatLabel({ label, abbr }: { label: string; abbr?: string }) {
     <p className="text-[14px] font-semibold leading-snug text-slate-500 dark:text-slate-400">
       {label}
       {abbr && (
-        <span className="ml-1 text-[10px] font-normal uppercase tracking-wide text-slate-400 dark:text-slate-500">
+        <span className="ml-1 text-[11px] font-normal uppercase tracking-wide text-slate-500 dark:text-slate-400 leading-4">
           {abbr}
         </span>
       )}
@@ -405,10 +407,10 @@ const EVENTS_RUN_START_MARGIN_MS = 3000
 // from the /analytics/routing-events feed: leader flips and auth-band entries/exits
 // as gateway success-rate scores shift during a run.
 const SIM_EVENT_META: Record<RoutingEventType, { icon: React.ElementType; iconClass: string }> = {
-  leader_changed: { icon: ArrowRightLeft, iconClass: 'text-sky-500' },
-  gateway_entered_auth_band: { icon: Target, iconClass: 'text-emerald-500' },
-  gateway_exited_auth_band: { icon: TrendingDown, iconClass: 'text-amber-500' },
-  calibration_applied: { icon: SlidersHorizontal, iconClass: 'text-violet-500' },
+  leader_changed: { icon: ArrowRightLeft, iconClass: 'text-sky-700' },
+  gateway_entered_auth_band: { icon: Target, iconClass: 'text-emerald-700' },
+  gateway_exited_auth_band: { icon: TrendingDown, iconClass: 'text-amber-700' },
+  calibration_applied: { icon: SlidersHorizontal, iconClass: 'text-violet-600' },
 }
 
 function formatSimEventTime(ms: number) {
@@ -1016,7 +1018,7 @@ function PendingAuditState({ title, body }: { title: string; body: string }) {
       <div className="mt-5 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-[#202734]">
         <div className="h-full w-1/3 animate-pulse rounded-full bg-brand-500" />
       </div>
-      <p className="mt-3 text-[11px] uppercase tracking-[0.16em] text-slate-400 dark:text-[#8390a7]">
+      <p className="mt-3 text-[11px] uppercase tracking-[0.16em] text-slate-500 dark:text-[#8d96aa] leading-4">
         Waiting for analytics
       </p>
     </div>
@@ -1033,7 +1035,7 @@ function InspectorKeyValueGrid({ rows }: { rows: Array<{ label: string; value: s
           key={`${row.label}-${row.value}`}
           className="rounded-[22px] border border-slate-200 bg-white/80 px-4 py-3 shadow-[0_14px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#161b24] dark:shadow-none"
         >
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8390a7]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8d96aa] leading-4">
             {row.label}
           </p>
           <p className="mt-2 break-words text-sm text-slate-900 dark:text-white">{row.value}</p>
@@ -3421,7 +3423,7 @@ export function DecisionSimulatorPage() {
       <div className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <div className="mt-2 flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">Decision Simulator</h1>
+            <PageHeading title="Decision Simulator" />
           </div>
         </div>
         {/* Deliberately a small, muted icon (not a full button) — hard refresh flushes this
@@ -3433,7 +3435,7 @@ export function DecisionSimulatorPage() {
           disabled={isSimulating || !effectiveMerchantId || isHardRefreshing}
           title="Hard refresh — flush this merchant's SR scores from Redis so the next run starts fresh. Use sparingly."
           aria-label="Hard refresh gateway scores"
-          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600 disabled:pointer-events-none disabled:opacity-40 dark:text-slate-500 dark:hover:bg-white/5 dark:hover:text-slate-300"
+          className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-600 disabled:pointer-events-none disabled:opacity-40 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-slate-300"
         >
           <RefreshCw size={14} className={isHardRefreshing ? 'animate-spin' : ''} />
         </button>
@@ -3469,7 +3471,7 @@ export function DecisionSimulatorPage() {
                 be saved is always visible before you commit). */}
             {addableConnectorOptions.length > 0 && (
               <div className="mt-4">
-                <span className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
+                <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500 leading-4">
                   Known processors
                 </span>
                 <div className="mt-2 flex flex-wrap gap-1.5">
@@ -3507,7 +3509,7 @@ export function DecisionSimulatorPage() {
                     )
                   })}
                 </div>
-                <p className="mt-1.5 text-[11px] text-slate-400">
+                <p className="mt-1.5 text-[11px] text-slate-500 leading-4">
                   <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-500 align-middle" />
                   has a fitted cost model; the rest use contract seed rates.
                 </p>
@@ -3532,7 +3534,7 @@ export function DecisionSimulatorPage() {
               }}
               className="mt-4 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
             />
-            {addConnectorError && <p className="mt-2 text-xs text-red-500">{addConnectorError}</p>}
+            {addConnectorError && <p className="mt-2 text-xs text-red-600">{addConnectorError}</p>}
             <div className="mt-6 flex justify-end gap-2">
               <Button variant="secondary" size="sm" onClick={() => setAddConnectorOpen(false)}>
                 Cancel
@@ -3600,7 +3602,7 @@ export function DecisionSimulatorPage() {
                       <button
                         type="button"
                         onClick={() => removeConnector(key)}
-                        className="ml-auto text-slate-400 transition-colors hover:text-red-500"
+                        className="ml-auto text-slate-500 transition-colors hover:text-red-600"
                         title={`Remove ${key} from the comparison`}
                         aria-label={`Remove ${key}`}
                       >
@@ -3619,7 +3621,7 @@ export function DecisionSimulatorPage() {
                       onChange={e => setGwSuccessRate(key, e.target.value === '' ? 0 : clampSuccessRate(parseFloat(e.target.value)))}
                       className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 pr-7 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
                     />
-                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">%</span>
+                    <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">%</span>
                   </div>
                   <input
                     type="range"
@@ -3652,7 +3654,7 @@ export function DecisionSimulatorPage() {
                   type="button"
                   onClick={openAddConnector}
                   title="Add another processor to the comparison"
-                  className="flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-500 transition-colors hover:border-brand-400 hover:text-brand-500 dark:border-[#33333a] dark:bg-[#0d0d13] dark:text-[#8a93a6] dark:hover:border-brand-500 dark:hover:text-brand-400"
+                  className="flex items-center justify-center gap-1.5 rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-500 transition-colors hover:border-brand-400 hover:text-brand-600 dark:border-[#33333a] dark:bg-[#0d0d13] dark:text-[#8a93a6] dark:hover:border-brand-500 dark:hover:text-brand-400"
                 >
                   <Plus size={14} /> Add
                 </button>
@@ -3766,7 +3768,7 @@ export function DecisionSimulatorPage() {
                       onSettle={() => setSimulationConfig(c => ({ ...c, minAmount: Math.min(c.minAmount, c.maxAmount) }))}
                       className={inputCls}
                     />
-                    <span className="shrink-0 text-xs text-slate-400">–</span>
+                    <span className="shrink-0 text-xs text-slate-500">–</span>
                     <AmountBoundInput
                       ariaLabel="Maximum amount"
                       value={simulationConfig.maxAmount}
@@ -3917,10 +3919,10 @@ export function DecisionSimulatorPage() {
                                 <div className="mb-2 flex items-start justify-between gap-3">
                                   <div>
                                     <h4 className="text-sm font-medium text-slate-800 dark:text-white">Success Rate Trend</h4>
-                                    {/* <p className="text-[13px] text-slate-400 dark:text-slate-500">Engine routing score per connector, with the cost-eligible band below the leader</p> */}
+                                    {/* <p className="text-[13px] text-slate-500 dark:text-slate-400 leading-[18px]">Engine routing score per connector, with the cost-eligible band below the leader</p> */}
                                   </div>
                                   <div className="flex items-center gap-2 shrink-0">
-                                    {/* <span className="text-[11px] text-slate-400 dark:text-slate-500">Window</span> */}
+                                    {/* <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-4">Window</span> */}
                                     <div className="inline-flex rounded-md border border-slate-200 dark:border-[#1f1f29] p-0.5">
                                       {CHART_WINDOW_OPTIONS.map((opt) => {
                                         const active = chartWindow === opt
@@ -3933,7 +3935,7 @@ export function DecisionSimulatorPage() {
                                               active
                                                 ? 'bg-brand-500 text-white'
                                                 : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'
-                                            }`}
+                                            } leading-4`}
                                           >
                                             {opt === 'all' ? 'All' : `Last ${opt}`}
                                           </button>
@@ -4026,7 +4028,7 @@ export function DecisionSimulatorPage() {
                                   </ComposedChart>
                                 </ResponsiveContainer>
                                 </div>
-                                <div className="mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-[11px] text-slate-500 dark:text-slate-400">
+                                <div className="mt-3 flex flex-wrap items-center justify-center gap-x-5 gap-y-1.5 text-[11px] text-slate-500 dark:text-slate-400 leading-4">
                                   {sortedGateways.map(([gw]) => (
                                     <span key={gw} className="inline-flex items-center gap-1.5">
                                       <span className="h-2 w-2 rounded-full" style={{ backgroundColor: gatewayColorMap[gw] ?? GW_PALETTE[0] }} />
@@ -4062,7 +4064,7 @@ export function DecisionSimulatorPage() {
                                     {latestSplit.map(({ gw, share, color }) => (
                                       <span
                                         key={gw}
-                                        className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 ring-1 ring-inset ring-slate-200/70 dark:bg-[#12121a] dark:text-slate-300 dark:ring-[#22222c]"
+                                        className="inline-flex items-center gap-1.5 rounded-full bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 ring-1 ring-inset ring-slate-200/70 dark:bg-[#12121a] dark:text-slate-300 dark:ring-[#22222c] leading-4"
                                       >
                                         <span className="h-2 w-2 rounded-full" style={{ backgroundColor: color }} />
                                         {gw}
@@ -4161,9 +4163,9 @@ export function DecisionSimulatorPage() {
                                   <div className="flex items-center justify-end gap-1.5">
                                     <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: gwColor }} />
                                     <span className="text-xs font-semibold text-slate-700 dark:text-slate-200 truncate shrink-0 w-14 text-left">{gw}</span>
-                                    <span className={`font-bold tabular-nums text-[11px] w-14 text-right ${sr >= 80 ? 'text-emerald-600 dark:text-emerald-400' : sr >= 50 ? 'text-amber-500' : 'text-red-500'}`}>{sr}% SR</span>
-                                    <span className="text-slate-300 dark:text-slate-600 text-[11px]">·</span>
-                                    <span className="text-slate-400 dark:text-slate-500 tabular-nums text-[11px] w-16 text-right">0% routed</span>
+                                    <span className={`font-bold tabular-nums text-[11px] w-14 text-right ${sr >= 80 ? 'text-emerald-700 dark:text-emerald-400' : sr >= 50 ? 'text-amber-700' : 'text-red-600'} leading-4`}>{sr}% SR</span>
+                                    <span className="text-slate-500 dark:text-slate-400 text-[11px] leading-4">·</span>
+                                    <span className="text-slate-500 dark:text-slate-400 tabular-nums text-[11px] w-16 text-right leading-4">0% routed</span>
                                   </div>
                                 </div>
                               )
@@ -4191,14 +4193,14 @@ export function DecisionSimulatorPage() {
                               </LineChart>
                             </ResponsiveContainer>
                           </div>
-                          <p className="pt-1 text-center text-[11px] text-slate-400">
+                          <p className="pt-1 text-center text-[11px] text-slate-500 leading-4">
                             Projected from configured success rates · run a simulation to see live routing.
                           </p>
                         </div>
                       )
                     })()}
                     {Object.keys(gatewayStats).length === 1 && eligibleGatewaysParsed.length > 1 && (
-                      <p className="text-[11px] text-slate-400 pt-1">
+                      <p className="text-[11px] text-slate-500 pt-1 mx-auto max-w-[57ch] leading-4">
                         SR routing concentrates traffic on the highest-scoring gateway. Run with a "Gateway Down" scenario to see score drop and traffic shift to the next gateway.
                       </p>
                     )}
@@ -4225,7 +4227,7 @@ export function DecisionSimulatorPage() {
           </CardHeader>
           <CardBody className="space-y-3 !px-5 !py-4">
             {!effectiveMerchantId && (
-              <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
                 Set a merchant ID in the top bar first.
               </p>
             )}
@@ -4250,7 +4252,7 @@ export function DecisionSimulatorPage() {
                 {/* Parameters */}
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-[#4e5870]">Parameters</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-[#78849a] leading-4">Parameters</p>
                   </div>
                   <div className="space-y-1.5">
                     {ruleParams.map((param, idx) => (
@@ -4268,7 +4270,7 @@ export function DecisionSimulatorPage() {
                               routingKeyNames.map(name => <option key={name} value={name}>{name}</option>)
                             )}
                           </select>
-                          <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2.5 py-2.5 text-[11px] font-bold text-slate-300 dark:text-[#3a4258] select-none">=</span>
+                          <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2.5 py-2.5 text-[11px] font-bold text-slate-500 dark:text-[#3a4258] select-none leading-4">=</span>
                           {param.type === 'enum_variant' ? (
                             <select
                               value={param.value}
@@ -4295,11 +4297,11 @@ export function DecisionSimulatorPage() {
                               className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none"
                             />
                           ) : (
-                            <span className="flex-1 px-3 py-2.5 text-sm text-slate-400 dark:text-[#3a4258] italic">see below</span>
+                            <span className="flex-1 px-3 py-2.5 text-sm text-slate-500 dark:text-[#78849a] italic">see below</span>
                           )}
                           <button
                             onClick={() => removeRuleParam(idx)}
-                            className="shrink-0 px-2.5 py-2.5 text-slate-300 dark:text-[#2a3040] hover:text-red-400 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="shrink-0 px-2.5 py-2.5 text-slate-500 dark:text-[#78849a] hover:text-red-600 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                           >
                             <Trash2 size={13} />
                           </button>
@@ -4326,7 +4328,7 @@ export function DecisionSimulatorPage() {
                   <button
                     onClick={addRuleParam}
                     disabled={routingConfigUnavailable || routingKeysLoading || routingKeyNames.length === 0}
-                    className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     <Plus size={12} /> Add Parameter
                   </button>
@@ -4334,11 +4336,11 @@ export function DecisionSimulatorPage() {
 
                 {/* Fallback Gateways */}
                 <div className="space-y-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-[#4e5870]">Fallback Gateways</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-[#78849a] leading-4">Fallback Gateways</p>
                   <div className="space-y-1.5">
                     {fallbackConnectors.map((connector, idx) => (
                       <div key={idx} className="group flex items-center gap-0 rounded-xl border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] overflow-hidden transition-shadow hover:shadow-sm">
-                        <span className="shrink-0 flex items-center justify-center w-8 self-stretch bg-slate-50 dark:bg-[#10131c] border-r border-slate-100 dark:border-[#1e2330] text-[10px] font-bold text-slate-300 dark:text-[#3a4258] select-none">
+                        <span className="shrink-0 flex items-center justify-center w-8 self-stretch bg-slate-50 dark:bg-[#10131c] border-r border-slate-100 dark:border-[#1e2330] text-[11px] font-bold text-slate-500 dark:text-[#3a4258] select-none leading-4">
                           {idx + 1}
                         </span>
                         <input
@@ -4347,7 +4349,7 @@ export function DecisionSimulatorPage() {
                           onChange={e => updateFallbackConnector(idx, 'gateway_name', e.target.value)}
                           className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-[#c8d0de] focus:outline-none"
                         />
-                        <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2 py-2.5 text-[11px] font-bold text-slate-300 dark:text-[#3a4258] select-none">/</span>
+                        <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2 py-2.5 text-[11px] font-bold text-slate-500 dark:text-[#3a4258] select-none leading-4">/</span>
                         <input
                           placeholder="gateway id (optional)"
                           value={connector.gateway_id || ''}
@@ -4356,7 +4358,7 @@ export function DecisionSimulatorPage() {
                         />
                         <button
                           onClick={() => removeFallbackConnector(idx)}
-                          className="shrink-0 px-2.5 py-2.5 text-slate-300 dark:text-[#2a3040] hover:text-red-400 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="shrink-0 px-2.5 py-2.5 text-slate-500 dark:text-[#78849a] hover:text-red-600 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                         >
                           <Trash2 size={13} />
                         </button>
@@ -4365,7 +4367,7 @@ export function DecisionSimulatorPage() {
                   </div>
                   <button
                     onClick={addFallbackConnector}
-                    className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/10 transition-colors"
+                    className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10 transition-colors"
                   >
                     <Plus size={12} /> Add Gateway
                   </button>
@@ -4379,18 +4381,18 @@ export function DecisionSimulatorPage() {
                     Loading debit routing flag...
                   </p>
                 ) : debitRoutingFlag.isEnabled ? (
-                  <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
+                  <Notice tone="success">
                     Debit routing is enabled. This tab will call /decide-gateway with NTW_BASED_ROUTING.
-                  </p>
+                  </Notice>
                 ) : (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+                  <Notice tone="warning">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <span>Debit routing is disabled.</span>
                       <Button size="sm" variant="secondary" onClick={enableDebitRoutingForExplorer} disabled={!effectiveMerchantId || loading}>
                         Enable Debit Routing
                       </Button>
                     </div>
-                  </div>
+                  </Notice>
                 )}
 
                 <div className="grid grid-cols-2 gap-3">
@@ -4508,7 +4510,7 @@ export function DecisionSimulatorPage() {
                   </div>
                 )}
 
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-500 max-w-[57ch]">
                   The request sends debit details inside paymentInfo.metadata because the backend debit router parses co-badged card data from metadata.
                 </p>
               </div>
@@ -4548,11 +4550,11 @@ export function DecisionSimulatorPage() {
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-[#283241] dark:bg-[#0b111a]">
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#77849a]">Target</span>
+                      <span className="font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-[#77849a]">Target</span>
                       <span className="font-semibold text-slate-900 dark:text-white">{volumeRunTarget || '--'}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#77849a]">Completed</span>
+                      <span className="font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-[#77849a]">Completed</span>
                       <span className="font-semibold text-slate-900 dark:text-white">
                         {loading ? volumeProgress : volumeEvaluationCount || '--'}
                       </span>
@@ -4569,7 +4571,7 @@ export function DecisionSimulatorPage() {
                     />
                   </div>
                   {loading && (
-                    <p className="mt-1 text-right text-[10px] font-semibold text-sky-600 dark:text-sky-300">
+                    <p className="mt-1 text-right text-[11px] font-semibold text-sky-700 dark:text-sky-300 leading-4">
                       {volumeProgressPercentage}%
                     </p>
                   )}
@@ -4589,7 +4591,7 @@ export function DecisionSimulatorPage() {
                         <option value="CHARGED">Success (CHARGED)</option>
                         <option value="FAILURE">Failure (FAILURE)</option>
                       </select>
-                      <p className="mt-1 text-xs text-slate-500">
+                      <p className="mt-1 text-xs text-slate-500 max-w-[57ch]">
                         After deciding the gateway, single test will post feedback with this outcome so the payment appears in Decision Audit.
                       </p>
                     </div>
@@ -4625,8 +4627,8 @@ export function DecisionSimulatorPage() {
                       className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
                     />
                     <span className="text-xs text-slate-600 dark:text-slate-400">
-                      Smart retry — on GSM <code className="text-[11px]">retry</code> decision, attempt next fallback gateway
-                      {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-500">(enable GSM scoring filter first)</span>}
+                      Smart retry — on GSM <code className="text-[11px] leading-4">retry</code> decision, attempt next fallback gateway
+                      {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-700">(enable GSM scoring filter first)</span>}
                     </span>
                   </label>
                 )}
@@ -4681,19 +4683,19 @@ export function DecisionSimulatorPage() {
                     <div className="grid grid-cols-3 gap-4">
                       <div className="flex flex-col gap-1.5" title="First Attempt Auth Rate — share of decisions charged on the first attempt (first-attempt charges ÷ total decisions).">
                         <StatLabel label="First-attempt auth rate" abbr="FAAR" />
-                        <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-600 dark:text-sky-400">
+                        <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-700 dark:text-sky-400">
                           {authRateStats.faar != null ? `${(authRateStats.faar * 100).toFixed(2)}%` : '—'}
                         </p>
                       </div>
                       <div className="flex flex-col gap-1.5" title="Net Auth Rate — share of decisions charged in the end, counting a successful smart retry (final charges ÷ total decisions). NAR ≥ FAAR when retries recover failures.">
                         <StatLabel label="Net auth rate" abbr="NAR" />
-                        <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-600 dark:text-sky-400">
+                        <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-700 dark:text-sky-400">
                           {authRateStats.nar != null ? `${(authRateStats.nar * 100).toFixed(2)}%` : '—'}
                         </p>
                       </div>
                       <div className="flex flex-col gap-1.5" title="Realized fee saved on charged cost-override decisions: Σ (costSavedBps ÷ 10000) × amount.">
                           <StatLabel label="Realized cost savings" />
-                          <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-600 dark:text-sky-400">
+                          <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-700 dark:text-sky-400">
                           {formatCurrencyValue(totalCostSaved.value, totalCostSaved.currency || ccy)}
                         </p>
                       </div>
@@ -4702,33 +4704,33 @@ export function DecisionSimulatorPage() {
                     <div className="grid grid-cols-3 gap-4">
                       <div className="flex min-w-0 flex-col gap-1.5">
                         <StatLabel label="Total decisions" />
-                        <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-600 dark:text-sky-400">
+                        <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-700 dark:text-sky-400">
                           {multiObjectiveStats.total.toLocaleString()}
                         </p>
                       </div>
                       <div className="flex min-w-0 flex-col gap-1.5">
                         <StatLabel label="SR-based decisions" />
-                        <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-600 dark:text-sky-400">
+                        <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-700 dark:text-sky-400">
                           {multiObjectiveStats.srBased.toLocaleString()}
                           <span className="ml-1.5 text-xs font-medium tabular-nums" title="Charged / Failed">
-                            <span className="text-slate-400">(</span>
-                            <span className="text-emerald-600 dark:text-emerald-400">{multiObjectiveStats.srSuccess.toLocaleString()}</span>
-                            <span className="text-slate-400"> / </span>
-                            <span className="text-red-500 dark:text-red-400">{multiObjectiveStats.srFailure.toLocaleString()}</span>
-                            <span className="text-slate-400">)</span>
+                            <span className="text-slate-500">(</span>
+                            <span className="text-emerald-700 dark:text-emerald-400">{multiObjectiveStats.srSuccess.toLocaleString()}</span>
+                            <span className="text-slate-500"> / </span>
+                            <span className="text-red-600 dark:text-red-400">{multiObjectiveStats.srFailure.toLocaleString()}</span>
+                            <span className="text-slate-500">)</span>
                           </span>
                         </p>
                       </div>
                       <div className="flex min-w-0 flex-col gap-1.5">
                         <StatLabel label="Cost-based decisions" />
-                        <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-600 dark:text-sky-400">
+                        <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-700 dark:text-sky-400">
                           {multiObjectiveStats.costWon.toLocaleString()}
                           <span className="ml-1.5 text-xs font-medium tabular-nums" title="Charged / Failed">
-                            <span className="text-slate-400">(</span>
-                            <span className="text-emerald-600 dark:text-emerald-400">{multiObjectiveStats.costSuccess.toLocaleString()}</span>
-                            <span className="text-slate-400"> / </span>
-                            <span className="text-red-500 dark:text-red-400">{multiObjectiveStats.costFailure.toLocaleString()}</span>
-                            <span className="text-slate-400">)</span>
+                            <span className="text-slate-500">(</span>
+                            <span className="text-emerald-700 dark:text-emerald-400">{multiObjectiveStats.costSuccess.toLocaleString()}</span>
+                            <span className="text-slate-500"> / </span>
+                            <span className="text-red-600 dark:text-red-400">{multiObjectiveStats.costFailure.toLocaleString()}</span>
+                            <span className="text-slate-500">)</span>
                           </span>
                         </p>
                       </div>
@@ -4837,8 +4839,8 @@ export function DecisionSimulatorPage() {
             ) : (
               <Card>
                 <CardBody className="py-12 text-center">
-                  <Network size={32} className="mx-auto mb-3 text-slate-300" />
-                  <p className="text-sm text-slate-500">Enable debit routing, keep the default debit metadata, and click "Run Debit Routing" to inspect ranked networks.</p>
+                  <Network size={32} className="mx-auto mb-3 text-slate-500" />
+                  <p className="text-sm text-slate-500 mx-auto max-w-[57ch]">Enable debit routing, keep the default debit metadata, and click "Run Debit Routing" to inspect ranked networks.</p>
                 </CardBody>
               </Card>
             )
@@ -4994,7 +4996,7 @@ export function DecisionSimulatorPage() {
             ) : (
               <section className="flex min-h-[360px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-8 py-12 text-center dark:border-[#2a303a] dark:bg-[#101722]/70">
                 <div className="max-w-sm">
-                  <PieChartIcon size={30} className="mx-auto text-slate-300 dark:text-[#536075]" />
+                  <PieChartIcon size={30} className="mx-auto text-slate-500 dark:text-[#78849a]" />
                   <h3 className="mt-4 text-sm font-semibold text-slate-900 dark:text-white">No volume results yet</h3>
                   <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-[#9aa6bb]">
                     Set the run size and run the volume split check to view distribution and traces.
@@ -5026,7 +5028,7 @@ export function DecisionSimulatorPage() {
 
                     {ruleResult.output.type === 'single' && ruleResult.output.connector && (
                       <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-3">
-                        <p className="text-xs text-slate-400 mb-1">Selected gateway_name</p>
+                        <p className="text-xs text-slate-500 mb-1">Selected gateway_name</p>
                         <p className="text-lg font-semibold">{ruleResult.output.connector.gateway_name}</p>
                         {ruleResult.output.connector.gateway_id && (
                           <p className="text-xs text-slate-500">gateway_id: {ruleResult.output.connector.gateway_id}</p>
@@ -5036,7 +5038,7 @@ export function DecisionSimulatorPage() {
 
                     {ruleResult.output.type === 'priority' && ruleResult.output.connectors && (
                       <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-3">
-                        <p className="text-xs text-slate-400 mb-2">Priority gateway_name list</p>
+                        <p className="text-xs text-slate-500 mb-2">Priority gateway_name list</p>
                         <div className="space-y-1">
                           {ruleResult.output.connectors.map((gw, idx) => (
                             <div key={idx} className="flex items-center gap-2 text-sm">
@@ -5051,7 +5053,7 @@ export function DecisionSimulatorPage() {
 
                     {ruleResult.output.type === 'volume_split' && (
                       <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-3">
-                        <p className="text-xs text-slate-400 mb-2">Volume Split Result</p>
+                        <p className="text-xs text-slate-500 mb-2">Volume Split Result</p>
                         <p className="text-sm text-slate-600">See Volume Split tab for detailed visualization.</p>
                       </div>
                     )}
@@ -5083,8 +5085,8 @@ export function DecisionSimulatorPage() {
             ) : (
               <Card>
                 <CardBody className="py-16 text-center">
-                  <Play size={32} className="text-gray-300 mx-auto mb-3" />
-                  <p className="text-slate-400 text-sm">Configure rule parameters and click "Evaluate Rules" to test routing.</p>
+                  <Play size={32} className="text-gray-500 mx-auto mb-3" />
+                  <p className="text-slate-500 text-sm">Configure rule parameters and click "Evaluate Rules" to test routing.</p>
                 </CardBody>
               </Card>
             )
@@ -5097,14 +5099,14 @@ export function DecisionSimulatorPage() {
                 <Card className="lg:shrink-0">
                   <CardHeader className="flex flex-row items-start justify-between gap-3">
                     <div>
-                      <h3 className="text-[14px] font-semibold text-slate-500 dark:text-slate-400">Gateway Selection Summary</h3>
-                      {/* <p className="text-[13px] text-slate-400 dark:text-slate-500 mt-0.5">Overall success rate &amp; routed share across the run</p> */}
+                      <h3 className="text-[14px] font-semibold text-slate-500 dark:text-slate-400 leading-5">Gateway Selection Summary</h3>
+                      {/* <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-0.5 leading-[18px]">Overall success rate &amp; routed share across the run</p> */}
                     </div>
-                    <span className="text-[13px] tabular-nums flex items-center gap-1.5 shrink-0">
-                      <span className="text-slate-400">{completedSimulationCount} / {totalSimulationPayments || 0}</span>
+                    <span className="text-[13px] tabular-nums flex items-center gap-1.5 shrink-0 leading-[18px]">
+                      <span className="text-slate-500">{completedSimulationCount} / {totalSimulationPayments || 0}</span>
                       {completedSimulationCount > 0 && hedgingHits > 0 && (
                         <>
-                          <span className="text-slate-300 dark:text-slate-600">·</span>
+                          <span className="text-slate-500 dark:text-slate-400">·</span>
                           <span className="font-medium text-brand-600 dark:text-sky-400">
                             {Math.round((hedgingHits / completedSimulationCount) * 100)}% hedged
                           </span>
@@ -5121,15 +5123,15 @@ export function DecisionSimulatorPage() {
                         <div key={gateway} className="flex items-center gap-2.5">
                           <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: gwColor }} />
                           <span className="text-sm font-semibold text-slate-800 dark:text-slate-100 w-20 truncate">{gateway}</span>
-                          <span className={`text-lg font-bold tabular-nums leading-none ${srPct >= 80 ? 'text-emerald-600 dark:text-emerald-400' : srPct >= 50 ? 'text-amber-500' : 'text-red-500'}`}>{srPct}%</span>
-                          <span className="text-[11px] text-slate-400 dark:text-slate-500">overall SR</span>
+                          <span className={`text-lg font-bold tabular-nums leading-none ${srPct >= 80 ? 'text-emerald-700 dark:text-emerald-400' : srPct >= 50 ? 'text-amber-700' : 'text-red-600'}`}>{srPct}%</span>
+                          <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-4">overall SR</span>
                           <span className="ml-auto flex items-center gap-2 text-xs tabular-nums text-slate-500 dark:text-slate-400">
                             <span>{share}% of traffic</span>
-                            <span className="text-slate-300 dark:text-slate-600">·</span>
+                            <span className="text-slate-500 dark:text-slate-400">·</span>
                             <span>
-                              <span className="text-emerald-600 dark:text-emerald-400">{stats.success}</span>
-                              <span className="text-slate-300 dark:text-slate-600 mx-0.5">/</span>
-                              <span className="text-red-400">{stats.failure}</span>
+                              <span className="text-emerald-700 dark:text-emerald-400">{stats.success}</span>
+                              <span className="text-slate-500 dark:text-slate-400 mx-0.5">/</span>
+                              <span className="text-red-600">{stats.failure}</span>
                             </span>
                           </span>
                         </div>
@@ -5145,21 +5147,21 @@ export function DecisionSimulatorPage() {
                     <h3 className="text-sm font-medium text-slate-800 dark:text-white">Autopilot Actions</h3>
                   </span>
                   {accumulatedEvents.length > 0 && (
-                    <span className="text-xs text-slate-400 tabular-nums">{accumulatedEvents.length} actions</span>
+                    <span className="text-xs text-slate-500 tabular-nums">{accumulatedEvents.length} actions</span>
                   )}
                 </CardHeader>
                 <CardBody className="p-0 lg:flex-1 lg:min-h-0 lg:flex lg:flex-col">
                   {simulationStartedAtMs == null ? (
                     <div className="py-12 text-center">
                       <p className="text-sm text-slate-500 dark:text-slate-400">No events yet</p>
-                      <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 mx-auto max-w-[57ch]">
                         Start a simulation — leader changes and auth-band crossings appear here as gateway scores shift.
                       </p>
                     </div>
                   ) : routingEvents.isUnavailable ? (
                     <div className="py-12 text-center">
                       <p className="text-sm text-slate-500 dark:text-slate-400">Events unavailable</p>
-                      <p className="mt-1 text-xs text-slate-400 dark:text-slate-500">
+                      <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
                         The analytics pipeline (Kafka → ClickHouse) is offline for this environment.
                       </p>
                     </div>
@@ -5174,18 +5176,18 @@ export function DecisionSimulatorPage() {
                               className={`flex items-start gap-2.5 px-4 py-2.5 transition-colors duration-1000 ${isFresh ? 'bg-emerald-200 dark:bg-emerald-500/25' : 'bg-transparent'}`}
                             >
                               <div className="mt-0.5 shrink-0">
-                                <ArrowRightLeft size={16} className="text-sky-500" />
+                                <ArrowRightLeft size={16} className="text-sky-700" />
                               </div>
                               <div className="min-w-0 flex-1">
-                                <p className="text-[15px] text-slate-700 dark:text-slate-200">
+                                <p className="text-[15px] text-slate-700 dark:text-slate-200 leading-[22px]">
                                   {item.latest.gateway}
                                   {item.latest.score != null ? ` (${(item.latest.score * 100).toFixed(1)}%)` : ''} now leads on success rate
                                   {item.latest.previous_gateway
                                     ? ` over ${item.latest.previous_gateway}${item.latest.previous_score != null ? ` (${(item.latest.previous_score * 100).toFixed(1)}%)` : ''}`
                                     : ''}
-                                  <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 dark:bg-sky-900/30 dark:text-sky-300">×{item.crossings}</span>
+                                  <span className="ml-1.5 rounded-full bg-sky-100 px-1.5 py-0.5 text-[11px] font-medium text-sky-700 dark:bg-sky-900/30 dark:text-sky-300 leading-4">×{item.crossings}</span>
                                 </p>
-                                <p className="mt-0.5 text-[13px] text-slate-600 dark:text-slate-400">
+                                <p className="mt-0.5 text-[13px] text-slate-600 dark:text-slate-400 leading-[18px]">
                                   now routing to the best PSP · {formatSimEventTime(item.latest.bucket_ms)}
                                 </p>
                               </div>
@@ -5200,14 +5202,14 @@ export function DecisionSimulatorPage() {
                               className={`flex items-start gap-2.5 px-4 py-2.5 transition-colors duration-1000 ${isFresh ? 'bg-emerald-200 dark:bg-emerald-500/25' : 'bg-transparent'}`}
                             >
                               <div className="mt-0.5 shrink-0">
-                                <RefreshCw size={16} className="text-amber-500" />
+                                <RefreshCw size={16} className="text-amber-700" />
                               </div>
                               <div className="min-w-0 flex-1">
-                                <p className="text-[15px] text-slate-700 dark:text-slate-200">
+                                <p className="text-[15px] text-slate-700 dark:text-slate-200 leading-[22px]">
                                   {item.gateway} fluctuating at the cost-savings cutoff
-                                  <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300">×{item.crossings}</span>
+                                  <span className="ml-1.5 rounded-full bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-900/30 dark:text-amber-300 leading-4">×{item.crossings}</span>
                                 </p>
-                                <p className="mt-0.5 text-[13px] text-slate-600 dark:text-slate-400">
+                                <p className="mt-0.5 text-[13px] text-slate-600 dark:text-slate-400 max-w-[57ch] leading-[18px]">
                                   now {item.inBand ? 'routed to save cost' : 'using top performer only'} · {formatSimEventTime(item.latest.bucket_ms)}
                                 </p>
                               </div>
@@ -5224,11 +5226,11 @@ export function DecisionSimulatorPage() {
                             className={`flex items-start gap-2.5 px-4 py-2.5 transition-colors duration-1000 ${isFresh ? 'bg-emerald-200 dark:bg-emerald-500/25' : 'bg-transparent'}`}
                           >
                             <div className="mt-0.5 shrink-0">
-                              <Icon size={16} className={meta?.iconClass ?? 'text-slate-400'} />
+                              <Icon size={16} className={meta?.iconClass ?? 'text-slate-500'} />
                             </div>
                             <div className="min-w-0 flex-1">
-                              <p className="text-[15px] text-slate-700 dark:text-slate-200">{describeRoutingEvent(event)}</p>
-                              <p className="mt-0.5 text-[13px] text-slate-600 dark:text-slate-400">{formatSimEventTime(event.bucket_ms)}</p>
+                              <p className="text-[15px] text-slate-700 dark:text-slate-200 leading-[22px]">{describeRoutingEvent(event)}</p>
+                              <p className="mt-0.5 text-[13px] text-slate-600 dark:text-slate-400 leading-[18px]">{formatSimEventTime(event.bucket_ms)}</p>
                             </div>
                           </div>
                         )
@@ -5237,12 +5239,12 @@ export function DecisionSimulatorPage() {
                           entry, so it sits at the bottom of the newest-first feed. */}
                       <div className="flex items-start gap-2.5 px-4 py-2.5 bg-gradient-to-r from-sky-50 via-transparent to-violet-50 dark:from-sky-500/10 dark:to-violet-500/10">
                         <div className="mt-0.5 shrink-0">
-                          <Flag size={16} className="text-violet-500" />
+                          <Flag size={16} className="text-violet-600" />
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="text-[15px] text-slate-700 dark:text-slate-200">
+                          <p className="text-[15px] text-slate-700 dark:text-slate-200 leading-[22px]">
                             Started tracking{' '}
-                            <span className="font-semibold text-emerald-600 dark:text-emerald-400">SR</span>{' '}and{' '}
+                            <span className="font-semibold text-emerald-700 dark:text-emerald-400">SR</span>{' '}and{' '}
                             <span className="font-semibold text-violet-600 dark:text-violet-400">Cost</span>{' '}for{' '}
                             {eligibleGatewaysParsed.map((gw, i) => (
                               <span key={gw}>
@@ -5252,7 +5254,7 @@ export function DecisionSimulatorPage() {
                             ))}{' '}at CARD, CARD SCHEME, CARD_TYPE, CARD_PROGRAM, AMOUNT combinations
                           </p>
                           {simulationStartedAtMs != null && (
-                            <p className="mt-0.5 text-[13px] text-slate-600 dark:text-slate-400">{formatSimEventTime(simulationStartedAtMs)}</p>
+                            <p className="mt-0.5 text-[13px] text-slate-600 dark:text-slate-400 leading-[18px]">{formatSimEventTime(simulationStartedAtMs)}</p>
                           )}
                         </div>
                       </div>
@@ -5321,17 +5323,17 @@ export function DecisionSimulatorPage() {
                           </Badge>
                         ) : null}
                         {result.latency != null && (
-                          <p className="text-xs text-slate-400">{result.latency}ms</p>
+                          <p className="text-xs text-slate-500">{result.latency}ms</p>
                         )}
                       </div>
                     </div>
                     {singleRunPaymentId ? (
                       <div className="mb-3 rounded-[18px] border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#1c1c23] dark:bg-[#0b0b10]">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93]">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93] leading-4">
                           Payment ID
                         </p>
                         <p className="mt-2 font-mono text-sm text-slate-900 dark:text-white">{singleRunPaymentId}</p>
-                        <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                        <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93] max-w-[57ch]">
                           Feedback recorded as {singleRunOutcome}. Open audit to inspect the full decide and update flow.
                         </p>
                       </div>
@@ -5339,17 +5341,17 @@ export function DecisionSimulatorPage() {
                     {result.routing_dimension && (
                       <div className="flex gap-4 text-sm text-slate-600 border-t border-slate-200 dark:border-[#1c1c24] pt-3">
                         <div>
-                          <span className="text-xs text-slate-400">Dimension</span>
+                          <span className="text-xs text-slate-500">Dimension</span>
                           <p className="font-medium">{result.routing_dimension}</p>
                         </div>
                         {result.routing_dimension_level && (
                           <div>
-                            <span className="text-xs text-slate-400">Level</span>
+                            <span className="text-xs text-slate-500">Level</span>
                             <p className="font-medium">{result.routing_dimension_level}</p>
                           </div>
                         )}
                         <div>
-                          <span className="text-xs text-slate-400">Reset</span>
+                          <span className="text-xs text-slate-500">Reset</span>
                           <p className="font-medium">{result.reset_approach}</p>
                         </div>
                       </div>
@@ -5423,7 +5425,7 @@ export function DecisionSimulatorPage() {
                                 ? gateways.map(gw => (
                                   <span key={gw} className="text-xs bg-blue-500/10 text-blue-400 ring-1 ring-inset ring-blue-500/20 rounded-md px-2 py-0.5">{gw}</span>
                                 ))
-                                : <span className="text-xs text-slate-400">—</span>
+                                : <span className="text-xs text-slate-500">—</span>
                               }
                             </div>
                           </div>
@@ -5458,8 +5460,8 @@ export function DecisionSimulatorPage() {
             ) : (
               <Card>
                 <CardBody className="py-16 text-center">
-                  <Play size={32} className="text-gray-300 mx-auto mb-3" />
-                  <p className="text-slate-400 text-sm">Fill in the parameters and click "Run Single Transaction" to decide a gateway, post feedback, and inspect the audit trail.</p>
+                  <Play size={32} className="text-gray-500 mx-auto mb-3" />
+                  <p className="text-slate-500 text-sm mx-auto max-w-[57ch]">Fill in the parameters and click "Run Single Transaction" to decide a gateway, post feedback, and inspect the audit trail.</p>
                 </CardBody>
               </Card>
             )
@@ -5473,17 +5475,17 @@ export function DecisionSimulatorPage() {
           <CardHeader className="flex flex-row items-center justify-between gap-3">
             <h3 className="text-sm font-medium text-slate-800 dark:text-white">Transaction Log</h3>
             {deferredSimulationResults.length > 0 && (
-              <span className="flex items-center gap-2 text-xs text-slate-400 tabular-nums">
+              <span className="flex items-center gap-2 text-xs text-slate-500 tabular-nums">
                 {txFiltersActive && (
                   <>
                     <button
                       type="button"
                       onClick={() => setTxFilters({})}
-                      className="rounded px-1.5 py-0.5 text-[11px] font-medium text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-900/20"
+                      className="rounded px-1.5 py-0.5 text-[11px] font-medium text-brand-600 hover:bg-brand-50 dark:text-brand-400 dark:hover:bg-brand-900/20 leading-4"
                     >
                       Clear filters
                     </button>
-                    <span className="text-slate-300 dark:text-slate-600">·</span>
+                    <span className="text-slate-500 dark:text-slate-400">·</span>
                   </>
                 )}
                 <span>
@@ -5499,7 +5501,7 @@ export function DecisionSimulatorPage() {
             {deferredSimulationResults.length > 0 ? (
               <div ref={txLogRef} className="max-h-[560px] overflow-y-auto overflow-x-auto">
                 <table className="w-full text-sm">
-                  <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-[11px] text-slate-400 dark:text-slate-500 sticky top-0 border-b border-slate-100 dark:border-[#1c1c24]">
+                  <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-[11px] text-slate-500 dark:text-slate-500 sticky top-0 border-b border-slate-100 dark:border-[#1c1c24] leading-4">
                     <tr>
                       <th className="text-left px-3 py-2 w-8">#</th>
                       <th className="text-left px-3 py-2">Amount</th>
@@ -5515,7 +5517,7 @@ export function DecisionSimulatorPage() {
                       {smartRetryEnabled && <th className="text-left px-3 py-2">Retry Outcome</th>}
                     </tr>
                     {(() => {
-                      const inputCls = 'w-full rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] font-normal text-slate-700 placeholder:text-slate-300 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-200 dark:placeholder:text-slate-600'
+                      const inputCls = 'w-full rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] font-normal text-slate-700 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-200 dark:placeholder:text-slate-600'
                       const setF = (key: string, value: string) => setTxFilters(prev => ({ ...prev, [key]: value }))
                       const sel = (key: string, opts: string[], placeholder: string) => (
                         <select value={txFilters[key] ?? ''} onChange={e => setF(key, e.target.value)} className={inputCls}>
@@ -5560,7 +5562,7 @@ export function DecisionSimulatorPage() {
                         className="group cursor-pointer hover:bg-slate-50 dark:hover:bg-[#0d0d14] transition-colors"
                         onClick={() => openAuditModal(res.paymentId)}
                       >
-                        <td className="px-3 py-2 text-[11px] text-slate-400 tabular-nums">{idx + 1}</td>
+                        <td className="px-3 py-2 text-[11px] text-slate-500 tabular-nums leading-4">{idx + 1}</td>
                         <td className="px-3 py-2 whitespace-nowrap">
                           <span className="block font-mono text-xs text-slate-700 dark:text-slate-300 tabular-nums group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
                             {formatCurrencyValue(res.amount, res.currency)}
@@ -5577,7 +5579,7 @@ export function DecisionSimulatorPage() {
                                 {(srScore * 100).toFixed(1)}%
                               </span>
                             ) : (
-                              <span className="text-[11px] text-slate-400">—</span>
+                              <span className="text-[11px] text-slate-500 leading-4">—</span>
                             )
                           })()}
                         </td>
@@ -5587,22 +5589,22 @@ export function DecisionSimulatorPage() {
                               {(res.evGapTop2 * 100).toFixed(2)}%
                             </span>
                           ) : (
-                            <span className="text-[11px] text-slate-400">—</span>
+                            <span className="text-[11px] text-slate-500 leading-4">—</span>
                           )}
                         </td>
                         <td className="px-3 py-2">
                           {res.routingApproach?.includes('HEDGING') ? (
-                            <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:ring-amber-800">Hedging</span>
+                            <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:ring-amber-800 leading-4">Hedging</span>
                           ) : res.routingApproach === 'SR_SELECTION_MULTI_OBJECTIVE' ? (
-                            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:ring-emerald-800">Cost Based</span>
+                            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:ring-emerald-800 leading-4">Cost Based</span>
                           ) : res.routingApproach === 'SR_SELECTION_V3_ROUTING' ? (
-                            <span className="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:ring-brand-800">Auth Based</span>
+                            <span className="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:ring-brand-800 leading-4">Auth Based</span>
                           ) : (
-                            <span className="text-[11px] text-slate-400">{res.routingApproach ?? '—'}</span>
+                            <span className="text-[11px] text-slate-500 leading-4">{res.routingApproach ?? '—'}</span>
                           )}
                         </td>
                         <td className="px-3 py-2">
-                          <span className={`text-xs font-semibold ${res.status === 'CHARGED' ? 'text-emerald-600 dark:text-emerald-400' : res.status === 'PENDING_VBV' ? 'text-amber-600 dark:text-amber-400' : 'text-red-500 dark:text-red-400'}`}>{res.status}</span>
+                          <span className={`text-xs font-semibold ${res.status === 'CHARGED' ? 'text-emerald-700 dark:text-emerald-400' : res.status === 'PENDING_VBV' ? 'text-amber-700 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>{res.status}</span>
                         </td>
                         <td className="px-3 py-2 text-right whitespace-nowrap">
                           {res.costWon && res.costSavedBps != null && res.costSavedBps > 0 && res.status === 'CHARGED' ? (
@@ -5622,14 +5624,14 @@ export function DecisionSimulatorPage() {
                               <Badge variant={res.retryStatus === 'CHARGED' ? 'green' : res.retryStatus === 'PENDING_VBV' ? 'orange' : 'red'}>
                                 {res.retryStatus}
                               </Badge>
-                            ) : <span className="text-xs text-slate-400">—</span>}
+                            ) : <span className="text-xs text-slate-500">—</span>}
                           </td>
                         )}
                       </tr>
                     ))}
                     {txFilteredRows.length === 0 && (
                       <tr>
-                        <td colSpan={smartRetryEnabled ? 12 : 10} className="px-3 py-8 text-center text-sm text-slate-400 dark:text-slate-500">
+                        <td colSpan={smartRetryEnabled ? 12 : 10} className="px-3 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
                           No transactions match the current filters.
                         </td>
                       </tr>
@@ -5638,13 +5640,13 @@ export function DecisionSimulatorPage() {
                   {txFilteredRows.length > 0 && (
                     <tfoot className="sticky bottom-0 z-10 bg-slate-50 dark:bg-[#0a0a0f] border-t border-slate-200 dark:border-[#1c1c24]">
                       <tr className="text-xs font-semibold text-slate-700 dark:text-slate-200">
-                        <td className="px-3 py-2 text-slate-400">Σ</td>
+                        <td className="px-3 py-2 text-slate-500">Σ</td>
                         <td className="px-3 py-2 whitespace-nowrap tabular-nums">{formatCurrencyValue(txColumnTotals.amount, txColumnTotals.currency)}</td>
                         <td className="px-3 py-2" />
                         <td className="px-3 py-2" />
-                        <td className="px-3 py-2 whitespace-nowrap font-normal text-slate-400">{txColumnTotals.count.toLocaleString()} rows</td>
+                        <td className="px-3 py-2 whitespace-nowrap font-normal text-slate-500">{txColumnTotals.count.toLocaleString()} rows</td>
                         <td className="px-3 py-2" />
-                        <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums font-normal text-slate-400" title="Average EV margin of victory across these rows">
+                        <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums font-normal text-slate-500" title="Average EV margin of victory across these rows">
                           {txColumnTotals.evGapPctAvg != null ? `${txColumnTotals.evGapPctAvg.toFixed(2)}% avg` : ''}
                         </td>
                         <td className="px-3 py-2" />
@@ -5698,7 +5700,7 @@ export function DecisionSimulatorPage() {
                 <button
                   type="button"
                   aria-label="Close setup prompt"
-                  className="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-[#1a2230] dark:hover:text-white"
+                  className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-[#1a2230] dark:hover:text-white"
                   onClick={() => setSetupPrompt(null)}
                 >
                   <X size={16} />
@@ -5746,7 +5748,7 @@ export function DecisionSimulatorPage() {
           >
             <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 bg-slate-50/90 px-6 py-5 dark:border-[#1c1c23] dark:bg-[#0b0b10]">
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-[#8a8a93]">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-[#8a8a93] leading-4">
                   Simulation Audit
                 </p>
                 <h2
@@ -5856,7 +5858,7 @@ export function DecisionSimulatorPage() {
                       <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
                         {selectedAuditEvent ? stageLabel(selectedAuditEvent) : 'Audit Inspector'}
                       </h3>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93] max-w-[57ch]">
                         {selectedAuditEvent
                           ? `${routeLabel(selectedAuditEvent.route)} · ${formatDateTime(selectedAuditEvent.created_at_ms)}`
                           : 'Select an event from the left to inspect payloads.'}
@@ -5898,7 +5900,7 @@ export function DecisionSimulatorPage() {
                           <InspectorKeyValueGrid rows={auditInspectorModel.summaryRows} />
                           {auditInspectorModel.selectionReason ? (
                             <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 px-5 py-4 dark:border-[#1d1d23] dark:bg-[#0b0b10]">
-                              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93]">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93] leading-4">
                                 Selection Reason
                               </p>
                               <p className="mt-3 text-sm leading-6 text-slate-700 dark:text-slate-200">
@@ -5974,7 +5976,7 @@ export function DecisionSimulatorPage() {
           >
             <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 bg-slate-50/90 px-6 py-5 dark:border-[#1c1c23] dark:bg-[#0b0b10]">
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-[#8a8a93]">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-[#8a8a93] leading-4">
                   Decision Trace
                 </p>
                 <h2
@@ -6101,7 +6103,7 @@ export function DecisionSimulatorPage() {
                       <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
                         {selectedPreviewEvent ? stageLabel(selectedPreviewEvent) : 'Decision Inspector'}
                       </h3>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93] max-w-[57ch]">
                         {selectedPreviewEvent
                           ? `${routeLabel(selectedPreviewEvent.route)} · ${formatDateTime(selectedPreviewEvent.created_at_ms)}`
                           : 'Select an event from the left to inspect the decision payload.'}
@@ -6216,7 +6218,7 @@ function MultiObjectiveDecisionPanel({ info }: { info: MultiObjectiveInfo }) {
         <div className={`rounded-2xl border px-4 py-3 ${tone}`}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+              <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400 leading-4">
                 Multi-Objective Decision
               </span>
               <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${pillTone}`}>
@@ -6248,7 +6250,7 @@ function MultiObjectiveDecisionPanel({ info }: { info: MultiObjectiveInfo }) {
             </div>
           )}
 
-          <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
+          <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400 leading-4">
             {info.qualifiedCount} PSP{info.qualifiedCount === 1 ? '' : 's'} ranked on EV.
           </p>
         </div>
@@ -6271,12 +6273,12 @@ function MultiObjectivePspCard({
     <div className={`rounded-xl border px-3 py-2 ${borderTone}`}>
       <div className="flex min-h-[16px] flex-wrap items-center gap-1.5">
         {candidate.isSrHead && (
-          <span className="inline-flex items-center rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-700 dark:bg-[#1f1f29] dark:text-slate-200">
+          <span className="inline-flex items-center rounded bg-slate-200 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-700 dark:bg-[#1f1f29] dark:text-slate-200 leading-4">
             SR head
           </span>
         )}
         {candidate.isChosen && (
-          <span className="inline-flex items-center rounded bg-cyan-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-200">
+          <span className="inline-flex items-center rounded bg-cyan-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-200 leading-4">
             Chosen
           </span>
         )}
@@ -6286,17 +6288,17 @@ function MultiObjectivePspCard({
       </p>
       <div className="mt-1.5 flex flex-wrap gap-3 text-xs text-slate-600 dark:text-slate-300">
         <span>
-          <span className="text-slate-400">auth</span>{' '}
+          <span className="text-slate-500">auth</span>{' '}
           <span className="font-mono">{(candidate.authRate * 100).toFixed(2)}%</span>
         </span>
         <span>
-          <span className="text-slate-400">cost</span>{' '}
+          <span className="text-slate-500">cost</span>{' '}
           <span className="font-mono">
             {candidate.costBps != null ? `${candidate.costBps.toFixed(2)} bps` : '—'}
           </span>
         </span>
         <span>
-          <span className="text-slate-400">EV</span>{' '}
+          <span className="text-slate-500">EV</span>{' '}
           <span className="font-mono">{candidate.ev.toFixed(4)}</span>
         </span>
       </div>

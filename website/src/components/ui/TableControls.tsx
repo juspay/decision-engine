@@ -33,7 +33,7 @@ export function HeaderFilter({
         className={`inline-flex items-center gap-1 rounded uppercase tracking-wide transition-colors ${
           isFiltered
             ? 'text-brand-600 dark:text-brand-400'
-            : 'text-slate-400 hover:text-slate-600 dark:text-[#4e5870] dark:hover:text-[#8d96a8]'
+            : 'text-slate-500 hover:text-slate-600 dark:text-[#78849a] dark:hover:text-[#8d96a8]'
         }`}
       >
         {isFiltered ? `${label}: ${current?.label ?? value}` : label}
@@ -85,7 +85,7 @@ export function HeaderSearch({
         type="button"
         aria-label={ariaLabel}
         onClick={() => setOpen(true)}
-        className="inline-flex items-center gap-1 uppercase tracking-wide text-slate-400 transition-colors hover:text-slate-600 dark:text-[#4e5870] dark:hover:text-[#8d96a8]"
+        className="inline-flex items-center gap-1 uppercase tracking-wide text-slate-500 transition-colors hover:text-slate-600 dark:text-[#78849a] dark:hover:text-[#8d96a8]"
       >
         {label}
         <Search size={13} className="shrink-0" />
@@ -100,7 +100,7 @@ export function HeaderSearch({
     <div className="relative w-[240px] max-w-full">
       <Search
         size={14}
-        className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+        className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500"
       />
       <input
         autoFocus
@@ -108,13 +108,13 @@ export function HeaderSearch({
         onChange={(e) => onChange(e.target.value)}
         placeholder="Filter by name or ID"
         aria-label={ariaLabel}
-        className="w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-8 text-sm font-normal normal-case tracking-normal text-slate-800 placeholder:text-slate-400 focus:border-brand-500 dark:border-[#2a303a] dark:bg-[#0d1018] dark:text-slate-100 dark:placeholder:text-[#5b6577]"
+        className="w-full rounded-lg border border-slate-200 bg-white py-1.5 pl-8 pr-8 text-sm font-normal normal-case tracking-normal text-slate-800 placeholder:text-slate-500 focus:border-brand-500 dark:border-[#2a303a] dark:bg-[#0d1018] dark:text-slate-100 dark:placeholder:text-[#5b6577]"
       />
       <button
         type="button"
         aria-label="Clear name filter"
         onClick={() => { onChange(''); setOpen(false) }}
-        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 transition-colors hover:text-slate-700 dark:hover:text-slate-200"
+        className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-500 transition-colors hover:text-slate-700 dark:hover:text-slate-200"
       >
         <X size={14} />
       </button>
@@ -188,7 +188,7 @@ export function RowMenu({ items }: { items: RowMenuItem[] }) {
 
   const toneClasses: Record<string, string> = {
     default: 'text-slate-700 dark:text-slate-300',
-    positive: 'text-emerald-600 dark:text-emerald-400',
+    positive: 'text-emerald-700 dark:text-emerald-400',
     danger: 'text-red-600 dark:text-red-400',
   }
 
@@ -204,7 +204,7 @@ export function RowMenu({ items }: { items: RowMenuItem[] }) {
         className={`rounded-md p-1.5 transition-colors ${
           open
             ? 'bg-slate-100 text-slate-700 dark:bg-[#1c2030] dark:text-white'
-            : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-[#1c2030] dark:hover:text-white'
+            : 'text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-[#1c2030] dark:hover:text-white'
         }`}
       >
         <MoreVertical size={16} />
@@ -229,7 +229,7 @@ export function RowMenu({ items }: { items: RowMenuItem[] }) {
                 onClick={() => { setOpen(false); item.onSelect() }}
                 className={`flex w-full items-center gap-2.5 px-3 py-2 text-left text-[13px] font-medium transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent dark:hover:bg-[#1c2030] ${
                   toneClasses[item.tone ?? 'default']
-                }`}
+                } leading-[18px]`}
               >
                 <Icon size={14} className="shrink-0" />
                 {item.label}

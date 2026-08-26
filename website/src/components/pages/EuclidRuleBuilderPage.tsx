@@ -22,6 +22,8 @@ import {
   type DefaultOutput,
 } from '../../features/routing/euclid/state'
 
+import { PageHeading } from '../ui/PageHeading'
+import { Notice } from '../ui/Notice'
 export function EuclidRuleBuilderPage() {
   const canEditRouting = useCanEditRouting()
   const navigate = useNavigate()
@@ -222,12 +224,7 @@ export function EuclidRuleBuilderPage() {
           >
             <ArrowLeft size={16} /> Rule-Based Routing
           </button>
-          <h1 className="truncate text-2xl font-semibold text-slate-900 dark:text-white">
-            {isEdit ? 'Edit Payment Rule' : 'Create Payment Rule'}
-          </h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-[#8d96a8]">
-            Create precise cascading routing paths for card transactions using conditional flags.
-          </p>
+          <PageHeading title={isEdit ? 'Edit Payment Rule' : 'Create Payment Rule'} description="Create precise cascading routing paths for card transactions using conditional flags." className="truncate" />
         </div>
         <div className="flex shrink-0 rounded-lg border border-slate-200 text-xs dark:border-[#222226] overflow-hidden">
           <button
@@ -251,10 +248,10 @@ export function EuclidRuleBuilderPage() {
         <ErrorMessage error="That rule no longer exists for this merchant." />
       )}
       {isEditingActiveRule && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+        <Notice tone="warning">
           <strong>This rule is active</strong> — active rules cannot be edited. Deactivate it from the
           rules list first, then come back.
-        </div>
+        </Notice>
       )}
 
       <div className="flex flex-col gap-6 xl:flex-row xl:items-start">
@@ -266,7 +263,7 @@ export function EuclidRuleBuilderPage() {
               <div className="flex items-start gap-2">
                 <label
                   htmlFor="rule-name"
-                  className="shrink-0 whitespace-nowrap py-2.5 text-[13px] font-semibold text-slate-700 dark:text-slate-300"
+                  className="shrink-0 whitespace-nowrap py-2.5 text-[13px] font-semibold text-slate-700 dark:text-slate-300 leading-[18px]"
                 >
                   Rule Name *
                 </label>
@@ -286,7 +283,7 @@ export function EuclidRuleBuilderPage() {
               <div className="flex items-center gap-2">
                 <label
                   htmlFor="rule-description"
-                  className="shrink-0 whitespace-nowrap text-[13px] font-semibold text-slate-700 dark:text-slate-300"
+                  className="shrink-0 whitespace-nowrap text-[13px] font-semibold text-slate-700 dark:text-slate-300 leading-[18px]"
                 >
                   Description
                 </label>
@@ -354,8 +351,8 @@ export function EuclidRuleBuilderPage() {
             </div>
 
             <div className="rounded-xl border border-dashed border-slate-300 px-4 py-4 dark:border-[#2a303a]">
-              <p className="text-[15px] font-semibold text-slate-800 dark:text-slate-200">Default Fallback Gateway</p>
-              <p className="mb-4 mt-1 text-[13px] text-slate-400 dark:text-[#8d96a8]">
+              <p className="text-[15px] font-semibold text-slate-800 dark:text-slate-200 leading-[22px]">Default Fallback Gateway</p>
+              <p className="mb-4 mt-1 text-[13px] text-slate-500 dark:text-[#8d96a8] leading-[18px]">
                 This gateway handles any transactions that do not match the custom rules configured
                 above. Per-request overrides are possible via <code className="font-mono">fallback_output</code>.
               </p>
@@ -388,7 +385,7 @@ export function EuclidRuleBuilderPage() {
           >
             Cancel
           </button>
-          <p className="text-sm text-slate-400 dark:text-[#6d7a8d]">
+          <p className="text-sm text-slate-500 dark:text-[#78849a] max-w-[57ch]">
             {isEdit
               ? 'Saved changes apply the next time this rule is activated.'
               : 'A new rule is created inactive — activate it from the rules list.'}

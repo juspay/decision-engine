@@ -21,7 +21,7 @@ export function CoverageBreakdown({ merchantId }: { merchantId?: string }) {
     )
   }
   if (error) {
-    return <p className="text-sm text-red-500">Failed to load coverage.</p>
+    return <p className="text-sm text-red-600">Failed to load coverage.</p>
   }
   if (!hasData || !coverage) {
     return (
@@ -85,7 +85,7 @@ function VerdictTable({ coverage }: { coverage: CoverageSummary }) {
     <div className="overflow-x-auto">
       <table className="w-full min-w-[520px] text-left text-sm">
         <thead>
-          <tr className="border-b border-slate-200 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] dark:border-[#232833]">
+          <tr className="border-b border-slate-200 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] dark:border-[#232833] leading-4">
             <th className="py-2 pr-3 font-semibold">Verdict</th>
             <th className="py-2 pr-3 text-right font-semibold">Txns</th>
             <th className="py-2 pr-3 text-right font-semibold">Txn %</th>
@@ -105,7 +105,7 @@ function VerdictTable({ coverage }: { coverage: CoverageSummary }) {
                   <span className={`h-2 w-2 rounded-full ${r.dot}`} />
                   <span className="font-medium text-slate-700 dark:text-[#c7cfdd]">{r.verdict}</span>
                 </span>
-                <span className="ml-4 text-xs text-slate-400">{r.note}</span>
+                <span className="ml-4 text-xs text-slate-500">{r.note}</span>
               </td>
               <td className="py-2 pr-3 text-right tabular-nums text-slate-600 dark:text-[#c7cfdd]">
                 {r.txns.toLocaleString()}

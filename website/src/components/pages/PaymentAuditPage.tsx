@@ -19,6 +19,7 @@ import { Card as GlassCard, InsetPanel } from '../ui/Card'
 import { CopyButton } from '../ui/CopyButton'
 import { DateTimePicker } from '../ui/DateTimePicker'
 
+import { PageHeading } from '../ui/PageHeading'
 const RANGE_OPTIONS: AnalyticsRangeValue[] = ['15m', '1h', '12h', '1d', '1w', 'custom']
 const STATUS_OPTIONS = [
   { value: '', label: 'Any status' },
@@ -343,8 +344,8 @@ function SummaryStat({ tone, label, detail }: { tone: string; label: string; det
 function HeadlineFact({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex min-w-0 items-baseline gap-2">
-      <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#8a8a93]">{label}:</span>
-      <span className="truncate text-[13px] font-semibold text-slate-900 dark:text-white">{value}</span>
+      <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">{label}:</span>
+      <span className="truncate text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">{value}</span>
     </div>
   )
 }
@@ -371,7 +372,7 @@ function sectionButtonClass(active: boolean) {
 }
 
 function fieldClassName() {
-  return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[13px] text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7] dark:placeholder:text-[#555f6e]'
+  return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[13px] text-slate-700 outline-none transition placeholder:text-slate-500 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7] dark:placeholder:text-[#555f6e]'
 }
 
 function fieldSelectClassName() {
@@ -380,9 +381,9 @@ function fieldSelectClassName() {
 
 function EmptyState({ title, body }: { title: string; body: string }) {
   return (
-    <InsetPanel className="!rounded-2xl border-dashed border-slate-200 bg-slate-50/70 px-[21px] py-[34px] text-center dark:border-[#2a303a] dark:bg-[#161b24]/80">
-      <p className="text-[13px] font-semibold text-slate-900 dark:text-white">{title}</p>
-      <p className="mt-[8px] text-[13px] text-slate-500 dark:text-[#b2bdd1]">{body}</p>
+    <InsetPanel className="!rounded-2xl border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center dark:border-[#2a303a] dark:bg-[#161b24]/80">
+      <p className="text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">{title}</p>
+      <p className="mt-2 text-[13px] text-slate-500 dark:text-[#b2bdd1] leading-[18px]">{body}</p>
     </InsetPanel>
   )
 }
@@ -391,15 +392,15 @@ function InspectorKeyValueGrid({ rows }: { rows: Array<{ label: string; value: s
   if (!rows.length) return null
 
   return (
-    <div className="grid gap-x-[34px] md:grid-cols-2 [&>*:last-child]:border-b-0 md:[&>*:nth-last-child(-n+2)]:border-b-0">
+    <div className="grid gap-x-8 md:grid-cols-2 [&>*:last-child]:border-b-0 md:[&>*:nth-last-child(-n+2)]:border-b-0">
       {rows.map((row) => (
         <div
           key={`${row.label}-${row.value}`}
-          className="flex items-center justify-between gap-[13px] border-b border-slate-100 py-[13px] dark:border-[#1b2029]"
+          className="flex items-center justify-between gap-3 border-b border-slate-100 py-3 dark:border-[#1b2029]"
         >
-          <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#8a8a93]">{row.label}</span>
+          <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">{row.label}</span>
           <span className="flex min-w-0 items-center gap-1.5">
-            <span className="truncate text-[13px] font-medium text-slate-900 dark:text-white">{row.value}</span>
+            <span className="truncate text-[13px] font-medium text-slate-900 dark:text-white leading-[18px]">{row.value}</span>
             {row.copyText && <CopyButton text={row.copyText} size={12} />}
           </span>
         </div>
@@ -410,7 +411,7 @@ function InspectorKeyValueGrid({ rows }: { rows: Array<{ label: string; value: s
 
 function JsonBlock({ value }: { value: unknown }) {
   return (
-    <pre className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-slate-50/90 px-[21px] py-[13px] font-mono text-[13px] leading-[21px] text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_16px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#0b1017] dark:text-[#d8e1ef] dark:shadow-none">
+    <pre className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-slate-50/90 px-5 py-3 font-mono text-[13px] leading-[21px] text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_16px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#0b1017] dark:text-[#d8e1ef] dark:shadow-none">
       {stringifyValue(value)}
     </pre>
   )
@@ -419,7 +420,7 @@ function JsonBlock({ value }: { value: unknown }) {
 function PanelSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
-      <h3 className="text-[13px] font-semibold text-slate-900 dark:text-white">{title}</h3>
+      <h3 className="text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">{title}</h3>
       {children}
     </div>
   )
@@ -496,7 +497,7 @@ function ConnectorScorePanel({
 
   return (
     <PanelSection title={title}>
-      <div className="space-y-[13px] rounded-2xl border border-slate-200/80 bg-slate-50/90 px-[21px] py-[13px] dark:border-[#2a303a] dark:bg-[#0b1017]">
+      <div className="space-y-3 rounded-2xl border border-slate-200/80 bg-slate-50/90 px-5 py-3 dark:border-[#2a303a] dark:bg-[#0b1017]">
         {sorted.map(([gateway, score]) => {
           const isWinner = gateway === winner
           const percent = Number(((score / denom) * 100).toFixed(1))
@@ -505,14 +506,14 @@ function ConnectorScorePanel({
             <div key={gateway} className="space-y-1.5">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
-                  <span className="truncate text-[13px] font-medium text-slate-900 dark:text-white">{gateway}</span>
+                  <span className="truncate text-[13px] font-medium text-slate-900 dark:text-white leading-[18px]">{gateway}</span>
                   {isWinner ? (
-                    <span className="shrink-0 rounded-md bg-brand-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-300">
+                    <span className="shrink-0 rounded-md bg-brand-500/10 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-300 leading-4">
                       Selected
                     </span>
                   ) : null}
                 </div>
-                <span className="shrink-0 text-[13px] font-semibold tabular-nums text-slate-700 dark:text-[#d8e1ef]">
+                <span className="shrink-0 text-[13px] font-semibold tabular-nums text-slate-700 dark:text-[#d8e1ef] leading-[18px]">
                   {asFraction ? `${(score * 100).toFixed(1)}%` : score.toLocaleString(undefined, { maximumFractionDigits: 4 })}
                 </span>
               </div>
@@ -1030,11 +1031,11 @@ export function PaymentAuditPage() {
   // Full-height column so the two panels fill the shell (78px top bar + main's vertical padding)
   // and scroll internally, as they did before the header moved into the page.
   return (
-    <div className="flex min-h-[620px] flex-col gap-[21px] xl:h-[calc(100vh-140px)]">
+    <div className="flex min-h-[620px] flex-col gap-5 xl:h-[calc(100vh-140px)]">
       {/* The mock draws these controls in an app-wide bar; the shell already owns that strip, so the
           mode tabs and time range live at the top of the page's own content instead. */}
-      <div className="grid grid-cols-1 items-center gap-[13px] xl:grid-cols-[1fr_auto_1fr]">
-        <h1 className="text-2xl font-semibold leading-none text-slate-900 dark:text-white">{content.title}</h1>
+      <div className="grid grid-cols-1 items-center gap-3 xl:grid-cols-[1fr_auto_1fr]">
+        <PageHeading title={content.title} />
 
         <div className="inline-flex max-w-full flex-wrap items-center gap-1 justify-self-start rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d] xl:justify-self-center">
           {(Object.keys(AUDIT_MODE_LABELS) as AuditMode[]).map((value) => (
@@ -1068,21 +1069,21 @@ export function PaymentAuditPage() {
             {range === 'custom' && customRangeOpen ? (
               <div className="absolute right-0 top-[calc(100%+10px)] z-[90] w-[min(92vw,560px)] rounded-[24px] border border-slate-200 bg-white/95 p-4 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.45)] backdrop-blur dark:border-[#2a303a] dark:bg-[#11151d]/95 dark:shadow-[0_24px_70px_-40px_rgba(0,0,0,0.7)]">
                 <div className="flex items-center justify-between gap-4">
-                  <p className="text-[13px] font-semibold text-slate-900 dark:text-white">Select time range</p>
+                  <p className="text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">Select time range</p>
                   <Button size="sm" variant="ghost" onClick={() => setCustomRangeOpen(false)}>Close</Button>
                 </div>
                 <div className="mt-4 grid gap-3 md:grid-cols-2">
                   <div>
-                    <p className="mb-[8px] text-[13px] font-medium text-slate-500 dark:text-[#8a8a93]">Start time</p>
+                    <p className="mb-2 text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">Start time</p>
                     <DateTimePicker className="w-full" value={customStart} onChange={setCustomStart} />
                   </div>
                   <div>
-                    <p className="mb-[8px] text-[13px] font-medium text-slate-500 dark:text-[#8a8a93]">End time</p>
+                    <p className="mb-2 text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">End time</p>
                     <DateTimePicker className="w-full" value={customEnd} onChange={setCustomEnd} />
                   </div>
                 </div>
                 {!customWindow ? (
-                  <p className="mt-[13px] text-[13px] text-red-500">
+                  <p className="mt-3 text-[13px] text-red-600 leading-[18px]">
                     Choose an end time after the start time. Future dates are not available.
                   </p>
                 ) : null}
@@ -1103,11 +1104,11 @@ export function PaymentAuditPage() {
       </div>
 
       <form
-        className="flex flex-wrap items-center gap-[13px]"
+        className="flex flex-wrap items-center gap-3"
         onSubmit={(e) => { e.preventDefault(); applyFilters() }}
       >
         <div className={`relative ${showAdvancedFilters ? 'min-w-[240px] flex-1' : 'min-w-[300px] flex-[1.618]'}`}>
-          <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400 dark:text-[#555f6e]" />
+          <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 dark:text-[#78849a]" />
           <input
             className={`${fieldClassName()} pl-11 ${hasActiveFilters ? 'pr-20' : ''}`}
             value={filters.paymentId || filters.requestId}
@@ -1123,14 +1124,14 @@ export function PaymentAuditPage() {
             <button
               type="button"
               onClick={clearFilters}
-              className="absolute right-4 top-1/2 -translate-y-1/2 text-[13px] font-medium text-brand-600 transition hover:text-brand-500 dark:text-brand-400"
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-[13px] font-medium text-brand-600 transition hover:text-brand-600 dark:text-brand-400 leading-[18px]"
             >
               Clear
             </button>
           ) : null}
         </div>
 
-        <div className="flex min-w-[300px] flex-1 items-center gap-[13px]">
+        <div className="flex min-w-[300px] flex-1 items-center gap-3">
         {showAdvancedFilters && mode === 'transactions' ? (
           <div className="flex-1">
             <select
@@ -1195,7 +1196,7 @@ export function PaymentAuditPage() {
           onClick={() => setShowAdvancedFilters((value) => !value)}
           aria-label="More filters"
           title="More filters"
-          className={`h-11 !px-3 ${showAdvancedFilters ? '!text-brand-600 dark:!text-brand-400' : ''}`}
+          className={`h-11 !px-3 ${showAdvancedFilters ? '!text-brand-600 dark:!text-brand-600' : ''}`}
         >
           <SlidersHorizontal className="h-4 w-4" />
         </Button>
@@ -1206,7 +1207,7 @@ export function PaymentAuditPage() {
 
       <ErrorMessage error={error} />
 
-      <div className="flex flex-wrap items-center gap-x-[21px] gap-y-2 text-[13px]">
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] leading-[18px]">
         {loading ? (
           <span className="flex items-center gap-2 text-slate-500 dark:text-[#8a8a93]">
             <Spinner size={14} />
@@ -1231,7 +1232,7 @@ export function PaymentAuditPage() {
         ) : null}
       </div>
 
-      <div className="grid min-h-0 flex-1 gap-[21px] xl:grid-cols-[minmax(360px,1fr)_minmax(0,1.618fr)]">
+      <div className="grid min-h-0 flex-1 gap-5 xl:grid-cols-[minmax(360px,1fr)_minmax(0,1.618fr)]">
         <GlassCard className="h-full overflow-hidden !rounded-2xl">
           {trailFocused ? (
             <div className="shrink-0 border-b border-slate-200 px-5 py-3 dark:border-[#2a303a]">
@@ -1244,7 +1245,7 @@ export function PaymentAuditPage() {
                   {selectedSummary?.payment_id || selectedSummary?.request_id || selectedSummary?.lookup_key || 'Selected payment'}
                 </h2>
                 <div className="flex shrink-0 items-center gap-2">
-                  <span className="text-[13px] text-slate-400 dark:text-[#555f6e]">{totalEvents} event{totalEvents === 1 ? '' : 's'}</span>
+                  <span className="text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">{totalEvents} event{totalEvents === 1 ? '' : 's'}</span>
                   {selectedSummary?.latest_status ? (
                     <Badge variant={summaryBadgeVariant(selectedSummary.latest_status)}>
                       {humanizeAuditValue(selectedSummary.latest_status)}
@@ -1257,11 +1258,11 @@ export function PaymentAuditPage() {
 
           {!trailFocused ? (
             <>
-            <div className="shrink-0 flex items-center justify-between gap-[13px] px-[21px] pb-[13px] pt-[21px]">
+            <div className="shrink-0 flex items-center justify-between gap-3 px-5 pb-3 pt-5">
               <h2 className="truncate text-[21px] font-semibold leading-tight text-slate-900 dark:text-white">
                 {content.matchingLabel}
               </h2>
-              <span className="shrink-0 text-[13px] text-slate-400 dark:text-[#555f6e]">
+              <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
                 {resultRows.length} of {totalMatches.toLocaleString()}
               </span>
             </div>
@@ -1274,7 +1275,7 @@ export function PaymentAuditPage() {
                   key={row.lookup_key}
                   type="button"
                   onClick={() => selectSummary(row.lookup_key, row.event_count)}
-                  className={`relative w-full px-[21px] py-[13px] text-left transition-colors ${
+                  className={`relative w-full px-5 py-3 text-left transition-colors ${
                     isSelected
                       ? 'bg-brand-50/70 dark:bg-[#161b24]'
                       : 'hover:bg-slate-50/80 dark:hover:bg-[#13131a]'
@@ -1283,38 +1284,38 @@ export function PaymentAuditPage() {
                   {isSelected && (
                     <span className="absolute inset-y-0 left-0 w-[3px] bg-brand-500" />
                   )}
-                  <div className="flex items-start justify-between gap-[13px]">
-                    <p className="min-w-0 flex-1 truncate font-mono text-[13px] font-semibold text-slate-900 dark:text-white">
+                  <div className="flex items-start justify-between gap-3">
+                    <p className="min-w-0 flex-1 truncate font-mono text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">
                       {row.payment_id || row.request_id || row.lookup_key}
                     </p>
-                    <span className="shrink-0 text-[13px] text-slate-400 dark:text-[#555f6e]">
+                    <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
                       {formatRelative(row.last_seen_ms)}
                     </span>
                   </div>
-                  <div className="mt-[8px] flex items-center justify-between gap-[13px]">
+                  <div className="mt-2 flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-2">
                       <span
                         className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(row.latest_status)}`}
                         title={humanizeAuditValue(row.latest_status) || 'Unknown'}
                       />
                       {row.latest_gateway ? (
-                        <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#a7b2c6]">
+                        <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#a7b2c6] leading-[18px]">
                           {row.latest_gateway}
                         </span>
                       ) : null}
-                      <span className="shrink-0 text-[13px] text-slate-400 dark:text-[#555f6e]">
+                      <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
                         · {row.event_count} event{row.event_count === 1 ? '' : 's'}
                       </span>
                     </div>
                     {gatewayPath ? (
-                      <span className="shrink-0 truncate rounded-md bg-orange-500/10 px-2 py-0.5 text-[13px] font-medium text-orange-600 ring-1 ring-inset ring-orange-500/20 dark:text-orange-300">
+                      <span className="shrink-0 truncate rounded-md bg-orange-500/10 px-2 py-0.5 text-[13px] font-medium text-orange-600 ring-1 ring-inset ring-orange-500/20 dark:text-orange-300 leading-[18px]">
                         {gatewayPath}
                       </span>
                     ) : null}
                   </div>
                 </button>
               )}) : (
-                <div className="p-[21px]">
+                <div className="p-5">
                   <EmptyState
                     title={content.noMatchesTitle}
                     body={content.noMatchesBody}
@@ -1322,7 +1323,7 @@ export function PaymentAuditPage() {
                 </div>
               )}
             </div>
-            <div className="shrink-0 flex items-center gap-2 border-t border-slate-200 px-[21px] py-[13px] dark:border-[#2a303a]">
+            <div className="shrink-0 flex items-center gap-2 border-t border-slate-200 px-5 py-3 dark:border-[#2a303a]">
               <Button
                 size="sm"
                 variant="secondary"
@@ -1349,7 +1350,7 @@ export function PaymentAuditPage() {
               >
                 Next
               </Button>
-              <span className="ml-auto text-[13px] text-slate-400 dark:text-[#555f6e]">Page {page}</span>
+              <span className="ml-auto text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">Page {page}</span>
             </div>
             </>
           ) : (
@@ -1379,14 +1380,14 @@ export function PaymentAuditPage() {
                           selected
                             ? 'bg-brand-500/15 text-brand-500 dark:text-brand-400'
                             : 'bg-slate-100 text-slate-500 dark:bg-[#1e2330] dark:text-[#8a8a93]'
-                        }`}>
+                        } leading-[18px]`}>
                           {index + 1}
                         </div>
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-[13px] font-semibold text-slate-900 dark:text-white">
+                          <p className="truncate text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">
                             {stageLabel(event)}
                           </p>
-                          <p className="mt-[8px] truncate text-[13px] text-slate-400 dark:text-[#555f6e]">
+                          <p className="mt-2 truncate text-[13px] text-slate-500 dark:text-[#78849a] max-w-[57ch] leading-[18px]">
                             {compactMeta([
                               event.gateway || null,
                               event.routing_approach || null,
@@ -1394,13 +1395,13 @@ export function PaymentAuditPage() {
                             ])}
                           </p>
                           {event.error_message ? (
-                            <p className="mt-[8px] truncate text-[13px] text-red-500 dark:text-red-400">
+                            <p className="mt-2 truncate text-[13px] text-red-600 dark:text-red-400 leading-[18px]">
                               {event.error_message}
                             </p>
                           ) : null}
                         </div>
                         <div className="shrink-0 space-y-1 text-right">
-                          <p className="text-[13px] text-slate-400 dark:text-[#555f6e]">{formatRelative(event.created_at_ms)}</p>
+                          <p className="text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">{formatRelative(event.created_at_ms)}</p>
                           {event.status ? (
                             <Badge variant={summaryBadgeVariant(event.status)}>
                               {humanizeAuditValue(event.status)}
@@ -1424,8 +1425,8 @@ export function PaymentAuditPage() {
         <GlassCard className="h-full overflow-hidden !rounded-2xl">
           {selectedEvent && inspectorModel ? (
             <>
-              <div className="shrink-0 space-y-[8px] px-[21px] pb-0 pt-[21px]">
-                <div className="flex flex-wrap items-center justify-between gap-[13px]">
+              <div className="shrink-0 space-y-2 px-5 pb-0 pt-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
                   <div className="flex min-w-0 items-center gap-2">
                     <h2 className="truncate font-mono text-[21px] font-semibold leading-tight text-slate-900 dark:text-white">
                       {selectedEvent.payment_id || selectedEvent.request_id || stageLabel(selectedEvent)}
@@ -1442,23 +1443,23 @@ export function PaymentAuditPage() {
                 </div>
 
                 {/* Outcome is not repeated here — the badge above it already carries the status. */}
-                <div className="flex flex-wrap items-center gap-x-[21px] gap-y-[8px]">
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
                   <HeadlineFact label="Gateway" value={selectedEvent.gateway || 'Unknown'} />
                   <HeadlineFact label="Stage" value={stageLabel(selectedEvent)} />
                   <HeadlineFact label="Time" value={formatDateTime(selectedEvent.created_at_ms)} />
                 </div>
 
-                <div className="!mt-[21px] flex flex-wrap items-center gap-[21px] border-b border-slate-200 dark:border-[#2a303a]">
+                <div className="!mt-5 flex flex-wrap items-center gap-5 border-b border-slate-200 dark:border-[#2a303a]">
                   {INSPECTOR_TABS.map((tab) => (
                     <button
                       key={tab}
                       type="button"
                       onClick={() => setInspectorTab(tab)}
-                      className={`-mb-px border-b-2 pb-[13px] text-[13px] font-medium transition ${
+                      className={`-mb-px border-b-2 pb-3 text-[13px] font-medium transition ${
                         inspectorTab === tab
                           ? 'border-brand-500 text-brand-600 dark:text-brand-400'
                           : 'border-transparent text-slate-500 hover:text-slate-900 dark:text-[#a7b2c6] dark:hover:text-white'
-                      }`}
+                      } leading-[18px]`}
                     >
                       {INSPECTOR_TAB_LABELS[tab]}
                     </button>
@@ -1466,9 +1467,9 @@ export function PaymentAuditPage() {
                 </div>
               </div>
 
-              <div className="min-h-0 flex-1 space-y-[21px] overflow-y-auto px-[21px] py-[21px]">
+              <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
                 {inspectorTab === 'summary' ? (
-                  <div className="space-y-[21px]">
+                  <div className="space-y-5">
                     {selectedEventIsDecision ? (
                       <ConnectorScorePanel
                         title="Connector scores"
@@ -1478,8 +1479,8 @@ export function PaymentAuditPage() {
                       />
                     ) : null}
                     {inspectorModel.summaryRows.length ? (
-                      <div className="space-y-[13px]">
-                        <h3 className="text-[13px] font-semibold text-slate-900 dark:text-white">Decision metadata</h3>
+                      <div className="space-y-3">
+                        <h3 className="text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">Decision metadata</h3>
                         <InspectorKeyValueGrid rows={inspectorModel.summaryRows} />
                       </div>
                     ) : null}

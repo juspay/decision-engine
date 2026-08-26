@@ -25,8 +25,10 @@ export default {
         },
       },
       fontFamily: {
-        sans: ['Outfit', 'Inter', 'system-ui', '-apple-system', 'sans-serif'],
-        mono: ['JetBrains Mono', 'Menlo', 'Monaco', 'monospace'],
+        // Both resolve through the variables index.css defines on `html`, so the whole app's
+        // type changes in one place.
+        sans: ['var(--font-sans)'],
+        mono: ['var(--font-mono)'],
       },
       letterSpacing: {
         tightest: '-0.03em',

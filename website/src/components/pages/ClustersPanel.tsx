@@ -203,7 +203,7 @@ export function ClustersPanel({
       facets={facets}
       onChange={setFilters}
       rightSlot={
-        <span className="text-[12px] text-slate-500 dark:text-[#8d96aa]">
+        <span className="text-[12px] text-slate-500 dark:text-[#8d96aa] leading-4">
           {clusters.length.toLocaleString()} segment{clusters.length === 1 ? '' : 's'}
           {clusters.length >= limit && ' (capped — narrow the filters to see the rest)'}
         </span>
@@ -240,7 +240,7 @@ export function ClustersPanel({
       <div className="overflow-x-auto">
         <table className="w-full min-w-[720px] text-left text-sm">
           <thead>
-            <tr className="border-b border-slate-200 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] dark:border-[#232833]">
+            <tr className="border-b border-slate-200 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] dark:border-[#232833] leading-4">
               <th className="py-2 pr-3 font-semibold">Connector</th>
               <th className="py-2 pr-3 font-semibold">Network</th>
               {showProgram && <th className="py-2 pr-3 font-semibold">Program</th>}
@@ -328,7 +328,7 @@ function FitBadge({ verdict, segments }: { verdict: string; segments?: ClusterSe
     )
   }
   // Override-only cluster: no fitted row behind it, so there's no grade to state.
-  return <span className="text-slate-400 dark:text-[#6b7280]">—</span>
+  return <span className="text-slate-500 dark:text-[#78849a]">—</span>
 }
 
 /** A right-aligned, clickable column header that shows the sort direction when active. */
@@ -503,7 +503,7 @@ function ClusterRow({
               title="Show per-segment rates"
               aria-expanded={expanded}
             >
-              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-400">
+              <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-500/15 dark:text-amber-400 leading-4">
                 {c.segments!.length} tiers
               </span>
               <span className="tabular-nums font-medium text-slate-800 dark:text-[#c7cfdd]">
@@ -520,7 +520,7 @@ function ClusterRow({
                 </span>
               </div>
               {isOverride && c.model_pct_bps != null && (
-                <span className="block text-[11px] tabular-nums text-slate-400 line-through">
+                <span className="block text-[11px] tabular-nums text-slate-500 line-through leading-4">
                   {formatFee(c.model_pct_bps, c.model_fixed)}
                 </span>
               )}
@@ -563,13 +563,13 @@ function ClusterRow({
       {expanded && hasSegments && (
         <tr className="bg-slate-50/60 dark:bg-[#15151a]">
           <td colSpan={10 + (showProgram ? 1 : 0) + (editable ? 1 : 0)} className="px-3 pb-3 pt-1">
-            <div className="mb-1 text-[11px] text-slate-500 dark:text-[#8d96aa]">
+            <div className="mb-1 text-[11px] text-slate-500 dark:text-[#8d96aa] leading-4">
               Per-segment rates — this cluster’s interchange is capped or tiered, so one rate can’t
               price it. Each tier below is priced separately by transaction amount.
             </div>
-            <table className="w-full text-[12px]">
+            <table className="w-full text-[12px] leading-4">
               <thead>
-                <tr className="text-slate-400 dark:text-[#6b7280]">
+                <tr className="text-slate-500 dark:text-[#78849a]">
                   <th className="py-1 pr-3 text-left font-medium">Amount range</th>
                   <th className="py-1 pr-3 text-right font-medium">Rate</th>
                   <th className="py-1 pr-3 text-right font-medium">Fixed</th>

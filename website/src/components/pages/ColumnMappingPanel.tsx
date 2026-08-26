@@ -12,6 +12,7 @@ import {
 } from '../../hooks/useCostRouting'
 import { inputClass } from './CostRoutingShared'
 
+import { Notice } from '../ui/Notice'
 /**
  * Column mapping: pair the merchant's report headers with the ones this connector reads, when their
  * export uses different labels for the same data.
@@ -148,12 +149,12 @@ export function ColumnMappingPanel({
   return (
     <div className="space-y-4 rounded-lg border border-amber-200 bg-amber-50/50 p-4 dark:border-amber-900/40 dark:bg-amber-950/20">
       <div className="flex items-start gap-2">
-        <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-500" />
+        <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-700" />
         <div>
           <h3 className="font-medium text-slate-800 dark:text-white">
             This file's columns don't match {connector}
           </h3>
-          <p className="mt-1 text-sm text-slate-600 dark:text-[#9ca7ba]">
+          <p className="mt-1 text-sm text-slate-600 dark:text-[#9ca7ba] max-w-[57ch]">
             {preflight.missing.length} required{' '}
             {preflight.missing.length === 1 ? 'column is' : 'columns are'} missing. Map them to the
             matching columns in your file below — we'll remember this mapping for future{' '}
@@ -166,7 +167,7 @@ export function ColumnMappingPanel({
           paper over it rather than fix it — so this is offered before the mapping work, not after. */}
       {preflight.suggested_connectors.length > 0 && (
         <div className="flex items-start gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-900/40 dark:bg-blue-950/30">
-          <Info size={15} className="mt-0.5 shrink-0 text-blue-500" />
+          <Info size={15} className="mt-0.5 shrink-0 text-blue-600" />
           <p className="text-sm text-blue-800 dark:text-blue-300">
             This file matches all{' '}
             {preflight.suggested_connectors[0].matched_required} columns of{' '}
@@ -179,7 +180,7 @@ export function ColumnMappingPanel({
 
       {/* Unmatched required columns — the actual work. */}
       <div className="space-y-2">
-        <div className="grid grid-cols-[1fr_auto_1fr] gap-3 px-1 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa]">
+        <div className="grid grid-cols-[1fr_auto_1fr] gap-3 px-1 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">
           <span>Your column</span>
           <span />
           <span>Maps to ({connector})</span>
@@ -212,7 +213,7 @@ export function ColumnMappingPanel({
                   ))}
                 </select>
                 {/* The example is what actually resolves "is this the right column?". */}
-                <p className="mt-1 truncate text-xs text-slate-400" title={example}>
+                <p className="mt-1 truncate text-xs text-slate-500" title={example}>
                   {selected
                     ? example
                       ? `e.g. ${example}`
@@ -221,13 +222,13 @@ export function ColumnMappingPanel({
                 </p>
               </div>
 
-              <ArrowRight size={15} className="shrink-0 text-slate-300 dark:text-slate-600" />
+              <ArrowRight size={15} className="shrink-0 text-slate-500 dark:text-slate-400" />
 
               <div className="min-w-0">
                 <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm font-medium text-slate-700 dark:border-[#232833] dark:bg-[#141a24] dark:text-[#c7cfdd]">
                   {expected}
                 </div>
-                <p className="mt-1 text-xs text-amber-600 dark:text-amber-500">Required</p>
+                <p className="mt-1 text-xs text-amber-700 dark:text-amber-500">Required</p>
               </div>
             </div>
           )
@@ -271,16 +272,16 @@ export function ColumnMappingPanel({
                         </option>
                       ))}
                     </select>
-                    <p className="mt-1 truncate text-xs text-slate-400" title={example}>
+                    <p className="mt-1 truncate text-xs text-slate-500" title={example}>
                       {selected && example ? `e.g. ${example}` : ' '}
                     </p>
                   </div>
-                  <ArrowRight size={15} className="shrink-0 text-slate-300 dark:text-slate-600" />
+                  <ArrowRight size={15} className="shrink-0 text-slate-500 dark:text-slate-400" />
                   <div className="min-w-0">
-                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600 dark:border-[#232833] dark:bg-[#141a24] dark:text-[#9ca7ba]">
+                    <Notice tone="info">
                       {expected}
-                    </div>
-                    <p className="mt-1 text-xs text-slate-400">Optional</p>
+                    </Notice>
+                    <p className="mt-1 text-xs text-slate-500">Optional</p>
                   </div>
                 </div>
               )
@@ -297,7 +298,7 @@ export function ColumnMappingPanel({
             onClick={() => setShowMatched((s) => !s)}
             className="flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-700 dark:text-[#9ca7ba] dark:hover:text-white"
           >
-            <Check size={14} className="text-emerald-500" />
+            <Check size={14} className="text-emerald-700" />
             {preflight.matched.length} required{' '}
             {preflight.matched.length === 1 ? 'column' : 'columns'} already matched
             <span className="text-xs">{showMatched ? '▲' : '▼'}</span>
@@ -309,7 +310,7 @@ export function ColumnMappingPanel({
                   key={c}
                   className="flex items-center gap-2 rounded-md bg-white px-2.5 py-1.5 text-xs text-slate-600 dark:bg-[#0b1017] dark:text-[#9ca7ba]"
                 >
-                  <Check size={12} className="shrink-0 text-emerald-500" />
+                  <Check size={12} className="shrink-0 text-emerald-700" />
                   <span className="truncate">{c}</span>
                 </li>
               ))}
@@ -346,7 +347,7 @@ export function ColumnMappingPanel({
         >
           Cancel
         </button>
-        <span className="text-xs text-slate-400">
+        <span className="text-xs text-slate-500">
           {!complete
             ? `${stillMissing.length} still to map`
             : !preview
@@ -386,7 +387,7 @@ function MappingPreview({ preview }: { preview: PreviewReport }) {
 
       {preview.warning && (
         <div className="flex items-start gap-2 rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-900/40 dark:bg-red-950/30">
-          <AlertTriangle size={15} className="mt-0.5 shrink-0 text-red-500" />
+          <AlertTriangle size={15} className="mt-0.5 shrink-0 text-red-600" />
           <p className="text-sm text-red-700 dark:text-red-400">{preview.warning}</p>
         </div>
       )}
@@ -394,7 +395,7 @@ function MappingPreview({ preview }: { preview: PreviewReport }) {
       {preview.rows.length > 0 ? (
         <div className="overflow-x-auto">
           <table className="w-full text-left text-xs">
-            <thead className="text-slate-400">
+            <thead className="text-slate-500">
               <tr>
                 <th className="py-1 pr-3 font-medium">Network</th>
                 <th className="py-1 pr-3 font-medium">Currency</th>
@@ -415,7 +416,7 @@ function MappingPreview({ preview }: { preview: PreviewReport }) {
               ))}
             </tbody>
           </table>
-          <p className="mt-2 text-xs text-slate-400">
+          <p className="mt-2 text-xs text-slate-500 max-w-[57ch]">
             Gross, Fee and Effective are derived from the columns you mapped — check they look right
             for your business before saving.
           </p>

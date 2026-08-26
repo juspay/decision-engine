@@ -15,7 +15,7 @@ export const UPLOAD_CONNECTORS = [
 /** Shared input styling for the cost-routing forms (credentials + manual upload). */
 export const inputClass =
   'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 ' +
-  'placeholder:text-slate-400 focus:border-brand-500 focus:outline-none ' +
+  'placeholder:text-slate-500 focus:border-brand-500 focus:outline-none ' +
   'dark:border-[#232833] dark:bg-[#0b1017] dark:text-white'
 
 /** Labelled form field with an optional hint line, used by both cost-routing forms. */

@@ -7,6 +7,7 @@ import { Card, CardBody, CardHeader } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
 
+import { PageHeading } from '../components/ui/PageHeading'
 interface ApiKeyListItem {
   key_id: string
   key_prefix: string
@@ -42,7 +43,7 @@ function CopyButton({ text }: { text: string }) {
       className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-600 transition hover:border-slate-300 hover:text-slate-900 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-slate-300 dark:hover:text-white"
       title={copied ? 'Copied' : 'Copy key'}
     >
-      {copied ? <Check size={12} className="text-emerald-500" /> : <Copy size={12} />}
+      {copied ? <Check size={12} className="text-emerald-700" /> : <Copy size={12} />}
       {copied ? 'Copied' : 'Copy'}
     </button>
   )
@@ -103,12 +104,7 @@ export function ApiKeysPage() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">API Keys</h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-[#8a8a93]">
-          Create and manage API keys for programmatic access to the routing engine. Pass the key via the{' '}
-          <code className="rounded bg-slate-100 px-1 py-0.5 text-xs font-mono dark:bg-[#1c1c24]">x-api-key</code>{' '}
-          header on all API requests.
-        </p>
+        <PageHeading title="API Keys" description={<>Create and manage API keys for programmatic access to the routing engine. Pass the key via the{' '} <code className="rounded bg-slate-100 px-1 py-0.5 text-xs font-mono dark:bg-[#1c1c24]">x-api-key</code>{' '} header on all API requests.</>} />
       </div>
 
       {/* Create new key */}
@@ -147,7 +143,7 @@ export function ApiKeysPage() {
                 <CopyButton text={newKey.api_key} />
               </div>
               {newKey.description && (
-                <p className="mt-2 text-xs text-emerald-600 dark:text-emerald-500">
+                <p className="mt-2 text-xs text-emerald-700 dark:text-emerald-500">
                   Description: {newKey.description}
                 </p>
               )}
@@ -189,9 +185,9 @@ export function ApiKeysPage() {
                       {key.key_prefix}…
                     </td>
                     <td className="px-5 py-3 text-slate-600 dark:text-[#8a8a93]">
-                      {key.description || <span className="italic text-slate-400">—</span>}
+                      {key.description || <span className="italic text-slate-500">—</span>}
                     </td>
-                    <td className="px-5 py-3 text-slate-500 dark:text-[#6d768a]">
+                    <td className="px-5 py-3 text-slate-500 dark:text-[#78849a]">
                       {new Date(key.created_at).toLocaleDateString()}
                     </td>
                     <td className="px-5 py-3 text-right">

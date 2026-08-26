@@ -17,9 +17,9 @@ type ChipVariant = 'blue' | 'purple' | 'green' | 'teal' | 'orange' | 'red' | 'gr
 const CHIP_CLASSES: Record<ChipVariant, string> = {
   blue: 'bg-blue-50 text-blue-600 dark:bg-blue-500/12 dark:text-blue-300',
   purple: 'bg-violet-50 text-violet-600 dark:bg-violet-500/12 dark:text-violet-300',
-  green: 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/12 dark:text-emerald-300',
-  teal: 'bg-teal-50 text-teal-600 dark:bg-teal-500/12 dark:text-teal-300',
-  orange: 'bg-orange-50 text-orange-600 dark:bg-orange-500/12 dark:text-orange-300',
+  green: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/12 dark:text-emerald-300',
+  teal: 'bg-teal-50 text-teal-700 dark:bg-teal-500/12 dark:text-teal-300',
+  orange: 'bg-orange-50 text-orange-700 dark:bg-orange-500/12 dark:text-orange-300',
   red: 'bg-rose-50 text-rose-600 dark:bg-rose-500/12 dark:text-rose-300',
   gray: 'bg-slate-100 text-slate-600 dark:bg-white/[0.06] dark:text-slate-300',
 }
@@ -36,7 +36,7 @@ export function Chip({ variant, children }: { variant: ChipVariant; children: Re
 // Full-width input used inside the scenario modal.
 const modalInput =
   'w-full rounded-md border border-slate-200 bg-white px-2 py-1.5 text-sm ' +
-  'text-slate-900 placeholder:text-slate-400 focus:border-brand-500 focus:outline-none ' +
+  'text-slate-900 placeholder:text-slate-500 focus:border-brand-500 focus:outline-none ' +
   'dark:border-[#232833] dark:bg-[#0b1017] dark:text-white disabled:opacity-50'
 
 // Colour a PSP / card-network chip. Known names get an on-brand colour; anything else falls back to
@@ -160,25 +160,25 @@ export function SeedRow({
         {row.card_network ? (
           <Chip variant={networkVariant(row.card_network)}>{row.card_network}</Chip>
         ) : (
-          <span className="text-slate-400">Any</span>
+          <span className="text-slate-500">Any</span>
         )}
       </td>
       <td className="py-3 pr-3 capitalize text-slate-600 dark:text-[#c7cfdd]">
-        {row.payment_method_type || <span className="text-slate-400">Any</span>}
+        {row.payment_method_type || <span className="text-slate-500">Any</span>}
       </td>
       <td className="py-3 pr-3 text-slate-600 dark:text-[#c7cfdd]">
         {/* Underscores read badly next to the other columns: "ultra_premium" → "ultra premium". */}
         {row.card_type ? (
           row.card_type.replace(/_/g, ' ')
         ) : (
-          <span className="text-slate-400">Any</span>
+          <span className="text-slate-500">Any</span>
         )}
       </td>
       <td className="py-3 pr-3 tabular-nums text-slate-600 dark:text-[#c7cfdd]">
-        {row.transaction_currency?.toUpperCase() || <span className="text-slate-400">Any</span>}
+        {row.transaction_currency?.toUpperCase() || <span className="text-slate-500">Any</span>}
       </td>
       <td className="py-3 pr-3 text-slate-600 dark:text-[#c7cfdd]">
-        {row.card_issuing_country || <span className="text-slate-400">Any</span>}
+        {row.card_issuing_country || <span className="text-slate-500">Any</span>}
       </td>
       <td className="py-3 pr-3 text-right tabular-nums text-slate-600 dark:text-[#c7cfdd]">
         {pctText(row.interchange_bps)}
@@ -279,7 +279,7 @@ export function ScenarioModal({
             onClick={onClose}
             disabled={busy}
             aria-label="Close"
-            className="text-slate-400 transition-colors hover:text-slate-700 disabled:opacity-40 dark:hover:text-white"
+            className="text-slate-500 transition-colors hover:text-slate-700 disabled:opacity-40 dark:hover:text-white"
           >
             <X size={16} />
           </button>
@@ -312,8 +312,8 @@ export function ScenarioModal({
           </div>
 
           <div>
-            <p className="mb-2 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa]">
-              Applies to <span className="font-normal text-slate-400">(blank = any card)</span>
+            <p className="mb-2 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">
+              Applies to <span className="font-normal text-slate-500">(blank = any card)</span>
             </p>
             <div className="grid grid-cols-2 gap-3">
               <ModalField label="Network">
@@ -374,8 +374,8 @@ export function ScenarioModal({
           </div>
 
           <div>
-            <p className="mb-2 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa]">
-              Fees <span className="font-normal text-slate-400">(rates in %, fixed per transaction)</span>
+            <p className="mb-2 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">
+              Fees <span className="font-normal text-slate-500">(rates in %, fixed per transaction)</span>
             </p>
             <div className="grid grid-cols-4 gap-3">
               <ModalField label="Interchange">
@@ -429,7 +429,7 @@ export function ScenarioModal({
 function ModalField({ label, children }: { label: string; children: ReactNode }) {
   return (
     <label className="block space-y-1">
-      <span className="block text-[12px] font-medium text-slate-500 dark:text-[#8d96aa]">{label}</span>
+      <span className="block text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">{label}</span>
       {children}
     </label>
   )
@@ -476,7 +476,7 @@ function PctInput({ bps, onChange }: { bps: number; onChange: (bps: number) => v
           onChange(Number.isFinite(p) ? Math.round(p * 100 * 100) / 100 : 0)
         }}
       />
-      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400">
+      <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-500">
         %
       </span>
     </div>

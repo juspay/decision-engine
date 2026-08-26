@@ -16,7 +16,7 @@ export function PriceChanges({ merchantId }: { merchantId?: string }) {
     <Card>
       <CardHeader>
         <div className="flex items-center gap-2">
-          <TrendingUp size={16} className="text-amber-500" />
+          <TrendingUp size={16} className="text-amber-700" />
           <div>
             <h2 className={type.heading}>Clusters whose price moved</h2>
           </div>
@@ -26,7 +26,7 @@ export function PriceChanges({ merchantId }: { merchantId?: string }) {
         <div className="overflow-x-auto">
           <table className="w-full min-w-[560px] text-left text-sm">
             <thead>
-              <tr className="border-b border-slate-200 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] dark:border-[#232833]">
+              <tr className="border-b border-slate-200 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] dark:border-[#232833] leading-4">
                 <th className="py-2 pr-3 font-semibold">Cluster</th>
                 <th className="py-2 pr-3 text-right font-semibold">Percentage</th>
                 <th className="py-2 pr-3 text-right font-semibold">Flat fee</th>
@@ -60,12 +60,12 @@ export function PriceChanges({ merchantId }: { merchantId?: string }) {
 }
 
 function Delta({ from, to, up, same }: { from: string; to: string; up: boolean; same: boolean }) {
-  if (same) return <span className="text-slate-400">{to}</span>
+  if (same) return <span className="text-slate-500">{to}</span>
   return (
     <span>
-      <span className="text-slate-400">{from}</span>
-      <span className="mx-1 text-slate-400">→</span>
-      <span className={up ? 'font-medium text-amber-500' : 'font-medium text-emerald-500'}>{to}</span>
+      <span className="text-slate-500">{from}</span>
+      <span className="mx-1 text-slate-500">→</span>
+      <span className={up ? 'font-medium text-amber-700' : 'font-medium text-emerald-700'}>{to}</span>
     </span>
   )
 }

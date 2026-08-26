@@ -61,7 +61,7 @@ export function IngestionHistory({ merchantId }: { merchantId?: string }) {
     <Card>
       <CardHeader>
         <div className="flex items-center gap-2">
-          <History size={16} className="text-brand-500" />
+          <History size={16} className="text-brand-600" />
           <div>
             <h2 className={type.heading}>Reports ingested</h2>
           </div>
@@ -81,7 +81,7 @@ export function IngestionHistory({ merchantId }: { merchantId?: string }) {
           <div className="overflow-x-auto">
             <table className="w-full min-w-[720px] text-left text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] dark:border-[#232833]">
+                <tr className="border-b border-slate-200 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] dark:border-[#232833] leading-4">
                   <th className="py-2 pr-2 font-semibold" />
                   <th className="py-2 pr-3 font-semibold">Ingested</th>
                   <th className="py-2 pr-3 font-semibold">Source</th>
@@ -147,7 +147,7 @@ function Row({
         className="cursor-pointer border-b border-slate-100 hover:bg-slate-50 dark:border-[#1c1c23] dark:hover:bg-[#0b1017]"
         onClick={onToggle}
       >
-        <td className="py-2 pr-2 text-slate-400">
+        <td className="py-2 pr-2 text-slate-500">
           {open ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
         </td>
         <td className="py-2 pr-3 text-slate-600 dark:text-[#c7cfdd]">{formatTs(job.created_at)}</td>
@@ -185,7 +185,7 @@ function Row({
                 e.stopPropagation()
                 onDelete()
               }}
-              className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950/30"
+              className="rounded p-1 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-950/30"
             >
               {deleting ? <Spinner size={14} /> : <Trash2 size={14} />}
             </button>
@@ -221,7 +221,7 @@ function Row({
                 snapshot), so it applies to routing from here on. */}
             {job.status === 'completed' && job.report_date && (
               <div className="mt-4 border-t border-slate-200 pt-3 dark:border-[#232833]">
-                <p className="mb-2 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa]">
+                <p className="mb-2 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">
                   Fitted segments (top by txns) — edit any rate to override it
                 </p>
                 <ClustersPanel
@@ -258,10 +258,10 @@ function Row({
 function Detail({ label, value, error }: { label: string; value: string; error?: boolean }) {
   return (
     <div>
-      <dt className="text-[12px] font-medium text-slate-500 dark:text-[#8d96aa]">{label}</dt>
+      <dt className="text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">{label}</dt>
       <dd
         className={`mt-0.5 break-words text-sm ${
-          error ? 'text-red-500' : 'text-slate-600 dark:text-[#c7cfdd]'
+          error ? 'text-red-600' : 'text-slate-600 dark:text-[#c7cfdd]'
         }`}
       >
         {value}

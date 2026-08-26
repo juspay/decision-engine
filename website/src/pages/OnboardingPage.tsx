@@ -37,7 +37,7 @@ function Field({
       </label>
       {children}
       {footer ? (
-        <p className="text-sm leading-6 text-slate-500 dark:text-[#707786]">{footer}</p>
+        <p className="text-sm leading-6 text-slate-500 dark:text-[#78849a]">{footer}</p>
       ) : null}
     </div>
   )
@@ -139,7 +139,7 @@ export function OnboardingPage() {
                       value={merchantName}
                       onChange={(e) => setMerchantName(e.target.value)}
                       placeholder="e.g. Acme Corp"
-                      className="h-16 w-full rounded-2xl border border-slate-200 bg-white pl-12 pr-5 text-[15px] text-slate-900 outline-none transition-all placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-white dark:placeholder:text-[#6e7684] dark:focus:border-blue-500"
+                      className="h-16 w-full rounded-2xl border border-slate-200 bg-white pl-12 pr-5 text-[15px] text-slate-900 outline-none transition-all placeholder:text-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-white dark:placeholder:text-[#6e7684] dark:focus:border-blue-500 leading-[22px]"
                     />
                   </div>
                 </Field>
@@ -168,9 +168,9 @@ export function OnboardingPage() {
                 </button>
               </form>
 
-              <div className="mt-10 border-t border-slate-200 pt-6 text-center text-xs text-slate-500 dark:border-[#1d1d23] dark:text-[#667085]">
+              <div className="mt-10 border-t border-slate-200 pt-6 text-center text-xs text-slate-500 dark:border-[#1d1d23] dark:text-[#78849a]">
                 <p>Merchant access will be linked to your current session.</p>
-                <p className="mt-4 text-slate-400 dark:text-[#525866]">Juspay Decision Engine</p>
+                <p className="mt-4 text-slate-500 dark:text-[#78849a]">Juspay Decision Engine</p>
               </div>
             </div>
           </div>

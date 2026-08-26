@@ -103,10 +103,10 @@ export function SearchableSelect({
         style={{ backgroundImage: 'none', display: 'flex', alignItems: 'center' }}
         data-value={value}
       >
-        <span className="min-w-0 truncate text-left">{selectedLabel || <span className="text-slate-400">select...</span>}</span>
+        <span className="min-w-0 truncate text-left">{selectedLabel || <span className="text-slate-500">select...</span>}</span>
         <ChevronDown
           size={11}
-          className={`shrink-0 text-slate-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+          className={`shrink-0 text-slate-500 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
         />
       </button>
 
@@ -131,7 +131,7 @@ export function SearchableSelect({
             style={{ maxHeight: `${Math.min(filtered.length * 32 + 8, 272)}px` }}
           >
             {filtered.length === 0 ? (
-              <p className="px-3 py-2.5 text-sm text-slate-400">No matches</p>
+              <p className="px-3 py-2.5 text-sm text-slate-500">No matches</p>
             ) : (
               filtered.map(o => (
                 <button
