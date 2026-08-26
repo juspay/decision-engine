@@ -90,14 +90,14 @@ export function InvoiceUpload({ merchantId }: { merchantId?: string }) {
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
-            <FileText size={16} className="text-brand-500" />
+            <FileText size={16} className="text-brand-600" />
             <div>
               <h2 className={type.heading}>Upload a connector invoice</h2>
             </div>
           </div>
         </CardHeader>
         <CardBody className="space-y-4">
-          <p className="text-sm text-slate-500 dark:text-[#9ca7ba]">
+          <p className="text-sm text-slate-500 dark:text-[#9ca7ba] max-w-[57ch]">
             The settlement report only carries a transaction's core fees, so our model was
             structurally missing ~9% of the true cost — flat per-transaction fees, periodic fees and
             credits that only appear on the monthly invoice. Upload that invoice and we'll identify
@@ -251,14 +251,14 @@ function LineTable({
 }) {
   if (lines.length === 0) {
     return (
-      <p className="text-sm text-slate-400">No lines in this group.</p>
+      <p className="text-sm text-slate-500">No lines in this group.</p>
     )
   }
   return (
     <div className="overflow-x-auto rounded-lg border border-slate-200 dark:border-[#232833]">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b border-slate-200 text-left text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] dark:border-[#232833]">
+          <tr className="border-b border-slate-200 text-left text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] dark:border-[#232833] leading-4">
             <th className="px-3 py-2 font-medium">Fee</th>
             <th className="px-3 py-2 font-medium">Category</th>
             <th className="px-3 py-2 text-right font-medium">On invoice</th>
@@ -336,7 +336,7 @@ function ActiveAddons({
           >
             <div className="min-w-0">
               <p className="text-sm font-medium text-slate-800 dark:text-white">{a.connector}</p>
-              <p className="text-xs text-slate-500 dark:text-[#9ca7ba]">
+              <p className="text-xs text-slate-500 dark:text-[#9ca7ba] max-w-[57ch]">
                 +{money(a.fixed_addon, a.currency, 4)} / txn · +{a.pct_addon_bps.toFixed(3)} bps
                 {a.invoice_ref ? ` · invoice ${a.invoice_ref}` : ''}
               </p>

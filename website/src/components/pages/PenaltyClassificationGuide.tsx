@@ -130,7 +130,7 @@ export function PenaltyClassificationGuide({ merchantId, gsmRules, decideParams 
       </CardHeader>
       <CardBody className="space-y-4">
         {gsmRules.length === 0 ? (
-          <p className="text-xs text-slate-400">Loading GSM rules…</p>
+          <p className="text-xs text-slate-500">Loading GSM rules…</p>
         ) : (
           <>
             {(['protected', 'penalized'] as const).map(kind => {
@@ -139,7 +139,7 @@ export function PenaltyClassificationGuide({ merchantId, gsmRules, decideParams 
               const isProtected = kind === 'protected'
               return (
                 <div key={kind}>
-                  <p className={`text-[11px] font-semibold uppercase tracking-wider mb-2 ${isProtected ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-500 dark:text-red-400'}`}>
+                  <p className={`text-[11px] font-semibold uppercase tracking-wider mb-2 ${isProtected ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'} max-w-[68ch] leading-4`}>
                     {isProtected ? '✓ Protected — gateway score unchanged' : '✗ Penalised — gateway score decremented'}
                   </p>
                   <div className="space-y-2">
@@ -176,21 +176,21 @@ export function PenaltyClassificationGuide({ merchantId, gsmRules, decideParams 
                               <span className="text-xs font-semibold text-slate-800 dark:text-slate-100">{scenario.label}</span>
                             </div>
                             <div className="flex items-center gap-2 shrink-0 ml-2">
-                              <span className="text-[10px] text-slate-400">{connectors.length} connector{connectors.length !== 1 ? 's' : ''}</span>
-                              <ChevronDown size={12} className={`text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+                              <span className="text-[11px] text-slate-500 leading-4">{connectors.length} connector{connectors.length !== 1 ? 's' : ''}</span>
+                              <ChevronDown size={12} className={`text-slate-500 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                             </div>
                           </button>
 
                           {isExpanded && (
                             <div className="px-3 py-3 space-y-3 border-t border-slate-100 dark:border-[#1c1c24] bg-white dark:bg-[#0d1117]">
-                              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                              <div className="text-[11px] text-slate-500 dark:text-slate-400 leading-4">
                                 <span className="font-medium text-slate-700 dark:text-slate-300">Unified message: </span>
                                 <span className="font-mono">{scenario.key}</span>
                               </div>
 
                               {connectors.length > 0 && (
                                 <div>
-                                  <p className="text-[10px] font-medium text-slate-500 dark:text-slate-400 mb-1.5">Select connector to test:</p>
+                                  <p className="text-[11px] font-medium text-slate-500 dark:text-slate-400 mb-1.5 leading-4">Select connector to test:</p>
                                   <div className="flex flex-wrap gap-1.5">
                                     {connectors.map(conn => (
                                       <button
@@ -203,7 +203,7 @@ export function PenaltyClassificationGuide({ merchantId, gsmRules, decideParams 
                                               ? 'bg-emerald-50 text-emerald-700 ring-emerald-300 dark:bg-emerald-900/30 dark:text-emerald-300 dark:ring-emerald-700'
                                               : 'bg-red-50 text-red-700 ring-red-300 dark:bg-red-900/30 dark:text-red-300 dark:ring-red-700'
                                             : 'bg-slate-50 text-slate-600 ring-slate-200 hover:bg-slate-100 dark:bg-[#1c1c24] dark:text-slate-400 dark:ring-[#2a2a35]'
-                                        }`}
+                                        } leading-4`}
                                       >
                                         {conn}
                                       </button>
@@ -213,7 +213,7 @@ export function PenaltyClassificationGuide({ merchantId, gsmRules, decideParams 
                               )}
 
                               {selectedRule && (
-                                <div className="rounded-lg bg-slate-50 dark:bg-[#10131c] px-3 py-2 text-[11px] space-y-0.5">
+                                <div className="rounded-lg bg-slate-50 dark:bg-[#10131c] px-3 py-2 text-[11px] space-y-0.5 leading-4">
                                   <div><span className="text-slate-500">Error code: </span><span className="font-mono font-medium text-slate-700 dark:text-slate-200">{selectedRule.errorCode}</span></div>
                                   <div><span className="text-slate-500">Message: </span><span className="text-slate-600 dark:text-slate-300">{selectedRule.errorMessage}</span></div>
                                 </div>
@@ -235,7 +235,7 @@ export function PenaltyClassificationGuide({ merchantId, gsmRules, decideParams 
                               )}
 
                               {!merchantId && (
-                                <p className="text-[11px] text-amber-600 dark:text-amber-400">Set a merchant ID in the top bar to run tests.</p>
+                                <p className="text-[11px] text-amber-700 dark:text-amber-400 leading-4">Set a merchant ID in the top bar to run tests.</p>
                               )}
 
                               {testResult && !testResult.loading && (
@@ -249,20 +249,20 @@ export function PenaltyClassificationGuide({ merchantId, gsmRules, decideParams 
                                         : 'border-red-200 bg-red-50 dark:border-red-800/40 dark:bg-red-900/10'
                                 }`}>
                                   {testResult.error ? (
-                                    <p className="text-[11px] text-amber-700 dark:text-amber-300">{testResult.error}</p>
+                                    <p className="text-[11px] text-amber-700 dark:text-amber-300 leading-4">{testResult.error}</p>
                                   ) : (
                                     <>
-                                      <div className="flex items-center gap-3 text-[11px]">
+                                      <div className="flex items-center gap-3 text-[11px] leading-4">
                                         <span className="text-slate-500">Score:</span>
                                         <span className="font-mono font-semibold text-slate-700 dark:text-slate-200">
                                           {testResult.scoreBefore?.toFixed(3) ?? '—'}
                                         </span>
-                                        <span className="text-slate-400">→</span>
-                                        <span className={`font-mono font-semibold ${scoreChanged ? 'text-red-600 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}`}>
+                                        <span className="text-slate-500">→</span>
+                                        <span className={`font-mono font-semibold ${scoreChanged ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}`}>
                                           {testResult.scoreAfter?.toFixed(3) ?? '—'}
                                         </span>
                                         {scoreDelta != null && (
-                                          <span className={`text-[10px] font-medium ${scoreChanged ? 'text-red-500' : 'text-emerald-500'}`}>
+                                          <span className={`text-[11px] font-medium ${scoreChanged ? 'text-red-600' : 'text-emerald-700'} leading-4`}>
                                             ({scoreDelta > 0 ? '+' : ''}{scoreDelta.toFixed(3)})
                                           </span>
                                         )}
@@ -273,7 +273,7 @@ export function PenaltyClassificationGuide({ merchantId, gsmRules, decideParams 
                                           : isProtected
                                             ? 'text-emerald-700 dark:text-emerald-300'
                                             : 'text-red-600 dark:text-red-400'
-                                      }`}>
+                                      } leading-4`}>
                                         {isProtected
                                           ? isUnexpected
                                             ? `⚠ Score decreased — gateway was penalised (${scoreDelta!.toFixed(3)})`
@@ -298,7 +298,7 @@ export function PenaltyClassificationGuide({ merchantId, gsmRules, decideParams 
                 </div>
               )
             })}
-            <p className="text-[11px] text-slate-400 dark:text-slate-500 pt-1 border-t border-slate-100 dark:border-[#1c1c24]">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400 pt-1 border-t border-slate-100 dark:border-[#1c1c24] leading-4">
               Errors with no matching GSM rule, or calls made without <span className="font-mono">error_info</span>, are always penalised. The GSM scoring filter must be enabled under SR Routing settings for skip-penalty logic to apply. Configure simulation parameters on the left and run to observe score changes live.
             </p>
           </>

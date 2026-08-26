@@ -299,7 +299,7 @@ export function AuthPage() {
               <h3 className="text-[clamp(2.25rem,3.6vw,3.15rem)] font-semibold tracking-[-0.05em] text-slate-950 dark:text-white">
                 {tab === 'login' ? 'Welcome back' : 'Create account'}
               </h3>
-              <p className="mt-3 text-base text-slate-500 dark:text-[#8a94a7]">
+              <p className="mt-3 text-base text-slate-500 dark:text-[#8a94a7] mx-auto max-w-[57ch]">
                 {tab === 'login'
                   ? 'Sign in to access your dashboard'
                   : 'Create access for your Decision Engine dashboard'}
@@ -369,7 +369,7 @@ export function AuthPage() {
                       <button
                         type="button"
                         onClick={() => setShowPassword((value) => !value)}
-                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 transition-colors hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-200"
+                        className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 transition-colors hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
                         aria-label={showPassword ? 'Hide password' : 'Show password'}
                       >
                         {showPassword ? <Eye size={18} /> : <EyeOff size={18} />}
@@ -390,7 +390,7 @@ export function AuthPage() {
                   ) : null}
 
                   {tab === 'signup' ? (
-                    <p className="text-xs leading-5 text-slate-500 dark:text-[#7b8496]">
+                    <p className="text-xs leading-5 text-slate-500 dark:text-[#7b8496] max-w-[57ch]">
                       Password policy: minimum 10 characters, including 1 uppercase letter, 1
                       lowercase letter, 1 number, and 1 special character.
                     </p>
@@ -425,9 +425,9 @@ export function AuthPage() {
                   </button>
                 </form>
 
-                <div className="mt-10 border-t border-slate-200 pt-6 text-center text-xs text-slate-500 dark:border-[#1d1d23] dark:text-[#667085]">
+                <div className="mt-10 border-t border-slate-200 pt-6 text-center text-xs text-slate-500 dark:border-[#1d1d23] dark:text-[#78849a]">
                   <p>By continuing you agree to access policy and audit logging for account activity.</p>
-                  <p className="mt-4 text-slate-400 dark:text-[#525866]">Juspay Decision Engine</p>
+                  <p className="mt-4 text-slate-500 dark:text-[#78849a]">Juspay Decision Engine</p>
                 </div>
               </div>
             </div>
@@ -492,14 +492,14 @@ function FieldInput({
   return (
     <div className="relative">
       {icon ? (
-        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 dark:text-[#667085]">
+        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 dark:text-[#78849a]">
           {icon}
         </span>
       ) : null}
       <input
         {...props}
         ref={inputRef}
-        className={`h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.12)] outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-white dark:shadow-none ${icon ? 'pl-12' : ''} ${className}`}
+        className={`h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.12)] outline-none transition placeholder:text-slate-500 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-white dark:shadow-none ${icon ? 'pl-12' : ''} ${className}`}
       />
     </div>
   )

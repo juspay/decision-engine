@@ -274,14 +274,14 @@ export function ScopeSwitcher() {
 
   const triggerBody = (
     <>
-      <TriggerIcon size={14} className="shrink-0 text-slate-400" />
+      <TriggerIcon size={14} className="shrink-0 text-slate-500" />
       <span className="flex min-w-0 flex-col items-start leading-tight">
         {current.merchant && (
-          <span className="max-w-[170px] truncate text-[10px] font-medium uppercase tracking-wide text-slate-400 dark:text-slate-500">
+          <span className="max-w-[170px] truncate text-[11px] font-medium uppercase tracking-wide text-slate-500 dark:text-slate-400 leading-4">
             {current.merchant}
           </span>
         )}
-        <span className="max-w-[170px] truncate text-[12.5px] font-semibold text-slate-700 dark:text-slate-200">
+        <span className="max-w-[170px] truncate text-[12.5px] font-semibold text-slate-700 dark:text-slate-200 leading-[17px]">
           {current.profile}
         </span>
       </span>
@@ -318,7 +318,7 @@ export function ScopeSwitcher() {
         className="flex h-10 items-center gap-2 rounded-lg border border-[#e6e6ee] bg-white px-3 text-slate-700 transition-colors hover:bg-slate-50 dark:border-[#1a1a24] dark:bg-[#121218] dark:text-slate-300 dark:hover:bg-[#18181f]"
       >
         {triggerBody}
-        <ChevronDown size={12} className="shrink-0 text-slate-400" />
+        <ChevronDown size={12} className="shrink-0 text-slate-500" />
       </button>
 
       {open && (
@@ -329,7 +329,7 @@ export function ScopeSwitcher() {
           {/* Where the session is now, spelled out one level per line — the panel is the one place
               with room for the full breadcrumb the trigger has to truncate. */}
           <div className="border-b border-[#e6e6ee] px-3.5 py-3 dark:border-[#1a1a24]">
-            <p className="mb-2 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400 leading-4">
               Current scope
             </p>
             <div className="space-y-1.5">
@@ -346,7 +346,7 @@ export function ScopeSwitcher() {
               />
             </div>
             <div className="mt-2 flex items-center gap-1.5 pl-[22px]">
-              <span className="truncate font-mono text-[10.5px] text-slate-400 dark:text-slate-500">
+              <span className="truncate font-mono text-[11px] text-slate-500 dark:text-slate-400 leading-4">
                 {user?.merchantId}
               </span>
               <CopyButton text={user?.merchantId ?? ''} label="Copy scope id" />
@@ -357,14 +357,14 @@ export function ScopeSwitcher() {
             <div className="relative">
               <Search
                 size={13}
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400"
+                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500"
               />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder={isGranted ? 'Search profiles, merchants, ids' : 'Search merchants'}
                 autoFocus
-                className="h-8 w-full rounded-md border border-[#e6e6ee] bg-white pl-8 pr-2.5 text-[13px] text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-brand-500/30 dark:border-[#1a1a24] dark:bg-[#121218] dark:text-slate-200"
+                className="h-8 w-full rounded-md border border-[#e6e6ee] bg-white pl-8 pr-2.5 text-[13px] text-slate-700 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 dark:border-[#1a1a24] dark:bg-[#121218] dark:text-slate-200 leading-[18px]"
               />
             </div>
           </div>
@@ -373,7 +373,7 @@ export function ScopeSwitcher() {
               would scroll through the band left above it. */}
           <div ref={listRef} className="flex-1 overflow-y-auto pb-1">
             {visibleGroups.length === 0 && (
-              <p className="px-3.5 py-6 text-center text-[12px] text-slate-400">
+              <p className="px-3.5 py-6 text-center text-[12px] text-slate-500 leading-4">
                 Nothing matches “{query.trim()}”.
               </p>
             )}
@@ -389,7 +389,7 @@ export function ScopeSwitcher() {
                       the answer to "which merchant is this profile under?" scrolls out of reach.
                       The merchant sits below the org band, so it pins at that band's height. */}
                   {showOrgHeader && (
-                    <p className="sticky top-0 z-20 flex items-center gap-1.5 bg-white px-3.5 pb-1 pt-2.5 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:bg-[#0c0c10] dark:text-slate-500">
+                    <p className="sticky top-0 z-20 flex items-center gap-1.5 bg-white px-3.5 pb-1 pt-2.5 text-[11px] font-semibold uppercase tracking-widest text-slate-500 dark:bg-[#0c0c10] dark:text-slate-500 leading-4">
                       <Building2 size={11} className="shrink-0" />
                       <span className="truncate">{group.org}</span>
                     </p>
@@ -404,13 +404,13 @@ export function ScopeSwitcher() {
                     >
                       <ChevronRight
                         size={12}
-                        className={`shrink-0 text-slate-400 transition-transform ${folded ? '' : 'rotate-90'}`}
+                        className={`shrink-0 text-slate-500 transition-transform ${folded ? '' : 'rotate-90'}`}
                       />
-                      <Store size={12} className="shrink-0 text-slate-400" />
-                      <span className="flex-1 truncate text-[12px] font-medium text-slate-600 dark:text-slate-300">
+                      <Store size={12} className="shrink-0 text-slate-500" />
+                      <span className="flex-1 truncate text-[12px] font-medium text-slate-600 dark:text-slate-300 leading-4">
                         {group.merchant}
                       </span>
-                      <span className="shrink-0 text-[10.5px] tabular-nums text-slate-400">
+                      <span className="shrink-0 text-[11px] tabular-nums text-slate-500 leading-4">
                         {group.scopes.length}
                       </span>
                     </button>
@@ -433,17 +433,17 @@ export function ScopeSwitcher() {
                             group.merchant !== null ? 'pl-9' : 'pl-3.5'
                           } ${isActive ? 'bg-slate-50 dark:bg-[#13131a]' : ''}`}
                         >
-                          <LeafIcon size={12} className="shrink-0 text-slate-300 dark:text-slate-600" />
+                          <LeafIcon size={12} className="shrink-0 text-slate-500 dark:text-slate-400" />
                           <span
                             className={`flex-1 truncate text-[13px] ${
                               isCurrent
                                 ? 'font-semibold text-brand-600'
                                 : 'font-medium text-slate-700 dark:text-slate-300'
-                            }`}
+                            } leading-[18px]`}
                           >
                             {labels.profile}
                           </span>
-                          <span className="shrink-0 font-mono text-[10px] text-slate-400 dark:text-slate-500">
+                          <span className="shrink-0 font-mono text-[11px] text-slate-500 dark:text-slate-400 leading-4">
                             {shortId(scope.merchant_id)}
                           </span>
                           {isCurrent && <Check size={13} className="shrink-0 text-brand-600" />}
@@ -465,7 +465,7 @@ export function ScopeSwitcher() {
                 className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-brand-600 transition-colors hover:bg-slate-50 dark:hover:bg-[#13131a]"
               >
                 <Plus size={13} />
-                <span className="text-[13px] font-medium">Add merchant</span>
+                <span className="text-[13px] font-medium leading-[18px]">Add merchant</span>
               </button>
             </div>
           )}
@@ -489,8 +489,8 @@ function ScopeLine({
 }) {
   return (
     <div className="flex items-center gap-1.5">
-      <Icon size={13} className="shrink-0 text-slate-400" />
-      <span className="w-[62px] shrink-0 text-[10px] uppercase tracking-wide text-slate-400 dark:text-slate-500">
+      <Icon size={13} className="shrink-0 text-slate-500" />
+      <span className="w-[70px] shrink-0 whitespace-nowrap text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400 leading-4">
         {level}
       </span>
       <span
@@ -498,7 +498,7 @@ function ScopeLine({
           strong
             ? 'font-semibold text-slate-800 dark:text-slate-100'
             : 'text-slate-600 dark:text-slate-300'
-        }`}
+        } leading-[17px]`}
       >
         {value}
       </span>

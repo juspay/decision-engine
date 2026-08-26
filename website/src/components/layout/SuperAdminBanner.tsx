@@ -57,7 +57,7 @@ export function SuperAdminBanner() {
   return (
     <div
       title={`Scope id  ${user.merchantId}`}
-      className="flex h-9 shrink-0 items-center justify-center gap-3 bg-amber-500 px-4 text-[12.5px] font-medium text-amber-950"
+      className="flex h-9 shrink-0 items-center justify-center gap-3 bg-amber-500 px-4 text-[12.5px] font-medium text-amber-950 leading-[17px]"
     >
       <span className="flex min-w-0 items-center gap-1.5">
         <ShieldCheck size={14} className="shrink-0" />

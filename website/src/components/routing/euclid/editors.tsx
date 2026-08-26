@@ -87,7 +87,7 @@ export function SortableGatewayItem({
           if (e.key === 'Enter') { e.preventDefault(); commit() }
         }}
       >
-        <span className="w-5 shrink-0 text-center text-sm tabular-nums text-slate-400">{position}.</span>
+        <span className="w-5 shrink-0 text-center text-sm tabular-nums text-slate-500">{position}.</span>
         <GatewaySelect
           value={draftName}
           onChange={setDraftName}
@@ -106,7 +106,7 @@ export function SortableGatewayItem({
           onClick={commit}
           disabled={!draftName.trim()}
           aria-label="Save gateway"
-          className="text-emerald-500 transition-colors hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
+          className="text-emerald-700 transition-colors hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Check size={14} />
         </button>
@@ -114,7 +114,7 @@ export function SortableGatewayItem({
           type="button"
           onClick={cancel}
           aria-label="Cancel edit"
-          className="text-slate-400 transition-colors hover:text-slate-600"
+          className="text-slate-500 transition-colors hover:text-slate-600"
         >
           <X size={14} />
         </button>
@@ -128,7 +128,7 @@ export function SortableGatewayItem({
       style={style}
       className="flex items-center gap-2 bg-slate-100 dark:bg-[#111118] border border-slate-200 dark:border-[#1c1c24] rounded-lg px-2 py-1.5"
     >
-      <span {...attributes} {...listeners} className="cursor-grab text-slate-400">
+      <span {...attributes} {...listeners} className="cursor-grab text-slate-500">
         <GripVertical size={14} />
       </span>
       <button
@@ -140,9 +140,9 @@ export function SortableGatewayItem({
         <span className="truncate font-mono text-sm">
           {position}. {gatewayName}{gatewayId ? ` (${gatewayId})` : ''}
         </span>
-        <Pencil size={12} className="shrink-0 text-slate-400 transition-colors group-hover:text-brand-600 dark:group-hover:text-brand-400" />
+        <Pencil size={12} className="shrink-0 text-slate-500 transition-colors group-hover:text-brand-600 dark:group-hover:text-brand-400" />
       </button>
-      <button type="button" onClick={onRemove} aria-label={`Remove ${gatewayName}`} className="text-red-400 hover:text-red-600">
+      <button type="button" onClick={onRemove} aria-label={`Remove ${gatewayName}`} className="text-red-600 hover:text-red-600">
         <Trash2 size={12} />
       </button>
     </div>
@@ -285,7 +285,7 @@ export function VolumeSplitEditor({
         />
       ))}
       {entries.length > 0 && (
-        <p className={`text-xs font-medium ${total === 100 ? 'text-emerald-500' : 'text-amber-500'}`}>
+        <p className={`text-xs font-medium ${total === 100 ? 'text-emerald-700' : 'text-amber-700'}`}>
           Total: {total}%{total !== 100 ? ' (must equal 100%)' : ' ✓'}
         </p>
       )}
@@ -383,7 +383,7 @@ function VolumeSplitRow({
           onClick={commit}
           disabled={!draftName.trim()}
           aria-label="Save split"
-          className="text-emerald-500 transition-colors hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
+          className="text-emerald-700 transition-colors hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Check size={14} />
         </button>
@@ -391,7 +391,7 @@ function VolumeSplitRow({
           type="button"
           onClick={() => setEditing(false)}
           aria-label="Cancel edit"
-          className="text-slate-400 transition-colors hover:text-slate-600"
+          className="text-slate-500 transition-colors hover:text-slate-600"
         >
           <X size={14} />
         </button>
@@ -401,7 +401,7 @@ function VolumeSplitRow({
 
   return (
     <div className="flex items-center gap-2 bg-slate-100 dark:bg-[#111118] border border-slate-200 dark:border-[#1c1c24] rounded-lg px-2 py-1.5">
-      <span className="text-xs font-bold text-brand-500 w-10 shrink-0 tabular-nums">{entry.split}%</span>
+      <span className="text-xs font-bold text-brand-600 w-10 shrink-0 tabular-nums">{entry.split}%</span>
       <button
         type="button"
         onClick={startEditing}
@@ -411,9 +411,9 @@ function VolumeSplitRow({
         <span className="truncate font-mono text-sm">
           {entry.gatewayName}{entry.gatewayId ? ` (${entry.gatewayId})` : ''}
         </span>
-        <Pencil size={12} className="shrink-0 text-slate-400 transition-colors group-hover:text-brand-600 dark:group-hover:text-brand-400" />
+        <Pencil size={12} className="shrink-0 text-slate-500 transition-colors group-hover:text-brand-600 dark:group-hover:text-brand-400" />
       </button>
-      <button type="button" onClick={onRemove} aria-label={`Remove ${entry.gatewayName}`} className="text-red-400 hover:text-red-600">
+      <button type="button" onClick={onRemove} aria-label={`Remove ${entry.gatewayName}`} className="text-red-600 hover:text-red-600">
         <Trash2 size={12} />
       </button>
     </div>
@@ -447,7 +447,7 @@ export function VolumeSplitPriorityEditor({
   return (
     <div className="space-y-3">
       {entries.length > 0 && (
-        <p className={`text-xs font-medium ${total === 100 ? 'text-emerald-500' : 'text-amber-500'}`}>
+        <p className={`text-xs font-medium ${total === 100 ? 'text-emerald-700' : 'text-amber-700'}`}>
           Total: {total}%{total !== 100 ? ' (must equal 100%)' : ' ✓'}
         </p>
       )}
@@ -457,24 +457,24 @@ export function VolumeSplitPriorityEditor({
           className="rounded-lg border border-slate-200 dark:border-[#222226] overflow-hidden"
         >
           <div className="flex items-center gap-2 px-3 py-2 bg-slate-50 dark:bg-[#111118] border-b border-slate-200 dark:border-[#1c1c24]">
-            <span className="text-xs text-slate-400 font-medium shrink-0">Split {idx + 1}:</span>
+            <span className="text-xs text-slate-500 font-medium shrink-0">Split {idx + 1}:</span>
             <input
               type="number"
               value={entry.split}
               onChange={(e) => updateEntry(entry.id, { split: Number(e.target.value) })}
               className="border border-slate-200 dark:border-[#222226] bg-transparent rounded px-2 py-0.5 text-xs w-16 focus:outline-none"
             />
-            <span className="text-xs text-slate-400">%</span>
+            <span className="text-xs text-slate-500">%</span>
             <button
               type="button"
               onClick={() => onChange(entries.filter((e) => e.id !== entry.id))}
-              className="ml-auto text-red-400 hover:text-red-600"
+              className="ml-auto text-red-600 hover:text-red-600"
             >
               <Trash2 size={12} />
             </button>
           </div>
           <div className="p-3">
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-slate-500 dark:text-[#8d96a8]">Priority list for this split</p>
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-slate-500 dark:text-[#8d96a8] leading-4">Priority list for this split</p>
             <PriorityEditor
               gateways={entry.gateways}
               suggestions={suggestions}
@@ -602,7 +602,7 @@ export function ConditionRowEditor({
               placeholder="key"
               className="rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none dark:border-[#222226] w-40"
             />
-            <span className="shrink-0 text-sm text-slate-400 dark:text-slate-500 select-none">=</span>
+            <span className="shrink-0 text-sm text-slate-500 dark:text-slate-400 select-none">=</span>
             <input
               type="text"
               value={row.value as string}
@@ -621,7 +621,7 @@ export function ConditionRowEditor({
           />
         )}
       </div>
-      <button type="button" onClick={onRemove} aria-label="Remove condition" className="shrink-0 text-red-400 transition-colors hover:text-red-600">
+      <button type="button" onClick={onRemove} aria-label="Remove condition" className="shrink-0 text-red-600 transition-colors hover:text-red-600">
         <Trash2 size={15} />
       </button>
     </div>
@@ -658,7 +658,7 @@ export function ConditionGroupEditor({
         {group.conditions.map((cond, idx) => (
           <div key={cond.id} data-testid="condition-row" className="flex items-center gap-3 px-4 py-3">
             {group.conditions.length > 1 && (
-              <span className="w-10 shrink-0 text-[11px] font-bold uppercase tracking-widest text-sky-500 select-none">
+              <span className="w-10 shrink-0 text-[11px] font-bold uppercase tracking-widest text-sky-700 select-none leading-4">
                 {idx === 0 ? 'IF' : 'AND'}
               </span>
             )}
@@ -685,7 +685,7 @@ export function ConditionGroupEditor({
           <button
             type="button"
             onClick={addCondition}
-            className="flex items-center gap-1 text-[13px] font-medium text-brand-600 transition-colors hover:text-brand-700 dark:text-brand-400"
+            className="flex items-center gap-1 text-[13px] font-medium text-brand-600 transition-colors hover:text-brand-700 dark:text-brand-400 leading-[18px]"
           >
             <Plus size={13} /> Add condition
           </button>
@@ -694,7 +694,7 @@ export function ConditionGroupEditor({
             <button
               type="button"
               onClick={onRemove}
-              className="ml-auto flex items-center gap-1 text-[13px] font-medium text-red-500 transition-colors hover:text-red-600"
+              className="ml-auto flex items-center gap-1 text-[13px] font-medium text-red-600 transition-colors hover:text-red-600 leading-[18px]"
             >
               <Trash2 size={13} /> Remove group
             </button>
@@ -705,14 +705,14 @@ export function ConditionGroupEditor({
       {/* Nested OR branches — shown only at depth 0 */}
       {depth === 0 && group.nested.length > 0 && (
         <div className="border-t border-slate-100 dark:border-[#1c1c24] px-3 pt-3 pb-2 space-y-2">
-          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-slate-500 dark:text-[#8d96a8]">
+          <div className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-widest text-slate-500 dark:text-[#8d96a8] leading-4">
             <CornerDownRight size={11} />
             Then match any of (nested OR)
           </div>
           {group.nested.map((nestedGroup, nIdx) => (
             <div key={nestedGroup.id} className="pl-3 border-l-2 border-sky-200 dark:border-sky-800">
               {nIdx > 0 && (
-                <p className="mb-1 text-[11px] font-bold text-sky-500">OR</p>
+                <p className="mb-1 text-[11px] font-bold text-sky-700 leading-4">OR</p>
               )}
               <ConditionGroupEditor
                 group={nestedGroup}
@@ -738,7 +738,7 @@ export function ConditionGroupEditor({
             <button
               type="button"
               onClick={addNestedBranch}
-              className="flex items-center gap-1 text-[13px] font-medium text-brand-600 transition-colors hover:text-brand-700 dark:text-brand-400"
+              className="flex items-center gap-1 text-[13px] font-medium text-brand-600 transition-colors hover:text-brand-700 dark:text-brand-400 leading-[18px]"
             >
               <CornerDownRight size={13} /> Add nested branch
             </button>
@@ -747,7 +747,7 @@ export function ConditionGroupEditor({
             <button
               type="button"
               onClick={onRemove}
-              className="ml-auto flex items-center gap-1 text-[13px] font-medium text-red-500 transition-colors hover:text-red-600"
+              className="ml-auto flex items-center gap-1 text-[13px] font-medium text-red-600 transition-colors hover:text-red-600 leading-[18px]"
             >
               <Trash2 size={13} /> Remove group
             </button>
@@ -809,22 +809,22 @@ export function RuleBlockEditor({
             onChange={(e) => onChange({ ...block, name: e.target.value })}
             onClick={(e) => e.stopPropagation()}
             placeholder="Rule name"
-            className="input-bare min-w-0 max-w-[16rem] flex-1 cursor-text text-[15px] font-semibold text-slate-800 focus:outline-none dark:text-slate-100"
+            className="input-bare min-w-0 max-w-[16rem] flex-1 cursor-text text-[15px] font-semibold text-slate-800 focus:outline-none dark:text-slate-100 leading-[22px]"
           />
           {/* Rules are evaluated top-down, so the first match wins — say so where it matters. */}
-          <span className="shrink-0 truncate text-xs text-slate-400 dark:text-[#6d7a8d]">
+          <span className="shrink-0 truncate text-xs text-slate-500 dark:text-[#78849a]">
             {index === 0 ? '(Highest priority matching check)' : index !== undefined ? `(Checked if rule ${index} does not match)` : ''}
           </span>
         </div>
         <div className="flex shrink-0 items-center gap-3">
-          <button type="button" onClick={(e) => { e.stopPropagation(); onRemove() }} aria-label="Delete rule" className="text-red-400 transition-colors hover:text-red-600">
+          <button type="button" onClick={(e) => { e.stopPropagation(); onRemove() }} aria-label="Delete rule" className="text-red-600 transition-colors hover:text-red-600">
             <Trash2 size={15} />
           </button>
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); setCollapsed(!collapsed) }}
             aria-label={collapsed ? 'Expand rule' : 'Collapse rule'}
-            className="text-slate-400 transition-colors hover:text-slate-600"
+            className="text-slate-500 transition-colors hover:text-slate-600"
           >
             {collapsed ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
           </button>
@@ -841,7 +841,7 @@ export function RuleBlockEditor({
                 {idx > 0 && (
                   <div className="flex items-center gap-3">
                     <span className="h-px flex-1 bg-slate-200 dark:bg-[#222]" />
-                    <span className="text-[11px] font-bold uppercase tracking-widest text-sky-500 px-1">or</span>
+                    <span className="text-[11px] font-bold uppercase tracking-widest text-sky-700 px-1 leading-4">or</span>
                     <span className="h-px flex-1 bg-slate-200 dark:bg-[#222]" />
                   </div>
                 )}
@@ -861,7 +861,7 @@ export function RuleBlockEditor({
             <button
               type="button"
               onClick={addGroup}
-              className="mt-1 flex items-center gap-1 text-[13px] font-medium text-brand-600 transition-colors hover:text-brand-700 dark:text-brand-400"
+              className="mt-1 flex items-center gap-1 text-[13px] font-medium text-brand-600 transition-colors hover:text-brand-700 dark:text-brand-400 leading-[18px]"
             >
               <Plus size={13} /> Add OR group
             </button>

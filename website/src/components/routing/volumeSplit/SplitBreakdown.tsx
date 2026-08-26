@@ -14,7 +14,7 @@ export function SplitBreakdown({ gateways }: { gateways: VolumeSplitGatewayFormE
   const named = gateways.filter((g) => g.gatewayName.trim())
   if (named.length === 0) {
     return (
-      <p className="text-[13px] text-slate-400 dark:text-[#6d7a8d]">
+      <p className="text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
         No gateways yet — add at least one to split traffic across.
       </p>
     )
@@ -24,7 +24,7 @@ export function SplitBreakdown({ gateways }: { gateways: VolumeSplitGatewayFormE
 
   return (
     <div className="space-y-3">
-      <div className="flex h-3 w-full gap-[2px] overflow-hidden rounded-full">
+      <div className="flex h-3 w-full gap-0.5 overflow-hidden rounded-full">
         {named.map((g, i) => (
           <div
             key={g.id}
@@ -52,7 +52,7 @@ export function SplitBreakdown({ gateways }: { gateways: VolumeSplitGatewayFormE
             </span>
             {g.gatewayId && (
               <span
-                className="min-w-0 truncate font-mono text-[11px] text-slate-400 dark:text-[#6d7a8d]"
+                className="min-w-0 truncate font-mono text-[11px] text-slate-500 dark:text-[#78849a] leading-4"
                 title={g.gatewayId}
               >
                 {g.gatewayId}
@@ -68,7 +68,7 @@ export function SplitBreakdown({ gateways }: { gateways: VolumeSplitGatewayFormE
       {/* A split that misses 100% silently drops or double-counts traffic, so surface it wherever
           the distribution is shown — not just in the editor. */}
       {total !== 100 && (
-        <p className="text-[11px] font-medium text-amber-600 dark:text-amber-400">
+        <p className="text-[11px] font-medium text-amber-700 dark:text-amber-400 leading-4">
           Splits total {total}% — must add up to 100%.
         </p>
       )}

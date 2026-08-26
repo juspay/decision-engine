@@ -134,13 +134,13 @@ export function TopBar() {
               className="flex items-center gap-2 h-8 px-3 rounded-lg border border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 hover:bg-amber-100 dark:hover:bg-amber-500/20 transition-colors text-amber-700 dark:text-amber-300"
             >
               <ShieldCheck size={13} className="shrink-0" />
-              <span className="text-[12px] font-medium">Super admin</span>
+              <span className="text-[12px] font-medium leading-4">Super admin</span>
               <ChevronDown size={12} className="shrink-0" />
             </button>
 
             {superAdminOpen && (
               <div className="absolute right-0 top-10 w-80 bg-white dark:bg-[#0c0c10] border border-[#e6e6ee] dark:border-[#1a1a24] rounded-lg shadow-lg p-3 z-50">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-2">
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-2 leading-4">
                   View a merchant dashboard
                 </p>
 
@@ -150,15 +150,15 @@ export function TopBar() {
                   onChange={(e) => setLookupQuery(e.target.value)}
                   placeholder="Search by email or merchant name"
                   autoFocus
-                  className="w-full h-8 px-2.5 rounded-md border border-[#e6e6ee] dark:border-[#1a1a24] bg-white dark:bg-[#121218] text-[13px] text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-400/40"
+                  className="w-full h-8 px-2.5 rounded-md border border-[#e6e6ee] dark:border-[#1a1a24] bg-white dark:bg-[#121218] text-[13px] text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-400/40 leading-[18px]"
                 />
 
                 {lookupQuery.trim() && (
                   <div className="mt-2 max-h-64 overflow-y-auto">
                     {searching && lookupResults.length === 0 ? (
-                      <p className="px-1 py-2 text-[12px] text-slate-400">Searching…</p>
+                      <p className="px-1 py-2 text-[12px] text-slate-500 leading-4">Searching…</p>
                     ) : lookupResults.length === 0 ? (
-                      <p className="px-1 py-2 text-[12px] text-slate-400">No matches.</p>
+                      <p className="px-1 py-2 text-[12px] text-slate-500 leading-4">No matches.</p>
                     ) : (
                       lookupResults.map((m) => (
                         <button
@@ -171,16 +171,16 @@ export function TopBar() {
                               returns one row per merchant, and the parent is the only thing
                               telling them apart. */}
                           {(m.hs_org_name || m.hs_merchant_name) && (
-                            <p className="text-[10.5px] text-slate-400 truncate">
+                            <p className="text-[11px] text-slate-500 truncate leading-4">
                               {[m.hs_org_name, m.hs_merchant_name].filter(Boolean).join(' › ')}
                             </p>
                           )}
-                          <p className="text-[13px] font-medium text-slate-700 dark:text-slate-200 truncate">
+                          <p className="text-[13px] font-medium text-slate-700 dark:text-slate-200 truncate leading-[18px]">
                             {m.merchant_name}
                           </p>
-                          <p className="text-[11px] text-slate-400 truncate">{m.merchant_id}</p>
+                          <p className="text-[11px] text-slate-500 truncate leading-4">{m.merchant_id}</p>
                           {m.members.length > 0 && (
-                            <p className="text-[11px] text-slate-400 truncate">
+                            <p className="text-[11px] text-slate-500 truncate leading-4">
                               {m.members.map((mem) => mem.email).join(', ')}
                             </p>
                           )}
@@ -197,15 +197,15 @@ export function TopBar() {
                     onChange={(e) => { setEnterId(e.target.value); setEnterError(null) }}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleEnterMerchant(enterId.trim()) }}
                     placeholder="…or paste an exact merchant ID"
-                    className="w-full h-8 px-2.5 rounded-md border border-[#e6e6ee] dark:border-[#1a1a24] bg-white dark:bg-[#121218] text-[13px] text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-400/40"
+                    className="w-full h-8 px-2.5 rounded-md border border-[#e6e6ee] dark:border-[#1a1a24] bg-white dark:bg-[#121218] text-[13px] text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-400/40 leading-[18px]"
                   />
                   {enterError && (
-                    <p className="mt-1.5 text-[11px] text-red-500">{enterError}</p>
+                    <p className="mt-1.5 text-[11px] text-red-600 leading-4">{enterError}</p>
                   )}
                   <button
                     onClick={() => handleEnterMerchant(enterId.trim())}
                     disabled={!enterId.trim() || entering}
-                    className="mt-2 w-full flex items-center justify-center gap-1.5 h-8 rounded-md bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-[13px] font-medium text-white"
+                    className="mt-2 w-full flex items-center justify-center gap-1.5 h-8 rounded-md bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-[13px] font-medium text-white leading-[18px]"
                   >
                     {entering ? 'Entering…' : (<>Enter dashboard <ArrowRight size={13} /></>)}
                   </button>

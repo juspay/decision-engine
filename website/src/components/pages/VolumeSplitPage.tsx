@@ -15,6 +15,8 @@ import { RoutingAlgorithm } from '../../types/api'
 import { toVolumeSplitRuleDetailsState } from '../../features/routing/volumeSplit/state'
 import { SplitBreakdown } from '../routing/volumeSplit/SplitBreakdown'
 
+import { PageHeading } from '../ui/PageHeading'
+import { Notice } from '../ui/Notice'
 type StatusFilter = 'all' | 'active' | 'inactive'
 
 /** "stripe 50% / adyen 50%" — the row's one-line view of where traffic goes. */
@@ -184,11 +186,7 @@ export function VolumeSplitPage() {
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Volume Split Routing</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-[#8d96a8]">
-            Divide payment traffic across gateways by fixed percentages, independent of transaction
-            attributes.
-          </p>
+          <PageHeading title="Volume Split Routing" description="Divide payment traffic across gateways by fixed percentages, independent of transaction attributes." />
         </div>
         <Button onClick={() => navigate('/routing/volume/new')} disabled={!canEditRouting}>
           <Plus size={15} /> Create Rule
@@ -204,16 +202,16 @@ export function VolumeSplitPage() {
 
       <Card className="!rounded-[18px]">
         {!merchantId ? (
-          <p className="px-4 py-6 text-sm text-slate-400">Set merchant ID to load rules.</p>
+          <p className="px-4 py-6 text-sm text-slate-500">Set merchant ID to load rules.</p>
         ) : !allRules ? (
-          <p className="px-4 py-6 text-sm text-slate-400">Loading...</p>
+          <p className="px-4 py-6 text-sm text-slate-500">Loading...</p>
         ) : volumeRules.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-slate-400">No volume split rules yet.</p>
+          <p className="px-4 py-6 text-sm text-slate-500">No volume split rules yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[880px] text-left">
               <thead>
-                <tr className="border-b border-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-[#1e2330] dark:text-[#6d7a8d]">
+                <tr className="border-b border-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-[#1e2330] dark:text-[#78849a] leading-4">
                   <th className="px-5 py-3.5">
                     <HeaderSearch
                       label="Rule Name & ID"
@@ -255,7 +253,7 @@ export function VolumeSplitPage() {
                 {visibleRules.length === 0 && (
                   <tr>
                     <td colSpan={5} className="px-4 py-8 text-center">
-                      <p className="text-sm text-slate-400">No rules match these filters.</p>
+                      <p className="text-sm text-slate-500">No rules match these filters.</p>
                       <button
                         type="button"
                         onClick={() => { setStatusFilter('all'); setGatewayFilter('all'); setNameFilter('') }}
@@ -290,14 +288,14 @@ export function VolumeSplitPage() {
                       <td className="px-5 py-4">
                         <div className="flex items-start gap-2">
                           {isExpanded
-                            ? <ChevronDown size={14} className="mt-1 shrink-0 text-slate-400" />
-                            : <ChevronRight size={14} className="mt-1 shrink-0 text-slate-400" />
+                            ? <ChevronDown size={14} className="mt-1 shrink-0 text-slate-500" />
+                            : <ChevronRight size={14} className="mt-1 shrink-0 text-slate-500" />
                           }
                           <div className="min-w-0">
                             <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
                               {algo.name}
                             </p>
-                            <p className="mt-0.5 truncate font-mono text-xs text-slate-400 dark:text-[#6d7a8d]">
+                            <p className="mt-0.5 truncate font-mono text-xs text-slate-500 dark:text-[#78849a]">
                               {algo.id}
                             </p>
                           </div>
@@ -308,7 +306,7 @@ export function VolumeSplitPage() {
                           isActive
                             ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400'
                             : 'bg-slate-100 text-slate-500 dark:bg-[#1a1f2a] dark:text-[#8090a8]'
-                        }`}>
+                        } leading-4`}>
                           {isActive ? 'Active' : 'Inactive'}
                         </span>
                       </td>
@@ -317,14 +315,14 @@ export function VolumeSplitPage() {
                           {distribution}
                         </p>
                       </td>
-                      <td className="whitespace-nowrap px-5 py-4 text-[13px] text-slate-500 dark:text-[#6d7a8d]">
+                      <td className="whitespace-nowrap px-5 py-4 text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
                         {(() => {
                           const stamp = formatLastModified(algo)
                           if (!stamp) return '—'
                           return (
                             <span title={stamp.full}>
                               {stamp.date}
-                              <span className="block text-[12px] text-slate-400 dark:text-[#55627a]">{stamp.time}</span>
+                              <span className="block text-[12px] text-slate-500 dark:text-[#78849a] leading-4">{stamp.time}</span>
                             </span>
                           )
                         })()}
@@ -375,7 +373,7 @@ export function VolumeSplitPage() {
                       <tr key={`${algo.id}-detail`} className="border-b border-slate-100 dark:border-[#1e2330]">
                         <td colSpan={5} className="bg-slate-50/60 px-6 py-5 dark:bg-[#0c0f17]">
                           {algo.description && algo.description !== 'N/A' && (
-                            <p className="mb-3 text-sm text-slate-500 dark:text-[#6d7a8d]">{algo.description}</p>
+                            <p className="mb-3 text-sm text-slate-500 dark:text-[#78849a]">{algo.description}</p>
                           )}
                           <SplitBreakdown gateways={toVolumeSplitRuleDetailsState(algo)?.gateways ?? []} />
                         </td>
@@ -390,10 +388,10 @@ export function VolumeSplitPage() {
       </Card>
 
       {activeRuleBased && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-          <strong>"{activeRuleBased.name}" is active</strong> — activating a volume split rule will
+        <Notice tone="warning">
+          <strong>“{activeRuleBased.name}” is active</strong> — activating a volume split rule will
           automatically deactivate it.
-        </div>
+        </Notice>
       )}
     </div>
   )

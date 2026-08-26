@@ -180,11 +180,11 @@ function SectionRail({
             >
               <Icon
                 size={18}
-                className={`mt-0.5 shrink-0 ${on ? 'text-brand-500' : 'text-slate-400'}`}
+                className={`mt-0.5 shrink-0 ${on ? 'text-brand-600' : 'text-slate-500'}`}
               />
               <span className="min-w-0">
                 <span className="block text-sm font-medium">{title}</span>
-                <span className="mt-0.5 hidden text-xs text-slate-400 lg:block">
+                <span className="mt-0.5 hidden text-xs text-slate-500 lg:block">
                   {hint[id] ?? blurb}
                 </span>
               </span>
@@ -227,7 +227,7 @@ function SectionHeading({ title, subtitle }: { title: string; subtitle: string }
   return (
     <div className="mb-5">
       <h2 className="text-lg font-semibold text-slate-900 dark:text-white">{title}</h2>
-      <p className="mt-1 text-sm text-slate-500 dark:text-[#9ca7ba]">{subtitle}</p>
+      <p className="mt-1 max-w-[57ch] text-sm text-slate-500 dark:text-[#9ca7ba]">{subtitle}</p>
     </div>
   )
 }

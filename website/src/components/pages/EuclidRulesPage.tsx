@@ -17,6 +17,8 @@ import {
   summarizeConditions, summarizeDestination, destinationGateways,
 } from '../../features/routing/euclid/summarize'
 
+import { PageHeading } from '../ui/PageHeading'
+import { Notice } from '../ui/Notice'
 type StatusFilter = 'all' | 'active' | 'inactive'
 
 export function EuclidRulesPage() {
@@ -183,11 +185,7 @@ export function EuclidRulesPage() {
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Rule-Based Routing</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-[#8d96a8]">
-            Create conditions to route card and alternative payment transactions dynamically across
-            multiple active gateways.
-          </p>
+          <PageHeading title="Rule-Based Routing" description="Create conditions to route card and alternative payment transactions dynamically across multiple active gateways." />
         </div>
         <Button onClick={() => navigate('/routing/rules/new')} disabled={!canEditRouting}>
           <Plus size={15} /> Create Rule
@@ -203,16 +201,16 @@ export function EuclidRulesPage() {
 
       <Card className="!rounded-[18px]">
         {!merchantId ? (
-          <p className="px-4 py-6 text-sm text-slate-400">Set merchant ID to load rules.</p>
+          <p className="px-4 py-6 text-sm text-slate-500">Set merchant ID to load rules.</p>
         ) : !allAlgorithms ? (
-          <p className="px-4 py-6 text-sm text-slate-400">Loading...</p>
+          <p className="px-4 py-6 text-sm text-slate-500">Loading...</p>
         ) : ruleAlgorithms.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-slate-400">No rule-based rules yet.</p>
+          <p className="px-4 py-6 text-sm text-slate-500">No rule-based rules yet.</p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full min-w-[880px] text-left">
               <thead>
-                <tr className="border-b border-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-[#1e2330] dark:text-[#6d7a8d]">
+                <tr className="border-b border-slate-100 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-[#1e2330] dark:text-[#78849a] leading-4">
                   <th className="px-5 py-3.5">
                     <HeaderSearch
                       label="Rule Name & ID"
@@ -255,7 +253,7 @@ export function EuclidRulesPage() {
                 {visibleRules.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-4 py-8 text-center">
-                      <p className="text-sm text-slate-400">No rules match these filters.</p>
+                      <p className="text-sm text-slate-500">No rules match these filters.</p>
                       <button
                         type="button"
                         onClick={() => { setStatusFilter('all'); setGatewayFilter('all'); setNameFilter('') }}
@@ -290,59 +288,59 @@ export function EuclidRulesPage() {
                         isActive ? 'bg-emerald-50/50 dark:bg-emerald-900/10' : isInAbTest ? 'bg-purple-50/40 dark:bg-purple-900/10' : ''
                       }`}
                     >
-                      <td className="px-5 py-4">
+                      <td className="align-top px-5 py-4">
                         <div className="flex items-start gap-2">
                           {isExpanded
-                            ? <ChevronDown size={14} className="mt-1 shrink-0 text-slate-400" />
-                            : <ChevronRight size={14} className="mt-1 shrink-0 text-slate-400" />
+                            ? <ChevronDown size={14} className="mt-1 shrink-0 text-slate-500" />
+                            : <ChevronRight size={14} className="mt-1 shrink-0 text-slate-500" />
                           }
                           <div className="min-w-0">
                             <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
                               {algo.name}
                             </p>
-                            <p className="mt-0.5 truncate font-mono text-xs text-slate-400 dark:text-[#6d7a8d]">
+                            <p className="mt-0.5 truncate font-mono text-xs text-slate-500 dark:text-[#78849a]">
                               {algo.id}
                             </p>
                           </div>
                         </div>
                       </td>
-                      <td className="px-5 py-4">
+                      <td className="align-top px-5 py-4">
                         <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-[11px] font-semibold ${
                           isActive
                             ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400'
                             : 'bg-slate-100 text-slate-500 dark:bg-[#1a1f2a] dark:text-[#8090a8]'
-                        }`}>
+                        } leading-4`}>
                           {isActive ? 'Active' : 'Inactive'}
                         </span>
                         {isInAbTest && (
-                          <span className="mt-1.5 block text-[11px] font-medium text-purple-600 dark:text-purple-400">
+                          <span className="mt-1.5 block text-[11px] font-medium text-purple-600 dark:text-purple-400 leading-4">
                             In A/B test
                           </span>
                         )}
                       </td>
-                      <td className="max-w-[340px] px-5 py-4">
-                        <p className="truncate font-mono text-xs text-slate-600 dark:text-[#8d96a8]" title={conditions}>
+                      <td className="max-w-[420px] px-5 py-4 align-top">
+                        <p className="break-words font-mono text-xs leading-[18px] text-slate-600 dark:text-[#8d96a8]" title={conditions}>
                           {conditions}
                         </p>
                       </td>
-                      <td className="max-w-[260px] px-5 py-4">
-                        <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-200" title={destination}>
+                      <td className="max-w-[300px] px-5 py-4 align-top">
+                        <p className="break-words text-sm font-medium leading-5 text-slate-800 dark:text-slate-200" title={destination}>
                           {destination}
                         </p>
                       </td>
-                      <td className="whitespace-nowrap px-5 py-4 text-[13px] text-slate-500 dark:text-[#6d7a8d]">
+                      <td className="align-top whitespace-nowrap px-5 py-4 text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
                         {(() => {
                           const stamp = formatLastModified(algo)
                           if (!stamp) return '—'
                           return (
                             <span title={stamp.full}>
                               {stamp.date}
-                              <span className="block text-[12px] text-slate-400 dark:text-[#55627a]">{stamp.time}</span>
+                              <span className="block text-[12px] text-slate-500 dark:text-[#78849a] leading-4">{stamp.time}</span>
                             </span>
                           )
                         })()}
                       </td>
-                      <td className="px-5 py-4" onClick={(e) => e.stopPropagation()}>
+                      <td className="align-top px-5 py-4" onClick={(e) => e.stopPropagation()}>
                         <RowMenu
                           items={[
                             isActive
@@ -388,7 +386,7 @@ export function EuclidRulesPage() {
                       <tr key={`${algo.id}-detail`} className="border-b border-slate-100 dark:border-[#1e2330]">
                         <td colSpan={6} className="bg-slate-50/60 px-6 py-5 dark:bg-[#0c0f17]">
                           {algo.description && algo.description !== 'N/A' && (
-                            <p className="mb-3 text-sm text-slate-500 dark:text-[#6d7a8d]">{algo.description}</p>
+                            <p className="mb-3 text-sm text-slate-500 dark:text-[#78849a]">{algo.description}</p>
                           )}
                           <RuleBreakdown algo={algo} />
                         </td>
@@ -403,14 +401,14 @@ export function EuclidRulesPage() {
       </Card>
 
       {activeVolumeAlgorithm && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+        <Notice tone="warning">
           <strong>Volume Split is active</strong> — activating a rule-based rule will automatically deactivate it.
-        </div>
+        </Notice>
       )}
       {activeAbTestAlgorithm && (
-        <div className="rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 text-xs text-purple-700 dark:border-purple-500/30 dark:bg-purple-500/10 dark:text-purple-300">
+        <Notice tone="info">
           <strong>A/B experiment "{activeAbTestAlgorithm.name}" is active</strong> — rules marked "In A/B test" are used as experiment arms. Activating a rule directly will stop the experiment.
-        </div>
+        </Notice>
       )}
     </div>
   )

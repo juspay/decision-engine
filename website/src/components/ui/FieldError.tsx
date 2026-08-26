@@ -8,7 +8,7 @@ export function FieldError({ message }: { message?: string | null }) {
   if (!message) return null
 
   return (
-    <p role="alert" className="mt-1.5 flex items-start gap-1.5 text-[13px] text-red-600 dark:text-red-400">
+    <p role="alert" className="mt-1.5 flex items-start gap-1.5 text-[13px] text-red-600 dark:text-red-400 leading-[18px]">
       <AlertCircle size={14} className="mt-px shrink-0" />
       <span>{message}</span>
     </p>

@@ -11,7 +11,7 @@ export function ReadOnlyBanner() {
   if (canEdit) return null
 
   return (
-    <div className="flex h-9 shrink-0 items-center justify-center gap-2 bg-slate-700 px-4 text-[12.5px] font-medium text-slate-100 dark:bg-[#1e2430]">
+    <div className="flex h-9 shrink-0 items-center justify-center gap-2 bg-slate-700 px-4 text-[12.5px] font-medium text-slate-100 dark:bg-[#1e2430] leading-[17px]">
       <Eye size={14} className="shrink-0" />
       <span>
         View only — your Hyperswitch role can see routing for{' '}

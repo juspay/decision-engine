@@ -23,6 +23,8 @@ import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings } from 'lucide-react'
 
+import { PageHeading } from '../ui/PageHeading'
+import { Notice } from '../ui/Notice'
 // UI-local algorithm tokens for the simulation dropdown. Both map to
 // { rankingAlgorithm: 'SR_BASED_ROUTING' } on the backend /decide-gateway request;
 // the dropdown no longer forces multi-objective. Whether cost-savings (multi-objective)
@@ -746,7 +748,7 @@ function PendingAuditState({ title, body }: { title: string; body: string }) {
       <div className="mt-5 h-2 overflow-hidden rounded-full bg-slate-200 dark:bg-[#202734]">
         <div className="h-full w-1/3 animate-pulse rounded-full bg-brand-500" />
       </div>
-      <p className="mt-3 text-[11px] uppercase tracking-[0.16em] text-slate-400 dark:text-[#8390a7]">
+      <p className="mt-3 text-[11px] uppercase tracking-[0.16em] text-slate-500 dark:text-[#8d96aa] leading-4">
         Waiting for analytics
       </p>
     </div>
@@ -763,7 +765,7 @@ function InspectorKeyValueGrid({ rows }: { rows: Array<{ label: string; value: s
           key={`${row.label}-${row.value}`}
           className="rounded-[22px] border border-slate-200 bg-white/80 px-4 py-3 shadow-[0_14px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#161b24] dark:shadow-none"
         >
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8390a7]">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8d96aa] leading-4">
             {row.label}
           </p>
           <p className="mt-2 break-words text-sm text-slate-900 dark:text-white">{row.value}</p>
@@ -2181,7 +2183,7 @@ export function DecisionExplorerPage() {
         <div>
           <SurfaceLabel>Simulation console</SurfaceLabel>
           <div className="mt-2 flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">Decision Explorer</h1>
+            <PageHeading title="Decision Explorer" />
             <Badge variant="blue">{effectiveMerchantId || 'No merchant'}</Badge>
           </div>
         </div>
@@ -2198,28 +2200,28 @@ export function DecisionExplorerPage() {
             className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'batch')}`}
           >
             <span className="block">Auth-rate</span>
-            <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Score simulation</span>
+            <span className="mt-1 block text-[11px] font-medium text-slate-500 dark:text-[#738097] leading-4">Score simulation</span>
           </button>
           <button
             onClick={() => { simulationAbortRef.current = true; setActiveTab('rule') }}
             className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'rule')}`}
           >
             <span className="block">Rule based</span>
-            <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Policy evaluator</span>
+            <span className="mt-1 block text-[11px] font-medium text-slate-500 dark:text-[#738097] leading-4">Policy evaluator</span>
           </button>
           <button
             onClick={() => { simulationAbortRef.current = true; setActiveTab('volume') }}
             className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'volume')}`}
           >
             <span className="block">Volume split</span>
-            <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Distribution run</span>
+            <span className="mt-1 block text-[11px] font-medium text-slate-500 dark:text-[#738097] leading-4">Distribution run</span>
           </button>
           <button
             onClick={() => { simulationAbortRef.current = true; setActiveTab('debit') }}
             className={`rounded-xl border px-4 py-3 text-left text-sm font-semibold transition ${explorerModeButtonClass(activeTab === 'debit')}`}
           >
             <span className="block">Debit routing</span>
-            <span className="mt-1 block text-[11px] font-medium text-slate-400 dark:text-[#738097]">Network decision</span>
+            <span className="mt-1 block text-[11px] font-medium text-slate-500 dark:text-[#738097] leading-4">Network decision</span>
           </button>
         </div>
       </div>
@@ -2261,7 +2263,7 @@ export function DecisionExplorerPage() {
           </CardHeader>
           <CardBody className="space-y-3 !px-5 !py-4">
             {!effectiveMerchantId && (
-              <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+              <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
                 Set a merchant ID in the top bar first.
               </p>
             )}
@@ -2286,7 +2288,7 @@ export function DecisionExplorerPage() {
                 {/* Parameters */}
                 <div className="space-y-2">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-[#4e5870]">Parameters</p>
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-[#78849a] leading-4">Parameters</p>
                   </div>
                   <div className="space-y-1.5">
                     {ruleParams.map((param, idx) => (
@@ -2304,7 +2306,7 @@ export function DecisionExplorerPage() {
                               routingKeyNames.map(name => <option key={name} value={name}>{name}</option>)
                             )}
                           </select>
-                          <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2.5 py-2.5 text-[11px] font-bold text-slate-300 dark:text-[#3a4258] select-none">=</span>
+                          <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2.5 py-2.5 text-[11px] font-bold text-slate-500 dark:text-[#3a4258] select-none leading-4">=</span>
                           {param.type === 'enum_variant' ? (
                             <select
                               value={param.value}
@@ -2331,11 +2333,11 @@ export function DecisionExplorerPage() {
                               className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none"
                             />
                           ) : (
-                            <span className="flex-1 px-3 py-2.5 text-sm text-slate-400 dark:text-[#3a4258] italic">see below</span>
+                            <span className="flex-1 px-3 py-2.5 text-sm text-slate-500 dark:text-[#78849a] italic">see below</span>
                           )}
                           <button
                             onClick={() => removeRuleParam(idx)}
-                            className="shrink-0 px-2.5 py-2.5 text-slate-300 dark:text-[#2a3040] hover:text-red-400 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                            className="shrink-0 px-2.5 py-2.5 text-slate-500 dark:text-[#78849a] hover:text-red-600 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                           >
                             <Trash2 size={13} />
                           </button>
@@ -2362,7 +2364,7 @@ export function DecisionExplorerPage() {
                   <button
                     onClick={addRuleParam}
                     disabled={routingConfigUnavailable || routingKeysLoading || routingKeyNames.length === 0}
-                    className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                    className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                   >
                     <Plus size={12} /> Add Parameter
                   </button>
@@ -2370,11 +2372,11 @@ export function DecisionExplorerPage() {
 
                 {/* Fallback Gateways */}
                 <div className="space-y-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-[#4e5870]">Fallback Gateways</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-[#78849a] leading-4">Fallback Gateways</p>
                   <div className="space-y-1.5">
                     {fallbackConnectors.map((connector, idx) => (
                       <div key={idx} className="group flex items-center gap-0 rounded-xl border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] overflow-hidden transition-shadow hover:shadow-sm">
-                        <span className="shrink-0 flex items-center justify-center w-8 self-stretch bg-slate-50 dark:bg-[#10131c] border-r border-slate-100 dark:border-[#1e2330] text-[10px] font-bold text-slate-300 dark:text-[#3a4258] select-none">
+                        <span className="shrink-0 flex items-center justify-center w-8 self-stretch bg-slate-50 dark:bg-[#10131c] border-r border-slate-100 dark:border-[#1e2330] text-[11px] font-bold text-slate-500 dark:text-[#3a4258] select-none leading-4">
                           {idx + 1}
                         </span>
                         <input
@@ -2383,7 +2385,7 @@ export function DecisionExplorerPage() {
                           onChange={e => updateFallbackConnector(idx, 'gateway_name', e.target.value)}
                           className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-[#c8d0de] focus:outline-none"
                         />
-                        <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2 py-2.5 text-[11px] font-bold text-slate-300 dark:text-[#3a4258] select-none">/</span>
+                        <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2 py-2.5 text-[11px] font-bold text-slate-500 dark:text-[#3a4258] select-none leading-4">/</span>
                         <input
                           placeholder="gateway id (optional)"
                           value={connector.gateway_id || ''}
@@ -2392,7 +2394,7 @@ export function DecisionExplorerPage() {
                         />
                         <button
                           onClick={() => removeFallbackConnector(idx)}
-                          className="shrink-0 px-2.5 py-2.5 text-slate-300 dark:text-[#2a3040] hover:text-red-400 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                          className="shrink-0 px-2.5 py-2.5 text-slate-500 dark:text-[#78849a] hover:text-red-600 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                         >
                           <Trash2 size={13} />
                         </button>
@@ -2401,7 +2403,7 @@ export function DecisionExplorerPage() {
                   </div>
                   <button
                     onClick={addFallbackConnector}
-                    className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/10 transition-colors"
+                    className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10 transition-colors"
                   >
                     <Plus size={12} /> Add Gateway
                   </button>
@@ -2415,18 +2417,18 @@ export function DecisionExplorerPage() {
                     Loading debit routing flag...
                   </p>
                 ) : debitRoutingFlag.isEnabled ? (
-                  <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
+                  <Notice tone="success">
                     Debit routing is enabled. This tab will call /decide-gateway with NTW_BASED_ROUTING.
-                  </p>
+                  </Notice>
                 ) : (
-                  <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+                  <Notice tone="warning">
                     <div className="flex flex-wrap items-center justify-between gap-3">
                       <span>Debit routing is disabled.</span>
                       <Button size="sm" variant="secondary" onClick={enableDebitRoutingForExplorer} disabled={!effectiveMerchantId || loading}>
                         Enable Debit Routing
                       </Button>
                     </div>
-                  </div>
+                  </Notice>
                 )}
 
                 <div className="grid grid-cols-2 gap-3">
@@ -2544,7 +2546,7 @@ export function DecisionExplorerPage() {
                   </div>
                 )}
 
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-500 max-w-[57ch]">
                   The request sends debit details inside paymentInfo.metadata because the backend debit router parses co-badged card data from metadata.
                 </p>
               </div>
@@ -2584,11 +2586,11 @@ export function DecisionExplorerPage() {
                 <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-[#283241] dark:bg-[#0b111a]">
                   <div className="flex items-center justify-between text-xs">
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#77849a]">Target</span>
+                      <span className="font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-[#77849a]">Target</span>
                       <span className="font-semibold text-slate-900 dark:text-white">{volumeRunTarget || '--'}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <span className="font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#77849a]">Completed</span>
+                      <span className="font-semibold uppercase tracking-[0.14em] text-slate-500 dark:text-[#77849a]">Completed</span>
                       <span className="font-semibold text-slate-900 dark:text-white">
                         {loading ? volumeProgress : volumeEvaluationCount || '--'}
                       </span>
@@ -2605,7 +2607,7 @@ export function DecisionExplorerPage() {
                     />
                   </div>
                   {loading && (
-                    <p className="mt-1 text-right text-[10px] font-semibold text-sky-600 dark:text-sky-300">
+                    <p className="mt-1 text-right text-[11px] font-semibold text-sky-700 dark:text-sky-300 leading-4">
                       {volumeProgressPercentage}%
                     </p>
                   )}
@@ -2643,7 +2645,7 @@ export function DecisionExplorerPage() {
                       <div className="grid grid-cols-3 gap-x-3 gap-y-2.5">
                         {fields.map(({ label, content }) => (
                           <div key={label}>
-                            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">{label}</label>
+                            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1 leading-4">{label}</label>
                             {content}
                           </div>
                         ))}
@@ -2651,7 +2653,7 @@ export function DecisionExplorerPage() {
                     )
                   })()}
                   <div>
-                    <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1">Algorithm</label>
+                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1 leading-4">Algorithm</label>
                     <select
                       value={form.ranking_algorithm}
                       onChange={e => set('ranking_algorithm', e.target.value as SimulationAlgorithm)}
@@ -2674,7 +2676,7 @@ export function DecisionExplorerPage() {
                         <option value="CHARGED">Success (CHARGED)</option>
                         <option value="FAILURE">Failure (FAILURE)</option>
                       </select>
-                      <p className="mt-1 text-xs text-slate-500">
+                      <p className="mt-1 text-xs text-slate-500 max-w-[57ch]">
                         After deciding the gateway, single test will post feedback with this outcome so the payment appears in Decision Audit.
                       </p>
                     </div>
@@ -2687,8 +2689,8 @@ export function DecisionExplorerPage() {
                     {/* Simulation header */}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-2">
-                        <Activity size={13} className="text-slate-400 dark:text-slate-500" />
-                        <span className="text-xs font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500">Simulation</span>
+                        <Activity size={13} className="text-slate-500 dark:text-slate-400" />
+                        <span className="text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400">Simulation</span>
                       </div>
                       <div className="flex items-center gap-2.5">
                         <label className="text-xs font-medium text-slate-500 dark:text-slate-400">Payments</label>
@@ -2754,8 +2756,8 @@ export function DecisionExplorerPage() {
                                   className="w-full h-2 cursor-pointer"
                                 />
                                 <div className="absolute top-full left-0 right-2 flex justify-between pointer-events-none">
-                                  <span className="text-[9px] text-slate-400 dark:text-slate-500 tabular-nums">0</span>
-                                  <span className="text-[9px] text-slate-400 dark:text-slate-500 tabular-nums">100%</span>
+                                  <span className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums leading-4">0</span>
+                                  <span className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums leading-4">100%</span>
                                 </div>
                               </div>
                               <UiTooltip text="Simulated success rate for this gateway">
@@ -2764,10 +2766,10 @@ export function DecisionExplorerPage() {
                                 </span>
                               </UiTooltip>
                               {FEATURE_FLAGS.GSM_RETRY_IN_SIMULATION && gwFailureMode === 'decline' && gsmScoringFilterEnabled && !!gatewaySimConfigs[gw]?.errorInfo?.error_code && (
-                                <span className="inline-flex items-center gap-1 text-[10px] text-slate-400 dark:text-slate-500 shrink-0">
-                                  <span className={`font-medium ${gwGsmDecision === 'retry' ? 'text-amber-500 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'}`}>{gwGsmDecision === 'retry' ? 'retry' : 'no retry'}</span>
+                                <span className="inline-flex items-center gap-1 text-[11px] text-slate-500 dark:text-slate-400 shrink-0 leading-4">
+                                  <span className={`font-medium ${gwGsmDecision === 'retry' ? 'text-amber-700 dark:text-amber-400' : 'text-slate-500 dark:text-slate-400'}`}>{gwGsmDecision === 'retry' ? 'retry' : 'no retry'}</span>
                                   <span>·</span>
-                                  <span className={gwPenalized ? 'text-red-500 dark:text-red-400' : 'text-emerald-600 dark:text-emerald-400'}>{gwPenalized ? 'penalized' : 'no penalty'}</span>
+                                  <span className={gwPenalized ? 'text-red-600 dark:text-red-400' : 'text-emerald-700 dark:text-emerald-400'}>{gwPenalized ? 'penalized' : 'no penalty'}</span>
                                 </span>
                               )}
                               <button
@@ -2779,13 +2781,13 @@ export function DecisionExplorerPage() {
                                   set('eligible_gateways', remaining.join(', '))
                                   setExpandedGateways(prev => { const next = new Set(prev); next.delete(gw); return next })
                                 }}
-                                className="text-slate-300 hover:text-red-400 dark:text-slate-600 dark:hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors shrink-0"
+                                className="text-slate-500 hover:text-red-600 dark:text-slate-400 dark:hover:text-red-400 disabled:opacity-30 disabled:cursor-not-allowed transition-colors shrink-0"
                               >
                                 <X size={13} />
                               </button>
                               <ChevronDown
                                 size={13}
-                                className={`text-slate-400 dark:text-slate-500 transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-180' : ''}`}
+                                className={`text-slate-500 dark:text-slate-400 transition-transform duration-200 shrink-0 ${isOpen ? 'rotate-180' : ''}`}
                               />
                             </div>
 
@@ -2799,7 +2801,7 @@ export function DecisionExplorerPage() {
                                       type="button"
                                       disabled={isSimulating}
                                       onClick={() => setGwFailureMode(gw, 'decline')}
-                                      className={`py-2 transition-colors ${gwFailureMode === 'decline' ? 'bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                                      className={`py-2 transition-colors ${gwFailureMode === 'decline' ? 'bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400' : 'text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'}`}
                                     >
                                       Decline
                                     </button>
@@ -2807,14 +2809,14 @@ export function DecisionExplorerPage() {
                                       type="button"
                                       disabled={isSimulating}
                                       onClick={() => setGwFailureMode(gw, 'timeout')}
-                                      className={`py-2 border-l border-slate-200 dark:border-[#222226] transition-colors ${gwFailureMode === 'timeout' ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400' : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-300'}`}
+                                      className={`py-2 border-l border-slate-200 dark:border-[#222226] transition-colors ${gwFailureMode === 'timeout' ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400' : 'text-slate-500 hover:text-slate-600 dark:hover:text-slate-300'}`}
                                     >
                                       Timeout
                                     </button>
                                   </div>
 
                                   {gwFailureMode === 'timeout' && (
-                                    <p className={`text-xs px-3 py-2 rounded-lg ${eliminationConfigured ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400' : 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400'}`}>
+                                    <p className={`text-xs px-3 py-2 rounded-lg ${eliminationConfigured ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400' : 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400'} max-w-[68ch]`}>
                                       {eliminationConfigured
                                         ? `Removed from routing below ${eliminationConfig!.config.data.threshold} threshold.`
                                         : 'Elimination not configured. Set it up in SR Routing settings.'}
@@ -2826,7 +2828,7 @@ export function DecisionExplorerPage() {
                                       <div className={`grid gap-2 ${FEATURE_FLAGS.GSM_RETRY_IN_SIMULATION ? 'grid-cols-2' : 'grid-cols-1'}`}>
                                         {FEATURE_FLAGS.GSM_RETRY_IN_SIMULATION && (
                                           <div>
-                                            <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">GSM Decision</label>
+                                            <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 leading-4">GSM Decision</label>
                                             <select
                                               value={gwGsmDecision}
                                               disabled={isSimulating}
@@ -2839,7 +2841,7 @@ export function DecisionExplorerPage() {
                                           </div>
                                         )}
                                         <div>
-                                          <label className="block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1.5">Score Impact</label>
+                                          <label className="block text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1.5 leading-4">Score Impact</label>
                                           <select
                                             value={gwPenalized ? 'penalized' : 'skipped'}
                                             onChange={e => setGwPenalized(gw, e.target.value === 'penalized')}
@@ -2890,20 +2892,20 @@ export function DecisionExplorerPage() {
                               onBlur={() => { setAddGwDraft(''); setAddGwOpen(false) }}
                               placeholder="e.g. stripe"
                               autoFocus
-                              className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-brand-300 dark:border-brand-700 rounded-lg px-3 py-2 pr-16 text-sm text-slate-800 dark:text-slate-100 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                              className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-brand-300 dark:border-brand-700 rounded-lg px-3 py-2 pr-16 text-sm text-slate-800 dark:text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
                             />
-                            <kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-400 dark:text-slate-500 bg-slate-100 dark:bg-[#1c1c24] border border-slate-200 dark:border-[#2a2a35] px-1.5 py-0.5 rounded font-mono">
+                            <kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-500 dark:text-slate-500 bg-slate-100 dark:bg-[#1c1c24] border border-slate-200 dark:border-[#2a2a35] px-1.5 py-0.5 rounded font-mono">
                               Enter ↵
                             </kbd>
                           </div>
-                          <p className="text-xs text-slate-400 dark:text-slate-500">Press Enter to add · Esc to cancel</p>
+                          <p className="text-xs text-slate-500 dark:text-slate-400">Press Enter to add · Esc to cancel</p>
                         </div>
                       ) : (
                         <button
                           type="button"
                           disabled={isSimulating}
                           onClick={() => { setAddGwOpen(true); setTimeout(() => addGwInputRef.current?.focus(), 0) }}
-                          className="w-full rounded-xl border border-dashed border-slate-200 dark:border-[#2a2a3a] flex items-center justify-center gap-2 h-11 text-slate-400 hover:text-brand-600 hover:border-brand-400 dark:hover:text-brand-400 dark:hover:border-brand-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
+                          className="w-full rounded-xl border border-dashed border-slate-200 dark:border-[#2a2a3a] flex items-center justify-center gap-2 h-11 text-slate-500 hover:text-brand-600 hover:border-brand-400 dark:hover:text-brand-400 dark:hover:border-brand-600 transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                         >
                           <Plus size={14} />
                           <span className="text-xs font-semibold uppercase tracking-wider">Add connector</span>
@@ -2941,8 +2943,8 @@ export function DecisionExplorerPage() {
                       className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
                     />
                     <span className="text-xs text-slate-600 dark:text-slate-400">
-                      Smart retry — on GSM <code className="text-[11px]">retry</code> decision, attempt next fallback gateway
-                      {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-500">(enable GSM scoring filter first)</span>}
+                      Smart retry — on GSM <code className="text-[11px] leading-4">retry</code> decision, attempt next fallback gateway
+                      {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-700">(enable GSM scoring filter first)</span>}
                     </span>
                   </label>
                 )}
@@ -2976,8 +2978,8 @@ export function DecisionExplorerPage() {
                       className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
                     />
                     <span className="text-xs text-slate-600 dark:text-slate-400">
-                      Smart retry — on GSM <code className="text-[11px]">retry</code> decision, attempt next fallback gateway
-                      {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-500">(enable GSM scoring filter first)</span>}
+                      Smart retry — on GSM <code className="text-[11px] leading-4">retry</code> decision, attempt next fallback gateway
+                      {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-700">(enable GSM scoring filter first)</span>}
                     </span>
                   </label>
                 )}
@@ -3089,8 +3091,8 @@ export function DecisionExplorerPage() {
             ) : (
               <Card>
                 <CardBody className="py-12 text-center">
-                  <Network size={32} className="mx-auto mb-3 text-slate-300" />
-                  <p className="text-sm text-slate-500">Enable debit routing, keep the default debit metadata, and click "Run Debit Routing" to inspect ranked networks.</p>
+                  <Network size={32} className="mx-auto mb-3 text-slate-500" />
+                  <p className="text-sm text-slate-500 mx-auto max-w-[57ch]">Enable debit routing, keep the default debit metadata, and click "Run Debit Routing" to inspect ranked networks.</p>
                 </CardBody>
               </Card>
             )
@@ -3246,7 +3248,7 @@ export function DecisionExplorerPage() {
             ) : (
               <section className="flex min-h-[360px] items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/70 px-8 py-12 text-center dark:border-[#2a303a] dark:bg-[#101722]/70">
                 <div className="max-w-sm">
-                  <PieChartIcon size={30} className="mx-auto text-slate-300 dark:text-[#536075]" />
+                  <PieChartIcon size={30} className="mx-auto text-slate-500 dark:text-[#78849a]" />
                   <h3 className="mt-4 text-sm font-semibold text-slate-900 dark:text-white">No volume results yet</h3>
                   <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-[#9aa6bb]">
                     Set the run size and run the volume split check to view distribution and traces.
@@ -3278,7 +3280,7 @@ export function DecisionExplorerPage() {
 
                     {ruleResult.output.type === 'single' && ruleResult.output.connector && (
                       <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-3">
-                        <p className="text-xs text-slate-400 mb-1">Selected gateway_name</p>
+                        <p className="text-xs text-slate-500 mb-1">Selected gateway_name</p>
                         <p className="text-lg font-semibold">{ruleResult.output.connector.gateway_name}</p>
                         {ruleResult.output.connector.gateway_id && (
                           <p className="text-xs text-slate-500">gateway_id: {ruleResult.output.connector.gateway_id}</p>
@@ -3288,7 +3290,7 @@ export function DecisionExplorerPage() {
 
                     {ruleResult.output.type === 'priority' && ruleResult.output.connectors && (
                       <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-3">
-                        <p className="text-xs text-slate-400 mb-2">Priority gateway_name list</p>
+                        <p className="text-xs text-slate-500 mb-2">Priority gateway_name list</p>
                         <div className="space-y-1">
                           {ruleResult.output.connectors.map((gw, idx) => (
                             <div key={idx} className="flex items-center gap-2 text-sm">
@@ -3303,7 +3305,7 @@ export function DecisionExplorerPage() {
 
                     {ruleResult.output.type === 'volume_split' && (
                       <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-3">
-                        <p className="text-xs text-slate-400 mb-2">Volume Split Result</p>
+                        <p className="text-xs text-slate-500 mb-2">Volume Split Result</p>
                         <p className="text-sm text-slate-600">See Volume Split tab for detailed visualization.</p>
                       </div>
                     )}
@@ -3335,8 +3337,8 @@ export function DecisionExplorerPage() {
             ) : (
               <Card>
                 <CardBody className="py-16 text-center">
-                  <Play size={32} className="text-gray-300 mx-auto mb-3" />
-                  <p className="text-slate-400 text-sm">Configure rule parameters and click "Evaluate Rules" to test routing.</p>
+                  <Play size={32} className="text-gray-500 mx-auto mb-3" />
+                  <p className="text-slate-500 text-sm">Configure rule parameters and click "Evaluate Rules" to test routing.</p>
                 </CardBody>
               </Card>
             )
@@ -3363,26 +3365,26 @@ export function DecisionExplorerPage() {
                             </svg>
                           )
                         })()}
-                        <span className="text-[11px] text-slate-500 dark:text-slate-400">
+                        <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-4">
                           {completedSimulationCount} / {totalSimulationPayments || 0}
                         </span>
                         {completedSimulationCount > 0 && (
                           <>
-                            <span className="text-slate-300 dark:text-slate-600">·</span>
+                            <span className="text-slate-500 dark:text-slate-400">·</span>
                             {hedgingHits > 0 ? (
-                              <span className="text-[11px] font-medium text-brand-600 dark:text-sky-400">
+                              <span className="text-[11px] font-medium text-brand-600 dark:text-sky-400 leading-4">
                                 {Math.round((hedgingHits / completedSimulationCount) * 100)}% hedged
                               </span>
                             ) : (
                               <UiTooltip text="Enable ENABLE_EXPLORE_AND_EXPLOIT_ON_SRV3_{PMT} or ENABLE_MERCHANT_ON_VOLUME_DISTRIBUTION_FEATURE_SR_V3 in Redis">
-                                <span className="text-[11px] text-amber-500 dark:text-amber-400 cursor-help">0 hedged</span>
+                                <span className="text-[11px] text-amber-700 dark:text-amber-400 cursor-help leading-4">0 hedged</span>
                               </UiTooltip>
                             )}
                             {smartRetryEnabled && smartRetryStats.triggered > 0 && (
                               <>
-                                <span className="text-slate-300 dark:text-slate-600">·</span>
+                                <span className="text-slate-500 dark:text-slate-400">·</span>
                                 <UiTooltip text={`${smartRetryStats.triggered} retries triggered · ${smartRetryStats.recovered} recovered`}>
-                                  <span className="text-[11px] font-medium text-orange-500 dark:text-orange-400 cursor-help">
+                                  <span className="text-[11px] font-medium text-orange-700 dark:text-orange-400 cursor-help leading-4">
                                     {smartRetryStats.triggered} retried · {smartRetryStats.recovered} recovered
                                   </span>
                                 </UiTooltip>
@@ -3390,8 +3392,8 @@ export function DecisionExplorerPage() {
                             )}
                             {totalCostSaved.value > 0 && totalCostSaved.currency && (
                               <>
-                                <span className="text-slate-300 dark:text-slate-600">·</span>
-                                <span className="text-[11px] font-medium text-emerald-600 dark:text-emerald-400">
+                                <span className="text-slate-500 dark:text-slate-400">·</span>
+                                <span className="text-[11px] font-medium text-emerald-700 dark:text-emerald-400 leading-4">
                                   saved {formatCurrencyValue(totalCostSaved.value, totalCostSaved.currency)}
                                 </span>
                               </>
@@ -3422,15 +3424,15 @@ export function DecisionExplorerPage() {
                                     <div className="flex-1 h-1.5 rounded-full bg-slate-100 dark:bg-[#1c1c24] overflow-hidden min-w-0">
                                       <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${share}%`, backgroundColor: gwColor }} />
                                     </div>
-                                    <div className="flex items-center gap-2.5 text-[11px] shrink-0">
-                                      <span className={`font-bold tabular-nums ${srPct >= 80 ? 'text-emerald-600 dark:text-emerald-400' : srPct >= 50 ? 'text-amber-500' : 'text-red-500'}`}>{srPct}% SR</span>
-                                      <span className="text-slate-300 dark:text-slate-600">·</span>
-                                      <span className="text-slate-400 dark:text-slate-500 tabular-nums">{share}% routed</span>
-                                      <span className="text-slate-300 dark:text-slate-600">·</span>
+                                    <div className="flex items-center gap-2.5 text-[11px] shrink-0 leading-4">
+                                      <span className={`font-bold tabular-nums ${srPct >= 80 ? 'text-emerald-700 dark:text-emerald-400' : srPct >= 50 ? 'text-amber-700' : 'text-red-600'}`}>{srPct}% SR</span>
+                                      <span className="text-slate-500 dark:text-slate-400">·</span>
+                                      <span className="text-slate-500 dark:text-slate-400 tabular-nums">{share}% routed</span>
+                                      <span className="text-slate-500 dark:text-slate-400">·</span>
                                       <span className="tabular-nums text-slate-500 dark:text-slate-400">
-                                        <span className="text-emerald-600 dark:text-emerald-400">{stats.success}</span>
-                                        <span className="text-slate-300 dark:text-slate-600 mx-0.5">/</span>
-                                        <span className="text-red-400">{stats.failure}</span>
+                                        <span className="text-emerald-700 dark:text-emerald-400">{stats.success}</span>
+                                        <span className="text-slate-500 dark:text-slate-400 mx-0.5">/</span>
+                                        <span className="text-red-600">{stats.failure}</span>
                                       </span>
                                     </div>
                                   </div>
@@ -3544,7 +3546,7 @@ export function DecisionExplorerPage() {
                       )
                     })()}
                     {Object.keys(gatewayStats).length === 1 && eligibleGatewaysParsed.length > 1 && (
-                      <p className="text-[11px] text-slate-400 pt-1">
+                      <p className="text-[11px] text-slate-500 pt-1 max-w-[57ch] leading-4">
                         SR routing concentrates traffic on the highest-scoring gateway. Run with a "Gateway Down" scenario to see score drop and traffic shift to the next gateway.
                       </p>
                     )}
@@ -3555,7 +3557,7 @@ export function DecisionExplorerPage() {
                   <CardHeader className="flex flex-row items-center justify-between gap-3">
                     <h3 className="text-sm font-medium text-slate-800 dark:text-white">Transaction Log</h3>
                     {deferredSimulationResults.length > 0 && (
-                      <span className="text-xs text-slate-400 tabular-nums">{deferredSimulationResults.length} transactions</span>
+                      <span className="text-xs text-slate-500 tabular-nums">{deferredSimulationResults.length} transactions</span>
                     )}
                   </CardHeader>
                   <CardBody className="p-0">
@@ -3563,7 +3565,7 @@ export function DecisionExplorerPage() {
                     {deferredSimulationResults.length > 0 ? (
                       <div ref={txLogRef} className="max-h-[480px] overflow-auto">
                         <table className="w-full text-sm">
-                          <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-[11px] text-slate-400 dark:text-slate-500 sticky top-0 border-b border-slate-100 dark:border-[#1c1c24]">
+                          <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-[11px] text-slate-500 dark:text-slate-500 sticky top-0 border-b border-slate-100 dark:border-[#1c1c24] leading-4">
                             <tr>
                               <th className="text-left px-3 py-2 w-10">#</th>
                               <th className="text-left px-3 py-2">Payment ID</th>
@@ -3585,7 +3587,7 @@ export function DecisionExplorerPage() {
                                 className="group cursor-pointer hover:bg-slate-50 dark:hover:bg-[#0d0d14] transition-colors"
                                 onClick={() => openAuditModal(res.paymentId)}
                               >
-                                <td className="px-3 py-2 text-[11px] text-slate-400 tabular-nums">{absIdx + 1}</td>
+                                <td className="px-3 py-2 text-[11px] text-slate-500 tabular-nums leading-4">{absIdx + 1}</td>
                                 <td className="px-3 py-2 max-w-[180px]">
                                   <span className="block truncate font-mono text-xs text-slate-700 dark:text-slate-300 group-hover:text-brand-600 dark:group-hover:text-brand-400 transition-colors">
                                     {res.paymentId}
@@ -3594,11 +3596,11 @@ export function DecisionExplorerPage() {
                                 <td className="px-3 py-2 text-xs font-medium text-slate-600 dark:text-slate-300 whitespace-nowrap">{res.decidedGateway}</td>
                                 <td className="px-3 py-2">
                                   {res.routingApproach?.includes('HEDGING') ? (
-                                    <span className="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:ring-brand-800">
+                                    <span className="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:ring-brand-800 leading-4">
                                       Hedging
                                     </span>
                                   ) : (
-                                    <span className="text-[11px] text-slate-400">
+                                    <span className="text-[11px] text-slate-500 leading-4">
                                       {res.routingApproach === 'SR_SELECTION_V3_ROUTING'
                                         ? 'SR V3'
                                         : res.routingApproach === 'SR_SELECTION_MULTI_OBJECTIVE'
@@ -3630,11 +3632,11 @@ export function DecisionExplorerPage() {
                                       <Badge variant={res.retryStatus === 'CHARGED' ? 'green' : res.retryStatus === 'PENDING_VBV' ? 'orange' : 'red'}>
                                         {res.retryStatus}
                                       </Badge>
-                                    ) : <span className="text-xs text-slate-400">—</span>}
+                                    ) : <span className="text-xs text-slate-500">—</span>}
                                   </td>
                                 )}
                                 <td className="pr-3 py-2">
-                                  <span className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-400 dark:text-slate-500">
+                                  <span className="opacity-0 group-hover:opacity-100 transition-opacity text-slate-500 dark:text-slate-400">
                                     <svg viewBox="0 0 16 16" fill="none" className="w-3.5 h-3.5" stroke="currentColor" strokeWidth="1.5">
                                       <path d="M3 8h10M9 4l4 4-4 4" strokeLinecap="round" strokeLinejoin="round" />
                                     </svg>
@@ -3714,17 +3716,17 @@ export function DecisionExplorerPage() {
                           </Badge>
                         ) : null}
                         {result.latency != null && (
-                          <p className="text-xs text-slate-400">{result.latency}ms</p>
+                          <p className="text-xs text-slate-500">{result.latency}ms</p>
                         )}
                       </div>
                     </div>
                     {singleRunPaymentId ? (
                       <div className="mb-3 rounded-[18px] border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#1c1c23] dark:bg-[#0b0b10]">
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93]">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93] leading-4">
                           Payment ID
                         </p>
                         <p className="mt-2 font-mono text-sm text-slate-900 dark:text-white">{singleRunPaymentId}</p>
-                        <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                        <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93] max-w-[57ch]">
                           Feedback recorded as {singleRunOutcome}. Open audit to inspect the full decide and update flow.
                         </p>
                       </div>
@@ -3732,17 +3734,17 @@ export function DecisionExplorerPage() {
                     {result.routing_dimension && (
                       <div className="flex gap-4 text-sm text-slate-600 border-t border-slate-200 dark:border-[#1c1c24] pt-3">
                         <div>
-                          <span className="text-xs text-slate-400">Dimension</span>
+                          <span className="text-xs text-slate-500">Dimension</span>
                           <p className="font-medium">{result.routing_dimension}</p>
                         </div>
                         {result.routing_dimension_level && (
                           <div>
-                            <span className="text-xs text-slate-400">Level</span>
+                            <span className="text-xs text-slate-500">Level</span>
                             <p className="font-medium">{result.routing_dimension_level}</p>
                           </div>
                         )}
                         <div>
-                          <span className="text-xs text-slate-400">Reset</span>
+                          <span className="text-xs text-slate-500">Reset</span>
                           <p className="font-medium">{result.reset_approach}</p>
                         </div>
                       </div>
@@ -3816,7 +3818,7 @@ export function DecisionExplorerPage() {
                                 ? gateways.map(gw => (
                                   <span key={gw} className="text-xs bg-blue-500/10 text-blue-400 ring-1 ring-inset ring-blue-500/20 rounded-md px-2 py-0.5">{gw}</span>
                                 ))
-                                : <span className="text-xs text-slate-400">—</span>
+                                : <span className="text-xs text-slate-500">—</span>
                               }
                             </div>
                           </div>
@@ -3851,8 +3853,8 @@ export function DecisionExplorerPage() {
             ) : (
               <Card>
                 <CardBody className="py-16 text-center">
-                  <Play size={32} className="text-gray-300 mx-auto mb-3" />
-                  <p className="text-slate-400 text-sm">Fill in the parameters and click "Run Single Transaction" to decide a gateway, post feedback, and inspect the audit trail.</p>
+                  <Play size={32} className="text-gray-500 mx-auto mb-3" />
+                  <p className="text-slate-500 text-sm mx-auto max-w-[57ch]">Fill in the parameters and click "Run Single Transaction" to decide a gateway, post feedback, and inspect the audit trail.</p>
                 </CardBody>
               </Card>
             )
@@ -3891,7 +3893,7 @@ export function DecisionExplorerPage() {
                 <button
                   type="button"
                   aria-label="Close setup prompt"
-                  className="rounded-full p-2 text-slate-400 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-[#1a2230] dark:hover:text-white"
+                  className="rounded-full p-2 text-slate-500 transition hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-[#1a2230] dark:hover:text-white"
                   onClick={() => setSetupPrompt(null)}
                 >
                   <X size={16} />
@@ -3939,7 +3941,7 @@ export function DecisionExplorerPage() {
           >
             <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 bg-slate-50/90 px-6 py-5 dark:border-[#1c1c23] dark:bg-[#0b0b10]">
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-[#8a8a93]">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-[#8a8a93] leading-4">
                   Simulation Audit
                 </p>
                 <h2
@@ -4049,7 +4051,7 @@ export function DecisionExplorerPage() {
                       <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
                         {selectedAuditEvent ? stageLabel(selectedAuditEvent) : 'Audit Inspector'}
                       </h3>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93] max-w-[57ch]">
                         {selectedAuditEvent
                           ? `${routeLabel(selectedAuditEvent.route)} · ${formatDateTime(selectedAuditEvent.created_at_ms)}`
                           : 'Select an event from the left to inspect payloads.'}
@@ -4091,7 +4093,7 @@ export function DecisionExplorerPage() {
                           <InspectorKeyValueGrid rows={auditInspectorModel.summaryRows} />
                           {auditInspectorModel.selectionReason ? (
                             <div className="rounded-[22px] border border-slate-200 bg-slate-50/80 px-5 py-4 dark:border-[#1d1d23] dark:bg-[#0b0b10]">
-                              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93]">
+                              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93] leading-4">
                                 Selection Reason
                               </p>
                               <p className="mt-3 text-sm leading-6 text-slate-700 dark:text-slate-200">
@@ -4167,7 +4169,7 @@ export function DecisionExplorerPage() {
           >
             <div className="flex flex-wrap items-start justify-between gap-4 border-b border-slate-200 bg-slate-50/90 px-6 py-5 dark:border-[#1c1c23] dark:bg-[#0b0b10]">
               <div className="min-w-0">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-[#8a8a93]">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-500 dark:text-[#8a8a93] leading-4">
                   Decision Trace
                 </p>
                 <h2
@@ -4294,7 +4296,7 @@ export function DecisionExplorerPage() {
                       <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
                         {selectedPreviewEvent ? stageLabel(selectedPreviewEvent) : 'Decision Inspector'}
                       </h3>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93] max-w-[57ch]">
                         {selectedPreviewEvent
                           ? `${routeLabel(selectedPreviewEvent.route)} · ${formatDateTime(selectedPreviewEvent.created_at_ms)}`
                           : 'Select an event from the left to inspect the decision payload.'}
@@ -4409,7 +4411,7 @@ function MultiObjectiveDecisionPanel({ info }: { info: MultiObjectiveInfo }) {
         <div className={`rounded-2xl border px-4 py-3 ${tone}`}>
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-2">
-              <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+              <span className="text-[11px] uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400 leading-4">
                 Multi-Objective Decision
               </span>
               <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${pillTone}`}>
@@ -4441,7 +4443,7 @@ function MultiObjectiveDecisionPanel({ info }: { info: MultiObjectiveInfo }) {
             </div>
           )}
 
-          <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400">
+          <p className="mt-3 text-[11px] text-slate-500 dark:text-slate-400 leading-4">
             {info.qualifiedCount} PSP{info.qualifiedCount === 1 ? '' : 's'} ranked on EV.
           </p>
         </div>
@@ -4464,12 +4466,12 @@ function MultiObjectivePspCard({
     <div className={`rounded-xl border px-3 py-2 ${borderTone}`}>
       <div className="flex min-h-[16px] flex-wrap items-center gap-1.5">
         {candidate.isSrHead && (
-          <span className="inline-flex items-center rounded bg-slate-200 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-slate-700 dark:bg-[#1f1f29] dark:text-slate-200">
+          <span className="inline-flex items-center rounded bg-slate-200 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-700 dark:bg-[#1f1f29] dark:text-slate-200 leading-4">
             SR head
           </span>
         )}
         {candidate.isChosen && (
-          <span className="inline-flex items-center rounded bg-cyan-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-200">
+          <span className="inline-flex items-center rounded bg-cyan-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-[0.12em] text-cyan-800 dark:bg-cyan-900/40 dark:text-cyan-200 leading-4">
             Chosen
           </span>
         )}
@@ -4479,17 +4481,17 @@ function MultiObjectivePspCard({
       </p>
       <div className="mt-1.5 flex flex-wrap gap-3 text-xs text-slate-600 dark:text-slate-300">
         <span>
-          <span className="text-slate-400">auth</span>{' '}
+          <span className="text-slate-500">auth</span>{' '}
           <span className="font-mono">{(candidate.authRate * 100).toFixed(2)}%</span>
         </span>
         <span>
-          <span className="text-slate-400">cost</span>{' '}
+          <span className="text-slate-500">cost</span>{' '}
           <span className="font-mono">
             {candidate.costBps != null ? `${candidate.costBps.toFixed(2)} bps` : '—'}
           </span>
         </span>
         <span>
-          <span className="text-slate-400">EV</span>{' '}
+          <span className="text-slate-500">EV</span>{' '}
           <span className="font-mono">{candidate.ev.toFixed(4)}</span>
         </span>
       </div>

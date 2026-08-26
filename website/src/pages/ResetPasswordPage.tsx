@@ -110,7 +110,7 @@ export function ResetPasswordPage() {
           {themeToggle}
         </header>
         <div className="flex flex-1 items-center justify-center px-6 py-12">{children}</div>
-        <footer className="px-6 py-5 text-center text-xs text-slate-400 dark:text-[#525866]">
+        <footer className="px-6 py-5 text-center text-xs text-slate-500 dark:text-[#78849a]">
           Juspay Decision Engine
         </footer>
       </div>
@@ -122,7 +122,7 @@ export function ResetPasswordPage() {
       <div className="w-full max-w-[420px] rounded-3xl border border-slate-200 bg-white px-10 py-12 text-center shadow-[0_20px_60px_-20px_rgba(15,23,42,0.08)] dark:border-[#1d1d23] dark:bg-[#0b0e14] dark:shadow-none">
         <div className="space-y-5">
           <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-500/10">
-            <XCircle size={28} className="text-red-500" />
+            <XCircle size={28} className="text-red-600" />
           </div>
           <div className="space-y-2">
             <p className="text-xl font-semibold tracking-tight text-slate-950 dark:text-white">
@@ -160,7 +160,7 @@ export function ResetPasswordPage() {
             New password
           </span>
           <div className="relative">
-            <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 dark:text-[#667085]">
+            <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 dark:text-[#78849a]">
               <LockKeyhole size={16} />
             </span>
             <input
@@ -170,12 +170,12 @@ export function ResetPasswordPage() {
               placeholder="Enter new password"
               required
               autoFocus
-              className="h-14 w-full rounded-2xl border border-slate-200 bg-white pl-12 pr-12 text-sm text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.12)] outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-white dark:shadow-none"
+              className="h-14 w-full rounded-2xl border border-slate-200 bg-white pl-12 pr-12 text-sm text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.12)] outline-none transition placeholder:text-slate-500 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-white dark:shadow-none"
             />
             <button
               type="button"
               onClick={() => setShowPassword((value) => !value)}
-              className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-400 transition-colors hover:text-slate-700 dark:text-slate-500 dark:hover:text-slate-200"
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-slate-500 transition-colors hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200"
               aria-label={showPassword ? 'Hide password' : 'Show password'}
             >
               {showPassword ? <Eye size={18} /> : <EyeOff size={18} />}
@@ -188,7 +188,7 @@ export function ResetPasswordPage() {
             Confirm password
           </span>
           <div className="relative">
-            <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 dark:text-[#667085]">
+            <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 dark:text-[#78849a]">
               <LockKeyhole size={16} />
             </span>
             <input
@@ -197,12 +197,12 @@ export function ResetPasswordPage() {
               onChange={(e) => setConfirmPassword(e.target.value)}
               placeholder="Re-enter new password"
               required
-              className="h-14 w-full rounded-2xl border border-slate-200 bg-white pl-12 pr-4 text-sm text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.12)] outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-white dark:shadow-none"
+              className="h-14 w-full rounded-2xl border border-slate-200 bg-white pl-12 pr-4 text-sm text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.12)] outline-none transition placeholder:text-slate-500 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-white dark:shadow-none"
             />
           </div>
         </label>
 
-        <p className="text-xs leading-5 text-slate-500 dark:text-[#7b8496]">
+        <p className="text-xs leading-5 text-slate-500 dark:text-[#7b8496] max-w-[57ch]">
           Minimum 10 characters, including 1 uppercase letter, 1 lowercase letter, 1 number, and 1
           special character.
         </p>

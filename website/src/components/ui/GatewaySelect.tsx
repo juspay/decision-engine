@@ -130,7 +130,7 @@ export function GatewaySelect({
           if (open) close()
           else openDropdown()
         }}
-        className="absolute inset-y-0 right-0 flex items-center px-2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
+        className="absolute inset-y-0 right-0 flex items-center px-2 text-slate-500 hover:text-slate-600 dark:hover:text-slate-200"
       >
         <ChevronDown size={13} className={`transition-transform duration-150 ${open ? 'rotate-180' : ''}`} />
       </button>
@@ -146,7 +146,7 @@ export function GatewaySelect({
             style={{ maxHeight: `${Math.min(Math.max(filtered.length, 1) * 32 + 8, maxHeight)}px` }}
           >
             {filtered.length === 0 ? (
-              <p className="px-3 py-2.5 text-sm text-slate-400">
+              <p className="px-3 py-2.5 text-sm text-slate-500">
                 {value.trim()
                   ? <>No connector matches — <span className="font-mono">{value.trim()}</span> is used as typed</>
                   : 'No gateways'}

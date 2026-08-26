@@ -97,7 +97,7 @@ export function SearchableMultiSelect({
         className="flex w-full min-w-0 cursor-pointer flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm dark:border-[#222226]"
       >
         {values.length === 0 && (
-          <span className="text-slate-400">{placeholder}</span>
+          <span className="text-slate-500">{placeholder}</span>
         )}
         {values.map(v => {
           const label = options.find(o => o.value === v)?.label ?? v
@@ -110,7 +110,7 @@ export function SearchableMultiSelect({
               <button
                 type="button"
                 onClick={(e) => remove(v, e)}
-                className="text-brand-400 hover:text-brand-600 dark:hover:text-brand-200"
+                className="text-brand-600 hover:text-brand-600 dark:hover:text-brand-200"
               >
                 <X size={10} />
               </button>
@@ -119,7 +119,7 @@ export function SearchableMultiSelect({
         })}
         <ChevronDown
           size={11}
-          className={`ml-auto shrink-0 text-slate-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+          className={`ml-auto shrink-0 text-slate-500 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
         />
       </div>
 
@@ -141,7 +141,7 @@ export function SearchableMultiSelect({
           </div>
           <div className="max-h-52 overflow-y-auto py-0.5">
             {filtered.length === 0 ? (
-              <p className="px-3 py-2.5 text-sm text-slate-400">No matches</p>
+              <p className="px-3 py-2.5 text-sm text-slate-500">No matches</p>
             ) : (
               filtered.map(o => {
                 const checked = values.includes(o.value)

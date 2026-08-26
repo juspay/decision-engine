@@ -23,6 +23,8 @@ import { SplitBreakdown, SPLIT_COLORS } from '../routing/volumeSplit/SplitBreakd
 import { GatewaySelect } from '../ui/GatewaySelect'
 import { gatewayOptions } from '../../lib/connectors'
 
+import { PageHeading } from '../ui/PageHeading'
+import { Notice } from '../ui/Notice'
 function makeId() { return Math.random().toString(36).slice(2) }
 
 function createInitialGateways(): VolumeSplitGatewayFormEntry[] {
@@ -184,22 +186,17 @@ export function VolumeSplitBuilderPage() {
         >
           <ArrowLeft size={16} /> Volume Split Routing
         </button>
-        <h1 className="truncate text-2xl font-semibold text-slate-900 dark:text-white">
-          {isEdit ? 'Edit Volume Split Rule' : 'Create Volume Split Rule'}
-        </h1>
-        <p className="mt-1 text-sm text-slate-500 dark:text-[#8d96a8]">
-          Divide traffic across gateways by percentage. The last row absorbs whatever the others leave.
-        </p>
+        <PageHeading title={isEdit ? 'Edit Volume Split Rule' : 'Create Volume Split Rule'} description="Divide traffic across gateways by percentage. The last row absorbs whatever the others leave." className="truncate" />
       </div>
 
       {isEdit && !sourceRule && allRules && (
         <ErrorMessage error="That rule no longer exists for this merchant." />
       )}
       {isEditingActiveRule && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
+        <Notice tone="warning">
           <strong>This rule is active</strong> — active rules cannot be edited. Deactivate it from the
           rules list first, then come back.
-        </div>
+        </Notice>
       )}
 
       <div className="flex flex-col gap-6 xl:flex-row xl:items-start">
@@ -210,7 +207,7 @@ export function VolumeSplitBuilderPage() {
                 <div className="flex items-start gap-2">
                   <label
                     htmlFor="volume-rule-name"
-                    className="shrink-0 whitespace-nowrap py-2.5 text-[13px] font-semibold text-slate-700 dark:text-slate-300"
+                    className="shrink-0 whitespace-nowrap py-2.5 text-[13px] font-semibold text-slate-700 dark:text-slate-300 leading-[18px]"
                   >
                     Rule Name *
                   </label>
@@ -233,7 +230,7 @@ export function VolumeSplitBuilderPage() {
                 <div className="flex items-center gap-2">
                   <label
                     htmlFor="volume-rule-description"
-                    className="shrink-0 whitespace-nowrap text-[13px] font-semibold text-slate-700 dark:text-slate-300"
+                    className="shrink-0 whitespace-nowrap text-[13px] font-semibold text-slate-700 dark:text-slate-300 leading-[18px]"
                   >
                     Description
                   </label>
@@ -322,7 +319,7 @@ export function VolumeSplitBuilderPage() {
                         />
                         <span className="text-xs text-slate-500">%</span>
                         {isInferred && gateways.length > 1 && (
-                          <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600 dark:bg-[#1a1a22] dark:text-slate-300">
+                          <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-600 dark:bg-[#1a1a22] dark:text-slate-300 leading-4">
                             Auto
                           </span>
                         )}
@@ -332,7 +329,7 @@ export function VolumeSplitBuilderPage() {
                         onClick={() => removeGateway(g.id)}
                         disabled={gateways.length === 1}
                         aria-label={`Remove ${label}`}
-                        className="text-slate-400 hover:text-red-500 disabled:cursor-not-allowed disabled:opacity-40"
+                        className="text-slate-500 hover:text-red-600 disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Trash2 size={15} />
                       </button>
@@ -344,13 +341,13 @@ export function VolumeSplitBuilderPage() {
                   <button
                     type="button"
                     onClick={addGateway}
-                    className="flex items-center gap-1 text-[13px] font-medium text-brand-600 transition-colors hover:text-brand-700 dark:text-brand-400"
+                    className="flex items-center gap-1 text-[13px] font-medium text-brand-600 transition-colors hover:text-brand-700 dark:text-brand-400 leading-[18px]"
                   >
                     <Plus size={14} /> Add Gateway
                   </button>
                   <span
                     role={fieldErrors.total ? 'alert' : undefined}
-                    className={`text-xs font-medium ${total === 100 ? 'text-emerald-500' : 'text-red-500'}`}
+                    className={`text-xs font-medium ${total === 100 ? 'text-emerald-700' : 'text-red-600'}`}
                   >
                     Total: {total}%
                     {overAllocated
@@ -379,7 +376,7 @@ export function VolumeSplitBuilderPage() {
             >
               Cancel
             </button>
-            <p className="text-sm text-slate-400 dark:text-[#6d7a8d]">
+            <p className="text-sm text-slate-500 dark:text-[#78849a] max-w-[57ch]">
               {isEdit
                 ? 'Saved changes apply the next time this rule is activated.'
                 : 'A new rule is created inactive — activate it from the rules list.'}
