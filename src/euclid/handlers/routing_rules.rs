@@ -550,6 +550,94 @@ async fn fetch_algorithm_from_db_and_cache(
     Ok(algorithm)
 }
 
+/// Response for a profile whose rules are all deactivated: the fallback the caller supplied,
+/// echoed back under a status that says the engine answered and has no rule to apply. The
+/// caller can then route by its fallback instead of guessing from a failed evaluation.
+fn no_active_algorithm_response(
+    payload: &RoutingRequest,
+    request_id: Option<String>,
+    global_request_id: Option<String>,
+    trace_id: Option<String>,
+) -> RoutingEvaluateResponse {
+    let fallback = payload.fallback_output.clone().unwrap_or_default();
+    let output = Output::Priority(fallback.clone());
+
+    let response = RoutingEvaluateResponse {
+        payment_id: payload.payment_id.clone(),
+        status: "no_active_algorithm".to_string(),
+        output: format_output(&output),
+        evaluated_output: fallback.clone(),
+        eligible_connectors: fallback,
+    };
+
+    crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
+        crate::analytics::AnalyticsFlowContext::new(
+            crate::analytics::ApiFlow::RuleBasedRouting,
+            crate::analytics::FlowType::RoutingEvaluatePreview,
+        ),
+        Some(payload.created_by.clone()),
+        payload.payment_id.clone(),
+        preview_gateway(&response),
+        None,
+        Some(response.status.clone()),
+        serialize_routing_evaluate_analytics_details(payload, &response, None),
+        request_id,
+        global_request_id,
+        trace_id,
+    );
+
+    response
+}
+
+/// Whether the profile has any routing rule at all, scoped the same way the active-mapper
+/// lookup is. Separates a profile that deactivated its rules from one the engine has never
+/// been given any -- the two are indistinguishable from the mapper miss alone, but callers
+/// must treat them oppositely: the first is an authoritative "no rule", the second means the
+/// engine simply has nothing to say about this profile.
+async fn profile_has_any_routing_rule(
+    state: &crate::app::TenantAppState,
+    created_by: &str,
+    algorithm_for: Option<&str>,
+) -> bool {
+    let existing = match algorithm_for {
+        Some(algorithm_for) => {
+            crate::generics::generic_find_one_optional::<
+                <RoutingAlgorithm as HasTable>::Table,
+                _,
+                RoutingAlgorithm,
+            >(
+                &state.db,
+                dsl::created_by
+                    .eq(created_by.to_string())
+                    .and(dsl::algorithm_for.eq(algorithm_for.to_string())),
+            )
+            .await
+        }
+        None => {
+            crate::generics::generic_find_one_optional::<
+                <RoutingAlgorithm as HasTable>::Table,
+                _,
+                RoutingAlgorithm,
+            >(&state.db, dsl::created_by.eq(created_by.to_string()))
+            .await
+        }
+    };
+
+    match existing {
+        Ok(found) => found.is_some(),
+        Err(error) => {
+            // Reported as "no rules", which routes the caller down the error path it already
+            // took before this check existed.
+            logger::error!(
+                ?error,
+                created_by = %created_by,
+                "routing_evaluate: failed to check for existing routing rules"
+            );
+            false
+        }
+    }
+}
+
 pub async fn routing_evaluate(
     headers: axum::http::HeaderMap,
     Json(payload): Json<RoutingRequest>,
@@ -703,6 +791,36 @@ pub async fn routing_evaluate(
                 .await
             {
                 Ok(algo) => algo,
+                // A profile that has rules but none active has deliberately deactivated them,
+                // and that is an answer rather than a failure: the caller should route by its
+                // fallback. Reporting it as an error instead lets a caller that treats an
+                // errored evaluation as "engine unavailable" keep serving the rule the
+                // merchant just switched off. A profile with no rules at all stays an error,
+                // so a caller can still tell that the engine has nothing for it.
+                Err(e)
+                    if matches!(
+                        e.get_inner(),
+                        EuclidErrors::ActiveRoutingAlgorithmNotFound(_)
+                    ) && profile_has_any_routing_rule(
+                        &state,
+                        &payload.created_by,
+                        algorithm_for,
+                    )
+                    .await =>
+                {
+                    API_REQUEST_COUNTER
+                        .with_label_values(&["routing_evaluate", "success"])
+                        .inc();
+                    if let Some(timer) = timer.take() {
+                        timer.observe_duration();
+                    }
+                    return Ok(Json(no_active_algorithm_response(
+                        &payload,
+                        request_id,
+                        global_request_id,
+                        trace_id,
+                    )));
+                }
                 Err(e) => return fail_preview(e, "active_routing_lookup_failed"),
             }
         }
