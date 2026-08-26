@@ -31,11 +31,12 @@ test.describe('Payment Audit UI', () => {
 
     // NOTE: the Cypress original asserts on "Search Decision Trail" / "Search Rule Decision Trail".
     // Those strings still exist in the page's content object but are no longer rendered anywhere, so
-    // this asserts on the heading and the search input, which are what a user actually sees.
+    // this asserts on the heading and the search input, which are what a user actually sees. The
+    // search box is addressed by its accessible name, which survives placeholder copy changes.
     await authedPage.goto('/audit')
 
     await expect(authedPage.getByRole('heading', { level: 1, name: 'Decision Audit' })).toBeVisible()
-    await authedPage.getByPlaceholder('PaymentID').fill(seeded.decisionPaymentId)
+    await authedPage.getByLabel('Payment ID', { exact: true }).fill(seeded.decisionPaymentId)
     await authedPage.keyboard.press('Enter')
 
     await expect(authedPage.getByText(seeded.decisionPaymentId).first()).toBeVisible({ timeout: 20_000 })
@@ -43,7 +44,7 @@ test.describe('Payment Audit UI', () => {
     // Rule-based mode is a separate view reading the preview trace instead of the decision trail.
     await authedPage.goto('/audit?mode=rule_based')
 
-    const ruleSearch = authedPage.getByPlaceholder('Decision payment ID')
+    const ruleSearch = authedPage.getByLabel('Decision payment ID', { exact: true })
     await expect(ruleSearch).toBeVisible({ timeout: 20_000 })
     await ruleSearch.fill(seeded.previewPaymentId!)
     await authedPage.keyboard.press('Enter')
