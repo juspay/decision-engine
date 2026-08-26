@@ -27,9 +27,11 @@ use crate::euclid::{
     errors::ValidationErrorDetails,
     types::{RoutingAlgorithmMapper, RoutingAlgorithmMapperUpdate},
 };
+use crate::generics::MeshError;
 use crate::{euclid::types::RoutingAlgorithm, logger, metrics};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use axum::{extract::Path, response::IntoResponse, Json};
-use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods};
+use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods, QueryDsl};
 use error_stack::ResultExt;
 
 use crate::app::get_tenant_app_state;
@@ -517,12 +519,26 @@ async fn fetch_algorithm_from_db_and_cache(
         }
     };
 
-    let active_routing_algorithm_id = mapper_result
-        .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
-            merchant_id.to_string(),
-        ))
-        .map_err(ContainerError::from)?
-        .routing_algorithm_id;
+    // Only a missing mapper row means no rule is active. Any other storage error is the engine
+    // failing to answer, and reporting it as ActiveRoutingAlgorithmNotFound would let the
+    // deactivated-rules path in `routing_evaluate` serve a 200 fallback while the database is
+    // unreachable -- exactly the "engine unavailable" case a caller must be able to tell apart.
+    let active_routing_algorithm_id = match mapper_result {
+        Ok(mapper) => mapper.routing_algorithm_id,
+        Err(MeshError::NotFound) => {
+            return Err(
+                EuclidErrors::ActiveRoutingAlgorithmNotFound(merchant_id.to_string()).into(),
+            )
+        }
+        Err(error) => {
+            logger::error!(
+                ?error,
+                merchant_id = %merchant_id,
+                "Failed to look up the active routing algorithm mapper"
+            );
+            return Err(EuclidErrors::StorageError.into());
+        }
+    };
 
     let algorithm = crate::generics::generic_find_one::<
         <RoutingAlgorithm as HasTable>::Table,
@@ -553,7 +569,8 @@ async fn fetch_algorithm_from_db_and_cache(
 /// Response for a profile whose rules are all deactivated: the fallback the caller supplied,
 /// echoed back under a status that says the engine answered and has no rule to apply. The
 /// caller can then route by its fallback instead of guessing from a failed evaluation.
-fn no_active_algorithm_response(
+async fn no_active_algorithm_response(
+    state: &crate::app::TenantAppState,
     payload: &RoutingRequest,
     request_id: Option<String>,
     global_request_id: Option<String>,
@@ -562,12 +579,27 @@ fn no_active_algorithm_response(
     let fallback = payload.fallback_output.clone().unwrap_or_default();
     let output = Output::Priority(fallback.clone());
 
+    // The evaluated path narrows both fields by the pm-filter graph, so this one does too:
+    // `evaluated_output` and `eligible_connectors` mean the same thing whichever path answered,
+    // and a caller reading them never has to know which it was.
+    let pm_filter_bundle = if pm_filter_graph::has_payment_method_type(&payload.parameters) {
+        state.get_pm_filter_graph_bundle().await
+    } else {
+        None
+    };
+    let eligible_connectors = eligibility_for_output(
+        pm_filter_bundle.as_deref(),
+        &payload.parameters,
+        &extract_connectors_for_eligibility(&output),
+    );
+    let evaluated_output = narrow_evaluated_output_to_eligible(fallback, &eligible_connectors);
+
     let response = RoutingEvaluateResponse {
         payment_id: payload.payment_id.clone(),
         status: "no_active_algorithm".to_string(),
         output: format_output(&output),
-        evaluated_output: fallback.clone(),
-        eligible_connectors: fallback,
+        evaluated_output,
+        eligible_connectors,
     };
 
     crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
@@ -599,32 +631,46 @@ async fn profile_has_any_routing_rule(
     created_by: &str,
     algorithm_for: Option<&str>,
 ) -> bool {
-    let existing = match algorithm_for {
+    let conn = match state.db.get_conn().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            logger::error!(
+                ?error,
+                created_by = %created_by,
+                "routing_evaluate: no connection to check for existing routing rules"
+            );
+            return false;
+        }
+    };
+
+    // A deactivated profile has no cache entry and no active mapper row, so this runs on every
+    // evaluate it makes. Selecting one id keeps it off the row itself, whose `algorithm_data`
+    // holds the whole rule program.
+    let existing: Result<Vec<String>, _> = match algorithm_for {
         Some(algorithm_for) => {
-            crate::generics::generic_find_one_optional::<
-                <RoutingAlgorithm as HasTable>::Table,
-                _,
-                RoutingAlgorithm,
-            >(
-                &state.db,
-                dsl::created_by
-                    .eq(created_by.to_string())
-                    .and(dsl::algorithm_for.eq(algorithm_for.to_string())),
-            )
-            .await
+            dsl::routing_algorithm
+                .filter(
+                    dsl::created_by
+                        .eq(created_by.to_string())
+                        .and(dsl::algorithm_for.eq(algorithm_for.to_string())),
+                )
+                .select(dsl::id)
+                .limit(1)
+                .get_results_async(&*conn)
+                .await
         }
         None => {
-            crate::generics::generic_find_one_optional::<
-                <RoutingAlgorithm as HasTable>::Table,
-                _,
-                RoutingAlgorithm,
-            >(&state.db, dsl::created_by.eq(created_by.to_string()))
-            .await
+            dsl::routing_algorithm
+                .filter(dsl::created_by.eq(created_by.to_string()))
+                .select(dsl::id)
+                .limit(1)
+                .get_results_async(&*conn)
+                .await
         }
     };
 
     match existing {
-        Ok(found) => found.is_some(),
+        Ok(found) => !found.is_empty(),
         Err(error) => {
             // Reported as "no rules", which routes the caller down the error path it already
             // took before this check existed.
@@ -814,12 +860,16 @@ pub async fn routing_evaluate(
                     if let Some(timer) = timer.take() {
                         timer.observe_duration();
                     }
-                    return Ok(Json(no_active_algorithm_response(
-                        &payload,
-                        request_id,
-                        global_request_id,
-                        trace_id,
-                    )));
+                    return Ok(Json(
+                        no_active_algorithm_response(
+                            &state,
+                            &payload,
+                            request_id,
+                            global_request_id,
+                            trace_id,
+                        )
+                        .await,
+                    ));
                 }
                 Err(e) => return fail_preview(e, "active_routing_lookup_failed"),
             }
