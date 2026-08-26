@@ -728,12 +728,22 @@ export function PaymentAuditPage() {
 
   // The audit results only name the connectors on the visible page, which would make the Gateway
   // dropdown unable to reach a connector that happens to fall on page 2. Gateway scores are
-  // merchant-wide, so they name every connector that has seen traffic in the window.
-  const gatewayCatalog = useSWR<AnalyticsGatewayScoresResponse>(
-    '/analytics/gateway-scores?range=1w',
-    fetcher,
-    { revalidateOnFocus: false, dedupingInterval: 300_000 },
-  )
+  // merchant-wide, so they name every connector with traffic — read over the same window the page
+  // is auditing, so the options can neither omit a connector that was only active back then nor
+  // offer one that saw no traffic in it.
+  const gatewayCatalogUrl =
+    range !== 'custom' || customWindow
+      ? `/analytics/gateway-scores?${queryString({
+          range: range === 'custom' ? '1h' : range,
+          start_ms: customWindow?.start_ms,
+          end_ms: customWindow?.end_ms,
+        })}`
+      : null
+
+  const gatewayCatalog = useSWR<AnalyticsGatewayScoresResponse>(gatewayCatalogUrl, fetcher, {
+    revalidateOnFocus: false,
+    dedupingInterval: 60_000,
+  })
 
   const selectedSummary = useMemo(() => {
     const rows = auditSearch.data?.results || []
