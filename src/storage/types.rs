@@ -925,3 +925,16 @@ pub struct UserEmailVerifiedUpdate {
 pub struct UserPasswordUpdate {
     pub password_hash: String,
 }
+
+/// Written when a password reset completes: consuming a reset token proves control of the
+/// mailbox, which is the same thing a verification link proves, so the reset settles both.
+#[derive(AsChangeset, Debug)]
+#[cfg_attr(feature = "mysql", diesel(table_name = schema::users))]
+#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::users))]
+pub struct UserPasswordResetUpdate {
+    pub password_hash: String,
+    #[cfg(feature = "mysql")]
+    pub email_verified: i8,
+    #[cfg(feature = "postgres")]
+    pub email_verified: bool,
+}
