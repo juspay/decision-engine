@@ -114,7 +114,7 @@ export function EuclidRuleBuilderPage() {
 
     // Collect every problem before returning, so one save reports all of them rather than making
     // the reader rediscover the next one on each attempt.
-    const nextNameError = ruleName.trim() ? null : 'Enter a name for this rule.'
+    const nextNameError = ruleName.trim() ? null : 'Rule name is required.'
     const nextBlockErrors: Record<string, string> = {}
     ruleBlocks.forEach((block) => {
       const empty =

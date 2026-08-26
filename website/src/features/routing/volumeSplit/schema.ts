@@ -34,7 +34,7 @@ export function collectVolumeSplitErrors(values: VolumeSplitRuleFormValues): Vol
   const errors: VolumeSplitFieldErrors = { gateways: {} }
 
   if (!values.ruleName.trim()) {
-    errors.ruleName = 'Enter a name for this rule.'
+    errors.ruleName = 'Enter a rule name'
   }
   if (!values.gateways.length) {
     errors.total = 'Add at least one gateway.'

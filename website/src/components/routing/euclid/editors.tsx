@@ -134,17 +134,13 @@ export function SortableGatewayItem({
       <button
         type="button"
         onClick={startEditing}
-        className="flex-1 truncate text-left font-mono text-sm hover:text-brand-600 dark:hover:text-brand-400"
-      >
-        {position}. {gatewayName}{gatewayId ? ` (${gatewayId})` : ''}
-      </button>
-      <button
-        type="button"
-        onClick={startEditing}
         aria-label={`Edit ${gatewayName}`}
-        className="text-slate-400 transition-colors hover:text-brand-600 dark:hover:text-brand-400"
+        className="group flex min-w-0 flex-1 items-center gap-2 text-left hover:text-brand-600 dark:hover:text-brand-400"
       >
-        <Pencil size={12} />
+        <span className="truncate font-mono text-sm">
+          {position}. {gatewayName}{gatewayId ? ` (${gatewayId})` : ''}
+        </span>
+        <Pencil size={12} className="shrink-0 text-slate-400 transition-colors group-hover:text-brand-600 dark:group-hover:text-brand-400" />
       </button>
       <button type="button" onClick={onRemove} aria-label={`Remove ${gatewayName}`} className="text-red-400 hover:text-red-600">
         <Trash2 size={12} />
@@ -406,16 +402,16 @@ function VolumeSplitRow({
   return (
     <div className="flex items-center gap-2 bg-slate-100 dark:bg-[#111118] border border-slate-200 dark:border-[#1c1c24] rounded-lg px-2 py-1.5">
       <span className="text-xs font-bold text-brand-500 w-10 shrink-0 tabular-nums">{entry.split}%</span>
-      <button type="button" onClick={startEditing} className="flex-1 truncate text-left font-mono text-sm hover:text-brand-600 dark:hover:text-brand-400">
-        {entry.gatewayName}{entry.gatewayId ? ` (${entry.gatewayId})` : ''}
-      </button>
       <button
         type="button"
         onClick={startEditing}
         aria-label={`Edit ${entry.gatewayName}`}
-        className="text-slate-400 transition-colors hover:text-brand-600 dark:hover:text-brand-400"
+        className="group flex min-w-0 flex-1 items-center gap-2 text-left hover:text-brand-600 dark:hover:text-brand-400"
       >
-        <Pencil size={12} />
+        <span className="truncate font-mono text-sm">
+          {entry.gatewayName}{entry.gatewayId ? ` (${entry.gatewayId})` : ''}
+        </span>
+        <Pencil size={12} className="shrink-0 text-slate-400 transition-colors group-hover:text-brand-600 dark:group-hover:text-brand-400" />
       </button>
       <button type="button" onClick={onRemove} aria-label={`Remove ${entry.gatewayName}`} className="text-red-400 hover:text-red-600">
         <Trash2 size={12} />
