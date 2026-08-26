@@ -1,0 +1,1734 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Migration front</title>
+<style>
+  :root {
+    --ground: #f4f6f8;
+    --panel: #ffffff;
+    --panel-sunk: #eef1f5;
+    --ink: #0f1620;
+    --ink-soft: #56616f;
+    --ink-faint: #8a94a2;
+    --line: #dde3ea;
+    --line-strong: #c3ccd7;
+    --hs: #9c5f14;
+    --hs-fill: #e6a340;
+    --de: #0c6f68;
+    --de-fill: #2aa79a;
+    --alarm: #a52a1f;
+    --alarm-fill: #d9503f;
+    --focus: #1f6feb;
+    --radius: 6px;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", "JetBrains Mono", Menlo, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground: #0e1116;
+      --panel: #161a21;
+      --panel-sunk: #1d222b;
+      --ink: #e8ecf1;
+      --ink-soft: #a4b0be;
+      --ink-faint: #6f7b8a;
+      --line: #262c36;
+      --line-strong: #39414d;
+      --hs: #e6a340;
+      --hs-fill: #c98a2e;
+      --de: #45c4b6;
+      --de-fill: #2a9083;
+      --alarm: #ef6d5c;
+      --alarm-fill: #b8392b;
+      --focus: #6ea8ff;
+    }
+  }
+
+  * { box-sizing: border-box; }
+  /* `hidden` has to win over the layout rules below, which set display on the same elements. */
+  [hidden] { display: none !important; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 14px;
+    line-height: 1.45;
+  }
+  button, input, select { font: inherit; color: inherit; }
+  :focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+  .wrap { max-width: 1500px; margin: 0 auto; padding: 22px 20px 120px; }
+
+  /* ---------------------------------------------------------------- header */
+  header { display: flex; flex-wrap: wrap; gap: 18px; align-items: flex-end; justify-content: space-between; }
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: 0.13em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-bottom: 4px;
+  }
+  h1 { margin: 0; font-size: 27px; font-weight: 640; letter-spacing: -0.02em; }
+  .endpoints { font-family: var(--mono); font-size: 11.5px; color: var(--ink-soft); margin-top: 6px; }
+  .endpoints b { font-weight: 600; color: var(--ink); }
+  .header-actions { display: flex; align-items: center; gap: 10px; }
+  .env-pick {
+    background: var(--panel); border: 1px solid var(--line-strong); border-radius: var(--radius);
+    padding: 5px 8px; font-family: var(--sans); font-size: 12.5px; margin-right: 8px;
+  }
+  /* Production is said in the one colour this page keeps for things that cannot be undone,
+     wherever the environment is named — the header, the panel and every confirm. */
+  .live-tag {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase;
+    color: var(--panel); background: var(--alarm); border-radius: 3px; padding: 2px 6px; margin-right: 8px;
+  }
+  /* Full width, above everything, for as long as the console is pointed at production. */
+  body.live { border-top: 3px solid var(--alarm); }
+  body.live .env-pick { border-color: var(--alarm); color: var(--alarm); }
+
+  button.action {
+    background: var(--ink);
+    color: var(--panel);
+    border: 1px solid var(--ink);
+    border-radius: var(--radius);
+    padding: 8px 15px;
+    font-weight: 560;
+    cursor: pointer;
+  }
+  button.action:hover:not(:disabled) { opacity: 0.86; }
+  button.action:disabled { opacity: 0.4; cursor: not-allowed; }
+  button.ghost {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius);
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+  button.ghost:hover { background: var(--panel-sunk); }
+
+  /* ------------------------------------------------------- the crossing bar */
+  /* One bar per estate and one per profile: rules landed in the decision engine,
+     rules still held only by Hyperswitch, rules this migration never carries. */
+  .crossing { display: flex; height: 100%; width: 100%; border-radius: 2px; overflow: hidden; background: var(--panel-sunk); }
+  .crossing span { display: block; height: 100%; }
+  .seg-de { background: var(--de-fill); }
+  .seg-hs { background: var(--hs-fill); }
+  .seg-oos { background: repeating-linear-gradient(135deg, var(--line-strong) 0 3px, transparent 3px 6px); }
+
+  .estate {
+    margin-top: 18px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 16px 18px;
+  }
+  .estate-bar { height: 12px; margin: 12px 0 10px; }
+  .estate-legend { display: flex; flex-wrap: wrap; gap: 18px; font-size: 12.5px; color: var(--ink-soft); }
+  .estate-legend b { font-family: var(--mono); font-weight: 600; color: var(--ink); }
+  .swatch { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; vertical-align: baseline; }
+  .counts { display: flex; flex-wrap: wrap; gap: 26px; }
+  .count-label { font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+  .count-value { font-family: var(--mono); font-size: 21px; font-weight: 600; }
+
+  /* --------------------------------------------------------------- filters */
+  .states { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 12px; }
+  .state-chip {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-left: 3px solid var(--tone, var(--line-strong));
+    border-radius: var(--radius);
+    padding: 7px 13px;
+    cursor: pointer;
+  }
+  .state-chip[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+  .state-chip .n { font-family: var(--mono); font-weight: 600; font-size: 15px; }
+  .state-chip .k { font-size: 12px; }
+  .state-chip:disabled { opacity: 0.35; cursor: default; }
+
+  .filters {
+    display: flex; flex-wrap: wrap; gap: 10px; align-items: center;
+    background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 11px 13px;
+  }
+  .filters label { font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint); margin-right: 6px; }
+  .filters select, .filters input[type="search"] {
+    background: var(--panel-sunk);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 6px 9px;
+    max-width: 230px;
+  }
+  .filters .spacer { flex: 1; }
+  .toggle { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--ink-soft); cursor: pointer; }
+
+  /* ----------------------------------------------------------------- table */
+  .table-wrap { margin-top: 12px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; }
+  thead th {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--panel);
+    border-bottom: 1px solid var(--line-strong);
+    text-align: left;
+    font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint);
+    font-weight: 600;
+    padding: 10px 12px;
+    white-space: nowrap;
+  }
+  thead th.sortable { cursor: pointer; }
+  thead th.sortable:hover { color: var(--ink); }
+  tbody td { border-bottom: 1px solid var(--line); padding: 8px 12px; vertical-align: middle; }
+  tbody tr:hover { background: var(--panel-sunk); }
+  tbody tr.selected { background: color-mix(in srgb, var(--focus) 8%, var(--panel)); }
+  .num { font-family: var(--mono); text-align: right; font-variant-numeric: tabular-nums; }
+  .id { font-family: var(--mono); font-size: 12px; }
+  .sub { display: block; font-size: 11.5px; color: var(--ink-faint); }
+  .bar-cell { width: 130px; }
+  .bar-cell .crossing { height: 8px; }
+
+  .badge {
+    display: inline-block; font-size: 11.5px; font-weight: 560;
+    padding: 2px 8px; border-radius: 999px;
+    border: 1px solid currentColor;
+  }
+  .badge.pending, .badge.partial { color: var(--hs); }
+  .badge.partial { background: color-mix(in srgb, var(--hs-fill) 16%, transparent); }
+  .badge.migrated { color: var(--de); }
+  .badge.enabled { color: var(--panel); background: var(--de); border-color: var(--de); }
+  .badge.diverged, .badge.enabled_without_rules { color: var(--panel); background: var(--alarm); border-color: var(--alarm); }
+  .badge.unknown { color: var(--ink-faint); }
+  .tag { font-family: var(--mono); font-size: 11px; color: var(--ink-faint); white-space: nowrap; }
+  /* A profile the decision engine has no scope for is not a slower migration but a broken one,
+     so it is toned like the states that mean the same thing. */
+  .tag.warn, .count-value.warn { color: var(--alarm); }
+  .notice.warn { border-left-color: var(--alarm); }
+
+  .group-row td { background: var(--panel-sunk); font-weight: 600; padding: 7px 12px; }
+  .group-row .id { font-weight: 600; }
+  tbody tr.row { cursor: pointer; }
+  .detail td { background: var(--panel-sunk); font-family: var(--mono); font-size: 11.5px; color: var(--ink-soft); }
+  .panel-actions {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+    padding-bottom: 10px; margin-bottom: 10px; border-bottom: 1px solid var(--line);
+  }
+  .panel-actions button { font-family: var(--sans); }
+  .panel-note { font-family: var(--sans); font-size: 12.5px; color: var(--ink-soft); flex: 1 1 320px; }
+  .panel-note code { font-family: var(--mono); color: var(--ink); }
+  .panel-note em { font-style: normal; color: var(--hs); font-weight: 560; }
+  .detail .ids { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+  .detail .ids span { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 1px 6px; }
+  .expand { background: none; border: none; cursor: pointer; color: var(--ink-faint); padding: 0 4px; }
+
+  .notice {
+    margin-top: 10px; padding: 9px 13px; border-radius: var(--radius);
+    background: var(--panel); border: 1px solid var(--line); border-left: 3px solid var(--hs-fill);
+    color: var(--ink-soft); font-size: 13px;
+  }
+  .notice b { font-family: var(--mono); color: var(--ink); }
+  .notice em { font-style: normal; color: var(--ink); }
+  .empty { padding: 46px 20px; text-align: center; color: var(--ink-soft); }
+  .empty b { display: block; font-size: 16px; color: var(--ink); margin-bottom: 6px; }
+
+  /* ------------------------------------------------------------ action bar */
+  .actionbar {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    background: var(--panel); border-top: 1px solid var(--line-strong);
+    padding: 12px 20px;
+    display: flex; align-items: center; gap: 16px;
+    box-shadow: 0 -6px 22px rgba(0,0,0,0.07);
+  }
+  .actionbar .summary { font-size: 13.5px; }
+  .actionbar .summary b { font-family: var(--mono); }
+  .actionbar .spacer { flex: 1; }
+  .progress { height: 4px; background: var(--panel-sunk); border-radius: 2px; overflow: hidden; width: 260px; }
+  .progress span { display: block; height: 100%; background: var(--de-fill); transition: width 0.3s ease; }
+  @media (prefers-reduced-motion: reduce) { .progress span { transition: none; } }
+
+  .report { margin-top: 14px; background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; }
+  .report h2 { margin: 0 0 8px; font-size: 15px; }
+  .report .rows { max-height: 260px; overflow: auto; margin-top: 10px; font-family: var(--mono); font-size: 12px; }
+  .report .rows div { padding: 3px 0; border-bottom: 1px solid var(--line); }
+  /* Hyperswitch's own log is searched by this, so it is one click to select rather than a
+     careful drag through an id that looks like the profile id beside it. */
+  .rid { color: var(--ink-faint); user-select: all; }
+  /* ----------------------------------------------------------- environment */
+  .env {
+    margin-top: 14px; background: var(--panel); border: 1px solid var(--line);
+    border-radius: 10px; padding: 15px 17px;
+  }
+  .env h2 { margin: 0 0 3px; font-size: 15px; }
+  .env .env-section {
+    margin: 22px 0 3px; font-size: 13px; letter-spacing: 0.07em;
+    text-transform: uppercase; color: var(--ink-faint);
+    border-top: 1px solid var(--line); padding-top: 16px;
+  }
+  .env .env-note code { font-family: var(--mono); color: var(--ink); }
+  .env .env-note em { font-style: normal; color: var(--ink); font-weight: 560; }
+  .env .env-note { margin: 0 0 13px; font-size: 12.5px; color: var(--ink-soft); max-width: 70ch; }
+  .env-grid { display: flex; flex-wrap: wrap; gap: 14px; }
+  .env-field { display: flex; flex-direction: column; gap: 4px; flex: 1 1 320px; }
+  .env-field span { font-size: 11px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--ink-faint); }
+  .env input {
+    background: var(--panel-sunk); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 7px 9px; width: 100%;
+  }
+  .env-headers { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+  .env-header-row { display: flex; gap: 8px; align-items: center; }
+  .env-header-row input:first-child { flex: 0 1 220px; font-family: var(--mono); font-size: 12.5px; }
+  .env-header-row input:nth-child(2) { flex: 1 1 260px; font-family: var(--mono); font-size: 12.5px; }
+  .env-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-top: 15px; }
+  .env-actions .toggle { white-space: nowrap; flex: 0 0 auto; }
+  .env-actions .spacer { flex: 1; }
+  .env-error { color: var(--alarm); font-size: 13px; }
+
+  /* --------------------------------------------------------------- paging */
+  .pager {
+    display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+    margin-top: 10px; font-size: 13px; color: var(--ink-soft);
+  }
+  .pager .spacer { flex: 1; }
+  .pager b { font-family: var(--mono); color: var(--ink); }
+  .pager select { background: var(--panel-sunk); border: 1px solid var(--line); border-radius: var(--radius); padding: 5px 8px; }
+  .pager button:disabled { opacity: 0.4; cursor: not-allowed; }
+
+  .banner a { color: inherit; }
+  .banner b { font-family: var(--mono); }
+  #report:target .report, #cutover-report:target .report { border-color: var(--alarm); }
+  .banner { margin-top: 14px; border-left: 3px solid var(--alarm); background: var(--panel); padding: 10px 14px; border-radius: var(--radius); color: var(--alarm); }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div>
+      <div class="eyebrow">hyperswitch &rarr; decision engine</div>
+      <h1>Migration front</h1>
+      <div class="endpoints">
+        <span class="live-tag" id="live-tag" hidden>production</span>
+        <b id="hs-url">&mdash;</b> &nbsp;<span id="key-state" class="tag"></span>
+      </div>
+    </div>
+    <div class="header-actions">
+      <span class="tag" id="scanned-at"></span>
+      <select class="env-pick" id="env-pick" title="The environment this console reads and writes"></select>
+      <button class="ghost" id="env-btn">Environment</button>
+      <button class="action" id="scan-btn">Scan estate</button>
+    </div>
+  </header>
+
+  <section class="env" id="env-panel" hidden>
+    <h2 id="env-title">Environment</h2>
+    <p class="env-note">The environment this console reads and writes. The API key is held by
+      the local server process and is never sent to this page; extra headers travel with every
+      call, which is how a hosted environment picks the release train to answer from.</p>
+    <p class="env-note">Each environment is kept under its own name with its own three
+      addresses and credentials, so sandbox and production are switched between from the header
+      rather than typed over each other. <em>Kind</em> is what a write here reaches: a
+      <em>production</em> environment is marked in the header and in every confirm, and a
+      migration, cutover or scope run against it asks for the environment's name once per
+      session before the first one.</p>
+    <div class="env-grid">
+      <label class="env-field"><span>Environment</span>
+        <input id="env-label" spellcheck="false" placeholder="Production EU" /></label>
+      <label class="env-field"><span>Kind</span>
+        <select id="env-kind">
+          <option value="sandbox">Sandbox &mdash; safe to write to</option>
+          <option value="production">Production &mdash; live merchants</option>
+          <option value="local">Local</option>
+          <option value="other">Other</option>
+        </select></label>
+    </div>
+    <div class="env-grid">
+      <label class="env-field"><span>Hyperswitch URL</span>
+        <input id="env-url" type="url" spellcheck="false" placeholder="https://sandbox.hyperswitch.io" /></label>
+      <label class="env-field"><span>Admin API key</span>
+        <input id="env-key" type="password" autocomplete="off" spellcheck="false" placeholder="paste the admin api-key" /></label>
+    </div>
+    <div class="env-headers" id="env-headers"></div>
+
+    <h3 class="env-section">Superposition</h3>
+    <p class="env-note">Where a cutover is written. Hyperswitch reads
+      <code id="env-key-name">routing.routing_result_source</code> per profile and asks whoever
+      it names for the routing result, so this is what moves a migrated profile from
+      <em>migrated</em> to <em>enabled</em>. Leave it empty to keep the dashboard read-only about
+      routing.</p>
+    <div class="env-grid">
+      <label class="env-field"><span>Superposition URL</span>
+        <input id="sp-url" type="url" spellcheck="false" placeholder="https://superposition.example.net" /></label>
+      <label class="env-field"><span>Superposition secret</span>
+        <input id="sp-secret" type="password" autocomplete="off" spellcheck="false" placeholder="x-superposition-secret" /></label>
+      <label class="env-field"><span>Override key</span>
+        <input id="sp-key" spellcheck="false" /></label>
+    </div>
+    <div class="env-headers" id="sp-headers"></div>
+
+    <h3 class="env-section">Decision engine</h3>
+    <p class="env-note">Optional, and the only part of this console that talks to the decision
+      engine directly. Hyperswitch reports which <em>rules</em> have crossed; whether it holds a
+      <em>scope</em> for a profile at all is a question only the decision engine can answer, and
+      a profile with rules but no scope is refused at
+      <code>decide-gateway</code> with <code>MERCHANT_NOT_FOUND</code>. Give an address and the
+      admin secret and every scan checks it; leave it empty and the scope column says it was not
+      read.</p>
+    <div class="env-grid">
+      <label class="env-field"><span>Decision engine URL</span>
+        <input id="de-url" type="url" spellcheck="false" placeholder="https://decision-engine.example.net" /></label>
+      <label class="env-field"><span>Admin secret</span>
+        <input id="de-secret" type="password" autocomplete="off" spellcheck="false" placeholder="x-admin-secret" /></label>
+    </div>
+    <div class="env-headers" id="de-headers"></div>
+
+    <div class="env-actions">
+      <button class="ghost" id="env-add-header">Add Hyperswitch header</button>
+      <button class="ghost" id="sp-add-header">Add Superposition header</button>
+      <button class="ghost" id="de-add-header">Add decision engine header</button>
+      <label class="toggle" title="Writes every environment configured here to ~/.config/hs-migration-dashboard/config.json, readable only by you"><input type="checkbox" id="env-remember" /> Remember on this machine</label>
+      <label class="toggle" title="Credentials are remembered together or not at all — every environment's key and secrets, or none of them"><input type="checkbox" id="env-remember-key" /> including the credentials</label>
+      <span class="spacer"></span>
+      <span class="env-error" id="env-error"></span>
+      <button class="ghost" id="env-forget" hidden>Forget saved</button>
+      <button class="action" id="env-save">Use this environment</button>
+    </div>
+  </section>
+
+  <div id="alert"></div>
+
+  <section class="estate" id="estate" hidden>
+    <div class="counts">
+      <div>
+        <div class="count-label">Organizations</div>
+        <div class="count-value" id="c-orgs">0</div>
+      </div>
+      <div>
+        <div class="count-label">Merchants</div>
+        <div class="count-value" id="c-merchants">0</div>
+      </div>
+      <div>
+        <div class="count-label">Profiles with rules</div>
+        <div class="count-value" id="c-profiles">0</div>
+      </div>
+      <div>
+        <div class="count-label">Rules pending</div>
+        <div class="count-value" id="c-pending">0</div>
+      </div>
+      <div>
+        <div class="count-label">Ready to cut over</div>
+        <div class="count-value" id="c-cutover">0</div>
+      </div>
+      <div>
+        <div class="count-label">Scopes to provision</div>
+        <div class="count-value" id="c-scopes">&mdash;</div>
+      </div>
+    </div>
+    <div class="estate-bar"><div class="crossing" id="estate-bar"></div></div>
+    <div class="estate-legend">
+      <span><i class="swatch" style="background:var(--de-fill)"></i>In the decision engine <b id="l-de">0</b></span>
+      <span><i class="swatch" style="background:var(--hs-fill)"></i>Only in Hyperswitch <b id="l-hs">0</b></span>
+      <span><i class="swatch seg-oos"></i>Out of scope &mdash; dynamic and 3DS <b id="l-oos">0</b></span>
+    </div>
+  </section>
+
+  <div id="scopes"></div>
+
+  <div class="states" id="states"></div>
+
+  <div class="filters">
+    <span><label for="f-org">Org</label><select id="f-org"></select></span>
+    <span><label for="f-merchant">Merchant</label><select id="f-merchant"></select></span>
+    <span><label for="f-source">Routing source</label><select id="f-source"></select></span>
+    <span><label for="f-scope">DE scope</label><select id="f-scope">
+      <option value="">Any scope</option>
+      <option value="missing">Missing in DE</option>
+      <option value="no_ancestry">No ancestry</option>
+      <option value="present">Complete</option>
+    </select></span>
+    <span><label for="f-search">Find</label><input type="search" id="f-search" placeholder="profile, merchant or rule id" /></span>
+    <span class="spacer"></span>
+    <label class="toggle"><input type="checkbox" id="f-actionable" /> Only profiles with rules to move</label>
+    <label class="toggle"><input type="checkbox" id="f-group" /> Group by org</label>
+    <label class="toggle" title="Migration can only answer &quot;not attempted&quot; for these until the merchant account exists in Hyperswitch"><input type="checkbox" id="f-blocked" /> Allow profiles with no merchant account</label>
+  </div>
+  <div id="more"></div>
+  <div id="nothing-selectable"></div>
+
+  <div class="pager" id="pager" hidden>
+    <span id="pager-info"></span>
+    <button class="ghost" id="select-view" hidden></button>
+    <span class="spacer"></span>
+    <label class="toggle" for="page-size">Rows per page</label>
+    <select id="page-size">
+      <option value="50">50</option>
+      <option value="100" selected>100</option>
+      <option value="250">250</option>
+      <option value="500">500</option>
+      <option value="0">All</option>
+    </select>
+    <button class="ghost" id="page-prev">&larr; Previous</button>
+    <span id="page-label"></span>
+    <button class="ghost" id="page-next">Next &rarr;</button>
+  </div>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th style="width:34px"><input type="checkbox" id="select-all" title="Select every profile on this page that has rules to move" /></th>
+          <th style="width:26px"></th>
+          <th class="sortable" data-sort="organization_id">Organization</th>
+          <th class="sortable" data-sort="merchant_id">Merchant</th>
+          <th class="sortable" data-sort="profile_id">Profile</th>
+          <th class="sortable num" data-sort="rules_hyperswitch">HS</th>
+          <th class="sortable num" data-sort="rules_decision_engine">DE</th>
+          <th class="bar-cell">Crossing</th>
+          <th class="sortable num" data-sort="rules_pending">Pending</th>
+          <th class="sortable num" data-sort="rules_out_of_scope">Out of scope</th>
+          <th class="sortable" data-sort="state">State</th>
+          <th>Note</th>
+        </tr>
+      </thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="empty" id="empty">
+      <b>Nothing scanned yet</b>
+      Scan the estate to read where every profile holding routing rules stands.
+    </div>
+  </div>
+
+  <div id="report" tabindex="-1"></div>
+  <div id="cutover-report" tabindex="-1"></div>
+  <div id="scope-report" tabindex="-1"></div>
+</div>
+
+<div class="actionbar" id="actionbar" hidden>
+  <div class="summary" id="action-summary"></div>
+  <div class="progress" id="job-progress" hidden><span></span></div>
+  <span class="tag" id="job-message"></span>
+  <div class="spacer"></div>
+  <button class="ghost" id="clear-btn">Clear selection</button>
+  <button class="ghost" id="scope-btn" hidden>Provision scopes</button>
+  <button class="ghost" id="rollback-btn" hidden>Roll back to Hyperswitch</button>
+  <button class="action" id="cutover-btn" hidden>Cut over to decision engine</button>
+  <button class="action" id="migrate-btn">Migrate selected</button>
+</div>
+
+<script>
+"use strict";
+
+// The lifecycle order Hyperswitch reports, with the tone each state is read in: amber while
+// rules are still only on the Hyperswitch side, teal once they have crossed, red where a
+// profile is cut over or counted right but is missing rules.
+const STATES = [
+  ["pending",               "Pending",              "var(--hs-fill)"],
+  ["partial",               "Partial",              "var(--hs)"],
+  ["diverged",              "Diverged",             "var(--alarm)"],
+  ["migrated",              "Migrated",             "var(--de-fill)"],
+  ["enabled",               "Enabled",              "var(--de)"],
+  ["enabled_without_rules", "Enabled, no rules",    "var(--alarm-fill)"],
+  ["unknown",               "Unknown",              "var(--ink-faint)"],
+];
+const BLOCKERS = {
+  no_merchant_account: "merchant account missing",
+  out_of_scope_only: "only out-of-scope rules",
+};
+// Why a row's checkbox is disabled, shown on hover. A control that is present and explained
+// beats one that silently is not there.
+// The two directions a cutover can take a profile, as Hyperswitch names them.
+const TO_DE = "decision_engine";
+const TO_HS = "hyperswitch_routing";
+const BLOCKED_WHY = {
+  no_merchant_account: "This profile's merchant account cannot be read in Hyperswitch, so a " +
+    "migration would answer \"merchant account could not be read\". Tick " +
+    "\u201cAllow profiles with no merchant account\u201d to try it anyway.",
+  out_of_scope_only: "Nothing to move: this profile holds only dynamic or 3DS rules, which " +
+    "reach the decision engine another way.",
+};
+// Why a scope that is not in the decision engine matters, said wherever the fact is shown.
+const NO_SCOPE_WHY = "The decision engine holds no scope for this profile. Rules can still be " +
+  "written under it, but decide-gateway loads the scope first and answers MERCHANT_NOT_FOUND " +
+  "without one, so it cannot be cut over until the scope exists.";
+// A scope with nothing recorded above it. Routing is unaffected — only naming and grants are.
+const NO_ANCESTRY_WHY = "The decision engine holds a scope for this profile but nothing above " +
+  "it: no organization, merchant or profile name. Routing is unaffected, but the dashboard " +
+  "cannot name the account and an org or merchant grant cannot expand to reach it.";
+
+// The picker's escape hatch: an environment that is not one of the ones already held. A name
+// is a slug of letters, digits and dashes, so a value with a space in it cannot collide.
+const NEW_ENV = "new environment";
+
+const el = (id) => document.getElementById(id);
+let data = null;              // last scan from the server
+let config = {};              // the environment the server is pointed at
+let selected = new Set();     // profile ids picked for migration
+let expanded = new Set();
+let stateFilter = new Set();
+let sort = { key: "state", dir: 1 };
+let polling = null;
+let page = 0;                 // page of the filtered table, not of the status feed
+let pageSize = 100;
+let liveAck = "";             // the production environment whose name has been typed back
+let ackedFor = "";            // which environment that answer was given for
+let envHeaders = [];          // extra Hyperswitch headers, edited in the environment panel
+let spHeaders = [];           // extra Superposition headers
+let deHeaders = [];           // extra decision engine headers
+
+// ------------------------------------------------------------------ loading
+
+async function loadState() {
+  // The scan is nearly the whole payload and only changes when one finishes, so the poll says
+  // which one it holds and is sent the jobs alone for as long as nothing has replaced it.
+  const held = data ? `?scan_at=${encodeURIComponent(data.scanned_at)}` : "";
+  const res = await fetch("/api/state" + held);
+  const state = await res.json();
+  if (state.scan_unchanged) state.scan = data;
+  render(state);
+  const running = state.scan_job.running || state.migrate_job.running ||
+                  state.cutover_job.running || state.scope_job.running;
+  if (running && !polling) polling = setInterval(loadState, 900);
+  if (!running && polling) { clearInterval(polling); polling = null; }
+  return state;
+}
+
+async function post(path, body) {
+  const res = await fetch(path, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body || {}),
+  });
+  const payload = await res.json();
+  if (!res.ok) throw new Error(payload.error || "request failed");
+  return payload;
+}
+
+// ----------------------------------------------------------------- rendering
+
+function render(state) {
+  config = state.config;
+  el("hs-url").textContent = config.hyperswitch_url;
+  el("key-state").textContent = config.api_key_set
+    ? `api-key ${config.api_key_hint}` : "no api-key set";
+  el("env-forget").hidden = !config.saved;
+  // The panel is a view of the environment in use, so a switch from the picker refills it. Left
+  // as it was, it would show the last environment's addresses and credentials under the new
+  // one's name — and "Use this environment" would then write them onto it.
+  if (!el("env-panel").hidden && !envCreating && envPanelFor !== config.name) openEnv(false);
+  renderEnvPick();
+  el("live-tag").hidden = !config.live;
+  document.body.classList.toggle("live", Boolean(config.live));
+  // The answer given for one production environment says nothing about another, so it is asked
+  // for again as soon as the console is pointed somewhere else.
+  if (ackedFor !== config.name) { liveAck = ""; ackedFor = config.name; }
+
+  const scanning = state.scan_job.running;
+  const migrating = state.migrate_job.running;
+  el("scan-btn").disabled = scanning || migrating || !config.api_key_set;
+  el("scan-btn").textContent = scanning ? "Scanning…" : (state.scan ? "Rescan" : "Scan estate");
+  // Nothing can be read without a key, so the panel opens itself rather than leaving the
+  // scan button inert with no explanation.
+  if (!config.api_key_set && !envTouched) openEnv();
+
+  const failure = state.scan_job.error || state.migrate_job.error || state.cutover_job.error ||
+                  state.scope_job.error;
+  el("alert").innerHTML = failure
+    ? `<div class="banner">${escape(failure)}</div>`
+    : runFailureBanner(state);
+
+  if (state.scan) {
+    data = state.scan;
+    el("scanned-at").textContent = "scanned " + timeAgo(data.scanned_at);
+    renderEstate(data.totals);
+    renderStates(data.totals.states);
+    renderFilters();
+    renderRows();
+  }
+  renderScopes(state);
+  renderMore(state);
+  renderActionBar(state);
+  renderReport(state.migrate_job);
+  renderCutoverReport(state.cutover_job);
+  renderScopeReport(state.scope_job);
+}
+
+// The batch this profile's outcome came back in. `HE_00 / Something went wrong` is the router
+// declining to say what happened; what happened is in its log, under this id.
+function requestIds(profile) {
+  const ids = profile.request_ids || [];
+  if (!ids.length) return "";
+  return ` · <span class="rid" title="Hyperswitch x-request-id — search its logs for this">` +
+         `${escape(ids.join(" "))}</span>`;
+}
+
+// What a finished run failed at, said at the top of the page. It stays until the next run, which
+// is when the result it describes is replaced.
+function runFailureBanner(state) {
+  const cut = state.cutover_job.result;
+  if (cut && cut.totals.failed) {
+    const first = cut.profiles.find((p) => !p.ok);
+    return `<div class="banner"><b>${cut.totals.failed}</b> of ${cut.totals.profiles}
+      ${plural(cut.totals.profiles, "profile")} did not switch routing &mdash;
+      ${escape(first.error)}. <a href="#cutover-report">See the run</a>.</div>`;
+  }
+  const run = state.migrate_job.result;
+  if (run && run.failures && run.failures.length) {
+    return `<div class="banner"><b>${run.failures.length}</b>
+      ${plural(run.failures.length, "batch")} did not run &mdash;
+      ${escape(run.failures[0].error)}. <a href="#report">See the run</a>.</div>`;
+  }
+  return "";
+}
+
+// How much of the estate the last scan read. A scan walks the status feed to its end, so this
+// says what the table is made of rather than offering to read the rest.
+function renderMore(state) {
+  const target = el("more");
+  if (!state.scan) { target.innerHTML = ""; return; }
+  const read = state.scan.rows.length;
+  target.innerHTML = `<div class="notice">Whole estate read &mdash; <b>${read}</b>
+    ${plural(read, "profile")} across <b>${state.pages_read}</b> ${plural(state.pages_read, "page")}
+    of the status feed.</div>`;
+}
+
+function renderEstate(totals) {
+  el("estate").hidden = false;
+  el("c-orgs").textContent = totals.organizations;
+  el("c-merchants").textContent = totals.merchants;
+  el("c-profiles").textContent = totals.profiles;
+  el("c-pending").textContent = totals.rules_pending;
+  el("c-cutover").textContent = totals.cutover_ready;
+  // Nothing checked is not the same as nothing missing, so an unread column says so rather
+  // than reading as a clean zero.
+  const checked = totals.scopes_checked > 0;
+  const incomplete = totals.scopes_missing + totals.scopes_no_ancestry;
+  el("c-scopes").textContent = checked ? incomplete : "\u2014";
+  el("c-scopes").classList.toggle("warn", checked && totals.scopes_missing > 0);
+  el("l-de").textContent = totals.rules_decision_engine;
+  el("l-hs").textContent = totals.rules_pending;
+  el("l-oos").textContent = totals.rules_out_of_scope;
+  el("estate-bar").innerHTML = crossing(
+    totals.rules_decision_engine, totals.rules_pending, totals.rules_out_of_scope);
+}
+
+// Whether the decision engine holds a scope for each profile — the one thing the migration
+// status cannot say, since Hyperswitch reads that engine for rules alone. Without a scope a
+// profile still migrates its rules and still reads `migrated`, and only fails when traffic
+// arrives, which is why this is stated at the top rather than left in a column.
+function renderScopes(state) {
+  const target = el("scopes");
+  if (!state.scan) { target.innerHTML = ""; return; }
+  const scopes = state.scan.scopes;
+  const de = config.decision_engine || {};
+  const busy = state.scan_job.running || state.migrate_job.running ||
+               state.cutover_job.running || state.scope_job.running;
+  if (!de.ready) {
+    target.innerHTML = `<div class="notice">Scopes not checked. Hyperswitch compares rule ids
+      only &mdash; a profile the decision engine has no scope for reads exactly like one whose
+      rules have not crossed yet, migrates clean, and is refused at
+      <code>decide-gateway</code> once it is cut over. Set the decision engine URL and admin
+      secret under <em>Environment</em> to have every scan check.</div>`;
+    return;
+  }
+  if (!scopes) { target.innerHTML = ""; return; }
+  if (scopes.error) {
+    target.innerHTML = `<div class="notice warn">The decision engine could not be read, so no
+      profile below claims a scope either way &mdash; ${escape(scopes.error)}</div>`;
+    return;
+  }
+  const missing = scopes.missing || [];
+  const noAncestry = scopes.no_ancestry || [];
+  const stranded = scopes.stranded || [];
+  const strandedNote = stranded.length
+    ? `<div style="margin-top:6px"><b>${stranded.length}</b>
+       ${plural(stranded.length, "scope")} in the decision engine ${stranded.length === 1 ? "is" : "are"}
+       registered under a merchant id rather than a profile id
+       (${stranded.slice(0, 3).map(escape).join(", ")}${stranded.length > 3 ? "…" : ""}).
+       They hold rules and scores no profile inherits, and nothing here can decide which profile
+       they meant &mdash; disposition them in the decision engine.</div>` : "";
+  // A scope with no ancestry against it is a second, milder gap: routing works, naming and
+  // grants do not. It is offered to the same run, and never holds a cutover.
+  const ancestryNote = noAncestry.length
+    ? `<div style="margin-top:6px"><b>${noAncestry.length}</b>
+       ${plural(noAncestry.length, "profile")} ${noAncestry.length === 1 ? "has" : "have"} a scope
+       with nothing recorded above it &mdash; no organization, merchant or profile name. Routing
+       is unaffected; the dashboard cannot name the account and an org or merchant grant cannot
+       expand to reach it. Provisioning fills it in.</div>` : "";
+  if (!missing.length && !noAncestry.length) {
+    target.innerHTML = `<div class="notice">Every profile read has a scope in the decision
+      engine, with its ancestry &mdash; <b>${scopes.linked}</b> linked.${strandedNote}</div>`;
+    return;
+  }
+  if (!missing.length) {
+    target.innerHTML = `<div class="notice"><b>${scopes.linked}</b> profiles have a scope in the
+      decision engine.${ancestryNote}
+      <span class="env-actions" style="margin-top:8px">
+        <button class="ghost" id="scopes-fix" ${busy ? "disabled" : ""}>Provision ${noAncestry.length}
+          ${plural(noAncestry.length, "scope")}</button>
+        <button class="ghost" id="scopes-filter">Show them</button>
+      </span>${strandedNote}</div>`;
+    wireScopeButtons(noAncestry, "no_ancestry");
+    return;
+  }
+  target.innerHTML = `<div class="notice warn"><b>${missing.length}</b>
+    ${plural(missing.length, "profile")} ${missing.length === 1 ? "has" : "have"} no scope in the
+    decision engine. Their rules can be migrated and will read as <em>migrated</em>, but
+    <code>decide-gateway</code> loads the scope before anything else and answers
+    <code>MERCHANT_NOT_FOUND</code> without one, so cutting them over is held back until it
+    exists.
+    <span class="env-actions" style="margin-top:8px">
+      <button class="ghost" id="scopes-fix" ${busy ? "disabled" : ""}>Provision
+        ${missing.length + noAncestry.length} ${plural(missing.length + noAncestry.length, "scope")}</button>
+      <button class="ghost" id="scopes-filter">Show them</button>
+    </span>${ancestryNote}${strandedNote}</div>`;
+  wireScopeButtons(missing.concat(noAncestry), "missing");
+}
+
+function wireScopeButtons(ids, filterValue) {
+  el("scopes-fix").onclick = () => createScopes(ids);
+  el("scopes-filter").onclick = () => {
+    el("f-scope").value = filterValue;
+    page = 0;
+    renderRows(); renderActionBarFromData();
+  };
+}
+
+function crossing(de, hs, oos) {
+  const total = Math.max(de + hs + oos, 1);
+  const pct = (n) => (n / total * 100).toFixed(2) + "%";
+  const parts = [];
+  if (de > 0) parts.push(`<span class="seg-de" style="width:${pct(de)}" title="${de} in the decision engine"></span>`);
+  if (hs > 0) parts.push(`<span class="seg-hs" style="width:${pct(hs)}" title="${hs} only in Hyperswitch"></span>`);
+  if (oos > 0) parts.push(`<span class="seg-oos" style="width:${pct(oos)}" title="${oos} out of scope"></span>`);
+  return parts.join("");
+}
+
+function renderStates(counts) {
+  el("states").innerHTML = STATES.map(([key, label, tone]) => {
+    const n = counts[key] || 0;
+    const on = stateFilter.has(key);
+    return `<button class="state-chip" data-state="${key}" style="--tone:${tone}"
+              aria-pressed="${on}" ${n === 0 && !on ? "disabled" : ""}>
+              <span class="n">${n}</span><span class="k">${label}</span></button>`;
+  }).join("");
+  el("states").querySelectorAll(".state-chip").forEach((btn) => {
+    btn.onclick = () => {
+      const key = btn.dataset.state;
+      stateFilter.has(key) ? stateFilter.delete(key) : stateFilter.add(key);
+      page = 0;
+      renderStates(counts); renderRows(); renderActionBarFromData();
+    };
+  });
+}
+
+function renderFilters() {
+  fillSelect("f-org", "All organizations",
+    unique(data.rows.map((r) => r.organization_id).filter(Boolean)));
+  fillSelect("f-merchant", "All merchants", unique(data.rows.map((r) => r.merchant_id)));
+  fillSelect("f-source", "Any routing source",
+    unique(data.rows.map((r) => r.routing_source).filter(Boolean)));
+}
+
+function fillSelect(id, allLabel, values) {
+  const select = el(id);
+  const current = select.value;
+  select.innerHTML = `<option value="">${allLabel}</option>` +
+    values.map((v) => `<option value="${escape(v)}">${escape(v)}</option>`).join("");
+  if (values.includes(current)) select.value = current;
+}
+
+// A profile can be picked when some run could act on it: rules to move, or a routing source to
+// switch. Profiles whose merchant account is gone are held back from migration by default, since
+// the endpoint can only answer "not attempted" for them.
+function isSelectable(row) {
+  if (row.migratable || row.cutover || row.needs_provision) return true;
+  return el("f-blocked").checked && row.blocker === "no_merchant_account" && row.rules_pending > 0;
+}
+
+function cutoverReady() { return Boolean(config.superposition && config.superposition.ready); }
+function scopesReady() { return Boolean(config.decision_engine && config.decision_engine.ready); }
+function selectedRows() { return data ? data.rows.filter((r) => selected.has(r.profile_id)) : []; }
+
+function visibleRows() {
+  if (!data) return [];
+  const org = el("f-org").value, merchant = el("f-merchant").value, source = el("f-source").value;
+  const scope = el("f-scope").value;
+  const needle = el("f-search").value.trim().toLowerCase();
+  const actionable = el("f-actionable").checked;
+  let rows = data.rows.filter((r) => {
+    if (stateFilter.size && !stateFilter.has(r.state)) return false;
+    if (org && r.organization_id !== org) return false;
+    if (merchant && r.merchant_id !== merchant) return false;
+    if (source && r.routing_source !== source) return false;
+    if (scope === "missing" && !r.scope_missing) return false;
+    if (scope === "no_ancestry" && !r.ancestry_missing) return false;
+    if (scope === "present" && (r.scope_in_de !== true || r.ancestry_missing)) return false;
+    if (actionable && !r.migratable) return false;
+    if (needle) {
+      const hay = [r.profile_id, r.merchant_id, r.merchant_name, r.organization_id,
+                   ...(r.rules_missing_in_decision_engine || [])].join(" ").toLowerCase();
+      if (!hay.includes(needle)) return false;
+    }
+    return true;
+  });
+  const key = sort.key;
+  const rank = (r) => key === "state" ? STATES.findIndex(([k]) => k === r.state) : r[key];
+  rows.sort((a, b) => {
+    const x = rank(a) ?? -1, y = rank(b) ?? -1;
+    if (x === y) return a.profile_id.localeCompare(b.profile_id);
+    return (x > y ? 1 : -1) * sort.dir;
+  });
+  if (el("f-group").checked) {
+    rows.sort((a, b) => {
+      const ax = a.organization_id || "￿", bx = b.organization_id || "￿";
+      if (ax !== bx) return ax.localeCompare(bx);
+      return a.merchant_id.localeCompare(b.merchant_id);
+    });
+  }
+  return rows;
+}
+
+function renderRows() {
+  const all = visibleRows();
+  renderSelectableNotice(all);
+  el("empty").hidden = all.length > 0;
+  if (!all.length && data) {
+    el("empty").innerHTML = "<b>No profiles match these filters</b>Widen the filters to see the rest of the estate.";
+  }
+  const rows = renderPager(all);
+  const grouped = el("f-group").checked;
+  const out = [];
+  let group = null;
+  for (const r of rows) {
+    if (grouped) {
+      const key = (r.organization_id || "(no organization)") + " / " + r.merchant_id;
+      if (key !== group) {
+        group = key;
+        out.push(`<tr class="group-row"><td colspan="12"><span class="id">${escape(key)}</span>
+          ${r.merchant_name ? `<span class="sub">${escape(r.merchant_name)}</span>` : ""}</td></tr>`);
+      }
+    }
+    out.push(rowHtml(r, grouped));
+    if (expanded.has(r.profile_id)) out.push(detailHtml(r));
+  }
+  el("rows").innerHTML = out.join("");
+  // The header box reflects the view: ticked only when everything movable in it is picked.
+  const movable = rows.filter(isSelectable);
+  el("select-all").checked = movable.length > 0 && movable.every((r) => selected.has(r.profile_id));
+
+  el("rows").querySelectorAll("input[data-pick]").forEach((box) => {
+    box.onchange = () => {
+      box.checked ? selected.add(box.dataset.pick) : selected.delete(box.dataset.pick);
+      box.closest("tr").classList.toggle("selected", box.checked);
+      renderActionBarFromData();
+    };
+  });
+  const toggle = (id) => {
+    expanded.has(id) ? expanded.delete(id) : expanded.add(id);
+    renderRows();
+  };
+  el("rows").querySelectorAll("button[data-expand]").forEach((btn) => {
+    btn.onclick = (event) => { event.stopPropagation(); toggle(btn.dataset.expand); };
+  });
+  // Clicking the row itself opens it. The checkbox and the panel's own buttons keep their
+  // meaning, so clicks that land on a control are left alone.
+  el("rows").querySelectorAll("tr[data-row]").forEach((tr) => {
+    tr.onclick = (event) => {
+      if (event.target.closest("input, button, a")) return;
+      toggle(tr.dataset.row);
+    };
+  });
+  el("rows").querySelectorAll("button[data-migrate-one]").forEach((btn) => {
+    btn.onclick = (event) => { event.stopPropagation(); migrateProfiles([btn.dataset.migrateOne]); };
+  });
+  el("rows").querySelectorAll("button[data-cutover-one]").forEach((btn) => {
+    btn.onclick = (event) => { event.stopPropagation(); cutoverProfiles([btn.dataset.cutoverOne], TO_DE); };
+  });
+  el("rows").querySelectorAll("button[data-rollback-one]").forEach((btn) => {
+    btn.onclick = (event) => { event.stopPropagation(); cutoverProfiles([btn.dataset.rollbackOne], TO_HS); };
+  });
+  el("rows").querySelectorAll("button[data-scope-one]").forEach((btn) => {
+    btn.onclick = (event) => { event.stopPropagation(); createScopes([btn.dataset.scopeOne]); };
+  });
+  el("rows").querySelectorAll("button[data-pick-btn]").forEach((btn) => {
+    btn.onclick = (event) => {
+      event.stopPropagation();
+      const id = btn.dataset.pickBtn;
+      selected.has(id) ? selected.delete(id) : selected.add(id);
+      renderRows();
+      renderActionBarFromData();
+    };
+  });
+}
+
+// The table shows one page of the filtered rows; the estate is larger than a browser wants to
+// lay out at once, and paging keeps a row's position stable while it is being worked on.
+function renderPager(all) {
+  const pages = pageSize === 0 ? 1 : Math.max(1, Math.ceil(all.length / pageSize));
+  if (page >= pages) page = pages - 1;
+  const start = pageSize === 0 ? 0 : page * pageSize;
+  const shown = pageSize === 0 ? all : all.slice(start, start + pageSize);
+  const pager = el("pager");
+  pager.hidden = all.length === 0;
+  el("pager-info").innerHTML = all.length
+    ? `Showing <b>${shown.length ? start + 1 : 0}\u2013${start + shown.length}</b> of
+       <b>${all.length}</b> ${plural(all.length, "profile")} in view`
+    : "";
+  // The header checkbox reaches one page; a cutover of everything `migrated` is a run over
+  // hundreds, so the filtered set gets its own control rather than 6 pages of ticking.
+  const selectable = all.filter(isSelectable);
+  const beyond = selectable.length > shown.filter(isSelectable).length;
+  const viewBtn = el("select-view");
+  viewBtn.hidden = !beyond;
+  if (beyond) {
+    const allPicked = selectable.every((r) => selected.has(r.profile_id));
+    viewBtn.textContent = allPicked
+      ? `Clear all ${selectable.length}`
+      : `Select all ${selectable.length} in view`;
+    viewBtn.onclick = () => {
+      selectable.forEach((r) => allPicked ? selected.delete(r.profile_id) : selected.add(r.profile_id));
+      renderRows(); renderActionBarFromData();
+    };
+  }
+  el("page-label").innerHTML = `Page <b>${page + 1}</b> of <b>${pages}</b>`;
+  el("page-prev").disabled = page === 0;
+  el("page-next").disabled = page >= pages - 1;
+  return shown;
+}
+
+// An operator looking for the migrate action needs to know why no row offers one.
+function renderSelectableNotice(rows) {
+  const target = el("nothing-selectable");
+  if (!rows.length || rows.some(isSelectable)) { target.innerHTML = ""; return; }
+  const counts = rows.reduce((acc, r) => {
+    const key = r.blocker || (r.rules_pending === 0 ? "nothing_pending" : "other");
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+  const reasons = [];
+  if (counts.no_merchant_account)
+    reasons.push(`<b>${counts.no_merchant_account}</b> have no merchant account in Hyperswitch`);
+  if (counts.out_of_scope_only)
+    reasons.push(`<b>${counts.out_of_scope_only}</b> hold only dynamic or 3DS rules`);
+  if (counts.nothing_pending)
+    reasons.push(`<b>${counts.nothing_pending}</b> are already across`);
+  if (counts.other) reasons.push(`<b>${counts.other}</b> report an unreadable decision engine`);
+  target.innerHTML = `<div class="notice">No profile in view can be migrated &mdash;
+    ${reasons.join(", ")}. ${counts.no_merchant_account
+      ? "Tick <em>Allow profiles with no merchant account</em> to send them anyway and see what Hyperswitch reports."
+      : ""}</div>`;
+}
+
+function rowHtml(r, grouped) {
+  const de = r.rules_decision_engine;
+  const landed = Math.max((de === null ? 0 : de) - r.rules_extra, 0);
+  const selectable = isSelectable(r);
+  const pick = `<input type="checkbox" data-pick="${escape(r.profile_id)}"
+      ${selected.has(r.profile_id) ? "checked" : ""} ${selectable ? "" : "disabled"}
+      title="${escape(selectable
+        ? (r.needs_provision && !r.migratable ? "Pick to have its scope provisioned" : "Pick for migration")
+        : (BLOCKED_WHY[r.blocker] || "Nothing to move"))}" />`;
+  // A missing scope is shown alongside whatever else holds the row back rather than replacing
+  // it: the two are independent, and the merchant-account note is what the escape hatch keys on.
+  const notes = [
+    r.scope_missing ? `<span class="tag warn" title="${escape(NO_SCOPE_WHY)}">no scope in DE</span>` : "",
+    !r.scope_missing && r.ancestry_missing
+      ? `<span class="tag" title="${escape(NO_ANCESTRY_WHY)}">no ancestry in DE</span>` : "",
+    r.blocker ? `<span class="tag">${BLOCKERS[r.blocker]}</span>` : "",
+    !r.blocker && r.rules_extra ? `<span class="tag">${r.rules_extra} only in DE</span>` : "",
+  ].filter(Boolean);
+  const note = notes.join(" ");
+  return `<tr class="row ${selected.has(r.profile_id) ? "selected" : ""}"
+      data-row="${escape(r.profile_id)}" title="Open this profile">
+    <td>${pick}</td>
+    <td><button class="expand" data-expand="${escape(r.profile_id)}"
+          aria-expanded="${expanded.has(r.profile_id)}"
+          title="Open this profile">${expanded.has(r.profile_id) ? "&minus;" : "+"}</button></td>
+    <td class="id">${grouped ? "" : escape(r.organization_id || "—")}</td>
+    <td class="id">${grouped ? "" : escape(r.merchant_id)}
+      ${!grouped && r.merchant_name ? `<span class="sub">${escape(r.merchant_name)}</span>` : ""}</td>
+    <td class="id">${escape(r.profile_id)}</td>
+    <td class="num">${r.rules_hyperswitch}</td>
+    <td class="num">${de === null ? "—" : de}</td>
+    <td class="bar-cell"><div class="crossing">${crossing(landed, r.rules_pending, r.rules_out_of_scope)}</div></td>
+    <td class="num">${r.rules_pending || ""}</td>
+    <td class="num">${r.rules_out_of_scope || ""}</td>
+    <td><span class="badge ${r.state}">${labelOf(r.state)}</span></td>
+    <td>${note}</td>
+  </tr>`;
+}
+
+function detailHtml(r) {
+  const list = (title, ids) => ids && ids.length
+    ? `<div>${title}<div class="ids">${ids.map((i) => `<span>${escape(i)}</span>`).join("")}</div></div>` : "";
+  const facts = [
+    list(`Missing in the decision engine (${r.rules_pending})`, r.rules_missing_in_decision_engine),
+    list(`Only in the decision engine (${r.rules_extra})`, r.rules_only_in_decision_engine),
+    r.routing_source ? `<div>Routing source: ${escape(r.routing_source)}</div>` : "",
+    r.rules_out_of_scope ? `<div>${r.rules_out_of_scope} ${plural(r.rules_out_of_scope, "rule")} out of scope — dynamic and 3DS rules reach the decision engine another way.</div>` : "",
+  ].filter(Boolean).join("");
+  return `<tr class="detail"><td colspan="2"></td><td colspan="10">
+    ${panelActions(r)}
+    ${facts || "Nothing outstanding."}
+  </td></tr>`;
+}
+
+// What can be done to this one profile, stated where the operator is looking. The batch
+// checkbox is for planning a run; this is for acting on the row in front of you.
+function panelActions(r) {
+  const inRun = migrateRunning();
+  const picked0 = selected.has(r.profile_id);
+  const pick0 = `<button class="ghost" data-pick-btn="${escape(r.profile_id)}">
+    ${picked0 ? "Remove from batch" : "Add to batch"}</button>`;
+  // A missing scope is a second thing wrong with the profile, independent of anything the rule
+  // counts say, so it is stated above whatever else the row offers rather than in place of it:
+  // a profile can be missing both a scope and its merchant account, and each has its own action.
+  if (!r.scope_missing && r.ancestry_missing) {
+    return `<div class="panel-actions">
+      <button class="action" data-scope-one="${escape(r.profile_id)}" ${inRun ? "disabled" : ""}>
+        Provision the ancestry</button>
+      ${pick0}
+      <span class="panel-note">The decision engine holds a scope for this profile but nothing
+        above it &mdash; no organization, merchant or profile name. <em>Routing is
+        unaffected</em>: <code>decide-gateway</code> needs only the scope, so this profile can be
+        cut over as it stands. What is missing is the account name the dashboard shows, and the
+        reach of any org or merchant grant. Provisioning re-runs the migration so Hyperswitch
+        records it; no rule is touched.</span></div>` + profileActions(r, inRun, "");
+  }
+  if (!r.scope_missing) return profileActions(r, inRun, pick0);
+  return `<div class="panel-actions">
+      <button class="action" data-scope-one="${escape(r.profile_id)}" ${inRun ? "disabled" : ""}>
+        Provision the scope</button>
+      ${pick0}
+      <span class="panel-note">The decision engine holds no scope for this profile.
+        ${r.rules_pending
+          ? `Its ${r.rules_pending} pending ${plural(r.rules_pending, "rule")} can still be migrated — rules key off the profile id and are written either way — `
+          : `Its rules are all across — they key off the profile id and were written either way — `}
+        but <code>decide-gateway</code> loads the scope first and answers
+        <code>MERCHANT_NOT_FOUND</code> without one, so <em>this profile cannot be cut over
+        until the scope exists</em>. Provisioning re-runs the migration for it: Hyperswitch
+        creates the scope, named with the organization, merchant and profile only it can read,
+        before it looks at a rule &mdash; and every rule already across is skipped.</span></div>` +
+    // The batch button is already above, so the panel below is drawn without one.
+    profileActions(r, inRun, "");
+}
+
+// What the rule counts alone say can be done to this profile.
+function profileActions(r, inRun, pick0) {
+  // A profile with every rule across is where a cutover belongs: the decision engine can answer
+  // for it, and until this is written Hyperswitch keeps deciding.
+  if (r.cutover === "to_de") {
+    return `<div class="panel-actions">
+      <button class="action" data-cutover-one="${escape(r.profile_id)}"
+        ${inRun || !cutoverReady() ? "disabled" : ""}>Cut over to decision engine</button>
+      ${pick0}
+      <span class="panel-note">${cutoverReady()
+        ? `Writes <code>${escape(config.superposition.config_key)}: decision_engine</code> for this
+           profile in Superposition. <em>This moves live traffic</em> — the decision engine starts
+           deciding routing for it.`
+        : `Set the Superposition URL and secret under <em>Environment</em> to cut profiles over
+           from here.`}</span></div>`;
+  }
+  if (r.cutover === "to_hs") {
+    return `<div class="panel-actions">
+      <button class="ghost" data-rollback-one="${escape(r.profile_id)}"
+        ${inRun || !cutoverReady() ? "disabled" : ""}>Roll back to Hyperswitch</button>
+      ${pick0}
+      <span class="panel-note">The decision engine decides routing for this profile
+        ${r.state === "enabled_without_rules" ? "and its rules are missing, so traffic falls through to the default connector list. " : ""}
+        Rolling back writes <code>hyperswitch_routing</code> for it, which hands routing back to
+        Hyperswitch without touching any rule.</span></div>`;
+  }
+  if (r.rules_pending === 0) {
+    return `<div class="panel-actions"><span class="panel-note">Every rule this endpoint
+      carries is already in the decision engine. Nothing to migrate.</span></div>`;
+  }
+  if (r.blocker === "out_of_scope_only") {
+    return `<div class="panel-actions"><span class="panel-note">${r.rules_out_of_scope} rules,
+      all of them dynamic or 3DS. This endpoint never carries those, so there is nothing to
+      migrate.</span></div>`;
+  }
+  const pickButton = pick0;
+  if (r.blocker === "no_merchant_account") {
+    return `<div class="panel-actions">
+      <button class="action" data-migrate-one="${escape(r.profile_id)}" ${inRun ? "disabled" : ""}>
+        Migrate anyway</button>
+      ${pickButton}
+      <span class="panel-note">Merchant <code>${escape(r.merchant_id)}</code> cannot be read in
+        Hyperswitch, so this will come back as <em>not attempted</em> until that account exists.
+        Running it is safe — it writes nothing.</span></div>`;
+  }
+  return `<div class="panel-actions">
+    <button class="action" data-migrate-one="${escape(r.profile_id)}" ${inRun ? "disabled" : ""}>
+      Migrate this profile</button>
+    ${pickButton}
+    <span class="panel-note">Writes ${r.rules_pending}
+      ${plural(r.rules_pending, "rule")} into the decision engine. Rules already there are left
+      alone, and Hyperswitch keeps serving this profile until routing is cut over
+      separately.</span></div>`;
+}
+
+// --------------------------------------------------------------- action bar
+
+function renderActionBarFromData() { renderActionBar(lastState); }
+function migrateRunning() {
+  return Boolean((lastState.migrate_job && lastState.migrate_job.running) ||
+                 (lastState.cutover_job && lastState.cutover_job.running) ||
+                 (lastState.scope_job && lastState.scope_job.running));
+}
+let lastState = { scan_job: {}, migrate_job: {}, cutover_job: {}, scope_job: {} };
+
+const JOB_VERB = { scan: "Scanning", migrate: "Migrating", cutover: "Switching routing",
+                   scopes: "Creating scopes" };
+
+function renderActionBar(state) {
+  lastState = state;
+  const migrating = state.migrate_job.running, scanning = state.scan_job.running;
+  const cutting = state.cutover_job.running, scoping = state.scope_job.running;
+  const job = migrating ? state.migrate_job
+            : cutting ? state.cutover_job
+            : scoping ? state.scope_job
+            : (scanning ? state.scan_job : null);
+  const bar = el("actionbar");
+  bar.hidden = !selected.size && !job;
+
+  const rows = selectedRows();
+  const rules = rows.reduce((n, r) => n + r.rules_pending, 0);
+  const movable = rows.filter((r) => r.rules_pending > 0).length;
+  const toDe = rows.filter((r) => r.cutover === "to_de").length;
+  const toHs = rows.filter((r) => r.cutover === "to_hs").length;
+  const noScope = rows.filter((r) => r.needs_provision).length;
+  const parts = [];
+  if (movable) parts.push(`<b>${rules}</b> ${plural(rules, "rule")} to move`);
+  if (noScope) parts.push(`<b>${noScope}</b> to provision in the decision engine`);
+  if (toDe) parts.push(`<b>${toDe}</b> ready to cut over`);
+  if (toHs) parts.push(`<b>${toHs}</b> already on the decision engine`);
+  el("action-summary").innerHTML = selected.size
+    ? `<b>${selected.size}</b> ${plural(selected.size, "profile")} selected` +
+      (parts.length ? ` &middot; ${parts.join(" &middot; ")}` : "")
+    : (job ? `${JOB_VERB[job.kind]}…` : "");
+
+  const progress = el("job-progress");
+  progress.hidden = !job;
+  if (job) {
+    const pct = job.total ? Math.min(100, job.done / job.total * 100) : 8;
+    progress.firstElementChild.style.width = pct + "%";
+    el("job-message").textContent = job.message + (job.total ? ` (${job.done}/${job.total})` : "");
+  } else {
+    el("job-message").textContent = "";
+  }
+  const busy = migrating || scanning || cutting || scoping;
+  el("migrate-btn").hidden = selected.size > 0 && movable === 0;
+  el("migrate-btn").disabled = !movable || busy;
+  el("migrate-btn").textContent = migrating ? "Migrating…" : `Migrate ${movable || ""}`.trim();
+
+  // The cutover buttons appear only for a selection that has something to switch, so the bar
+  // offers the direction the selection is actually in rather than both at all times.
+  const cutBtn = el("cutover-btn");
+  cutBtn.hidden = !toDe;
+  cutBtn.disabled = busy || !cutoverReady();
+  cutBtn.title = cutoverReady() ? "" : "Set the Superposition URL and secret under Environment";
+  cutBtn.textContent = cutting ? "Switching…" : `Cut over ${toDe} to decision engine`;
+  const backBtn = el("rollback-btn");
+  backBtn.hidden = !toHs || toDe > 0;
+  backBtn.disabled = busy || !cutoverReady();
+  backBtn.textContent = `Roll back ${toHs} to Hyperswitch`;
+
+  // Creating scopes comes before either cutover direction in the order work actually happens,
+  // and it is the only action a scope-missing selection has.
+  const scopeBtn = el("scope-btn");
+  scopeBtn.hidden = !noScope;
+  scopeBtn.disabled = busy || !scopesReady();
+  scopeBtn.textContent = scoping ? "Provisioning…" : `Provision ${noScope} ${plural(noScope, "scope")}`;
+}
+
+function renderReport(job) {
+  const result = job.result;
+  if (!result) { el("report").innerHTML = ""; return; }
+  const t = result.totals;
+  const notAttempted = result.profiles.filter((p) => p.not_attempted);
+  const withErrors = result.profiles.filter((p) => (p.errors || []).length);
+  el("report").innerHTML = `
+    <div class="report">
+      <h2>Last migration run</h2>
+      <div class="estate-legend">
+        <span><b>${t.profiles}</b> ${plural(t.profiles, "profile")}</span>
+        <span><b>${t.rules_migrated}</b> ${plural(t.rules_migrated, "rule")} moved</span>
+        <span><b>${t.rules_skipped}</b> already there</span>
+        <span><b>${t.rules_failed}</b> failed</span>
+        <span><b>${t.rules_not_applicable}</b> not applicable</span>
+        <span><b>${t.profiles_not_attempted}</b> not attempted</span>
+      </div>
+      ${result.failures.length ? `<div class="banner">${result.failures.length} batches did not run: ${escape(result.failures[0].error)}</div>` : ""}
+      ${(withErrors.length || notAttempted.length) ? `<div class="rows">
+        ${withErrors.map((p) => p.errors.map((e) =>
+          `<div>${escape(p.profile_id)} · ${escape(e.algorithm_id)} · ${escape(e.error)}${requestIds(p)}</div>`).join("")).join("")}
+        ${notAttempted.map((p) =>
+          `<div>${escape(p.profile_id)} · not attempted · ${escape(p.not_attempted)}${requestIds(p)}</div>`).join("")}
+      </div>` : ""}
+    </div>`;
+}
+
+// What Superposition answered, profile by profile. The table still reads as the last scan left
+// it — a switch does not re-read the estate — so the report says which profiles moved and leaves
+// the rescan to whoever wants the states refreshed.
+function renderCutoverReport(job) {
+  const result = job.result;
+  if (!result) { el("cutover-report").innerHTML = ""; return; }
+  queueMicrotask(() => {
+    const btn = el("use-other-key");
+    if (btn) btn.onclick = () => useOtherKey(otherKeyName(result.config_key));
+  });
+  const t = result.totals;
+  const target = result.source === TO_DE ? "the decision engine" : "Hyperswitch";
+  const failed = result.profiles.filter((p) => !p.ok);
+  el("cutover-report").innerHTML = `
+    <div class="report">
+      <h2>Last routing switch &mdash; to ${target}</h2>
+      <div class="estate-legend">
+        <span><b>${t.profiles}</b> ${plural(t.profiles, "profile")}</span>
+        <span><b>${t.written}</b> overrides written</span>
+        <span><b>${t.failed}</b> failed</span>
+        <span class="tag">${escape((result.key_used || []).join(", ") || result.config_key)}:
+          ${escape(result.source)}</span>
+      </div>
+      ${t.failed ? `<div class="banner">${t.failed} ${plural(t.failed, "profile")} did not
+        switch &mdash; they are listed below and can be sent again, since writing the same
+        override twice changes nothing.</div>` : ""}
+      ${unknownKeyNote(result)}
+      ${failed.length ? `<div class="rows">
+        ${failed.map((p) => `<div>${escape(p.profile_id)} · ${escape(p.error)}</div>`).join("")}
+      </div>` : `<div class="panel-note" style="margin-top:8px">The table still shows the states
+        the last scan read. <b>Rescan</b> to read them again with the new routing source.</div>`}
+    </div>`;
+}
+
+// What the sync wrote. The scan is re-read as the run's last step, so unlike a cutover the
+// table beneath this already reflects it — the report is here to say what happened to the
+// profiles that were left out.
+function renderScopeReport(job) {
+  const result = job.result;
+  if (!result) { el("scope-report").innerHTML = ""; return; }
+  const t = result.totals;
+  const notAttempted = result.profiles.filter((p) => p.not_attempted);
+  el("scope-report").innerHTML = `
+    <div class="report">
+      <h2>Last scope run</h2>
+      <div class="estate-legend">
+        <span><b>${result.requested}</b> ${plural(result.requested, "profile")} sent</span>
+        <span><b>${result.still_missing.length}</b> still without a scope</span>
+        <span><b>${result.still_without_ancestry.length}</b> still without ancestry</span>
+        <span><b>${t.rules_skipped}</b> ${plural(t.rules_skipped, "rule")} already across</span>
+        <span><b>${t.rules_migrated}</b> moved</span>
+      </div>
+      ${result.failures.length ? `<div class="banner">${result.failures.length}
+        ${plural(result.failures.length, "batch")} did not run &mdash;
+        ${escape(result.failures[0].error)}</div>` : ""}
+      ${notAttempted.length ? `<div class="rows">
+        ${notAttempted.map((p) =>
+          `<div>${escape(p.profile_id)} · not attempted · ${escape(p.not_attempted)}${requestIds(p)}</div>`).join("")}
+      </div>` : ""}
+      ${(() => {
+        // Sent, reported fine, and the rescan still finds the gap — which means Hyperswitch
+        // answered success without provisioning. Worth naming, since nothing else would say so.
+        const unfixed = result.still_missing.concat(result.still_without_ancestry)
+          .filter((id) => !notAttempted.some((p) => p.profile_id === id));
+        const sent = new Map(result.profiles.map((p) => [p.profile_id, p]));
+        return unfixed.length ? `<div class="notice warn">These profiles were sent and the
+          decision engine still holds no scope, or none of their ancestry, afterwards &mdash; so
+          Hyperswitch reported success without provisioning one. That is a Hyperswitch-side
+          failure, not a selection mistake, and the id beside each is the request that reported
+          it.<div class="rows" style="margin-top:6px">${unfixed
+            .map((id) => `<div>${escape(id)}${requestIds(sent.get(id) || {})}</div>`).join("")}</div></div>` : "";
+      })()}
+    </div>`;
+}
+
+// Superposition rejects an override whose key its workspace does not define. That key was moved
+// into a `routing.` folder at one point, so an environment seeded either side of that rename
+// wants the other spelling — which is offered here rather than left to be guessed.
+function unknownKeyNote(result) {
+  // The workspace had no schema for the configured name and took the other one; the run says so
+  // and the field now holds what worked, so nothing has to be guessed twice.
+  if (result.key_switched) {
+    return `<div class="notice">This workspace has no config called
+      <b>${escape(result.key_switched)}</b>. The overrides went under
+      <b>${escape((result.key_used || []).join(", "))}</b> instead, which is now the override key
+      &mdash; save it under <em>Environment</em> with <em>Remember on this machine</em> to keep
+      it past a restart.</div>`;
+  }
+  const missing = result.profiles.some((p) =>
+    !p.ok && /failed to get schema for config key/i.test(p.error || ""));
+  if (!missing) return "";
+  const other = otherKeyName(result.config_key);
+  return `<div class="notice">This workspace has no config called
+    <b>${escape(result.config_key)}</b>, so every override under it is refused. Here it is likely
+    to be <b>${escape(other)}</b>: the routing configs were moved into a <code>routing.</code>
+    folder at one point, and an environment answers to the name it was seeded with.
+    <button class="ghost" id="use-other-key" style="margin-left:8px">Use ${escape(other)}</button>
+    </div>`;
+}
+
+function otherKeyName(key) {
+  return key.includes(".") ? key.slice(key.lastIndexOf(".") + 1) : "routing." + key;
+}
+
+// Switching the key is a config change, not a rerun: the profiles stay selected so the run can
+// be sent again once the name is right.
+async function useOtherKey(key) {
+  const sp = config.superposition || {};
+  try {
+    render(await post("/api/config", {
+      hyperswitch_url: config.hyperswitch_url,
+      headers: config.headers,
+      superposition: { url: sp.url, headers: sp.headers, config_key: key },
+    }));
+  } catch (err) { alert(err.message); }
+}
+
+// -------------------------------------------------------------------- events
+
+async function startScan(options) {
+  try { await post("/api/scan", { restart: options.restart !== false }); }
+  catch (err) { alert(err.message); }
+  loadState();
+  if (!polling) polling = setInterval(loadState, 900);
+}
+
+el("scan-btn").onclick = () => startScan({ restart: true });
+
+// ------------------------------------------------------------- environment
+
+let envTouched = false;       // set once the panel is opened, so it stops opening itself
+let envCreating = false;      // whether the panel is adding an environment or editing this one
+let envPanelFor = null;       // which environment the panel's fields were filled from
+
+// Every environment the server holds, plus the way to start another one. Rebuilt on each render
+// so a rename or a new environment shows up without a reload; the option in hand is not
+// replaced while it is open, or picking from it would fight the poll.
+function renderEnvPick() {
+  const pick = el("env-pick");
+  const wanted = (config.environments || []).map((env) =>
+    `<option value="${escape(env.name)}"${env.current ? " selected" : ""}>` +
+    `${escape(env.label)}${env.live ? " \u2022 production" : ""}</option>`).join("") +
+    `<option value="${NEW_ENV}">New environment\u2026</option>`;
+  if (pick.innerHTML !== wanted) pick.innerHTML = wanted;
+  pick.value = config.name;
+}
+
+// `blank` opens the panel on nothing at all, for an environment that does not exist yet: saving
+// it adds one rather than editing the one on screen.
+function openEnv(blank) {
+  envTouched = true;
+  envCreating = Boolean(blank);
+  el("env-panel").hidden = false;
+  el("env-label").value = blank ? "" : (config.label || "");
+  el("env-kind").value = blank ? "other" : (config.kind || "other");
+  el("env-url").value = blank ? "" : (config.hyperswitch_url || "");
+  el("env-key").value = "";
+  el("env-key").placeholder = !blank && config.api_key_set
+    ? `unchanged (${config.api_key_hint})` : "paste the admin api-key";
+  el("env-remember").checked = Boolean(config.saved);
+  envHeaders = blank ? [] : (config.headers || []).map((h) => ({ ...h }));
+  const sp = blank ? {} : (config.superposition || {});
+  el("sp-url").value = sp.url || "";
+  el("sp-secret").value = "";
+  el("sp-secret").placeholder = sp.secret_set ? "unchanged" : "x-superposition-secret";
+  el("sp-key").value = sp.config_key || config.cutover_key_default || "";
+  el("env-key-name").textContent = sp.config_key || config.cutover_key_default || "";
+  spHeaders = blank ? [] : (sp.headers || []).map((h) => ({ ...h }));
+  const de = blank ? {} : (config.decision_engine || {});
+  el("de-url").value = de.url || "";
+  el("de-secret").value = "";
+  el("de-secret").placeholder = de.secret_set ? "unchanged" : "x-admin-secret";
+  deHeaders = blank ? [] : (de.headers || []).map((h) => ({ ...h }));
+  envPanelFor = blank ? null : config.name;
+  el("env-title").textContent = blank ? "New environment" : "Environment";
+  el("env-save").textContent = blank ? "Add this environment" : "Use this environment";
+  el("env-error").textContent = "";
+  renderEnvHeaders();
+  el("env-label").focus();
+}
+
+// The environment's kind follows the address while it is being typed, so a production URL is
+// marked as one before it is saved. It stops following as soon as the kind is set by hand.
+let kindTouched = false;
+function guessKind(url) {
+  const host = (url.match(/^https?:\/\/([^/]*)/) || ["", ""])[1].toLowerCase();
+  if (!host || /^(localhost|127\.0\.0\.1|\[::1\])(:|$)/.test(host)) return "local";
+  if (host.includes("sandbox") || host.includes("integ")) return "sandbox";
+  if (host.endsWith("hyperswitch.io")) return "production";
+  return "other";
+}
+
+function renderEnvHeaders() {
+  drawHeaders("env-headers", envHeaders,
+    `No extra headers. A hosted environment usually needs one &mdash; <code>x-feature</code>
+     names the release train that answers.`);
+  drawHeaders("sp-headers", spHeaders,
+    `No Superposition headers. <code>x-tenant</code> and <code>x-org-id</code> are what a
+     workspace is usually addressed by.`);
+  drawHeaders("de-headers", deHeaders,
+    `No decision engine headers. A multi-tenant deployment picks its tenant with
+     <code>x-tenant-id</code>; the default tenant answers without one.`);
+}
+
+function drawHeaders(id, list, emptyNote) {
+  const box = el(id);
+  box.innerHTML = list.map((h, i) => `
+    <div class="env-header-row">
+      <input value="${escape(h.name)}" data-header-name="${i}" placeholder="header" spellcheck="false" />
+      <input value="${escape(h.value)}" data-header-value="${i}" placeholder="value" spellcheck="false" />
+      <button class="ghost" data-header-drop="${i}" title="Remove this header">Remove</button>
+    </div>`).join("") || `<div class="env-note">${emptyNote}</div>`;
+  box.querySelectorAll("input[data-header-name]").forEach((input) => {
+    input.oninput = () => { list[input.dataset.headerName].name = input.value; };
+  });
+  box.querySelectorAll("input[data-header-value]").forEach((input) => {
+    input.oninput = () => { list[input.dataset.headerValue].value = input.value; };
+  });
+  box.querySelectorAll("button[data-header-drop]").forEach((btn) => {
+    btn.onclick = () => { list.splice(Number(btn.dataset.headerDrop), 1); renderEnvHeaders(); };
+  });
+}
+
+el("env-btn").onclick = () => {
+  if (el("env-panel").hidden) openEnv(false); else el("env-panel").hidden = true;
+};
+
+el("env-url").oninput = () => {
+  if (!kindTouched) el("env-kind").value = guessKind(el("env-url").value.trim());
+};
+el("env-kind").onchange = () => { kindTouched = true; };
+
+el("env-pick").onchange = async () => {
+  const name = el("env-pick").value;
+  if (name === NEW_ENV) { kindTouched = false; openEnv(true); el("env-pick").value = config.name; return; }
+  if (name === config.name) return;
+  try {
+    adoptState(await post("/api/environment", { name }));
+  } catch (err) { alert(err.message); el("env-pick").value = config.name; }
+};
+
+// The server drops the scan when the environment changes, so the table follows it down rather
+// than showing the last estate under the new environment's name.
+function adoptState(state) {
+  data = state.scan;
+  selected.clear();
+  expanded.clear();
+  page = 0;
+  if (!state.scan) { el("estate").hidden = true; el("rows").innerHTML = ""; el("pager").hidden = true; }
+  render(state);
+}
+
+el("env-add-header").onclick = () => { envHeaders.push({ name: "", value: "" }); renderEnvHeaders(); };
+el("sp-add-header").onclick = () => { spHeaders.push({ name: "", value: "" }); renderEnvHeaders(); };
+el("de-add-header").onclick = () => { deHeaders.push({ name: "", value: "" }); renderEnvHeaders(); };
+
+el("env-save").onclick = async () => {
+  el("env-error").textContent = "";
+  try {
+    const state = await post("/api/config", {
+      create: envCreating,
+      label: el("env-label").value.trim(),
+      kind: el("env-kind").value,
+      hyperswitch_url: el("env-url").value.trim(),
+      api_key: el("env-key").value,
+      headers: envHeaders.filter((h) => h.name.trim()),
+      superposition: {
+        url: el("sp-url").value.trim(),
+        secret: el("sp-secret").value,
+        config_key: el("sp-key").value.trim(),
+        headers: spHeaders.filter((h) => h.name.trim()),
+      },
+      decision_engine: {
+        url: el("de-url").value.trim(),
+        admin_secret: el("de-secret").value,
+        headers: deHeaders.filter((h) => h.name.trim()),
+      },
+      remember: el("env-remember").checked,
+      remember_key: el("env-remember").checked && el("env-remember-key").checked,
+    });
+    el("env-panel").hidden = true;
+    kindTouched = false;
+    envCreating = false;
+    adoptState(state);
+  } catch (err) { el("env-error").textContent = err.message; }
+};
+
+el("env-forget").onclick = async () => {
+  if (!confirm("Remove every saved environment from ~/.config/hs-migration-dashboard/config.json?\n\n" +
+               "They stay in this session; the credentials are gone when the server stops.")) return;
+  try {
+    render(await post("/api/config", {
+      hyperswitch_url: el("env-url").value.trim(),
+      headers: envHeaders.filter((h) => h.name.trim()),
+      forget: true,
+    }));
+  } catch (err) { el("env-error").textContent = err.message; }
+};
+
+// What a confirm opens with when the environment is production, so which estate is being
+// written to is read before the sentence that says what to.
+function liveHeading() {
+  return config.live ? `${config.label} \u2014 PRODUCTION. This writes to live merchants.\n\n` : "";
+}
+
+// A production environment is confirmed by name once per session, on top of the confirm each
+// action already asks for. The answer is held for the rest of the session because a migration
+// window is many runs, and sent with every write — the server asks for it too, so a page left
+// open on production cannot write by a click alone.
+function confirmLive(what) {
+  if (!config.live || liveAck === config.name) return true;
+  const typed = prompt(
+    `${config.label} is a production environment.\n\n` +
+    `${what} here changes live merchants' routing data. Type the environment's name to ` +
+    `confirm, once for this session:\n\n  ${config.name}`);
+  if (typed === null) return false;
+  if (typed.trim() !== config.name) {
+    alert(`That is not ${config.name} \u2014 nothing was sent.`);
+    return false;
+  }
+  liveAck = config.name;
+  return true;
+}
+
+async function migrateProfiles(ids) {
+  const rows = data.rows.filter((r) => ids.includes(r.profile_id));
+  const rules = rows.reduce((n, r) => n + r.rules_pending, 0);
+  const blocked = rows.filter((r) => r.blocker === "no_merchant_account").length;
+  const scope = ids.length === 1
+    ? `profile ${ids[0]}`
+    : `${ids.length} profiles`;
+  if (!confirmLive("Migrating rules")) return;
+  if (!confirm(liveHeading() +
+               `Write ${rules} ${plural(rules, "rule")} from ${scope} into the decision engine?\n\n` +
+               (blocked ? `${blocked === ids.length ? (ids.length === 1 ? "It has" : "All of them have")
+                                                    : `${blocked} of them have`} ` +
+                          `no merchant account in Hyperswitch, so the run will come back as ` +
+                          `"not attempted".\n\n` : "") +
+               `Rules already there are left alone. Hyperswitch keeps serving these profiles ` +
+               `until routing is switched over separately.`)) return;
+  try {
+    await post("/api/migrate", { profile_ids: ids, live_ack: liveAck });
+    ids.forEach((id) => selected.delete(id));
+  } catch (err) { alert(err.message); }
+  loadState();
+  if (!polling) polling = setInterval(loadState, 900);
+}
+
+el("migrate-btn").onclick = () =>
+  migrateProfiles(selectedRows().filter((r) => r.rules_pending > 0).map((r) => r.profile_id));
+
+// Switching routing is the one action here that moves live traffic, so it names what it will do
+// to whom before it does it, and the count it confirms is the count it sends.
+async function cutoverProfiles(ids, source) {
+  const toDe = source === TO_DE;
+  const scope = ids.length === 1 ? `profile ${ids[0]}` : `${ids.length} profiles`;
+  const key = (config.superposition || {}).config_key;
+  if (!confirmLive("Switching routing")) return;
+  if (!confirm(
+      liveHeading() +
+      (toDe ? `Hand routing for ${scope} to the decision engine?`
+            : `Hand routing for ${scope} back to Hyperswitch?`) + "\n\n" +
+      `This writes ${key}: ${source} in Superposition and takes effect on live traffic. ` +
+      (toDe ? "Every rule for these profiles is already across, and rules are not touched either way."
+            : "Rules are left where they are, so this can be reversed by cutting over again."))) return;
+  try {
+    await post("/api/cutover", { profile_ids: ids, source, live_ack: liveAck });
+    ids.forEach((id) => selected.delete(id));
+  } catch (err) { alert(err.message); }
+  loadState();
+  if (!polling) polling = setInterval(loadState, 900);
+}
+
+// Creating a scope writes an empty row and no rule, so unlike a migration or a cutover there is
+// nothing here to undo — the confirm says what it is rather than asking for a decision twice.
+async function createScopes(ids) {
+  const scope = ids.length === 1 ? `profile ${ids[0]}` : `${ids.length} profiles`;
+  if (!confirmLive("Provisioning scopes")) return;
+  if (!confirm(liveHeading() + `Provision a decision engine scope for ${scope}?\n\n` +
+               `This re-runs the migration for them. Hyperswitch creates the scope before it ` +
+               `reads a rule, and rules already across are skipped — so no routing moves and ` +
+               `nothing is rewritten. It is what lets these profiles be cut over later.`)) return;
+  try {
+    await post("/api/de-scopes", { profile_ids: ids, live_ack: liveAck });
+    ids.forEach((id) => selected.delete(id));
+  } catch (err) { alert(err.message); }
+  loadState();
+  if (!polling) polling = setInterval(loadState, 900);
+}
+
+el("scope-btn").onclick = () =>
+  createScopes(selectedRows().filter((r) => r.needs_provision).map((r) => r.profile_id));
+
+el("cutover-btn").onclick = () =>
+  cutoverProfiles(selectedRows().filter((r) => r.cutover === "to_de").map((r) => r.profile_id), TO_DE);
+el("rollback-btn").onclick = () =>
+  cutoverProfiles(selectedRows().filter((r) => r.cutover === "to_hs").map((r) => r.profile_id), TO_HS);
+
+el("clear-btn").onclick = () => { selected.clear(); renderRows(); renderActionBarFromData(); };
+
+el("select-all").onchange = (event) => {
+  const rows = visibleRows().filter(isSelectable);
+  rows.forEach((r) => event.target.checked ? selected.add(r.profile_id) : selected.delete(r.profile_id));
+  renderRows(); renderActionBarFromData();
+};
+
+["f-org", "f-merchant", "f-source", "f-scope", "f-actionable", "f-group"].forEach((id) => {
+  el(id).onchange = () => { page = 0; renderRows(); renderActionBarFromData(); };
+});
+
+el("page-prev").onclick = () => { page = Math.max(0, page - 1); renderRows(); window.scrollTo({ top: 0 }); };
+el("page-next").onclick = () => { page += 1; renderRows(); window.scrollTo({ top: 0 }); };
+el("page-size").onchange = () => { pageSize = Number(el("page-size").value); page = 0; renderRows(); };
+// Turning the escape hatch back off drops what it let through first, or a blocked profile
+// would ride along in a run whose checkbox no longer offers it.
+el("f-blocked").onchange = () => {
+  if (!el("f-blocked").checked && data) {
+    for (const row of data.rows) {
+      if (selected.has(row.profile_id) && !isSelectable(row)) selected.delete(row.profile_id);
+    }
+  }
+  renderRows();
+  renderActionBarFromData();
+};
+
+el("f-search").oninput = debounce(() => { page = 0; renderRows(); renderActionBarFromData(); }, 160);
+
+document.querySelectorAll("th.sortable").forEach((th) => {
+  th.onclick = () => {
+    const key = th.dataset.sort;
+    sort = { key, dir: sort.key === key ? -sort.dir : 1 };
+    renderRows();
+  };
+});
+
+// ------------------------------------------------------------------- helpers
+
+function labelOf(state) {
+  const found = STATES.find(([k]) => k === state);
+  return found ? found[1] : state;
+}
+function plural(n, word) { return n === 1 ? word : word + "s"; }
+function unique(values) { return [...new Set(values)].sort(); }
+function escape(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (c) =>
+    ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+function timeAgo(seconds) {
+  const delta = Math.max(0, Date.now() / 1000 - seconds);
+  if (delta < 60) return "just now";
+  if (delta < 3600) return `${Math.round(delta / 60)}m ago`;
+  return `${Math.round(delta / 3600)}h ago`;
+}
+function debounce(fn, ms) {
+  let timer;
+  return (...args) => { clearTimeout(timer); timer = setTimeout(() => fn(...args), ms); };
+}
+
+loadState();
+</script>
+</body>
+</html>
