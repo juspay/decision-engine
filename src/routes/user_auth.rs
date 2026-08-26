@@ -57,11 +57,28 @@ pub struct SwitchMerchantRequest {
     pub merchant_id: String,
 }
 
+/// One scope a session can switch to, as the dashboard's picker sees it.
+///
+/// `merchant_id` is the routing scope (an HS profile, for scopes that came from one) and
+/// `merchant_name` is its flat one-line label. The `hs_*` and `profile_name` fields carry the same
+/// scope split into its account-tree levels, so the picker can group and search by level instead of
+/// re-parsing the label. They are absent for a scope with no Hyperswitch ancestry — every DE-native
+/// merchant — which is why every one of them is optional.
 #[derive(Debug, Serialize, Clone)]
 pub struct MerchantInfo {
     pub merchant_id: String,
     pub merchant_name: String,
     pub role: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hs_merchant_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hs_merchant_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hs_org_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hs_org_name: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1287,15 +1304,26 @@ async fn fetch_user_merchants(
         .await
         .change_error(UserAuthError::StorageError)?;
 
-        let name = accounts
-            .pop()
-            .and_then(|a| a.merchant_name)
+        let account = accounts.pop();
+        let name = account
+            .as_ref()
+            .and_then(|a| a.merchant_name.clone())
             .unwrap_or_else(|| um.merchant_id.clone());
+        // Ancestry rides along on the row already fetched, so the picker can place a synced scope
+        // in its account tree. A DE-native merchant has none, and stays a bare one-level entry.
+        let ancestry = account
+            .as_ref()
+            .and_then(|a| hierarchy::from_internal_metadata(a.internal_metadata.as_deref()));
 
         result.push(MerchantInfo {
             merchant_id: um.merchant_id,
             merchant_name: name,
             role: um.role,
+            profile_name: ancestry.as_ref().and_then(|h| h.profile_name.clone()),
+            hs_merchant_id: ancestry.as_ref().map(|h| h.hs_merchant_id.clone()),
+            hs_merchant_name: ancestry.as_ref().and_then(|h| h.hs_merchant_name.clone()),
+            hs_org_id: ancestry.as_ref().map(|h| h.hs_org_id.clone()),
+            hs_org_name: ancestry.as_ref().and_then(|h| h.hs_org_name.clone()),
         });
     }
     Ok(result)
@@ -1644,6 +1672,11 @@ async fn granted_merchants(grant: &ScopeGrant, role: &str) -> Vec<MerchantInfo> 
             merchant_name: switcher_label(&scope),
             merchant_id: scope.profile_id,
             role: role.to_string(),
+            profile_name: scope.profile_name,
+            hs_merchant_id: scope.hs_merchant_id,
+            hs_merchant_name: scope.hs_merchant_name,
+            hs_org_id: scope.hs_org_id,
+            hs_org_name: scope.hs_org_name,
         })
         .collect()
 }
@@ -1956,11 +1989,20 @@ pub struct MerchantMember {
     pub role: String,
 }
 
+/// One scope a super-admin lookup found, with enough of its account tree to tell it apart.
+///
+/// `merchant_name` is the scope's own name, which for a synced scope is the profile name — and
+/// profile names repeat across merchants, "default" most of all. The ancestry fields are what make
+/// two identically named hits distinguishable, and are absent for a scope that has none.
 #[derive(Debug, Serialize)]
 pub struct MerchantLookupResult {
     pub merchant_id: String,
     pub merchant_name: String,
     pub members: Vec<MerchantMember>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hs_merchant_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hs_org_name: Option<String>,
 }
 
 /// Cap on lookup results — this is a "find the ID to enter" helper, not a full directory dump.
@@ -2117,12 +2159,18 @@ pub async fn lookup_merchants(
     )
     .await
     .change_error(UserAuthError::StorageError)?;
-    let name_by_id: std::collections::HashMap<String, String> = name_rows
+    // Ancestry rides along on these same rows, so placing each hit in its account tree costs no
+    // extra query.
+    let account_by_id: std::collections::HashMap<
+        String,
+        (String, Option<crate::types::merchant::hierarchy::Hierarchy>),
+    > = name_rows
         .into_iter()
         .filter_map(|m| {
+            let ancestry = hierarchy::from_internal_metadata(m.internal_metadata.as_deref());
             m.merchant_id
                 .clone()
-                .map(|id| (id, m.merchant_name.unwrap_or_default()))
+                .map(|id| (id, (m.merchant_name.unwrap_or_default(), ancestry)))
         })
         .collect();
 
@@ -2170,15 +2218,23 @@ pub async fn lookup_merchants(
                         })
                 })
                 .collect();
-            let merchant_name = name_by_id
-                .get(&merchant_id)
-                .cloned()
+            let account = account_by_id.get(&merchant_id);
+            let merchant_name = account
+                .map(|(name, _)| name.clone())
                 .filter(|n| !n.is_empty())
                 .unwrap_or_else(|| merchant_id.clone());
+            let ancestry = account.and_then(|(_, h)| h.as_ref());
             MerchantLookupResult {
                 merchant_id,
                 merchant_name,
                 members,
+                hs_merchant_name: ancestry.and_then(|h| {
+                    h.hs_merchant_name
+                        .clone()
+                        .or(Some(h.hs_merchant_id.clone()))
+                }),
+                hs_org_name: ancestry
+                    .and_then(|h| h.hs_org_name.clone().or(Some(h.hs_org_id.clone()))),
             }
         })
         .collect();
@@ -2200,6 +2256,8 @@ mod tests {
             profile_name: profile_name.map(str::to_string),
             hs_merchant_id: Some("merchant_id_1".to_string()),
             hs_merchant_name: merchant_name.map(str::to_string),
+            hs_org_id: Some("org_abc".to_string()),
+            hs_org_name: Some("Acme Group".to_string()),
         }
     }
 
