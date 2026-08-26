@@ -10,6 +10,7 @@ import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useCanEditRouting } from '../../store/authStore'
 import { apiPost } from '../../lib/api'
+import { formatLastModified, lastModifiedMs } from '../../lib/routingRuleTimestamps'
 import { RoutingAlgorithm } from '../../types/api'
 import { RuleBreakdown } from '../routing/euclid/RuleBreakdown'
 import {
@@ -68,7 +69,8 @@ export function EuclidRulesPage() {
       const algorithm = algo.algorithm_data || algo.algorithm
       return algorithm?.type !== 'volume_split' && algorithm?.type !== 'ab_test'
     })
-    .sort((a, b) => new Date(b.created_at ?? 0).getTime() - new Date(a.created_at ?? 0).getTime())
+    // Sorted by the same stamp the Last Modified column shows, so the order matches what is read.
+    .sort((a, b) => lastModifiedMs(b) - lastModifiedMs(a))
 
   const gatewayOptions = Array.from(new Set(ruleAlgorithms.flatMap(destinationGateways))).sort()
 
@@ -329,9 +331,16 @@ export function EuclidRulesPage() {
                         </p>
                       </td>
                       <td className="whitespace-nowrap px-5 py-4 text-[13px] text-slate-500 dark:text-[#6d7a8d]">
-                        {algo.created_at
-                          ? new Date(algo.created_at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })
-                          : '—'}
+                        {(() => {
+                          const stamp = formatLastModified(algo)
+                          if (!stamp) return '—'
+                          return (
+                            <span title={stamp.full}>
+                              {stamp.date}
+                              <span className="block text-[12px] text-slate-400 dark:text-[#55627a]">{stamp.time}</span>
+                            </span>
+                          )
+                        })()}
                       </td>
                       <td className="px-5 py-4" onClick={(e) => e.stopPropagation()}>
                         <RowMenu

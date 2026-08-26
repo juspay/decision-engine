@@ -633,120 +633,90 @@ function RoutingAlignmentCard({
       </CardHeader>
       {expanded ? (
         <CardBody className="space-y-[21px] px-[21px] py-[13px]">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#2a303a] dark:bg-[#0d1118]">
-            <div className="flex flex-wrap items-start justify-between gap-[13px]">
-              <div>
-                <div className="flex flex-wrap items-center gap-[8px]">
-                  <Badge variant="gray">Best score: {srLeaderName}</Badge>
-                  <Badge variant={volumeBadgeVariant}>
-                    Traffic leader: {volumeLeaderName}
-                  </Badge>
-                </div>
-                <p className="mt-[13px] text-[13px] font-semibold text-slate-900 dark:text-white">
-                  {summary.headline}
-                </p>
-                <p className="mt-[8px] text-[13px] leading-5 text-slate-500 dark:text-[#8a8a93]">
-                  {summary.detail}
-                </p>
-              </div>
-              <p className="text-right text-[13px] font-medium text-slate-500 dark:text-[#8a8a93]">
-                {alignmentText}
-              </p>
+          {/* The verdict reads as one sentence; the connectors it names are detailed in the table
+              below, so it does not restate their rates or volumes. */}
+          <div className="space-y-[8px]">
+            <div className="flex flex-wrap items-center gap-[8px]">
+              <Badge variant="gray">Best score: {srLeaderName}</Badge>
+              <Badge variant={volumeBadgeVariant}>
+                Traffic leader: {volumeLeaderName}
+              </Badge>
             </div>
+            <p className="text-[13px] font-semibold text-slate-900 dark:text-white">
+              {summary.headline}
+            </p>
+            <p className="text-[13px] leading-[21px] text-slate-500 dark:text-[#8a8a93]">
+              {summary.detail}
+            </p>
           </div>
 
-          <div className="grid overflow-hidden rounded-2xl border border-slate-200 bg-white/70 dark:border-[#2a303a] dark:bg-[#0c0f15] lg:grid-cols-3">
-              <div className="border-b border-slate-200 p-4 dark:border-[#2a303a] lg:border-b-0 lg:border-r">
-                <p className="text-[13px] font-medium text-slate-500 dark:text-[#8a8a93]">
-                  Best score
-                </p>
-                <p className="mt-[13px] truncate text-[21px] font-semibold text-slate-950 dark:text-white">
-                  {summary.srLeader?.gateway || '--'}
-                </p>
-                <p className="mt-[8px] text-[13px] text-slate-500 dark:text-[#8a8a93]">
-                  {summary.srLeader
-                    ? `${formatPercent(summary.srLeader.value)} success rate, ${formatPercentPointDelta(srMargin)} vs next`
-                    : 'No score in this window'}
-                </p>
-              </div>
+          {/* The one figure the card exists to report, and the only one the table cannot show. */}
+          <div className="flex flex-wrap items-baseline gap-x-[13px] gap-y-[8px] rounded-2xl border border-slate-200 bg-slate-50/80 px-[21px] py-[13px] dark:border-[#2a303a] dark:bg-[#0d1118]">
+            <span className="text-[21px] font-semibold tabular-nums text-slate-950 dark:text-white">
+              {summary.alignmentPercent === null ? 'Not enough data' : formatPercent(summary.alignmentPercent)}
+            </span>
+            <span className="text-[13px] text-slate-500 dark:text-[#8a8a93]">
+              {alignedVolumeText}
+            </span>
+          </div>
 
-              <div className="border-b border-slate-200 p-4 dark:border-[#2a303a] lg:border-b-0 lg:border-r">
-                <p className="text-[13px] font-medium text-slate-500 dark:text-[#8a8a93]">
-                  Traffic leader
-                </p>
-                <p className="mt-[13px] truncate text-[21px] font-semibold text-slate-950 dark:text-white">
-                  {summary.volumeLeader?.gateway || '--'}
-                </p>
-                <p className="mt-[8px] text-[13px] text-slate-500 dark:text-[#8a8a93]">
-                  {summary.volumeLeader
-                    ? `${formatNumber(summary.volumeLeader.count, 0)} payments, ${formatPercent(summary.volumeLeader.share)} traffic share`
-                    : 'No payment traffic in this window'}
-                </p>
-              </div>
-
-              <div className="p-4">
-                <p className="text-[13px] font-medium text-slate-500 dark:text-[#8a8a93]">
-                  Best-score share
-                </p>
-                <p className="mt-[13px] text-[21px] font-semibold text-slate-950 dark:text-white">
-                  {alignmentText}
-                </p>
-                <p className="mt-[8px] text-[13px] text-slate-500 dark:text-[#8a8a93]">
-                  {alignedVolumeText}
-                </p>
+          {comparisonRows.length ? (
+            <div className="overflow-x-auto">
+              <div className="min-w-[640px]">
+                <div className="grid grid-cols-[minmax(0,1.2fr)_0.9fr_0.65fr_0.65fr_1fr] gap-[13px] border-b border-slate-200 px-[13px] py-[13px] text-[13px] font-medium text-slate-500 dark:border-[#2a303a] dark:text-[#8a8a93]">
+                  <span>Connector</span>
+                  <span>Success rate</span>
+                  <span>Traffic</span>
+                  <span>Share</span>
+                  <span>Role</span>
+                </div>
+                {comparisonRows.map((row) => (
+                  <div
+                    key={row.gateway}
+                    className="grid grid-cols-[minmax(0,1.2fr)_0.9fr_0.65fr_0.65fr_1fr] gap-[13px] border-b border-slate-200 px-[13px] py-[13px] text-[13px] last:border-b-0 dark:border-[#2a303a]"
+                  >
+                    <div className="flex min-w-0 items-center gap-[8px]">
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: row.color }}
+                      />
+                      <span className="truncate font-medium text-slate-900 dark:text-white">
+                        {row.gateway}
+                      </span>
+                    </div>
+                    <span className="flex flex-wrap items-baseline gap-[8px] text-slate-600 dark:text-[#cbd5e1]">
+                      {row.srValue === null ? '--' : formatPercent(row.srValue)}
+                      {/* The winning margin belongs beside the rate it is a margin on — a lead of a
+                          tenth of a point is the difference between a verdict and a coin toss. */}
+                      {row.isSrLeader && srMargin !== undefined ? (
+                        <span className="text-slate-400 dark:text-[#555f6e]">
+                          {formatPercentPointDelta(srMargin)} vs next
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="text-slate-600 dark:text-[#cbd5e1]">
+                      {formatNumber(row.count, 0)}
+                    </span>
+                    <span className="text-slate-600 dark:text-[#cbd5e1]">
+                      {formatPercent(row.share)}
+                    </span>
+                    <div className="flex flex-wrap gap-[8px]">
+                      {row.isSrLeader ? <Badge variant="blue">Best score</Badge> : null}
+                      {row.isVolumeLeader ? <Badge variant="green">Traffic leader</Badge> : null}
+                      {!row.isSrLeader && !row.isVolumeLeader ? (
+                        <span className="text-[13px] text-slate-500 dark:text-[#8a8a93]">Secondary</span>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-
-            {comparisonRows.length ? (
-              <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-[#2a303a]">
-                <div className="min-w-[640px]">
-                  <div className="grid grid-cols-[minmax(0,1.2fr)_0.65fr_0.65fr_0.65fr_1fr] gap-[13px] border-b border-slate-200 bg-slate-50 px-4 py-3 text-[13px] font-medium text-slate-500 dark:border-[#2a303a] dark:bg-[#0c0f15] dark:text-[#8a8a93]">
-                    <span>Connector</span>
-                    <span>Success rate</span>
-                    <span>Traffic</span>
-                    <span>Share</span>
-                    <span>Read</span>
-                  </div>
-                  {comparisonRows.map((row) => (
-                    <div
-                      key={row.gateway}
-                      className="grid grid-cols-[minmax(0,1.2fr)_0.65fr_0.65fr_0.65fr_1fr] gap-[13px] border-b border-slate-200 px-4 py-3 text-[13px] last:border-b-0 dark:border-[#2a303a]"
-                    >
-                      <div className="flex min-w-0 items-center gap-[8px]">
-                        <span
-                          className="h-2.5 w-2.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: row.color }}
-                        />
-                        <span className="truncate font-medium text-slate-900 dark:text-white">
-                          {row.gateway}
-                        </span>
-                      </div>
-                      <span className="text-slate-600 dark:text-[#cbd5e1]">
-                        {row.srValue === null ? '--' : formatPercent(row.srValue)}
-                      </span>
-                      <span className="text-slate-600 dark:text-[#cbd5e1]">
-                        {formatNumber(row.count, 0)}
-                      </span>
-                      <span className="text-slate-600 dark:text-[#cbd5e1]">
-                        {formatPercent(row.share)}
-                      </span>
-                      <div className="flex flex-wrap gap-[8px]">
-                        {row.isSrLeader ? <Badge variant="blue">Best score</Badge> : null}
-                        {row.isVolumeLeader ? <Badge variant="green">Traffic leader</Badge> : null}
-                        {!row.isSrLeader && !row.isVolumeLeader ? (
-                          <span className="text-[13px] text-slate-500 dark:text-[#8a8a93]">Secondary</span>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <EmptyState
-                title="No connector comparison yet"
-                body="This view needs both payment traffic and connector scores in the selected time window."
-              />
-            )}
+          ) : (
+            <EmptyState
+              title="No connector comparison yet"
+              body="This view needs both payment traffic and connector scores in the selected time window."
+            />
+          )}
       </CardBody>
       ) : null}
     </Card>

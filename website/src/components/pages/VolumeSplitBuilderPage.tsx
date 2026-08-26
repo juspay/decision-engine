@@ -5,6 +5,7 @@ import { Plus, Trash2, ArrowLeft } from 'lucide-react'
 import { Card, CardBody } from '../ui/Card'
 import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
+import { FieldError, invalidFieldClass } from '../ui/FieldError'
 import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useCanEditRouting } from '../../store/authStore'
@@ -13,7 +14,11 @@ import { RoutingAlgorithm } from '../../types/api'
 import { VolumeSplitGatewayFormEntry } from '../../features/routing/volumeSplit/types'
 import { toVolumeSplitCreatePayload, toVolumeSplitAlgorithm } from '../../features/routing/volumeSplit/payload'
 import { toVolumeSplitRuleDetailsState } from '../../features/routing/volumeSplit/state'
-import { validateVolumeSplitRule } from '../../features/routing/volumeSplit/schema'
+import {
+  collectVolumeSplitErrors,
+  hasVolumeSplitErrors,
+  VolumeSplitFieldErrors,
+} from '../../features/routing/volumeSplit/schema'
 import { SplitBreakdown, SPLIT_COLORS } from '../routing/volumeSplit/SplitBreakdown'
 import { GatewaySelect } from '../ui/GatewaySelect'
 import { gatewayOptions } from '../../lib/connectors'
@@ -56,7 +61,11 @@ export function VolumeSplitBuilderPage() {
   const [ruleDesc, setRuleDesc] = useState('')
   const [gateways, setGateways] = useState<VolumeSplitGatewayFormEntry[]>(() => createInitialGateways())
   const [saving, setSaving] = useState(false)
+  // Field-level problems render at their own control; `error` is only for things with no field to
+  // point at — a missing merchant or a failed request.
   const [error, setError] = useState<string | null>(null)
+  const [fieldErrors, setFieldErrors] = useState<VolumeSplitFieldErrors>({ gateways: {} })
+  const ruleNameRef = useRef<HTMLInputElement | null>(null)
 
   const { data: allRules, mutate: mutateRules } = useSWR<RoutingAlgorithm[]>(
     merchantId ? `/routing/list/${merchantId}` : null,
@@ -122,13 +131,22 @@ export function VolumeSplitBuilderPage() {
     setRuleDesc('')
     setGateways(createInitialGateways())
     setError(null)
+    setFieldErrors({ gateways: {} })
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!merchantId) { setError('Set a merchant ID first'); return }
-    const validationError = validateVolumeSplitRule({ ruleName, description: ruleDesc, gateways })
-    if (validationError) { setError(validationError); return }
+
+    // Collect every problem before returning, so one save reports all of them rather than making
+    // the reader rediscover the next one on each attempt.
+    const nextFieldErrors = collectVolumeSplitErrors({ ruleName, description: ruleDesc, gateways })
+    setFieldErrors(nextFieldErrors)
+    if (hasVolumeSplitErrors(nextFieldErrors)) {
+      setError('Fix the highlighted fields before saving.')
+      if (nextFieldErrors.ruleName) ruleNameRef.current?.focus()
+      return
+    }
 
     setSaving(true)
     setError(null)
@@ -189,20 +207,28 @@ export function VolumeSplitBuilderPage() {
           <Card>
             <CardBody className="space-y-5">
               <div className="grid grid-cols-1 gap-x-12 gap-y-4 md:grid-cols-2">
-                <div className="flex items-center gap-2">
+                <div className="flex items-start gap-2">
                   <label
                     htmlFor="volume-rule-name"
-                    className="shrink-0 whitespace-nowrap text-[13px] font-semibold text-slate-700 dark:text-slate-300"
+                    className="shrink-0 whitespace-nowrap py-2.5 text-[13px] font-semibold text-slate-700 dark:text-slate-300"
                   >
                     Rule Name *
                   </label>
-                  <input
-                    id="volume-rule-name"
-                    value={ruleName}
-                    onChange={(e) => setRuleName(e.target.value)}
-                    placeholder="e.g. ab-test-split"
-                    className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-transparent px-3.5 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
-                  />
+                  <div className="min-w-0 flex-1">
+                    <input
+                      id="volume-rule-name"
+                      ref={ruleNameRef}
+                      value={ruleName}
+                      onChange={(e) => {
+                        setRuleName(e.target.value)
+                        if (fieldErrors.ruleName) setFieldErrors((prev) => ({ ...prev, ruleName: undefined }))
+                      }}
+                      placeholder="e.g. ab-test-split"
+                      aria-invalid={Boolean(fieldErrors.ruleName)}
+                      className={`w-full rounded-lg border border-slate-200 bg-transparent px-3.5 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] ${invalidFieldClass(Boolean(fieldErrors.ruleName))}`}
+                    />
+                    <FieldError message={fieldErrors.ruleName} />
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <label
@@ -241,16 +267,27 @@ export function VolumeSplitBuilderPage() {
                       key={g.id}
                       className="grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(260px,320px)_32px] md:items-center"
                     >
-                      <GatewaySelect
-                        value={g.gatewayName}
-                        onChange={(val) => updateGateway(g.id, 'gatewayName', val)}
-                        placeholder="e.g. stripe"
-                        options={gatewayOptions(
-                          [],
-                          gateways.filter((other) => other.id !== g.id).map((other) => other.gatewayName)
-                        )}
-                        className="min-w-0"
-                      />
+                      <div className="min-w-0">
+                        <GatewaySelect
+                          value={g.gatewayName}
+                          onChange={(val) => {
+                            updateGateway(g.id, 'gatewayName', val)
+                            if (fieldErrors.gateways[g.id]) {
+                              setFieldErrors((prev) => {
+                                const { [g.id]: _removed, ...rest } = prev.gateways
+                                return { ...prev, gateways: rest }
+                              })
+                            }
+                          }}
+                          placeholder="e.g. stripe"
+                          options={gatewayOptions(
+                            [],
+                            gateways.filter((other) => other.id !== g.id).map((other) => other.gatewayName)
+                          )}
+                          className="min-w-0"
+                        />
+                        <FieldError message={fieldErrors.gateways[g.id]} />
+                      </div>
                       <input
                         value={g.gatewayId}
                         onChange={(e) => updateGateway(g.id, 'gatewayId', e.target.value)}
@@ -311,7 +348,10 @@ export function VolumeSplitBuilderPage() {
                   >
                     <Plus size={14} /> Add Gateway
                   </button>
-                  <span className={`text-xs font-medium ${total === 100 ? 'text-emerald-500' : 'text-red-500'}`}>
+                  <span
+                    role={fieldErrors.total ? 'alert' : undefined}
+                    className={`text-xs font-medium ${total === 100 ? 'text-emerald-500' : 'text-red-500'}`}
+                  >
                     Total: {total}%
                     {overAllocated
                       ? ` (reduce fixed splits by ${overAllocated}%)`
@@ -320,9 +360,10 @@ export function VolumeSplitBuilderPage() {
                 </div>
               </div>
 
-              <ErrorMessage error={error} />
             </CardBody>
           </Card>
+
+          <ErrorMessage error={error} />
 
           <div className="flex flex-wrap items-center gap-4">
             <Button type="submit" disabled={saving || !merchantId || !canEditRouting || isEditingActiveRule}>
