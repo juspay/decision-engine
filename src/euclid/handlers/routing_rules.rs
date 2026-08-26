@@ -10,10 +10,9 @@ use crate::{
         pm_filter_graph,
         types::{
             ActivateRoutingConfigRequest, Context, DeactivateRoutingConfigRequest,
-            JsonifiedRoutingAlgorithm, KeyDataType, RoutingAlgorithmMapperNew,
-            RoutingBatchRequest, RoutingBatchResponse, RoutingDictionaryRecord,
-            RoutingEvaluateResponse, RoutingRequest, RoutingRule,
-            SrDimensionConfig, StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
+            JsonifiedRoutingAlgorithm, KeyDataType, RoutingAlgorithmMapperNew, RoutingBatchRequest,
+            RoutingBatchResponse, RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest,
+            RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
         },
         utils::{
             generate_random_id, is_valid_enum_value, normalize_rule_value_types,
@@ -723,7 +722,9 @@ async fn evaluate_algorithm_data(
 
                 // Check if fallback is enabled
                 if default_output_present && ir.output == program.default_selection {
-                    logger::debug!("Default fallback triggered: Overriding with fallback connector");
+                    logger::debug!(
+                        "Default fallback triggered: Overriding with fallback connector"
+                    );
 
                     // Replace output with fallback connector from request
                     if let Some(fallback_connector) = payload.fallback_output.clone() {
@@ -883,11 +884,11 @@ pub async fn routing_evaluate(
 
     // ── Fetch active routing algorithm (Redis cache → DB fallback) ──────────
     let algorithm_for = payload.algorithm_for.as_deref();
-    let algorithm =
-        match resolve_active_algorithm(&state, &payload.created_by, algorithm_for).await {
-            Ok(algo) => algo,
-            Err(e) => return fail_preview(e, "active_routing_lookup_failed"),
-        };
+    let algorithm = match resolve_active_algorithm(&state, &payload.created_by, algorithm_for).await
+    {
+        Ok(algo) => algo,
+        Err(e) => return fail_preview(e, "active_routing_lookup_failed"),
+    };
 
     logger::debug!("Fetched routing algorithm: {:?}", algorithm);
     let algorithm_data: StaticRoutingAlgorithm =
@@ -1050,11 +1051,11 @@ pub async fn routing_evaluate_batch(
 
     // ── Resolve and parse the active algorithm once for the whole batch ─────
     let algorithm_for = payload.algorithm_for.as_deref();
-    let algorithm =
-        match resolve_active_algorithm(&state, &payload.created_by, algorithm_for).await {
-            Ok(algo) => algo,
-            Err(e) => return fail_batch(e),
-        };
+    let algorithm = match resolve_active_algorithm(&state, &payload.created_by, algorithm_for).await
+    {
+        Ok(algo) => algo,
+        Err(e) => return fail_batch(e),
+    };
 
     let algorithm_data: StaticRoutingAlgorithm =
         match serde_json::from_str(&algorithm.algorithm_data).map_err(|e| {
