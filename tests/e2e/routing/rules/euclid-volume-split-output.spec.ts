@@ -68,13 +68,9 @@ test.describe('Volume split output', () => {
     await euclid.addVolumeSplitEntry(0, 40, 'adyen', 'mca_adyen')
 
     const then = euclid.thenSection(0)
-    await then
-      .locator('div')
-      .filter({ hasText: /^60%stripe/ })
-      .last()
-      .locator('button')
-      .first()
-      .click()
+    // Targeted by accessible name rather than button order: a row also carries an edit control,
+    // so "the first button in the row" is not the delete one.
+    await then.getByRole('button', { name: 'Remove stripe' }).click()
 
     await expect(then.getByText('stripe')).toHaveCount(0)
     await expect(then.getByText('Total: 40%')).toBeVisible()

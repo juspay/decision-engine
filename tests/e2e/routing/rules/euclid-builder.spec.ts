@@ -308,13 +308,9 @@ test.describe('Rule Builder — UI interactions', () => {
       await euclid.addGatewayToBlock(0, 'adyen', 'mca_adyen')
 
       const block = euclid.ruleBlock(0)
-      await block
-        .locator('div')
-        .filter({ hasText: /^1\. stripe/ })
-        .last()
-        .locator('button')
-        .first()
-        .click()
+      // Targeted by accessible name rather than button order: a row also carries an edit control,
+      // so "the first button in the row" is not the delete one.
+      await block.getByRole('button', { name: 'Remove stripe' }).click()
 
       await expect(block.getByText('stripe')).toHaveCount(0)
       await expect(block.getByText('1. adyen')).toBeVisible()

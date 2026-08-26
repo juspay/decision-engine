@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   DndContext,
   closestCenter,
@@ -16,8 +16,9 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Plus, Trash2, GripVertical, CornerDownRight, ChevronDown, ChevronUp } from 'lucide-react'
+import { Plus, Trash2, GripVertical, CornerDownRight, ChevronDown, ChevronUp, Pencil, Check, X } from 'lucide-react'
 import { Button } from '../../ui/Button'
+import { FieldError } from '../../ui/FieldError'
 import { SearchableSelect } from '../../ui/SearchableSelect'
 import { SearchableMultiSelect } from '../../ui/SearchableMultiSelect'
 import { GatewaySelect } from '../../ui/GatewaySelect'
@@ -34,15 +35,93 @@ import {
 // ---- Sortable gateway item ----
 export function SortableGatewayItem({
   id,
-  name,
+  position,
+  gatewayName,
+  gatewayId,
+  options,
+  onEdit,
   onRemove,
 }: {
   id: string
-  name: string
+  position: number
+  gatewayName: string
+  gatewayId: string
+  options: string[]
+  onEdit: (next: { gatewayName: string; gatewayId: string }) => void
   onRemove: () => void
 }) {
-  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id })
+  const [editing, setEditing] = useState(false)
+  const [draftName, setDraftName] = useState(gatewayName)
+  const [draftId, setDraftId] = useState(gatewayId)
+
+  // Dragging a row while its inputs are open would fight the pointer for the same gestures.
+  const { attributes, listeners, setNodeRef, transform, transition } = useSortable({ id, disabled: editing })
   const style = { transform: CSS.Transform.toString(transform), transition }
+
+  function startEditing() {
+    setDraftName(gatewayName)
+    setDraftId(gatewayId)
+    setEditing(true)
+  }
+
+  function commit() {
+    const name = draftName.trim()
+    // An empty name would leave a row that routes nowhere, so stay in edit mode until it has one.
+    if (!name) return
+    onEdit({ gatewayName: name, gatewayId: draftId.trim() })
+    setEditing(false)
+  }
+
+  function cancel() {
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <div
+        ref={setNodeRef}
+        style={style}
+        className="flex items-center gap-2 rounded-lg border border-brand-300 bg-white px-2 py-1.5 dark:border-brand-500/50 dark:bg-[#111118]"
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') { e.preventDefault(); cancel() }
+          if (e.key === 'Enter') { e.preventDefault(); commit() }
+        }}
+      >
+        <span className="w-5 shrink-0 text-center text-sm tabular-nums text-slate-400">{position}.</span>
+        <GatewaySelect
+          value={draftName}
+          onChange={setDraftName}
+          onEnter={commit}
+          options={options}
+          className="flex-1"
+        />
+        <input
+          value={draftId}
+          onChange={(e) => setDraftId(e.target.value)}
+          placeholder="Gateway ID (optional)"
+          className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
+        />
+        <button
+          type="button"
+          onClick={commit}
+          disabled={!draftName.trim()}
+          aria-label="Save gateway"
+          className="text-emerald-500 transition-colors hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Check size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={cancel}
+          aria-label="Cancel edit"
+          className="text-slate-400 transition-colors hover:text-slate-600"
+        >
+          <X size={14} />
+        </button>
+      </div>
+    )
+  }
+
   return (
     <div
       ref={setNodeRef}
@@ -52,8 +131,18 @@ export function SortableGatewayItem({
       <span {...attributes} {...listeners} className="cursor-grab text-slate-400">
         <GripVertical size={14} />
       </span>
-      <span className="text-sm flex-1 font-mono">{name}</span>
-      <button type="button" onClick={onRemove} className="text-red-400 hover:text-red-600">
+      <button
+        type="button"
+        onClick={startEditing}
+        aria-label={`Edit ${gatewayName}`}
+        className="group flex min-w-0 flex-1 items-center gap-2 text-left hover:text-brand-600 dark:hover:text-brand-400"
+      >
+        <span className="truncate font-mono text-sm">
+          {position}. {gatewayName}{gatewayId ? ` (${gatewayId})` : ''}
+        </span>
+        <Pencil size={12} className="shrink-0 text-slate-400 transition-colors group-hover:text-brand-600 dark:group-hover:text-brand-400" />
+      </button>
+      <button type="button" onClick={onRemove} aria-label={`Remove ${gatewayName}`} className="text-red-400 hover:text-red-600">
         <Trash2 size={12} />
       </button>
     </div>
@@ -106,7 +195,17 @@ export function PriorityEditor({
             <SortableGatewayItem
               key={gw.id}
               id={gw.id}
-              name={`${idx + 1}. ${gw.gatewayName}${gw.gatewayId ? ` (${gw.gatewayId})` : ''}`}
+              position={idx + 1}
+              gatewayName={gw.gatewayName}
+              gatewayId={gw.gatewayId}
+              // The row's own gateway stays selectable while editing it; only the others are taken.
+              options={gatewayOptions(
+                suggestions,
+                gateways.filter((g) => g.id !== gw.id).map((g) => g.gatewayName),
+              )}
+              onEdit={(next) =>
+                onChange(gateways.map((g) => (g.id === gw.id ? { ...g, ...next } : g)))
+              }
               onRemove={() => onChange(gateways.filter((g) => g.id !== gw.id))}
             />
           ))}
@@ -173,18 +272,17 @@ export function VolumeSplitEditor({
   return (
     <div className="space-y-2">
       {entries.map((e) => (
-        <div
+        <VolumeSplitRow
           key={e.id}
-          className="flex items-center gap-2 bg-slate-100 dark:bg-[#111118] border border-slate-200 dark:border-[#1c1c24] rounded-lg px-2 py-1.5"
-        >
-          <span className="text-xs font-bold text-brand-500 w-10 shrink-0 tabular-nums">{e.split}%</span>
-          <span className="text-sm flex-1 font-mono">
-            {e.gatewayName}{e.gatewayId ? ` (${e.gatewayId})` : ''}
-          </span>
-          <button type="button" onClick={() => onChange(entries.filter((x) => x.id !== e.id))} className="text-red-400 hover:text-red-600">
-            <Trash2 size={12} />
-          </button>
-        </div>
+          entry={e}
+          // The row's own gateway stays selectable while editing it; only the others are taken.
+          options={gatewayOptions(
+            suggestions,
+            entries.filter((other) => other.id !== e.id).map((other) => other.gatewayName),
+          )}
+          onEdit={(patch) => onChange(entries.map((x) => (x.id === e.id ? { ...x, ...patch } : x)))}
+          onRemove={() => onChange(entries.filter((x) => x.id !== e.id))}
+        />
       ))}
       {entries.length > 0 && (
         <p className={`text-xs font-medium ${total === 100 ? 'text-emerald-500' : 'text-amber-500'}`}>
@@ -221,6 +319,103 @@ export function VolumeSplitEditor({
           <Plus size={13} /> Add
         </Button>
       </div>
+    </div>
+  )
+}
+
+/** One split row of {@link VolumeSplitEditor}, readable at a glance and editable in place. */
+function VolumeSplitRow({
+  entry,
+  options,
+  onEdit,
+  onRemove,
+}: {
+  entry: VolumeSplitEntry
+  options: string[]
+  onEdit: (patch: Partial<VolumeSplitEntry>) => void
+  onRemove: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draftSplit, setDraftSplit] = useState(String(entry.split))
+  const [draftName, setDraftName] = useState(entry.gatewayName)
+  const [draftId, setDraftId] = useState(entry.gatewayId)
+
+  function startEditing() {
+    setDraftSplit(String(entry.split))
+    setDraftName(entry.gatewayName)
+    setDraftId(entry.gatewayId)
+    setEditing(true)
+  }
+
+  function commit() {
+    const name = draftName.trim()
+    // An empty name would leave a row that routes nowhere, so stay in edit mode until it has one.
+    if (!name) return
+    onEdit({ split: Number(draftSplit) || 0, gatewayName: name, gatewayId: draftId.trim() })
+    setEditing(false)
+  }
+
+  if (editing) {
+    return (
+      <div
+        className="flex items-center gap-2 rounded-lg border border-brand-300 bg-white px-2 py-1.5 dark:border-brand-500/50 dark:bg-[#111118]"
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') { e.preventDefault(); setEditing(false) }
+          if (e.key === 'Enter') { e.preventDefault(); commit() }
+        }}
+      >
+        <input
+          type="number"
+          value={draftSplit}
+          onChange={(e) => setDraftSplit(e.target.value)}
+          aria-label="Split percentage"
+          className="w-20 rounded-lg border border-slate-200 bg-transparent px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
+        />
+        <GatewaySelect value={draftName} onChange={setDraftName} onEnter={commit} options={options} className="flex-1" />
+        <input
+          value={draftId}
+          onChange={(e) => setDraftId(e.target.value)}
+          placeholder="Gateway ID (optional)"
+          className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
+        />
+        <button
+          type="button"
+          onClick={commit}
+          disabled={!draftName.trim()}
+          aria-label="Save split"
+          className="text-emerald-500 transition-colors hover:text-emerald-600 disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          <Check size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setEditing(false)}
+          aria-label="Cancel edit"
+          className="text-slate-400 transition-colors hover:text-slate-600"
+        >
+          <X size={14} />
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex items-center gap-2 bg-slate-100 dark:bg-[#111118] border border-slate-200 dark:border-[#1c1c24] rounded-lg px-2 py-1.5">
+      <span className="text-xs font-bold text-brand-500 w-10 shrink-0 tabular-nums">{entry.split}%</span>
+      <button
+        type="button"
+        onClick={startEditing}
+        aria-label={`Edit ${entry.gatewayName}`}
+        className="group flex min-w-0 flex-1 items-center gap-2 text-left hover:text-brand-600 dark:hover:text-brand-400"
+      >
+        <span className="truncate font-mono text-sm">
+          {entry.gatewayName}{entry.gatewayId ? ` (${entry.gatewayId})` : ''}
+        </span>
+        <Pencil size={12} className="shrink-0 text-slate-400 transition-colors group-hover:text-brand-600 dark:group-hover:text-brand-400" />
+      </button>
+      <button type="button" onClick={onRemove} aria-label={`Remove ${entry.gatewayName}`} className="text-red-400 hover:text-red-600">
+        <Trash2 size={12} />
+      </button>
     </div>
   )
 }
@@ -576,6 +771,7 @@ export function RuleBlockEditor({
   onRemove,
   routingKeys,
   gatewaySuggestions = [],
+  error,
 }: {
   block: RuleBlock
   index?: number
@@ -583,15 +779,24 @@ export function RuleBlockEditor({
   onRemove: () => void
   routingKeys: Record<string, RoutingKeyConfig>
   gatewaySuggestions?: string[]
+  /** Validation message for this block, shown against the section that produced it. */
+  error?: string | null
 }) {
   const [collapsed, setCollapsed] = useState(false)
+
+  // A message inside a collapsed block would be invisible, so an errored block opens itself.
+  useEffect(() => {
+    if (error) setCollapsed(false)
+  }, [error])
 
   function addGroup() {
     onChange({ ...block, statements: [...block.statements, createStatementGroup(routingKeys)] })
   }
 
   return (
-    <div className="border border-slate-200 dark:border-[#1c1c24] rounded-xl overflow-hidden">
+    <div className={`overflow-hidden rounded-xl border ${
+      error ? 'border-red-300 dark:border-red-500/50' : 'border-slate-200 dark:border-[#1c1c24]'
+    }`}>
       {/* Header — clicking anywhere on it collapses the block, except the name field and the
           action buttons, which stop the click from reaching it. */}
       <div
@@ -704,6 +909,7 @@ export function RuleBlockEditor({
                 onChange={(entries) => onChange({ ...block, volumeSplitPriorityEntries: entries })}
               />
             )}
+            <FieldError message={error} />
           </div>
         </div>
       )}

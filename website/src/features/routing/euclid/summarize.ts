@@ -2,8 +2,18 @@ import { RoutingAlgorithm, EuclidAlgorithmData } from '../../../types/api'
 import { describeRuleConditions } from './describe'
 
 type PriorityGateway = { gateway_name: string; gateway_id: string | null }
-type VolumeSplit = { split: number; output: { gateway_name: string } }
+type VolumeSplit = { split: number; output: { gateway_name: string; gateway_id?: string | null } }
 type VolumeSplitPriority = { split: number; output: PriorityGateway[] }
+
+/**
+ * `stripe (mca_123456)` when a rule pins a specific merchant connector account, `stripe` otherwise.
+ * The id is part of what the rule routes to, so anything describing a destination has to show it.
+ */
+export function gatewayLabel(gateway?: { gateway_name?: string; gateway_id?: string | null } | null) {
+  const name = gateway?.gateway_name
+  if (!name) return undefined
+  return gateway?.gateway_id ? `${name} (${gateway.gateway_id})` : name
+}
 
 export type NormalizedRuleOutput = {
   priorityGateways: PriorityGateway[]
@@ -74,14 +84,14 @@ export function summarizeDestination(algo: RoutingAlgorithm): string {
     const out = normalizeRuleOutput(first)
     if (out.isVolumeSplitPriority) {
       primary = out.volumeSplitPriorityEntries
-        .map((e) => `${e.output?.[0]?.gateway_name ?? '?'} (${e.split}%)`)
+        .map((e) => `${gatewayLabel(e.output?.[0]) ?? '?'} (${e.split}%)`)
         .join(' / ')
     } else if (out.isVolumeSplit) {
       primary = out.volumeSplits
-        .map((e) => `${e.output?.gateway_name ?? '?'} (${e.split}%)`)
+        .map((e) => `${gatewayLabel(e.output) ?? '?'} (${e.split}%)`)
         .join(' / ')
     } else if (out.priorityGateways.length > 0) {
-      primary = `${out.priorityGateways[0].gateway_name} (Priority 100%)`
+      primary = `${gatewayLabel(out.priorityGateways[0])} (Priority 100%)`
     }
   }
 
@@ -92,13 +102,16 @@ export function summarizeDestination(algo: RoutingAlgorithm): string {
     : Array.isArray(fallbackRaw?.data)
     ? fallbackRaw!.data
     : []) as PriorityGateway[]
-  const fallback = fallbackArr[0]?.gateway_name
+  const fallback = gatewayLabel(fallbackArr[0])
 
   if (!primary) return fallback ? `${fallback} (fallback only)` : 'No destination configured'
   return fallback ? `${primary} — fallback ${fallback}` : primary
 }
 
-/** Every distinct destination gateway a rule mentions — powers the list's Gateway filter. */
+/**
+ * Every distinct destination gateway a rule mentions — powers the list's Gateway filter, which
+ * matches on connector name, so these stay bare names rather than the labelled form above.
+ */
 export function destinationGateways(algo: RoutingAlgorithm): string[] {
   const data = algorithmData(algo)
   const names = new Set<string>()

@@ -1,6 +1,6 @@
 import { RoutingAlgorithm, EuclidAlgorithmData, EuclidCondition, EuclidStatement } from '../../../types/api'
 import { toLabel, formatOp } from '../../../features/routing/euclid/state'
-import { normalizeRuleOutput } from '../../../features/routing/euclid/summarize'
+import { gatewayLabel, normalizeRuleOutput } from '../../../features/routing/euclid/summarize'
 
 export function RuleBreakdown({ algo }: { algo: RoutingAlgorithm }) {
   const algorithm = algo.algorithm_data || algo.algorithm
@@ -54,18 +54,18 @@ export function RuleBreakdown({ algo }: { algo: RoutingAlgorithm }) {
                   {isVolumeSplitPriority
                     ? volumeSplitPriorityEntries.map((e, j) => (
                         <span key={j} className="rounded-full bg-purple-50 dark:bg-purple-900/20 px-2 py-0.5 text-[11px] font-medium text-purple-700 dark:text-purple-300">
-                          {e.split}%: {e.output.map(g => g.gateway_name).join(', ')}
+                          {e.split}%: {e.output.map(gatewayLabel).join(', ')}
                         </span>
                       ))
                     : isVolumeSplit
                     ? volumeSplits.map((s, j) => (
                         <span key={j} className="rounded-full bg-emerald-50 dark:bg-emerald-900/20 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:text-emerald-300">
-                          {s.output.gateway_name} {s.split}%
+                          {gatewayLabel(s.output)} {s.split}%
                         </span>
                       ))
                     : priorityGateways.map((g, j) => (
                         <span key={j} className="rounded-full bg-brand-50 dark:bg-brand-900/20 px-2 py-0.5 text-[11px] font-medium text-brand-700 dark:text-brand-300">
-                          {j + 1}. {g.gateway_name}
+                          {j + 1}. {gatewayLabel(g)}
                         </span>
                       ))
                   }
@@ -81,7 +81,7 @@ export function RuleBreakdown({ algo }: { algo: RoutingAlgorithm }) {
 
       {(() => {
         const defRaw = defaultSel as Record<string, unknown> | undefined
-        const defGateways = (Array.isArray(defRaw?.priority) ? defRaw!.priority : Array.isArray(defRaw?.data) ? defRaw!.data : []) as { gateway_name: string }[]
+        const defGateways = (Array.isArray(defRaw?.priority) ? defRaw!.priority : Array.isArray(defRaw?.data) ? defRaw!.data : []) as { gateway_name: string; gateway_id?: string | null }[]
         // An empty default_selection is accepted by the API but leaves unmatched payments with a
         // blank gateway (interpreter.rs evaluates Priority([]) to a default-constructed connector),
         // so call it out rather than rendering nothing.
@@ -91,7 +91,7 @@ export function RuleBreakdown({ algo }: { algo: RoutingAlgorithm }) {
             <div className="flex flex-wrap gap-1">
               {defGateways.map((g, i) => (
                 <span key={i} className="rounded-full bg-slate-100 dark:bg-[#1a1f2a] px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:text-[#8090a8]">
-                  {g.gateway_name}
+                  {gatewayLabel(g)}
                 </span>
               ))}
             </div>
