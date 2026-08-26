@@ -1471,15 +1471,23 @@ pub async fn reset_password(
         .await
         .change_error(UserAuthError::StorageError)?;
 
+    // The reset link only ever goes to the address on the account, and the token above is
+    // single-use, so reaching this point proves the caller reads that mailbox — the same proof
+    // the verification link asks for. Settling both here is what lets someone whose verification
+    // token lapsed get back in: they reset, and the account is verified by the act of resetting.
     let rows_updated = crate::generics::generic_update_if_present::<
         <User as HasTable>::Table,
-        crate::storage::types::UserPasswordUpdate,
+        crate::storage::types::UserPasswordResetUpdate,
         _,
     >(
         &conn,
         dsl::user_id.eq(user_id.clone()),
-        crate::storage::types::UserPasswordUpdate {
+        crate::storage::types::UserPasswordResetUpdate {
             password_hash: new_hash,
+            #[cfg(feature = "mysql")]
+            email_verified: 1,
+            #[cfg(feature = "postgres")]
+            email_verified: true,
         },
     )
     .await
