@@ -129,6 +129,34 @@ pub struct RoutingRequest {
     pub algorithm_for: Option<String>,
 }
 
+/// One evaluation in a batch request: only the parameters (and optional payment id)
+/// differ per entry; everything shared lives on `RoutingBatchRequest`.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RoutingBatchEntry {
+    pub payment_id: Option<String>,
+    pub parameters: HashMap<String, Option<ValueType>>,
+}
+
+/// Evaluates the caller's active algorithm against several parameter sets in one round
+/// trip. The algorithm is resolved and parsed once; results are positional.
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct RoutingBatchRequest {
+    pub created_by: String,
+    pub fallback_output: Option<Vec<ConnectorInfo>>,
+    /// Transaction type whose active rule should be evaluated; absent keeps the
+    /// legacy type-blind lookup.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub algorithm_for: Option<String>,
+    pub requests: Vec<RoutingBatchEntry>,
+}
+
+/// Positional results for a batch evaluation. An entry the engine could not evaluate
+/// has `status: "error"` and empty outputs, so one failing entry does not fail the rest.
+#[derive(Debug, serde::Serialize)]
+pub struct RoutingBatchResponse {
+    pub results: Vec<RoutingEvaluateResponse>,
+}
+
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct BackendOutput {
     pub rule_name: Option<String>,
