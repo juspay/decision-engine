@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { takeDashboardRoute } from '../lib/dashboardHandoff'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
@@ -107,7 +108,9 @@ export function AuthPage() {
 
   useEffect(() => {
     if (!hasHydrated || !token || loading) return
-    navigate('/', { replace: true })
+    // A dashboard hand-off whose one-time code failed lands here; send the user where they were
+    // headed rather than to the overview.
+    navigate(takeDashboardRoute() ?? '/', { replace: true })
   }, [hasHydrated, loading, navigate, token])
 
   useEffect(() => {

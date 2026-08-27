@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
+import type { GatewayOption } from '../../lib/connectors'
 
 const MAX_LIST_HEIGHT = 272
 const MIN_LIST_HEIGHT = 160
@@ -8,8 +9,9 @@ const VIEWPORT_MARGIN = 12
 
 interface GatewaySelectProps {
   value: string
-  onChange: (value: string) => void
-  options: string[]
+  /** `option` is present only when the value came from the list, so callers can also take its id. */
+  onChange: (value: string, option?: GatewayOption) => void
+  options: GatewayOption[]
   placeholder?: string
   className?: string
   dataCy?: string
@@ -35,7 +37,7 @@ export function GatewaySelect({
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   const query = value.trim().toLowerCase()
-  const filtered = query ? options.filter((o) => o.toLowerCase().includes(query)) : options
+  const filtered = query ? options.filter((o) => o.name.toLowerCase().includes(query)) : options
 
   function openDropdown() {
     const rect = inputRef.current?.getBoundingClientRect()
@@ -83,7 +85,7 @@ export function GatewaySelect({
       // Nothing highlighted means the typed text is the answer, so Enter still adds the row the way
       // it did when this was a plain input.
       if (open && highlight >= 0 && filtered[highlight]) {
-        onChange(filtered[highlight])
+        onChange(filtered[highlight].name, filtered[highlight])
         close()
       } else {
         close()
@@ -143,7 +145,7 @@ export function GatewaySelect({
         >
           <div
             className="overflow-y-auto py-0.5"
-            style={{ maxHeight: `${Math.min(Math.max(filtered.length, 1) * 32 + 8, maxHeight)}px` }}
+            style={{ maxHeight: `${Math.min(Math.max(filtered.length, 1) * (filtered.some((o) => o.gatewayId) ? 52 : 32) + 8, maxHeight)}px` }}
           >
             {filtered.length === 0 ? (
               <p className="px-3 py-2.5 text-sm text-slate-500">
@@ -154,17 +156,27 @@ export function GatewaySelect({
             ) : (
               filtered.map((o, i) => (
                 <button
-                  key={o}
+                  key={o.gatewayId || o.name}
                   type="button"
-                  data-value={o}
+                  data-value={o.name}
                   onMouseDown={(e) => e.preventDefault()}
                   onMouseEnter={() => setHighlight(i)}
-                  onClick={() => { onChange(o); close(); inputRef.current?.focus() }}
+                  onClick={() => { onChange(o.name, o); close(); inputRef.current?.focus() }}
                   className={`w-full px-3 py-2.5 text-left font-mono text-sm transition-colors ${
                     i === highlight ? 'bg-slate-50 dark:bg-[#1c1c24]' : ''
-                  } ${o === value ? 'bg-brand-50/50 font-medium text-brand-600 dark:bg-brand-900/10 dark:text-brand-400' : ''}`}
+                  } ${o.name === value ? 'bg-brand-50/50 font-medium text-brand-600 dark:bg-brand-900/10 dark:text-brand-400' : ''}`}
                 >
-                  {o}
+                  {o.name}
+                  {/* The merchant may run several accounts of one connector, so the id is what
+                      actually tells two options apart. */}
+                  {o.gatewayId && (
+                    <span
+                      data-gateway-id={o.gatewayId}
+                      className="mt-0.5 block truncate text-xs font-normal text-slate-500"
+                    >
+                      {o.gatewayId}
+                    </span>
+                  )}
                 </button>
               ))
             )}

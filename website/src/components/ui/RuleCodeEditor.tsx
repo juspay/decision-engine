@@ -474,7 +474,7 @@ function getSuggestions(
     const gwPfxM = /(\w*)$/.exec(line)
     // Gateways already named in the rule rank first; the routable connector list backs them up so
     // Code mode offers the same choices the visual builder's dropdown does.
-    return fuzzyFilter(gwPfxM?.[1] ?? '', gatewayOptions(gatewaySuggestions)).slice(0, 10)
+    return fuzzyFilter(gwPfxM?.[1] ?? '', gatewayOptions(gatewaySuggestions).map((o) => o.name)).slice(0, 10)
   }
 
   const inValM = /(\w+)\s+(?:in|not\s+in)\s*\[(?:[^\]]*,\s*)?(\w*)$/.exec(trimmed)

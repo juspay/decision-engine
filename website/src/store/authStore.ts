@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { clearDashboardHandoff } from '../lib/dashboardHandoff'
 import { persist } from 'zustand/middleware'
 import { tokenRef } from '../lib/tokenRef'
 
@@ -115,6 +116,7 @@ export const useAuthStore = create<AuthStore>()(
       clearAuth: () => {
         tokenRef.set(null)
         set({ token: null, user: null, merchants: [] })
+        clearDashboardHandoff()
       },
       setHasHydrated: (hasHydrated) => set({ hasHydrated }),
     }),

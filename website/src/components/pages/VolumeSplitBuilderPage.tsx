@@ -83,9 +83,13 @@ export function VolumeSplitBuilderPage() {
   // /routing/update rejects an active algorithm (ensure_routing_algorithm_inactive), so say so up
   // front rather than letting Save fail.
   const isEditingActiveRule = isEdit && (activeRules || []).some((r) => r.id === editId)
+  // Until the active list resolves, whether this rule is active is unknown — and the answer decides
+  // update-in-place vs fork. Treat unknown as "not yet saveable" rather than assuming inactive.
+  const activeStateUnknown = isEdit && !activeRules
 
   // Seed from the source rule exactly once — otherwise SWR revalidation would overwrite edits.
   const seededFrom = useRef<string | null>(null)
+  const seededForm = useRef<string | null>(null)
   useEffect(() => {
     if (!sourceRule || seededFrom.current === sourceRule.id) return
     const details = toVolumeSplitRuleDetailsState(sourceRule)
@@ -94,7 +98,23 @@ export function VolumeSplitBuilderPage() {
     setRuleName(isEdit ? details.name : `copy-of-${details.name}`)
     setRuleDesc(details.description && details.description !== 'N/A' ? details.description : '')
     if (details.gateways.length > 0) setGateways(details.gateways)
+    seededForm.current = JSON.stringify([
+      (isEdit ? details.name : `copy-of-${details.name}`).trim(),
+      details.description && details.description !== 'N/A' ? details.description : '',
+      details.gateways.length > 0 ? details.gateways : gateways,
+    ])
   }, [sourceRule, isEdit])
+
+  // An active rule is forked rather than updated, so there is nothing to save until something has
+  // actually changed — an untouched copy would just be rule sprawl.
+  const isDirty =
+    seededForm.current !== null &&
+    seededForm.current !== JSON.stringify([ruleName.trim(), ruleDesc, gateways])
+
+  // A fork keeps the merchant's own name if they renamed it, otherwise it must not collide with the
+  // rule it came from — nothing enforces name uniqueness on the way in.
+  const forkName =
+    sourceRule && ruleName.trim() === sourceRule.name ? `copy-of-${sourceRule.name}` : ruleName.trim()
 
   const inferredGatewayId = gateways[gateways.length - 1]?.id ?? null
   const fixedTotal = inferredGatewayId
@@ -153,7 +173,7 @@ export function VolumeSplitBuilderPage() {
     setSaving(true)
     setError(null)
     try {
-      if (isEdit) {
+      if (isEdit && !isEditingActiveRule) {
         await apiPost('/routing/update', {
           created_by: merchantId,
           routing_algorithm_id: editId,
@@ -162,9 +182,14 @@ export function VolumeSplitBuilderPage() {
           algorithm: toVolumeSplitAlgorithm(gateways),
         })
       } else {
+        // The backend refuses to update an active algorithm, so saving one forks it. The live rule
+        // keeps serving traffic until the merchant activates the copy from the rules list.
         await apiPost<RoutingAlgorithm>(
           '/routing/create',
-          toVolumeSplitCreatePayload({ ruleName, description: ruleDesc, gateways }, merchantId)
+          toVolumeSplitCreatePayload(
+            { ruleName: isEditingActiveRule ? forkName : ruleName, description: ruleDesc, gateways },
+            merchantId,
+          )
         )
       }
       await mutateRules()
@@ -194,8 +219,10 @@ export function VolumeSplitBuilderPage() {
       )}
       {isEditingActiveRule && (
         <Notice tone="warning">
-          <strong>This rule is active</strong> — active rules cannot be edited. Deactivate it from the
-          rules list first, then come back.
+          <strong>This rule is active</strong> — it keeps serving traffic and cannot be changed in
+          place. Edit freely: saving creates a copy named{' '}
+          <strong>{forkName || 'copy-of-…'}</strong>, which you can activate from the rules list when
+          you are ready.
         </Notice>
       )}
 
@@ -267,8 +294,12 @@ export function VolumeSplitBuilderPage() {
                       <div className="min-w-0">
                         <GatewaySelect
                           value={g.gatewayName}
-                          onChange={(val) => {
+                          onChange={(val, option) => {
                             updateGateway(g.id, 'gatewayName', val)
+                            // Parity with the rule-builder editors: a picked connector fills in its
+                            // own id, and a hand-typed name clears it rather than leaving behind the
+                            // id of whatever was picked before.
+                            updateGateway(g.id, 'gatewayId', option?.gatewayId ?? '')
                             if (fieldErrors.gateways[g.id]) {
                               setFieldErrors((prev) => {
                                 const { [g.id]: _removed, ...rest } = prev.gateways
@@ -279,7 +310,8 @@ export function VolumeSplitBuilderPage() {
                           placeholder="e.g. stripe"
                           options={gatewayOptions(
                             [],
-                            gateways.filter((other) => other.id !== g.id).map((other) => other.gatewayName)
+                            gateways.filter((other) => other.id !== g.id).map((other) => other.gatewayName),
+                            gateways.filter((other) => other.id !== g.id).map((other) => other.gatewayId)
                           )}
                           className="min-w-0"
                         />
@@ -363,8 +395,30 @@ export function VolumeSplitBuilderPage() {
           <ErrorMessage error={error} />
 
           <div className="flex flex-wrap items-center gap-4">
-            <Button type="submit" disabled={saving || !merchantId || !canEditRouting || isEditingActiveRule}>
-              {saving ? <><Spinner size={14} /> Saving…</> : isEdit ? 'Save Changes' : 'Create Rule'}
+            <Button
+              type="submit"
+              disabled={
+                saving ||
+                !merchantId ||
+                !canEditRouting ||
+                activeStateUnknown ||
+                (isEditingActiveRule && !isDirty)
+              }
+              title={
+                isEditingActiveRule && !isDirty
+                  ? 'Change something to save it as a copy. To copy this rule unchanged, use Duplicate in the rules list.'
+                  : undefined
+              }
+            >
+              {saving ? (
+                <><Spinner size={14} /> Saving…</>
+              ) : isEditingActiveRule ? (
+                'Duplicate and save'
+              ) : isEdit ? (
+                'Save Changes'
+              ) : (
+                'Create Rule'
+              )}
             </Button>
             <Button type="button" variant="secondary" size="sm" onClick={handleClear}>
               Clear

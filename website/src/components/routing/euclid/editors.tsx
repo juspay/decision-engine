@@ -22,7 +22,7 @@ import { FieldError } from '../../ui/FieldError'
 import { SearchableSelect } from '../../ui/SearchableSelect'
 import { SearchableMultiSelect } from '../../ui/SearchableMultiSelect'
 import { GatewaySelect } from '../../ui/GatewaySelect'
-import { gatewayOptions } from '../../../lib/connectors'
+import { gatewayOptions, type GatewayOption } from '../../../lib/connectors'
 import { RoutingKeyConfig } from '../../../hooks/useDynamicRoutingConfig'
 import type {
   RuleBlock, StatementGroup, ConditionRow,
@@ -46,7 +46,7 @@ export function SortableGatewayItem({
   position: number
   gatewayName: string
   gatewayId: string
-  options: string[]
+  options: GatewayOption[]
   onEdit: (next: { gatewayName: string; gatewayId: string }) => void
   onRemove: () => void
 }) {
@@ -90,7 +90,11 @@ export function SortableGatewayItem({
         <span className="w-5 shrink-0 text-center text-sm tabular-nums text-slate-500">{position}.</span>
         <GatewaySelect
           value={draftName}
-          onChange={setDraftName}
+          onChange={(name, option) => {
+            setDraftName(name)
+            // The id belongs to the picked connector; a hand-typed name invalidates it.
+            setDraftId(option?.gatewayId ?? '')
+          }}
           onEnter={commit}
           options={options}
           className="flex-1"
@@ -185,7 +189,11 @@ export function PriorityEditor({
     setNewGatewayId('')
   }
 
-  const options = gatewayOptions(suggestions, gateways.map((g) => g.gatewayName))
+  const options = gatewayOptions(
+    suggestions,
+    gateways.map((g) => g.gatewayName),
+    gateways.map((g) => g.gatewayId),
+  )
 
   return (
     <div className="space-y-2">
@@ -202,6 +210,7 @@ export function PriorityEditor({
               options={gatewayOptions(
                 suggestions,
                 gateways.filter((g) => g.id !== gw.id).map((g) => g.gatewayName),
+                gateways.filter((g) => g.id !== gw.id).map((g) => g.gatewayId),
               )}
               onEdit={(next) =>
                 onChange(gateways.map((g) => (g.id === gw.id ? { ...g, ...next } : g)))
@@ -220,7 +229,10 @@ export function PriorityEditor({
       >
         <GatewaySelect
           value={newGatewayName}
-          onChange={setNewGatewayName}
+          onChange={(name, option) => {
+            setNewGatewayName(name)
+            setNewGatewayId(option?.gatewayId ?? '')
+          }}
           onEnter={add}
           options={options}
           className="flex-1"
@@ -267,7 +279,11 @@ export function VolumeSplitEditor({
     setNewId('')
   }
 
-  const options = gatewayOptions(suggestions, entries.map((e) => e.gatewayName))
+  const options = gatewayOptions(
+    suggestions,
+    entries.map((e) => e.gatewayName),
+    entries.map((e) => e.gatewayId),
+  )
 
   return (
     <div className="space-y-2">
@@ -279,6 +295,7 @@ export function VolumeSplitEditor({
           options={gatewayOptions(
             suggestions,
             entries.filter((other) => other.id !== e.id).map((other) => other.gatewayName),
+            entries.filter((other) => other.id !== e.id).map((other) => other.gatewayId),
           )}
           onEdit={(patch) => onChange(entries.map((x) => (x.id === e.id ? { ...x, ...patch } : x)))}
           onRemove={() => onChange(entries.filter((x) => x.id !== e.id))}
@@ -303,7 +320,10 @@ export function VolumeSplitEditor({
         />
         <GatewaySelect
           value={newName}
-          onChange={setNewName}
+          onChange={(name, option) => {
+            setNewName(name)
+            setNewId(option?.gatewayId ?? '')
+          }}
           onEnter={add}
           options={options}
           className="flex-1"
@@ -331,7 +351,7 @@ function VolumeSplitRow({
   onRemove,
 }: {
   entry: VolumeSplitEntry
-  options: string[]
+  options: GatewayOption[]
   onEdit: (patch: Partial<VolumeSplitEntry>) => void
   onRemove: () => void
 }) {
@@ -371,7 +391,16 @@ function VolumeSplitRow({
           aria-label="Split percentage"
           className="w-20 rounded-lg border border-slate-200 bg-transparent px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
         />
-        <GatewaySelect value={draftName} onChange={setDraftName} onEnter={commit} options={options} className="flex-1" />
+        <GatewaySelect
+          value={draftName}
+          onChange={(name, option) => {
+            setDraftName(name)
+            setDraftId(option?.gatewayId ?? '')
+          }}
+          onEnter={commit}
+          options={options}
+          className="flex-1"
+        />
         <input
           value={draftId}
           onChange={(e) => setDraftId(e.target.value)}
