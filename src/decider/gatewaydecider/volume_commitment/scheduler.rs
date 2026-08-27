@@ -1,7 +1,4 @@
-//! The schedule — the only part that knows about time. It holds no commitment maths and no plan:
-//! it watches each merchant's forecast cadence and POSTs the main server's run endpoint when one
-//! comes due. The seam is HTTP, so *when* can later move to its own deployment without *what*
-//! changing at all. Forecasting is the only scheduled job.
+//! Owns the clock only: POSTs the main server's run endpoint when each merchant's cadence comes due.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -44,8 +41,7 @@ impl Scheduler {
         Self {
             deps,
             admin_secret,
-            // The main server is normally this same process; a short timeout keeps a wedged run
-            // from pinning the loop, and the next tick simply tries again.
+            // Short timeout so a wedged run cannot pin the loop; the next tick retries.
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(30))
                 .build()
@@ -123,7 +119,7 @@ impl Scheduler {
             let due_in_secs = match last_notified_at {
                 None => 0,
                 Some(at) => {
-                    let elapsed = (now - at).num_seconds().max(0) as u64;
+                    let elapsed = u64::try_from((now - at).num_seconds()).unwrap_or(0);
                     every_secs.saturating_sub(elapsed)
                 }
             };
@@ -163,8 +159,7 @@ impl Scheduler {
                             report.merchants_failed,
                         );
                     }
-                    // The run happened; only the reply was unreadable. Stamping it anyway is right —
-                    // re-running on the next tick would repeat work that already succeeded.
+                    // The run happened; only the reply was unreadable, so it still counts as done.
                     Err(error) => logger::warn!(
                         tag = "volume_commitment",
                         merchant_id = merchant_id,

@@ -96,9 +96,10 @@ impl KnownFeature {
             Self::Elimination => "enable_gateway_level_sr_elimination",
             Self::SrAutoCalibration => "sr_auto_calibration_enabled",
             Self::Autopilot => "autopilot_enabled",
-            // Exactly the key `flow_new` checks via `is_feature_enabled`, so this toggle drives the
-            // routing gate directly.
-            Self::VolumeContracts => "volume_commitment_routing_enabled",
+            // The same key `flow_new` checks, so this toggle drives the routing gate directly.
+            Self::VolumeContracts => {
+                crate::decider::gatewaydecider::volume_commitment::FEATURE_FLAG
+            }
         }
     }
 

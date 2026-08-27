@@ -555,6 +555,10 @@ where
             "/merchant-account/:merchant-id/volume-commitment/audit",
             get(routes::volume_commitment::get_audit),
         )
+        .route(
+            "/merchant-account/:merchant-id/volume-commitment/impact",
+            get(routes::volume_commitment::get_impact),
+        )
         // Called by the volume-commitment scheduler when a merchant's forecast comes due. Behind
         // the same auth as any other write; the scheduler presents the admin secret like any
         // service-to-service caller.

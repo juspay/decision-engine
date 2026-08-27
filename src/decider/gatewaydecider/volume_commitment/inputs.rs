@@ -20,7 +20,19 @@ pub struct CommitmentInputs {
     pub expected_daily_traffic: f64,
     /// Forecast cadence override; None means the config default.
     pub forecast_interval_secs: Option<u64>,
+    /// ISO-4217 code every amount in the document is denominated in, for display.
+    pub currency: Option<String>,
     pub commitments: Vec<Commitment>,
+}
+
+impl CommitmentInputs {
+    /// Contract-day length shared by the document's commitments (a calendar day when empty).
+    pub fn day_secs(&self) -> u64 {
+        self.commitments
+            .first()
+            .map(|c| c.day_secs)
+            .unwrap_or(super::math::SECS_PER_DAY)
+    }
 }
 
 /// One promise the merchant made to one PSP.
@@ -31,6 +43,8 @@ pub struct Commitment {
     pub goal: f64,
     /// What the merchant earns if the goal is met.
     pub reward: f64,
+    /// How the reward is earned, in words — "0.25% rebate", "lump sum" — for the contract card.
+    pub reward_note: String,
     /// Instant the current cycle opened — the lower bound of the window we measure.
     pub period_start_ms: i64,
     /// Instant it closes (the next cycle's start).
@@ -51,10 +65,32 @@ pub struct MeasuredVolume {
     pub pace: HashMap<String, f64>,
     /// Volume normal routing sends each PSP per day, without any help.
     pub routing_gives_daily: HashMap<String, f64>,
-    /// Volume the nudge itself has already moved to each PSP so far in the current contract day.
-    /// Subtracting it from the day's shortfall is what closes the loop: the rate falls as delivery
-    /// catches up, and rises again when it does not.
+    /// Volume the nudge has already steered here this contract day; subtracted from the shortfall to close the loop.
     pub steered_today: HashMap<String, f64>,
+}
+
+impl MeasuredVolume {
+    /// A connector's value in one of the maps, zero when it had no traffic.
+    fn of(map: &HashMap<String, f64>, connector: &str) -> f64 {
+        map.get(connector).copied().unwrap_or(0.0)
+    }
+
+    pub fn achieved_for(&self, connector: &str) -> f64 {
+        Self::of(&self.achieved, connector)
+    }
+
+    /// `None` when unmeasured, so the caller can fall back to a starting guess.
+    pub fn pace_for(&self, connector: &str) -> Option<f64> {
+        self.pace.get(connector).copied()
+    }
+
+    pub fn routing_gives_daily_for(&self, connector: &str) -> f64 {
+        Self::of(&self.routing_gives_daily, connector)
+    }
+
+    pub fn steered_today_for(&self, connector: &str) -> f64 {
+        Self::of(&self.steered_today, connector)
+    }
 }
 
 /// Where commitments come from — the contract DSL in production, a stub in tests.

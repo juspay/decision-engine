@@ -32,7 +32,6 @@ test('steers a behind-pace PSP and reports the run in analytics', async ({ authe
           currency: { denomination: 'USD', amount_units: 'minor' },
           expected_daily_traffic: 500000,
           forecast_interval_secs: 5,
-          steering_interval_secs: 5,
           volume_contracts: [
             {
               id: 'adyen', connector: 'adyen', status: 'active',
@@ -74,7 +73,10 @@ test('steers a behind-pace PSP and reports the run in analytics', async ({ authe
 
   // ── Analytics: the run and its audit ──
   await page.goto('/analytics?view=volume_commitments')
-  await expect(page.getByText('Cumulative volume vs. each promise')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('What the volume contract did')).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('Previous cycle').first()).toBeVisible()
+  await expect(page.getByText('This cycle').first()).toBeVisible()
+  await expect(page.getByText('Cumulative volume vs. each promise')).toBeVisible()
   await expect(page.getByText('Audit trail')).toBeVisible()
 
   // stripe is the one the engine gives up on; adyen is the one it chases.

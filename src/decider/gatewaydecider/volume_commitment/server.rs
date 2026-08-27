@@ -1,6 +1,4 @@
-//! The scheduler's own HTTP port — a second axum listener modelled on
-//! [`crate::metrics::metrics_server_builder`], serving a health check and the schedule view. The
-//! real work is the [`scheduler::Scheduler`] loop it starts.
+//! The scheduler's own axum listener (like the metrics server): `/health`, `/schedule`, and the loop.
 
 use std::sync::Arc;
 

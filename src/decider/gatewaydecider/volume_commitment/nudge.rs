@@ -1,14 +1,5 @@
-//! The per-payment decision — the only part of this feature on the routing path.
-//!
-//! A behind-pace PSP takes the payment only when the plan is fresh, its cycle is still open, it
-//! approves within the merchant's tolerance of the best PSP — and then only on a roll against the
-//! rate the forecast published for it.
-//!
-//! Sampling rather than counting is what keeps this path stateless. A volume target would have to
-//! be summed as it was delivered, and that sum would have to be shared across every pod and
-//! survive restarts. A rate needs none of that: each payment decides alone, and the forecast
-//! corrects the rate from what actually landed. It also paces itself, because it applies to
-//! arriving traffic rather than to a budget that can be drained.
+//! Per-payment decision: a behind-pace PSP takes the payment if the plan is fresh, its cycle is
+//! open, it is within tolerance, and it wins a roll against its steer rate — stateless by design.
 
 use std::collections::HashMap;
 
@@ -171,27 +162,26 @@ fn keep_routing_choice(
     }
 }
 
+/// Highest score first; equal scores fall back to name, so the order is deterministic.
+fn by_score_desc(a: &(&String, &f64), b: &(&String, &f64)) -> std::cmp::Ordering {
+    b.1.partial_cmp(a.1)
+        .unwrap_or(std::cmp::Ordering::Equal)
+        .then_with(|| a.0.cmp(b.0))
+}
+
 /// The best-approving PSP, ties broken by name for determinism.
 fn highest_scoring(scores: &HashMap<String, f64>) -> Option<(String, f64)> {
     scores
         .iter()
         .filter(|(_, score)| score.is_finite())
-        .max_by(|a, b| {
-            a.1.partial_cmp(b.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| b.0.cmp(a.0))
-        })
+        .min_by(by_score_desc)
         .map(|(psp, score)| (psp.clone(), *score))
 }
 
 /// The remaining PSPs, best-approving first.
 fn others_by_score(scores: &HashMap<String, f64>, chosen: &str) -> Vec<String> {
     let mut rest: Vec<(&String, &f64)> = scores.iter().filter(|(psp, _)| *psp != chosen).collect();
-    rest.sort_by(|a, b| {
-        b.1.partial_cmp(a.1)
-            .unwrap_or(std::cmp::Ordering::Equal)
-            .then_with(|| a.0.cmp(b.0))
-    });
+    rest.sort_by(by_score_desc);
     rest.into_iter().map(|(psp, _)| psp.clone()).collect()
 }
 

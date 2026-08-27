@@ -44,9 +44,7 @@ pub struct SteeringPlan {
     /// Which execution of the contract this plan belongs to — one cycle, start to close. Every
     /// forecast, steer and elimination it produces is filed under this.
     pub run_id: String,
-    /// The contract document this plan was built from. Activating a different one leaves the old
-    /// plan sitting in the store until the next forecast; comparing this tells a reader the plan
-    /// belongs to a contract that is no longer active, rather than showing its stale verdicts.
+    /// Anchor of the contract this plan was built from; a mismatch means the plan is for a replaced contract.
     pub contract_anchor_ms: i64,
     pub computed_at_epoch_secs: i64,
     /// Epoch second after which this plan may no longer steer — a dead scheduler fails safe.
@@ -71,36 +69,15 @@ impl SteeringPlan {
     }
 }
 
-/// Keep the best-rewarding commitments that can still be met with the traffic we have left.
-///
-/// Two passes. A commitment whose daily need exceeds the whole day's traffic is lost whatever we
-/// do, so it is dropped outright — its reward rank must not crowd out commitments that can still
-/// land. Whatever remains is ranked by reward and dropped from the tail until both budgets fit,
-/// so who survives is predictable straight from the reward column.
-///
-/// A dropped PSP is not blocked — normal routing still sends it whatever it would have sent.
+/// Drop the unreachable, then rank by reward and shed the tail until period and daily budgets fit;
+/// dropped PSPs still get normal traffic.
 pub fn choose_commitments_to_keep(
     psps: Vec<PspPlan>,
     traffic_left: f64,
     daily_traffic: f64,
 ) -> (Vec<PspPlan>, Vec<DroppedPsp>) {
     // Pass 1: the certifiably lost.
-    let (unreachable, mut kept): (Vec<PspPlan>, Vec<PspPlan>) = psps
-        .into_iter()
-        .partition(|psp| psp.needed_daily > daily_traffic);
-    let mut dropped: Vec<DroppedPsp> = unreachable
-        .into_iter()
-        .map(|psp| DroppedPsp {
-            reason: format!(
-                "needs {:.0} a day but the merchant only expects {:.0} a day in total, \
-                 so this commitment cannot be met and is not chased",
-                psp.needed_daily, daily_traffic
-            ),
-            connector: psp.connector,
-            remaining: psp.remaining,
-            reward: psp.reward,
-        })
-        .collect();
+    let (mut kept, mut dropped) = drop_unreachable(psps, daily_traffic);
 
     // Pass 2: reward-ranked, giving up the tail until the period and daily budgets both fit.
     kept.sort_by(by_reward_desc);
@@ -128,6 +105,28 @@ pub fn choose_commitments_to_keep(
     // Popped cheapest-first; report best-reward-first, matching the kept list.
     budget_dropped.reverse();
     dropped.extend(budget_dropped);
+    (kept, dropped)
+}
+
+/// Drop only commitments whose daily need exceeds total daily traffic; used alone through the
+/// first contract day, when the budget pass would be noise.
+pub fn drop_unreachable(psps: Vec<PspPlan>, daily_traffic: f64) -> (Vec<PspPlan>, Vec<DroppedPsp>) {
+    let (unreachable, kept): (Vec<PspPlan>, Vec<PspPlan>) = psps
+        .into_iter()
+        .partition(|psp| psp.needed_daily > daily_traffic);
+    let dropped: Vec<DroppedPsp> = unreachable
+        .into_iter()
+        .map(|psp| DroppedPsp {
+            reason: format!(
+                "needs {:.0} a day but the merchant only expects {:.0} a day in total, \
+                 so this commitment cannot be met and is not chased",
+                psp.needed_daily, daily_traffic
+            ),
+            connector: psp.connector,
+            remaining: psp.remaining,
+            reward: psp.reward,
+        })
+        .collect();
     (kept, dropped)
 }
 
@@ -168,6 +167,24 @@ mod tests {
     }
 
     fn names(psps: &[PspPlan]) -> Vec<&str> {
+        psps.iter().map(|p| p.connector.as_str()).collect()
+    }
+
+    /// The first-day pass never trades on reward: an over-promised pair both survive it, and only
+    /// a commitment that is unreachable on its own is dropped.
+    #[test]
+    fn the_first_day_pass_drops_only_the_unreachable() {
+        let psps = vec![
+            psp("adyen", 13_000.0, 900_000.0, 300_000.0),
+            psp("stripe", 5_000.0, 1_150_000.0, 380_000.0),
+            psp("checkout", 1_000.0, 3_000_000.0, 750_000.0),
+        ];
+        let (kept, dropped) = drop_unreachable(psps, 500_000.0);
+        assert_eq!(names(&kept), vec!["adyen", "stripe"]);
+        assert_eq!(names_dropped(&dropped), vec!["checkout"]);
+    }
+
+    fn names_dropped(psps: &[DroppedPsp]) -> Vec<&str> {
         psps.iter().map(|p| p.connector.as_str()).collect()
     }
 

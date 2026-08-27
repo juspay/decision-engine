@@ -16,6 +16,7 @@ import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { useAuthStore } from '../../store/authStore'
 import { apiErrorStatus, apiPost, fetcher } from '../../lib/api'
 import { ContractSimulationPanel } from './ContractSimulationPanel'
+import { VolumeCommitmentRunChart } from './VolumeCommitmentRunChart'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import { DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RankedPsp, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
@@ -319,6 +320,10 @@ interface SimulationResult {
   cardProgram?: string
   cardIssuerRegion?: string
   cardScenario?: string
+  // Whether the volume-commitment engine moved this payment, and — when it did — the PSP
+  // approval-rate routing had picked. Drives the per-PSP steering chart above the results.
+  steerOutcome?: 'STEERED' | 'SR_PREVAILED' | null
+  steerSrHead?: string | null
 }
 
 // Soft, sentence-case stat label (vs the all-caps SurfaceLabel) for the cost/auth summary.
@@ -2518,6 +2523,8 @@ export function DecisionSimulatorPage() {
         cardProgram,
         cardIssuerRegion: cardIssuerCountry,
         cardScenario: variant?.label,
+        steerOutcome: decideRes.volume_steer_info?.outcome ?? null,
+        steerSrHead: decideRes.volume_steer_info?.srHead ?? null,
       }
     }
 
@@ -2838,6 +2845,20 @@ export function DecisionSimulatorPage() {
       }),
     )
   }, [eligibleGatewaysParsed])
+
+  // The same color the trend charts use for a connector; a contract PSP that is not in the
+  // eligible list yet still gets a stable palette slot rather than the first color every time.
+  const colorForGateway = useMemo(() => {
+    const map = gatewayColorMap as Record<string, string>
+    return (gateway: string) => {
+      if (map[gateway]) return map[gateway]
+      const override = GW_COLOR_OVERRIDES[gateway.toLowerCase()]
+      if (override) return override
+      let hash = 0
+      for (const ch of gateway) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0
+      return GW_PALETTE[hash % GW_PALETTE.length]
+    }
+  }, [gatewayColorMap])
 
   // Auto-populate errorInfo for any gateway whose config has no error code yet,
   // once GSM rules have loaded from the API.
@@ -3957,6 +3978,13 @@ export function DecisionSimulatorPage() {
                 totalPayments: String(totalPayments),
               }))
             }}
+          />
+        )}
+        {activeTab === 'batch' && (
+          <VolumeCommitmentRunChart
+            merchantId={effectiveMerchantId}
+            results={simulationResults}
+            colorFor={colorForGateway}
           />
         )}
         {activeTab === 'batch' && (

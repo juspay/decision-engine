@@ -932,11 +932,30 @@ use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
 
-/// Rebuild the merchant's volume-commitment plan right after a contract is activated.
-///
-/// The scheduler would get to it on its next tick, but until then the store still holds the plan
-/// built from the *previous* contract — so a freshly activated contract appears to arrive with the
-/// old one's eliminations already applied. Spawned, so activation does not wait on ClickHouse.
+/// Bump `modified_at` on activation of a volume contract — it anchors `test_minutes` cycles (see
+/// `volume_commitment::dsl::active_config`); other rule types keep it as a plain edit timestamp.
+async fn stamp_contract_activation(
+    #[cfg(feature = "mysql")] conn: &crate::storage::MysqlPoolConn,
+    #[cfg(feature = "postgres")] conn: &crate::storage::PgPoolConn,
+    algorithm: &RoutingAlgorithm,
+) -> Result<(), ContainerError<EuclidErrors>> {
+    if algorithm.algorithm_for != AlgorithmType::VolumeCommitment.to_string() {
+        return Ok(());
+    }
+    let now = time::OffsetDateTime::now_utc();
+    let timestamp = time::PrimitiveDateTime::new(now.date(), now.time());
+    crate::generics::generic_update::<<RoutingAlgorithm as HasTable>::Table, _, _>(
+        conn,
+        dsl::id.eq(algorithm.id.clone()),
+        dsl::modified_at.eq(timestamp),
+    )
+    .await
+    .change_context(EuclidErrors::StorageError)?;
+    Ok(())
+}
+
+/// Rebuild the plan now (spawned, so activation does not wait on ClickHouse) so a newly activated
+/// contract does not inherit the previous plan's verdicts until the next scheduler tick.
 fn refresh_volume_commitment_plan(algorithm_for: &str, merchant_id: &str) {
     if algorithm_for != AlgorithmType::VolumeCommitment.to_string() {
         return;
@@ -1040,6 +1059,11 @@ pub async fn activate_routing_rule(
             .change_context(EuclidErrors::StorageError)
             {
                 Ok(_) => {
+                    if let Err(e) = stamp_contract_activation(&conn, &algorithm).await {
+                        update_failure_metrics();
+                        timer.observe_duration();
+                        return Err(e);
+                    }
                     cache_routing_algorithm(&state, &payload.created_by, &algorithm).await;
                     refresh_volume_commitment_plan(&algorithm.algorithm_for, &payload.created_by);
                     API_REQUEST_COUNTER
@@ -1078,6 +1102,11 @@ pub async fn activate_routing_rule(
         .change_context(EuclidErrors::StorageError)
     {
         Ok(_) => {
+            if let Err(e) = stamp_contract_activation(&conn, &algorithm).await {
+                update_failure_metrics();
+                timer.observe_duration();
+                return Err(e);
+            }
             cache_routing_algorithm(&state, &merchant_id_for_cache, &algorithm).await;
             refresh_volume_commitment_plan(&algorithm.algorithm_for, &merchant_id_for_cache);
             API_REQUEST_COUNTER

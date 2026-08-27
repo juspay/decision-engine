@@ -1,25 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Handshake } from 'lucide-react'
 import { Card, CardBody } from '../ui/Card'
 import { Badge } from '../ui/Badge'
 import { Button } from '../ui/Button'
 import { apiPost } from '../../lib/api'
 import { useVolumeCommitment, useVolumeCommitmentSeries } from '../../hooks/useVolumeCommitment'
+import { SECS_PER_DAY, compactAmount as compact, isTestCycle as isTestCycleOf } from './volumeCommitmentChartBits'
 
-function compact(value: number) {
-  if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
-  if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(0)}k`
-  return value.toFixed(0)
-}
+/** Extra payments over the seconds left, so latency cannot end the run before the cycle does. */
+const RUN_HEADROOM = 3
 
-/**
- * Drives the batch simulator from the merchant's active volume contract.
- *
- * The contract already says who the connectors are, how much volume a contract day carries, and
- * when the cycle closes — everything the simulator would otherwise ask you to type. "Load" copies
- * those across, sized to the time *left* in the cycle rather than a whole one, because the seconds
- * spent activating and switching pages are seconds of that cycle already gone.
- */
+/** Loads the simulator from the active contract, sized to the time left in the cycle. */
 export function ContractSimulationPanel({
   merchantId,
   isSimulating,
@@ -49,6 +40,10 @@ export function ContractSimulationPanel({
   const connectors = series.data?.connectors ?? []
   const hasContract = Boolean(data?.active) && connectors.length > 0
 
+  // The page's callbacks change identity every render; the effects below key on facts, not on them.
+  const callbacks = useRef({ onContractGone, onCycleEnded })
+  callbacks.current = { onContractGone, onCycleEnded }
+
   // Re-render every second so the countdown ticks and a run can be cut off the moment the cycle
   // closes, without waiting for the next poll.
   const [, setNow] = useState(Date.now())
@@ -58,9 +53,7 @@ export function ContractSimulationPanel({
   }, [])
 
   useEffect(() => {
-    if (!hasContract) onContractGone()
-    // Keyed on the fact, not the callback identity.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!hasContract) callbacks.current.onContractGone()
   }, [hasContract])
 
   const cycleEndMs = connectors[0] ? Date.parse(connectors[0].cycleEnd) : 0
@@ -69,25 +62,21 @@ export function ContractSimulationPanel({
 
   // A run outliving its cycle delivers into the next period, against goals that have just reset.
   useEffect(() => {
-    if (cycleOver && isSimulating) onCycleEnded()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (cycleOver && isSimulating) callbacks.current.onCycleEnded()
   }, [cycleOver, isSimulating])
 
-  // The moment the cycle closes, pull the next one rather than waiting out the poll interval —
-  // otherwise the countdown sits at "Cycle over" until something else happens to refetch, which
-  // looked like the panel had frozen.
+  // Refetch on cycle close so the countdown does not sit at "Cycle over" until the next poll.
   useEffect(() => {
     if (!cycleOver) return
     void seriesMutate()
     void mutate()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cycleOver])
+  }, [cycleOver, seriesMutate, mutate])
 
   if (!hasContract || !data) return null
 
-  const daySecs = data.daySecs ?? 86_400
+  const daySecs = data.daySecs ?? SECS_PER_DAY
   const expectedDaily = data.expectedDailyTraffic ?? 0
-  const isTestCycle = daySecs < 86_400
+  const isTestCycle = isTestCycleOf(daySecs)
   const cycleDays = Math.max(...connectors.map((c) => c.daysTotal), 1)
 
   // Volume rate is a contract term: `expectedDaily` per contract day, however many payments carry
@@ -95,11 +84,7 @@ export function ContractSimulationPanel({
   const paymentsPerDay = Math.max(1, Math.round(tps * daySecs))
   const perPayment = expectedDaily > 0 ? Math.max(1, Math.round(expectedDaily / paymentsPerDay)) : 1000
   const paceMs = Math.max(1, Math.round((daySecs * 1000) / paymentsPerDay))
-  // The cycle should be what ends the run, never the payment count. Each payment costs a round
-  // trip on top of its pace slot, so a count sized exactly to the seconds remaining runs out
-  // before the cycle closes and leaves the contract half-fed. The headroom absorbs that latency;
-  // whatever is unused is discarded when `onCycleEnded` stops the run at the boundary.
-  const RUN_HEADROOM = 3
+  // Over-provisioned so the cycle, never the count, ends the run; `onCycleEnded` discards the rest.
   const totalPayments = Math.max(1, Math.round(tps * secondsLeft * RUN_HEADROOM))
 
   async function deactivate() {
@@ -122,6 +107,10 @@ export function ContractSimulationPanel({
             </span>
             {cycleOver ? (
               <Badge variant="red">Cycle over</Badge>
+            ) : data.psps.length === 0 && data.eliminated.length === 0 ? (
+              // The contract is live but no plan covers this cycle yet — right after activation,
+              // or in the seconds between one cycle closing and the next forecast landing.
+              <Badge variant="gray">Forecast pending</Badge>
             ) : isTestCycle ? (
               <Badge variant="orange">
                 Test cycle · {secondsLeft}s left of {cycleDays} min
@@ -148,10 +137,13 @@ export function ContractSimulationPanel({
         <div className="flex flex-wrap gap-x-5 gap-y-1 text-xs text-slate-600 dark:text-slate-300">
           {connectors.map((c) => {
             const pacing = data.psps.find((p) => p.connector === c.connector)
+            // A dropped PSP leaves `psps` for `eliminated`, but its delivered volume is still real.
+            const dropped = data.eliminated.find((e) => e.connector === c.connector)
+            const achieved = pacing?.achieved ?? dropped?.achieved ?? 0
             const eliminated = c.eliminated
             return (
               <span key={c.connector} className="tabular-nums">
-                <strong>{c.connector}</strong> {compact(pacing?.achieved ?? 0)}/{compact(c.goal)}
+                <strong>{c.connector}</strong> {compact(achieved)}/{compact(c.goal)}
                 {eliminated ? (
                   <span className="ml-1 text-red-500">· eliminated</span>
                 ) : pacing?.steering ? (
@@ -170,15 +162,10 @@ export function ContractSimulationPanel({
           </p>
         ) : (
           <p className="text-xs text-slate-500 dark:text-slate-400">
-            Fixes every payment at{' '}
-            <strong className="tabular-nums">{perPayment.toLocaleString()}</strong> and fires{' '}
-            {tps}/sec — {compact(expectedDaily)} per {isTestCycle ? 'minute' : 'day'}, the
-            contract&apos;s stated rate. It runs for the{' '}
-            <strong className="tabular-nums">{secondsLeft}s</strong> left in this cycle and stops
-            when the cycle closes — not when a payment count runs out. Raise TPS for a livelier run
-            — the volume rate is fixed by the contract, so more payments simply means smaller ones.
-            Pausing is a real traffic drop the next forecast will see, and you can switch to
-            Analytics → Volume commitments while it keeps running.
+            Every payment <strong className="tabular-nums">{perPayment.toLocaleString()}</strong> at {tps}/sec
+            — {compact(expectedDaily)} per {isTestCycle ? 'minute' : 'day'}, the contract&apos;s rate — until
+            the cycle closes. More TPS means smaller payments, not more volume; pausing is a real
+            traffic drop.
           </p>
         )}
       </CardBody>

@@ -1,35 +1,33 @@
-//! Commitments as the merchant actually configured them, read from the volume-contract DSL.
-//!
-//! The DSL stores raw contract facts only — a target or a tier ladder, a billing cycle, a reward
-//! rate. It deliberately persists nothing derived: no goal, no reward amount, no period-end date.
-//! Turning those facts into the flat `(goal, reward, period_start, period_end)` the controller
-//! works in is this module's whole job, and the only thing that changes when the contract source
-//! changes. Nothing downstream of here knows the DSL exists.
-//!
-//! Contracts are stored through the routing-rule machinery: a `RoutingAlgorithm` row carrying a
-//! [`StaticRoutingAlgorithm::VolumeContract`] document, activated for a merchant by a mapper row in
-//! the `volume_commitment` slot. Reading one is therefore the same two-step lookup
-//! `routing_evaluate` does for the payment slot.
+//! Flattens the stored volume-contract document (a routing-rule row activated in the
+//! `volume_commitment` slot) into `CommitmentInputs`; nothing downstream knows the DSL exists.
 
 use async_trait::async_trait;
 use chrono::{DateTime, Datelike, Months, NaiveDate, Utc};
 use chrono_tz::Tz;
+use diesel::associations::HasTable;
+use diesel::{BoolExpressionMethods, ExpressionMethods};
 
 use super::inputs::{Commitment, CommitmentInputs, InputSource};
+use super::math::{MIN_TEST_CYCLE_MINUTES, SECS_PER_DAY, TEST_DAY_SECS};
+use super::FEATURE_FLAG;
 use crate::app::get_tenant_app_state;
-use crate::euclid::types::{AlgorithmType, RoutingAlgorithm, RoutingAlgorithmMapper};
 use crate::euclid::types::StaticRoutingAlgorithm;
+use crate::euclid::types::{AlgorithmType, RoutingAlgorithm, RoutingAlgorithmMapper};
 use crate::euclid::volume_contract::{
-    Amount, BillingCycle, BillingCycleType, ContractStatus, ContractTerms, Reward, RoutingMode,
-    TierRate, VolumeContract, VolumeContractConfig,
+    Amount, BillingCycle, BillingCycleType, CommitmentMetric, ContractStatus, ContractTerms,
+    Reward, RoutingMode, TierRate, VolumeContract, VolumeContractConfig,
 };
 use crate::feedback::constants::kvRedis;
 use crate::logger;
 use crate::redis::feature::is_feature_enabled;
-
-/// The per-merchant switch for this feature. The same key the routing path checks, so a merchant
-/// that is not being steered is not forecast for either.
-const FEATURE_FLAG: &str = "volume_commitment_routing_enabled";
+#[cfg(feature = "mysql")]
+use crate::storage::schema::routing_algorithm::dsl as algo_dsl;
+#[cfg(feature = "mysql")]
+use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::routing_algorithm::dsl as algo_dsl;
+#[cfg(feature = "postgres")]
+use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
 
 /// One basis point is one ten-thousandth. Rewards and tolerance both arrive in bps.
 const BPS: f64 = 10_000.0;
@@ -47,46 +45,20 @@ impl InputSource for DslInputSource {
         to_commitment_inputs(merchant_id, &config, anchor_ms, rule_id)
     }
 
+    /// Every merchant with a contract activated; `load` is where the feature flag is applied.
     async fn list_active(&self) -> Vec<String> {
-        let mut enabled = Vec::new();
-        for merchant_id in active_merchant_ids().await {
-            if feature_on(&merchant_id).await {
-                enabled.push(merchant_id);
-            }
-        }
-        enabled
+        active_merchant_ids().await
     }
 }
 
-/// Whether this merchant has volume-commitment routing switched on. An activated contract alone
-/// is not enough: without the flag nothing would be steered, so forecasting for it would burn
-/// ClickHouse reads to produce a plan no payment can ever read.
+/// Per-merchant feature flag; without it no payment is steered, so nothing is forecast either.
 async fn feature_on(merchant_id: &str) -> bool {
-    is_feature_enabled(
-        FEATURE_FLAG.to_string(),
-        merchant_id.to_string(),
-        kvRedis(),
-    )
-    .await
+    is_feature_enabled(FEATURE_FLAG.to_string(), merchant_id.to_string(), kvRedis()).await
 }
 
-/// The merchant's active contract document, with the instant it was written.
-///
-/// That instant anchors `test_minutes` cycles: a test contract should open its first cycle when
-/// you create it, not at whatever point of a wall-clock grid you happen to activate on. `None`
-/// when the merchant has none — the ordinary case, not an error.
+/// Active contract document, its `modified_at` (the anchor for `test_minutes` cycles, stamped on
+/// activation and on edit — see `routing_rules::stamp_contract_activation`), and its rule id.
 async fn active_config(merchant_id: &str) -> Option<(VolumeContractConfig, i64, String)> {
-    use diesel::associations::HasTable;
-    use diesel::{BoolExpressionMethods, ExpressionMethods};
-    #[cfg(feature = "mysql")]
-    use crate::storage::schema::routing_algorithm::dsl as algo_dsl;
-    #[cfg(feature = "mysql")]
-    use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
-    #[cfg(feature = "postgres")]
-    use crate::storage::schema_pg::routing_algorithm::dsl as algo_dsl;
-    #[cfg(feature = "postgres")]
-    use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
-
     let state = get_tenant_app_state().await;
 
     // A merchant holds at most one mapper row per slot; the volume_commitment slot is ours.
@@ -96,9 +68,9 @@ async fn active_config(merchant_id: &str) -> Option<(VolumeContractConfig, i64, 
         RoutingAlgorithmMapper,
     >(
         &state.db,
-        mapper_dsl::created_by.eq(merchant_id.to_string()).and(
-            mapper_dsl::algorithm_for.eq(AlgorithmType::VolumeCommitment.to_string()),
-        ),
+        mapper_dsl::created_by
+            .eq(merchant_id.to_string())
+            .and(mapper_dsl::algorithm_for.eq(AlgorithmType::VolumeCommitment.to_string())),
     )
     .await
     .ok()
@@ -108,12 +80,15 @@ async fn active_config(merchant_id: &str) -> Option<(VolumeContractConfig, i64, 
         <RoutingAlgorithm as HasTable>::Table,
         _,
         RoutingAlgorithm,
-    >(&state.db, algo_dsl::id.eq(mapper.routing_algorithm_id.clone()))
+    >(
+        &state.db,
+        algo_dsl::id.eq(mapper.routing_algorithm_id.clone()),
+    )
     .await
     .ok()
     .flatten()?;
 
-    let anchor_ms = algorithm.created_at.assume_utc().unix_timestamp() * 1000;
+    let anchor_ms = algorithm.modified_at.assume_utc().unix_timestamp() * 1000;
 
     match serde_json::from_str::<StaticRoutingAlgorithm>(&algorithm.algorithm_data) {
         Ok(StaticRoutingAlgorithm::VolumeContract(config)) => {
@@ -142,13 +117,6 @@ async fn active_config(merchant_id: &str) -> Option<(VolumeContractConfig, i64, 
 
 /// Every merchant with a contract document activated. Read on each pass of the schedule.
 async fn active_merchant_ids() -> Vec<String> {
-    use diesel::ExpressionMethods;
-    use diesel::associations::HasTable;
-    #[cfg(feature = "mysql")]
-    use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
-    #[cfg(feature = "postgres")]
-    use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
-
     let state = get_tenant_app_state().await;
     let rows: Vec<RoutingAlgorithmMapper> = crate::generics::generic_find_all::<
         <RoutingAlgorithmMapper as HasTable>::Table,
@@ -164,10 +132,8 @@ async fn active_merchant_ids() -> Vec<String> {
     rows.into_iter().map(|row| row.created_by).collect()
 }
 
-/// Flatten a contract document into what the controller works in.
-///
-/// Returns `None` when there is nothing to pace — an empty or inactive document, or one written
-/// for a routing mode this engine does not implement.
+/// Flatten a document into controller inputs; `None` when nothing is paceable (empty, inactive,
+/// or an unimplemented routing mode).
 fn to_commitment_inputs(
     merchant_id: &str,
     config: &VolumeContractConfig,
@@ -206,6 +172,9 @@ fn to_commitment_inputs(
         tolerance: f64::from(config.tolerance_bps.0) / BPS,
         expected_daily_traffic,
         forecast_interval_secs: config.forecast_interval_secs.map(u64::from),
+        // Counts are not money: no currency, so the dashboard shows plain numbers.
+        currency: matches!(config.metric, CommitmentMetric::Gmv)
+            .then(|| config.currency.denomination.to_string()),
         commitments,
     })
 }
@@ -227,10 +196,14 @@ fn to_commitment(
         None::<Commitment>
     };
 
-    let (goal, reward) = match &contract.terms {
+    let (goal, reward, reward_note) = match &contract.terms {
         ContractTerms::Lumpsum(terms) => {
             let goal = canonical(&terms.target)?;
-            (goal, reward_amount(&terms.reward, goal)?)
+            (
+                goal,
+                reward_amount(&terms.reward, goal)?,
+                reward_note(&terms.reward),
+            )
         }
         ContractTerms::Tiered(terms) => {
             // Validation guarantees exactly one targeted tier, and that it is retroactive — a
@@ -238,7 +211,11 @@ fn to_commitment(
             let tier = terms.tiers.iter().find(|tier| tier.targeted)?;
             let goal = canonical(&tier.threshold)?;
             match &tier.rate {
-                TierRate::Retroactive(rate) => (goal, goal * f64::from(rate.rebate_bps) / BPS),
+                TierRate::Retroactive(rate) => (
+                    goal,
+                    goal * f64::from(rate.rebate_bps) / BPS,
+                    format!("{} rebate, tier", pct_label(f64::from(rate.rebate_bps))),
+                ),
                 TierRate::Marginal(_) => return skip("its targeted tier is marginal"),
             }
         }
@@ -256,11 +233,28 @@ fn to_commitment(
         connector: contract.connector.clone(),
         goal,
         reward,
+        reward_note,
         period_start_ms: window.start_ms,
         period_end_ms: window.end_ms,
         day_secs: window.day_secs,
         timezone: contract.billing_cycle.timezone.clone(),
     })
+}
+
+/// The reward's terms in words, for the contract card: "0.25% rebate" or "lump sum".
+fn reward_note(reward: &Reward) -> String {
+    match reward {
+        Reward::Flat(_) => "lump sum".to_string(),
+        Reward::Percentage(pct) => format!("{} rebate", pct_label(f64::from(pct.rebate_bps))),
+    }
+}
+
+/// Basis points as a short percentage — 25 → "0.25%", 150 → "1.5%", 200 → "2%".
+fn pct_label(bps: f64) -> String {
+    let pct = bps / 100.0;
+    let text = format!("{pct:.2}");
+    let text = text.trim_end_matches('0').trim_end_matches('.');
+    format!("{text}%")
 }
 
 /// What the merchant earns for landing `goal`.
@@ -285,26 +279,19 @@ pub struct CycleWindow {
     pub day_secs: u64,
 }
 
-/// The cycle the contract is currently in, resolved in the contract's own timezone — a cycle
-/// anchored to the 1st in `America/New_York` turns over at midnight there, not at midnight UTC.
-///
-/// A `test_minutes` cycle instead lasts `anchor` minutes and repeats from `anchor_ms` — the
-/// instant the contract was written — with one contract day per minute: the same pacing maths,
-/// played out while you watch.
+/// Current billing window in the contract's timezone; a `test_minutes` cycle repeats from
+/// `anchor_ms` with one contract day per minute.
 fn cycle_window(cycle: &BillingCycle, now: DateTime<Utc>, anchor_ms: i64) -> Option<CycleWindow> {
     if cycle.cycle_type == BillingCycleType::TestMinutes {
-        let span_ms = i64::from(cycle.anchor.max(2)) * 60_000;
-        // Measured from when the contract was written, not from a wall-clock grid: anchoring to
-        // the epoch meant activating 118s into a 120s window opened a cycle with two seconds left,
-        // where every commitment is unreachable before a single payment arrives. Replicas still
-        // agree, because they all read the same stored timestamp.
+        let minutes = u32::from(cycle.anchor).max(MIN_TEST_CYCLE_MINUTES);
+        let span_ms = i64::from(minutes) * i64::try_from(TEST_DAY_SECS).unwrap_or(60) * 1000;
+        // Anchored to activation, not the epoch, so a fresh contract always gets a whole first cycle.
         let elapsed = now.timestamp_millis().saturating_sub(anchor_ms).max(0);
         let start_ms = anchor_ms + (elapsed / span_ms) * span_ms;
         return Some(CycleWindow {
             start_ms,
             end_ms: start_ms + span_ms,
-            // One minute per contract day: `anchor` minutes gives `anchor` days to pace across.
-            day_secs: 60,
+            day_secs: TEST_DAY_SECS,
         });
     }
 
@@ -348,7 +335,7 @@ fn cycle_window(cycle: &BillingCycle, now: DateTime<Utc>, anchor_ms: i64) -> Opt
     Some(CycleWindow {
         start_ms: start_of_day_ms(start, &tz),
         end_ms: start_of_day_ms(end, &tz),
-        day_secs: super::math::SECS_PER_DAY,
+        day_secs: SECS_PER_DAY,
     })
 }
 
@@ -558,9 +545,7 @@ mod anchor_tests {
         }
     }
 
-    /// The bug this anchoring fixes: on a wall-clock grid, a contract written at 10:01:58 opened a
-    /// cycle with two seconds left on it, so every commitment was unreachable before a single
-    /// payment arrived. Anchored to the write, the first cycle is always a whole one.
+    /// A contract activated seconds before a grid boundary must still get a whole first cycle.
     #[test]
     fn a_fresh_contract_gets_a_whole_first_cycle() {
         let written = at("2026-08-24T10:01:58Z");

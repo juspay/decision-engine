@@ -6,18 +6,19 @@ pub const PACE_WINDOW_DAYS: u32 = 7;
 /// Seconds in a calendar day — the contract-day length for every non-test billing cycle.
 pub const SECS_PER_DAY: u64 = 86_400;
 
-/// Smallest slice of a day we will divide by — about a second of one. Below this the cycle is
-/// effectively over, and the large `needed_daily` that follows reads as unreachable, which is the
-/// honest answer rather than a division by zero.
-const MIN_DAYS_LEFT: f64 = 1.0 / 86_400.0;
+/// Contract-day length on a `test_minutes` cycle: one minute per contract day.
+pub const TEST_DAY_SECS: u64 = 60;
 
-/// Contract days left in the billing period, as a fraction: 1.5 means a day and a half.
-///
-/// Fractional, because rounding a day and a half down to one is wrong in both directions at once —
-/// it inflates the daily rate a commitment needs *and* shrinks the traffic left to fund it, so a
-/// commitment still comfortably reachable is written off as lost. The error is worst on short
-/// cycles, where a single day is a large share of the period, but it bites real calendar contracts
-/// too: on the last day of a month you have hours left, not a day.
+/// Shortest `test_minutes` cycle, so a test contract always has at least two contract days.
+pub const MIN_TEST_CYCLE_MINUTES: u32 = 2;
+
+/// Prefix of every run id; the rest is the cycle's opening instant in epoch ms.
+pub const RUN_ID_PREFIX: &str = "vcr_";
+
+/// Floor for days-left (~1s) so an ended cycle yields a huge `needed_daily` instead of a division by zero.
+const MIN_DAYS_LEFT: f64 = 1.0 / SECS_PER_DAY as f64;
+
+/// Fractional contract days left; flooring would overstate the needed rate and understate the traffic left.
 pub fn days_left(period_end_ms: i64, now_ms: i64, day_secs: u64) -> f64 {
     let remaining_ms = (period_end_ms - now_ms).max(0) as f64;
     (remaining_ms / day_ms(day_secs) as f64).max(MIN_DAYS_LEFT)
@@ -33,15 +34,21 @@ pub fn day_index(period_start_ms: i64, now_ms: i64, day_secs: u64) -> i64 {
     (now_ms - period_start_ms).max(0) / day_ms(day_secs)
 }
 
-/// Identifier for one execution of a contract — one billing cycle, start to close.
-///
-/// A contract does not run once; it runs every month, quarter or (under a test cycle) every few
-/// minutes, and each pass is judged on its own delivery. Naming the pass lets a merchant look back
-/// at "the March run" and see the forecasts, steering and eliminations that belonged to it, rather
-/// than one undifferentiated stream. The cycle's opening instant is what makes it unique, and
-/// keeps runs sorting in the order they happened.
+/// Whole contract days in a cycle, never below one — the x-axis span a promise line runs to.
+pub fn days_total(period_start_ms: i64, period_end_ms: i64, day_secs: u64) -> u32 {
+    days_left(period_end_ms, period_start_ms, day_secs)
+        .round()
+        .max(1.0) as u32
+}
+
+/// Run id for one billing cycle, keyed on its opening instant so runs sort chronologically.
 pub fn run_id(cycle_start_ms: i64) -> String {
-    format!("vcr_{cycle_start_ms}")
+    format!("{RUN_ID_PREFIX}{cycle_start_ms}")
+}
+
+/// The cycle-opening instant a run id names, or None for anything that is not a run id.
+pub fn run_start_ms(run_id: &str) -> Option<i64> {
+    run_id.strip_prefix(RUN_ID_PREFIX)?.parse().ok()
 }
 
 /// Volume still owed on a commitment. Never negative — an over-delivered PSP owes nothing.
@@ -79,16 +86,8 @@ pub fn daily_shortfall(needed_daily: f64, routing_gives_daily: f64) -> f64 {
     (needed_daily - routing_gives_daily).max(0.0)
 }
 
-/// The share of eligible payments to divert to a PSP, as a fraction of 0..=1.
-///
-/// This is what the forecast publishes instead of a volume budget, and it is the reason no counter
-/// exists. Delivering a *quantity* forces you to sum what you have delivered — across pods that
-/// sum has to be shared, and it is lost whenever a pod restarts. A rate makes every payment
-/// independent: roll, act, forget. It is also self-pacing, because it applies to arriving traffic
-/// rather than to a bucket, so it cannot be spent in one burst and needs no release window.
-///
-/// The forecast measures what actually landed and recomputes this each run, so the loop closes:
-/// under-delivering raises the rate, over-delivering lowers it.
+/// Share of remaining traffic to divert (0..=1) = shortfall / expected remaining traffic; a rate
+/// needs no shared counter and self-paces.
 pub fn steer_rate(remaining_shortfall: f64, expected_remaining_traffic: f64) -> f64 {
     if expected_remaining_traffic <= 0.0 {
         // No traffic left to steer into; whatever is owed cannot be delivered this cycle.
@@ -135,7 +134,7 @@ mod tests {
     #[test]
     fn days_left_counts_contract_days_not_calendar_days() {
         let day_ms = 60_000; // one-minute contract days
-        // Ten minutes of cycle remaining = ten contract days.
+                             // Ten minutes of cycle remaining = ten contract days.
         assert_eq!(days_left(10 * day_ms, 0, 60), 10.0);
         // Past the end nothing is left, but the value stays safe to divide by.
         assert!(days_left(0, 10 * day_ms, 60) > 0.0);

@@ -721,17 +721,16 @@ pub async fn run_decider_flow(
                         decider_flow.writer.multi_objective_info = Some(outcome.info);
                     }
 
-                    // Volume commitment steering (pace-guarded, Mode 1). Runs last, on its own
-                    // flag: a behind-pace PSP can take the payment off the cost pick, but the
-                    // concession is still measured against the SR head. Fails open — no flag,
-                    // deps or plan leaves routing alone.
-                    let volume_commitment_on = is_feature_enabled(
-                        "volume_commitment_routing_enabled".to_string(),
-                        merchant_id_text.clone(),
-                        kvRedis(),
-                    )
-                    .await;
-                    if volume_commitment_on && !hedging_on {
+                    // Volume-commitment nudge runs last on its own flag; fails open when flag,
+                    // deps or plan is absent. Under hedging the flag is not even read.
+                    let volume_commitment_on = !hedging_on
+                        && is_feature_enabled(
+                            volume_commitment::FEATURE_FLAG.to_string(),
+                            merchant_id_text.clone(),
+                            kvRedis(),
+                        )
+                        .await;
+                    if volume_commitment_on {
                         if let Some(vc_deps) = volume_commitment::deps() {
                             if let Some(plan) = vc_deps.state.load_plan(&merchant_id_text).await {
                                 // Sampling, not counting: the forecast already decided each PSP's

@@ -1,12 +1,5 @@
-//! Volume commitment routing: merchants promise PSPs volume for rebates, and normal routing may
-//! not deliver it. Routing stays in charge; payments are only nudged toward a behind-pace PSP
-//! where it approves almost as well, so approvals barely move.
-//!
-//! `forecast_interval_secs` is the only cadence: each run re-measures delivery and republishes the
-//! share of eligible payments each behind-pace PSP should take.
-//!
-//! Three parts: `controller` writes the plan (never on a timer), `server`+`scheduler` own the
-//! clock on their own port, `nudge` reads the plan per payment. No plan means normal routing.
+//! Volume-commitment routing: nudge payments toward a behind-pace PSP within an approval
+//! tolerance. `controller` writes the plan, `scheduler` owns the clock, `nudge` reads it per payment.
 
 pub mod controller;
 pub mod dsl;
@@ -31,6 +24,9 @@ pub use plan::{DroppedPsp, PspPlan, SteeringPlan};
 pub use state::{RedisStateStore, StateStore};
 pub use volume::{ClickHouseVolumeSource, FixtureVolumeSource, VolumeSource};
 
+/// Per-merchant feature flag; the routing path, the forecaster and the dashboard toggle all read it.
+pub const FEATURE_FLAG: &str = "volume_commitment_routing_enabled";
+
 /// What this feature needs from outside: the promise, the delivery, and somewhere to keep state.
 pub struct Deps {
     /// Deployment settings — cadence defaults, where the main server is.
@@ -43,15 +39,12 @@ pub struct Deps {
     pub volume: Arc<dyn VolumeSource>,
 }
 
-/// Build the shared dependencies at startup, before any server binds. Commitments come from the
-/// merchant's active volume-contract document; a merchant without one is simply not steered.
+/// Build the shared dependencies at startup, before any server binds.
 pub async fn build_deps(
     config: &crate::config::VolumeCommitmentConfig,
     clickhouse: &crate::config::ClickHouseAnalyticsConfig,
 ) -> Deps {
-
-    // Real routed traffic when analytics is on. Without ClickHouse there is nowhere to read
-    // delivered volume from, so every PSP measures zero and nothing is ever judged behind.
+    // Without ClickHouse nothing can be measured: every PSP reads as zero-delivered, i.e. behind.
     let volume: Arc<dyn VolumeSource> = if clickhouse.enabled {
         crate::logger::info!(
             tag = "volume_commitment",
@@ -70,9 +63,7 @@ pub async fn build_deps(
     Deps {
         config: config.clone(),
         inputs: Arc::new(DslInputSource),
-        // Redis, always. Redis is already a hard dependency of the process, and a plan held only
-        // in local memory is invisible to every other replica and gone on restart — there is no
-        // deployment, single-process included, where that is the better answer.
+        // Redis, always: a process-local plan would be invisible to other replicas and lost on restart.
         state: Arc::new(RedisStateStore),
         volume,
     }

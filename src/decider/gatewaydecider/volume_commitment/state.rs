@@ -1,7 +1,4 @@
-//! Where the plan lives between forecasts.
-//!
-//! Only the plan: steering used to also keep a running per-day counter here, which a rate makes
-//! unnecessary — each payment now rolls independently, so there is nothing to accumulate.
+//! Redis-backed plan store with a short process-local cache; the plan is the only state.
 
 use async_trait::async_trait;
 
@@ -15,11 +12,8 @@ pub trait StateStore: Send + Sync {
     async fn store_plan(&self, merchant_id: &str, plan: &SteeringPlan);
 }
 
-/// How long a plan may sit in the process-local cache before it is re-read from Redis.
-///
-/// Short, because a pod that has cached a plan must notice the next forecast quickly — but
-/// correctness never rests on it: every plan carries `stale_after_epoch_secs`, and the nudge
-/// refuses an expired one regardless of where it came from.
+/// Local cache TTL; short so pods notice a new forecast quickly — freshness itself is enforced by
+/// `stale_after_epoch_secs`, not by this.
 const PLAN_CACHE_TTL_MS: u64 = 5_000;
 
 /// At most this many merchants' plans are held locally. Well above any realistic active-contract
@@ -37,17 +31,8 @@ fn plan_key(merchant_id: &str) -> String {
     format!("vc_plan_{merchant_id}")
 }
 
-/// Redis-backed store with a read-through local cache.
-///
-/// Redis is the source of truth, which is what makes the feature survive a restart and behave the
-/// same on every pod — the forecast runs once, and whichever process serves a payment reads that
-/// same plan. The local cache exists because the plan is read on *every* payment: without it each
-/// one would pay a network round trip, so Redis load would scale with payment volume instead of
-/// with time.
-///
-/// A plan is derived state — a pure function of the contract document and delivered volume, both
-/// durable elsewhere — so losing it costs one forecast, not data. That is why Redis with a TTL is
-/// the right home for it, and why nothing here tries to be a system of record.
+/// Redis is the source of truth (survives restarts, shared by all pods); the local cache only
+/// spares a round trip per payment. A plan is derived state, so losing it costs one forecast.
 pub struct RedisStateStore;
 
 #[async_trait]
@@ -86,19 +71,14 @@ impl StateStore for RedisStateStore {
     async fn store_plan(&self, merchant_id: &str, plan: &SteeringPlan) {
         let key = plan_key(merchant_id);
 
-        // Expire the key exactly when the nudge would start refusing the plan, so Redis never
-        // holds one that could only ever be rejected. Floored at a second so a plan built right on
-        // a boundary still lands.
+        // TTL = time until the nudge would refuse the plan anyway, floored at 1s.
         let ttl_secs = (plan.stale_after_epoch_secs - chrono::Utc::now().timestamp()).max(1);
 
         let state = crate::app::get_tenant_app_state().await;
         match serde_json::to_string(plan) {
             Ok(raw) => {
                 if let Err(error) = state.redis_conn.set_key_with_ttl(&key, raw, ttl_secs).await {
-                    // Redis is the source of truth, so a failed write means other pods will not
-                    // see this plan. Loud, and deliberately not cached locally either — a local
-                    // copy of a plan Redis never received would make one pod behave differently
-                    // from the rest, which is the failure this store exists to prevent.
+                    // Not cached locally on failure: a plan Redis never saw must not steer on one pod only.
                     crate::logger::error!(
                         tag = "volume_commitment",
                         merchant_id = merchant_id,

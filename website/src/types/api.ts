@@ -694,6 +694,8 @@ export interface PspPacing {
 /** A commitment the controller stopped chasing, with the reason why. */
 export interface EliminatedPspView {
   connector: string
+  /** Volume sent so far this cycle — still counted after the drop. */
+  achieved: number
   gap: number
   reward: number
   reason: string
@@ -715,13 +717,17 @@ export interface VolumeCommitmentView {
   eliminated: EliminatedPspView[]
 }
 
-
 /** One PSP-day of delivered volume on the commitment chart. */
 export interface CommitmentDayVolume {
   connector: string
   dayIndex: number
+  /** Where in the cycle the bucket starts, in fractional contract days. */
+  day: number
   total: number
   steered: number
+  /** Payments behind `total` / `steered`. */
+  payments: number
+  steeredPayments: number
 }
 
 /** One PSP's chart series: the promise it races and its per-day delivery. */
@@ -729,6 +735,8 @@ export interface CommitmentConnectorSeries {
   connector: string
   goal: number
   reward: number
+  /** How the reward is earned — "0.25% rebate", "lump sum". */
+  rewardNote: string
   cycleStart: string
   /** When the cycle closes — the next one's start. */
   cycleEnd: string
@@ -739,6 +747,10 @@ export interface CommitmentConnectorSeries {
 
 export interface CommitmentSeriesResponse {
   merchantId: string
+  /** ISO-4217 code the amounts are in, when the contract states one. */
+  currency?: string | null
+  /** Seconds in one contract day — the unit `points[].day` counts in. */
+  daySecs?: number | null
   connectors: CommitmentConnectorSeries[]
 }
 
@@ -772,6 +784,51 @@ export interface CommitmentAuditResponse {
   events: CommitmentAuditEvent[]
 }
 
+/** Payments and volume one PSP received in a window. */
+export interface CommitmentImpactSlice {
+  payments: number
+  volume: number
+}
+
+/** One PSP's before-and-after under the contract. */
+export interface CommitmentConnectorImpact {
+  connector: string
+  goal: number
+  reward: number
+  eliminated: boolean
+  steering: boolean
+  /** Everything it received in the previous cycle. */
+  before: CommitmentImpactSlice
+  /** Everything it received in the cycle — `unaided + steered`. */
+  withContract: CommitmentImpactSlice
+  /** The part normal routing sent by itself. */
+  unaided: CommitmentImpactSlice
+  /** The part the nudge moved here to meet the commitment. */
+  steered: CommitmentImpactSlice
+  /** What routing would have sent here but the nudge moved to a PSP behind on its commitment. */
+  ceded: CommitmentImpactSlice
+}
+
+export interface CommitmentImpactWindow {
+  startMs: number
+  endMs: number
+}
+
+/** The story of a contract: each PSP's traffic in the previous cycle next to this one. */
+export interface CommitmentImpactResponse {
+  merchantId: string
+  contractSinceMs: number
+  cycle: CommitmentImpactWindow
+  daysTotal: number
+  daySecs: number
+  baseline: CommitmentImpactWindow
+  connectors: CommitmentConnectorImpact[]
+  /** Day-by-day delivery per PSP across the previous cycle, days counted from its start. */
+  baselineDays: CommitmentDayVolume[]
+  /** The same across the cycle, days counted from the cycle's start. */
+  cycleDays: CommitmentDayVolume[]
+}
+
 /** Why the volume-commitment nudge did or did not move a payment, on the decide response. */
 export interface VolumeSteerInfo {
   outcome: 'STEERED' | 'SR_PREVAILED'
@@ -779,6 +836,9 @@ export interface VolumeSteerInfo {
   srHead?: string | null
   chosen?: string | null
   srGapConceded?: number | null
-  allowanceSoFar?: number | null
+  /** Share of eligible payments the chosen PSP was set to take when the roll happened. */
+  steerRate?: number | null
   steeringCount: number
+  /** The contract execution this steer belongs to. */
+  runId?: string | null
 }

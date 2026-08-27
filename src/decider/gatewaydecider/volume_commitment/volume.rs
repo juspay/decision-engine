@@ -10,20 +10,45 @@ use serde::Deserialize;
 
 use super::inputs::{Commitment, MeasuredVolume};
 use super::math;
-use crate::analytics::clickhouse::common::{fetch_all, DOMAIN_TABLE};
+use crate::analytics::clickhouse::common::{
+    fetch_all, DOMAIN_TABLE, PAYMENT_AMOUNT_EXPR as AMOUNT_EXPR,
+};
 use crate::analytics::clickhouse::query::{BoundQueryBuilder, FilterClause, OrderClause};
 use crate::analytics::flow::FlowType;
 use crate::config::ClickHouseAnalyticsConfig;
+use crate::decider::gatewaydecider::types::GatewayDeciderApproach;
 use crate::logger;
 
-/// Payment amount on the decision event, inside `details` JSON. Keep identical to the cost
-/// savings metrics' expression — if the request shape moves, both move together.
-const AMOUNT_EXPR: &str =
-    "JSONExtractFloat(assumeNotNull(details), 'request', 'paymentInfo', 'amount')";
+/// Approach stamped on nudged decisions; steered volume counts toward the goal, not toward what
+/// routing provides unaided.
+static STEERED_APPROACH: once_cell::sync::Lazy<String> =
+    once_cell::sync::Lazy::new(|| GatewayDeciderApproach::SrSelectionVolumeCommitment.to_string());
 
-/// Approach stamped on nudged decisions. Steered volume counts toward the goal but not toward
-/// what *routing* provides, or the controller would read its own nudges as routing catching up.
-const STEERED_APPROACH: &str = "SR_SELECTION_VOLUME_COMMITMENT";
+/// SQL predicates for steered / unaided decide events.
+static STEERED_PRED: once_cell::sync::Lazy<String> =
+    once_cell::sync::Lazy::new(|| format!("routing_approach = '{}'", *STEERED_APPROACH));
+static UNAIDED_PRED: once_cell::sync::Lazy<String> = once_cell::sync::Lazy::new(|| {
+    format!(
+        "(routing_approach IS NULL OR routing_approach != '{}')",
+        *STEERED_APPROACH
+    )
+});
+
+/// The filters every query here starts from: one merchant, one flow type.
+fn base_filters(builder: &mut BoundQueryBuilder, merchant_id: &str, flow: FlowType) {
+    builder.add_filter(FilterClause::eq("merchant_id", merchant_id.to_string()));
+    builder.add_filter(FilterClause::raw(format!(
+        "flow_type = '{}'",
+        flow.as_str()
+    )));
+}
+
+/// Restrict to the contract's connectors; a no-op on an empty list (callers never pass one).
+fn connector_filter(builder: &mut BoundQueryBuilder, connectors: &[String]) {
+    if let Some(filter) = FilterClause::in_list("gateway", connectors) {
+        builder.add_filter(filter);
+    }
+}
 
 /// One PSP's volume on one day of its cycle, for the pacing chart.
 #[derive(Debug, Clone, serde::Serialize)]
@@ -32,10 +57,17 @@ pub struct DayVolume {
     pub connector: String,
     /// Days since the PSP's cycle started (0 = the first day).
     pub day_index: u32,
+    /// Where in the cycle this bucket starts, in (fractional) contract days — `day_index` with
+    /// the sub-day resolution the caller asked for, so an intraday chart can plot it.
+    pub day: f64,
     /// Everything delivered that day.
     pub total: f64,
     /// Of that, what the nudge moved.
     pub steered: f64,
+    /// Payments behind `total`.
+    pub payments: u64,
+    /// Payments behind `steered`.
+    pub steered_payments: u64,
 }
 
 /// What kind of audit entry an event is.
@@ -65,6 +97,19 @@ pub struct AuditEvent {
     pub amount: Option<f64>,
 }
 
+/// Per-PSP window totals: `steered_*` moved *to* it by the nudge, `ceded_*` moved *away* from it.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WindowTotals {
+    pub connector: String,
+    pub payments: u64,
+    pub volume: f64,
+    pub steered_payments: u64,
+    pub steered_volume: f64,
+    pub ceded_payments: u64,
+    pub ceded_volume: f64,
+}
+
 /// Where observed traffic is read from.
 #[async_trait]
 pub trait VolumeSource: Send + Sync {
@@ -77,12 +122,28 @@ pub trait VolumeSource: Send + Sync {
         pace_window_days: u32,
     ) -> MeasuredVolume;
 
-    /// Per-day volume for each PSP since its cycle started. Empty when nothing can be measured.
-    async fn daily_series(&self, merchant_id: &str, commitments: &[Commitment]) -> Vec<DayVolume>;
+    /// Volume for each PSP since its cycle started, in `per_day` buckets per contract day (1 =
+    /// whole days), ordered by `day`. Empty when nothing can be measured.
+    async fn daily_series(
+        &self,
+        merchant_id: &str,
+        commitments: &[Commitment],
+        per_day: u32,
+    ) -> Vec<DayVolume>;
 
     /// The audit trail, newest first: forecasts and eliminations from the controller's events,
     /// steer chunks from the decide events themselves.
     async fn audit_events(&self, merchant_id: &str, limit: u64) -> Vec<AuditEvent>;
+
+    /// Per-connector totals in `[start_ms, end_ms)`, split into unaided / steered-in / ceded;
+    /// absent when no traffic.
+    async fn window_totals(
+        &self,
+        merchant_id: &str,
+        connectors: &[String],
+        start_ms: i64,
+        end_ms: i64,
+    ) -> Vec<WindowTotals>;
 }
 
 /// Reads routed volume out of the analytics events in ClickHouse.
@@ -125,12 +186,8 @@ impl ClickHouseVolumeSource {
         let pace_start_ms = start_of_today_ms
             .saturating_sub(pace_days.saturating_sub(1) * day_ms)
             .max(cycle_start_ms);
-
-        let unaided =
-            format!("(routing_approach IS NULL OR routing_approach != '{STEERED_APPROACH}')");
-        // Start of the contract day now in progress — the window the steering rate is set against.
-        let today_start_ms =
-            cycle_start_ms + math::day_index(cycle_start_ms, now_ms, day_secs) * day_ms;
+        let unaided = &*UNAIDED_PRED;
+        let steered = &*STEERED_PRED;
 
         let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
         builder.extend_selects([
@@ -141,27 +198,17 @@ impl ClickHouseVolumeSource {
                 "sumIf({AMOUNT_EXPR}, created_at_ms >= {pace_start_ms} AND {unaided}) \
                  AS unaided_total"
             ),
+            // Today's running steered total, measured from the start of the contract day.
             format!(
-                "sumIf({AMOUNT_EXPR}, created_at_ms >= {today_start_ms} \
-                 AND routing_approach = '{STEERED_APPROACH}') AS steered_today"
+                "sumIf({AMOUNT_EXPR}, created_at_ms >= {start_of_today_ms} AND {steered}) \
+                 AS steered_today"
             ),
         ]);
-        builder.add_filter(FilterClause::eq("merchant_id", merchant_id.to_string()));
-        builder.add_filter(FilterClause::raw(format!(
-            "flow_type = '{}'",
-            FlowType::DecideGatewayDecision.as_str()
-        )));
+        base_filters(&mut builder, merchant_id, FlowType::DecideGatewayDecision);
         builder.add_filter(FilterClause::raw(format!(
             "created_at_ms >= {cycle_start_ms}"
         )));
-        builder.add_filter(FilterClause::raw(format!(
-            "gateway IN ({})",
-            connectors
-                .iter()
-                .map(|c| format!("'{}'", c.replace('\'', "\\'")))
-                .collect::<Vec<_>>()
-                .join(", ")
-        )));
+        connector_filter(&mut builder, connectors);
         builder.extend_group_bys(["gateway"]);
 
         let rows = match fetch_all::<VolumeRow>(builder.build(&self.client)).await {
@@ -183,13 +230,17 @@ impl ClickHouseVolumeSource {
         let window_days = elapsed_window_days(now_ms, pace_start_ms, pace_days, day_ms);
         for row in rows {
             let Some(gateway) = row.gateway else { continue };
-            into.achieved.insert(gateway.clone(), row.achieved);
+            into.achieved
+                .insert(gateway.clone(), nan_to_zero(row.achieved));
             into.pace
-                .insert(gateway.clone(), row.pace_total / window_days);
-            into.routing_gives_daily
-                .insert(gateway.clone(), row.unaided_total / window_days);
+                .insert(gateway.clone(), nan_to_zero(row.pace_total) / window_days);
+            into.routing_gives_daily.insert(
+                gateway.clone(),
+                nan_to_zero(row.unaided_total) / window_days,
+            );
             // Not divided: this is today's running total, not a rate.
-            into.steered_today.insert(gateway, row.steered_today);
+            into.steered_today
+                .insert(gateway, nan_to_zero(row.steered_today));
         }
     }
 }
@@ -226,61 +277,69 @@ impl VolumeSource for ClickHouseVolumeSource {
         measured
     }
 
-    async fn daily_series(&self, merchant_id: &str, commitments: &[Commitment]) -> Vec<DayVolume> {
+    async fn daily_series(
+        &self,
+        merchant_id: &str,
+        commitments: &[Commitment],
+        per_day: u32,
+    ) -> Vec<DayVolume> {
         let mut series = Vec::new();
+        let per_day = i64::from(per_day.max(1));
 
-        let mut by_cycle: HashMap<(i64, u64), Vec<String>> = HashMap::new();
+        let mut by_cycle: HashMap<(i64, i64, u64), Vec<String>> = HashMap::new();
         for commitment in commitments {
             by_cycle
-                .entry((commitment.period_start_ms, commitment.day_secs))
+                .entry((
+                    commitment.period_start_ms,
+                    commitment.period_end_ms,
+                    commitment.day_secs,
+                ))
                 .or_default()
                 .push(commitment.connector.clone());
         }
 
-        for ((cycle_start_ms, day_secs), connectors) in by_cycle {
+        for ((cycle_start_ms, cycle_end_ms, day_secs), connectors) in by_cycle {
             let day_ms = math::day_ms(day_secs);
-            let steered = format!("routing_approach = '{STEERED_APPROACH}'");
+            // Buckets of a contract day (or a slice of one); the bucket index is turned back into
+            // whole days and a fractional position below.
+            let bucket_ms = (day_ms / per_day).max(1);
+            let steered = &*STEERED_PRED;
 
             let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
             builder.extend_selects([
                 "gateway".to_string(),
-                // Whole local days since the cycle opened, so each bucket is a contract-day.
                 format!(
-                    "toInt64(intDiv(created_at_ms - {cycle_start_ms}, {day_ms})) AS day_index"
+                    "toInt64(intDiv(created_at_ms - {cycle_start_ms}, {bucket_ms})) AS day_index"
                 ),
                 format!("sum({AMOUNT_EXPR}) AS total"),
                 format!("sumIf({AMOUNT_EXPR}, {steered}) AS steered"),
+                "toUInt64(count()) AS payments".to_string(),
+                format!("toUInt64(countIf({steered})) AS steered_payments"),
             ]);
-            builder.add_filter(FilterClause::eq("merchant_id", merchant_id.to_string()));
-            builder.add_filter(FilterClause::raw(format!(
-                "flow_type = '{}'",
-                FlowType::DecideGatewayDecision.as_str()
-            )));
+            base_filters(&mut builder, merchant_id, FlowType::DecideGatewayDecision);
             builder.add_filter(FilterClause::raw(format!(
                 "created_at_ms >= {cycle_start_ms}"
             )));
-            builder.add_filter(FilterClause::raw(format!(
-                "gateway IN ({})",
-                connectors
-                    .iter()
-                    .map(|c| format!("'{}'", c.replace('\'', "\\'")))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            )));
+            // Bounded above too, or later cycles' traffic lands in a past cycle's last bucket.
+            builder.add_filter(FilterClause::raw(format!("created_at_ms < {cycle_end_ms}")));
+            connector_filter(&mut builder, &connectors);
             builder.extend_group_bys(["gateway", "day_index"]);
 
             match fetch_all::<DayVolumeRow>(builder.build(&self.client)).await {
                 Ok(rows) => {
                     for row in rows {
                         let Some(gateway) = row.gateway else { continue };
-                        let Ok(day_index) = u32::try_from(row.day_index) else {
+                        let Ok(day_index) = u32::try_from(row.day_index / per_day) else {
                             continue;
                         };
                         series.push(DayVolume {
                             connector: gateway,
                             day_index,
-                            total: row.total,
-                            steered: row.steered,
+                            day: row.day_index as f64 / per_day as f64,
+                            total: nan_to_zero(row.total),
+                            steered: nan_to_zero(row.steered),
+                            payments: row.payments,
+                            steered_payments: row.steered_payments,
                         });
                     }
                 }
@@ -293,6 +352,7 @@ impl VolumeSource for ClickHouseVolumeSource {
                 }
             }
         }
+        series.sort_by(|a, b| a.day.total_cmp(&b.day));
         series
     }
 
@@ -302,11 +362,11 @@ impl VolumeSource for ClickHouseVolumeSource {
         // Forecast runs (which carry the eliminations) — one event per controller run.
         let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
         builder.extend_selects(["created_at_ms".to_string(), "details".to_string()]);
-        builder.add_filter(FilterClause::eq("merchant_id", merchant_id.to_string()));
-        builder.add_filter(FilterClause::raw(format!(
-            "flow_type = '{}'",
-            FlowType::VolumeCommitmentForecast.as_str()
-        )));
+        base_filters(
+            &mut builder,
+            merchant_id,
+            FlowType::VolumeCommitmentForecast,
+        );
         builder.add_order_by(OrderClause::desc("created_at_ms"));
         builder.set_limit(Some(limit));
         match fetch_all::<ForecastEventRow>(builder.build(&self.client)).await {
@@ -335,14 +395,8 @@ impl VolumeSource for ClickHouseVolumeSource {
              AS run_id"
                 .to_string(),
         ]);
-        builder.add_filter(FilterClause::eq("merchant_id", merchant_id.to_string()));
-        builder.add_filter(FilterClause::raw(format!(
-            "flow_type = '{}'",
-            FlowType::DecideGatewayDecision.as_str()
-        )));
-        builder.add_filter(FilterClause::raw(format!(
-            "routing_approach = '{STEERED_APPROACH}'"
-        )));
+        base_filters(&mut builder, merchant_id, FlowType::DecideGatewayDecision);
+        builder.add_filter(FilterClause::raw(STEERED_PRED.clone()));
         builder.add_order_by(OrderClause::desc("created_at_ms"));
         builder.set_limit(Some(limit));
         match fetch_all::<SteerEventRow>(builder.build(&self.client)).await {
@@ -374,8 +428,106 @@ impl VolumeSource for ClickHouseVolumeSource {
         }
 
         events.sort_by_key(|e| std::cmp::Reverse(e.at_epoch_ms));
-        events.truncate(limit as usize);
+        events.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
         events
+    }
+
+    async fn window_totals(
+        &self,
+        merchant_id: &str,
+        connectors: &[String],
+        start_ms: i64,
+        end_ms: i64,
+    ) -> Vec<WindowTotals> {
+        if connectors.is_empty() || end_ms <= start_ms {
+            return Vec::new();
+        }
+        let steered = &*STEERED_PRED;
+        let window_filters = |builder: &mut BoundQueryBuilder| {
+            base_filters(builder, merchant_id, FlowType::DecideGatewayDecision);
+            builder.add_filter(FilterClause::raw(format!("created_at_ms >= {start_ms}")));
+            builder.add_filter(FilterClause::raw(format!("created_at_ms < {end_ms}")));
+        };
+
+        let mut by_connector: HashMap<String, WindowTotals> = HashMap::new();
+
+        // What landed on each PSP, and how much of it the nudge put there.
+        let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
+        builder.extend_selects([
+            "gateway".to_string(),
+            "toUInt64(count()) AS payments".to_string(),
+            format!("sum({AMOUNT_EXPR}) AS volume"),
+            format!("toUInt64(countIf({steered})) AS steered_payments"),
+            format!("sumIf({AMOUNT_EXPR}, {steered}) AS steered_volume"),
+        ]);
+        window_filters(&mut builder);
+        connector_filter(&mut builder, connectors);
+        builder.extend_group_bys(["gateway"]);
+        match fetch_all::<WindowRow>(builder.build(&self.client)).await {
+            Ok(rows) => {
+                for row in rows {
+                    let Some(gateway) = row.gateway else { continue };
+                    let entry = by_connector.entry(gateway.clone()).or_default();
+                    entry.connector = gateway;
+                    entry.payments = row.payments;
+                    entry.volume = nan_to_zero(row.volume);
+                    entry.steered_payments = row.steered_payments;
+                    entry.steered_volume = nan_to_zero(row.steered_volume);
+                }
+            }
+            Err(error) => {
+                logger::error!(
+                    tag = "volume_commitment",
+                    merchant_id = merchant_id,
+                    "could not read window totals from clickhouse: {error:?}"
+                );
+                return Vec::new();
+            }
+        }
+
+        // What each PSP gave up: steered decisions name the PSP routing had picked (`srHead`).
+        let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
+        builder.extend_selects([
+            "JSONExtractString(assumeNotNull(details), 'response', 'volume_steer_info', 'srHead') \
+             AS sr_head"
+                .to_string(),
+            "toUInt64(count()) AS payments".to_string(),
+            format!("sum({AMOUNT_EXPR}) AS volume"),
+        ]);
+        window_filters(&mut builder);
+        builder.add_filter(FilterClause::raw(steered.clone()));
+        builder.extend_group_bys(["sr_head"]);
+        match fetch_all::<CededRow>(builder.build(&self.client)).await {
+            Ok(rows) => {
+                for row in rows {
+                    if row.sr_head.is_empty() || !connectors.contains(&row.sr_head) {
+                        continue;
+                    }
+                    let entry = by_connector.entry(row.sr_head.clone()).or_default();
+                    entry.connector = row.sr_head;
+                    entry.ceded_payments = row.payments;
+                    entry.ceded_volume = nan_to_zero(row.volume);
+                }
+            }
+            Err(error) => logger::error!(
+                tag = "volume_commitment",
+                merchant_id = merchant_id,
+                "could not read ceded volume from clickhouse: {error:?}"
+            ),
+        }
+
+        let mut totals: Vec<WindowTotals> = by_connector.into_values().collect();
+        totals.sort_by(|a, b| a.connector.cmp(&b.connector));
+        totals
+    }
+}
+
+/// Float aggregates are non-nullable and can come back NaN/inf; every consumer wants zero.
+fn nan_to_zero(value: f64) -> f64 {
+    if value.is_finite() {
+        value
+    } else {
+        0.0
     }
 }
 
@@ -452,6 +604,8 @@ struct DayVolumeRow {
     day_index: i64,
     total: f64,
     steered: f64,
+    payments: u64,
+    steered_payments: u64,
 }
 
 /// `sum`/`sumIf` over `JSONExtractFloat` are non-nullable Float64 (NaN when nothing matched), so
@@ -465,8 +619,25 @@ struct VolumeRow {
     steered_today: f64,
 }
 
-/// Contract days of history the query actually covered, flooring at one: sub-day rates are noise,
-/// and the floor errs toward steering slightly early (tolerance-bounded) over missing the goal.
+/// One row of the window-totals query.
+#[derive(Debug, Deserialize, Row)]
+struct WindowRow {
+    gateway: Option<String>,
+    payments: u64,
+    volume: f64,
+    steered_payments: u64,
+    steered_volume: f64,
+}
+
+/// One row of the ceded-volume query: what a PSP lost to steering, keyed by routing's own pick.
+#[derive(Debug, Deserialize, Row)]
+struct CededRow {
+    sr_head: String,
+    payments: u64,
+    volume: f64,
+}
+
+/// Contract days the query covered, floored at one (sub-day rates are noise) and capped at the pace window.
 fn elapsed_window_days(now_ms: i64, window_start_ms: i64, pace_days: i64, day_ms: i64) -> f64 {
     ((now_ms.saturating_sub(window_start_ms)) as f64 / day_ms.max(1) as f64)
         .clamp(1.0, pace_days as f64)
@@ -494,11 +665,26 @@ impl VolumeSource for FixtureVolumeSource {
         self.merchants.get(merchant_id).cloned().unwrap_or_default()
     }
 
-    async fn daily_series(&self, _merchant_id: &str, _commitments: &[Commitment]) -> Vec<DayVolume> {
+    async fn daily_series(
+        &self,
+        _merchant_id: &str,
+        _commitments: &[Commitment],
+        _per_day: u32,
+    ) -> Vec<DayVolume> {
         Vec::new()
     }
 
     async fn audit_events(&self, _merchant_id: &str, _limit: u64) -> Vec<AuditEvent> {
+        Vec::new()
+    }
+
+    async fn window_totals(
+        &self,
+        _merchant_id: &str,
+        _connectors: &[String],
+        _start_ms: i64,
+        _end_ms: i64,
+    ) -> Vec<WindowTotals> {
         Vec::new()
     }
 }
@@ -507,7 +693,7 @@ impl VolumeSource for FixtureVolumeSource {
 mod tests {
     use super::*;
 
-    const DAY_MS: i64 = 86_400_000;
+    const DAY_MS: i64 = math::SECS_PER_DAY as i64 * 1000;
 
     /// Mid-cycle at noon: six full days plus half of today.
     #[test]
@@ -535,5 +721,4 @@ mod tests {
         let day_ms = 120_000; // 120s contract days
         assert!((elapsed_window_days(3 * day_ms, 0, 7, day_ms) - 3.0).abs() < 1e-9);
     }
-
 }

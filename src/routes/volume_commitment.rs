@@ -1,16 +1,24 @@
-//! The main server's volume-commitment surface: the read-only pacing view, and the run endpoint
-//! the scheduler calls. Runs live here — not on the scheduler's port — so they share the exact
-//! plan and counters the routing path reads.
+//! Read-only pacing/series/audit/impact views plus the scheduler-called run endpoint.
+
+use std::collections::HashMap;
 
 use axum::extract::{Path, Query};
 use axum::http::StatusCode;
 use axum::Json;
-use serde::{Deserialize, Serialize};
-
 use futures::FutureExt;
+use serde::{Deserialize, Serialize};
 
 use crate::decider::gatewaydecider::volume_commitment;
 use volume_commitment::controller::{self, RunReport};
+use volume_commitment::volume::{AuditEvent, AuditKind, DayVolume};
+use volume_commitment::{math, Commitment, CommitmentInputs, Deps, SteeringPlan};
+
+/// Newest audit events read per request; runs and their counters are summarised from them.
+const AUDIT_EVENT_WINDOW: u64 = 500;
+/// Finest series resolution: one bucket per minute of a contract day.
+const MAX_BUCKETS_PER_DAY: u32 = 1440;
+/// Pseudo run id for events written before runs were named.
+const UNNAMED_RUN: &str = "earlier";
 
 /// `?merchant_id=` narrows a run to one merchant; omitted, the run sweeps everyone.
 #[derive(Debug, Deserialize)]
@@ -98,6 +106,9 @@ pub struct PspPacing {
 #[serde(rename_all = "camelCase")]
 pub struct EliminatedPspView {
     pub connector: String,
+    /// Volume sent so far this cycle — it keeps counting after the drop, since normal routing
+    /// still sends the PSP whatever it would have anyway.
+    pub achieved: f64,
     pub gap: f64,
     pub reward: f64,
     pub reason: String,
@@ -108,7 +119,8 @@ pub struct EliminatedPspView {
 #[serde(rename_all = "camelCase")]
 pub struct VolumeCommitmentView {
     pub merchant_id: String,
-    /// `false` before the controller's first tick — nothing is steered.
+    /// `true` whenever a contract document is live for the merchant — even between the previous
+    /// cycle's plan expiring and the next forecast, when `psps` is empty and nothing is steered.
     pub active: bool,
     /// Epoch seconds of the last controller tick.
     pub computed_at_epoch_secs: Option<i64>,
@@ -116,8 +128,7 @@ pub struct VolumeCommitmentView {
     pub tolerance: Option<f64>,
     /// Total volume the merchant expects per day, from the contract document.
     pub expected_daily_traffic: Option<f64>,
-    /// How long one contract day lasts, in seconds — 86400 for calendar cycles, 60 on a
-    /// `test_minutes` cycle. Lets a client size simulated traffic to the contract.
+    /// Contract-day length in seconds (`SECS_PER_DAY`, or 60 on a test cycle).
     pub day_secs: Option<u64>,
     /// The routing rule holding the active contract, so the dashboard can act on it.
     pub rule_id: Option<String>,
@@ -135,86 +146,53 @@ pub async fn get_volume_commitment(
         return Ok(Json(inactive(merchant_id)));
     };
 
-    // Goals live on the contract source, not the plan — and measuring delivered volume needs the
-    // same commitments (their connectors and cycle starts), so load them once for both. `None`
-    // means the merchant has no usable contract *or* the feature is switched off for it; either
-    // way nothing is being paced, whatever plan a previous run may have left in memory.
-    let inputs = deps.inputs.load(&merchant_id).await;
-    if inputs.is_none() {
-        return Ok(Json(inactive(merchant_id)));
-    }
-
-    let Some(plan) = deps.state.load_plan(&merchant_id).await else {
+    // Load inputs once for goals and measurement; `None` = no usable contract or feature off.
+    let Some(inputs) = deps.inputs.load(&merchant_id).await else {
         return Ok(Json(inactive(merchant_id)));
     };
 
-    // The stored plan belongs to a contract that has since been replaced — activating a new
-    // document leaves the previous plan in the store until the next forecast lands. Reporting it
-    // would show the old contract's verdicts against the new contract's name, which is how a
-    // freshly activated contract appeared to arrive with everything already eliminated.
-    let anchor_matches = inputs
-        .as_ref()
-        .is_some_and(|i| i.contract_anchor_ms == plan.contract_anchor_ms);
-    if !anchor_matches {
-        let mut pending = inactive(merchant_id);
-        pending.active = true; // a contract *is* live; its first plan is simply not built yet
-        return Ok(Json(pending));
-    }
-    let goals: std::collections::HashMap<String, f64> = inputs
-        .as_ref()
-        .map(|i| {
-            i.commitments
-                .iter()
-                .map(|c| (c.connector.clone(), c.goal))
-                .collect()
-        })
-        .unwrap_or_default();
-    let measured = match inputs.as_ref() {
-        Some(i) => {
-            deps.volume
-                .measure(
-                    &merchant_id,
-                    &i.commitments,
-                    volume_commitment::math::PACE_WINDOW_DAYS,
-                )
-                .await
-        }
-        None => Default::default(),
+    // No plan for *this* contract yet (first forecast pending, cycle just rolled, or the stored
+    // plan belongs to a replaced document): the contract is live, nothing is paced.
+    let Some(plan) = current_plan(deps, &inputs).await else {
+        return Ok(Json(pending(merchant_id, &inputs)));
     };
 
-    let mut psps = Vec::with_capacity(plan.psps.len());
-    for entry in &plan.psps {
-        psps.push(PspPacing {
-            goal: goals.get(&entry.connector).copied().unwrap_or(0.0),
-            achieved: measured
-                .achieved
-                .get(&entry.connector)
-                .copied()
-                .unwrap_or(0.0),
+    let goals: HashMap<&str, f64> = inputs
+        .commitments
+        .iter()
+        .map(|c| (c.connector.as_str(), c.goal))
+        .collect();
+    let measured = deps
+        .volume
+        .measure(&merchant_id, &inputs.commitments, math::PACE_WINDOW_DAYS)
+        .await;
+
+    let psps = plan
+        .psps
+        .iter()
+        .map(|entry| PspPacing {
+            goal: goals.get(entry.connector.as_str()).copied().unwrap_or(0.0),
+            achieved: measured.achieved_for(&entry.connector),
             gap: entry.remaining,
-            pace: measured.pace.get(&entry.connector).copied().unwrap_or(0.0),
+            pace: measured.pace_for(&entry.connector).unwrap_or(0.0),
             sr_volume: entry.routing_gives_daily,
             floor_per_day: entry.needed_daily,
             steer_rate: entry.steer_rate,
-            steered_today: measured
-                .steered_today
-                .get(&entry.connector)
-                .copied()
-                .unwrap_or(0.0),
+            steered_today: measured.steered_today_for(&entry.connector),
             reward: entry.reward,
             steering: entry.needs_steering,
             connector: entry.connector.clone(),
-        });
-    }
+        })
+        .collect();
 
     Ok(Json(VolumeCommitmentView {
         merchant_id,
         active: true,
         computed_at_epoch_secs: Some(plan.computed_at_epoch_secs),
         tolerance: Some(plan.tolerance),
-        expected_daily_traffic: inputs.as_ref().map(|i| i.expected_daily_traffic),
-        day_secs: inputs.as_ref().and_then(|i| i.commitments.first().map(|c| c.day_secs)),
-        rule_id: inputs.as_ref().map(|i| i.contract_rule_id.clone()),
+        expected_daily_traffic: Some(inputs.expected_daily_traffic),
+        day_secs: Some(inputs.day_secs()),
+        rule_id: Some(inputs.contract_rule_id.clone()),
         reward_at_stake: plan.psps.iter().map(|p| p.reward).sum(),
         psps,
         eliminated: plan
@@ -222,12 +200,40 @@ pub async fn get_volume_commitment(
             .iter()
             .map(|p| EliminatedPspView {
                 connector: p.connector.clone(),
+                achieved: measured.achieved_for(&p.connector),
                 gap: p.remaining,
                 reward: p.reward,
                 reason: p.reason.clone(),
             })
             .collect(),
     }))
+}
+
+/// The stored plan, only if it was built from the contract now active — a plan left behind by a
+/// replaced document must not lend its verdicts to the new one.
+async fn current_plan(deps: &Deps, inputs: &CommitmentInputs) -> Option<SteeringPlan> {
+    deps.state
+        .load_plan(&inputs.merchant_id)
+        .await
+        .filter(|plan| plan.contract_anchor_ms == inputs.contract_anchor_ms)
+}
+
+/// A live contract with no plan for it yet: active, nothing paced.
+fn pending(merchant_id: String, inputs: &CommitmentInputs) -> VolumeCommitmentView {
+    VolumeCommitmentView {
+        active: true,
+        expected_daily_traffic: Some(inputs.expected_daily_traffic),
+        day_secs: Some(inputs.day_secs()),
+        rule_id: Some(inputs.contract_rule_id.clone()),
+        ..inactive(merchant_id)
+    }
+}
+
+/// Epoch ms as RFC 3339, or empty for an instant chrono cannot represent.
+fn rfc3339(epoch_ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(epoch_ms)
+        .map(|dt| dt.to_rfc3339())
+        .unwrap_or_default()
 }
 
 fn inactive(merchant_id: String) -> VolumeCommitmentView {
@@ -252,61 +258,78 @@ pub struct ConnectorSeries {
     pub connector: String,
     pub goal: f64,
     pub reward: f64,
+    /// How the reward is earned — "0.25% rebate", "lump sum".
+    pub reward_note: String,
     /// First day of the cycle, `YYYY-MM-DD` in the contract's zone.
     pub cycle_start: String,
-    /// When the cycle closes — the next one's start. Lets a client show a countdown and size a
-    /// simulated run to the time actually left rather than to a whole cycle.
+    /// Cycle close (the next cycle's start), for countdowns and sizing a simulated run.
     pub cycle_end: String,
     /// Length of the cycle in days — the x-axis span the promise line runs to.
     pub days_total: u32,
     /// True when the current plan has given this commitment up.
     pub eliminated: bool,
-    pub points: Vec<volume_commitment::volume::DayVolume>,
+    pub points: Vec<DayVolume>,
 }
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SeriesResponse {
     pub merchant_id: String,
+    /// ISO-4217 code the amounts are in, when the contract states one.
+    pub currency: Option<String>,
+    /// How long one contract day lasts, in seconds — the unit `points[].day` counts in.
+    pub day_secs: Option<u64>,
     pub connectors: Vec<ConnectorSeries>,
 }
 
-/// `?run_id=` renders a past execution instead of the one in flight.
+/// `?run_id=` renders a past execution instead of the one in flight; `?per_day=` asks for that
+/// many buckets per contract day (default 1) so a live chart can move within a day.
 #[derive(Debug, Deserialize)]
 pub struct SeriesQuery {
     #[serde(default)]
     pub run_id: Option<String>,
+    #[serde(default)]
+    pub per_day: Option<u32>,
 }
 
-/// The cycle window a run covers, taken from its id.
-///
-/// A run is named for the instant its cycle opened, so the id alone fixes the start; the length
-/// comes from the contract's current cycle, which is exact for a fixed-length cycle and within a
-/// day or two for calendar months of differing length.
-fn shift_to_run(commitments: &mut [volume_commitment::Commitment], run_id: &str) {
-    let Some(start_ms) = run_id
-        .strip_prefix("vcr_")
-        .and_then(|ms| ms.parse::<i64>().ok())
-    else {
-        return;
-    };
-    for commitment in commitments {
-        let length_ms = commitment.period_end_ms - commitment.period_start_ms;
-        commitment.period_start_ms = start_ms;
-        commitment.period_end_ms = start_ms + length_ms;
+/// Every commitment re-aimed at `[start_ms, end_ms)` — a past run, or the baseline before one.
+fn rewindow(commitments: &[Commitment], start_ms: i64, end_ms: i64) -> Vec<Commitment> {
+    commitments
+        .iter()
+        .map(|c| Commitment {
+            period_start_ms: start_ms,
+            period_end_ms: end_ms,
+            ..c.clone()
+        })
+        .collect()
+}
+
+/// The commitments as they stood in the run `run_id` names: the current cycle's length, starting
+/// where that run opened. The live cycle for anything that is not a run id.
+fn commitments_for_run(commitments: &[Commitment], run_id: Option<&str>) -> Vec<Commitment> {
+    match run_id.and_then(math::run_start_ms) {
+        Some(start_ms) => commitments
+            .iter()
+            .map(|c| Commitment {
+                period_start_ms: start_ms,
+                period_end_ms: start_ms.saturating_add(c.period_end_ms - c.period_start_ms),
+                ..c.clone()
+            })
+            .collect(),
+        None => commitments.to_vec(),
     }
 }
 
-/// `GET /merchant-account/:merchant_id/volume-commitment/series` — per-day delivered volume per
-/// PSP over a cycle, plus the promise each line is racing. Defaults to the cycle in flight;
-/// `?run_id=` renders a past one, so a finished run can be read with its own chart rather than
-/// against whatever is live now.
+/// `GET /merchant-account/:merchant_id/volume-commitment/series` — per-bucket delivered volume per
+/// PSP and the promise each races; `?run_id=` renders a past cycle.
 pub async fn get_series(
     Path(merchant_id): Path<String>,
     Query(query): Query<SeriesQuery>,
 ) -> Result<Json<SeriesResponse>, (StatusCode, String)> {
     let empty = || SeriesResponse {
         merchant_id: merchant_id.clone(),
+        currency: None,
+        day_secs: None,
         connectors: Vec::new(),
     };
     let Some(deps) = volume_commitment::deps() else {
@@ -316,22 +339,17 @@ pub async fn get_series(
         return Ok(Json(empty()));
     };
 
-    let eliminated: Vec<String> = deps
-        .state
-        .load_plan(&merchant_id)
+    let eliminated: Vec<String> = current_plan(deps, &inputs)
         .await
         .map(|plan| plan.dropped.iter().map(|d| d.connector.clone()).collect())
         .unwrap_or_default();
 
-    // Re-aim the window at the requested run before measuring; everything downstream then reads
-    // that cycle, not the live one.
-    let mut commitments = inputs.commitments.clone();
-    if let Some(run_id) = &query.run_id {
-        shift_to_run(&mut commitments, run_id);
-    }
-
-    let mut points = deps.volume.daily_series(&merchant_id, &commitments).await;
-    points.sort_by_key(|p| p.day_index);
+    let commitments = commitments_for_run(&inputs.commitments, query.run_id.as_deref());
+    let per_day = query.per_day.unwrap_or(1).clamp(1, MAX_BUCKETS_PER_DAY);
+    let points = deps
+        .volume
+        .daily_series(&merchant_id, &commitments, per_day)
+        .await;
 
     let connectors = commitments
         .iter()
@@ -339,21 +357,14 @@ pub async fn get_series(
             connector: commitment.connector.clone(),
             goal: commitment.goal,
             reward: commitment.reward,
-            cycle_start: chrono::DateTime::from_timestamp_millis(commitment.period_start_ms)
-                .map(|dt| dt.to_rfc3339())
-                .unwrap_or_default(),
-            cycle_end: chrono::DateTime::from_timestamp_millis(commitment.period_end_ms)
-                .map(|dt| dt.to_rfc3339())
-                .unwrap_or_default(),
-            // The cycle's full span in contract days — a whole number by construction, since it
-            // is measured end-to-start rather than from now.
-            days_total: volume_commitment::math::days_left(
-                commitment.period_end_ms,
+            reward_note: commitment.reward_note.clone(),
+            cycle_start: rfc3339(commitment.period_start_ms),
+            cycle_end: rfc3339(commitment.period_end_ms),
+            days_total: math::days_total(
                 commitment.period_start_ms,
+                commitment.period_end_ms,
                 commitment.day_secs,
-            )
-            .round()
-            .max(1.0) as u32,
+            ),
             eliminated: eliminated.contains(&commitment.connector),
             points: points
                 .iter()
@@ -365,6 +376,8 @@ pub async fn get_series(
 
     Ok(Json(SeriesResponse {
         merchant_id,
+        currency: inputs.currency.clone(),
+        day_secs: commitments.first().map(|c| c.day_secs),
         connectors,
     }))
 }
@@ -392,22 +405,21 @@ pub struct AuditResponse {
     /// Every execution of this merchant's contract, newest first.
     pub runs: Vec<RunSummary>,
     /// Newest first. Narrowed to `?run_id=` when one is given.
-    pub events: Vec<volume_commitment::volume::AuditEvent>,
+    pub events: Vec<AuditEvent>,
 }
 
-/// `?run_id=` narrows the audit to one execution of the contract.
+/// `?run_id=` narrows a view to one execution of the contract instead of the one in flight.
 #[derive(Debug, Deserialize)]
-pub struct AuditQuery {
+pub struct RunScopedQuery {
     #[serde(default)]
     pub run_id: Option<String>,
 }
 
-/// `GET /merchant-account/:merchant_id/volume-commitment/audit` — everything the feature did for
-/// this merchant and why, reconstructed from the analytics events: forecasts, steer chunks,
-/// eliminations. Persistent, because the events are.
+/// `GET /merchant-account/:merchant_id/volume-commitment/audit` — forecasts, steers and
+/// eliminations reconstructed from analytics events, grouped by run.
 pub async fn get_audit(
     Path(merchant_id): Path<String>,
-    Query(query): Query<AuditQuery>,
+    Query(query): Query<RunScopedQuery>,
 ) -> Result<Json<AuditResponse>, (StatusCode, String)> {
     let Some(deps) = volume_commitment::deps() else {
         return Ok(Json(AuditResponse {
@@ -417,9 +429,11 @@ pub async fn get_audit(
         }));
     };
 
-    // Read the whole window once, then group: the run list and the filtered events are two views
-    // of the same events, and a merchant has few enough runs in flight to summarise in memory.
-    let all = deps.volume.audit_events(&merchant_id, 500).await;
+    // One read, two views: the run list and the filtered events come from the same window.
+    let all = deps
+        .volume
+        .audit_events(&merchant_id, AUDIT_EVENT_WINDOW)
+        .await;
     let current_run = deps
         .state
         .load_plan(&merchant_id)
@@ -427,18 +441,17 @@ pub async fn get_audit(
         .map(|plan| plan.run_id);
 
     let mut order: Vec<String> = Vec::new();
-    let mut summaries: std::collections::HashMap<String, RunSummary> =
-        std::collections::HashMap::new();
+    let mut summaries: HashMap<String, RunSummary> = HashMap::new();
     for event in &all {
         // Events written before runs were named still deserve a home rather than vanishing.
-        let run_id = event.run_id.clone().unwrap_or_else(|| "earlier".to_string());
+        let run_id = event
+            .run_id
+            .clone()
+            .unwrap_or_else(|| UNNAMED_RUN.to_string());
         let entry = summaries.entry(run_id.clone()).or_insert_with(|| {
             order.push(run_id.clone());
             RunSummary {
-                started_at_epoch_ms: run_id
-                    .strip_prefix("vcr_")
-                    .and_then(|ms| ms.parse().ok())
-                    .unwrap_or(event.at_epoch_ms),
+                started_at_epoch_ms: math::run_start_ms(&run_id).unwrap_or(event.at_epoch_ms),
                 last_activity_epoch_ms: event.at_epoch_ms,
                 is_current: current_run.as_deref() == Some(run_id.as_str()),
                 run_id,
@@ -449,9 +462,9 @@ pub async fn get_audit(
         });
         entry.last_activity_epoch_ms = entry.last_activity_epoch_ms.max(event.at_epoch_ms);
         match event.kind {
-            volume_commitment::volume::AuditKind::Forecast => entry.forecasts += 1,
-            volume_commitment::volume::AuditKind::Steered => entry.steers += 1,
-            volume_commitment::volume::AuditKind::Eliminated => entry.eliminations += 1,
+            AuditKind::Forecast => entry.forecasts += 1,
+            AuditKind::Steered => entry.steers += 1,
+            AuditKind::Eliminated => entry.eliminations += 1,
         }
     }
 
@@ -464,7 +477,7 @@ pub async fn get_audit(
     let events = match &query.run_id {
         Some(wanted) => all
             .into_iter()
-            .filter(|e| e.run_id.as_deref().unwrap_or("earlier") == wanted)
+            .filter(|e| e.run_id.as_deref().unwrap_or(UNNAMED_RUN) == wanted)
             .collect(),
         None => all,
     };
@@ -473,5 +486,205 @@ pub async fn get_audit(
         merchant_id,
         runs,
         events,
+    }))
+}
+
+/// What one PSP received in a window — payments and volume.
+#[derive(Debug, Serialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct ImpactSlice {
+    pub payments: u64,
+    pub volume: f64,
+}
+
+/// One PSP's before-and-after: what it got without the contract, and what it got with it —
+/// split into what routing sent on its own, what was steered in, and what it gave up.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorImpact {
+    pub connector: String,
+    pub goal: f64,
+    pub reward: f64,
+    /// True when the plan for this cycle has given the commitment up.
+    pub eliminated: bool,
+    /// True when the live plan is currently diverting extra payments here.
+    pub steering: bool,
+    /// Everything this PSP received in the previous cycle.
+    pub before: ImpactSlice,
+    /// Everything this PSP received in the cycle (`unaided + steered`).
+    pub with_contract: ImpactSlice,
+    /// The part normal routing sent here by itself.
+    pub unaided: ImpactSlice,
+    /// The part the nudge moved here to meet the commitment.
+    pub steered: ImpactSlice,
+    /// What routing would have sent here but the nudge moved to a PSP behind on its commitment.
+    pub ceded: ImpactSlice,
+}
+
+/// A window of time the impact view compares.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImpactWindow {
+    pub start_ms: i64,
+    pub end_ms: i64,
+}
+
+/// `GET /merchant-account/:merchant_id/volume-commitment/impact`
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImpactResponse {
+    pub merchant_id: String,
+    /// When the active contract document went live.
+    pub contract_since_ms: i64,
+    /// The cycle being reported: the one in flight, or the run `?run_id=` asked for.
+    pub cycle: ImpactWindow,
+    /// Length of that cycle in contract days.
+    pub days_total: u32,
+    /// How long one contract day lasts, in seconds.
+    pub day_secs: u64,
+    /// The cycle immediately before `cycle` — what `before` and `baseline_days` are measured over.
+    pub baseline: ImpactWindow,
+    pub connectors: Vec<ConnectorImpact>,
+    /// Day-by-day delivery per PSP across the previous cycle, `day_index` counted from its start.
+    pub baseline_days: Vec<DayVolume>,
+    /// The same across the cycle, `day_index` counted from the cycle's start.
+    pub cycle_days: Vec<DayVolume>,
+}
+
+/// `GET /merchant-account/:merchant_id/volume-commitment/impact` — each PSP's traffic in the
+/// previous cycle (same length, ending where this one starts) vs this one, split by who sent it.
+pub async fn get_impact(
+    Path(merchant_id): Path<String>,
+    Query(query): Query<RunScopedQuery>,
+) -> Result<Json<ImpactResponse>, (StatusCode, String)> {
+    let not_active = || {
+        (
+            StatusCode::NOT_FOUND,
+            format!("no active volume contract for merchant {merchant_id}"),
+        )
+    };
+    let Some(deps) = volume_commitment::deps() else {
+        return Err(not_active());
+    };
+    let Some(inputs) = deps.inputs.load(&merchant_id).await else {
+        return Err(not_active());
+    };
+
+    let (eliminated, steering): (Vec<String>, Vec<String>) = current_plan(deps, &inputs)
+        .await
+        .map(|plan| {
+            (
+                plan.dropped.iter().map(|d| d.connector.clone()).collect(),
+                plan.needing_steering()
+                    .map(|p| p.connector.clone())
+                    .collect(),
+            )
+        })
+        .unwrap_or_default();
+
+    let commitments = commitments_for_run(&inputs.commitments, query.run_id.as_deref());
+    let Some(first) = commitments.first() else {
+        return Err(not_active());
+    };
+    // PSP contracts share a cycle in practice; the response reports the widest span so every
+    // connector's traffic is inside it.
+    let cycle_start_ms = commitments
+        .iter()
+        .map(|c| c.period_start_ms)
+        .min()
+        .unwrap_or(first.period_start_ms);
+    let cycle_end_ms = commitments
+        .iter()
+        .map(|c| c.period_end_ms)
+        .max()
+        .unwrap_or(first.period_end_ms);
+    let cycle_len_ms = (cycle_end_ms - cycle_start_ms).max(1);
+    let day_secs = first.day_secs;
+    let days_total = math::days_total(cycle_start_ms, cycle_end_ms, day_secs);
+
+    let baseline_end_ms = cycle_start_ms;
+    let baseline_start_ms = baseline_end_ms.saturating_sub(cycle_len_ms);
+
+    let connectors: Vec<String> = commitments.iter().map(|c| c.connector.clone()).collect();
+    let before = deps
+        .volume
+        .window_totals(
+            &merchant_id,
+            &connectors,
+            baseline_start_ms,
+            baseline_end_ms,
+        )
+        .await;
+    let during = deps
+        .volume
+        .window_totals(&merchant_id, &connectors, cycle_start_ms, cycle_end_ms)
+        .await;
+
+    // Day-by-day for both windows: hand the series reader the baseline as if it were a cycle.
+    let baseline_days = deps
+        .volume
+        .daily_series(
+            &merchant_id,
+            &rewindow(&commitments, baseline_start_ms, baseline_end_ms),
+            1,
+        )
+        .await;
+    let cycle_days = deps
+        .volume
+        .daily_series(
+            &merchant_id,
+            &rewindow(&commitments, cycle_start_ms, cycle_end_ms),
+            1,
+        )
+        .await;
+
+    let slice = |payments: u64, volume: f64| ImpactSlice { payments, volume };
+    let connectors = commitments
+        .iter()
+        .map(|commitment| {
+            let b = before.iter().find(|t| t.connector == commitment.connector);
+            let d = during.iter().find(|t| t.connector == commitment.connector);
+            ConnectorImpact {
+                connector: commitment.connector.clone(),
+                goal: commitment.goal,
+                reward: commitment.reward,
+                eliminated: eliminated.contains(&commitment.connector),
+                steering: steering.contains(&commitment.connector),
+                before: b.map(|t| slice(t.payments, t.volume)).unwrap_or_default(),
+                with_contract: d.map(|t| slice(t.payments, t.volume)).unwrap_or_default(),
+                unaided: d
+                    .map(|t| {
+                        slice(
+                            t.payments.saturating_sub(t.steered_payments),
+                            (t.volume - t.steered_volume).max(0.0),
+                        )
+                    })
+                    .unwrap_or_default(),
+                steered: d
+                    .map(|t| slice(t.steered_payments, t.steered_volume))
+                    .unwrap_or_default(),
+                ceded: d
+                    .map(|t| slice(t.ceded_payments, t.ceded_volume))
+                    .unwrap_or_default(),
+            }
+        })
+        .collect();
+
+    Ok(Json(ImpactResponse {
+        merchant_id,
+        contract_since_ms: inputs.contract_anchor_ms,
+        cycle: ImpactWindow {
+            start_ms: cycle_start_ms,
+            end_ms: cycle_end_ms,
+        },
+        days_total,
+        day_secs,
+        baseline: ImpactWindow {
+            start_ms: baseline_start_ms,
+            end_ms: baseline_end_ms,
+        },
+        connectors,
+        baseline_days,
+        cycle_days,
     }))
 }

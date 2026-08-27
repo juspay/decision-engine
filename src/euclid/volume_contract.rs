@@ -730,9 +730,7 @@ pub fn validate_volume_contract_config(
         &mut errors,
     );
 
-    for (field, interval) in [
-        ("forecast_interval_secs", config.forecast_interval_secs),
-    ] {
+    for (field, interval) in [("forecast_interval_secs", config.forecast_interval_secs)] {
         if let Some(secs) = interval {
             if !(MIN_INTERVAL_SECS..=MAX_INTERVAL_SECS).contains(&secs) {
                 errors.push(ValidationErrorDetails::new(
