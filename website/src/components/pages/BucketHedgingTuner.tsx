@@ -33,10 +33,10 @@ function perPgHedge(bucket: number, vHour: number, split: number, pgs: number): 
 }
 
 function refreshTone(min: number): string {
-  if (!Number.isFinite(min)) return 'text-slate-400'
-  if (min <= 60) return 'text-emerald-500'
-  if (min <= 120) return 'text-amber-500'
-  return 'text-red-500'
+  if (!Number.isFinite(min)) return 'text-slate-500'
+  if (min <= 60) return 'text-emerald-700'
+  if (min <= 120) return 'text-amber-700'
+  return 'text-red-600'
 }
 
 type ParseResult = { hours: number[]; note: string } | { error: string }
@@ -352,7 +352,7 @@ export function BucketHedgingTuner() {
         <CardBody>
           <div className="mb-3">
             <h3 className="text-sm font-semibold text-slate-800 dark:text-white">Auto-tuning — Static vs Automatic</h3>
-            {/* <p className="text-[13px] text-slate-400 dark:text-slate-500">
+            {/* <p className="text-[13px] text-slate-500 dark:text-slate-400 max-w-[57ch] leading-[18px]">
               A fixed bucket size and hedging % are sized for one hour and leak on every other. Feed a day of volume to see what deriving them per-hour saves. Illustration only — does not change routing.
             </p> */}
           </div>
@@ -388,7 +388,7 @@ export function BucketHedgingTuner() {
               <input ref={fileRef} type="file" accept=".csv,.txt,text/csv,text/plain" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f) }} />
               <span className="font-medium text-slate-600 dark:text-slate-300">Drop a CSV or click to browse</span>
               <span>A raw PAR export (auto-detected — busiest weekday), or any 24-value layout — row, column, N×24, time-column.</span>
-              {parStatus && <span className="mt-1 font-medium text-amber-600 dark:text-amber-400">{parStatus}</span>}
+              {parStatus && <span className="mt-1 font-medium text-amber-700 dark:text-amber-400">{parStatus}</span>}
             </div>
             <button
               type="button"
@@ -399,12 +399,12 @@ export function BucketHedgingTuner() {
             </button>
           </div>
 
-          <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8d96aa]">
+          <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8d96aa] leading-[18px]">
             {inputError ? (
-              <span className="text-red-500">{inputError}</span>
+              <span className="text-red-600">{inputError}</span>
             ) : (
               <>
-                <span className="text-emerald-600 dark:text-emerald-400">{inputNote}</span>
+                <span className="text-emerald-700 dark:text-emerald-400">{inputNote}</span>
                 {' · '}Total {model.totalDay.toLocaleString()} · avg {model.avgV.toFixed(0)}/hr · peak {model.peak.v.toLocaleString()} @ {model.peak.h}h · active {model.activeCount}/{model.hoursCount}h
               </>
             )}
@@ -418,11 +418,11 @@ export function BucketHedgingTuner() {
           <div className="mb-2 flex flex-wrap items-start justify-between gap-3">
             <div>
               <h4 className="text-sm font-medium text-slate-800 dark:text-white">Daily volume &amp; {ov.label.toLowerCase()}</h4>
-              <p className="text-[13px] text-slate-400 dark:text-slate-500">Bars = traffic. Lines = the static (flat) vs automatic (per-hour) value — watch automatic track the volume.</p>
+              <p className="text-[13px] text-slate-500 dark:text-slate-400 max-w-[57ch] leading-[18px]">Bars = traffic. Lines = the static (flat) vs automatic (per-hour) value — watch automatic track the volume.</p>
             </div>
             <div className="inline-flex rounded-md border border-slate-200 p-0.5 dark:border-[#1f1f29]">
               {(['bucket', 'hedge', 'noise'] as OverlayMetric[]).map((m) => (
-                <button key={m} type="button" onClick={() => setOverlay(m)} className={`px-2.5 py-1 text-[11px] font-medium rounded transition-colors ${overlay === m ? 'bg-brand-500 text-white' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'}`}>
+                <button key={m} type="button" onClick={() => setOverlay(m)} className={`px-2.5 py-1 text-[11px] font-medium rounded transition-colors ${overlay === m ? 'bg-brand-500 text-white' : 'text-slate-500 dark:text-slate-400 hover:text-slate-700 dark:hover:text-slate-200'} leading-4`}>
                   {overlayCfg[m].label}
                 </button>
               ))}
@@ -459,34 +459,34 @@ export function BucketHedgingTuner() {
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="rounded-xl border border-slate-200 bg-white px-4 py-3 dark:border-[#1c1c24] dark:bg-[#0b0b10]">
               <div className="flex items-center justify-between">
-                <span className="text-[13px] font-semibold text-slate-600 dark:text-slate-300">Static</span>
-                <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500 dark:bg-[#1f1f29] dark:text-slate-400">sized for leanest hour</span>
+                <span className="text-[13px] font-semibold text-slate-600 dark:text-slate-300 leading-[18px]">Static</span>
+                <span className="rounded bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-500 dark:bg-[#1f1f29] dark:text-slate-400 leading-4">sized for leanest hour</span>
               </div>
               <div className="mt-2 grid grid-cols-2 gap-y-2 text-sm">
-                <span className="text-slate-400">Bucket B</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">{model.staticB}</span>
-                <span className="text-slate-400">Hedge / PG</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">{(model.staticH * 100).toFixed(1)}% <span className="text-slate-400">(tot {(model.staticH * model.nHedged * 100).toFixed(0)}%)</span></span>
-                <span className="text-slate-400">Hedged / day</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">{Math.round(model.staticHedged).toLocaleString()}</span>
-                <span className="text-slate-400">Vol-wt noise</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">±{model.staticNoise.toFixed(2)}pp</span>
+                <span className="text-slate-500">Bucket B</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">{model.staticB}</span>
+                <span className="text-slate-500">Hedge / PG</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">{(model.staticH * 100).toFixed(1)}% <span className="text-slate-500">(tot {(model.staticH * model.nHedged * 100).toFixed(0)}%)</span></span>
+                <span className="text-slate-500">Hedged / day</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">{Math.round(model.staticHedged).toLocaleString()}</span>
+                <span className="text-slate-500">Vol-wt noise</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">±{model.staticNoise.toFixed(2)}pp</span>
               </div>
             </div>
             <div className="rounded-xl border border-emerald-200 bg-emerald-50/40 px-4 py-3 dark:border-emerald-900 dark:bg-emerald-950/20">
               <div className="flex items-center justify-between">
-                <span className="text-[13px] font-semibold text-emerald-600 dark:text-emerald-300">Automatic</span>
-                <span className="rounded bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200">per-hour sizing</span>
+                <span className="text-[13px] font-semibold text-emerald-700 dark:text-emerald-300 leading-[18px]">Automatic</span>
+                <span className="rounded bg-emerald-100 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-200 leading-4">per-hour sizing</span>
               </div>
               <div className="mt-2 grid grid-cols-2 gap-y-2 text-sm">
-                <span className="text-slate-400">Bucket B</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">{model.autoBMin === model.autoBMax ? model.autoBMin : `${model.autoBMin}–${model.autoBMax}`}</span>
-                <span className="text-slate-400">Hedge / PG</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">{(model.autoHMin * 100).toFixed(1)}–{(model.autoHMax * 100).toFixed(1)}%</span>
-                <span className="text-slate-400">Hedged / day</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">{Math.round(model.autoHedged).toLocaleString()}</span>
-                <span className="text-slate-400">Vol-wt noise</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">±{model.autoNoise.toFixed(2)}pp</span>
+                <span className="text-slate-500">Bucket B</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">{model.autoBMin === model.autoBMax ? model.autoBMin : `${model.autoBMin}–${model.autoBMax}`}</span>
+                <span className="text-slate-500">Hedge / PG</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">{(model.autoHMin * 100).toFixed(1)}–{(model.autoHMax * 100).toFixed(1)}%</span>
+                <span className="text-slate-500">Hedged / day</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">{Math.round(model.autoHedged).toLocaleString()}</span>
+                <span className="text-slate-500">Vol-wt noise</span><span className="text-right font-mono font-semibold text-slate-800 dark:text-slate-100">±{model.autoNoise.toFixed(2)}pp</span>
               </div>
             </div>
           </div>
 
           <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 px-4 py-2.5 text-sm text-slate-700 dark:border-[#1c1c24] dark:bg-[#0b0b10] dark:text-slate-200">
             Automatic trims <strong className="font-mono">{Math.round(model.hedgedSaved).toLocaleString()}</strong> hedged txns/day
-            (≈ <strong className="font-mono text-emerald-600 dark:text-emerald-400">{Math.round(model.recovered).toLocaleString()}</strong> recovered approvals) and cuts volume-weighted noise from
-            <strong className="font-mono"> ±{model.staticNoise.toFixed(2)}pp</strong> → <strong className="font-mono text-emerald-600 dark:text-emerald-400">±{model.autoNoise.toFixed(2)}pp</strong> by enlarging buckets in busy hours.
+            (≈ <strong className="font-mono text-emerald-700 dark:text-emerald-400">{Math.round(model.recovered).toLocaleString()}</strong> recovered approvals) and cuts volume-weighted noise from
+            <strong className="font-mono"> ±{model.staticNoise.toFixed(2)}pp</strong> → <strong className="font-mono text-emerald-700 dark:text-emerald-400">±{model.autoNoise.toFixed(2)}pp</strong> by enlarging buckets in busy hours.
             {' '}Lean-hour refresh is volume-limited, so both stay equal there — the win is the over-hedge trim and busy-hour accuracy.
           </div>
 
@@ -497,7 +497,7 @@ export function BucketHedgingTuner() {
           {showTable && (
             <div className="mt-2 overflow-x-auto">
               <table className="w-full text-right text-xs tabular-nums">
-                <thead className="text-slate-400">
+                <thead className="text-slate-500">
                   <tr className="border-b border-slate-200 dark:border-[#1c1c24]">
                     <th className="py-1 pr-3 text-left font-medium">Hour</th>
                     <th className="py-1 pr-3 font-medium">Volume</th>
@@ -519,7 +519,7 @@ export function BucketHedgingTuner() {
                         <span className={refreshTone(r.static.worstRefresh)}>{r.static.worstRefresh.toFixed(0)}</span>
                         {' → '}
                         <span className={refreshTone(r.auto.worstRefresh)}>{r.auto.worstRefresh.toFixed(0)}</span>
-                        <span className="text-slate-400"> min</span>
+                        <span className="text-slate-500"> min</span>
                       </td>
                     </tr>
                   ))}

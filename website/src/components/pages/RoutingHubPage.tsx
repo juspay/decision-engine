@@ -22,6 +22,7 @@ import { AnalyticsOverviewResponse, RoutingAlgorithm, RuleConfig, SRConfigData }
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 
+import { PageHeading } from '../ui/PageHeading'
 type StrategyId = 'auth-rate' | 'rules' | 'volume' | 'debit' | 'ab-test'
 type StrategyState = 'configured' | 'enabled' | 'autopilot' | 'not_set'
 
@@ -228,7 +229,7 @@ export function RoutingHubPage() {
       />
 
       <header>
-        <h1 className="text-lg font-semibold text-slate-900 dark:text-white">Routing Hub</h1>
+        <PageHeading title="Routing Hub" />
       </header>
 
       {actionError && (
@@ -261,8 +262,8 @@ export function RoutingHubPage() {
                   >
                     <div className={`rounded-xl border p-2.5 flex-shrink-0 ${
                       active
-                        ? 'border-emerald-200/60 bg-emerald-50 text-emerald-600 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400'
-                        : 'border-slate-200 bg-slate-50 text-slate-400 dark:border-[#273141] dark:bg-[#0c1119] dark:text-[#6d778a]'
+                        ? 'border-emerald-200/60 bg-emerald-50 text-emerald-700 dark:border-emerald-500/25 dark:bg-emerald-500/10 dark:text-emerald-400'
+                        : 'border-slate-200 bg-slate-50 text-slate-500 dark:border-[#273141] dark:bg-[#0c1119] dark:text-[#6d778a]'
                     }`}>
                       <Icon size={17} />
                     </div>
@@ -274,10 +275,10 @@ export function RoutingHubPage() {
                           ? <Badge variant="green">{strategyStateLabel(strategy.state)}</Badge>
                           : <Badge variant="gray">Not set</Badge>}
                       </div>
-                      <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#8390a7]">
+                      <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#8d96aa]">
                         {strategy.description}
                       </p>
-                      <p className="mt-0.5 text-xs leading-5 text-slate-400 dark:text-[#5a6a82]">
+                      <p className="mt-0.5 text-xs leading-5 text-slate-500 dark:text-[#78849a]">
                         {strategy.useCase}
                       </p>
                     </div>
@@ -299,7 +300,7 @@ export function RoutingHubPage() {
                         className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 transition-colors hover:bg-slate-50 dark:border-[#2a303a] dark:bg-[#11151d] dark:text-[#c4cfdf] dark:hover:bg-[#161b26]"
                       >
                         Configure
-                        <ChevronRight size={13} className="text-slate-400 dark:text-[#5a6a82]" />
+                        <ChevronRight size={13} className="text-slate-500 dark:text-[#78849a]" />
                       </Link>
                     </div>
                   </div>
@@ -322,7 +323,7 @@ export function RoutingHubPage() {
                   return (
                     <div key={s.id} className="flex items-center justify-between gap-3 py-2.5">
                       <div className="flex items-center gap-2.5 min-w-0">
-                        <Icon size={14} className="flex-shrink-0 text-emerald-500" />
+                        <Icon size={14} className="flex-shrink-0 text-emerald-700" />
                         <span className="truncate text-sm font-medium text-slate-900 dark:text-white">
                           {s.title}
                         </span>
@@ -333,7 +334,7 @@ export function RoutingHubPage() {
                     </div>
                   )
                 }) : (
-                  <p className="py-2 text-sm text-slate-500 dark:text-[#8390a7]">
+                  <p className="py-2 text-sm text-slate-500 dark:text-[#8d96aa]">
                     {loading ? 'Checking…' : 'No active strategies yet'}
                   </p>
                 )}
@@ -348,7 +349,7 @@ export function RoutingHubPage() {
                   {activeNamedAlgorithm.name}
                 </p>
                 {activeNamedAlgorithm.description && (
-                  <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#8390a7]">
+                  <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#8d96aa]">
                     {activeNamedAlgorithm.description}
                   </p>
                 )}
@@ -380,7 +381,7 @@ export function RoutingHubPage() {
                   ))}
                 </div>
               ) : (
-                <p className="mt-2 text-xs text-slate-500 dark:text-[#8390a7]">
+                <p className="mt-2 text-xs text-slate-500 dark:text-[#8d96aa]">
                   No rule hits in the last 24 hours.
                 </p>
               )}
@@ -427,7 +428,7 @@ export function RoutingHubPage() {
 function SRRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-center justify-between gap-3 py-2">
-      <span className="text-xs text-slate-500 dark:text-[#8390a7]">{label}</span>
+      <span className="text-xs text-slate-500 dark:text-[#8d96aa]">{label}</span>
       <span className="text-xs font-semibold tabular-nums text-slate-950 dark:text-white">{value}</span>
     </div>
   )

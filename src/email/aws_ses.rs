@@ -1,3 +1,4 @@
+use aws_config::meta::region::RegionProviderChain;
 use aws_config::BehaviorVersion;
 use aws_sdk_sesv2::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_sesv2::types::{Body, Content, Destination, EmailContent, Message};
@@ -22,14 +23,23 @@ impl AwsSesEmailClient {
     ) -> error_stack::Result<Self, EmailError> {
         let region = aws_sdk_sesv2::config::Region::new(config.region.clone());
 
-        // Credential resolution intentionally uses no proxy — STS is reachable via VPC endpoint.
+        // Credential resolution uses no proxy — STS is reached over the VPC endpoint in the
+        // region the pod itself runs in.
         let aws_config = if let (Some(role_arn), Some(session_name)) =
             (&config.email_role_arn, &config.sts_role_session_name)
         {
             // Load a base config to build the STS client, then assume the target role.
             // The resulting credentials are used for all SES calls (cross-account setup).
+            //
+            // The STS client keeps its own region, resolved from the pod environment
+            // (`AWS_REGION`/profile/IMDS) and falling back to the SES region. AssumeRole is
+            // answered identically by every regional STS endpoint, so binding it to the local
+            // region lets the call resolve through the local STS VPC endpoint while SES stays
+            // pinned to `config.region`.
+            let sts_region = RegionProviderChain::default_provider().or_else(region.clone());
+
             let base_config = aws_config::defaults(BehaviorVersion::latest())
-                .region(region.clone())
+                .region(sts_region)
                 .load()
                 .await;
 

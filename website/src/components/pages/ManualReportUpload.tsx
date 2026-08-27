@@ -19,6 +19,7 @@ import { Field, UPLOAD_CONNECTORS, inputClass } from './CostRoutingShared'
 import { ColumnMappingPanel } from './ColumnMappingPanel'
 import { sampleReportEnabled } from '../../lib/appConfig'
 
+import { Notice } from '../ui/Notice'
 type IngestMode = 'upload' | 'sample'
 
 /**
@@ -200,7 +201,7 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
     <Card>
       <CardHeader>
         <div className="flex items-center gap-2">
-          <Upload size={16} className="text-brand-500" />
+          <Upload size={16} className="text-brand-600" />
           <div>
             <h2 className={type.heading}>Upload a settlement report</h2>
           </div>
@@ -235,7 +236,7 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
             ))}
           </div>
         )}
-        <p className="text-sm text-slate-500 dark:text-[#9ca7ba]">
+        <p className="text-sm text-slate-500 dark:text-[#9ca7ba] max-w-[57ch]">
           {mode === 'upload'
             ? "Upload a settlement report file directly - no webhook needed. Processing runs in the background (the upload won't hang on large files). Watch progress below and in the history."
             : `No report file? Run a curated ${connectorLabel} sample report through the exact same fit, so you can see the ingest → cost-coverage flow end to end. Progress shows below and in the history.`}
@@ -282,10 +283,10 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
             )}
 
             {preflight?.ok && (
-              <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700 dark:border-emerald-900/40 dark:bg-emerald-950/30 dark:text-emerald-400">
+              <Notice tone="success">
                 All {preflight.required.length} required columns found — this file is ready to
                 upload.
-              </p>
+              </Notice>
             )}
 
             {preflight && !preflight.ok && !mappingDismissed && merchantId && account && (
@@ -308,7 +309,7 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
             {/* Dismissed the panel but the file still cannot be parsed: keep the reason visible
                 rather than leaving a disabled button with no explanation. */}
             {preflight && !preflight.ok && mappingDismissed && account && (
-              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-500">
+              <Notice tone="warning">
                 This file is still missing {preflight.missing.length} required{' '}
                 {preflight.missing.length === 1 ? 'column' : 'columns'}, so it can't be uploaded.{' '}
                 <button
@@ -319,17 +320,17 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
                   Map columns
                 </button>{' '}
                 or choose a different file.
-              </p>
+              </Notice>
             )}
 
             {/* Mapping is stored per (connector, account), so there is nothing to save it under
                 until the account is filled in. */}
             {preflight && !preflight.ok && !account && (
-              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-500">
+              <Notice tone="warning">
                 This file is missing {preflight.missing.length} required{' '}
                 {preflight.missing.length === 1 ? 'column' : 'columns'}. Enter the account above to
                 map your columns to {connector}'s.
-              </p>
+              </Notice>
             )}
           </>
         )}
@@ -367,7 +368,7 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
               )}
             </Button>
           )}
-          <span className="text-xs text-slate-400">
+          <span className="text-xs text-slate-500">
             {mode === 'upload'
               ? 'Runs in the background after upload.'
               : 'Fetches the sample and runs in the background.'}
@@ -396,7 +397,7 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
 
         {done && activeJob && (
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 dark:border-emerald-900/40 dark:bg-emerald-950/30">
-            <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+            <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400 max-w-[57ch]">
               Ingested {activeJob.staged_rows.toLocaleString()} rows for {activeJob.connector} /{' '}
               {activeJob.account}
               {activeJob.period_start && activeJob.period_end
@@ -404,7 +405,7 @@ export function ManualReportUpload({ merchantId }: { merchantId?: string }) {
                 : ''}
               .
             </p>
-            <p className="mt-1 text-sm text-emerald-700 dark:text-emerald-400">
+            <p className="mt-1 text-sm text-emerald-700 dark:text-emerald-400 max-w-[57ch]">
               {activeJob.good_clusters} of {activeJob.total_clusters} clusters graded GOOD ·{' '}
               {activeJob.currency_count} currencies · {activeJob.country_count} countries.
               {activeJob.good_clusters === 0 &&

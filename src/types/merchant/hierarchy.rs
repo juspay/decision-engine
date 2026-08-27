@@ -260,6 +260,8 @@ pub struct GrantedScope {
     pub profile_name: Option<String>,
     pub hs_merchant_id: Option<String>,
     pub hs_merchant_name: Option<String>,
+    pub hs_org_id: Option<String>,
+    pub hs_org_name: Option<String>,
 }
 
 /// Upper bound on how many scopes one grant expands to.
@@ -361,6 +363,8 @@ async fn granted_profile(profile_id: &str, under: Under<'_>) -> Option<GrantedSc
         profile_name: ancestry.as_ref().and_then(|h| h.profile_name.clone()),
         hs_merchant_id: ancestry.as_ref().map(|h| h.hs_merchant_id.clone()),
         hs_merchant_name: ancestry.as_ref().and_then(|h| h.hs_merchant_name.clone()),
+        hs_org_id: ancestry.as_ref().map(|h| h.hs_org_id.clone()),
+        hs_org_name: ancestry.as_ref().and_then(|h| h.hs_org_name.clone()),
     })
 }
 

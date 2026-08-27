@@ -40,7 +40,7 @@ const controlClass =
 
 const searchClass =
   'w-full rounded-md border border-slate-200 bg-white px-2 py-1 text-[12px] text-slate-900 ' +
-  'placeholder:text-slate-400 focus:border-brand-500 focus:outline-none ' +
+  'placeholder:text-slate-500 focus:border-brand-500 focus:outline-none ' +
   'dark:border-[#232833] dark:bg-[#0b1017] dark:text-white dark:placeholder:text-[#5c6577]'
 
 /**
@@ -113,7 +113,7 @@ function MultiSelect({
         aria-expanded={open}
         onClick={() => setOpen((o) => !o)}
       >
-        <span className={`truncate ${selected.length ? 'font-medium' : 'text-slate-400 dark:text-[#5c6577]'}`}>
+        <span className={`truncate ${selected.length ? 'font-medium' : 'text-slate-500 dark:text-[#78849a]'}`}>
           {summary}
         </span>
         <ChevronDown size={13} className="shrink-0 opacity-60" />
@@ -131,7 +131,7 @@ function MultiSelect({
           {selected.length > 0 && (
             <button
               type="button"
-              className="mt-1 w-full rounded px-1 py-0.5 text-left text-[11px] text-brand-600 hover:underline dark:text-brand-400"
+              className="mt-1 w-full rounded px-1 py-0.5 text-left text-[11px] text-brand-600 hover:underline dark:text-brand-400 leading-4"
               onClick={() => onChange([])}
             >
               Clear {selected.length} selected
@@ -139,13 +139,13 @@ function MultiSelect({
           )}
           <div className="mt-1 max-h-56 overflow-y-auto">
             {visible.length === 0 && (
-              <p className="px-1 py-2 text-[12px] text-slate-500">No matching values.</p>
+              <p className="px-1 py-2 text-[12px] text-slate-500 leading-4">No matching values.</p>
             )}
             {visible.map((o) => (
               <button
                 key={o.value}
                 type="button"
-                className="flex w-full items-center gap-2 rounded px-1 py-1 text-left text-[12px] text-slate-700 hover:bg-slate-100 dark:text-[#c7cede] dark:hover:bg-[#141a24]"
+                className="flex w-full items-center gap-2 rounded px-1 py-1 text-left text-[12px] text-slate-700 hover:bg-slate-100 dark:text-[#c7cede] dark:hover:bg-[#141a24] leading-4"
                 onClick={() => toggle(o.value)}
               >
                 <span
@@ -161,7 +161,7 @@ function MultiSelect({
                   {o.value}
                 </span>
                 {o.txns > 0 && (
-                  <span className="shrink-0 text-[10px] text-slate-400">
+                  <span className="shrink-0 text-[11px] text-slate-500 leading-4">
                     {o.txns.toLocaleString()}
                   </span>
                 )}

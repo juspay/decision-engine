@@ -10,11 +10,14 @@ use crate::{
         pm_filter_graph,
         types::{
             ActivateRoutingConfigRequest, AlgorithmType, Context, DeactivateRoutingConfigRequest,
-            JsonifiedRoutingAlgorithm, KeyDataType, RoutingAlgorithmMapperNew,
-            RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest, RoutingRule,
-            SrDimensionConfig, StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
+            JsonifiedRoutingAlgorithm, KeyDataType, RoutingAlgorithmMapperNew, RoutingBatchRequest,
+            RoutingBatchResponse, RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest,
+            RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
         },
-        utils::{generate_random_id, is_valid_enum_value, validate_routing_rule},
+        utils::{
+            generate_random_id, is_valid_enum_value, normalize_rule_value_types,
+            validate_routing_rule,
+        },
     },
     types::service_configuration::{find_config_by_name, insert_config, update_config},
 };
@@ -24,9 +27,11 @@ use crate::euclid::{
     errors::ValidationErrorDetails,
     types::{RoutingAlgorithmMapper, RoutingAlgorithmMapperUpdate},
 };
+use crate::generics::MeshError;
 use crate::{euclid::types::RoutingAlgorithm, logger, metrics};
+use async_bb8_diesel::AsyncRunQueryDsl;
 use axum::{extract::Path, response::IntoResponse, Json};
-use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods};
+use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods, QueryDsl};
 use error_stack::ResultExt;
 
 use crate::app::get_tenant_app_state;
@@ -40,11 +45,48 @@ use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOT
 // every /routing/evaluate call. Written on activate, deleted on deactivate,
 // read-with-fallback on evaluate.
 //
-// Key  : DE_routing_algo_eval:{merchant_id}
+// Key  : DE_routing_algo_eval:{merchant_id}:{algorithm_for} — one entry per transaction
+//        type. The legacy type-blind key (no suffix) still serves callers that omit
+//        `algorithm_for` and is dropped on activate/deactivate (type-ambiguous content).
 // Value: JSON { id, algorithm_data }
 // TTL  : cache_config.service_config_ttl (default 300s)
 
 const ROUTING_ALGO_CACHE_PREFIX: &str = "DE_routing_algo_eval:";
+
+/// Kept in sync with AlgorithmType (enforced by the test below).
+const ALGORITHM_FOR_VALUES: [&str; 4] = [
+    "payment",
+    "payout",
+    "three_ds_authentication",
+    "volume_commitment",
+];
+
+#[cfg(test)]
+mod cache_key_tests {
+    use super::ALGORITHM_FOR_VALUES;
+    use crate::euclid::types::AlgorithmType;
+
+    #[test]
+    fn algorithm_for_values_cover_algorithm_type() {
+        // Exhaustive match forces revisiting this test when a variant is added.
+        let all = [
+            AlgorithmType::Payment,
+            AlgorithmType::Payout,
+            AlgorithmType::ThreeDsAuthentication,
+            AlgorithmType::VolumeCommitment,
+        ];
+        for variant in &all {
+            match variant {
+                AlgorithmType::Payment
+                | AlgorithmType::Payout
+                | AlgorithmType::ThreeDsAuthentication
+                | AlgorithmType::VolumeCommitment => {}
+            }
+            assert!(ALGORITHM_FOR_VALUES.contains(&variant.to_string().as_str()));
+        }
+        assert_eq!(ALGORITHM_FOR_VALUES.len(), all.len());
+    }
+}
 
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct CachedRoutingAlgorithm {
@@ -52,8 +94,26 @@ struct CachedRoutingAlgorithm {
     algorithm_data: String,
 }
 
-fn routing_algo_cache_key(merchant_id: &str) -> String {
-    format!("{}{}", ROUTING_ALGO_CACHE_PREFIX, merchant_id)
+fn routing_algo_cache_key(merchant_id: &str, algorithm_for: Option<&str>) -> String {
+    match algorithm_for {
+        Some(algorithm_for) => format!("{ROUTING_ALGO_CACHE_PREFIX}{merchant_id}:{algorithm_for}"),
+        None => format!("{ROUTING_ALGO_CACHE_PREFIX}{merchant_id}"),
+    }
+}
+
+async fn cache_routing_algorithm_under_key(
+    state: &crate::app::TenantAppState,
+    key: String,
+    algorithm: &RoutingAlgorithm,
+) {
+    let value = CachedRoutingAlgorithm {
+        id: algorithm.id.clone(),
+        algorithm_data: algorithm.algorithm_data.clone(),
+    };
+    let ttl = state.config.cache_config.service_config_ttl;
+    if let Err(e) = state.redis_conn.set_key_with_ttl(&key, value, ttl).await {
+        logger::warn!(error = ?e, cache_key = %key, "Failed to cache routing algorithm in Redis — falling back to DB on next evaluate");
+    }
 }
 
 async fn cache_routing_algorithm(
@@ -61,27 +121,28 @@ async fn cache_routing_algorithm(
     merchant_id: &str,
     algorithm: &RoutingAlgorithm,
 ) {
-    // Only the merchant's *payment* algorithm may occupy this key: /routing/evaluate is a
-    // payment-flow read that parses whatever is cached here as its active algorithm. Activating
-    // a payout/3DS/volume-commitment entry must not overwrite it.
-    if algorithm.algorithm_for != AlgorithmType::Payment.to_string() {
-        return;
-    }
-    let key = routing_algo_cache_key(merchant_id);
-    let value = CachedRoutingAlgorithm {
-        id: algorithm.id.clone(),
-        algorithm_data: algorithm.algorithm_data.clone(),
-    };
-    let ttl = state.config.cache_config.service_config_ttl;
-    if let Err(e) = state.redis_conn.set_key_with_ttl(&key, value, ttl).await {
-        logger::warn!(error = ?e, merchant_id = %merchant_id, "Failed to cache routing algorithm in Redis — falling back to DB on next evaluate");
+    cache_routing_algorithm_under_key(
+        state,
+        routing_algo_cache_key(merchant_id, Some(algorithm.algorithm_for.as_str())),
+        algorithm,
+    )
+    .await;
+    // Drop the type-ambiguous legacy key so legacy evaluates never serve a stale entry.
+    let legacy_key = routing_algo_cache_key(merchant_id, None);
+    if let Err(e) = state.redis_conn.delete_key(&legacy_key).await {
+        logger::warn!(error = ?e, merchant_id = %merchant_id, "Failed to drop legacy routing algorithm cache key");
     }
 }
 
 async fn invalidate_routing_algorithm_cache(state: &crate::app::TenantAppState, merchant_id: &str) {
-    let key = routing_algo_cache_key(merchant_id);
-    if let Err(e) = state.redis_conn.delete_key(&key).await {
-        logger::warn!(error = ?e, merchant_id = %merchant_id, "Failed to invalidate routing algorithm cache");
+    let keys = ALGORITHM_FOR_VALUES
+        .iter()
+        .map(|algorithm_for| routing_algo_cache_key(merchant_id, Some(algorithm_for)))
+        .chain(std::iter::once(routing_algo_cache_key(merchant_id, None)));
+    for key in keys {
+        if let Err(e) = state.redis_conn.delete_key(&key).await {
+            logger::warn!(error = ?e, merchant_id = %merchant_id, cache_key = %key, "Failed to invalidate routing algorithm cache");
+        }
     }
 }
 use serde::Serialize;
@@ -356,6 +417,10 @@ pub async fn routing_create(
 
     logger::debug!("Received routing config: {:?}", config);
 
+    if let Some(routing_config) = state.config.routing_config.as_ref() {
+        normalize_rule_value_types(&mut config.algorithm, routing_config);
+    }
+
     match validate_routing_rule(&config, &state.config.routing_config) {
         Ok(validation_result) => {
             if !validation_result.is_valid {
@@ -461,35 +526,56 @@ pub async fn routing_create(
     Ok(Json(response))
 }
 
-// Fetches the active routing algorithm from DB (2 queries) and back-fills Redis cache.
-// Extracted to keep `routing_evaluate` readable and to reuse on cache miss / parse error.
+// Fetches the active routing algorithm from DB and back-fills the Redis cache. With
+// `algorithm_for` the mapper lookup is type-scoped; without it the legacy lookup applies.
 async fn fetch_algorithm_from_db_and_cache(
     state: &crate::app::TenantAppState,
     merchant_id: &str,
+    algorithm_for: Option<&str>,
 ) -> Result<RoutingAlgorithm, ContainerError<EuclidErrors>> {
     #[cfg(feature = "mysql")]
     use crate::storage::schema::routing_algorithm_mapper::dsl as db_mapper_dsl;
     #[cfg(feature = "postgres")]
     use crate::storage::schema_pg::routing_algorithm_mapper::dsl as db_mapper_dsl;
 
-    let active_routing_algorithm_id = crate::generics::generic_find_one::<
+    // The merchant can hold one mapper row per algorithm_for slot (payment, payout, 3DS,
+    // volume_commitment). Callers that omit `algorithm_for` are on the legacy payment flow and
+    // must only ever see the payment row.
+    let mapper_algorithm_for = algorithm_for
+        .map(str::to_string)
+        .unwrap_or_else(|| AlgorithmType::Payment.to_string());
+    let mapper_result = crate::generics::generic_find_one::<
         <RoutingAlgorithmMapper as HasTable>::Table,
         _,
         RoutingAlgorithmMapper,
     >(
         &state.db,
-        // The merchant can hold one mapper row per algorithm_for slot (payment, payout, 3DS,
-        // volume_commitment); evaluate is a payment flow and must only ever see the payment row.
         db_mapper_dsl::created_by
             .eq(merchant_id.to_string())
-            .and(db_mapper_dsl::algorithm_for.eq(AlgorithmType::Payment.to_string())),
+            .and(db_mapper_dsl::algorithm_for.eq(mapper_algorithm_for)),
     )
-    .await
-    .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
-        merchant_id.to_string(),
-    ))
-    .map_err(ContainerError::from)?
-    .routing_algorithm_id;
+    .await;
+
+    // Only a missing mapper row means no rule is active. Any other storage error is the engine
+    // failing to answer, and reporting it as ActiveRoutingAlgorithmNotFound would let the
+    // deactivated-rules path in `routing_evaluate` serve a 200 fallback while the database is
+    // unreachable -- exactly the "engine unavailable" case a caller must be able to tell apart.
+    let active_routing_algorithm_id = match mapper_result {
+        Ok(mapper) => mapper.routing_algorithm_id,
+        Err(MeshError::NotFound) => {
+            return Err(
+                EuclidErrors::ActiveRoutingAlgorithmNotFound(merchant_id.to_string()).into(),
+            )
+        }
+        Err(error) => {
+            logger::error!(
+                ?error,
+                merchant_id = %merchant_id,
+                "Failed to look up the active routing algorithm mapper"
+            );
+            return Err(EuclidErrors::StorageError.into());
+        }
+    };
 
     let algorithm = crate::generics::generic_find_one::<
         <RoutingAlgorithm as HasTable>::Table,
@@ -507,9 +593,402 @@ async fn fetch_algorithm_from_db_and_cache(
     .change_context(EuclidErrors::StorageError)
     .map_err(ContainerError::from)?;
 
-    // Back-fill cache so subsequent requests hit Redis
-    cache_routing_algorithm(state, merchant_id, &algorithm).await;
+    // Back-fill only the key shape this caller reads; never evict the legacy key here.
+    cache_routing_algorithm_under_key(
+        state,
+        routing_algo_cache_key(merchant_id, algorithm_for),
+        &algorithm,
+    )
+    .await;
     Ok(algorithm)
+}
+
+/// Response for a profile whose rules are all deactivated: the fallback the caller supplied,
+/// echoed back under a status that says the engine answered and has no rule to apply. The
+/// caller can then route by its fallback instead of guessing from a failed evaluation.
+async fn no_active_algorithm_response(
+    state: &crate::app::TenantAppState,
+    payload: &RoutingRequest,
+    request_id: Option<String>,
+    global_request_id: Option<String>,
+    trace_id: Option<String>,
+) -> RoutingEvaluateResponse {
+    let fallback = payload.fallback_output.clone().unwrap_or_default();
+    let output = Output::Priority(fallback.clone());
+
+    // The evaluated path narrows both fields by the pm-filter graph, so this one does too:
+    // `evaluated_output` and `eligible_connectors` mean the same thing whichever path answered,
+    // and a caller reading them never has to know which it was.
+    let pm_filter_bundle = if pm_filter_graph::has_payment_method_type(&payload.parameters) {
+        state.get_pm_filter_graph_bundle().await
+    } else {
+        None
+    };
+    let eligible_connectors = eligibility_for_output(
+        pm_filter_bundle.as_deref(),
+        &payload.parameters,
+        &extract_connectors_for_eligibility(&output),
+    );
+    let evaluated_output = narrow_evaluated_output_to_eligible(fallback, &eligible_connectors);
+
+    let response = RoutingEvaluateResponse {
+        payment_id: payload.payment_id.clone(),
+        status: "no_active_algorithm".to_string(),
+        output: format_output(&output),
+        evaluated_output,
+        eligible_connectors,
+    };
+
+    crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
+        crate::analytics::AnalyticsFlowContext::new(
+            crate::analytics::ApiFlow::RuleBasedRouting,
+            crate::analytics::FlowType::RoutingEvaluatePreview,
+        ),
+        Some(payload.created_by.clone()),
+        payload.payment_id.clone(),
+        preview_gateway(&response),
+        None,
+        Some(response.status.clone()),
+        serialize_routing_evaluate_analytics_details(payload, &response, None),
+        request_id,
+        global_request_id,
+        trace_id,
+    );
+
+    response
+}
+
+/// Whether the profile has any routing rule at all, scoped the same way the active-mapper
+/// lookup is. Separates a profile that deactivated its rules from one the engine has never
+/// been given any -- the two are indistinguishable from the mapper miss alone, but callers
+/// must treat them oppositely: the first is an authoritative "no rule", the second means the
+/// engine simply has nothing to say about this profile.
+async fn profile_has_any_routing_rule(
+    state: &crate::app::TenantAppState,
+    created_by: &str,
+    algorithm_for: Option<&str>,
+) -> bool {
+    let conn = match state.db.get_conn().await {
+        Ok(conn) => conn,
+        Err(error) => {
+            logger::error!(
+                ?error,
+                created_by = %created_by,
+                "routing_evaluate: no connection to check for existing routing rules"
+            );
+            return false;
+        }
+    };
+
+    // A deactivated profile has no cache entry and no active mapper row, so this runs on every
+    // evaluate it makes. Selecting one id keeps it off the row itself, whose `algorithm_data`
+    // holds the whole rule program.
+    let existing: Result<Vec<String>, _> = match algorithm_for {
+        Some(algorithm_for) => {
+            dsl::routing_algorithm
+                .filter(
+                    dsl::created_by
+                        .eq(created_by.to_string())
+                        .and(dsl::algorithm_for.eq(algorithm_for.to_string())),
+                )
+                .select(dsl::id)
+                .limit(1)
+                .get_results_async(&*conn)
+                .await
+        }
+        None => {
+            dsl::routing_algorithm
+                .filter(dsl::created_by.eq(created_by.to_string()))
+                .select(dsl::id)
+                .limit(1)
+                .get_results_async(&*conn)
+                .await
+        }
+    };
+
+    match existing {
+        Ok(found) => !found.is_empty(),
+        Err(error) => {
+            // Reported as "no rules", which routes the caller down the error path it already
+            // took before this check existed.
+            logger::error!(
+                ?error,
+                created_by = %created_by,
+                "routing_evaluate: failed to check for existing routing rules"
+            );
+            false
+        }
+    }
+}
+
+/// Resolves the active routing algorithm for a merchant: Redis cache first, DB with
+/// cache back-fill on a miss. Extracted so the batch endpoint can resolve once and
+/// evaluate many parameter sets against the same algorithm.
+async fn resolve_active_algorithm(
+    state: &crate::app::TenantAppState,
+    created_by: &str,
+    algorithm_for: Option<&str>,
+) -> Result<RoutingAlgorithm, ContainerError<EuclidErrors>> {
+    let cache_key = routing_algo_cache_key(created_by, algorithm_for);
+
+    match state
+        .redis_conn
+        .get_key::<CachedRoutingAlgorithm>(&cache_key, "CachedRoutingAlgorithm")
+        .await
+    {
+        Ok(cached) => {
+            logger::debug!(
+                merchant_id = %created_by,
+                algorithm_id = %cached.id,
+                "routing_evaluate: cache hit"
+            );
+            Ok(RoutingAlgorithm {
+                id: cached.id,
+                created_by: created_by.to_string(),
+                name: String::new(),
+                description: String::new(),
+                metadata: None,
+                algorithm_data: cached.algorithm_data,
+                algorithm_for: String::new(),
+                created_at: time::PrimitiveDateTime::MIN,
+                modified_at: time::PrimitiveDateTime::MIN,
+            })
+        }
+        Err(_) => {
+            // Cache miss or stale entry — fetch from DB and back-fill
+            fetch_algorithm_from_db_and_cache(state, created_by, algorithm_for).await
+        }
+    }
+}
+
+/// Validates evaluation parameters against the global routing key config. Shared by the
+/// single and batch evaluate handlers; behaviour is identical to the original inline
+/// validation in `routing_evaluate`.
+fn validate_evaluation_parameters(
+    routing_config: &crate::euclid::types::TomlConfig,
+    parameters: &std::collections::HashMap<String, Option<ValueType>>,
+) -> Result<(), ContainerError<EuclidErrors>> {
+    for (key, value) in parameters {
+        if !routing_config.keys.keys.contains_key(key)
+            && value.as_ref().is_some_and(|val| !val.is_metadata())
+        {
+            return Err(EuclidErrors::InvalidRequestParameter(key.clone()).into());
+        }
+
+        if let Some(key_config) = routing_config.keys.keys.get(key) {
+            if key_config.data_type == KeyDataType::Enum {
+                if let Some(Some(ValueType::EnumVariant(value))) = parameters.get(key) {
+                    if !is_valid_enum_value(routing_config, key, value) {
+                        return Err(EuclidErrors::InvalidRequest(format!(
+                            "Invalid enum value '{}' for key '{}'",
+                            value, key
+                        ))
+                        .into());
+                    }
+                } else {
+                    return Err(EuclidErrors::InvalidRequest(format!(
+                        "Expected enum value for key '{}'",
+                        key
+                    ))
+                    .into());
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Everything the caller needs after one evaluation: the response body plus the
+/// metadata the analytics events are built from.
+struct EvaluationOutcome {
+    response: RoutingEvaluateResponse,
+    rule_name: Option<String>,
+    flow_type: crate::analytics::FlowType,
+    ab_experiment_id: Option<String>,
+    ab_variant_arm: Option<String>,
+}
+
+/// Evaluates one parsed algorithm against one request's parameters and assembles the
+/// response, including eligibility narrowing. Extracted verbatim from
+/// `routing_evaluate`; errors carry the original analytics stage label.
+async fn evaluate_algorithm_data(
+    state: &crate::app::TenantAppState,
+    algorithm: &RoutingAlgorithm,
+    algorithm_data: &StaticRoutingAlgorithm,
+    payload: &RoutingRequest,
+) -> Result<EvaluationOutcome, (ContainerError<EuclidErrors>, &'static str)> {
+    let default_output_present = payload
+        .fallback_output
+        .as_ref()
+        .is_some_and(|output| !output.is_empty());
+    let parameters = &payload.parameters;
+
+    let mut preview_flow_type = crate::analytics::refine_routing_evaluate_flow_type(algorithm_data);
+
+    // Populated by the AbTest arm to tag analytics events with experiment context.
+    let mut ab_experiment_id: Option<String> = None;
+    let mut ab_variant_arm: Option<String> = None;
+
+    let (output, evaluated_output, rule_name): (Output, Vec<ConnectorInfo>, Option<String>) =
+        match algorithm_data {
+            StaticRoutingAlgorithm::Single(conn) => {
+                let out_enum = Output::Single((**conn).clone());
+                let eval = evaluate_output(&out_enum).map_err(|_| {
+                    (
+                        EuclidErrors::FailedToEvaluateOutput(format!(
+                            "{}",
+                            StaticRoutingAlgorithm::Single(conn.clone())
+                        ))
+                        .into(),
+                        "preview_output_evaluation_failed",
+                    )
+                })?;
+                (out_enum, eval, Some("straight_through_rule".into()))
+            }
+
+            StaticRoutingAlgorithm::Priority(connectors) => {
+                let out_enum = Output::Priority(connectors.clone());
+                let eval = evaluate_output(&out_enum).map_err(|_| {
+                    (
+                        EuclidErrors::FailedToEvaluateOutput(format!(
+                            "{}",
+                            StaticRoutingAlgorithm::Priority(connectors.clone())
+                        ))
+                        .into(),
+                        "preview_output_evaluation_failed",
+                    )
+                })?;
+                (out_enum, eval, Some("priority_rule".into()))
+            }
+
+            StaticRoutingAlgorithm::VolumeSplit(splits) => {
+                let out_enum = Output::VolumeSplit(splits.clone());
+                let eval = evaluate_output(&out_enum).map_err(|_| {
+                    (
+                        EuclidErrors::FailedToEvaluateOutput(format!(
+                            "{}",
+                            StaticRoutingAlgorithm::VolumeSplit(splits.clone())
+                        ))
+                        .into(),
+                        "preview_output_evaluation_failed",
+                    )
+                })?;
+                (out_enum, eval, Some("volume_split_rule".into()))
+            }
+
+            StaticRoutingAlgorithm::Advanced(program) => {
+                let ctx = Context::new(payload.parameters.clone());
+                logger::debug!("routing_evaluation: context keys = {:?}", parameters.keys());
+
+                let mut ir = InterpreterBackend::eval_program(program, &ctx).map_err(|e| {
+                    (
+                        EuclidErrors::InvalidRequest(format!(
+                            "Interpreter error: {:?}",
+                            e.error_type
+                        ))
+                        .into(),
+                        "preview_interpreter_failed",
+                    )
+                })?;
+
+                // Check if fallback is enabled
+                if default_output_present && ir.output == program.default_selection {
+                    logger::debug!(
+                        "Default fallback triggered: Overriding with fallback connector"
+                    );
+
+                    // Replace output with fallback connector from request
+                    if let Some(fallback_connector) = payload.fallback_output.clone() {
+                        ir.rule_name = Some("default_fallback".to_string());
+                        ir.output = Output::Priority(fallback_connector.clone());
+                        ir.evaluated_output = fallback_connector;
+                    }
+                }
+                (ir.output, ir.evaluated_output, ir.rule_name)
+            }
+
+            // Only reachable when a caller explicitly evaluates the `volume_commitment` slot (the
+            // legacy lookup is payment-scoped); kept as a guard so a mis-slotted document degrades
+            // to a clean 400 instead of a parse panic.
+            StaticRoutingAlgorithm::VolumeContract(_) => {
+                return Err((
+                    EuclidErrors::InvalidRequest(
+                        "the resolved algorithm is a volume-commitment configuration; it cannot be evaluated for routing".to_string(),
+                    )
+                    .into(),
+                    "volume_contract_not_evaluable",
+                ))
+            }
+
+            StaticRoutingAlgorithm::AbTest(ab_data) => {
+                let payment_id = payload.payment_id.as_deref().unwrap_or("");
+                let arm = crate::decider::gatewaydecider::ab_test::assign_arm(
+                    payment_id,
+                    ab_data.variant_split_pct,
+                );
+                let arm_algorithm_id = if arm == "variant" {
+                    ab_data.variant_algorithm_id.as_str()
+                } else {
+                    ab_data.control_algorithm_id.as_str()
+                };
+                logger::debug!(
+                    "A/B test routing evaluate: payment_id={:?} arm={} algorithm={}",
+                    payload.payment_id,
+                    arm,
+                    arm_algorithm_id
+                );
+                ab_experiment_id = Some(algorithm.id.clone());
+                ab_variant_arm = Some(arm.to_string());
+
+                let result = crate::decider::gatewaydecider::ab_test::preview::evaluate_arm(
+                    arm,
+                    arm_algorithm_id,
+                    payload,
+                    default_output_present,
+                    &state.db,
+                )
+                .await;
+                let r = result.map_err(|e| (e, "ab_test_evaluation_failed"))?;
+                preview_flow_type = r.flow_type;
+                (r.output, r.evaluated_output, r.rule_name)
+            }
+        };
+
+    let pm_filter_bundle = if pm_filter_graph::has_payment_method_type(parameters) {
+        state.get_pm_filter_graph_bundle().await
+    } else {
+        None
+    };
+
+    let connectors_for_eligibility = extract_connectors_for_eligibility(&output);
+    let eligible_connectors = eligibility_for_output(
+        pm_filter_bundle.as_deref(),
+        parameters,
+        &connectors_for_eligibility,
+    );
+
+    let evaluated_output =
+        narrow_evaluated_output_to_eligible(evaluated_output, &eligible_connectors);
+
+    let response = RoutingEvaluateResponse {
+        payment_id: payload.payment_id.clone(),
+        status: match rule_name.as_deref() {
+            Some("default_selection") | Some("default_fallback") => "default_selection".into(),
+            Some(_) => "success".into(),
+            None => "default_selection".into(),
+        },
+        output: format_output(&output),
+        evaluated_output,
+        eligible_connectors,
+    };
+
+    Ok(EvaluationOutcome {
+        response,
+        rule_name,
+        flow_type: preview_flow_type,
+        ab_experiment_id,
+        ab_variant_arm,
+    })
 }
 
 pub async fn routing_evaluate(
@@ -573,15 +1052,6 @@ pub async fn routing_evaluate(
         Err(err)
     };
 
-    // Check for the fallback_output in evaluate request:
-    let default_output_present = payload
-        .fallback_output
-        .as_ref()
-        .is_some_and(|output| !output.is_empty());
-
-    // ── Parameter validation ────────────────────────────────────────────────
-    let parameters = payload.parameters.clone();
-
     let routing_config = match state
         .config
         .routing_config
@@ -592,79 +1062,44 @@ pub async fn routing_evaluate(
         Err(e) => return fail_preview(e.into(), "routing_config_unavailable"),
     };
 
-    for (key, value) in &parameters {
-        if !routing_config.keys.keys.contains_key(key)
-            && value.as_ref().is_some_and(|val| !val.is_metadata())
-        {
-            return fail_preview(
-                EuclidErrors::InvalidRequestParameter(key.clone()).into(),
-                "parameter_validation_failed",
-            );
-        }
-
-        if let Some(key_config) = routing_config.keys.keys.get(key) {
-            if key_config.data_type == KeyDataType::Enum {
-                if let Some(Some(ValueType::EnumVariant(value))) = parameters.get(key) {
-                    if !is_valid_enum_value(routing_config, key, value) {
-                        return fail_preview(
-                            EuclidErrors::InvalidRequest(format!(
-                                "Invalid enum value '{}' for key '{}'",
-                                value, key
-                            ))
-                            .into(),
-                            "parameter_validation_failed",
-                        );
-                    }
-                } else {
-                    return fail_preview(
-                        EuclidErrors::InvalidRequest(format!(
-                            "Expected enum value for key '{}'",
-                            key
-                        ))
-                        .into(),
-                        "parameter_validation_failed",
-                    );
-                }
-            }
-        }
+    if let Err(e) = validate_evaluation_parameters(routing_config, &payload.parameters) {
+        return fail_preview(e, "parameter_validation_failed");
     }
 
     // ── Fetch active routing algorithm (Redis cache → DB fallback) ──────────
-    //
-    // Cache hit  : skip both DB queries entirely.
-    // Cache miss : run the original 2-query DB path and back-fill the cache.
-    let cache_key = routing_algo_cache_key(&payload.created_by);
-
-    let algorithm: RoutingAlgorithm = match state
-        .redis_conn
-        .get_key::<CachedRoutingAlgorithm>(&cache_key, "CachedRoutingAlgorithm")
-        .await
+    let algorithm_for = payload.algorithm_for.as_deref();
+    let algorithm = match resolve_active_algorithm(&state, &payload.created_by, algorithm_for).await
     {
-        Ok(cached) => {
-            logger::debug!(
-                merchant_id = %payload.created_by,
-                algorithm_id = %cached.id,
-                "routing_evaluate: cache hit"
-            );
-            RoutingAlgorithm {
-                id: cached.id,
-                created_by: payload.created_by.clone(),
-                name: String::new(),
-                description: String::new(),
-                metadata: None,
-                algorithm_data: cached.algorithm_data,
-                algorithm_for: String::new(),
-                created_at: time::PrimitiveDateTime::MIN,
-                modified_at: time::PrimitiveDateTime::MIN,
+        Ok(algo) => algo,
+        // A profile that has rules but none active has deliberately deactivated them,
+        // and that is an answer rather than a failure: the caller should route by its
+        // fallback. A profile with no rules at all stays an error, so a caller can still
+        // tell that the engine has nothing for it.
+        Err(e)
+            if matches!(
+                e.get_inner(),
+                EuclidErrors::ActiveRoutingAlgorithmNotFound(_)
+            ) && profile_has_any_routing_rule(&state, &payload.created_by, algorithm_for)
+                .await =>
+        {
+            API_REQUEST_COUNTER
+                .with_label_values(&["routing_evaluate", "success"])
+                .inc();
+            if let Some(timer) = timer.take() {
+                timer.observe_duration();
             }
+            return Ok(Json(
+                no_active_algorithm_response(
+                    &state,
+                    &payload,
+                    request_id,
+                    global_request_id,
+                    trace_id,
+                )
+                .await,
+            ));
         }
-        Err(_) => {
-            // Cache miss or stale entry — fetch from DB and back-fill
-            match fetch_algorithm_from_db_and_cache(&state, &payload.created_by).await {
-                Ok(algo) => algo,
-                Err(e) => return fail_preview(e, "active_routing_lookup_failed"),
-            }
-        }
+        Err(e) => return fail_preview(e, "active_routing_lookup_failed"),
     };
 
     logger::debug!("Fetched routing algorithm: {:?}", algorithm);
@@ -680,154 +1115,16 @@ pub async fn routing_evaluate(
             Ok(data) => data,
             Err(e) => return fail_preview(e.into(), "routing_algorithm_parse_failed"),
         };
-    let mut preview_flow_type =
-        crate::analytics::refine_routing_evaluate_flow_type(&algorithm_data);
 
-    // Populated by the AbTest arm to tag analytics events with experiment context.
-    let mut ab_experiment_id: Option<String> = None;
-    let mut ab_variant_arm: Option<String> = None;
-
-    let (output, evaluated_output, rule_name): (Output, Vec<ConnectorInfo>, Option<String>) =
-        match algorithm_data {
-            StaticRoutingAlgorithm::Single(conn) => {
-                let out_enum = Output::Single(*conn.clone());
-                match evaluate_output(&out_enum).map_err(|_| {
-                    EuclidErrors::FailedToEvaluateOutput(format!(
-                        "{}",
-                        StaticRoutingAlgorithm::Single(conn.clone())
-                    ))
-                }) {
-                    Ok((_, eval)) => (out_enum, eval, Some("straight_through_rule".into())),
-                    Err(e) => return fail_preview(e.into(), "preview_output_evaluation_failed"),
-                }
-            }
-
-            StaticRoutingAlgorithm::Priority(connectors) => {
-                let out_enum = Output::Priority(connectors.clone());
-                match evaluate_output(&out_enum).map_err(|_| {
-                    EuclidErrors::FailedToEvaluateOutput(format!(
-                        "{}",
-                        StaticRoutingAlgorithm::Priority(connectors.clone())
-                    ))
-                }) {
-                    Ok((_, eval)) => (out_enum, eval, Some("priority_rule".into())),
-                    Err(e) => return fail_preview(e.into(), "preview_output_evaluation_failed"),
-                }
-            }
-
-            StaticRoutingAlgorithm::VolumeSplit(splits) => {
-                let out_enum = Output::VolumeSplit(splits.clone());
-                match evaluate_output(&out_enum).map_err(|_| {
-                    EuclidErrors::FailedToEvaluateOutput(format!(
-                        "{}",
-                        StaticRoutingAlgorithm::VolumeSplit(splits.clone())
-                    ))
-                }) {
-                    Ok((_, eval)) => (out_enum, eval, Some("volume_split_rule".into())),
-                    Err(e) => return fail_preview(e.into(), "preview_output_evaluation_failed"),
-                }
-            }
-
-            StaticRoutingAlgorithm::Advanced(program) => {
-                let ctx = Context::new(payload.parameters.clone());
-                logger::debug!("routing_evaluation: context keys = {:?}", parameters.keys());
-
-                match InterpreterBackend::eval_program(&program, &ctx).map_err(|e| {
-                    EuclidErrors::InvalidRequest(format!("Interpreter error: {:?}", e.error_type))
-                }) {
-                    Ok(mut ir) => {
-                        // Check if fallback is enabled
-                        if default_output_present && ir.output == program.default_selection {
-                            logger::debug!(
-                                "Default fallback triggered: Overriding with fallback connector"
-                            );
-
-                            // Replace output with fallback connector from request
-                            if let Some(fallback_connector) = payload.fallback_output.clone() {
-                                ir.rule_name = Some("default_fallback".to_string());
-                                ir.output = Output::Priority(fallback_connector.clone());
-                                ir.evaluated_output =
-                                    vec![fallback_connector.first().cloned().unwrap_or_default()];
-                            }
-                        }
-                        (ir.output, ir.evaluated_output, ir.rule_name)
-                    }
-                    Err(e) => return fail_preview(e.into(), "preview_interpreter_failed"),
-                }
-            }
-
-            // Unreachable while the active-algorithm lookup is payment-scoped; kept as a guard
-            // so a mis-slotted document degrades to a clean 400 instead of a parse panic.
-            StaticRoutingAlgorithm::VolumeContract(_) => {
-                return fail_preview(
-                    ContainerError::from(EuclidErrors::InvalidRequest(
-                        "the resolved algorithm is a volume-commitment configuration; it cannot be evaluated for routing".to_string(),
-                    )),
-                    "volume_contract_not_evaluable",
-                )
-            }
-
-            StaticRoutingAlgorithm::AbTest(ab_data) => {
-                let payment_id = payload.payment_id.as_deref().unwrap_or("");
-                let arm = crate::decider::gatewaydecider::ab_test::assign_arm(
-                    payment_id,
-                    ab_data.variant_split_pct,
-                );
-                let arm_algorithm_id = if arm == "variant" {
-                    ab_data.variant_algorithm_id.as_str()
-                } else {
-                    ab_data.control_algorithm_id.as_str()
-                };
-                logger::debug!(
-                    "A/B test routing evaluate: payment_id={:?} arm={} algorithm={}",
-                    payload.payment_id,
-                    arm,
-                    arm_algorithm_id
-                );
-                ab_experiment_id = Some(algorithm.id.clone());
-                ab_variant_arm = Some(arm.to_string());
-
-                let result = crate::decider::gatewaydecider::ab_test::preview::evaluate_arm(
-                    arm,
-                    arm_algorithm_id,
-                    &payload,
-                    default_output_present,
-                    &state.db,
-                )
-                .await;
-                match result {
-                    Ok(r) => {
-                        preview_flow_type = r.flow_type;
-                        (r.output, r.evaluated_output, r.rule_name)
-                    }
-                    Err(e) => return fail_preview(e, "ab_test_evaluation_failed"),
-                }
-            }
-        };
-
-    let pm_filter_bundle = if pm_filter_graph::has_payment_method_type(&parameters) {
-        state.get_pm_filter_graph_bundle().await
-    } else {
-        None
-    };
-
-    let connectors_for_eligibility = extract_connectors_for_eligibility(&output);
-    let eligible_connectors = eligibility_for_output(
-        pm_filter_bundle.as_deref(),
-        &parameters,
-        &connectors_for_eligibility,
-    );
-
-    let response = RoutingEvaluateResponse {
-        payment_id: payload.payment_id.clone(),
-        status: match rule_name.as_deref() {
-            Some("default_selection") | Some("default_fallback") => "default_selection".into(),
-            Some(_) => "success".into(),
-            None => "default_selection".into(),
-        },
-        output: format_output(&output),
-        evaluated_output,
-        eligible_connectors,
+    let EvaluationOutcome {
+        response,
+        rule_name,
+        flow_type: preview_flow_type,
+        ab_experiment_id,
+        ab_variant_arm,
+    } = match evaluate_algorithm_data(&state, &algorithm, &algorithm_data, &payload).await {
+        Ok(outcome) => outcome,
+        Err((e, stage)) => return fail_preview(e, stage),
     };
 
     logger::debug!("Response: {response:?}");
@@ -868,6 +1165,241 @@ pub async fn routing_evaluate(
         timer.observe_duration();
     }
     Ok(Json(response))
+}
+
+/// Largest number of evaluations one batch request may carry. Callers batch per
+/// payment method type, so real requests stay in single digits; the cap only bounds
+/// abuse.
+const MAX_BATCH_EVALUATIONS: usize = 50;
+
+/// Evaluates the caller's active algorithm against several parameter sets in one
+/// round trip: one cache/DB resolution and one parse, N evaluations.
+///
+/// Request-level problems (no active algorithm, invalid parameters, an empty or
+/// oversized batch) fail the whole request. A single entry failing to evaluate yields
+/// `status: "error"` with empty outputs at its position instead, so one wallet type
+/// falling back does not take the others down with it.
+pub async fn routing_evaluate_batch(
+    headers: axum::http::HeaderMap,
+    Json(payload): Json<RoutingBatchRequest>,
+) -> Result<Json<RoutingBatchResponse>, ContainerError<EuclidErrors>> {
+    let mut timer = Some(
+        metrics::API_LATENCY_HISTOGRAM
+            .with_label_values(&["routing_evaluate_batch"])
+            .start_timer(),
+    );
+
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&["routing_evaluate_batch"])
+        .inc();
+
+    let state = get_tenant_app_state().await;
+    let request_id = headers
+        .get(crate::storage::consts::X_REQUEST_ID)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
+    let trace_id = crate::analytics::trace_id_from_headers(&headers);
+    logger::debug!(
+        created_by = %payload.created_by,
+        entry_count = payload.requests.len(),
+        "Received batch routing evaluation request"
+    );
+    crate::analytics::DomainAnalyticsEvent::record_request_hit(
+        crate::analytics::AnalyticsFlowContext::new(
+            crate::analytics::ApiFlow::RuleBasedRouting,
+            crate::analytics::FlowType::RoutingEvaluateRequestHit,
+        ),
+        crate::analytics::AnalyticsRoute::RoutingEvaluate,
+        Some(payload.created_by.clone()),
+        None,
+        request_id.clone(),
+        global_request_id.clone(),
+        trace_id.clone(),
+        None,
+    );
+
+    let mut fail_batch = |err: ContainerError<EuclidErrors>| {
+        API_REQUEST_COUNTER
+            .with_label_values(&["routing_evaluate_batch", "failure"])
+            .inc();
+        if let Some(timer) = timer.take() {
+            timer.observe_duration();
+        }
+        Err(err)
+    };
+
+    if payload.requests.is_empty() {
+        return fail_batch(
+            EuclidErrors::InvalidRequest("batch request carries no evaluations".to_string()).into(),
+        );
+    }
+    if payload.requests.len() > MAX_BATCH_EVALUATIONS {
+        return fail_batch(
+            EuclidErrors::InvalidRequest(format!(
+                "batch request carries {} evaluations; the maximum is {}",
+                payload.requests.len(),
+                MAX_BATCH_EVALUATIONS
+            ))
+            .into(),
+        );
+    }
+
+    let routing_config = match state
+        .config
+        .routing_config
+        .as_ref()
+        .ok_or(EuclidErrors::GlobalRoutingConfigsUnavailable)
+    {
+        Ok(config) => config,
+        Err(e) => return fail_batch(e.into()),
+    };
+
+    for entry in &payload.requests {
+        if let Err(e) = validate_evaluation_parameters(routing_config, &entry.parameters) {
+            return fail_batch(e);
+        }
+    }
+
+    // ── Resolve and parse the active algorithm once for the whole batch ─────
+    let algorithm_for = payload.algorithm_for.as_deref();
+    let algorithm = match resolve_active_algorithm(&state, &payload.created_by, algorithm_for).await
+    {
+        Ok(algo) => algo,
+        // Same semantics as the single endpoint: rules exist but none are active is an
+        // authoritative "route by your fallback", answered once per entry so eligibility
+        // narrowing still runs against each entry's own parameters.
+        Err(e)
+            if matches!(
+                e.get_inner(),
+                EuclidErrors::ActiveRoutingAlgorithmNotFound(_)
+            ) && profile_has_any_routing_rule(&state, &payload.created_by, algorithm_for)
+                .await =>
+        {
+            let mut results = Vec::with_capacity(payload.requests.len());
+            for entry in payload.requests {
+                let entry_payload = RoutingRequest {
+                    payment_id: entry.payment_id,
+                    created_by: payload.created_by.clone(),
+                    fallback_output: payload.fallback_output.clone(),
+                    parameters: entry.parameters,
+                    algorithm_for: payload.algorithm_for.clone(),
+                };
+                results.push(
+                    no_active_algorithm_response(
+                        &state,
+                        &entry_payload,
+                        request_id.clone(),
+                        global_request_id.clone(),
+                        trace_id.clone(),
+                    )
+                    .await,
+                );
+            }
+            API_REQUEST_COUNTER
+                .with_label_values(&["routing_evaluate_batch", "success"])
+                .inc();
+            if let Some(timer) = timer.take() {
+                timer.observe_duration();
+            }
+            return Ok(Json(RoutingBatchResponse { results }));
+        }
+        Err(e) => return fail_batch(e),
+    };
+
+    let algorithm_data: StaticRoutingAlgorithm =
+        match serde_json::from_str(&algorithm.algorithm_data).map_err(|e| {
+            logger::error!(
+                error = ?e,
+                raw_data = %algorithm.algorithm_data,
+                "Failed to parse algorithm_data into StaticRoutingAlgorithm"
+            );
+            EuclidErrors::InvalidRequest(format!("Invalid algorithm data format: {}", e))
+        }) {
+            Ok(data) => data,
+            Err(e) => return fail_batch(e.into()),
+        };
+
+    let mut results = Vec::with_capacity(payload.requests.len());
+    for entry in payload.requests {
+        // Each entry is evaluated as if it were a single call sharing the batch's
+        // identity, so per-entry analytics stay comparable with the single endpoint.
+        let entry_payload = RoutingRequest {
+            payment_id: entry.payment_id,
+            created_by: payload.created_by.clone(),
+            fallback_output: payload.fallback_output.clone(),
+            parameters: entry.parameters,
+            algorithm_for: payload.algorithm_for.clone(),
+        };
+
+        match evaluate_algorithm_data(&state, &algorithm, &algorithm_data, &entry_payload).await {
+            Ok(outcome) => {
+                let analytics_details = match (&outcome.ab_experiment_id, &outcome.ab_variant_arm) {
+                    (Some(exp_id), Some(arm)) => {
+                        crate::decider::gatewaydecider::ab_test::preview::serialize_analytics_details(
+                            &entry_payload,
+                            &outcome.response,
+                            outcome.rule_name.as_deref(),
+                            exp_id,
+                            arm,
+                        )
+                    }
+                    _ => serialize_routing_evaluate_analytics_details(
+                        &entry_payload,
+                        &outcome.response,
+                        outcome.rule_name.as_deref(),
+                    ),
+                };
+                crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
+                    crate::analytics::AnalyticsFlowContext::new(
+                        crate::analytics::ApiFlow::RuleBasedRouting,
+                        outcome.flow_type,
+                    ),
+                    Some(payload.created_by.clone()),
+                    entry_payload.payment_id.clone(),
+                    preview_gateway(&outcome.response),
+                    outcome.rule_name.clone(),
+                    Some(outcome.response.status.clone()),
+                    analytics_details,
+                    request_id.clone(),
+                    global_request_id.clone(),
+                    trace_id.clone(),
+                );
+                results.push(outcome.response);
+            }
+            Err((error, stage)) => {
+                logger::error!(
+                    ?error,
+                    stage,
+                    created_by = %payload.created_by,
+                    "routing_evaluate_batch: one entry failed to evaluate"
+                );
+                record_routing_evaluate_preview_error(
+                    &entry_payload,
+                    &error,
+                    stage,
+                    request_id.clone(),
+                    global_request_id.clone(),
+                    trace_id.clone(),
+                );
+                results.push(RoutingEvaluateResponse {
+                    payment_id: entry_payload.payment_id.clone(),
+                    status: "error".to_string(),
+                    output: serde_json::Value::Null,
+                    evaluated_output: Vec::new(),
+                    eligible_connectors: Vec::new(),
+                });
+            }
+        }
+    }
+
+    API_REQUEST_COUNTER
+        .with_label_values(&["routing_evaluate_batch", "success"])
+        .inc();
+    if let Some(timer) = timer.take() {
+        timer.observe_duration();
+    }
+    Ok(Json(RoutingBatchResponse { results }))
 }
 
 fn record_routing_evaluate_preview_error(
@@ -1264,7 +1796,7 @@ async fn ensure_routing_algorithm_inactive(
 /// Edit an existing inactive routing algorithm in place (name/description/definition). Used by the
 /// A/B Testing dashboard's Edit action. Keeps the same id so history/links remain valid.
 pub async fn update_routing_rule(
-    Json(payload): Json<crate::euclid::types::UpdateRoutingConfigRequest>,
+    Json(mut payload): Json<crate::euclid::types::UpdateRoutingConfigRequest>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["update_routing_rule"])
@@ -1309,6 +1841,10 @@ pub async fn update_routing_rule(
             return Err(ContainerError::from(EuclidErrors::InvalidRequest(
                 "Routing algorithm does not belong to this merchant".to_string(),
             )));
+        }
+
+        if let Some(routing_config) = state.config.routing_config.as_ref() {
+            normalize_rule_value_types(&mut payload.algorithm, routing_config);
         }
 
         // Update must not be able to store a definition create would reject: canonicalize
@@ -1651,6 +2187,16 @@ pub(crate) fn apply_pm_filter_eligibility(
     };
 
     pm_filter_graph::filter_eligible_connectors(bundle, parameters, eligible_connectors)
+}
+
+pub(crate) fn narrow_evaluated_output_to_eligible(
+    evaluated_output: Vec<ConnectorInfo>,
+    eligible_connectors: &[ConnectorInfo],
+) -> Vec<ConnectorInfo> {
+    evaluated_output
+        .into_iter()
+        .filter(|connector| eligible_connectors.contains(connector))
+        .collect()
 }
 
 pub(crate) fn extract_connectors_for_eligibility(output: &Output) -> Vec<ConnectorInfo> {

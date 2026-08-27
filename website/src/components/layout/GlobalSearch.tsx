@@ -165,12 +165,12 @@ function SearchTrigger({ onClick }: { onClick: () => void }) {
     <button
       type="button"
       onClick={onClick}
-      className="group flex h-9 w-full max-w-md items-center gap-2 rounded-lg border border-[#e6e6ee] bg-white px-3 text-slate-400 transition-colors hover:border-slate-300 hover:text-slate-500 dark:border-[#1a1a24] dark:bg-[#121218] dark:hover:border-[#2a2a38] dark:hover:text-slate-300"
+      className="group flex h-9 w-full max-w-md items-center gap-2 rounded-lg border border-[#e6e6ee] bg-white px-3 text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-500 dark:border-[#1a1a24] dark:bg-[#121218] dark:hover:border-[#2a2a38] dark:hover:text-slate-300"
       aria-label="Search"
     >
       <Search size={14} className="shrink-0" />
-      <span className="flex-1 text-left text-[13px] font-medium">Search…</span>
-      <kbd className="hidden shrink-0 items-center gap-0.5 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[10px] font-semibold text-slate-400 sm:flex dark:border-[#22262f] dark:bg-[#0a0d12] dark:text-[#6d768a]">
+      <span className="flex-1 text-left text-[13px] font-medium leading-[18px]">Search…</span>
+      <kbd className="hidden shrink-0 items-center gap-0.5 rounded border border-slate-200 bg-slate-50 px-1.5 py-0.5 text-[11px] font-semibold text-slate-500 sm:flex dark:border-[#22262f] dark:bg-[#0a0d12] dark:text-[#6d768a] leading-4">
         {isMac ? '⌘' : 'Ctrl'} K
       </kbd>
     </button>
@@ -198,16 +198,16 @@ function SearchDialog({
       contentClassName="fixed left-1/2 top-[12vh] z-[101] flex max-h-[76vh] w-[calc(100vw-2rem)] max-w-xl -translate-x-1/2 flex-col overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_30px_80px_-40px_rgba(15,23,42,0.55)] focus:outline-none dark:border-[#22262f] dark:bg-[#0a0d12]"
     >
       <div className="flex items-center gap-3 border-b border-slate-200 px-4 dark:border-[#22262f]">
-        <Search size={17} className="shrink-0 text-slate-400" />
+        <Search size={17} className="shrink-0 text-slate-500" />
         <Command.Input
           autoFocus
           placeholder="Search pages and settings…"
-          className="h-12 w-full bg-transparent text-[15px] text-slate-900 outline-none placeholder:text-slate-400 dark:text-white dark:placeholder:text-[#6d768a]"
+          className="h-12 w-full bg-transparent px-0 text-[15px] text-slate-900 outline-none focus:ring-0 placeholder:text-slate-500 dark:text-white dark:placeholder:text-[#78849a] leading-[22px]"
         />
       </div>
 
       <Command.List className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden p-2">
-        <Command.Empty className="px-3 py-8 text-center text-sm text-slate-400">
+        <Command.Empty className="px-3 py-8 text-center text-sm text-slate-500">
           No results found.
         </Command.Empty>
 
@@ -228,12 +228,12 @@ function SearchDialog({
                   value={item.hint ? `${item.label} ${item.hint}` : item.label}
                   keywords={item.keywords ?? []}
                   onSelect={() => onSelect(item.to)}
-                  className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] text-slate-600 aria-selected:bg-slate-100 aria-selected:text-slate-900 dark:text-[#8d96aa] dark:aria-selected:bg-white/[0.06] dark:aria-selected:text-white"
+                  className="flex cursor-pointer items-center gap-3 rounded-xl px-3 py-2.5 text-[14px] text-slate-600 aria-selected:bg-slate-100 aria-selected:text-slate-900 dark:text-[#8d96aa] dark:aria-selected:bg-white/[0.06] dark:aria-selected:text-white leading-5"
                 >
-                  <Icon size={16} className="shrink-0 text-slate-400" />
+                  <Icon size={16} className="shrink-0 text-slate-500" />
                   <span className="flex-1 truncate font-medium">{item.label}</span>
                   {item.hint ? (
-                    <span className="shrink-0 text-[12px] text-slate-400 dark:text-[#6d768a]">
+                    <span className="shrink-0 text-[12px] text-slate-500 dark:text-[#78849a] leading-4">
                       {item.hint}
                     </span>
                   ) : null}

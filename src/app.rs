@@ -398,6 +398,10 @@ where
             axum::routing::post(crate::euclid::handlers::routing_rules::routing_evaluate),
         )
         .route(
+            "/routing/evaluate/batch",
+            axum::routing::post(crate::euclid::handlers::routing_rules::routing_evaluate_batch),
+        )
+        .route(
             "/decision_gateway",
             post(routes::decision_gateway::decision_gateway),
         )

@@ -13,7 +13,7 @@ import {
   XAxis,
   YAxis,
 } from 'recharts'
-import { CheckCircle2, ChevronRight } from 'lucide-react'
+import { CheckCircle2, ChevronRight, RefreshCw } from 'lucide-react'
 import { fetcher } from '../../lib/api'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
@@ -61,6 +61,7 @@ import { ErrorMessage } from '../ui/ErrorMessage'
 import { DateTimePicker } from '../ui/DateTimePicker'
 import { VolumeCommitmentAnalytics } from './VolumeCommitmentAnalytics'
 
+import { PageHeading } from '../ui/PageHeading'
 type TimeWindow = {
   start_ms: number
   end_ms: number
@@ -417,27 +418,27 @@ function fromDateTimeInputValue(value: string) {
 
 function EmptyState({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-[24px] border border-dashed border-slate-200 bg-white/60 px-6 py-12 text-center dark:border-[#222227] dark:bg-[#0b0b0d]">
-      <p className="text-sm font-semibold text-slate-900 dark:text-white">{title}</p>
-      <p className="mt-2 text-sm text-slate-500 dark:text-[#8a8a93]">{body}</p>
+    <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 px-6 py-12 text-center dark:border-[#222227] dark:bg-[#0b0b0d]">
+      <p className="text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">{title}</p>
+      <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">{body}</p>
     </div>
   )
 }
 
 function PendingState({ title, body }: { title: string; body: string }) {
   return (
-    <div className="rounded-[24px] border border-slate-200 bg-white/60 px-6 py-12 text-center dark:border-[#222227] dark:bg-[#0b0b0d]">
+    <div className="rounded-2xl border border-slate-200 bg-white/60 px-6 py-12 text-center dark:border-[#222227] dark:bg-[#0b0b0d]">
       <div className="flex justify-center">
         <Spinner size={20} />
       </div>
-      <p className="mt-4 text-sm font-semibold text-slate-900 dark:text-white">{title}</p>
-      <p className="mt-2 text-sm text-slate-500 dark:text-[#8a8a93]">{body}</p>
+      <p className="mt-5 text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">{title}</p>
+      <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">{body}</p>
     </div>
   )
 }
 
 function controlClassName() {
-  return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#27272a] dark:bg-[#121214] dark:text-[#e5e7eb]'
+  return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[13px] text-slate-700 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#27272a] dark:bg-[#121214] dark:text-[#e5e7eb]'
 }
 
 function sectionButtonClass(active: boolean) {
@@ -509,11 +510,11 @@ function InfoButton({ content }: { content: InfoContent }) {
         type="button"
         aria-label={`About ${content.title}`}
         onClick={() => setOpen((value) => !value)}
-        className={`flex h-7 w-7 items-center justify-center rounded-full border text-xs font-semibold transition ${
+        className={`flex h-7 w-7 items-center justify-center rounded-full border text-[13px] font-semibold transition ${
           open
             ? 'border-brand-500/50 bg-brand-500/10 text-brand-700 dark:text-brand-200'
             : 'border-slate-200 bg-white text-slate-500 hover:border-slate-300 hover:text-slate-900 dark:border-[#27272a] dark:bg-[#121214] dark:text-[#8a8a93] dark:hover:text-white'
-        }`}
+        } leading-[18px]`}
       >
         i
       </button>
@@ -525,21 +526,21 @@ function InfoButton({ content }: { content: InfoContent }) {
             left: position.left,
             width: position.width,
           }}
-          className="z-[120] rounded-[24px] border border-slate-200 bg-white/95 p-4 shadow-2xl backdrop-blur dark:border-[#1d1d23] dark:bg-[#09090d]/95"
+          className="z-[120] rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-2xl backdrop-blur dark:border-[#1d1d23] dark:bg-[#09090d]/95"
         >
-          <p className="text-sm font-semibold text-slate-900 dark:text-white">{content.title}</p>
-          <div className="mt-3 space-y-3 text-xs leading-6 text-slate-600 dark:text-[#b3b3bd]">
+          <p className="text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">{content.title}</p>
+          <div className="mt-3 space-y-3 text-[13px] leading-6 text-slate-600 dark:text-[#b3b3bd]">
             <div>
               <p className="font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93]">Why it matters</p>
-              <p className="mt-1">{content.purpose}</p>
+              <p className="mt-2">{content.purpose}</p>
             </div>
             <div>
               <p className="font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93]">How it is calculated</p>
-              <p className="mt-1">{content.calculation}</p>
+              <p className="mt-2">{content.calculation}</p>
             </div>
             <div>
               <p className="font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-[#8a8a93]">Data source</p>
-              <p className="mt-1">{content.source}</p>
+              <p className="mt-2">{content.source}</p>
             </div>
           </div>
         </div>
@@ -590,22 +591,22 @@ function RoutingAlignmentCard({
   ].join(' · ')
 
   return (
-    <Card className="overflow-visible">
-      <CardHeader className={expanded ? 'px-5 py-4' : 'px-5 py-4 !border-b-0'}>
+    <Card className="!rounded-2xl overflow-visible">
+      <CardHeader className={expanded ? 'px-5 py-3' : 'px-5 py-3 !border-b-0'}>
         <div className={`flex flex-wrap justify-between gap-3 ${expanded ? 'items-start' : 'items-center'}`}>
           {expanded ? (
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
+              <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">
                 Routing alignment
               </h2>
-              <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+              <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                 Traffic share: checks if the best-scoring connector is also getting the largest share.
               </p>
             </div>
           ) : (
             <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <CheckCircle2 size={18} className="shrink-0 text-emerald-500" />
-              <span className="min-w-0 text-sm text-slate-600 dark:text-[#9aa7bb]">
+              <CheckCircle2 size={18} className="shrink-0 text-emerald-700" />
+              <span className="min-w-0 text-[13px] text-slate-600 dark:text-[#9aa7bb] leading-[18px]">
                 <span className="font-semibold text-slate-800 dark:text-white">Routing alignment</span>
                 {' — '}
                 {collapsedReadout}
@@ -624,7 +625,7 @@ function RoutingAlignmentCard({
               <button
                 type="button"
                 onClick={onToggle}
-                className="inline-flex items-center gap-1 text-sm font-semibold text-brand-600 transition hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-200"
+                className="inline-flex items-center gap-2 text-[13px] font-semibold text-brand-600 transition hover:text-brand-700 dark:text-brand-300 dark:hover:text-brand-200 leading-[18px]"
               >
                 Show details
                 <ChevronRight size={16} />
@@ -634,121 +635,91 @@ function RoutingAlignmentCard({
         </div>
       </CardHeader>
       {expanded ? (
-        <CardBody className="space-y-4 px-5 py-4">
-          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#2a303a] dark:bg-[#0d1118]">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <Badge variant="gray">Best score: {srLeaderName}</Badge>
-                  <Badge variant={volumeBadgeVariant}>
-                    Traffic leader: {volumeLeaderName}
-                  </Badge>
-                </div>
-                <p className="mt-3 text-sm font-semibold text-slate-900 dark:text-white">
-                  {summary.headline}
-                </p>
-                <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#8a8a93]">
-                  {summary.detail}
-                </p>
-              </div>
-              <p className="text-right text-xs font-medium text-slate-500 dark:text-[#8a8a93]">
-                {alignmentText}
-              </p>
+        <CardBody className="space-y-5 px-5 py-3">
+          {/* The verdict reads as one sentence; the connectors it names are detailed in the table
+              below, so it does not restate their rates or volumes. */}
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="gray">Best score: {srLeaderName}</Badge>
+              <Badge variant={volumeBadgeVariant}>
+                Traffic leader: {volumeLeaderName}
+              </Badge>
             </div>
+            <p className="text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">
+              {summary.headline}
+            </p>
+            <p className="text-[13px] leading-[21px] text-slate-500 dark:text-[#8a8a93]">
+              {summary.detail}
+            </p>
           </div>
 
-          <div className="grid overflow-hidden rounded-2xl border border-slate-200 bg-white/70 dark:border-[#2a303a] dark:bg-[#0c0f15] lg:grid-cols-3">
-              <div className="border-b border-slate-200 p-4 dark:border-[#2a303a] lg:border-b-0 lg:border-r">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-                  Best score
-                </p>
-                <p className="mt-3 truncate text-2xl font-semibold text-slate-950 dark:text-white">
-                  {summary.srLeader?.gateway || '--'}
-                </p>
-                <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                  {summary.srLeader
-                    ? `${formatPercent(summary.srLeader.value)} success rate, ${formatPercentPointDelta(srMargin)} vs next`
-                    : 'No score in this window'}
-                </p>
-              </div>
+          {/* The one figure the card exists to report, and the only one the table cannot show. */}
+          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-2 rounded-2xl border border-slate-200 bg-slate-50/80 px-5 py-3 dark:border-[#2a303a] dark:bg-[#0d1118]">
+            <span className="text-[21px] font-semibold tabular-nums text-slate-950 dark:text-white leading-7">
+              {summary.alignmentPercent === null ? 'Not enough data' : formatPercent(summary.alignmentPercent)}
+            </span>
+            <span className="text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
+              {alignedVolumeText}
+            </span>
+          </div>
 
-              <div className="border-b border-slate-200 p-4 dark:border-[#2a303a] lg:border-b-0 lg:border-r">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-                  Traffic leader
-                </p>
-                <p className="mt-3 truncate text-2xl font-semibold text-slate-950 dark:text-white">
-                  {summary.volumeLeader?.gateway || '--'}
-                </p>
-                <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                  {summary.volumeLeader
-                    ? `${formatNumber(summary.volumeLeader.count, 0)} payments, ${formatPercent(summary.volumeLeader.share)} traffic share`
-                    : 'No payment traffic in this window'}
-                </p>
-              </div>
-
-              <div className="p-4">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-                  Best-score share
-                </p>
-                <p className="mt-3 text-2xl font-semibold text-slate-950 dark:text-white">
-                  {alignmentText}
-                </p>
-                <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                  {alignedVolumeText}
-                </p>
+          {comparisonRows.length ? (
+            <div className="overflow-x-auto">
+              <div className="min-w-[640px]">
+                <div className="grid grid-cols-[minmax(0,1.2fr)_0.9fr_0.65fr_0.65fr_1fr] gap-3 border-b border-slate-200 px-3 py-3 text-[13px] font-medium text-slate-500 dark:border-[#2a303a] dark:text-[#8a8a93] leading-[18px]">
+                  <span>Connector</span>
+                  <span>Success rate</span>
+                  <span>Traffic</span>
+                  <span>Share</span>
+                  <span>Role</span>
+                </div>
+                {comparisonRows.map((row) => (
+                  <div
+                    key={row.gateway}
+                    className="grid grid-cols-[minmax(0,1.2fr)_0.9fr_0.65fr_0.65fr_1fr] gap-3 border-b border-slate-200 px-3 py-3 text-[13px] last:border-b-0 dark:border-[#2a303a] leading-[18px]"
+                  >
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span
+                        className="h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{ backgroundColor: row.color }}
+                      />
+                      <span className="truncate font-medium text-slate-900 dark:text-white">
+                        {row.gateway}
+                      </span>
+                    </div>
+                    <span className="flex flex-wrap items-baseline gap-2 text-slate-600 dark:text-[#cbd5e1]">
+                      {row.srValue === null ? '--' : formatPercent(row.srValue)}
+                      {/* The winning margin belongs beside the rate it is a margin on — a lead of a
+                          tenth of a point is the difference between a verdict and a coin toss. */}
+                      {row.isSrLeader && srMargin !== undefined ? (
+                        <span className="text-slate-500 dark:text-[#78849a]">
+                          {formatPercentPointDelta(srMargin)} vs next
+                        </span>
+                      ) : null}
+                    </span>
+                    <span className="text-slate-600 dark:text-[#cbd5e1]">
+                      {formatNumber(row.count, 0)}
+                    </span>
+                    <span className="text-slate-600 dark:text-[#cbd5e1]">
+                      {formatPercent(row.share)}
+                    </span>
+                    <div className="flex flex-wrap gap-2">
+                      {row.isSrLeader ? <Badge variant="blue">Best score</Badge> : null}
+                      {row.isVolumeLeader ? <Badge variant="green">Traffic leader</Badge> : null}
+                      {!row.isSrLeader && !row.isVolumeLeader ? (
+                        <span className="text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">Secondary</span>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
-
-            {comparisonRows.length ? (
-              <div className="overflow-x-auto rounded-2xl border border-slate-200 dark:border-[#2a303a]">
-                <div className="min-w-[640px]">
-                  <div className="grid grid-cols-[minmax(0,1.2fr)_0.65fr_0.65fr_0.65fr_1fr] gap-3 border-b border-slate-200 bg-slate-50 px-4 py-3 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:border-[#2a303a] dark:bg-[#0c0f15] dark:text-[#8a8a93]">
-                    <span>Connector</span>
-                    <span>Success rate</span>
-                    <span>Traffic</span>
-                    <span>Share</span>
-                    <span>Read</span>
-                  </div>
-                  {comparisonRows.map((row) => (
-                    <div
-                      key={row.gateway}
-                      className="grid grid-cols-[minmax(0,1.2fr)_0.65fr_0.65fr_0.65fr_1fr] gap-3 border-b border-slate-200 px-4 py-3 text-sm last:border-b-0 dark:border-[#2a303a]"
-                    >
-                      <div className="flex min-w-0 items-center gap-2">
-                        <span
-                          className="h-2.5 w-2.5 shrink-0 rounded-full"
-                          style={{ backgroundColor: row.color }}
-                        />
-                        <span className="truncate font-medium text-slate-900 dark:text-white">
-                          {row.gateway}
-                        </span>
-                      </div>
-                      <span className="text-slate-600 dark:text-[#cbd5e1]">
-                        {row.srValue === null ? '--' : formatPercent(row.srValue)}
-                      </span>
-                      <span className="text-slate-600 dark:text-[#cbd5e1]">
-                        {formatNumber(row.count, 0)}
-                      </span>
-                      <span className="text-slate-600 dark:text-[#cbd5e1]">
-                        {formatPercent(row.share)}
-                      </span>
-                      <div className="flex flex-wrap gap-2">
-                        {row.isSrLeader ? <Badge variant="blue">Best score</Badge> : null}
-                        {row.isVolumeLeader ? <Badge variant="green">Traffic leader</Badge> : null}
-                        {!row.isSrLeader && !row.isVolumeLeader ? (
-                          <span className="text-xs text-slate-500 dark:text-[#8a8a93]">Secondary</span>
-                        ) : null}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : (
-              <EmptyState
-                title="No connector comparison yet"
-                body="This view needs both payment traffic and connector scores in the selected time window."
-              />
-            )}
+          ) : (
+            <EmptyState
+              title="No connector comparison yet"
+              body="This view needs both payment traffic and connector scores in the selected time window."
+            />
+          )}
       </CardBody>
       ) : null}
     </Card>
@@ -763,9 +734,9 @@ function analyticsRouteLabel(route: string) {
 }
 
 function authRateColor(rate: number) {
-  if (rate >= 0.85) return 'text-emerald-600 dark:text-emerald-400'
-  if (rate >= 0.70) return 'text-amber-500 dark:text-amber-400'
-  return 'text-red-500 dark:text-red-400'
+  if (rate >= 0.85) return 'text-emerald-700 dark:text-emerald-400'
+  if (rate >= 0.70) return 'text-amber-700 dark:text-amber-400'
+  return 'text-red-600 dark:text-red-400'
 }
 
 function srBadgeVariant(valuePercent: number): BadgeVariant {
@@ -778,50 +749,50 @@ function SmartRetrySection({ stats }: { stats: SmartRetryStats | null }) {
   if (!stats || stats.retried_count === 0) return null
   const recoveryRate = Math.round((stats.recovered_count / stats.retried_count) * 100)
   const rateColor = recoveryRate >= 70
-    ? 'text-emerald-600 dark:text-emerald-400'
-    : recoveryRate >= 40 ? 'text-amber-500' : 'text-red-500'
+    ? 'text-emerald-700 dark:text-emerald-400'
+    : recoveryRate >= 40 ? 'text-amber-700' : 'text-red-600'
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {/* Summary row */}
-      <Card>
+      <Card className="!rounded-2xl">
         <CardHeader>
-          <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Smart Retry</h2>
-          <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+          <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Smart Retry</h2>
+          <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
             Payments retried on a fallback gateway after GSM classified the failure as retryable.
           </p>
         </CardHeader>
         <CardBody>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-3 gap-5">
             <div className="rounded-lg bg-slate-50 dark:bg-[#111114] px-4 py-3">
-              <p className="text-xs text-slate-500 dark:text-slate-400">Retried</p>
-              <p className="mt-1 text-2xl font-bold text-slate-800 dark:text-white tabular-nums">{stats.retried_count}</p>
+              <p className="text-[13px] text-slate-500 dark:text-slate-400 leading-[18px]">Retried</p>
+              <p className="mt-2 text-[21px] font-bold text-slate-800 dark:text-white tabular-nums leading-7">{stats.retried_count}</p>
             </div>
             <div className="rounded-lg bg-slate-50 dark:bg-[#111114] px-4 py-3">
-              <p className="text-xs text-slate-500 dark:text-slate-400">Recovered</p>
-              <p className="mt-1 text-2xl font-bold text-emerald-600 dark:text-emerald-400 tabular-nums">{stats.recovered_count}</p>
+              <p className="text-[13px] text-slate-500 dark:text-slate-400 leading-[18px]">Recovered</p>
+              <p className="mt-2 text-[21px] font-bold text-emerald-700 dark:text-emerald-400 tabular-nums leading-7">{stats.recovered_count}</p>
             </div>
             <div className="rounded-lg bg-slate-50 dark:bg-[#111114] px-4 py-3">
-              <p className="text-xs text-slate-500 dark:text-slate-400">Recovery rate</p>
-              <p className={`mt-1 text-2xl font-bold tabular-nums ${rateColor}`}>{recoveryRate}%</p>
+              <p className="text-[13px] text-slate-500 dark:text-slate-400 leading-[18px]">Recovery rate</p>
+              <p className={`mt-2 text-[21px] font-bold tabular-nums ${rateColor} leading-7`}>{recoveryRate}%</p>
             </div>
           </div>
         </CardBody>
       </Card>
 
-      <div className="grid gap-4 lg:grid-cols-2">
+      <div className="grid gap-5 lg:grid-cols-2">
         {/* By trigger — which connectors failed with a retryable error */}
         {stats.by_trigger.length > 0 && (
-          <Card>
+          <Card className="!rounded-2xl">
             <CardHeader>
-              <h3 className="text-sm font-semibold text-slate-800 dark:text-white">Retry triggers by connector</h3>
-              <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+              <h3 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Retry triggers by connector</h3>
+              <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                 Connectors whose failures were classified as retryable by GSM.
               </p>
             </CardHeader>
             <CardBody className="p-0">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-[11px] text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-[#1c1c24]">
+              <table className="w-full text-[13px] leading-[18px]">
+                <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-[11px] text-slate-500 dark:text-slate-500 border-b border-slate-100 dark:border-[#1c1c24] leading-4">
                   <tr>
                     <th className="text-left px-4 py-2">Connector</th>
                     <th className="text-left px-4 py-2">Error code</th>
@@ -831,13 +802,13 @@ function SmartRetrySection({ stats }: { stats: SmartRetryStats | null }) {
                 <tbody className="divide-y divide-slate-100 dark:divide-[#1a1a22]">
                   {stats.by_trigger.map((row, i) => (
                     <tr key={i} className="hover:bg-slate-50 dark:hover:bg-[#0d0d14]">
-                      <td className="px-4 py-2 text-xs font-medium text-slate-700 dark:text-slate-300">{row.gateway}</td>
+                      <td className="px-4 py-2 text-[13px] font-medium text-slate-700 dark:text-slate-300 leading-[18px]">{row.gateway}</td>
                       <td className="px-4 py-2">
                         {row.error_code
-                          ? <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400">{row.error_code}</span>
-                          : <span className="text-[11px] text-slate-400">—</span>}
+                          ? <span className="font-mono text-[11px] text-slate-500 dark:text-slate-400 leading-4">{row.error_code}</span>
+                          : <span className="text-[11px] text-slate-500 leading-4">—</span>}
                       </td>
-                      <td className="px-4 py-2 text-right tabular-nums text-xs text-slate-600 dark:text-slate-300">{row.count}</td>
+                      <td className="px-4 py-2 text-right tabular-nums text-[13px] text-slate-600 dark:text-slate-300 leading-[18px]">{row.count}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -848,16 +819,16 @@ function SmartRetrySection({ stats }: { stats: SmartRetryStats | null }) {
 
         {/* By fallback — which connectors were used as fallback and how well they recovered */}
         {stats.by_fallback.length > 0 && (
-          <Card>
+          <Card className="!rounded-2xl">
             <CardHeader>
-              <h3 className="text-sm font-semibold text-slate-800 dark:text-white">Recovery by fallback connector</h3>
-              <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+              <h3 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Recovery by fallback connector</h3>
+              <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                 Connectors used as the retry fallback and their recovery outcomes.
               </p>
             </CardHeader>
             <CardBody className="p-0">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-[11px] text-slate-400 dark:text-slate-500 border-b border-slate-100 dark:border-[#1c1c24]">
+              <table className="w-full text-[13px] leading-[18px]">
+                <thead className="bg-slate-50 dark:bg-[#0a0a0f] text-[11px] text-slate-500 dark:text-slate-500 border-b border-slate-100 dark:border-[#1c1c24] leading-4">
                   <tr>
                     <th className="text-left px-4 py-2">Connector</th>
                     <th className="text-right px-4 py-2">Retried</th>
@@ -870,11 +841,11 @@ function SmartRetrySection({ stats }: { stats: SmartRetryStats | null }) {
                     const rate = row.retried > 0 ? Math.round((row.recovered / row.retried) * 100) : 0
                     return (
                       <tr key={i} className="hover:bg-slate-50 dark:hover:bg-[#0d0d14]">
-                        <td className="px-4 py-2 text-xs font-medium text-slate-700 dark:text-slate-300">{row.gateway}</td>
-                        <td className="px-4 py-2 text-right tabular-nums text-xs text-slate-600 dark:text-slate-300">{row.retried}</td>
-                        <td className="px-4 py-2 text-right tabular-nums text-xs text-emerald-600 dark:text-emerald-400">{row.recovered}</td>
+                        <td className="px-4 py-2 text-[13px] font-medium text-slate-700 dark:text-slate-300 leading-[18px]">{row.gateway}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-[13px] text-slate-600 dark:text-slate-300 leading-[18px]">{row.retried}</td>
+                        <td className="px-4 py-2 text-right tabular-nums text-[13px] text-emerald-700 dark:text-emerald-400 leading-[18px]">{row.recovered}</td>
                         <td className="px-4 py-2 text-right">
-                          <span className={`text-xs font-semibold tabular-nums ${rate >= 70 ? 'text-emerald-600 dark:text-emerald-400' : rate >= 40 ? 'text-amber-500' : 'text-red-500'}`}>
+                          <span className={`text-[13px] font-semibold tabular-nums ${rate >= 70 ? 'text-emerald-700 dark:text-emerald-400' : rate >= 40 ? 'text-amber-700' : 'text-red-600'} leading-[18px]`}>
                             {rate}%
                           </span>
                         </td>
@@ -1732,50 +1703,42 @@ export function AnalyticsPage() {
   }
 
   return (
-    <div className="space-y-8 px-5 sm:px-6 lg:px-8 xl:px-10">
-      <div className="space-y-4">
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div className="space-y-1">
-            <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Analytics</h1>
-            <p className="text-sm text-slate-500 dark:text-[#8a8a93]">
-              Real-time multi-gateway routing performance overview.
-            </p>
-          </div>
-
-          <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
-            <Button
-              size="sm"
-              variant="secondary"
-              className={sectionButtonClass(view === 'transactions')}
-              onClick={() => setView('transactions')}
-            >
-              {ANALYTICS_VIEW_LABELS.transactions}
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              className={sectionButtonClass(view === 'rule_based')}
-              onClick={() => setView('rule_based')}
-            >
-              {ANALYTICS_VIEW_LABELS.rule_based}
-            </Button>
-            <Button
-              size="sm"
-              variant="secondary"
-              className={sectionButtonClass(view === 'volume_commitments')}
-              onClick={() => setView('volume_commitments')}
-            >
-              {ANALYTICS_VIEW_LABELS.volume_commitments}
-            </Button>
-          </div>
+    <div className="space-y-8 px-5 sm:px-5 lg:px-8 xl:px-8">
+      <div className="grid grid-cols-1 items-center gap-3 xl:grid-cols-[1fr_auto_1fr]">
+        <div className="space-y-2">
+          <PageHeading title="Analytics" description="Real-time multi-gateway routing performance overview." />
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button size="sm" variant="ghost" onClick={refreshAll}>
-            Refresh
+        <div className="inline-flex max-w-full flex-wrap items-center gap-1 justify-self-start rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d] xl:justify-self-center">
+          <Button
+            size="sm"
+            variant="secondary"
+            className={sectionButtonClass(view === 'transactions')}
+            onClick={() => setView('transactions')}
+          >
+            {ANALYTICS_VIEW_LABELS.transactions}
           </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            className={sectionButtonClass(view === 'rule_based')}
+            onClick={() => setView('rule_based')}
+          >
+            {ANALYTICS_VIEW_LABELS.rule_based}
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            className={sectionButtonClass(view === 'volume_commitments')}
+            onClick={() => setView('volume_commitments')}
+          >
+            {ANALYTICS_VIEW_LABELS.volume_commitments}
+          </Button>
+        </div>
+
+        <div className="flex items-center gap-2 justify-self-start xl:justify-self-end">
           <div ref={timeRangeControlRef} className="relative">
-            <div className="flex flex-wrap items-center gap-2 rounded-full border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
+            <div className="flex flex-wrap items-center gap-1 rounded-full border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
               {PRESET_OPTIONS.map((option) => (
                 <Button
                   key={option.value}
@@ -1790,13 +1753,13 @@ export function AnalyticsPage() {
             </div>
 
             {range === 'custom' && customRangeOpen ? (
-              <div className="absolute right-0 top-[calc(100%+10px)] z-[90] w-[min(92vw,620px)] rounded-[24px] border border-slate-200 bg-white/95 p-4 shadow-[0_24px_70px_-34px_rgba(15,23,42,0.48)] backdrop-blur dark:border-[#2a303a] dark:bg-[#11151d]/95 dark:shadow-[0_24px_70px_-34px_rgba(0,0,0,0.72)]">
-                <div className="flex items-start justify-between gap-4">
+              <div className="absolute right-0 top-[calc(100%+10px)] z-[90] w-[min(92vw,620px)] rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-[0_24px_70px_-34px_rgba(15,23,42,0.48)] backdrop-blur dark:border-[#2a303a] dark:bg-[#11151d]/95 dark:shadow-[0_24px_70px_-34px_rgba(0,0,0,0.72)]">
+                <div className="flex items-start justify-between gap-5">
                   <div>
-                    <p className="text-sm font-semibold text-slate-900 dark:text-white">
+                    <p className="text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">
                       Select time range
                     </p>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                    <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                       {customWindow ? activeWindowLabel : 'Choose a valid start and end time'}
                     </p>
                   </div>
@@ -1809,9 +1772,9 @@ export function AnalyticsPage() {
                   </Button>
                 </div>
 
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <div className="mt-5 grid gap-3 md:grid-cols-2">
                   <label className="space-y-2">
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                    <span className="text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                       Start time
                     </span>
                     <DateTimePicker
@@ -1822,7 +1785,7 @@ export function AnalyticsPage() {
                   </label>
 
                   <label className="space-y-2">
-                    <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                    <span className="text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                       End time
                     </span>
                     <DateTimePicker
@@ -1834,20 +1797,30 @@ export function AnalyticsPage() {
                 </div>
 
                 {!customWindow ? (
-                  <p className="mt-3 text-xs text-red-500">
+                  <p className="mt-3 text-[13px] text-red-600 leading-[18px]">
                     Choose an end time after the start time. Future dates are not available.
                   </p>
                 ) : null}
               </div>
             ) : null}
           </div>
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={refreshAll}
+            aria-label="Refresh"
+            title="Refresh"
+            className="!h-9 !px-3"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </Button>
         </div>
       </div>
 
       <ErrorMessage error={error} />
 
       {loading ? (
-        <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-[#8a8a93]">
+        <div className="flex items-center gap-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
           <Spinner size={16} />
           Loading analytics…
         </div>
@@ -1855,65 +1828,65 @@ export function AnalyticsPage() {
 
       <div className="relative">
       {view === 'transactions' ? (
-        <div className="space-y-6">
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Card>
+        <div className="space-y-5">
+          <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
+            <Card className="!rounded-2xl">
               <CardBody>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                <p className="text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                   Overall auth rate
                 </p>
                 {overallAuthRate !== null ? (
                   <>
-                    <p className={`mt-2 text-4xl font-semibold tabular-nums ${authRateColor(overallAuthRate)}`}>
+                    <p className={`mt-2 text-[34px] font-semibold tabular-nums ${authRateColor(overallAuthRate)} leading-[42px]`}>
                       {formatPercent(overallAuthRate)}
                     </p>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                    <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                       Weighted across all gateways
                     </p>
                   </>
                 ) : (
                   <>
-                    <p className="mt-2 text-4xl font-semibold text-slate-300 dark:text-slate-700">—</p>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">No score data yet</p>
+                    <p className="mt-2 text-[34px] font-semibold text-slate-500 dark:text-slate-400 leading-[42px]">—</p>
+                    <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">No score data yet</p>
                   </>
                 )}
               </CardBody>
             </Card>
 
             {transactionRouteHits.map((item) => (
-              <Card key={item.route}>
+              <Card key={item.route} className="!rounded-2xl">
                 <CardBody>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                  <p className="text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                     {analyticsRouteLabel(item.route)}
                   </p>
-                  <p className="mt-2 text-4xl font-semibold tabular-nums text-slate-950 dark:text-white">
+                  <p className="mt-2 text-[34px] font-semibold tabular-nums text-slate-950 dark:text-white leading-[42px]">
                     {formatNumber(item.count, 0)}
                   </p>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                  <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                     {item.route === '/decide_gateway' ? 'routing decisions' : 'score feedback calls'}
                   </p>
                 </CardBody>
               </Card>
             ))}
 
-            <Card>
+            <Card className="!rounded-2xl">
               <CardBody>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                <p className="text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                   Total cost saved
                 </p>
                 {costSavings.data && costSavings.data.currency && costSavings.data.totals.saved_value > 0 ? (
                   <>
-                    <p className="mt-2 text-4xl font-semibold tabular-nums text-emerald-600 dark:text-emerald-400">
+                    <p className="mt-2 text-[34px] font-semibold tabular-nums text-emerald-700 dark:text-emerald-400 leading-[42px]">
                       {formatCurrencyValue(costSavings.data.totals.saved_value, costSavings.data.currency)}
                     </p>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                    <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] max-w-[57ch] leading-[18px]">
                       {formatNumber(costSavings.data.totals.cost_won_count, 0)} of {formatNumber(costSavings.data.totals.total_decisions, 0)} cost decisions
                     </p>
                   </>
                 ) : (
                   <>
-                    <p className="mt-2 text-4xl font-semibold text-slate-300 dark:text-slate-700">—</p>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                    <p className="mt-2 text-[34px] font-semibold text-slate-500 dark:text-slate-400 leading-[42px]">—</p>
+                    <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                       {costSavings.data ? 'No multi-objective wins yet' : 'Loading…'}
                     </p>
                   </>
@@ -1931,12 +1904,12 @@ export function AnalyticsPage() {
 
           {FEATURE_FLAGS.SMART_RETRY_IN_ANALYTICS && <SmartRetrySection stats={overview.data?.smart_retry_stats ?? null} />}
 
-          <Card className="overflow-visible">
+          <Card className="!rounded-2xl overflow-visible">
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Selected gateways over time</h2>
-              <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+              <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Selected gateways over time</h2>
+              <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                 Connector decision counts for the same active filters used by the success-rate chart.
               </p>
             </div>
@@ -1980,12 +1953,12 @@ export function AnalyticsPage() {
         </CardBody>
       </Card>
 
-          <Card className="overflow-visible">
+          <Card className="!rounded-2xl overflow-visible">
             <CardHeader>
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Cost saved over time</h2>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                  <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Cost saved over time</h2>
+                  <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] max-w-[57ch] leading-[18px]">
                     Savings from multi-objective routing promoting the higher-EV PSP within the derived auth band.
                   </p>
                 </div>
@@ -2023,14 +1996,14 @@ export function AnalyticsPage() {
             </CardBody>
           </Card>
 
-          <Card className="overflow-visible">
+          <Card className="!rounded-2xl overflow-visible">
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
+              <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">
                 Connector success rate over time
               </h2>
-              <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+              <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] max-w-[57ch] leading-[18px]">
                 Historical connector success rate for the active filters; compare it with selected volume above.
               </p>
             </div>
@@ -2046,37 +2019,15 @@ export function AnalyticsPage() {
             </div>
           </div>
         </CardHeader>
-        <CardBody className="space-y-4">
+        <CardBody className="space-y-5">
           {connectorFiltersOpen ? (
-          <div className="rounded-[24px] border border-slate-200 bg-white p-4 dark:border-[#1d1d23] dark:bg-[#0c0c0e]">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-                  Connector filters
-                </p>
-                <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                  Narrow the success-rate line chart by recorded routing dimensions.
-                </p>
-              </div>
-              <Button
-                size="sm"
-                variant="secondary"
-                onClick={clearRoutingFilters}
-                disabled={
-                  !Object.values(routingFilters.dimensions).some(Boolean) &&
-                  !routingFilters.gateways.length
-                }
-              >
-                Clear filters
-              </Button>
-            </div>
-
+          <div className="space-y-3 border-b border-slate-200 pb-5 dark:border-[#1d1d23]">
             {availableFilters.dimensions.length ? (
-              <div className="mt-4 space-y-3">
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              <>
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
                   {visibleDimensions.map((dimension) => (
-                    <label key={dimension.key} className="space-y-2">
-                      <span className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                    <label key={dimension.key} className="block">
+                      <span className="mb-2 block text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                         {dimension.label}
                       </span>
                       <select
@@ -2085,7 +2036,7 @@ export function AnalyticsPage() {
                         className={controlClassName()}
                         disabled={!dimension.values.length}
                       >
-                        <option value="">All {dimension.label.toLowerCase()}</option>
+                        <option value="">Any {dimension.label.toLowerCase()}</option>
                         {dimension.values.map((value) => (
                           <option key={value} value={value}>
                             {value}
@@ -2095,23 +2046,37 @@ export function AnalyticsPage() {
                     </label>
                   ))}
                 </div>
-                {hasExtraDimensions ? (
-                  <div className="flex items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 dark:border-[#1d1d23] dark:bg-[#09090b]">
-                    <p className="text-xs text-slate-500 dark:text-[#8a8a93]">
-                      {showAllFilters
-                        ? 'Showing all routing dimensions.'
-                        : `${hiddenDimensionCount} more routing dimension${hiddenDimensionCount === 1 ? '' : 's'} available.`}
-                    </p>
-                    <Button
-                      size="sm"
-                      variant="secondary"
-                      onClick={() => setShowAllFilters((value) => !value)}
-                    >
-                      {showAllFilters ? 'Show fewer filters' : 'More filters'}
-                    </Button>
-                  </div>
-                ) : null}
-              </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">
+                    Connectors
+                  </span>
+                  {availableFilters.gateways.length ? (
+                    availableFilters.gateways.map((gateway) => {
+                      const active = routingFilters.gateways.includes(gateway)
+                      return (
+                        <button
+                          key={gateway}
+                          type="button"
+                          aria-pressed={active}
+                          onClick={() => toggleGatewayFilter(gateway)}
+                          className={`rounded-full border px-3 py-2 text-[13px] font-medium transition ${
+                            active
+                              ? 'border-brand-500/50 bg-brand-500/10 text-brand-700 dark:text-brand-200'
+                              : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 dark:border-[#27272a] dark:bg-[#121214] dark:text-[#a1a1aa] dark:hover:text-white'
+                          } leading-[18px]`}
+                        >
+                          {gateway}
+                        </button>
+                      )
+                    })
+                  ) : (
+                    <span className="text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
+                      No connector history yet for the selected window.
+                    </span>
+                  )}
+                </div>
+              </>
             ) : availableFilters.missing_dimensions.length ? (
               <EmptyState
                 title="No routing dimension values in this window"
@@ -2119,67 +2084,46 @@ export function AnalyticsPage() {
               />
             ) : null}
 
-            {availableFilters.missing_dimensions.length ? (
-              <div className="mt-4 rounded-2xl border border-dashed border-slate-200 bg-white px-4 py-3 dark:border-[#1d1d23] dark:bg-[#09090b]">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-                  No values in this window yet
-                </p>
-                <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
-                  {availableFilters.missing_dimensions.map((dimension) => dimension.label).join(', ')}
-                </p>
-              </div>
-            ) : null}
+            <div className="flex flex-wrap items-center gap-3">
+              {hasExtraDimensions ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAllFilters((value) => !value)}
+                  className="text-[13px] font-medium text-brand-600 transition hover:text-brand-600 dark:text-brand-400 leading-[18px]"
+                >
+                  {showAllFilters
+                    ? 'Fewer dimensions'
+                    : `${hiddenDimensionCount} more dimension${hiddenDimensionCount === 1 ? '' : 's'}`}
+                </button>
+              ) : null}
 
-            {activeFilterChips.length ? (
-              <div className="mt-4 space-y-2">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-                  Active filters
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {activeFilterChips.map((chip) => (
-                    <button
-                      key={chip.key}
-                      type="button"
-                      onClick={() => removeRoutingFilterChip(chip.key)}
-                      className="inline-flex items-center gap-2 rounded-full border border-brand-500/30 bg-brand-500/10 px-3 py-1.5 text-xs font-semibold text-brand-700 transition hover:bg-brand-500/15 dark:text-brand-200"
-                    >
-                      <span>{chip.label}</span>
-                      <span aria-hidden="true">×</span>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+              {availableFilters.missing_dimensions.length ? (
+                <span className="text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
+                  No values yet: {availableFilters.missing_dimensions.map((dimension) => dimension.label).join(', ')}
+                </span>
+              ) : null}
 
-            <div className="mt-4 space-y-2">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
-                Connectors
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {availableFilters.gateways.length ? (
-                  availableFilters.gateways.map((gateway) => {
-                    const active = routingFilters.gateways.includes(gateway)
-                    return (
-                      <button
-                        key={gateway}
-                        type="button"
-                        onClick={() => toggleGatewayFilter(gateway)}
-                        className={`rounded-full border px-3 py-1.5 text-xs font-semibold transition ${
-                          active
-                            ? 'border-brand-500/50 bg-brand-500/10 text-brand-700 dark:text-brand-200'
-                            : 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:text-slate-900 dark:border-[#27272a] dark:bg-[#121214] dark:text-[#a1a1aa] dark:hover:text-white'
-                        }`}
-                      >
-                        {gateway}
-                      </button>
-                    )
-                  })
-                ) : (
-                  <p className="text-xs text-slate-500 dark:text-[#8a8a93]">
-                    No connector history yet for the selected window.
-                  </p>
-                )}
-              </div>
+              {activeFilterChips.map((chip) => (
+                <button
+                  key={chip.key}
+                  type="button"
+                  onClick={() => removeRoutingFilterChip(chip.key)}
+                  className="inline-flex items-center gap-2 rounded-full border border-brand-500/30 bg-brand-500/10 px-3 py-2 text-[13px] font-medium text-brand-700 transition hover:bg-brand-500/15 dark:text-brand-200 leading-[18px]"
+                >
+                  <span>{chip.label}</span>
+                  <span aria-hidden="true">×</span>
+                </button>
+              ))}
+
+              {activeFilterChips.length ? (
+                <button
+                  type="button"
+                  onClick={clearRoutingFilters}
+                  className="ml-auto text-[13px] font-medium text-slate-500 transition hover:text-slate-900 dark:text-[#8a8a93] dark:hover:text-white leading-[18px]"
+                >
+                  Clear filters
+                </button>
+              ) : null}
             </div>
           </div>
           ) : null}
@@ -2242,60 +2186,60 @@ export function AnalyticsPage() {
       ) : view === 'volume_commitments' ? (
         <VolumeCommitmentAnalytics />
       ) : (
-        <div className="space-y-6">
-          <Card>
+        <div className="space-y-5">
+          <Card className="!rounded-2xl">
             <CardBody>
-              <div className="grid gap-6 sm:grid-cols-3">
+              <div className="grid gap-5 sm:grid-cols-3">
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                  <p className="text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                     Rule match rate
                   </p>
                   {ruleMatchRate !== null ? (
                     <>
-                      <p className={`mt-2 text-4xl font-semibold tabular-nums ${authRateColor(ruleMatchRate)}`}>
+                      <p className={`mt-2 text-[34px] font-semibold tabular-nums ${authRateColor(ruleMatchRate)} leading-[42px]`}>
                         {formatPercent(ruleMatchRate)}
                       </p>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                      <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                         Decisions matched to a configured rule
                       </p>
                     </>
                   ) : (
                     <>
-                      <p className="mt-2 text-4xl font-semibold text-slate-300 dark:text-slate-700">—</p>
-                      <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">No decision data yet</p>
+                      <p className="mt-2 text-[34px] font-semibold text-slate-500 dark:text-slate-400 leading-[42px]">—</p>
+                      <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">No decision data yet</p>
                     </>
                   )}
                 </div>
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                  <p className="text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                     Rule Evaluate
                   </p>
-                  <p className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">
+                  <p className="mt-2 text-[21px] font-semibold tabular-nums text-slate-950 dark:text-white leading-7">
                     {formatNumber(ruleEvaluateHits, 0)}
                   </p>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">routing decisions</p>
+                  <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">routing decisions</p>
                 </div>
                 <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-[#8a8a93]">
+                  <p className="text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                     Gateways active
                   </p>
-                  <p className="mt-2 text-2xl font-semibold tabular-nums text-slate-950 dark:text-white">
+                  <p className="mt-2 text-[21px] font-semibold tabular-nums text-slate-950 dark:text-white leading-7">
                     {previewGatewaysTouched}
                   </p>
-                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">unique connectors selected</p>
+                  <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">unique connectors selected</p>
                 </div>
               </div>
             </CardBody>
           </Card>
 
-          <Card className="overflow-visible">
+          <Card className="!rounded-2xl overflow-visible">
               <CardHeader>
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">
+                    <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">
                       Connector selections over time
                     </h2>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                    <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                       Connector counts over time for selected rule decisions.
                     </p>
                   </div>
@@ -2349,12 +2293,12 @@ export function AnalyticsPage() {
             </Card>
 
           <div className="grid items-stretch gap-5 xl:grid-cols-2">
-            <Card className="h-full overflow-visible">
+            <Card className="!rounded-2xl h-full overflow-visible">
               <CardHeader>
                 <div className="flex items-start justify-between gap-3">
                   <div>
-                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Recent decisions</h2>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                    <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Recent decisions</h2>
+                    <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                       Latest decisions from <code>/routing/evaluate</code>.
                     </p>
                   </div>
@@ -2378,12 +2322,12 @@ export function AnalyticsPage() {
                               {row.latest_status || 'decision'}
                             </Badge>
                             {row.latest_gateway ? (
-                              <span className="truncate text-xs font-medium text-slate-700 dark:text-[#c8d3e6]">
+                              <span className="truncate text-[13px] font-medium text-slate-700 dark:text-[#c8d3e6] leading-[18px]">
                                 {row.latest_gateway}
                               </span>
                             ) : null}
                           </div>
-                          <span className="shrink-0 text-xs text-slate-400 dark:text-[#5a6478]">
+                          <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
                             {formatDateTime(row.last_seen_ms)}
                           </span>
                         </div>
@@ -2405,11 +2349,11 @@ export function AnalyticsPage() {
             </Card>
 
             <div className="grid h-full gap-5 xl:grid-rows-2">
-              <Card className="h-full overflow-visible">
+              <Card className="!rounded-2xl h-full overflow-visible">
                 <CardHeader>
                   <div>
-                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Gateway activity</h2>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                    <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Gateway activity</h2>
+                    <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                       Recent decisions grouped by latest chosen gateway.
                     </p>
                   </div>
@@ -2420,8 +2364,8 @@ export function AnalyticsPage() {
                       {previewGatewaySummary.map((item, index) => (
                         <div key={item.gateway} className="space-y-2">
                           <div className="flex items-center justify-between gap-3">
-                            <p className="text-sm font-medium text-slate-900 dark:text-white">{item.gateway}</p>
-                            <p className="text-xs font-semibold text-slate-500 dark:text-[#8a8a93]">{item.count}</p>
+                            <p className="text-[13px] font-medium text-slate-900 dark:text-white leading-[18px]">{item.gateway}</p>
+                            <p className="text-[13px] font-semibold text-slate-500 dark:text-[#8a8a93] leading-[18px]">{item.count}</p>
                           </div>
                           <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-[#141822]">
                             <div
@@ -2449,27 +2393,27 @@ export function AnalyticsPage() {
                 </CardBody>
               </Card>
 
-              <Card className="h-full overflow-visible">
+              <Card className="!rounded-2xl h-full overflow-visible">
                 <CardHeader>
                   <div>
-                    <h2 className="text-sm font-semibold text-slate-800 dark:text-white">Decision outcomes</h2>
-                    <p className="mt-1 text-xs text-slate-500 dark:text-[#8a8a93]">
+                    <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Decision outcomes</h2>
+                    <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                       How decisions resolved — rule match vs. default fallback.
                     </p>
                   </div>
                 </CardHeader>
                 <CardBody>
                   {previewStatusSummary.length ? (
-                    <div className="space-y-4">
+                    <div className="space-y-5">
                       {previewStatusSummary.map((item) => {
                         const pct = previewStatusTotal ? (item.count / previewStatusTotal) * 100 : 0
                         const variant: BadgeVariant = item.status.toLowerCase().includes('fail') ? 'red' : item.status === 'default_selection' ? 'orange' : 'green'
                         const barColor = variant === 'green' ? '#22c55e' : variant === 'orange' ? '#f97316' : '#ef4444'
                         return (
-                          <div key={item.status} className="space-y-1.5">
+                          <div key={item.status} className="space-y-2">
                             <div className="flex items-center justify-between gap-3">
                               <Badge variant={variant}>{item.status}</Badge>
-                              <span className="text-xs font-semibold tabular-nums text-slate-900 dark:text-white">
+                              <span className="text-[13px] font-semibold tabular-nums text-slate-900 dark:text-white leading-[18px]">
                                 {item.count} <span className="font-normal text-slate-500 dark:text-[#8a8a93]">({formatPercent(pct)})</span>
                               </span>
                             </div>

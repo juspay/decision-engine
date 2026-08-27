@@ -84,7 +84,7 @@ export function VerifyEmailPage() {
             {status === 'verifying' && (
               <div className="space-y-5">
                 <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-brand-500/10">
-                  <Loader2 size={28} className="animate-spin text-brand-500" />
+                  <Loader2 size={28} className="animate-spin text-brand-600" />
                 </div>
                 <div className="space-y-2">
                   <p className="text-xl font-semibold tracking-tight text-slate-950 dark:text-white">
@@ -100,7 +100,7 @@ export function VerifyEmailPage() {
             {status === 'success' && (
               <div className="space-y-5">
                 <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/10">
-                  <CheckCircle size={28} className="text-emerald-500" />
+                  <CheckCircle size={28} className="text-emerald-700" />
                 </div>
                 <div className="space-y-2">
                   <p className="text-xl font-semibold tracking-tight text-slate-950 dark:text-white">
@@ -121,7 +121,7 @@ export function VerifyEmailPage() {
             {status === 'error' && (
               <div className="space-y-5">
                 <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-red-500/10">
-                  <XCircle size={28} className="text-red-500" />
+                  <XCircle size={28} className="text-red-600" />
                 </div>
                 <div className="space-y-2">
                   <p className="text-xl font-semibold tracking-tight text-slate-950 dark:text-white">
@@ -145,7 +145,7 @@ export function VerifyEmailPage() {
           </div>
         </div>
 
-        <footer className="px-6 py-5 text-center text-xs text-slate-400 dark:text-[#525866]">
+        <footer className="px-6 py-5 text-center text-xs text-slate-500 dark:text-[#78849a]">
           Juspay Decision Engine
         </footer>
       </div>

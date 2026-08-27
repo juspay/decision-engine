@@ -6,6 +6,7 @@ import { Badge } from '../ui/Badge'
 import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Spinner } from '../ui/Spinner'
 
+import { PageHeading } from '../ui/PageHeading'
 const PRESET_OPTIONS: { value: AnalyticsRangeValue; label: string }[] = [
   { value: '1h', label: 'Last 1 hour' },
   { value: '12h', label: 'Last 12 hours' },
@@ -64,16 +65,13 @@ export function RoutingEventsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Routing events</h1>
-          <p className="mt-1 text-sm text-slate-500 dark:text-[#8d96aa]">
-            Live changes in success-rate based routing — leader flips and gateways entering or exiting the auth band.
-          </p>
+          <PageHeading title="Routing events" description="Live changes in success-rate based routing — leader flips and gateways entering or exiting the auth band." />
         </div>
         <div className="flex items-center gap-2">
           {unseenCount > 0 && (
             <button
               onClick={markAllSeen}
-              className="text-[13px] font-medium text-brand-600 hover:underline"
+              className="text-[13px] font-medium text-brand-600 hover:underline leading-[18px]"
             >
               Mark all read ({unseenCount})
             </button>
@@ -81,7 +79,7 @@ export function RoutingEventsPage() {
           <select
             value={range}
             onChange={(event) => setRange(event.target.value as AnalyticsRangeValue)}
-            className="h-9 rounded-lg border border-[#e6e6ee] bg-white px-3 text-[13px] font-medium text-slate-700 dark:border-[#1a1a24] dark:bg-[#121218] dark:text-slate-300"
+            className="h-9 rounded-lg border border-[#e6e6ee] bg-white px-3 text-[13px] font-medium text-slate-700 dark:border-[#1a1a24] dark:bg-[#121218] dark:text-slate-300 leading-[18px]"
           >
             {PRESET_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -104,7 +102,7 @@ export function RoutingEventsPage() {
                 active
                   ? 'border-brand-600/40 bg-brand-50 text-brand-700 dark:border-sky-400/40 dark:bg-sky-400/10 dark:text-sky-200'
                   : 'border-[#e6e6ee] bg-white text-slate-500 hover:bg-slate-50 dark:border-[#1a1a24] dark:bg-[#121218] dark:text-slate-400 dark:hover:bg-[#18181f]'
-              }`}
+              } leading-4`}
             >
               <meta.icon size={13} />
               {meta.label}
@@ -119,7 +117,7 @@ export function RoutingEventsPage() {
             <p className="text-sm font-semibold text-slate-900 dark:text-white">
               {visibleEvents.length} event{visibleEvents.length === 1 ? '' : 's'}
             </p>
-            <p className="text-[12px] text-slate-400">Refreshes every 30 seconds</p>
+            <p className="text-[12px] text-slate-500 leading-4">Refreshes every 30 seconds</p>
           </div>
         </CardHeader>
         <CardBody className="p-0">
@@ -129,21 +127,21 @@ export function RoutingEventsPage() {
             </div>
           ) : isUnavailable ? (
             <div className="px-6 py-14 text-center">
-              <BellRing size={28} className="mx-auto text-slate-300 dark:text-slate-600" />
+              <BellRing size={28} className="mx-auto text-slate-500 dark:text-slate-400" />
               <p className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-300">
                 Routing events are unavailable
               </p>
-              <p className="mt-1 text-[13px] text-slate-400">
+              <p className="mt-1 text-[13px] text-slate-500 leading-[18px]">
                 The analytics pipeline (Kafka → ClickHouse) is offline or disabled for this environment.
               </p>
             </div>
           ) : visibleEvents.length === 0 ? (
             <div className="px-6 py-14 text-center">
-              <BellRing size={28} className="mx-auto text-slate-300 dark:text-slate-600" />
+              <BellRing size={28} className="mx-auto text-slate-500 dark:text-slate-400" />
               <p className="mt-3 text-sm font-medium text-slate-700 dark:text-slate-300">
                 No routing events in this window
               </p>
-              <p className="mt-1 text-[13px] text-slate-400">
+              <p className="mt-1 text-[13px] text-slate-500 mx-auto max-w-[57ch] leading-[18px]">
                 Events appear once success-rate feedback flows through update-gateway-score and gateway
                 scores start shifting.
               </p>
@@ -161,7 +159,7 @@ export function RoutingEventsPage() {
                       <p className="text-sm text-slate-800 dark:text-slate-200">
                         {describeRoutingEvent(event)}
                       </p>
-                      <p className="mt-0.5 text-[12px] text-slate-400">
+                      <p className="mt-0.5 text-[12px] text-slate-500 max-w-[57ch] leading-4">
                         {formatEventDateTime(event.bucket_ms)} · dimension {eventDimension(event)}
                         {event.transaction_count != null && ` · ${event.transaction_count} txns in SR window`}
                       </p>

@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=Inter:ital,opsz,wght@0,14..32,100..900;1,14..32,100..900&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Google+Sans:ital,opsz,wght@0,17..18,400..700;1,17..18,400..700&family=Inter:ital,opsz,wght@0,14..32,400..700;1,14..32,400..700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -7,6 +7,18 @@
 @layer base {
 
   html {
+    /* Google Sans, with Inter behind it as a webfont fallback and the platform's own UI face
+       behind that. Both webfonts are OFL-1.1 and cover the 400..700 the app uses; a browser
+       fetches a webfont only when it has text to render in it, so the Inter files stay unfetched
+       while Google Sans resolves.
+
+       The system faces sit ahead of Roboto and Arial on purpose. Arial ships with both macOS and
+       Windows, so listing it earlier would win on every desktop the moment the webfonts fail to
+       load — an air-gapped install, or a blocked CDN — and Arial is a poorer match for this UI
+       than San Francisco or Segoe UI in both proportion and weight. This order also decides what
+       shows during the `display=swap` flash on a normal load. */
+    --font-sans: 'Google Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+    --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
     color-scheme: light;
     --chart-tooltip-bg: rgba(248, 250, 252, 0.98);
     --chart-tooltip-border: #cbd5e1;
@@ -26,7 +38,21 @@
 
   html,
   body {
-    font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
+    font-family: var(--font-sans);
+    /* Google Sans carries a 17..18 optical-size axis — the split Google ships as two families,
+       Google Sans Text for body and Google Sans for headings — and Inter behind it carries 14..32.
+       `auto` feeds the rendered size into whichever resolves, so body copy lands on the text cut
+       and headings on the display cut either way. */
+    font-optical-sizing: auto;
+    /* A slashed zero, so 0 and O stay apart in merchant IDs, payment IDs and gateway names.
+       Google Sans has no equivalent of Inter's l/I disambiguation set — its `ss02` is
+       "Colon Time" — so `zero` is the whole of what is available here. It is not a figure-width
+       feature, so the `tabular-nums` utilities still control that. */
+    font-feature-settings: 'zero' 1;
+    /* Every role in the scale pairs a size with its own line-height. This is the floor for anything
+       that sets neither: 1.5 matches the 16px/24px pairing Tailwind's `text-base` already uses, so
+       untouched text lands on a designed leading rather than the font's `normal` (~1.25 here). */
+    line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     @apply bg-[#ffffff] text-slate-800 dark:bg-[#000000] dark:text-[#f4f4f5] transition-colors duration-300;
@@ -80,7 +106,7 @@
   }
 
   .dark .text-slate-400 {
-    color: #64748b !important;
+    color: #78849a !important;
   }
 
   .dark .text-blue-800,
@@ -118,13 +144,17 @@
     @apply bg-slate-300 dark:bg-[#222222] rounded-full hover:bg-slate-400 dark:hover:bg-[#333333] transition-colors;
   }
 
-  /* Form elements — Dynamic override */
+  /* Form elements — Dynamic override.
+     Every declaration here has to stay overridable by a component's own utility classes, so the
+     radius is a conservative default rather than a pill, only colours transition (animating
+     `all` made focus decoration fade in and out), and nothing is `!important` — an `!important`
+     box-shadow here silently suppressed every `focus:ring-*` in the app, because Tailwind
+     implements rings as box-shadows. */
   :where(input:not([type='checkbox']):not([type='radio']):not([type='range'])),
   :where(select),
   :where(textarea) {
-    @apply bg-white dark:bg-[#0f0f11] border-slate-200 dark:border-transparent text-slate-800 dark:text-white rounded-full px-4 placeholder-slate-400 dark:placeholder-[#66666e] transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:focus:bg-[#151518] dark:focus:border-[#333338];
-    box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05) !important;
-    font-family: 'Outfit', sans-serif;
+    @apply bg-white dark:bg-[#0f0f11] border-slate-200 dark:border-transparent text-slate-800 dark:text-white rounded-lg px-4 placeholder-slate-500 dark:placeholder-[#8a8a93] transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:focus:bg-[#151518] dark:focus:border-[#333338];
+    font-family: var(--font-sans);
   }
 
   :where(select) {
@@ -136,12 +166,6 @@
     background-repeat: no-repeat;
     background-position: right 1rem center;
     background-size: 16px 16px;
-  }
-
-  .dark input:not([type='checkbox']):not([type='radio']):not([type='range']),
-  .dark select,
-  .dark textarea {
-    box-shadow: none !important;
   }
 
   .dark select {
@@ -184,12 +208,12 @@
   appearance: none;
   display: inline-block;
   border-radius: 0.5rem;
-  padding: 0.25rem 1.75rem 0.25rem 0.5rem;
-  font-size: 0.75rem;
-  line-height: 1rem;
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6.5L8 10.5L12 6.5' stroke='%236b7280' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
-  background-position: right 0.4rem center;
+  background-position: right 0.6rem center;
   background-color: transparent;
   background-size: 14px 14px;
   border: 1px solid #e2e8f0;
@@ -246,5 +270,18 @@
 
   100% {
     transform: scaleX(0.96);
+  }
+}
+
+@layer components {
+  /* An input used as an inline title rather than a form field — an editable heading. Opts out of
+     the form-element defaults above (padding, border, radius, focus ring) so it sits flush with
+     the text around it, and marks focus with a soft tint instead of an outline. */
+  .input-bare {
+    @apply border-0 bg-transparent px-0 focus:ring-0;
+  }
+
+  .input-bare:focus {
+    @apply rounded-md bg-slate-100/80 dark:bg-white/[0.06];
   }
 }

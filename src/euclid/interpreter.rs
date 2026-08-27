@@ -174,7 +174,7 @@ impl InterpreterBackend {
             let res = Self::eval_rule(rule, ctx, &program.globals)?;
 
             if res {
-                let (_, evaluated_output) =
+                let evaluated_output =
                     evaluate_output(&rule.output).map_err(|e| types::InterpreterError {
                         error_type: types::InterpreterErrorType::OutputEvaluationFailed(format!(
                             "{:?}",
@@ -191,7 +191,7 @@ impl InterpreterBackend {
         }
 
         // If no rule matched, evaluate default selection
-        let (_, evaluated_output) =
+        let evaluated_output =
             evaluate_output(&program.default_selection).map_err(|e| types::InterpreterError {
                 error_type: types::InterpreterErrorType::OutputEvaluationFailed(format!("{:?}", e)),
                 metadata: HashMap::new(),
@@ -220,51 +220,47 @@ impl fmt::Display for RoutingError {
 impl Error for RoutingError {}
 type RoutingResult<T> = Result<T, RoutingError>;
 
-pub fn perform_volume_split(
-    splits: Vec<VolumeSplit<ConnectorInfo>>,
-) -> RoutingResult<ConnectorInfo> {
+fn sample_split_winner_first<T>(mut splits: Vec<VolumeSplit<T>>) -> RoutingResult<Vec<T>> {
     let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
     let weighted_index =
         WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
     let mut rng = rand::thread_rng();
     let idx = weighted_index.sample(&mut rng);
-    splits
-        .get(idx)
-        .map(|split| split.output.clone())
-        .ok_or(RoutingError::VolumeSplitFailed)
+
+    if idx >= splits.len() {
+        return Err(RoutingError::VolumeSplitFailed);
+    }
+    let winner = splits.remove(idx);
+    splits.insert(0, winner);
+
+    Ok(splits.into_iter().map(|split| split.output).collect())
+}
+
+pub fn perform_volume_split(
+    splits: Vec<VolumeSplit<ConnectorInfo>>,
+) -> RoutingResult<Vec<ConnectorInfo>> {
+    sample_split_winner_first(splits)
 }
 
 pub fn perform_volume_split_priority(
     splits: Vec<VolumeSplit<Vec<ConnectorInfo>>>,
 ) -> RoutingResult<Vec<ConnectorInfo>> {
-    let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
-    let weighted_index =
-        WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
-    let mut rng = rand::thread_rng();
-    let idx = weighted_index.sample(&mut rng);
-    splits
-        .get(idx)
-        .map(|split| split.output.clone())
-        .ok_or(RoutingError::VolumeSplitFailed)
+    Ok(sample_split_winner_first(splits)?
+        .into_iter()
+        .flatten()
+        .fold(Vec::new(), |mut ordered, connector| {
+            if !ordered.contains(&connector) {
+                ordered.push(connector);
+            }
+            ordered
+        }))
 }
 
-pub fn evaluate_output(output: &Output) -> RoutingResult<(Vec<ConnectorInfo>, Vec<ConnectorInfo>)> {
+pub fn evaluate_output(output: &Output) -> RoutingResult<Vec<ConnectorInfo>> {
     match output {
-        Output::Single(connector) => Ok((vec![connector.clone()], vec![connector.clone()])),
-        Output::Priority(connectors) => {
-            let first_connector = connectors.first().cloned();
-            Ok((
-                connectors.clone(),
-                vec![first_connector.unwrap_or_default()],
-            ))
-        }
-        Output::VolumeSplit(splits) => {
-            let selected_connector = perform_volume_split(splits.clone())?;
-            Ok((vec![selected_connector.clone()], vec![selected_connector]))
-        }
-        Output::VolumeSplitPriority(splits) => {
-            let selected_list = perform_volume_split_priority(splits.clone())?;
-            Ok((selected_list.clone(), selected_list))
-        }
+        Output::Single(connector) => Ok(vec![connector.clone()]),
+        Output::Priority(connectors) => Ok(connectors.clone()),
+        Output::VolumeSplit(splits) => perform_volume_split(splits.clone()),
+        Output::VolumeSplitPriority(splits) => perform_volume_split_priority(splits.clone()),
     }
 }

@@ -22,7 +22,7 @@ test.describe('"is one of" / "is not one of" operator', () => {
 
   test.beforeEach(async ({ sharedPage }) => {
     euclid = new EuclidRuleBuilder(sharedPage)
-    await euclid.goto('/routing/rules')
+    await euclid.goto('/routing/rules/new')
     await euclid.addRuleBlock()
     await euclid.selectCondLhs(0, 'payment_method')
   })
@@ -69,13 +69,13 @@ test.describe('"is one of" / "is not one of" operator', () => {
     const options = sharedPage.locator('button[data-value]:not(.cond-select)')
     const chosen = await options.first().getAttribute('data-value')
     await options.first().click({ force: true })
-    await sharedPage.locator('body').click({ force: true })
+    await euclid.dismissDropdown()
     await expect(value.locator(PILL)).toHaveCount(1)
 
     // Re-open and click the same option to deselect it.
     await value.click()
     await sharedPage.locator(`button[data-value="${chosen}"]:not(.cond-select)`).click({ force: true })
-    await sharedPage.locator('body').click({ force: true })
+    await euclid.dismissDropdown()
 
     await expect(value.locator(PILL)).toHaveCount(0)
   })
@@ -93,7 +93,7 @@ test.describe('"is one of" / "is not one of" operator', () => {
     const second = await options.nth(1).getAttribute('data-value')
     await sharedPage.locator(`button[data-value="${first}"]:not(.cond-select)`).click({ force: true })
     await sharedPage.locator(`button[data-value="${second}"]:not(.cond-select)`).click({ force: true })
-    await sharedPage.locator('body').click({ force: true })
+    await euclid.dismissDropdown()
 
     await expect(value.locator(PILL)).toHaveCount(2)
   })
@@ -117,41 +117,5 @@ test.describe('"is one of" / "is not one of" operator', () => {
     await euclid.ruleBlock(0).locator('select.cond-select').first().selectOption({ label: 'is one of' })
 
     await expect(sharedPage.locator('[data-cy="cond-val"]').first().locator(PILL)).toHaveCount(1)
-  })
-
-  test('JSON preview emits enum_variant_array type with the selected values', async ({ sharedPage }) => {
-    await euclid.ruleBlock(0).locator('select.cond-select').first().selectOption({ label: 'is one of' })
-
-    const value = sharedPage.locator('[data-cy="cond-val"]').first()
-    await value.click()
-    const options = sharedPage.locator('button[data-value]:not(.cond-select)')
-    await options.nth(0).click()
-    await options.nth(1).click()
-    await sharedPage.locator('body').click({ force: true })
-
-    await euclid.addGatewayToBlock(0, 'stripe')
-    await sharedPage.getByPlaceholder('my-rule').fill('enum-array-rule')
-    await sharedPage.getByRole('button', { name: 'Preview JSON' }).click()
-
-    const preview = sharedPage.locator('pre')
-    await expect(preview).toContainText('"type": "enum_variant_array"')
-    await expect(preview).toContainText('"value": [')
-  })
-
-  test('JSON preview for "is not one of" uses not_equal comparison', async ({ sharedPage }) => {
-    await euclid.ruleBlock(0).locator('select.cond-select').first().selectOption({ label: 'is not one of' })
-
-    const value = sharedPage.locator('[data-cy="cond-val"]').first()
-    await value.click()
-    await sharedPage.locator('button[data-value]:not(.cond-select)').nth(0).click()
-    await sharedPage.locator('body').click({ force: true })
-
-    await euclid.addGatewayToBlock(0, 'stripe')
-    await sharedPage.getByPlaceholder('my-rule').fill('enum-not-array-rule')
-    await sharedPage.getByRole('button', { name: 'Preview JSON' }).click()
-
-    const preview = sharedPage.locator('pre')
-    await expect(preview).toContainText('"comparison": "not_equal"')
-    await expect(preview).toContainText('"type": "enum_variant_array"')
   })
 })

@@ -30,6 +30,8 @@ import { useMerchantFeatures, type KnownFeature } from '../../hooks/useMerchantF
 import { BucketHedgingTuner } from './BucketHedgingTuner'
 import { CostEstimationPanel } from './CostEstimationPanel'
 
+import { PageHeading } from '../ui/PageHeading'
+import { Notice } from '../ui/Notice'
 /** One input treatment for the config forms, so fields don't drift apart field by field. */
 const configInputClass =
   'w-full rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm ' +
@@ -387,16 +389,13 @@ export function SRRoutingPage() {
     <div className={`space-y-6 ${WIDE_TABS.includes(activeTab) ? 'w-full' : 'max-w-4xl'}`}>
       {/* Page header */}
       <div>
-        <h1 className="text-lg font-semibold text-slate-900 dark:text-white">Multi Objective Routing</h1>
-        <p className="mt-0.5 text-[13px] leading-relaxed text-slate-500 dark:text-slate-400">
-          Dynamic gateway scoring based on real-time success rates.
-        </p>
+        <PageHeading title="Multi Objective Routing" description="Dynamic gateway scoring based on real-time success rates." />
       </div>
 
       {!merchantId && (
-        <div className="rounded-lg border border-yellow-200 bg-yellow-50 px-4 py-3 text-sm text-yellow-800 dark:border-yellow-800/30 dark:bg-yellow-900/20 dark:text-yellow-400">
+        <Notice tone="warning">
           Set a Merchant ID in the top bar to load and save configuration.
-        </div>
+        </Notice>
       )}
 
       {/* Tab navigation */}
@@ -439,7 +438,7 @@ export function SRRoutingPage() {
                       {...register('defaultBucketSize')}
                       className={configInputClass}
                     />
-                    {errors.defaultBucketSize && <p className="text-[13px] text-red-500">{errors.defaultBucketSize.message}</p>}
+                    {errors.defaultBucketSize && <p className="text-[13px] text-red-600 leading-[18px]">{errors.defaultBucketSize.message}</p>}
                     <p className={type.hint}>
                       Recent payments per gateway score. Lower adapts faster, higher stays steadier.
                     </p>
@@ -488,7 +487,7 @@ export function SRRoutingPage() {
                     {fields.length ? (
                       <table className="w-full text-sm">
                         <thead>
-                          <tr className="text-left text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] border-b border-slate-200 dark:border-[#1c1c24] bg-slate-50 dark:bg-[#0a0a0f]">
+                          <tr className="text-left text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] border-b border-slate-200 dark:border-[#1c1c24] bg-slate-50 dark:bg-[#0a0a0f] leading-4">
                             <th className="px-4 py-2">Source</th>
                             <th className="px-4 py-2">Method Type</th>
                             <th className="px-4 py-2">Method</th>
@@ -567,7 +566,7 @@ export function SRRoutingPage() {
                                 <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.bucketSize`)} /><span className={lockedTextCls} title={lockedTitle}>{numText(row?.bucketSize)}</span></>) : (<input type="number" {...register(`subLevelInputConfig.${idx}.bucketSize`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" />)}</td>
                                 <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.hedgingPercent`)} /><span className={lockedTextCls} title={lockedTitle}>{numText(row?.hedgingPercent)}</span></>) : (<input type="number" step="0.1" {...register(`subLevelInputConfig.${idx}.hedgingPercent`)} placeholder="—" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" />)}</td>
                                 <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.latencyThreshold`)} /><span className={lockedTextCls} title={lockedTitle}>{numText(row?.latencyThreshold)}</span></>) : (<input type="number" {...register(`subLevelInputConfig.${idx}.latencyThreshold`)} placeholder="—" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500" />)}</td>
-                                <td className="px-4 py-2">{autopilotOwned ? (<span className="text-slate-300 dark:text-slate-600" title="Managed by Autopilot — turn Autopilot off to remove"><Trash2 size={14} /></span>) : (<button type="button" onClick={() => removeSubLevelOverride(idx)} className="text-slate-400 hover:text-red-500"><Trash2 size={14} /></button>)}</td>
+                                <td className="px-4 py-2">{autopilotOwned ? (<span className="text-slate-500 dark:text-slate-400" title="Managed by Autopilot — turn Autopilot off to remove"><Trash2 size={14} /></span>) : (<button type="button" onClick={() => removeSubLevelOverride(idx)} className="text-slate-500 hover:text-red-600"><Trash2 size={14} /></button>)}</td>
                               </tr>
                             )
                           })}
@@ -639,10 +638,10 @@ function ManualSectionRail({
                 : 'border-transparent text-slate-600 hover:bg-slate-50 dark:text-[#9ca7ba] dark:hover:bg-[#141923]'
             }`}
           >
-            <Icon size={18} className={`mt-0.5 shrink-0 ${on ? 'text-brand-500' : 'text-slate-400'}`} />
+            <Icon size={18} className={`mt-0.5 shrink-0 ${on ? 'text-brand-600' : 'text-slate-500'}`} />
             <span className="min-w-0">
               <span className="block text-sm font-medium">{title}</span>
-              <span className="mt-0.5 hidden text-xs text-slate-400 lg:block">{blurb}</span>
+              <span className="mt-0.5 hidden text-xs text-slate-500 lg:block">{blurb}</span>
             </span>
           </button>
         )
@@ -754,13 +753,13 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
                   onClick={() => setShowTuner((s) => !s)}
                   aria-expanded={showTuner}
                   aria-label="Show static vs automatic tuning illustration"
-                  className={`inline-flex items-center rounded-full p-0.5 transition-colors ${showTuner ? 'text-brand-600 dark:text-brand-400' : 'text-slate-400 hover:text-slate-600 dark:text-slate-500 dark:hover:text-slate-300'}`}
+                  className={`inline-flex items-center rounded-full p-0.5 transition-colors ${showTuner ? 'text-brand-600 dark:text-brand-400' : 'text-slate-500 hover:text-slate-600 dark:text-slate-400 dark:hover:text-slate-300'}`}
                 >
                   <Info className="h-4 w-4" />
                 </button>
               )}
             </div>
-            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
+            <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb] max-w-[57ch]">
               Let the engine self-tune routing to your traffic — it auto-configures the Learning window
               and Discovery share from your volume. Turn off to route purely by your Manual configuration.
             </p>
@@ -879,7 +878,7 @@ function SrDimensionsConfig({ merchantId }: { merchantId: string | null }) {
       <Card>
         <CardHeader>
           <h2 className={type.heading}>SR scoring dimensions</h2>
-          <p className={`mt-1 ${type.subheading}`}>
+          <p className={`mt-1 ${type.subheading} max-w-[68ch]`}>
             Attributes SR scoring splits clusters on. More dimensions = finer, more responsive scores, but more clusters (each needs its own volume to score well). Changing this re-buckets scores. Autopilot enables the low-cardinality dimensions automatically.
           </p>
         </CardHeader>
@@ -894,7 +893,7 @@ function SrDimensionsConfig({ merchantId }: { merchantId: string | null }) {
                 className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
               />
               <span className="text-sm text-slate-700 dark:text-slate-200">{label}</span>
-              {note && <span className="text-[11px] text-amber-500">{note}</span>}
+              {note && <span className="text-[11px] text-amber-700 leading-4">{note}</span>}
             </label>
           ))}
         </CardBody>
@@ -938,7 +937,7 @@ function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
     <div className="space-y-4">
       <div>
         <h2 className={type.heading}>Scoring behaviour flags</h2>
-        <p className={`mt-1 ${type.subheading}`}>
+        <p className={`mt-1 ${type.subheading} max-w-[68ch]`}>
           Merchant-level toggles that affect how SR scores are computed and how traffic is explored.
         </p>
       </div>
@@ -970,7 +969,7 @@ function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
                       rel="noreferrer"
                       aria-label={`${title} — documentation`}
                       title="Learn more"
-                      className="inline-flex items-center rounded-full p-0.5 text-slate-400 transition-colors hover:text-brand-600 dark:text-slate-500 dark:hover:text-brand-400"
+                      className="inline-flex items-center rounded-full p-0.5 text-slate-500 transition-colors hover:text-brand-600 dark:text-slate-400 dark:hover:text-brand-400"
                     >
                       <Info className="h-4 w-4" />
                     </a>
@@ -983,7 +982,7 @@ function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
                     <Badge variant="gray">Disabled</Badge>
                   )}
                 </div>
-                <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">{description}</p>
+                <p className={`mt-1 ${type.hint} max-w-[68ch]`}>{description}</p>
               </div>
               <div>
                 {enabled ? (
@@ -1124,14 +1123,14 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
       <Card>
         <CardHeader>
           <h2 className={type.heading}>Elimination</h2>
-          <p className={`mt-1 ${type.subheading}`}>
+          <p className={`mt-1 ${type.subheading} max-w-[68ch]`}>
             Each gateway carries a health score that decays on consecutive failures and recovers on
             successes. Below the threshold, it drops out of routing until it recovers.
           </p>
         </CardHeader>
         <CardBody className="grid gap-4 md:grid-cols-2">
           <label className="space-y-1.5">
-            <span className={type.label}>Threshold <span className="text-red-400">*</span></span>
+            <span className={type.label}>Threshold <span className="text-red-600">*</span></span>
             <input
               type="number" step="0.01" min="0" max="1"
               value={threshold}

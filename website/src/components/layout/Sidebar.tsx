@@ -108,17 +108,17 @@ export function Sidebar() {
   return (
     <aside className="relative z-20 flex h-screen w-64 shrink-0 flex-col border-r border-slate-200 bg-white transition-colors duration-300 dark:border-[#22262f] dark:bg-[#06080d]">
       {/* Logo */}
-      <div className="flex h-[78px] shrink-0 items-center border-b border-slate-200 px-6 transition-colors duration-300 dark:border-[#22262f]">
+      <div className="flex h-[78px] shrink-0 items-center border-b border-slate-200 px-4 transition-colors duration-300 dark:border-[#22262f]">
         <svg
           xmlns="http://www.w3.org/2000/svg"
-          viewBox="0 0 480 56"
+          viewBox="0 0 434 56"
           fill="none"
           className="h-14 w-auto"
           aria-label="Juspay Decision Engine"
           role="img"
         >
           <defs>
-            <style>{`.de-brand{font-family:Inter,Arial,sans-serif;font-size:30px;dominant-baseline:central}.de-bold{font-weight:700;letter-spacing:-0.02em}.de-semi{font-weight:600;letter-spacing:-0.01em}`}</style>
+            <style>{`.de-brand{font-family:'Google Sans',Inter,-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;font-size:30px;dominant-baseline:central}.de-bold{font-weight:700;letter-spacing:-0.02em}.de-semi{font-weight:600;letter-spacing:-0.01em}`}</style>
           </defs>
           <g transform="translate(0, 1)">
             <path fillRule="evenodd" clipRule="evenodd" d="M27.2375 54.3079C25.9366 54.3441 24.6718 54.2355 23.3708 54.0545C19.8655 53.5477 16.577 52.4255 13.5414 50.5792C6.81987 46.5246 2.51952 40.6238 0.748782 32.8766C0.35127 31.139 0.170583 29.3651 0.170583 27.5912C0.134446 20.4957 2.44724 14.2691 7.1451 8.98363C11.2286 4.42224 16.2879 1.63472 22.2505 0.476271C23.9129 0.150457 25.5752 -0.0305508 27.2375 0.0418522C27.2375 2.75697 27.2375 5.43588 27.2375 8.15099C27.1652 8.18719 27.093 8.2234 27.0207 8.2958C26.045 8.98363 25.0693 9.70766 24.1297 10.4679C21.9976 12.2056 19.9739 14.0518 18.2754 16.2601C15.9988 19.1925 14.481 22.4144 14.2642 26.2156C14.1558 28.0256 14.3726 29.7995 14.9508 31.501C16.3601 35.7366 20.7328 40.1169 26.8761 40.2255C27.2375 40.2255 27.3098 40.298 27.3098 40.6962C27.2736 42.5424 27.2736 46.235 27.2736 46.235C27.2736 46.235 27.2736 46.4522 27.2736 46.5608C27.2375 49.1311 27.2375 51.7014 27.2375 54.3079Z" fill="#0099FF" />
@@ -137,7 +137,7 @@ export function Sidebar() {
         <SideLink to="/events" icon={BellRing} selectedPath={selectedPath} onNavigate={setPendingPath}>Routing Events</SideLink>
 
         <div className="flex items-center gap-2 px-3 pb-2 pt-5">
-          <span className="text-[12px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-[#78849a] leading-4">
             Routing
           </span>
         </div>
@@ -153,7 +153,7 @@ export function Sidebar() {
         {simulatorEnabled ? (
           <>
             <div className="flex items-center gap-2 px-3 pb-2 pt-5">
-              <span className="text-[12px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">
+              <span className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-[#78849a] leading-4">
                 Simulation
               </span>
             </div>
@@ -164,7 +164,7 @@ export function Sidebar() {
         ) : null}
 
         <div className="flex items-center gap-2 px-3 pb-2 pt-5">
-          <span className="text-[12px] font-bold uppercase tracking-widest text-slate-400 dark:text-[#6d768a]">
+          <span className="text-[11px] font-bold uppercase tracking-widest text-slate-500 dark:text-[#78849a] leading-4">
             Settings
           </span>
         </div>
@@ -177,7 +177,7 @@ export function Sidebar() {
         {accountOpen ? (
           <div className="absolute bottom-full left-4 right-4 mb-3 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-[0_20px_60px_-36px_rgba(15,23,42,0.35)] dark:border-[#2a303a] dark:bg-[#0d1118]">
             <div className="border-b border-slate-200 px-3 py-3 dark:border-[#242b36]">
-              <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
+              <p className="break-all text-sm font-semibold text-slate-900 dark:text-white">
                 {user?.email || 'Signed-in user'}
               </p>
               {user?.merchantId ? (
@@ -189,7 +189,7 @@ export function Sidebar() {
                     text={user.merchantId}
                     label="Copy merchant ID"
                     size={13}
-                    className="rounded-md p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-[#6d768a] dark:hover:bg-[#151b24] dark:hover:text-white"
+                    className="rounded-md p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:text-[#6d768a] dark:hover:bg-[#151b24] dark:hover:text-white"
                   />
                 </div>
               ) : null}
@@ -213,36 +213,37 @@ export function Sidebar() {
           </div>
         ) : null}
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
           <button
             type="button"
             onClick={() => setAccountOpen((value) => !value)}
             aria-haspopup="menu"
             aria-expanded={accountOpen}
-            className="flex min-w-0 flex-1 items-center gap-3 rounded-2xl px-2 py-2 text-left transition-colors hover:bg-slate-100 dark:hover:bg-[#151b24]"
+            title={user?.email || 'Account'}
+            className="flex min-w-0 flex-1 items-center gap-2 rounded-2xl px-1.5 py-2 text-left transition-colors hover:bg-slate-100 dark:hover:bg-[#151b24]"
           >
-            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-brand-600 text-[11px] font-semibold text-white">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-600 text-[11px] font-semibold text-white leading-4">
               {initials}
             </span>
             <span className="min-w-0 flex-1">
-              <span className="block truncate text-sm font-semibold text-slate-900 dark:text-white">
+              <span className="block truncate text-xs font-semibold text-slate-900 dark:text-white">
                 {user?.email || 'Account'}
               </span>
             </span>
             <ChevronDown
-              size={15}
-              className={`shrink-0 text-slate-400 transition-transform ${accountOpen ? 'rotate-180' : ''}`}
+              size={13}
+              className={`shrink-0 text-slate-500 transition-transform ${accountOpen ? 'rotate-180' : ''}`}
             />
           </button>
 
           <button
             type="button"
             onClick={handleThemeToggle}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-[#1a1f2a] dark:hover:text-white"
+            className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-950 dark:text-slate-400 dark:hover:bg-[#1a1f2a] dark:hover:text-white"
             aria-label="Toggle theme"
             title="Toggle theme"
           >
-            {isDark ? <Sun size={18} /> : <Moon size={18} />}
+            {isDark ? <Sun size={15} /> : <Moon size={15} />}
           </button>
         </div>
       </div>
@@ -291,11 +292,11 @@ function SideLink({
         event.currentTarget.blur()
         navigate(to)
       }}
-      className={`group relative flex w-full appearance-none items-center gap-3 rounded-[16px] border-0 px-4 py-2.5 text-[15px] font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]/40 focus-visible:ring-offset-0 ${indent ? 'pl-8' : ''
+      className={`group relative flex w-full appearance-none items-center gap-3 rounded-[16px] border-0 px-4 py-2.5 text-sm font-medium transition-colors duration-150 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]/40 focus-visible:ring-offset-0 ${indent ? 'pl-8' : ''
         } ${isHighlighted
           ? 'bg-transparent text-slate-950 dark:text-white'
           : 'bg-transparent text-slate-500 hover:bg-slate-900/[0.025] hover:text-slate-900 dark:text-[#8d96aa] dark:hover:bg-white/[0.035] dark:hover:text-white'
-        }`}
+        } leading-5`}
     >
       <span
         aria-hidden="true"
@@ -303,12 +304,12 @@ function SideLink({
       />
       <Icon
         size={18}
-        className={`transition-colors duration-200 ${isHighlighted ? 'text-brand-600 dark:text-sky-300' : 'text-slate-400 group-hover:text-slate-700 dark:text-[#697387] dark:group-hover:text-white'}`}
+        className={`transition-colors duration-200 ${isHighlighted ? 'text-brand-600 dark:text-sky-300' : 'text-slate-500 group-hover:text-slate-700 dark:text-[#78849a] dark:group-hover:text-white'}`}
         strokeWidth={isHighlighted ? 2.5 : 2}
       />
       <span className="flex-1 text-left">{children}</span>
       {beta && (
-        <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-violet-600 dark:bg-violet-500/15 dark:text-violet-400">
+        <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:bg-violet-500/15 dark:text-violet-400 leading-4">
           Beta
         </span>
       )}
