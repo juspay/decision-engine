@@ -7,7 +7,6 @@ import {
   BookOpen,
   PieChart,
   Network,
-  Target,
   BarChart3,
   Activity,
   BellRing,
@@ -147,7 +146,6 @@ export function Sidebar() {
         <SideLink to="/routing/rules" icon={BookOpen} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Rule-Based</SideLink>
         <SideLink to="/routing/volume" icon={PieChart} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Volume Split</SideLink>
         <SideLink to="/routing/debit" icon={Network} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Debit Routing</SideLink>
-        <SideLink to="/routing/volume-contracts" icon={Target} indent beta selectedPath={selectedPath} onNavigate={setPendingPath}>Volume Contracts</SideLink>
         <SideLink to="/routing/ab-testing" icon={FlaskConical} indent beta selectedPath={selectedPath} onNavigate={setPendingPath}>A/B Testing</SideLink>
 
         {simulatorEnabled ? (

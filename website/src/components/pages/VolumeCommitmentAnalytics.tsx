@@ -384,8 +384,9 @@ export function VolumeCommitmentAnalytics() {
                 No volume contracts are active for this merchant
               </p>
               <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                Configure commitments on the Volume Contracts page and activate the document, then
-                enable “Volume contracts (meet PSP commitments)” on the Multi Objective page. Pick a
+                Configure commitments on the Multi Objective page&apos;s Volume Contracts tab and
+                activate the document, then enable “Volume contracts (meet PSP commitments)” under
+                its Feature Flags. Pick a
                 short test cycle so a full period plays out in minutes, then drive traffic from the
                 Decision Simulator and watch it land here.
               </p>

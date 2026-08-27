@@ -1,13 +1,15 @@
 import { useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import useSWR, { useSWRConfig } from 'swr'
 import {
+  ArrowLeft,
   CalendarClock,
   ChevronDown,
-  ChevronUp,
-  Layers,
+  ChevronRight,
   Plus,
-  Target,
+  PowerOff,
   Trash2,
+  Zap,
 } from 'lucide-react'
 import { apiPost } from '../../lib/api'
 import { useMerchantStore } from '../../store/merchantStore'
@@ -17,11 +19,15 @@ import type {
   RoutingAlgorithm,
   VolumeContract,
   VolumeContractConfig,
+  VolumeContractReward,
   VolumeContractTier,
 } from '../../types/api'
-import { Card, CardBody, CardHeader, InsetPanel } from '../ui/Card'
+import { Card, CardBody, InsetPanel } from '../ui/Card'
 import { Button } from '../ui/Button'
-import { Badge } from '../ui/Badge'
+import { PageHeading } from '../ui/PageHeading'
+import { HeaderFilter, HeaderSearch, RowMenu } from '../ui/TableControls'
+import { parseBackendTimestamp } from '../../lib/routingRuleTimestamps'
+import { formatMoney } from './volumeCommitmentChartBits'
 import { Spinner } from '../ui/Spinner'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
@@ -112,7 +118,189 @@ function amount(value: string): string {
   return value.trim()
 }
 
-export function VolumeContractsPage() {
+type StatusFilter = 'all' | 'active' | 'inactive'
+
+/**
+ * When the document was written. Deliberately `created_at`, not `modified_at`: activation stamps
+ * `modified_at` (test cycles anchor to it), so "last modified" would read as "last activated".
+ */
+function formatCreated(doc: RoutingAlgorithm) {
+  const ms = doc.created_at ? parseBackendTimestamp(doc.created_at) : 0
+  if (!ms) return null
+  const date = new Date(ms)
+  return {
+    date: date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }),
+    time: date.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' }),
+    full: date.toLocaleString(undefined, { dateStyle: 'full', timeStyle: 'medium' }),
+  }
+}
+
+/** What a PSP promised and earns, in words. Stored amounts are minor units. */
+type CommitmentLine = { connector: string; promise: string; reward: string; status: 'active' | 'inactive' }
+
+function commitmentLines(config: VolumeContractConfig | undefined): CommitmentLine[] {
+  if (!config?.volume_contracts?.length) return []
+  const currency = config.metric === 'volume' ? null : config.currency?.denomination
+  const money = (value: unknown) => formatMoney(Number(value ?? 0), currency)
+  const rewardText = (reward: VolumeContractReward) =>
+    reward.kind === 'flat' ? `${money(reward.value.flat_amount)} flat` : `${reward.value.rebate_bps / 100}% rebate`
+  return config.volume_contracts.map((c) => {
+    const status = c.status ?? 'active'
+    if (c.archetype === 'lumpsum') {
+      return { connector: c.connector, promise: money(c.terms.target), reward: rewardText(c.terms.reward), status }
+    }
+    if (c.archetype === 'tiered') {
+      const targeted = c.terms.tiers.find((t) => t.targeted) ?? c.terms.tiers[0]
+      const rate = targeted ? ('rebate_bps' in targeted.rate ? targeted.rate.rebate_bps : targeted.rate.rate_bps) : 0
+      return {
+        connector: c.connector,
+        promise: targeted ? money(targeted.threshold) : '—',
+        reward: `${rate / 100}% ${targeted?.kind === 'marginal' ? 'marginal' : 'retroactive'} · ${c.terms.tiers.length} tier${c.terms.tiers.length === 1 ? '' : 's'}`,
+        status,
+      }
+    }
+    return { connector: c.connector, promise: money(c.terms.floor), reward: rewardText(c.terms.reward), status }
+  })
+}
+
+/** Document-level settings as label/value pairs for the detail panel. */
+function documentSettings(config: VolumeContractConfig) {
+  const currency = config.metric === 'volume' ? null : config.currency?.denomination
+  const toleranceBps = config.tolerance_bps ?? (config.tolerance ? parseFloat(config.tolerance) : undefined)
+  return [
+    { label: 'Routing mode', value: config.routing_mode === 'pace_guarded' ? 'Pace‑guarded (auth‑rate first)' : 'Volume‑commitment first' },
+    { label: 'Tolerance', value: toleranceBps != null ? `${(toleranceBps / 100).toFixed(toleranceBps % 100 ? 2 : 0)} pp` : '—' },
+    { label: 'Metric', value: config.metric === 'volume' ? 'Transaction count' : 'GMV' },
+    { label: 'Currency', value: config.currency?.denomination ?? '—' },
+    { label: 'Expected daily traffic', value: formatMoney(Number(config.expected_daily_traffic ?? 0), currency) },
+    { label: 'Forecast interval', value: config.forecast_interval_secs ? `${config.forecast_interval_secs}s` : 'default' },
+    { label: 'Billing cycle', value: summarizeCycle(config) },
+  ]
+}
+
+function cycleWords(cycle: VolumeContract['billing_cycle']) {
+  switch (cycle.type) {
+    case 'test_minutes':
+      return `${cycle.anchor}-minute test cycle`
+    case 'calendar_month':
+      return `Monthly from day ${cycle.anchor}`
+    case 'calendar_quarter':
+      return `Quarterly from month ${cycle.anchor}`
+    case 'calendar_year':
+      return `Yearly from month ${cycle.anchor}`
+    default:
+      return String(cycle.type)
+  }
+}
+
+/**
+ * What an expanded row shows: the document's settings as a compact spec strip, one row per PSP
+ * commitment, and the raw JSON only on request.
+ */
+function ContractDocumentDetail({ config }: { config: VolumeContractConfig | undefined }) {
+  const [showJson, setShowJson] = useState(false)
+  if (!config) return <p className="text-sm text-slate-500">This document has no readable configuration.</p>
+  const currency = config.metric === 'volume' ? null : config.currency?.denomination
+  const money = (value: unknown) => formatMoney(Number(value ?? 0), currency)
+  const lines = commitmentLines(config)
+  return (
+    <div className="space-y-4">
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4 lg:grid-cols-7">
+        {documentSettings(config).map((item) => (
+          <div key={item.label} className="min-w-0">
+            <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-[#78849a]">{item.label}</dt>
+            <dd className="mt-0.5 truncate text-sm text-slate-800 dark:text-slate-200" title={item.value}>{item.value}</dd>
+          </div>
+        ))}
+      </dl>
+
+      <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-[#1e2330]">
+        <table className="w-full text-left text-sm">
+          <thead>
+            <tr className="border-b border-slate-100 bg-slate-50/70 text-[11px] font-semibold uppercase tracking-wide text-slate-500 dark:border-[#1e2330] dark:bg-[#11151d] dark:text-[#78849a]">
+              <th className="px-4 py-2.5">PSP</th>
+              <th className="px-4 py-2.5">Promise</th>
+              <th className="px-4 py-2.5">Reward</th>
+              <th className="px-4 py-2.5">Cycle</th>
+              <th className="px-4 py-2.5">Timezone</th>
+              <th className="px-4 py-2.5">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            {config.volume_contracts.map((c, i) => {
+              const line = lines[i]
+              return (
+                <tr key={c.id || c.connector} className="border-b border-slate-100 last:border-b-0 dark:border-[#1e2330]">
+                  <td className="px-4 py-2.5 font-medium text-slate-900 dark:text-white">{c.connector}</td>
+                  <td className="px-4 py-2.5 tabular-nums text-slate-800 dark:text-slate-200">{line?.promise}</td>
+                  <td className="px-4 py-2.5 text-slate-800 dark:text-slate-200">
+                    {line?.reward}
+                    {c.archetype === 'tiered' && (
+                      <span className="mt-1 block text-xs text-slate-500 dark:text-[#8d96a8]">
+                        {c.terms.tiers.map((t) => `${money(t.threshold)} → ${('rebate_bps' in t.rate ? t.rate.rebate_bps : t.rate.rate_bps) / 100}%${t.targeted ? ' (target)' : ''}`).join(' · ')}
+                      </span>
+                    )}
+                  </td>
+                  <td className="px-4 py-2.5 text-slate-800 dark:text-slate-200">{cycleWords(c.billing_cycle)}</td>
+                  <td className="px-4 py-2.5 text-slate-600 dark:text-[#8d96a8]">{c.billing_cycle.timezone}</td>
+                  <td className="px-4 py-2.5">
+                    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold leading-4 ${
+                      (c.status ?? 'active') === 'active'
+                        ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400'
+                        : 'bg-slate-100 text-slate-500 dark:bg-[#1a1f2a] dark:text-[#8090a8]'
+                    }`}>
+                      {(c.status ?? 'active') === 'active' ? 'Active' : 'Inactive'}
+                    </span>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowJson((v) => !v)}
+          className="text-xs font-medium text-slate-500 transition-colors hover:text-brand-600 dark:text-[#8d96a8] dark:hover:text-brand-400"
+        >
+          {showJson ? 'Hide JSON' : 'Show JSON'}
+        </button>
+        {showJson && (
+          <pre className="mt-2 max-h-80 overflow-auto rounded-lg border border-slate-200 bg-white p-3 text-[11px] leading-relaxed text-slate-600 dark:border-[#1e2330] dark:bg-[#0a0d12] dark:text-[#9ca7ba]">
+            {JSON.stringify(config, null, 2)}
+          </pre>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/** The billing cycle in words, from the first contract — documents share one in practice. */
+function summarizeCycle(config: VolumeContractConfig | undefined) {
+  const cycle = config?.volume_contracts?.[0]?.billing_cycle
+  if (!cycle) return '—'
+  switch (cycle.type) {
+    case 'test_minutes':
+      return `${cycle.anchor}-minute test cycle`
+    case 'calendar_month':
+      return `Monthly from day ${cycle.anchor} (${cycle.timezone})`
+    case 'calendar_quarter':
+      return `Quarterly from month ${cycle.anchor} (${cycle.timezone})`
+    case 'calendar_year':
+      return `Yearly from month ${cycle.anchor} (${cycle.timezone})`
+    default:
+      return String(cycle.type)
+  }
+}
+
+/**
+ * The contract editor. `embedded` drops the page heading so it can sit as a tab on the Multi
+ * Objective Routing page, where that page already supplies the title; everything else — data,
+ * validation, activation — is identical either way.
+ */
+export function VolumeContractsPage({ embedded = false }: { embedded?: boolean } = {}) {
   const merchantId = useMerchantStore((s) => s.merchantId)
   const canEditRouting = useCanEditRouting()
   const { mutate: mutateCache } = useSWRConfig()
@@ -160,8 +348,11 @@ export function VolumeContractsPage() {
 
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
-  const [createdName, setCreatedName] = useState<string | null>(null)
+  const [actionSuccess, setActionSuccess] = useState<string | null>(null)
 
+  const [searchParams, setSearchParams] = useSearchParams()
+  const [nameFilter, setNameFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all')
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [activatingId, setActivatingId] = useState<string | null>(null)
   const [deactivatingId, setDeactivatingId] = useState<string | null>(null)
@@ -265,7 +456,7 @@ export function VolumeContractsPage() {
     if (!merchantId) return
     setSubmitting(true)
     setSubmitError(null)
-    setCreatedName(null)
+    setActionSuccess(null)
     try {
       const payload: CreateRoutingRequest = {
         name: docName.trim(),
@@ -275,9 +466,10 @@ export function VolumeContractsPage() {
         algorithm: { type: 'volume_contract', data: buildConfig() },
       }
       await apiPost('/routing/create', payload)
-      setCreatedName(docName.trim())
+      setActionSuccess(`“${docName.trim()}” created — activate it from the list to hand it to the routing engine.`)
       resetBuilder()
       revalidate()
+      closeBuilder()
     } catch (e) {
       setSubmitError(e instanceof Error ? e.message : 'Failed to create contract document')
     } finally {
@@ -336,134 +528,56 @@ export function VolumeContractsPage() {
 
   const unitHint = metric === 'volume' ? 'transaction count' : `${amountUnits} ${currency.toUpperCase()} units`
 
-  return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">Volume Contracts</h1>
-          <p className={`mt-1 ${type.subheading}`}>
-            Express PSP volume-commitment contracts — goals, rebates and billing cycles. The routing engine
-            reads the active document to pace and steer traffic; nothing here changes routing until activated.
-          </p>
+  // ── Views: the document list, or the builder as its own screen (like the rules pages) ────────
+  // The builder is addressed by URL (`?contract=new`) so a reload or shared link reopens it.
+  const showBuilder = searchParams.get('contract') === 'new'
+  function openBuilder() {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.set('contract', 'new')
+      return next
+    })
+  }
+  function closeBuilder() {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev)
+      next.delete('contract')
+      return next
+    })
+  }
+
+  const visibleDocuments = documents.filter((doc) => {
+    const isActive = doc.id === activeDocumentId
+    if (statusFilter === 'active' && !isActive) return false
+    if (statusFilter === 'inactive' && isActive) return false
+    if (nameFilter.trim()) {
+      const needle = nameFilter.trim().toLowerCase()
+      if (!doc.name.toLowerCase().includes(needle) && !doc.id.toLowerCase().includes(needle)) return false
+    }
+    return true
+  })
+
+  if (showBuilder) {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <button
+              type="button"
+              onClick={closeBuilder}
+              className="mb-2 inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition-colors hover:text-brand-600 dark:text-[#8d96a8] dark:hover:text-brand-400"
+            >
+              <ArrowLeft size={16} /> Volume Contracts
+            </button>
+            <PageHeading
+              title="Create Contract Document"
+              description="Express PSP volume-commitment contracts — goals, rebates and billing cycles. Nothing here changes routing until the document is activated."
+              className="truncate"
+            />
+          </div>
         </div>
-      </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        {/* ── Existing documents ── */}
-        <Card className="xl:col-span-1">
-          <CardHeader>
-            <div className="flex items-center gap-2.5">
-              <Layers size={18} className="text-slate-400 dark:text-[#8a8a93]" />
-              <h2 className={type.heading}>Contract Documents</h2>
-            </div>
-          </CardHeader>
-          <CardBody>
-            {!merchantId ? (
-              <p className={type.hint}>Set a merchant ID to see its contract documents.</p>
-            ) : isLoading ? (
-              <div className="flex items-center gap-2 py-6 text-sm text-slate-500">
-                <Spinner size={16} /> Loading…
-              </div>
-            ) : documents.length === 0 ? (
-              <p className={type.hint}>No contract documents yet. Build one on the right.</p>
-            ) : (
-              <ul className="space-y-2">
-                {documents.map((doc) => {
-                  const isActive = doc.id === activeDocumentId
-                  const isExpanded = expandedId === doc.id
-                  const data = (doc.algorithm_data ?? doc.algorithm)?.data as VolumeContractConfig | undefined
-                  return (
-                    <li
-                      key={doc.id}
-                      className={`rounded-xl border px-3 py-2.5 transition-colors ${
-                        isActive
-                          ? 'border-emerald-200 bg-emerald-50/50 dark:border-emerald-500/25 dark:bg-emerald-500/5'
-                          : 'border-slate-200 dark:border-[#222226]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <button
-                          type="button"
-                          className="min-w-0 flex-1 text-left"
-                          onClick={() => setExpandedId(isExpanded ? null : doc.id)}
-                        >
-                          <span className="block truncate text-sm font-medium text-slate-800 dark:text-white">
-                            {doc.name}
-                          </span>
-                          <span className="block text-[11px] text-slate-400 dark:text-[#8d96aa]">
-                            {data?.volume_contracts?.length ?? 0} contract{(data?.volume_contracts?.length ?? 0) === 1 ? '' : 's'}
-                            {doc.created_at ? ` · ${new Date(doc.created_at).toLocaleDateString()}` : ''}
-                          </span>
-                        </button>
-                        {isActive ? <Badge variant="green">Active</Badge> : <Badge variant="gray">Inactive</Badge>}
-                        <button
-                          type="button"
-                          className="text-slate-400 hover:text-slate-600 dark:hover:text-white"
-                          onClick={() => setExpandedId(isExpanded ? null : doc.id)}
-                          aria-label={isExpanded ? 'Collapse' : 'Expand'}
-                        >
-                          {isExpanded ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                        </button>
-                      </div>
-
-                      {isExpanded ? (
-                        <div className="mt-2 space-y-2">
-                          <pre className="max-h-64 overflow-auto rounded-lg bg-slate-50 p-2.5 text-[11px] leading-relaxed text-slate-600 dark:bg-[#0a0d12] dark:text-[#9ca7ba]">
-                            {JSON.stringify(data, null, 2)}
-                          </pre>
-                          <div className="flex flex-wrap items-center gap-2">
-                            {isActive ? (
-                              <Button
-                                size="sm"
-                                variant="danger"
-                                disabled={deactivatingId === doc.id || !canEditRouting}
-                                onClick={() => setPendingDeactivateId(doc.id)}
-                              >
-                                {deactivatingId === doc.id ? <Spinner size={12} /> : null} Deactivate
-                              </Button>
-                            ) : (
-                              <>
-                                <Button
-                                  size="sm"
-                                  disabled={activatingId === doc.id || !canEditRouting}
-                                  onClick={() =>
-                                    activeDocumentId ? setPendingActivateId(doc.id) : doActivate(doc.id)
-                                  }
-                                >
-                                  {activatingId === doc.id ? <Spinner size={12} /> : null} Activate
-                                </Button>
-                                <Button
-                                  size="sm"
-                                  variant="ghost"
-                                  disabled={deletingId === doc.id || !canEditRouting}
-                                  onClick={() => setPendingDeleteId(doc.id)}
-                                >
-                                  <Trash2 size={12} /> Delete
-                                </Button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      ) : null}
-                    </li>
-                  )
-                })}
-              </ul>
-            )}
-            <div className="mt-3">
-              <ErrorMessage error={actionError} />
-            </div>
-          </CardBody>
-        </Card>
-
-        {/* ── Builder ── */}
-        <Card className="xl:col-span-2">
-          <CardHeader>
-            <div className="flex items-center gap-2.5">
-              <Target size={18} className="text-slate-400 dark:text-[#8a8a93]" />
-              <h2 className={type.heading}>New Contract Document</h2>
-            </div>
-          </CardHeader>
+        <Card>
           <CardBody>
             <div className="space-y-6">
               {/* Document */}
@@ -864,30 +978,215 @@ export function VolumeContractsPage() {
                 </Button>
               </div>
 
-              {/* Submit */}
-              <div className="space-y-3 border-t border-slate-100 pt-4 dark:border-[#1a1d25]">
-                <ErrorMessage error={submitError} />
-                {createdName ? (
-                  <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/10 px-4 py-3 text-sm text-emerald-600 dark:text-emerald-400">
-                    “{createdName}” created. Activate it from the list to hand it to the routing engine.
-                  </div>
-                ) : null}
-                <div className="flex items-center justify-end gap-3">
-                  <Button variant="ghost" onClick={resetBuilder} disabled={submitting}>
-                    Reset
-                  </Button>
-                  <Button
-                    onClick={handleCreate}
-                    disabled={submitting || !merchantId || !docName.trim() || !canEditRouting}
-                  >
-                    {submitting ? <Spinner size={14} /> : null} Create Document
-                  </Button>
-                </div>
-              </div>
             </div>
           </CardBody>
         </Card>
+
+        <ErrorMessage error={submitError} />
+        <div className="flex flex-wrap items-center gap-4">
+          <Button
+            onClick={handleCreate}
+            disabled={submitting || !merchantId || !docName.trim() || !canEditRouting}
+          >
+            {submitting ? <Spinner size={14} /> : null} {submitting ? 'Saving...' : 'Create Contract'}
+          </Button>
+          <Button variant="secondary" size="sm" onClick={resetBuilder} disabled={submitting}>
+            Clear
+          </Button>
+          <button
+            type="button"
+            onClick={closeBuilder}
+            className="text-sm font-medium text-slate-500 transition-colors hover:text-slate-800 dark:text-[#8d96a8] dark:hover:text-white"
+          >
+            Cancel
+          </button>
+          <p className="max-w-[57ch] text-sm text-slate-500 dark:text-[#78849a]">
+            A new document is created inactive — activate it from the contracts list.
+          </p>
+        </div>
       </div>
+    )
+  }
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-start justify-between gap-4">
+        <div className="min-w-0">
+          {embedded ? (
+            <p className={type.subheading}>
+              PSP volume-commitment contracts — goals, rebates and billing cycles. The routing engine reads
+              the active document to pace and steer traffic.
+            </p>
+          ) : (
+            <PageHeading
+              title="Volume Contracts"
+              description="PSP volume-commitment contracts — goals, rebates and billing cycles. The routing engine reads the active document to pace and steer traffic."
+            />
+          )}
+        </div>
+        <Button onClick={openBuilder} disabled={!canEditRouting}>
+          <Plus size={15} /> Create Contract
+        </Button>
+      </div>
+
+      {actionError && <ErrorMessage error={actionError} />}
+      {actionSuccess && (
+        <div className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-sm text-emerald-600 dark:text-emerald-400">
+          {actionSuccess}
+        </div>
+      )}
+
+      <Card className="!rounded-[18px]">
+        {!merchantId ? (
+          <p className="px-4 py-6 text-sm text-slate-500">Set merchant ID to load contract documents.</p>
+        ) : isLoading ? (
+          <p className="px-4 py-6 text-sm text-slate-500">Loading...</p>
+        ) : documents.length === 0 ? (
+          <p className="px-4 py-6 text-sm text-slate-500">No contract documents yet.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px] text-left">
+              <thead>
+                <tr className="border-b border-slate-100 text-[11px] font-semibold uppercase leading-4 tracking-wide text-slate-500 dark:border-[#1e2330] dark:text-[#78849a]">
+                  <th className="px-5 py-3.5">
+                    <HeaderSearch
+                      label="Document Name & ID"
+                      value={nameFilter}
+                      onChange={setNameFilter}
+                      ariaLabel="Filter documents by name"
+                    />
+                  </th>
+                  <th className="px-5 py-3.5">
+                    <HeaderFilter
+                      label="Status"
+                      value={statusFilter}
+                      options={[
+                        { value: 'all', label: 'All statuses' },
+                        { value: 'active', label: 'Active' },
+                        { value: 'inactive', label: 'Inactive' },
+                      ]}
+                      onChange={(v) => setStatusFilter(v as StatusFilter)}
+                      ariaLabel="Filter by status"
+                    />
+                  </th>
+                  <th className="px-5 py-3.5">Billing Cycle</th>
+                  <th className="px-5 py-3.5">Created</th>
+                  <th className="px-5 py-3.5 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {visibleDocuments.length === 0 && (
+                  <tr>
+                    <td colSpan={5} className="px-4 py-8 text-center">
+                      <p className="text-sm text-slate-500">No documents match these filters.</p>
+                      <button
+                        type="button"
+                        onClick={() => { setStatusFilter('all'); setNameFilter('') }}
+                        className="mt-1.5 text-sm font-medium text-brand-600 hover:text-brand-700 dark:text-brand-400"
+                      >
+                        Clear filters
+                      </button>
+                    </td>
+                  </tr>
+                )}
+                {visibleDocuments.map((doc) => {
+                  const isActive = doc.id === activeDocumentId
+                  const isExpanded = expandedId === doc.id
+                  const data = (doc.algorithm_data ?? doc.algorithm)?.data as VolumeContractConfig | undefined
+                  const stamp = formatCreated(doc)
+                  // /routing/delete rejects an active document, so the control mirrors that.
+                  const lockedReason = isActive
+                    ? 'Deactivate this document first'
+                    : !canEditRouting
+                    ? 'You do not have permission to change routing'
+                    : undefined
+                  return [
+                    <tr
+                      key={doc.id}
+                      onClick={() => setExpandedId(isExpanded ? null : doc.id)}
+                      className={`cursor-pointer border-b border-slate-100 align-middle transition-colors hover:bg-slate-50 dark:border-[#1e2330] dark:hover:bg-[#11151d] ${
+                        isActive ? 'bg-emerald-50/50 dark:bg-emerald-900/10' : ''
+                      }`}
+                    >
+                      <td className="px-5 py-4 align-top">
+                        <div className="flex items-start gap-2">
+                          {isExpanded
+                            ? <ChevronDown size={14} className="mt-1 shrink-0 text-slate-500" />
+                            : <ChevronRight size={14} className="mt-1 shrink-0 text-slate-500" />}
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">{doc.name}</p>
+                            <p className="mt-0.5 truncate font-mono text-xs text-slate-500 dark:text-[#78849a]">{doc.id}</p>
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-5 py-4 align-top">
+                        <span className={`inline-flex shrink-0 items-center rounded-full px-2.5 py-1 text-[11px] font-semibold leading-4 ${
+                          isActive
+                            ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400'
+                            : 'bg-slate-100 text-slate-500 dark:bg-[#1a1f2a] dark:text-[#8090a8]'
+                        }`}>
+                          {isActive ? 'Active' : 'Inactive'}
+                        </span>
+                      </td>
+                      <td className="max-w-[260px] px-5 py-4 align-top">
+                        <p className="break-words text-sm font-medium leading-5 text-slate-800 dark:text-slate-200">
+                          {summarizeCycle(data)}
+                        </p>
+                        <p className="mt-0.5 text-xs text-slate-500 dark:text-[#78849a]">
+                          {(data?.volume_contracts?.length ?? 0)} PSP commitment{(data?.volume_contracts?.length ?? 0) === 1 ? '' : 's'}
+                        </p>
+                      </td>
+                      <td className="whitespace-nowrap px-5 py-4 align-top text-[13px] leading-[18px] text-slate-500 dark:text-[#78849a]">
+                        {stamp ? (
+                          <span title={stamp.full}>
+                            {stamp.date}
+                            <span className="block text-[12px] leading-4 text-slate-500 dark:text-[#78849a]">{stamp.time}</span>
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td className="px-5 py-4 align-top" onClick={(e) => e.stopPropagation()}>
+                        <RowMenu
+                          items={[
+                            isActive
+                              ? {
+                                  label: deactivatingId === doc.id ? 'Deactivating…' : 'Deactivate',
+                                  icon: PowerOff,
+                                  onSelect: () => setPendingDeactivateId(doc.id),
+                                  disabled: deactivatingId === doc.id || !canEditRouting,
+                                }
+                              : {
+                                  label: activatingId === doc.id ? 'Activating…' : 'Activate',
+                                  icon: Zap,
+                                  tone: 'positive',
+                                  onSelect: () => (activeDocumentId ? setPendingActivateId(doc.id) : doActivate(doc.id)),
+                                  disabled: activatingId === doc.id || !canEditRouting,
+                                },
+                            {
+                              label: deletingId === doc.id ? 'Deleting…' : 'Delete',
+                              icon: Trash2,
+                              tone: 'danger',
+                              onSelect: () => setPendingDeleteId(doc.id),
+                              disabled: Boolean(lockedReason) || deletingId === doc.id,
+                              hint: lockedReason,
+                            },
+                          ]}
+                        />
+                      </td>
+                    </tr>,
+                    isExpanded ? (
+                      <tr key={`${doc.id}-detail`} className="border-b border-slate-100 dark:border-[#1e2330]">
+                        <td colSpan={5} className="bg-slate-50/60 px-5 py-5 dark:bg-[#0d1017]">
+                          <ContractDocumentDetail config={data} />
+                        </td>
+                      </tr>
+                    ) : null,
+                  ]
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
 
       <ConfirmDialog
         open={pendingActivateId != null}
