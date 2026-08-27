@@ -22,7 +22,7 @@ import { FieldError } from '../../ui/FieldError'
 import { SearchableSelect } from '../../ui/SearchableSelect'
 import { SearchableMultiSelect } from '../../ui/SearchableMultiSelect'
 import { GatewaySelect } from '../../ui/GatewaySelect'
-import { gatewayOptions } from '../../../lib/connectors'
+import { gatewayOptions, type GatewayOption } from '../../../lib/connectors'
 import { RoutingKeyConfig } from '../../../hooks/useDynamicRoutingConfig'
 import type {
   RuleBlock, StatementGroup, ConditionRow,
@@ -46,7 +46,7 @@ export function SortableGatewayItem({
   position: number
   gatewayName: string
   gatewayId: string
-  options: string[]
+  options: GatewayOption[]
   onEdit: (next: { gatewayName: string; gatewayId: string }) => void
   onRemove: () => void
 }) {
@@ -90,7 +90,10 @@ export function SortableGatewayItem({
         <span className="w-5 shrink-0 text-center text-sm tabular-nums text-slate-500">{position}.</span>
         <GatewaySelect
           value={draftName}
-          onChange={setDraftName}
+          onChange={(name, option) => {
+            setDraftName(name)
+            if (option?.gatewayId) setDraftId(option.gatewayId)
+          }}
           onEnter={commit}
           options={options}
           className="flex-1"
@@ -220,7 +223,10 @@ export function PriorityEditor({
       >
         <GatewaySelect
           value={newGatewayName}
-          onChange={setNewGatewayName}
+          onChange={(name, option) => {
+            setNewGatewayName(name)
+            if (option?.gatewayId) setNewGatewayId(option.gatewayId)
+          }}
           onEnter={add}
           options={options}
           className="flex-1"
@@ -303,7 +309,10 @@ export function VolumeSplitEditor({
         />
         <GatewaySelect
           value={newName}
-          onChange={setNewName}
+          onChange={(name, option) => {
+            setNewName(name)
+            if (option?.gatewayId) setNewId(option.gatewayId)
+          }}
           onEnter={add}
           options={options}
           className="flex-1"
@@ -331,7 +340,7 @@ function VolumeSplitRow({
   onRemove,
 }: {
   entry: VolumeSplitEntry
-  options: string[]
+  options: GatewayOption[]
   onEdit: (patch: Partial<VolumeSplitEntry>) => void
   onRemove: () => void
 }) {
@@ -371,7 +380,16 @@ function VolumeSplitRow({
           aria-label="Split percentage"
           className="w-20 rounded-lg border border-slate-200 bg-transparent px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
         />
-        <GatewaySelect value={draftName} onChange={setDraftName} onEnter={commit} options={options} className="flex-1" />
+        <GatewaySelect
+          value={draftName}
+          onChange={(name, option) => {
+            setDraftName(name)
+            if (option?.gatewayId) setDraftId(option.gatewayId)
+          }}
+          onEnter={commit}
+          options={options}
+          className="flex-1"
+        />
         <input
           value={draftId}
           onChange={(e) => setDraftId(e.target.value)}
