@@ -83,6 +83,9 @@ export function VolumeSplitBuilderPage() {
   // /routing/update rejects an active algorithm (ensure_routing_algorithm_inactive), so say so up
   // front rather than letting Save fail.
   const isEditingActiveRule = isEdit && (activeRules || []).some((r) => r.id === editId)
+  // Until the active list resolves, whether this rule is active is unknown — and the answer decides
+  // update-in-place vs fork. Treat unknown as "not yet saveable" rather than assuming inactive.
+  const activeStateUnknown = isEdit && !activeRules
 
   // Seed from the source rule exactly once — otherwise SWR revalidation would overwrite edits.
   const seededFrom = useRef<string | null>(null)
@@ -395,7 +398,16 @@ export function VolumeSplitBuilderPage() {
             <Button
               type="submit"
               disabled={
-                saving || !merchantId || !canEditRouting || (isEditingActiveRule && !isDirty)
+                saving ||
+                !merchantId ||
+                !canEditRouting ||
+                activeStateUnknown ||
+                (isEditingActiveRule && !isDirty)
+              }
+              title={
+                isEditingActiveRule && !isDirty
+                  ? 'Change something to save it as a copy. To copy this rule unchanged, use Duplicate in the rules list.'
+                  : undefined
               }
             >
               {saving ? (

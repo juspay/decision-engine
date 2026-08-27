@@ -80,6 +80,9 @@ export function EuclidRuleBuilderPage() {
   // The backend refuses to update an active algorithm (ensure_routing_algorithm_inactive), so say
   // that up front rather than letting Save fail.
   const isEditingActiveRule = isEdit && (activeAlgorithms || []).some((a) => a.id === editId)
+  // Until the active list resolves, whether this rule is active is unknown — and the answer decides
+  // update-in-place vs fork. Treat unknown as "not yet saveable" rather than assuming inactive.
+  const activeStateUnknown = isEdit && !activeAlgorithms
 
   // Seed the form from the source rule exactly once. Without the guard, SWR revalidation would
   // overwrite whatever the user has typed since the page loaded.
@@ -191,7 +194,7 @@ export function EuclidRuleBuilderPage() {
           name: isEditingActiveRule ? forkName : ruleName.trim(),
           description: ruleDesc,
           created_by: merchantId,
-          algorithm_for: 'payment',
+          algorithm_for: sourceRule?.algorithm_for ?? 'payment',
           algorithm,
         })
       }
@@ -410,7 +413,13 @@ export function EuclidRuleBuilderPage() {
               submitting ||
               routingKeysUnavailable ||
               !canEditRouting ||
+              activeStateUnknown ||
               (isEditingActiveRule && !isDirty)
+            }
+            title={
+              isEditingActiveRule && !isDirty
+                ? 'Change something to save it as a copy. To copy this rule unchanged, use Duplicate in the rules list.'
+                : undefined
             }
           >
             {submitting
