@@ -156,7 +156,7 @@ export function GatewaySelect({
             ) : (
               filtered.map((o, i) => (
                 <button
-                  key={o.gatewayId ?? o.name}
+                  key={o.gatewayId || o.name}
                   type="button"
                   data-value={o.name}
                   onMouseDown={(e) => e.preventDefault()}
@@ -170,7 +170,10 @@ export function GatewaySelect({
                   {/* The merchant may run several accounts of one connector, so the id is what
                       actually tells two options apart. */}
                   {o.gatewayId && (
-                    <span className="mt-0.5 block truncate text-xs font-normal text-slate-500">
+                    <span
+                      data-gateway-id={o.gatewayId}
+                      className="mt-0.5 block truncate text-xs font-normal text-slate-500"
+                    >
                       {o.gatewayId}
                     </span>
                   )}

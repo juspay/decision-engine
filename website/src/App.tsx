@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { AnalyticsPage } from './components/pages/AnalyticsPage'
 import { DecisionExplorerPage } from './components/pages/DecisionExplorerPage'
@@ -28,6 +28,7 @@ import { signupEnabled, simulatorEnabled } from './lib/appConfig'
 import { useAuthStore } from './store/authStore'
 import { useMerchantStore } from './store/merchantStore'
 import { apiPost } from './lib/api'
+import { takeDashboardRoute } from './lib/dashboardHandoff'
 
 interface ExchangeResponse {
   token: string
@@ -37,13 +38,17 @@ interface ExchangeResponse {
   role: string
 }
 
-// Module-scoped guard: the one-time SSO code must be exchanged exactly once, even under
-// React StrictMode's double-invoked effects (the code is single-use — a second exchange 401s).
-let hsSsoExchangeStarted = false
+// The one-time SSO code must be exchanged exactly once, even under React StrictMode's
+// double-invoked effects (the code is single-use — a second exchange 401s). Holding the in-flight
+// promise rather than a boolean matters: with a boolean, StrictMode's second effect run took the
+// "already started" branch and opened the gate while the exchange was still in flight, so <Routes>
+// mounted with no token, AuthGuard replaced the URL with /login, and the deep-linked path was lost.
+let hsSsoExchange: Promise<ExchangeResponse | null> | null = null
 
 export default function App() {
   const setAuth = useAuthStore((s) => s.setAuth)
   const setMerchantId = useMerchantStore((s) => s.setMerchantId)
+  const navigate = useNavigate()
   // Hold the app on a loader while an SSO `?code=` is being exchanged. Without this, <Routes>
   // (and AuthGuard) render immediately; AuthGuard's child effect navigates to /login and strips
   // the code from the URL before this parent effect can read it, so the exchange never fires.
@@ -52,30 +57,37 @@ export default function App() {
   )
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const code = params.get('code')
-    if (!code || hsSsoExchangeStarted) {
+    const code = new URLSearchParams(window.location.search).get('code')
+    if (!code) {
       setExchangingCode(false)
       return
     }
-    hsSsoExchangeStarted = true
 
     const stripCode = () => {
-      // Strip the code from the URL so it doesn't linger in the address bar or history.
+      // Strip the code from the URL so it doesn't linger in the address bar or history. Carry the
+      // existing history state over — it holds React Router's {usr, key, idx}, and nulling it
+      // corrupts the router's history bookkeeping for the rest of the session.
+      const params = new URLSearchParams(window.location.search)
       params.delete('code')
       const newSearch = params.toString()
       const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : '')
-      window.history.replaceState(null, '', newUrl)
+      window.history.replaceState(window.history.state, '', newUrl)
     }
 
-    void (async () => {
-      try {
-        // Redeem the one-time code for a session token. The token is only ever returned in this
-        // POST response body — it never appears in the URL.
-        const res = await apiPost<ExchangeResponse>(
-          '/auth/admin/merchant-token/exchange',
-          { code },
-        )
+    // Redeem the one-time code for a session token. The token is only ever returned in this POST
+    // response body — it never appears in the URL.
+    if (!hsSsoExchange) {
+      hsSsoExchange = apiPost<ExchangeResponse>('/auth/admin/merchant-token/exchange', { code })
+        // Invalid / expired / already-used code — leave the user unauthenticated and let
+        // AuthGuard redirect to login.
+        .catch(() => null)
+    }
+
+    // Both StrictMode runs await the same exchange; only the mounted one commits its result.
+    let active = true
+    void hsSsoExchange.then((res) => {
+      if (!active) return
+      if (res) {
         const merchantId = res.merchant_id ?? ''
         setAuth(res.token, {
           userId: res.user_id ?? '',
@@ -85,15 +97,18 @@ export default function App() {
           isRedirectSession: true,
         })
         if (merchantId) setMerchantId(merchantId)
-      } catch {
-        // Invalid / expired / already-used code — leave the user unauthenticated and let
-        // AuthGuard redirect to login.
-      } finally {
-        stripCode()
-        setExchangingCode(false)
       }
-    })()
-  }, [setAuth, setMerchantId])
+      stripCode()
+      // Restore where the dashboard meant to land. This runs before <Routes> mounts, so AuthGuard
+      // never sees the pre-navigation location and AuthPage never gets to bounce us to "/".
+      const route = res ? takeDashboardRoute() : null
+      if (route) navigate(route, { replace: true })
+      setExchangingCode(false)
+    })
+    return () => {
+      active = false
+    }
+  }, [setAuth, setMerchantId, navigate])
 
   if (exchangingCode) {
     return (

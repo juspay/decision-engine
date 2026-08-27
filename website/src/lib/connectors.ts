@@ -1,4 +1,4 @@
-import { getDashboardConnectors } from './dashboardConnectors'
+import { getDashboardConnectors } from './dashboardHandoff'
 
 export const ROUTABLE_CONNECTORS: readonly string[] = [
   'absa_sanlam',

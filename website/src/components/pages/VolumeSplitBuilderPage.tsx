@@ -267,8 +267,11 @@ export function VolumeSplitBuilderPage() {
                       <div className="min-w-0">
                         <GatewaySelect
                           value={g.gatewayName}
-                          onChange={(val) => {
+                          onChange={(val, option) => {
                             updateGateway(g.id, 'gatewayName', val)
+                            // Parity with the rule-builder editors: a picked connector fills in its
+                            // own id rather than leaving the neighbouring field for the user.
+                            if (option?.gatewayId) updateGateway(g.id, 'gatewayId', option.gatewayId)
                             if (fieldErrors.gateways[g.id]) {
                               setFieldErrors((prev) => {
                                 const { [g.id]: _removed, ...rest } = prev.gateways
