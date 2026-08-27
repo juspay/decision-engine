@@ -171,7 +171,7 @@ function FieldLabel({ children, hint, required }: { children: ReactNode; hint?: 
 /** One input/select treatment for the experiment form, so fields don't drift apart field by field. */
 const fieldCls =
   'border border-slate-200 bg-transparent rounded-lg px-3 py-1.5 text-sm ' +
-  'focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]'
+  'focus:outline-none focus:border-brand-500 dark:border-[#222226]'
 
 // Visually separates the create form's three groups (what you're comparing / traffic & duration /
 // safety) with a hairline divider. No headings: each field labels itself and the arms are already
@@ -1357,7 +1357,7 @@ function CreateForm({
                     <input
                       type="text" inputMode="numeric" autoFocus
                       placeholder="Custom"
-                      className="w-24 rounded-md bg-transparent px-2.5 py-1.5 text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-24 rounded-md bg-transparent px-2.5 py-1.5 text-xs tabular-nums focus:outline-none focus:border-brand-500"
                       value={form.minSampleSize ? form.minSampleSize.toLocaleString() : ''}
                       onChange={e => setForm(f => ({ ...f, minSampleSize: Number(e.target.value.replace(/[^\d]/g, '')) }))}
                     />

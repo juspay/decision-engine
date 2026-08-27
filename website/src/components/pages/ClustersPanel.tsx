@@ -15,6 +15,7 @@ import {
   type ClustersScope,
 } from '../../hooks/useCostRouting'
 import { ClusterFilterBar } from './ClusterFilterBar'
+import { bpsToPct, ccySymbol, formatFee, pctText, pctToBps } from './SeedCostShared'
 
 // Compact numeric input for the inline fee editor. Deliberately not `inputClass` (which is `w-full`
 // and would collapse in the narrow Fee cell, scrolling the value out of view).
@@ -105,12 +106,6 @@ function programTitle(c: ClusterFee): string | undefined {
   const bps = Number(c.card_product)
   if (!c.card_product || !Number.isFinite(bps) || bps <= 0) return undefined
   return `Issuer BIN's dominant interchange rate: ${(bps / 100).toFixed(2)}%`
-}
-
-function formatFee(pctBps: number | null, fixed: number | null): string {
-  if (pctBps == null && fixed == null) return '—'
-  const pct = `${(pctBps ?? 0).toFixed(1)} bps`
-  return fixed && fixed > 0 ? `${pct} + ${fixed.toFixed(2)}` : pct
 }
 
 function formatCompact(n: number): string {
@@ -370,7 +365,7 @@ function SortableHeader({
 
 /**
  * One segment row. In the overrides view it edits inline: clicking Edit swaps this row's Fee cell
- * for the bps/fixed inputs and its action cell for Save/Cancel/Remove — no detached editor panel.
+ * for the rate/fixed inputs and its action cell for Save/Cancel/Remove — no detached editor panel.
  * The identity columns (network/program/country/…) stay put and serve as the row's label.
  */
 function ClusterRow({
@@ -397,9 +392,9 @@ function ClusterRow({
   // Pre-fill with the fee the row actually shows (effective = override, else model, else an inherited
   // connector fee). Seeding from override/model alone left inherited-fee segments at 0 even though a
   // real fee was displayed.
-  const seedPctBps = () => String(c.effective_pct_bps ?? c.override_pct_bps ?? c.model_pct_bps ?? 0)
+  const seedPct = () => String(bpsToPct(c.effective_pct_bps ?? c.override_pct_bps ?? c.model_pct_bps ?? 0))
   const seedFixed = () => String(c.effective_fixed ?? c.override_fixed ?? c.model_fixed ?? 0)
-  const [pctBps, setPctBps] = useState(seedPctBps)
+  const [pct, setPct] = useState(seedPct)
   const [fixed, setFixed] = useState(seedFixed)
   const [busy, setBusy] = useState<'save' | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -412,7 +407,7 @@ function ClusterRow({
   // on the open/close transition so a background data refresh can't clobber in-progress typing.
   useEffect(() => {
     if (!isEditing) return
-    setPctBps(seedPctBps())
+    setPct(seedPct())
     setFixed(seedFixed())
     setError(null)
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -420,16 +415,16 @@ function ClusterRow({
 
   async function save() {
     if (!merchantId) return
-    const p = parseFloat(pctBps)
+    const p = parseFloat(pct)
     const f = parseFloat(fixed)
     if (!isFinite(p) || p < 0 || !isFinite(f) || f < 0) {
-      setError('Enter non-negative numbers for bps and fixed fee.')
+      setError('Enter non-negative numbers for the rate and fixed fee.')
       return
     }
     setBusy('save')
     setError(null)
     try {
-      await setClusterOverride(merchantId, c.key, { pct_bps: p, fixed: f })
+      await setClusterOverride(merchantId, c.key, { pct_bps: pctToBps(p), fixed: f })
       onSaved()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to save fee')
@@ -477,12 +472,12 @@ function ClusterRow({
               <input
                 className={`${feeInputClass} w-20`}
                 type="number"
-                step="0.1"
+                step="0.01"
                 min="0"
-                value={pctBps}
-                onChange={(e) => setPctBps(e.target.value)}
-                title="Percentage (bps)"
-                aria-label="Percentage (bps)"
+                value={pct}
+                onChange={(e) => setPct(e.target.value)}
+                title="Rate (%)"
+                aria-label="Rate (%)"
               />
               <input
                 className={`${feeInputClass} w-16`}
@@ -507,7 +502,7 @@ function ClusterRow({
                 {c.segments!.length} tiers
               </span>
               <span className="tabular-nums font-medium text-slate-800 dark:text-[#c7cfdd]">
-                {formatFee(c.effective_pct_bps, c.effective_fixed)}
+                {formatFee(c.effective_pct_bps, c.effective_fixed, { currency: c.currency })}
               </span>
               {expanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
             </button>
@@ -516,12 +511,12 @@ function ClusterRow({
               <div className="flex items-center justify-end gap-1.5">
                 {isOverride && <Badge variant="purple">Override</Badge>}
                 <span className="tabular-nums font-medium text-slate-800 dark:text-[#c7cfdd]">
-                  {formatFee(c.effective_pct_bps, c.effective_fixed)}
+                  {formatFee(c.effective_pct_bps, c.effective_fixed, { currency: c.currency })}
                 </span>
               </div>
               {isOverride && c.model_pct_bps != null && (
                 <span className="block text-[11px] tabular-nums text-slate-500 line-through leading-4">
-                  {formatFee(c.model_pct_bps, c.model_fixed)}
+                  {formatFee(c.model_pct_bps, c.model_fixed, { currency: c.currency })}
                 </span>
               )}
             </>
@@ -575,7 +570,7 @@ function ClusterRow({
                   <th className="py-1 pr-3 text-right font-medium">Fixed</th>
                   <th className="py-1 pr-3 text-right font-medium">Txns</th>
                   <th className="py-1 pr-3 text-right font-medium">Volume</th>
-                  <th className="py-1 pr-3 text-right font-medium">Fit err</th>
+                  <th className="py-1 pr-3 text-right font-medium">Fit err (bps)</th>
                   <th className="py-1 text-right font-medium">Quality</th>
                 </tr>
               </thead>
@@ -589,10 +584,10 @@ function ClusterRow({
                       {formatCompact(s.lo)}–{formatCompact(s.hi)}
                     </td>
                     <td className="py-1 pr-3 text-right font-medium">
-                      {s.pct_bps != null ? `${s.pct_bps.toFixed(1)} bps` : '—'}
+                      {s.pct_bps != null ? pctText(s.pct_bps) : '—'}
                     </td>
                     <td className="py-1 pr-3 text-right">
-                      {s.fixed != null ? s.fixed.toFixed(2) : '—'}
+                      {s.fixed != null ? `${ccySymbol(c.currency)}${s.fixed.toFixed(2)}` : '—'}
                     </td>
                     <td className="py-1 pr-3 text-right">{s.n.toLocaleString()}</td>
                     <td className="py-1 pr-3 text-right">{formatCompact(s.gross_sum)}</td>

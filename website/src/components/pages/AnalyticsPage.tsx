@@ -58,14 +58,15 @@ import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Badge } from '../ui/Badge'
 import { Spinner } from '../ui/Spinner'
 import { ErrorMessage } from '../ui/ErrorMessage'
-import { DateTimePicker } from '../ui/DateTimePicker'
+import { TimeRangeFilter } from '../ui/TimeRangeFilter'
+import {
+  TimeWindow,
+  customWindowFrom,
+  presetWindow,
+  toDateTimeInputValue,
+} from '../../lib/timeRange'
 
 import { PageHeading } from '../ui/PageHeading'
-type TimeWindow = {
-  start_ms: number
-  end_ms: number
-}
-
 type RoutingFilters = {
   dimensions: Record<string, string>
   gateways: string[]
@@ -121,15 +122,6 @@ type ConnectorComparisonRow = {
   isSrLeader: boolean
   isVolumeLeader: boolean
 }
-
-const PRESET_OPTIONS: { value: AnalyticsRangeValue; label: string }[] = [
-  { value: '15m', label: 'Last 15 mins' },
-  { value: '1h', label: 'Last 1 hour' },
-  { value: '12h', label: 'Last 12 hours' },
-  { value: '1d', label: 'Last 1 day' },
-  { value: '1w', label: 'Last 1 week' },
-  { value: 'custom', label: 'Custom window' },
-]
 
 const CHART_COLORS = ['#0069ED', '#14b8a6', '#f97316', '#e11d48', '#8b5cf6', '#22c55e']
 const CHART_TOOLTIP_WRAPPER_STYLE = {
@@ -382,38 +374,6 @@ function buildBucketTimeline(window: TimeWindow, bucketSize: number) {
   return buckets
 }
 
-function presetWindow(range: AnalyticsRange) {
-  const now = Date.now()
-  const duration =
-    range === '15m'
-      ? 15 * 60 * 1000
-      : range === '1h'
-        ? 60 * 60 * 1000
-        : range === '12h'
-          ? 12 * 60 * 60 * 1000
-          : range === '1d'
-            ? 24 * 60 * 60 * 1000
-            : 7 * 24 * 60 * 60 * 1000
-
-  return {
-    start_ms: now - duration,
-    end_ms: now,
-  }
-}
-
-function toDateTimeInputValue(timestampMs: number) {
-  const date = new Date(timestampMs)
-  const pad = (value: number) => value.toString().padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-    date.getHours(),
-  )}:${pad(date.getMinutes())}`
-}
-
-function fromDateTimeInputValue(value: string) {
-  const timestamp = new Date(value).getTime()
-  return Number.isFinite(timestamp) ? timestamp : null
-}
-
 function EmptyState({ title, body }: { title: string; body: string }) {
   return (
     <div className="rounded-2xl border border-dashed border-slate-200 bg-white/60 px-6 py-12 text-center dark:border-[#222227] dark:bg-[#0b0b0d]">
@@ -436,7 +396,7 @@ function PendingState({ title, body }: { title: string; body: string }) {
 }
 
 function controlClassName() {
-  return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[13px] text-slate-700 shadow-sm outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#27272a] dark:bg-[#121214] dark:text-[#e5e7eb]'
+  return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[13px] text-slate-700 shadow-sm outline-none transition focus:border-brand-500 dark:border-[#27272a] dark:bg-[#121214] dark:text-[#e5e7eb]'
 }
 
 function sectionButtonClass(active: boolean) {
@@ -891,12 +851,10 @@ export function AnalyticsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, viewParam])
   const [routingFilters, setRoutingFilters] = useState<RoutingFilters>(EMPTY_ROUTING_FILTERS)
-  const [customRangeOpen, setCustomRangeOpen] = useState(false)
   const [connectorFiltersOpen, setConnectorFiltersOpen] = useState(false)
   const [routingAlignmentOpen, setRoutingAlignmentOpen] = useState(false)
   const [showAllFilters, setShowAllFilters] = useState(false)
   const [previewListPage, setPreviewListPage] = useState(1)
-  const timeRangeControlRef = useRef<HTMLDivElement | null>(null)
   const [customStart, setCustomStart] = useState(() =>
     toDateTimeInputValue(Date.now() - 24 * 60 * 60 * 1000),
   )
@@ -905,16 +863,10 @@ export function AnalyticsPage() {
     presetWindow('1d'),
   )
 
-  const customWindow = useMemo(() => {
-    if (range !== 'custom') return undefined
-    const start_ms = fromDateTimeInputValue(customStart)
-    const end_ms = fromDateTimeInputValue(customEnd)
-    const now = Date.now()
-    if (start_ms === null || end_ms === null || end_ms <= start_ms || start_ms > now || end_ms > now) {
-      return undefined
-    }
-    return { start_ms, end_ms }
-  }, [customEnd, customStart, range])
+  const customWindow = useMemo(
+    () => (range === 'custom' ? customWindowFrom(customStart, customEnd) : undefined),
+    [customEnd, customStart, range],
+  )
   const activeQueryWindow = range === 'custom' ? customWindow : presetWindowBounds
 
   const costCurrency = 'USD'
@@ -1008,29 +960,6 @@ export function AnalyticsPage() {
     fetcher,
     previewListSwrOptions,
   )
-
-  useEffect(() => {
-    if (!customRangeOpen) return
-
-    function handlePointerDown(event: MouseEvent) {
-      if (!timeRangeControlRef.current?.contains(event.target as Node)) {
-        setCustomRangeOpen(false)
-      }
-    }
-
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setCustomRangeOpen(false)
-      }
-    }
-
-    document.addEventListener('mousedown', handlePointerDown)
-    document.addEventListener('keydown', handleEscape)
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown)
-      document.removeEventListener('keydown', handleEscape)
-    }
-  }, [customRangeOpen])
 
   useEffect(() => {
     const revalidateCurrentView = () => {
@@ -1137,13 +1066,6 @@ export function AnalyticsPage() {
     setPreviewListPage(1)
   }, [range, activeQueryWindow?.start_ms, activeQueryWindow?.end_ms])
 
-  const activeWindowLabel = useMemo(() => {
-    if (range !== 'custom') {
-      return PRESET_OPTIONS.find((option) => option.value === range)?.label || 'Selected window'
-    }
-    if (!customWindow) return 'Custom window'
-    return `${formatDateTime(customWindow.start_ms)} to ${formatDateTime(customWindow.end_ms)}`
-  }, [customWindow, range])
   const effectiveWindow = useMemo(() => {
     if (activeQueryWindow) return activeQueryWindow
     return presetWindow(range as AnalyticsRange)
@@ -1631,14 +1553,9 @@ export function AnalyticsPage() {
   }, [availableFilters.dimensions, routingFilters])
 
   function handleRangeChange(value: AnalyticsRangeValue) {
-    if (value === 'custom') {
-      setRange(value)
-      setCustomRangeOpen((current) => (range === 'custom' ? !current : true))
-      return
-    }
-
     setRange(value)
-    setCustomRangeOpen(false)
+    if (value === 'custom') return
+
     const preset = presetWindow(value)
     setPresetWindowBounds(preset)
     setCustomStart(toDateTimeInputValue(preset.start_ms))
@@ -1727,73 +1644,16 @@ export function AnalyticsPage() {
         </div>
 
         <div className="flex items-center gap-2 justify-self-start xl:justify-self-end">
-          <div ref={timeRangeControlRef} className="relative">
-            <div className="flex flex-wrap items-center gap-1 rounded-full border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
-              {PRESET_OPTIONS.map((option) => (
-                <Button
-                  key={option.value}
-                  size="sm"
-                  variant="secondary"
-                  className={sectionButtonClass(range === option.value)}
-                  onClick={() => handleRangeChange(option.value)}
-                >
-                  {option.value === 'custom' ? 'Custom' : option.value}
-                </Button>
-              ))}
-            </div>
-
-            {range === 'custom' && customRangeOpen ? (
-              <div className="absolute right-0 top-[calc(100%+10px)] z-[90] w-[min(92vw,620px)] rounded-2xl border border-slate-200 bg-white/95 p-4 shadow-[0_24px_70px_-34px_rgba(15,23,42,0.48)] backdrop-blur dark:border-[#2a303a] dark:bg-[#11151d]/95 dark:shadow-[0_24px_70px_-34px_rgba(0,0,0,0.72)]">
-                <div className="flex items-start justify-between gap-5">
-                  <div>
-                    <p className="text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">
-                      Select time range
-                    </p>
-                    <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
-                      {customWindow ? activeWindowLabel : 'Choose a valid start and end time'}
-                    </p>
-                  </div>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => setCustomRangeOpen(false)}
-                  >
-                    Close
-                  </Button>
-                </div>
-
-                <div className="mt-5 grid gap-3 md:grid-cols-2">
-                  <label className="space-y-2">
-                    <span className="text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">
-                      Start time
-                    </span>
-                    <DateTimePicker
-                      className="w-full"
-                      value={customStart}
-                      onChange={setCustomStart}
-                    />
-                  </label>
-
-                  <label className="space-y-2">
-                    <span className="text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">
-                      End time
-                    </span>
-                    <DateTimePicker
-                      className="w-full"
-                      value={customEnd}
-                      onChange={setCustomEnd}
-                    />
-                  </label>
-                </div>
-
-                {!customWindow ? (
-                  <p className="mt-3 text-[13px] text-red-600 leading-[18px]">
-                    Choose an end time after the start time. Future dates are not available.
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
+          <TimeRangeFilter
+            range={range}
+            customStart={customStart}
+            customEnd={customEnd}
+            onRangeChange={handleRangeChange}
+            onCustomChange={(nextStart, nextEnd) => {
+              setCustomStart(nextStart)
+              setCustomEnd(nextEnd)
+            }}
+          />
           <Button
             size="sm"
             variant="secondary"

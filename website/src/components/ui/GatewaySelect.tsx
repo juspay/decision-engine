@@ -117,7 +117,7 @@ export function GatewaySelect({
         aria-expanded={open}
         aria-autocomplete="list"
         autoComplete="off"
-        className="w-full rounded-lg border border-slate-200 bg-transparent py-2 pl-3 pr-8 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
+        className="w-full rounded-lg border border-slate-200 bg-transparent py-2 pl-3 pr-8 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226]"
       />
       <button
         type="button"

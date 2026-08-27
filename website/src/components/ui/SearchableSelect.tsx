@@ -123,7 +123,7 @@ export function SearchableSelect({
               value={query}
               onChange={e => setQuery(e.target.value)}
               placeholder="Search…"
-              className="w-full rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0f0f11]"
+              className="w-full rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226] dark:bg-[#0f0f11]"
             />
           </div>
           <div

@@ -122,16 +122,16 @@ export function TopBar() {
         <GlobalSearch />
       </div>
 
-      <div className="flex flex-1 items-center justify-end gap-2">
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
         <NotificationBell />
 
         {/* Super-admin: enter any merchant by ID. Hidden inside a view session — Exit first (via the
             banner) so the single-level session model stays intact. */}
         {user?.isSuperAdmin && !user?.isSuperAdminView && (
-          <div className="relative" ref={superAdminRef}>
+          <div className="relative shrink-0" ref={superAdminRef}>
             <button
               onClick={() => setSuperAdminOpen((v) => !v)}
-              className="flex items-center gap-2 h-8 px-3 rounded-lg border border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 hover:bg-amber-100 dark:hover:bg-amber-500/20 transition-colors text-amber-700 dark:text-amber-300"
+              className="flex items-center gap-2 h-8 px-3 whitespace-nowrap rounded-lg border border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 hover:bg-amber-100 dark:hover:bg-amber-500/20 transition-colors text-amber-700 dark:text-amber-300"
             >
               <ShieldCheck size={13} className="shrink-0" />
               <span className="text-[12px] font-medium leading-4">Super admin</span>
@@ -150,7 +150,7 @@ export function TopBar() {
                   onChange={(e) => setLookupQuery(e.target.value)}
                   placeholder="Search by email or merchant name"
                   autoFocus
-                  className="w-full h-8 px-2.5 rounded-md border border-[#e6e6ee] dark:border-[#1a1a24] bg-white dark:bg-[#121218] text-[13px] text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-400/40 leading-[18px]"
+                  className="w-full h-8 px-2.5 rounded-md border border-[#e6e6ee] dark:border-[#1a1a24] bg-white dark:bg-[#121218] text-[13px] text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-brand-500 leading-[18px]"
                 />
 
                 {lookupQuery.trim() && (
@@ -197,7 +197,7 @@ export function TopBar() {
                     onChange={(e) => { setEnterId(e.target.value); setEnterError(null) }}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleEnterMerchant(enterId.trim()) }}
                     placeholder="…or paste an exact merchant ID"
-                    className="w-full h-8 px-2.5 rounded-md border border-[#e6e6ee] dark:border-[#1a1a24] bg-white dark:bg-[#121218] text-[13px] text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-amber-400/40 leading-[18px]"
+                    className="w-full h-8 px-2.5 rounded-md border border-[#e6e6ee] dark:border-[#1a1a24] bg-white dark:bg-[#121218] text-[13px] text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-brand-500 leading-[18px]"
                   />
                   {enterError && (
                     <p className="mt-1.5 text-[11px] text-red-600 leading-4">{enterError}</p>

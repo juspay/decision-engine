@@ -54,6 +54,8 @@ interface MerchantGroup {
   key: string
   merchant: string | null
   org: string | null
+  /** The org label is a raw Hyperswitch id, not a name — it is set in mono and never upper-cased. */
+  orgIsId: boolean
   orgKey: string
   scopes: MerchantInfo[]
 }
@@ -79,6 +81,7 @@ function groupScopes(scopes: MerchantInfo[]): MerchantGroup[] {
         key,
         merchant: labels.merchant,
         org: labels.org,
+        orgIsId: scope.hs_org_name == null,
         orgKey: scope.hs_org_id ?? labels.org ?? UNGROUPED_KEY,
         scopes: [scope],
       })
@@ -107,8 +110,9 @@ function matches(scope: MerchantInfo, query: string): boolean {
  * The three levels are laid out as the tree they are — org and merchant as headers, profiles as the
  * rows — rather than flattened into one label per row, because an org grant repeats the same
  * merchant name on every row and truncates the profile name that is the only part differing between
- * them. Search and collapsed groups are what make a large org navigable; both are inert on a small
- * account, where the whole list is already visible.
+ * them. A level shared by every scope in the list is stated once above the list instead of repeated
+ * on every row, so the panel grows structure only as the account does. Search and collapsed groups are what make a large org
+ * navigable; both are inert on a small account, where the whole list is already visible.
  */
 export function ScopeSwitcher() {
   const navigate = useNavigate()
@@ -152,6 +156,19 @@ export function ScopeSwitcher() {
   const groups = useMemo(() => groupScopes(merchants), [merchants])
   const trimmedQuery = query.trim().toLowerCase()
 
+  // A level that is the same for every scope in the list names nothing — it is the account the
+  // session is already in, which the trigger chip and the footer id already say. Only the levels
+  // that actually separate one row from another are drawn, so a single-merchant account gets a
+  // plain list of profiles instead of two header rows repeating what is above the panel.
+  // Computed over every group, not the filtered ones, so searching never reshapes the list.
+  const showMerchantHeaders = groups.length > 1
+  const showOrgHeaders = useMemo(() => new Set(groups.map((g) => g.orgKey)).size > 1, [groups])
+
+  // ...and where no header row will carry those levels, they are stated once above the list. The
+  // two are exclusive: ancestry common to every row is context for the whole panel, ancestry that
+  // differs between rows is a header on each group. Either way it is written exactly once.
+  const sharedAncestry = showMerchantHeaders ? null : (groups[0] ?? null)
+
   // Searching filters the rows and reveals every group still holding one, so a match is never
   // hidden behind a collapsed header.
   const visibleGroups = useMemo(() => {
@@ -161,13 +178,16 @@ export function ScopeSwitcher() {
       .filter((group) => group.scopes.length > 0)
   }, [groups, trimmedQuery])
 
-  const isCollapsed = (key: string) => !trimmedQuery && collapsed.has(key)
+  // The one rule for whether a group's rows are hidden, so what the keyboard walks is exactly what
+  // is painted. A group whose merchant header is not drawn has no control to fold it and stays open.
+  const isFolded = (group: MerchantGroup) =>
+    showMerchantHeaders && group.merchant !== null && !trimmedQuery && collapsed.has(group.key)
 
   // The rows the keyboard walks, in the order they are painted.
   const navigableScopes = useMemo(
-    () =>
-      visibleGroups.flatMap((g) => (!trimmedQuery && collapsed.has(g.key) ? [] : g.scopes)),
-    [visibleGroups, collapsed, trimmedQuery],
+    () => visibleGroups.flatMap((g) => (isFolded(g) ? [] : g.scopes)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- isFolded is derived from these
+    [visibleGroups, collapsed, trimmedQuery, showMerchantHeaders],
   )
 
   useEffect(() => {
@@ -303,7 +323,7 @@ export function ScopeSwitcher() {
     return (
       <div
         title={triggerTitle}
-        className="flex h-10 items-center gap-2 rounded-lg border border-[#e6e6ee] bg-white px-3 text-slate-700 dark:border-[#1a1a24] dark:bg-[#121218] dark:text-slate-300"
+        className="flex h-10 min-w-0 items-center gap-2 rounded-lg border border-[#e6e6ee] bg-white px-3 text-slate-700 dark:border-[#1a1a24] dark:bg-[#121218] dark:text-slate-300"
       >
         {triggerBody}
       </div>
@@ -315,7 +335,7 @@ export function ScopeSwitcher() {
       <button
         onClick={() => setOpen((v) => !v)}
         title={triggerTitle}
-        className="flex h-10 items-center gap-2 rounded-lg border border-[#e6e6ee] bg-white px-3 text-slate-700 transition-colors hover:bg-slate-50 dark:border-[#1a1a24] dark:bg-[#121218] dark:text-slate-300 dark:hover:bg-[#18181f]"
+        className="flex h-10 min-w-0 items-center gap-2 rounded-lg border border-[#e6e6ee] bg-white px-3 text-slate-700 transition-colors hover:bg-slate-50 dark:border-[#1a1a24] dark:bg-[#121218] dark:text-slate-300 dark:hover:bg-[#18181f]"
       >
         {triggerBody}
         <ChevronDown size={12} className="shrink-0 text-slate-500" />
@@ -326,52 +346,61 @@ export function ScopeSwitcher() {
           onKeyDown={handleKeyDown}
           className="absolute right-0 top-12 z-50 flex max-h-[min(560px,70vh)] w-[380px] flex-col overflow-hidden rounded-xl border border-[#e6e6ee] bg-white shadow-xl dark:border-[#1a1a24] dark:bg-[#0c0c10]"
         >
-          {/* Where the session is now, spelled out one level per line — the panel is the one place
-              with room for the full breadcrumb the trigger has to truncate. */}
-          <div className="border-b border-[#e6e6ee] px-3.5 py-3 dark:border-[#1a1a24]">
-            <p className="mb-2 text-[11px] font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400 leading-4">
-              Current scope
-            </p>
-            <div className="space-y-1.5">
-              {current.org && <ScopeLine icon={Building2} level="Org" value={current.org} />}
-              {current.merchant && <ScopeLine icon={Store} level="Merchant" value={current.merchant} />}
-              {/* The leaf is a profile only where there is a merchant above it. Standing alone it
-                  *is* the merchant, and calling it a profile would name a level that account does
-                  not have. */}
-              <ScopeLine
-                icon={current.merchant ? Layers : Building2}
-                level={current.merchant ? 'Profile' : 'Merchant'}
-                value={current.profile}
-                strong
-              />
+          {/* The org and merchant every listed scope sits under. Not a repeat of the rows below:
+              it is the level they all share, which is exactly why no row states it. */}
+          {sharedAncestry && (sharedAncestry.org || sharedAncestry.merchant) && (
+            <div className="flex items-center gap-1.5 border-b border-[#e6e6ee] px-3.5 py-2 text-slate-500 dark:border-[#1a1a24] dark:text-slate-400">
+              {sharedAncestry.org && (
+                <>
+                  <Building2 size={11} className="shrink-0" />
+                  <span
+                    className={`min-w-0 truncate leading-4 ${
+                      sharedAncestry.orgIsId ? 'font-mono text-[10.5px]' : 'text-[11px]'
+                    }`}
+                  >
+                    {sharedAncestry.org}
+                  </span>
+                </>
+              )}
+              {sharedAncestry.org && sharedAncestry.merchant && (
+                <ChevronRight size={10} className="shrink-0" />
+              )}
+              {sharedAncestry.merchant && (
+                <>
+                  <Store size={11} className="shrink-0" />
+                  <span className="min-w-0 truncate text-[11px] font-medium text-slate-600 dark:text-slate-300 leading-4">
+                    {sharedAncestry.merchant}
+                  </span>
+                </>
+              )}
             </div>
-            <div className="mt-2 flex items-center gap-1.5 pl-[22px]">
-              <span className="truncate font-mono text-[11px] text-slate-500 dark:text-slate-400 leading-4">
-                {user?.merchantId}
-              </span>
-              <CopyButton text={user?.merchantId ?? ''} label="Copy scope id" />
-            </div>
+          )}
+
+          {/* The search is the panel's first row rather than a boxed field inside a band: it is
+              focused the moment the panel opens, so a border and a focus ring would draw a second
+              outline around the one control already holding the caret. */}
+          <div className="relative border-b border-[#e6e6ee] dark:border-[#1a1a24]">
+            <Search
+              size={13}
+              className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-500"
+            />
+            <input
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder={isGranted ? 'Search profiles, merchants, ids' : 'Search merchants'}
+              autoFocus
+              className="h-11 w-full bg-transparent pl-9 pr-3.5 text-[13px] text-slate-700 placeholder:text-slate-500 focus:outline-none dark:text-slate-200 leading-[18px]"
+            />
           </div>
 
-          <div className="border-b border-[#e6e6ee] p-2 dark:border-[#1a1a24]">
-            <div className="relative">
-              <Search
-                size={13}
-                className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-500"
-              />
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder={isGranted ? 'Search profiles, merchants, ids' : 'Search merchants'}
-                autoFocus
-                className="h-8 w-full rounded-md border border-[#e6e6ee] bg-white pl-8 pr-2.5 text-[13px] text-slate-700 placeholder:text-slate-500 focus:outline-none focus:ring-2 focus:ring-brand-500/30 dark:border-[#1a1a24] dark:bg-[#121218] dark:text-slate-200 leading-[18px]"
-              />
-            </div>
-          </div>
-
-          {/* No top padding: a sticky header pins below the scroll container's own padding, and rows
-              would scroll through the band left above it. */}
-          <div ref={listRef} className="flex-1 overflow-y-auto pb-1">
+          {/* Top padding only where no header is drawn: a sticky header pins below the scroll
+              container's own padding, and rows would scroll through the band left above it. */}
+          <div
+            ref={listRef}
+            className={`flex-1 overflow-y-auto pb-1 ${
+              showOrgHeaders || showMerchantHeaders ? '' : 'pt-1'
+            }`}
+          >
             {visibleGroups.length === 0 && (
               <p className="px-3.5 py-6 text-center text-[12px] text-slate-500 leading-4">
                 Nothing matches “{query.trim()}”.
@@ -379,9 +408,11 @@ export function ScopeSwitcher() {
             )}
 
             {visibleGroups.map((group, i) => {
+              const orgHeaderRow = showOrgHeaders && group.org !== null
               const showOrgHeader =
-                group.org !== null && (i === 0 || visibleGroups[i - 1].orgKey !== group.orgKey)
-              const folded = isCollapsed(group.key)
+                orgHeaderRow && (i === 0 || visibleGroups[i - 1].orgKey !== group.orgKey)
+              const merchantHeaderRow = showMerchantHeaders && group.merchant !== null
+              const folded = isFolded(group)
 
               return (
                 <div key={group.key}>
@@ -389,17 +420,27 @@ export function ScopeSwitcher() {
                       the answer to "which merchant is this profile under?" scrolls out of reach.
                       The merchant sits below the org band, so it pins at that band's height. */}
                   {showOrgHeader && (
-                    <p className="sticky top-0 z-20 flex items-center gap-1.5 bg-white px-3.5 pb-1 pt-2.5 text-[11px] font-semibold uppercase tracking-widest text-slate-500 dark:bg-[#0c0c10] dark:text-slate-500 leading-4">
+                    <p className="sticky top-0 z-20 flex items-center gap-1.5 bg-white px-3.5 pb-1 pt-2.5 text-slate-500 dark:bg-[#0c0c10] dark:text-slate-500 leading-4">
                       <Building2 size={11} className="shrink-0" />
-                      <span className="truncate">{group.org}</span>
+                      {/* An org with no synced name shows its id, which upper-casing would mangle
+                          past recognition — that spelling is the only copy of it the user has. */}
+                      <span
+                        className={`truncate ${
+                          group.orgIsId
+                            ? 'font-mono text-[10.5px]'
+                            : 'text-[11px] font-semibold uppercase tracking-widest'
+                        }`}
+                      >
+                        {group.org}
+                      </span>
                     </p>
                   )}
 
-                  {group.merchant !== null && (
+                  {merchantHeaderRow && (
                     <button
                       onClick={() => toggleGroup(group.key)}
                       className={`sticky z-10 flex w-full items-center gap-1.5 bg-white px-3.5 py-1.5 text-left transition-colors hover:bg-slate-50 dark:bg-[#0c0c10] dark:hover:bg-[#13131a] ${
-                        group.org !== null ? 'top-[26px]' : 'top-0'
+                        orgHeaderRow ? 'top-[26px]' : 'top-0'
                       }`}
                     >
                       <ChevronRight
@@ -430,7 +471,7 @@ export function ScopeSwitcher() {
                           onClick={() => handleSwitch(scope.merchant_id)}
                           disabled={switching === scope.merchant_id}
                           className={`flex w-full items-center gap-2 py-1.5 pr-3 text-left transition-colors disabled:opacity-50 ${
-                            group.merchant !== null ? 'pl-9' : 'pl-3.5'
+                            merchantHeaderRow ? 'pl-9' : 'pl-3.5'
                           } ${isActive ? 'bg-slate-50 dark:bg-[#13131a]' : ''}`}
                         >
                           <LeafIcon size={12} className="shrink-0 text-slate-500 dark:text-slate-400" />
@@ -455,53 +496,33 @@ export function ScopeSwitcher() {
             })}
           </div>
 
-          {canAddMerchant && (
-            <div className="border-t border-[#e6e6ee] p-1 dark:border-[#1a1a24]">
+          {/* The list already marks where the session is, so the footer carries only what a row
+              cannot: the current scope's id in full, to copy into an API call or a support thread.
+              Its tooltip holds the breadcrumb for the levels the list no longer repeats. */}
+          <div className="flex items-center gap-1.5 border-t border-[#e6e6ee] px-3.5 py-2 dark:border-[#1a1a24]">
+            <span
+              title={triggerTitle}
+              className="min-w-0 truncate font-mono text-[11px] text-slate-500 dark:text-slate-400 leading-4"
+            >
+              {user?.merchantId}
+            </span>
+            <CopyButton text={user?.merchantId ?? ''} label="Copy scope id" />
+            {canAddMerchant && (
               <button
                 onClick={() => {
                   setOpen(false)
                   navigate('/onboarding')
                 }}
-                className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left text-brand-600 transition-colors hover:bg-slate-50 dark:hover:bg-[#13131a]"
+                className="ml-auto flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-brand-600 transition-colors hover:bg-slate-50 dark:hover:bg-[#13131a]"
               >
-                <Plus size={13} />
-                <span className="text-[13px] font-medium leading-[18px]">Add merchant</span>
+                <Plus size={12} />
+                <span className="text-[12px] font-medium leading-4">Add merchant</span>
               </button>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       )}
     </div>
   )
 }
 
-/** One level of the current scope: what it is, and what it is called. */
-function ScopeLine({
-  icon: Icon,
-  level,
-  value,
-  strong = false,
-}: {
-  icon: typeof Building2
-  level: string
-  value: string
-  strong?: boolean
-}) {
-  return (
-    <div className="flex items-center gap-1.5">
-      <Icon size={13} className="shrink-0 text-slate-500" />
-      <span className="w-[70px] shrink-0 whitespace-nowrap text-[11px] uppercase tracking-wide text-slate-500 dark:text-slate-400 leading-4">
-        {level}
-      </span>
-      <span
-        className={`truncate text-[12.5px] ${
-          strong
-            ? 'font-semibold text-slate-800 dark:text-slate-100'
-            : 'text-slate-600 dark:text-slate-300'
-        } leading-[17px]`}
-      >
-        {value}
-      </span>
-    </div>
-  )
-}

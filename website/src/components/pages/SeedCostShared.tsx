@@ -97,11 +97,38 @@ export function pctText(bps: number): string {
   return `${(bps / 100).toFixed(2)}%`
 }
 
+/** bps → the percent an editor shows: 180 → 1.8. Rounded at 4 dp so the divide can't drift. */
+export function bpsToPct(bps: number): number {
+  return Number.isFinite(bps) ? Math.round((bps / 100) * 10000) / 10000 : 0
+}
+
+/** percent → the bps a fee is stored as: 1.8 → 180, at the 0.01 bps the fee tables keep. */
+export function pctToBps(pct: number): number {
+  return Number.isFinite(pct) ? Math.round(pct * 100 * 100) / 100 : 0
+}
+
 /** "2.05% + $0.10" — the contract's headline effective rate for a row. */
 export function formatEffective(r: SeedCostRow, currency?: string | null): string {
   const pct = pctText(totalRate(r))
   if (!r.fixed) return pct
   return `${pct} + ${ccySymbol(currency ?? r.transaction_currency)}${r.fixed.toFixed(2)}`
+}
+
+/**
+ * A blended fee — learned, overridden or contractual — in the units the contract table and the fee
+ * editors use: "2.38% + $0.45/txn", with the fixed part omitted when zero and "/txn" only when
+ * `perTxn`. Every fee on the Costs surface goes through this or `formatEffective`, so a rate reads
+ * the same whichever rung of the ladder produced it.
+ */
+export function formatFee(
+  pctBps: number | null,
+  fixed: number | null,
+  { currency, perTxn = false }: { currency?: string | null; perTxn?: boolean } = {},
+): string {
+  if (pctBps == null && fixed == null) return '—'
+  const pct = pctText(pctBps ?? 0)
+  if (!(fixed && fixed > 0)) return pct
+  return `${pct} + ${ccySymbol(currency)}${fixed.toFixed(2)}${perTxn ? '/txn' : ''}`
 }
 
 /**
@@ -152,9 +179,6 @@ export function SeedRow({
     <tr className="border-b border-slate-100 transition-colors last:border-0 hover:bg-slate-50 dark:border-[#1c1c23] dark:hover:bg-[#0f131b]">
       <td className="px-5 py-3 text-slate-700 dark:text-[#c7cfdd]">
         {row.is_default ? <Badge variant="gray">Default</Badge> : row.label || '—'}
-      </td>
-      <td className="py-3 pr-3">
-        {row.psp ? <Chip variant={pspVariant(row.psp)}>{row.psp}</Chip> : '—'}
       </td>
       <td className="py-3 pr-3">
         {row.card_network ? (
@@ -302,12 +326,9 @@ export function ScenarioModal({
               )}
             </ModalField>
             <ModalField label="PSP">
-              <input
-                className={`${modalInput} capitalize`}
-                value={buf.psp}
-                placeholder="e.g. adyen"
-                onChange={(e) => set({ psp: e.target.value })}
-              />
+              <div className="flex h-[34px] items-center">
+                {buf.psp ? <Chip variant={pspVariant(buf.psp)}>{buf.psp}</Chip> : '—'}
+              </div>
             </ModalField>
           </div>
 
@@ -461,8 +482,8 @@ function NumInput({
 }
 
 /** A percentage input over a bps-stored fee: shows 1.80 for 180 bps, writes back bps on change. */
-function PctInput({ bps, onChange }: { bps: number; onChange: (bps: number) => void }) {
-  const pct = Number.isFinite(bps) ? Math.round((bps / 100) * 10000) / 10000 : 0
+export function PctInput({ bps, onChange }: { bps: number; onChange: (bps: number) => void }) {
+  const pct = bpsToPct(bps)
   return (
     <div className="relative">
       <input
@@ -472,8 +493,7 @@ function PctInput({ bps, onChange }: { bps: number; onChange: (bps: number) => v
         step={0.01}
         value={pct}
         onChange={(e) => {
-          const p = parseFloat(e.target.value)
-          onChange(Number.isFinite(p) ? Math.round(p * 100 * 100) / 100 : 0)
+          onChange(pctToBps(parseFloat(e.target.value)))
         }}
       />
       <span className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-500">

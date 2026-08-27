@@ -122,7 +122,7 @@ export function ApiKeysPage() {
               onChange={(e) => setDescription(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleCreate()}
               placeholder="Description (optional)"
-              className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
+              className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-1.5 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226]"
             />
             <Button onClick={handleCreate} disabled={creating || !merchantId}>
               {creating ? 'Creating…' : 'Create API Key'}
