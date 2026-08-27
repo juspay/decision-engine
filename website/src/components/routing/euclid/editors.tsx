@@ -92,7 +92,8 @@ export function SortableGatewayItem({
           value={draftName}
           onChange={(name, option) => {
             setDraftName(name)
-            if (option?.gatewayId) setDraftId(option.gatewayId)
+            // The id belongs to the picked connector; a hand-typed name invalidates it.
+            setDraftId(option?.gatewayId ?? '')
           }}
           onEnter={commit}
           options={options}
@@ -188,7 +189,11 @@ export function PriorityEditor({
     setNewGatewayId('')
   }
 
-  const options = gatewayOptions(suggestions, gateways.map((g) => g.gatewayName))
+  const options = gatewayOptions(
+    suggestions,
+    gateways.map((g) => g.gatewayName),
+    gateways.map((g) => g.gatewayId),
+  )
 
   return (
     <div className="space-y-2">
@@ -205,6 +210,7 @@ export function PriorityEditor({
               options={gatewayOptions(
                 suggestions,
                 gateways.filter((g) => g.id !== gw.id).map((g) => g.gatewayName),
+                gateways.filter((g) => g.id !== gw.id).map((g) => g.gatewayId),
               )}
               onEdit={(next) =>
                 onChange(gateways.map((g) => (g.id === gw.id ? { ...g, ...next } : g)))
@@ -225,7 +231,7 @@ export function PriorityEditor({
           value={newGatewayName}
           onChange={(name, option) => {
             setNewGatewayName(name)
-            if (option?.gatewayId) setNewGatewayId(option.gatewayId)
+            setNewGatewayId(option?.gatewayId ?? '')
           }}
           onEnter={add}
           options={options}
@@ -273,7 +279,11 @@ export function VolumeSplitEditor({
     setNewId('')
   }
 
-  const options = gatewayOptions(suggestions, entries.map((e) => e.gatewayName))
+  const options = gatewayOptions(
+    suggestions,
+    entries.map((e) => e.gatewayName),
+    entries.map((e) => e.gatewayId),
+  )
 
   return (
     <div className="space-y-2">
@@ -285,6 +295,7 @@ export function VolumeSplitEditor({
           options={gatewayOptions(
             suggestions,
             entries.filter((other) => other.id !== e.id).map((other) => other.gatewayName),
+            entries.filter((other) => other.id !== e.id).map((other) => other.gatewayId),
           )}
           onEdit={(patch) => onChange(entries.map((x) => (x.id === e.id ? { ...x, ...patch } : x)))}
           onRemove={() => onChange(entries.filter((x) => x.id !== e.id))}
@@ -311,7 +322,7 @@ export function VolumeSplitEditor({
           value={newName}
           onChange={(name, option) => {
             setNewName(name)
-            if (option?.gatewayId) setNewId(option.gatewayId)
+            setNewId(option?.gatewayId ?? '')
           }}
           onEnter={add}
           options={options}
@@ -384,7 +395,7 @@ function VolumeSplitRow({
           value={draftName}
           onChange={(name, option) => {
             setDraftName(name)
-            if (option?.gatewayId) setDraftId(option.gatewayId)
+            setDraftId(option?.gatewayId ?? '')
           }}
           onEnter={commit}
           options={options}

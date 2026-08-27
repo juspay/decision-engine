@@ -28,7 +28,7 @@ import { signupEnabled, simulatorEnabled } from './lib/appConfig'
 import { useAuthStore } from './store/authStore'
 import { useMerchantStore } from './store/merchantStore'
 import { apiPost } from './lib/api'
-import { takeDashboardRoute } from './lib/dashboardHandoff'
+import { stampDashboardHandoffScope, takeDashboardRoute } from './lib/dashboardHandoff'
 
 interface ExchangeResponse {
   token: string
@@ -87,23 +87,31 @@ export default function App() {
     let active = true
     void hsSsoExchange.then((res) => {
       if (!active) return
-      if (res) {
-        const merchantId = res.merchant_id ?? ''
-        setAuth(res.token, {
-          userId: res.user_id ?? '',
-          email: res.email ?? '',
-          merchantId,
-          role: res.role ?? 'admin',
-          isRedirectSession: true,
-        })
-        if (merchantId) setMerchantId(merchantId)
+      // Whatever happens in here, the loader has to come down and the spent code has to leave the
+      // URL — a throw that skipped those would strand the tab on "signing you in" with no way back.
+      try {
+        if (res) {
+          const merchantId = res.merchant_id ?? ''
+          setAuth(res.token, {
+            userId: res.user_id ?? '',
+            email: res.email ?? '',
+            merchantId,
+            role: res.role ?? 'admin',
+            isRedirectSession: true,
+          })
+          if (merchantId) {
+            setMerchantId(merchantId)
+            stampDashboardHandoffScope(merchantId)
+          }
+        }
+        // Restore where the dashboard meant to land. This runs before <Routes> mounts, so AuthGuard
+        // never sees the pre-navigation location and AuthPage never gets to bounce us to "/".
+        const route = res ? takeDashboardRoute() : null
+        if (route) navigate(route, { replace: true })
+      } finally {
+        stripCode()
+        setExchangingCode(false)
       }
-      stripCode()
-      // Restore where the dashboard meant to land. This runs before <Routes> mounts, so AuthGuard
-      // never sees the pre-navigation location and AuthPage never gets to bounce us to "/".
-      const route = res ? takeDashboardRoute() : null
-      if (route) navigate(route, { replace: true })
-      setExchangingCode(false)
     })
     return () => {
       active = false

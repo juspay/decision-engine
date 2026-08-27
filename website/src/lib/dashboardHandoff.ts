@@ -12,6 +12,8 @@
  * Mirror into sessionStorage so a reload of the same tab keeps the hand-off: sessionStorage is
  * per-tab and dies with the tab, which is exactly the lifetime of one hand-off.
  */
+import { useMerchantStore } from '../store/merchantStore'
+
 export interface DashboardConnector {
   merchant_connector_id: string
   connector_name: string
@@ -34,21 +36,30 @@ interface Handoff {
   ruleId: string | null
   /** Where the dashboard meant to land, already resolved to a router path. Consumed once. */
   route: string | null
+  /**
+   * The merchant the hand-off belongs to, stamped once the SSO exchange resolves it. A tab outlives
+   * a scope switch and a logout, and these ids are another profile's to leak — so nothing here is
+   * served under a different merchant.
+   */
+  merchantId: string | null
 }
 
 /** The dashboard is a separate client, so treat its payload as untrusted and keep only valid rows. */
+function validConnectors(parsed: unknown): DashboardConnector[] | null {
+  if (!Array.isArray(parsed)) return null
+  const connectors = parsed.filter(
+    (c): c is DashboardConnector =>
+      !!c &&
+      typeof c === 'object' &&
+      typeof (c as DashboardConnector).merchant_connector_id === 'string' &&
+      typeof (c as DashboardConnector).connector_name === 'string',
+  )
+  return connectors.length > 0 ? connectors : null
+}
+
 function parseConnectors(raw: string): DashboardConnector[] | null {
   try {
-    const parsed: unknown = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return null
-    const connectors = parsed.filter(
-      (c): c is DashboardConnector =>
-        !!c &&
-        typeof c === 'object' &&
-        typeof (c as DashboardConnector).merchant_connector_id === 'string' &&
-        typeof (c as DashboardConnector).connector_name === 'string',
-    )
-    return connectors.length > 0 ? connectors : null
+    return validConnectors(JSON.parse(raw))
   } catch {
     return null
   }
@@ -117,11 +128,12 @@ function readStorage(): Handoff | null {
     if (!raw) return null
     const parsed: unknown = JSON.parse(raw)
     if (!parsed || typeof parsed !== 'object') return null
-    const { connectors, ruleId, route } = parsed as Record<string, unknown>
+    const { connectors, ruleId, route, merchantId } = parsed as Record<string, unknown>
     return {
-      connectors: Array.isArray(connectors) ? parseConnectors(JSON.stringify(connectors)) : null,
+      connectors: validConnectors(connectors),
       ruleId: typeof ruleId === 'string' && ruleId ? ruleId : null,
       route: typeof route === 'string' && route ? route : null,
+      merchantId: typeof merchantId === 'string' && merchantId ? merchantId : null,
     }
   } catch {
     return null
@@ -135,21 +147,49 @@ function capture(): Handoff | null {
   const ruleId = fragment?.ruleId ?? stored?.ruleId ?? null
   const route = intendedRoute(ruleId) ?? stored?.route ?? null
   if (!connectors && !ruleId && !route) return null
-  const next: Handoff = { connectors, ruleId, route }
+  const next: Handoff = { connectors, ruleId, route, merchantId: stored?.merchantId ?? null }
   persist(next)
   return next
 }
 
-const handoff = capture()
+let handoff = capture()
+
+/**
+ * A hand-off is only ever served to the merchant it was minted for. Until the SSO exchange stamps
+ * one, the hand-off is unscoped and usable — that window is the exchange itself, where no other
+ * merchant can be active yet.
+ */
+function inScope(): boolean {
+  if (!handoff) return false
+  if (!handoff.merchantId) return true
+  return handoff.merchantId === useMerchantStore.getState().merchantId
+}
 
 /** The profile's connectors when this tab was opened from the dashboard, otherwise `null`. */
 export function getDashboardConnectors(): DashboardConnector[] | null {
-  return handoff?.connectors ?? null
+  return inScope() ? handoff?.connectors ?? null : null
 }
 
 /** The rule the merchant clicked in Hyperswitch, when this tab was opened from the dashboard. */
 export function getDashboardRuleId(): string | null {
-  return handoff?.ruleId ?? null
+  return inScope() ? handoff?.ruleId ?? null : null
+}
+
+/** Bind the hand-off to the merchant the SSO exchange resolved. */
+export function stampDashboardHandoffScope(merchantId: string): void {
+  if (!handoff || !merchantId) return
+  handoff.merchantId = merchantId
+  persist(handoff)
+}
+
+/** Drop the hand-off outright — on logout, so the next session in this tab starts clean. */
+export function clearDashboardHandoff(): void {
+  handoff = null
+  try {
+    sessionStorage.removeItem(STORAGE_KEY)
+  } catch {
+    // Nothing to do; the in-memory copy is already gone.
+  }
 }
 
 /**
@@ -157,7 +197,7 @@ export function getDashboardRuleId(): string | null {
  * session is established and never hijacks the user's own navigation afterwards.
  */
 export function takeDashboardRoute(): string | null {
-  if (!handoff?.route) return null
+  if (!inScope() || !handoff?.route) return null
   const { route } = handoff
   handoff.route = null
   persist(handoff)

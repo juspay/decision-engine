@@ -270,8 +270,9 @@ export function VolumeSplitBuilderPage() {
                           onChange={(val, option) => {
                             updateGateway(g.id, 'gatewayName', val)
                             // Parity with the rule-builder editors: a picked connector fills in its
-                            // own id rather than leaving the neighbouring field for the user.
-                            if (option?.gatewayId) updateGateway(g.id, 'gatewayId', option.gatewayId)
+                            // own id, and a hand-typed name clears it rather than leaving behind the
+                            // id of whatever was picked before.
+                            updateGateway(g.id, 'gatewayId', option?.gatewayId ?? '')
                             if (fieldErrors.gateways[g.id]) {
                               setFieldErrors((prev) => {
                                 const { [g.id]: _removed, ...rest } = prev.gateways
@@ -282,7 +283,8 @@ export function VolumeSplitBuilderPage() {
                           placeholder="e.g. stripe"
                           options={gatewayOptions(
                             [],
-                            gateways.filter((other) => other.id !== g.id).map((other) => other.gatewayName)
+                            gateways.filter((other) => other.id !== g.id).map((other) => other.gatewayName),
+                            gateways.filter((other) => other.id !== g.id).map((other) => other.gatewayId)
                           )}
                           className="min-w-0"
                         />

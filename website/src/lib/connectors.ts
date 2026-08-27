@@ -161,13 +161,18 @@ export interface GatewayOption {
 export function gatewayOptions(
   suggestions: readonly string[],
   alreadyPicked: readonly string[] = [],
+  alreadyPickedIds: readonly string[] = [],
 ): GatewayOption[] {
   const picked = new Set(alreadyPicked.filter(Boolean))
   const handoff = getDashboardConnectors()
 
   if (handoff) {
+    // A merchant can run several accounts of one connector, so the name cannot say which option is
+    // already taken — only the id can. Filtering by name here would delete the merchant's second
+    // stripe account from every other row the moment the first was picked.
+    const pickedIds = new Set(alreadyPickedIds.filter(Boolean))
     return handoff
-      .filter((connector) => !picked.has(connector.connector_name))
+      .filter((connector) => !pickedIds.has(connector.merchant_connector_id))
       .map((connector) => ({
         name: connector.connector_name,
         gatewayId: connector.merchant_connector_id,
