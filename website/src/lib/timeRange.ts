@@ -49,7 +49,7 @@ export function fromDateTimeInputValue(value: string) {
 
 /**
  * The window a pair of datetime-local strings describes, or `undefined` when the pair is not a
- * usable window: unparseable, reversed, or reaching into the future.
+ * usable window: unparsable, reversed, or reaching into the future.
  */
 export function customWindowFrom(start: string, end: string): TimeWindow | undefined {
   const start_ms = fromDateTimeInputValue(start)

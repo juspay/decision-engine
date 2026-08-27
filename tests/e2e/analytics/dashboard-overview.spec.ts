@@ -45,7 +45,8 @@ test.describe('Dashboard Overview UI', () => {
       (r) => r.url().includes('/analytics/overview') && r.url().includes('range='),
       { timeout: 30_000 },
     )
-    await authedPage.getByRole('button', { name: '1 week' }).click()
+    // Overview shares the app's TimeRangeFilter, so its pills read '1w' rather than '1 week'.
+    await authedPage.getByRole('button', { name: '1w', exact: true }).click()
     await refetch
 
     await expect(authedPage.getByText('Top gateway').first()).toBeVisible({ timeout: 30_000 })

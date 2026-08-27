@@ -41,6 +41,15 @@ function clampToNow(date: Date) {
   return date.getTime() > now.getTime() ? now : date
 }
 
+function fullDateLabel(date: Date) {
+  return new Intl.DateTimeFormat(undefined, {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    year: 'numeric',
+  }).format(date)
+}
+
 function monthLabel(date: Date) {
   return new Intl.DateTimeFormat(undefined, { month: 'long', year: 'numeric' }).format(date)
 }
@@ -200,16 +209,13 @@ export function DateRangeCalendar({ start, end, onApply, onCancel }: DateRangeCa
             <div
               key={cell.key}
               className={`py-px ${
-                state === 'inside'
-                  ? 'bg-brand-500/10 dark:bg-brand-500/15'
-                  : state === 'edge'
-                    ? 'bg-brand-500/10 first:rounded-l-md last:rounded-r-md dark:bg-brand-500/15'
-                    : ''
+                state === 'idle' ? '' : 'bg-brand-500/10 dark:bg-brand-500/15'
               }`}
             >
               <button
                 type="button"
                 disabled={future}
+                aria-label={fullDateLabel(cell.date)}
                 onClick={() => selectDay(cell.date)}
                 onMouseEnter={() => setHoverDate(rangeComplete ? null : cell.date)}
                 className={`flex h-7 w-full items-center justify-center rounded-md text-[12px] leading-4 transition ${
