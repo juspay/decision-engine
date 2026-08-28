@@ -103,7 +103,7 @@ export function SortableGatewayItem({
           value={draftId}
           onChange={(e) => setDraftId(e.target.value)}
           placeholder="Gateway ID (optional)"
-          className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
+          className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226]"
         />
         <button
           type="button"
@@ -242,7 +242,7 @@ export function PriorityEditor({
           onChange={(e) => setNewGatewayId(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
           placeholder="Gateway ID (optional)"
-          className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
+          className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226]"
         />
         <Button type="button" size="sm" variant="secondary" onClick={add}>
           <Plus size={13} /> Add
@@ -316,7 +316,7 @@ export function VolumeSplitEditor({
           value={newSplit}
           onChange={(e) => setNewSplit(e.target.value)}
           placeholder="Split %"
-          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm w-20 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm w-20 focus:outline-none focus:border-brand-500"
         />
         <GatewaySelect
           value={newName}
@@ -333,7 +333,7 @@ export function VolumeSplitEditor({
           onChange={(e) => setNewId(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
           placeholder="Gateway ID (optional)"
-          className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
+          className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226]"
         />
         <Button type="button" size="sm" variant="secondary" onClick={add}>
           <Plus size={13} /> Add
@@ -389,7 +389,7 @@ function VolumeSplitRow({
           value={draftSplit}
           onChange={(e) => setDraftSplit(e.target.value)}
           aria-label="Split percentage"
-          className="w-20 rounded-lg border border-slate-200 bg-transparent px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
+          className="w-20 rounded-lg border border-slate-200 bg-transparent px-2 py-1 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226]"
         />
         <GatewaySelect
           value={draftName}
@@ -405,7 +405,7 @@ function VolumeSplitRow({
           value={draftId}
           onChange={(e) => setDraftId(e.target.value)}
           placeholder="Gateway ID (optional)"
-          className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
+          className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226]"
         />
         <button
           type="button"
@@ -523,7 +523,7 @@ export function VolumeSplitPriorityEditor({
           onChange={(e) => setNewSplit(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addSplit())}
           placeholder="Split %"
-          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm w-24 focus:outline-none focus:ring-1 focus:ring-brand-500"
+          className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 text-sm w-24 focus:outline-none focus:border-brand-500"
         />
         <Button type="button" size="sm" variant="secondary" onClick={addSplit}>
           <Plus size={13} /> Add split

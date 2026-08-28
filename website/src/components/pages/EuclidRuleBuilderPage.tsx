@@ -313,7 +313,7 @@ export function EuclidRuleBuilderPage() {
                     onChange={(e) => { setRuleName(e.target.value); if (nameError) setNameError(null) }}
                     placeholder="my-rule"
                     aria-invalid={Boolean(nameError)}
-                    className={`w-full rounded-lg border border-slate-200 bg-transparent px-3.5 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] ${invalidFieldClass(Boolean(nameError))}`}
+                    className={`w-full rounded-lg border border-slate-200 bg-transparent px-3.5 py-2.5 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226] ${invalidFieldClass(Boolean(nameError))}`}
                   />
                   <FieldError message={nameError} />
                 </div>
@@ -330,7 +330,7 @@ export function EuclidRuleBuilderPage() {
                   value={ruleDesc}
                   onChange={(e) => setRuleDesc(e.target.value)}
                   placeholder="Optional description"
-                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-transparent px-3.5 py-2.5 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]"
+                  className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-transparent px-3.5 py-2.5 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226]"
                 />
               </div>
             </div>

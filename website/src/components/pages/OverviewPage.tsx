@@ -14,6 +14,7 @@ import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
 import {
   AnalyticsRange,
+  AnalyticsRangeValue,
   AnalyticsOverviewResponse,
   AnalyticsRoutingStatsResponse,
   RoutingAlgorithm,
@@ -23,21 +24,22 @@ import { Badge } from '../ui/Badge'
 import { Card as GlassCard, SurfaceLabel } from '../ui/Card'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
+import { TimeRangeFilter } from '../ui/TimeRangeFilter'
+import {
+  customWindowFrom,
+  formatWindowBound,
+  presetWindow,
+  toDateTimeInputValue,
+} from '../../lib/timeRange'
 
 import { PageHeading } from '../ui/PageHeading'
-const OVERVIEW_RANGE_OPTIONS: {
-  value: AnalyticsRange
-  label: string
-  detail: string
-  badge: string
-  summaryLabel: string
-}[] = [
-  { value: '15m', label: '15m', detail: 'Last 15 mins', badge: 'Live 15m', summaryLabel: 'Errors last 15 mins' },
-  { value: '1h', label: '1h', detail: 'Last hour', badge: 'Live 1h', summaryLabel: 'Errors last hour' },
-  { value: '12h', label: '12h', detail: 'Last 12 hours', badge: 'Live 12h', summaryLabel: 'Errors last 12 hours' },
-  { value: '1d', label: '1 day', detail: 'Last 1 day', badge: 'Live 1d', summaryLabel: 'Errors last 1 day' },
-  { value: '1w', label: '1 week', detail: 'Last 1 week', badge: 'Live 1w', summaryLabel: 'Errors last 1 week' },
-]
+const PRESET_WINDOW_COPY: Record<AnalyticsRange, { detail: string; badge: string }> = {
+  '15m': { detail: 'Last 15 mins', badge: 'Live 15m' },
+  '1h': { detail: 'Last hour', badge: 'Live 1h' },
+  '12h': { detail: 'Last 12 hours', badge: 'Live 12h' },
+  '1d': { detail: 'Last 1 day', badge: 'Live 1d' },
+  '1w': { detail: 'Last 1 week', badge: 'Live 1w' },
+}
 
 function formatCompactNumber(value: number | undefined) {
   return new Intl.NumberFormat(undefined, {
@@ -124,7 +126,16 @@ export function OverviewPage() {
   const { merchantId } = useMerchantStore()
   const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
   const effectiveMerchantId = merchantId || authMerchantId
-  const [range, setRange] = useState<AnalyticsRange>('1d')
+  const [range, setRange] = useState<AnalyticsRangeValue>('1d')
+  const [customStart, setCustomStart] = useState(() =>
+    toDateTimeInputValue(presetWindow('1d').start_ms),
+  )
+  const [customEnd, setCustomEnd] = useState(() => toDateTimeInputValue(Date.now()))
+
+  const customWindow = useMemo(
+    () => (range === 'custom' ? customWindowFrom(customStart, customEnd) : undefined),
+    [customEnd, customStart, range],
+  )
 
   const { data: activeAlgorithms } = useSWR<RoutingAlgorithm[]>(
     effectiveMerchantId ? `/routing/list/active/${effectiveMerchantId}` : null,
@@ -140,8 +151,15 @@ export function OverviewPage() {
   const debitRoutingFlag = useDebitRoutingFlag(effectiveMerchantId)
   const merchantFeatures = useMerchantFeatures(effectiveMerchantId || undefined)
 
-  const analyticsOverviewUrl = `/analytics/overview?range=${range}`
-  const analyticsRoutingUrl = `/analytics/routing-stats?range=${range}`
+  // A half-picked custom window has no bounds to query with, so both requests wait for it.
+  const windowQuery =
+    range === 'custom'
+      ? customWindow
+        ? `range=1h&start_ms=${customWindow.start_ms}&end_ms=${customWindow.end_ms}`
+        : null
+      : `range=${range}`
+  const analyticsOverviewUrl = windowQuery ? `/analytics/overview?${windowQuery}` : null
+  const analyticsRoutingUrl = windowQuery ? `/analytics/routing-stats?${windowQuery}` : null
 
   const analyticsOverview = useSWR<AnalyticsOverviewResponse>(analyticsOverviewUrl, fetcher, {
     shouldRetryOnError: false,
@@ -201,7 +219,14 @@ export function OverviewPage() {
 
   const topGateway = gatewayUsage[0]?.gateway || analyticsOverview.data?.top_scores?.[0]?.gateway
   const selectedWindow =
-    OVERVIEW_RANGE_OPTIONS.find((option) => option.value === range) || OVERVIEW_RANGE_OPTIONS[1]
+    range === 'custom'
+      ? {
+          detail: customWindow
+            ? `${formatWindowBound(customWindow.start_ms)} — ${formatWindowBound(customWindow.end_ms)}`
+            : 'Custom window',
+          badge: 'Custom',
+        }
+      : PRESET_WINDOW_COPY[range]
   // Multi-objective is set up when either the merchant saved a manual successRate
   // config on /routing/sr (a merchant-specific /rule/get response — the same
   // condition that page uses) or turned on Autopilot mode there (the `autopilot`
@@ -285,25 +310,23 @@ export function OverviewPage() {
 
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
 
-          <div className="inline-flex rounded-2xl border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
-            {OVERVIEW_RANGE_OPTIONS.map((option) => {
-              const active = option.value === range
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setRange(option.value)}
-                  className={`rounded-[14px] px-3 py-2 text-xs font-semibold transition ${
-                    active
-                      ? 'bg-white text-slate-950 shadow-sm dark:bg-[#1a2332] dark:text-white'
-                      : 'text-slate-500 hover:text-slate-900 dark:text-[#8ea0bb] dark:hover:text-white'
-                  }`}
-                >
-                  {option.label}
-                </button>
-              )
-            })}
-          </div>
+          <TimeRangeFilter
+            range={range}
+            customStart={customStart}
+            customEnd={customEnd}
+            onRangeChange={(nextRange) => {
+              setRange(nextRange)
+              if (nextRange !== 'custom') {
+                const preset = presetWindow(nextRange)
+                setCustomStart(toDateTimeInputValue(preset.start_ms))
+                setCustomEnd(toDateTimeInputValue(preset.end_ms))
+              }
+            }}
+            onCustomChange={(nextStart, nextEnd) => {
+              setCustomStart(nextStart)
+              setCustomEnd(nextEnd)
+            }}
+          />
         </div>
 
         {/* loading bar — sits at the bottom edge of the header, no layout shift */}

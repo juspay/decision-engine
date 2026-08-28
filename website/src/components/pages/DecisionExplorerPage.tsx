@@ -2348,13 +2348,13 @@ export function DecisionExplorerPage() {
                               placeholder="Metadata key"
                               value={param.metadataKey || ''}
                               onChange={e => updateRuleParamMetadataKey(idx, e.target.value)}
-                              className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:ring-1 focus:ring-brand-500"
+                              className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:border-brand-500"
                             />
                             <input
                               placeholder="Metadata value"
                               value={param.value}
                               onChange={e => updateRuleParam(idx, 'value', e.target.value)}
-                              className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:ring-1 focus:ring-brand-500"
+                              className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:border-brand-500"
                             />
                           </div>
                         )}
@@ -2437,7 +2437,7 @@ export function DecisionExplorerPage() {
                     <input
                       value={debitForm.amount}
                       onChange={e => setDebitField('amount', e.target.value)}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                     />
                   </div>
                   <div>
@@ -2445,7 +2445,7 @@ export function DecisionExplorerPage() {
                     <input
                       value={debitForm.currency}
                       onChange={e => setDebitField('currency', e.target.value.toUpperCase())}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                     />
                   </div>
                   <div>
@@ -2453,7 +2453,7 @@ export function DecisionExplorerPage() {
                     <select
                       value={debitForm.auth_type}
                       onChange={e => setDebitField('auth_type', e.target.value)}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                     >
                       <option value="THREE_DS">THREE_DS</option>
                       <option value="NO_THREE_DS">NO_THREE_DS</option>
@@ -2464,7 +2464,7 @@ export function DecisionExplorerPage() {
                     <select
                       value={debitForm.card_type}
                       onChange={e => setDebitField('card_type', e.target.value as DebitRoutingFormState['card_type'])}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                     >
                       <option value="debit">Debit</option>
                       <option value="credit">Credit</option>
@@ -2478,7 +2478,7 @@ export function DecisionExplorerPage() {
                     value={debitForm.eligible_gateways}
                     onChange={e => setDebitField('eligible_gateways', e.target.value)}
                     placeholder="stripe, adyen"
-                    className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                   />
                 </div>
 
@@ -2488,7 +2488,7 @@ export function DecisionExplorerPage() {
                     <input
                       value={debitForm.merchant_category_code}
                       onChange={e => setDebitField('merchant_category_code', e.target.value)}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                     />
                   </div>
                   <div>
@@ -2496,7 +2496,7 @@ export function DecisionExplorerPage() {
                     <input
                       value={debitForm.acquirer_country}
                       onChange={e => setDebitField('acquirer_country', e.target.value.toUpperCase())}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                     />
                   </div>
                 </div>
@@ -2507,7 +2507,7 @@ export function DecisionExplorerPage() {
                     value={debitForm.co_badged_networks}
                     onChange={e => setDebitField('co_badged_networks', e.target.value)}
                     placeholder="VISA, NYCE, PULSE, STAR"
-                    className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                   />
                 </div>
 
@@ -2517,7 +2517,7 @@ export function DecisionExplorerPage() {
                     <input
                       value={debitForm.issuer_country}
                       onChange={e => setDebitField('issuer_country', e.target.value.toUpperCase())}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                     />
                   </div>
                   <div className="flex items-center gap-2 pt-6">
@@ -2541,7 +2541,7 @@ export function DecisionExplorerPage() {
                       value={debitForm.regulated_name}
                       onChange={e => setDebitField('regulated_name', e.target.value)}
                       placeholder="GOVERNMENT NON-EXEMPT INTERCHANGE FEE (WITH FRAUD)"
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                     />
                   </div>
                 )}
@@ -2631,15 +2631,15 @@ export function DecisionExplorerPage() {
                       ? [...MULTI_OBJECTIVE_CARD_BRANDS]
                       : cardBrandOptions
                     const fields: { label: string; content: React.ReactNode }[] = [
-                      { label: 'Amount', content: <input value={form.amount} onChange={e => set('amount', e.target.value)} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500" /> },
-                      { label: 'Currency', content: <select value={form.currency} onChange={e => set('currency', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading || isMultiObjective} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{currencyOptionsForRender.map(c => <option key={c} value={c}>{c}</option>)}</select> },
-                      { label: 'Method Type', content: <select value={form.payment_method_type} onChange={e => set('payment_method_type', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading || isMultiObjective} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{methodTypeOptionsForRender.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}</select> },
-                      { label: 'Payment Method', content: <select value={form.payment_method} onChange={e => set('payment_method', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{paymentMethodOptionsForRender.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}</select> },
-                      { label: 'Card Brand', content: <select value={form.card_brand} onChange={e => set('card_brand', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{cardBrandOptionsForRender.map(b => <option key={b} value={b}>{formatOptionLabel(b)}</option>)}</select> },
-                      { label: 'Auth Type', content: <select value={form.auth_type} onChange={e => set('auth_type', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50">{authTypeOptions.map(a => <option key={a} value={a}>{formatOptionLabel(a)}</option>)}</select> },
+                      { label: 'Amount', content: <input value={form.amount} onChange={e => set('amount', e.target.value)} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand-500" /> },
+                      { label: 'Currency', content: <select value={form.currency} onChange={e => set('currency', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading || isMultiObjective} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand-500 disabled:opacity-50">{currencyOptionsForRender.map(c => <option key={c} value={c}>{c}</option>)}</select> },
+                      { label: 'Method Type', content: <select value={form.payment_method_type} onChange={e => set('payment_method_type', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading || isMultiObjective} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand-500 disabled:opacity-50">{methodTypeOptionsForRender.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}</select> },
+                      { label: 'Payment Method', content: <select value={form.payment_method} onChange={e => set('payment_method', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand-500 disabled:opacity-50">{paymentMethodOptionsForRender.map(p => <option key={p} value={p}>{formatOptionLabel(p)}</option>)}</select> },
+                      { label: 'Card Brand', content: <select value={form.card_brand} onChange={e => set('card_brand', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand-500 disabled:opacity-50">{cardBrandOptionsForRender.map(b => <option key={b} value={b}>{formatOptionLabel(b)}</option>)}</select> },
+                      { label: 'Auth Type', content: <select value={form.auth_type} onChange={e => set('auth_type', e.target.value)} disabled={routingConfigUnavailable || routingKeysLoading} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand-500 disabled:opacity-50">{authTypeOptions.map(a => <option key={a} value={a}>{formatOptionLabel(a)}</option>)}</select> },
                     ]
                     if (isMultiObjective) {
-                      fields.push({ label: 'Card Type', content: <select value={form.card_program} onChange={e => set('card_program', e.target.value)} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500">{CARD_PROGRAM_OPTIONS.map(c => <option key={c} value={c}>{formatOptionLabel(c)}</option>)}</select> })
+                      fields.push({ label: 'Card Type', content: <select value={form.card_program} onChange={e => set('card_program', e.target.value)} className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand-500">{CARD_PROGRAM_OPTIONS.map(c => <option key={c} value={c}>{formatOptionLabel(c)}</option>)}</select> })
                     }
                     return (
                       <div className="grid grid-cols-3 gap-x-3 gap-y-2.5">
@@ -2657,7 +2657,7 @@ export function DecisionExplorerPage() {
                     <select
                       value={form.ranking_algorithm}
                       onChange={e => set('ranking_algorithm', e.target.value as SimulationAlgorithm)}
-                      className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 cursor-pointer"
+                      className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-1.5 text-sm font-medium text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand-500 cursor-pointer"
                     >
                       {ALGORITHMS.map(a => <option key={a} value={a}>{ALGORITHM_LABELS[a]}</option>)}
                     </select>
@@ -2671,7 +2671,7 @@ export function DecisionExplorerPage() {
                       <select
                         value={singleRunOutcome}
                         onChange={e => setSingleRunOutcome(e.target.value as TransactionOutcome)}
-                        className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                       >
                         <option value="CHARGED">Success (CHARGED)</option>
                         <option value="FAILURE">Failure (FAILURE)</option>
@@ -2704,7 +2704,7 @@ export function DecisionExplorerPage() {
                             const total = Math.max(1, Math.min(5000, parseInt(e.target.value) || 1))
                             setSimulationConfig({ totalPayments: String(total) })
                           }}
-                          className="w-24 bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-2 text-sm font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                          className="w-24 bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-3 py-2 text-sm font-semibold text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand-500 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                         />
                       </div>
                     </div>
@@ -2833,7 +2833,7 @@ export function DecisionExplorerPage() {
                                               value={gwGsmDecision}
                                               disabled={isSimulating}
                                               onChange={e => setGwGsmDecision(gw, e.target.value as 'retry' | 'do_default')}
-                                              className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50"
+                                              className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand-500 disabled:opacity-50"
                                             >
                                               <option value="retry">Retry</option>
                                               <option value="do_default">Do Default</option>
@@ -2845,7 +2845,7 @@ export function DecisionExplorerPage() {
                                           <select
                                             value={gwPenalized ? 'penalized' : 'skipped'}
                                             onChange={e => setGwPenalized(gw, e.target.value === 'penalized')}
-                                            className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                                            className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-2.5 py-1.5 text-xs text-slate-800 dark:text-slate-100 focus:outline-none focus:border-brand-500"
                                           >
                                             <option value="penalized">Penalized</option>
                                             <option value="skipped">Penalty skipped</option>
@@ -2892,7 +2892,7 @@ export function DecisionExplorerPage() {
                               onBlur={() => { setAddGwDraft(''); setAddGwOpen(false) }}
                               placeholder="e.g. stripe"
                               autoFocus
-                              className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-brand-300 dark:border-brand-700 rounded-lg px-3 py-2 pr-16 text-sm text-slate-800 dark:text-slate-100 placeholder-slate-500 focus:outline-none focus:ring-1 focus:ring-brand-500"
+                              className="w-full bg-slate-50 dark:bg-[#0d0d13] border border-brand-300 dark:border-brand-700 rounded-lg px-3 py-2 pr-16 text-sm text-slate-800 dark:text-slate-100 placeholder-slate-500 focus:outline-none focus:border-brand-500"
                             />
                             <kbd className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-slate-500 dark:text-slate-500 bg-slate-100 dark:bg-[#1c1c24] border border-slate-200 dark:border-[#2a2a35] px-1.5 py-0.5 rounded font-mono">
                               Enter ↵

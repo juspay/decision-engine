@@ -3532,7 +3532,7 @@ export function DecisionSimulatorPage() {
                 if (e.key === 'Enter') submitAddConnector()
                 else if (e.key === 'Escape') setAddConnectorOpen(false)
               }}
-              className="mt-4 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
+              className="mt-4 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800 focus:outline-none focus:border-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
             />
             {addConnectorError && <p className="mt-2 text-xs text-red-600">{addConnectorError}</p>}
             <div className="mt-6 flex justify-end gap-2">
@@ -3619,7 +3619,7 @@ export function DecisionSimulatorPage() {
                       step={1}
                       value={rate}
                       onChange={e => setGwSuccessRate(key, e.target.value === '' ? 0 : clampSuccessRate(parseFloat(e.target.value)))}
-                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 pr-7 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
+                      className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 pr-7 text-sm font-semibold text-slate-800 focus:outline-none focus:border-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
                     />
                     <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-sm text-slate-500">%</span>
                   </div>
@@ -3670,7 +3670,7 @@ export function DecisionSimulatorPage() {
                   value={String(multiObjScenario)}
                   disabled={isSimulating && !isPaused}
                   onChange={e => setMultiObjScenario(e.target.value === 'ALL' ? 'ALL' : Number(e.target.value))}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50 disabled:cursor-not-allowed dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:border-brand-500 disabled:opacity-50 disabled:cursor-not-allowed dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
                 >
                   <option value="ALL">All scenarios (rotate)</option>
                   {activeVariants.map((v, idx) => (
@@ -3689,7 +3689,7 @@ export function DecisionSimulatorPage() {
                   value={moCurrency}
                   disabled={isSimulating && !isPaused}
                   onChange={e => setMoCurrency(e.target.value)}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:opacity-50 disabled:cursor-not-allowed dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:border-brand-500 disabled:opacity-50 disabled:cursor-not-allowed dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
                 >
                   {moCurrencyOptions.map(c => (
                     <option key={c} value={c}>{c}</option>
@@ -3717,7 +3717,7 @@ export function DecisionSimulatorPage() {
                       const clamped = Number.isFinite(n) ? Math.max(1, Math.min(MAX_SIMULATION_TPS, n)) : 1
                       setSimulationConfig(c => ({ ...c, tps: clamped }))
                     }}
-                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
+                    className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm font-semibold text-slate-800 focus:outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
                   />
                 </div>
               )
@@ -3752,7 +3752,7 @@ export function DecisionSimulatorPage() {
               // Spinners are hidden: at step=5 they're a slow way to cross a 1–100,000 range, and
               // the pair is narrow enough that two sets of arrows crowd out the digits. Typing (and
               // ↑/↓, which the spinners only duplicate) still works.
-              const inputCls = 'w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm font-semibold tabular-nums text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
+              const inputCls = 'w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm font-semibold tabular-nums text-slate-800 focus:outline-none focus:border-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none'
               return (
                 <div className="flex w-[220px] flex-col gap-1.5">
                   <SurfaceLabel>
@@ -4312,13 +4312,13 @@ export function DecisionSimulatorPage() {
                               placeholder="Metadata key"
                               value={param.metadataKey || ''}
                               onChange={e => updateRuleParamMetadataKey(idx, e.target.value)}
-                              className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:ring-1 focus:ring-brand-500"
+                              className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:border-brand-500"
                             />
                             <input
                               placeholder="Metadata value"
                               value={param.value}
                               onChange={e => updateRuleParam(idx, 'value', e.target.value)}
-                              className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:ring-1 focus:ring-brand-500"
+                              className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:border-brand-500"
                             />
                           </div>
                         )}
@@ -4401,7 +4401,7 @@ export function DecisionSimulatorPage() {
                     <input
                       value={debitForm.amount}
                       onChange={e => setDebitField('amount', e.target.value)}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                     />
                   </div>
                   <div>
@@ -4409,7 +4409,7 @@ export function DecisionSimulatorPage() {
                     <input
                       value={debitForm.currency}
                       onChange={e => setDebitField('currency', e.target.value.toUpperCase())}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                     />
                   </div>
                   <div>
@@ -4417,7 +4417,7 @@ export function DecisionSimulatorPage() {
                     <select
                       value={debitForm.auth_type}
                       onChange={e => setDebitField('auth_type', e.target.value)}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                     >
                       <option value="THREE_DS">THREE_DS</option>
                       <option value="NO_THREE_DS">NO_THREE_DS</option>
@@ -4428,7 +4428,7 @@ export function DecisionSimulatorPage() {
                     <select
                       value={debitForm.card_type}
                       onChange={e => setDebitField('card_type', e.target.value as DebitRoutingFormState['card_type'])}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                     >
                       <option value="debit">Debit</option>
                       <option value="credit">Credit</option>
@@ -4442,7 +4442,7 @@ export function DecisionSimulatorPage() {
                     value={debitForm.eligible_gateways}
                     onChange={e => setDebitField('eligible_gateways', e.target.value)}
                     placeholder="stripe, adyen"
-                    className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                   />
                 </div>
 
@@ -4452,7 +4452,7 @@ export function DecisionSimulatorPage() {
                     <input
                       value={debitForm.merchant_category_code}
                       onChange={e => setDebitField('merchant_category_code', e.target.value)}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                     />
                   </div>
                   <div>
@@ -4460,7 +4460,7 @@ export function DecisionSimulatorPage() {
                     <input
                       value={debitForm.acquirer_country}
                       onChange={e => setDebitField('acquirer_country', e.target.value.toUpperCase())}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                     />
                   </div>
                 </div>
@@ -4471,7 +4471,7 @@ export function DecisionSimulatorPage() {
                     value={debitForm.co_badged_networks}
                     onChange={e => setDebitField('co_badged_networks', e.target.value)}
                     placeholder="VISA, NYCE, PULSE, STAR"
-                    className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                    className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                   />
                 </div>
 
@@ -4481,7 +4481,7 @@ export function DecisionSimulatorPage() {
                     <input
                       value={debitForm.issuer_country}
                       onChange={e => setDebitField('issuer_country', e.target.value.toUpperCase())}
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                     />
                   </div>
                   <div className="flex items-center gap-2 pt-6">
@@ -4505,7 +4505,7 @@ export function DecisionSimulatorPage() {
                       value={debitForm.regulated_name}
                       onChange={e => setDebitField('regulated_name', e.target.value)}
                       placeholder="GOVERNMENT NON-EXEMPT INTERCHANGE FEE (WITH FRAUD)"
-                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                     />
                   </div>
                 )}
@@ -4586,7 +4586,7 @@ export function DecisionSimulatorPage() {
                       <select
                         value={singleRunOutcome}
                         onChange={e => setSingleRunOutcome(e.target.value as TransactionOutcome)}
-                        className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        className="w-full border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-500"
                       >
                         <option value="CHARGED">Success (CHARGED)</option>
                         <option value="FAILURE">Failure (FAILURE)</option>
@@ -5517,7 +5517,7 @@ export function DecisionSimulatorPage() {
                       {smartRetryEnabled && <th className="text-left px-3 py-2">Retry Outcome</th>}
                     </tr>
                     {(() => {
-                      const inputCls = 'w-full rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] font-normal text-slate-700 placeholder:text-slate-500 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-200 dark:placeholder:text-slate-600'
+                      const inputCls = 'w-full rounded border border-slate-200 bg-white px-1.5 py-1 text-[11px] font-normal text-slate-700 placeholder:text-slate-500 focus:outline-none focus:border-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-200 dark:placeholder:text-slate-600'
                       const setF = (key: string, value: string) => setTxFilters(prev => ({ ...prev, [key]: value }))
                       const sel = (key: string, opts: string[], placeholder: string) => (
                         <select value={txFilters[key] ?? ''} onChange={e => setF(key, e.target.value)} className={inputCls}>

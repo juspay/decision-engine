@@ -147,13 +147,13 @@
   /* Form elements — Dynamic override.
      Every declaration here has to stay overridable by a component's own utility classes, so the
      radius is a conservative default rather than a pill, only colours transition (animating
-     `all` made focus decoration fade in and out), and nothing is `!important` — an `!important`
-     box-shadow here silently suppressed every `focus:ring-*` in the app, because Tailwind
-     implements rings as box-shadows. */
+     `all` made focus decoration fade in and out), and nothing is `!important`.
+     Focus is marked by the border colour alone: fields carry no ring or glow, so a focused input
+     keeps exactly the footprint it had at rest. */
   :where(input:not([type='checkbox']):not([type='radio']):not([type='range'])),
   :where(select),
   :where(textarea) {
-    @apply bg-white dark:bg-[#0f0f11] border-slate-200 dark:border-transparent text-slate-800 dark:text-white rounded-lg px-4 placeholder-slate-500 dark:placeholder-[#8a8a93] transition-colors duration-150 focus:outline-none focus:ring-2 focus:ring-brand-500/20 dark:focus:bg-[#151518] dark:focus:border-[#333338];
+    @apply bg-white dark:bg-[#0f0f11] border-slate-200 dark:border-transparent text-slate-800 dark:text-white rounded-lg px-4 placeholder-slate-500 dark:placeholder-[#8a8a93] transition-colors duration-150 focus:outline-none focus:border-brand-500 dark:focus:bg-[#151518] dark:focus:border-[#333338];
     font-family: var(--font-sans);
   }
 

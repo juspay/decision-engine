@@ -123,12 +123,12 @@ export function MembersPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="colleague@example.com"
-              className="h-10 flex-1 rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-white dark:placeholder:text-[#6e7684] dark:focus:border-blue-500"
+              className="h-10 flex-1 rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-500 focus:border-blue-500 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-white dark:placeholder:text-[#6e7684] dark:focus:border-blue-500"
             />
             <select
               value={role}
               onChange={(e) => setRole(e.target.value)}
-              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-slate-200"
+              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-500 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-slate-200"
             >
               <option value="member">Member</option>
               <option value="admin">Admin</option>
