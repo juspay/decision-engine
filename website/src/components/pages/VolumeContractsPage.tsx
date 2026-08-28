@@ -1,13 +1,13 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import useSWR, { useSWRConfig } from 'swr'
 import {
   ArrowLeft,
-  CalendarClock,
   ChevronDown,
   ChevronRight,
   Plus,
   PowerOff,
+  SlidersHorizontal,
   Trash2,
   Zap,
 } from 'lucide-react'
@@ -346,6 +346,72 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
   const [forecastInterval, setForecastInterval] = useState('')
   const [contracts, setContracts] = useState<ContractForm[]>([emptyContract()])
 
+  // ── Merchant-level settings live outside the document builder ────────────────────────────
+  // Edited on their own screen and kept per merchant in this browser; every new document is
+  // stamped with them (the engine still reads them from the document). Seeded from the active
+  // document the first time, so an existing setup carries over.
+  type MerchantSettings = {
+    routingMode: 'pace_guarded' | 'volume_commitment'
+    tolerancePp: string
+    metric: 'gmv' | 'volume'
+    currency: string
+    amountUnits: 'major' | 'minor'
+    expectedDailyTraffic: string
+    forecastInterval: string
+  }
+  const settingsKey = merchantId ? `vc_merchant_settings_${merchantId}` : null
+  const activeConfig = useMemo(() => {
+    const doc = documents.find((d) => d.id === activeDocumentId)
+    return (doc?.algorithm_data ?? doc?.algorithm)?.data as VolumeContractConfig | undefined
+  }, [documents, activeDocumentId])
+  function applySettings(next: Partial<MerchantSettings>) {
+    if (next.routingMode) setRoutingMode(next.routingMode)
+    if (next.tolerancePp != null) setTolerancePp(next.tolerancePp)
+    if (next.metric) setMetric(next.metric)
+    if (next.currency != null) setCurrency(next.currency)
+    if (next.amountUnits) setAmountUnits(next.amountUnits)
+    if (next.expectedDailyTraffic != null) setExpectedDailyTraffic(next.expectedDailyTraffic)
+    if (next.forecastInterval != null) setForecastInterval(next.forecastInterval)
+  }
+  useEffect(() => {
+    if (!settingsKey) return
+    let stored: Partial<MerchantSettings> | null = null
+    try {
+      const raw = window.localStorage.getItem(settingsKey)
+      stored = raw ? (JSON.parse(raw) as Partial<MerchantSettings>) : null
+    } catch {
+      stored = null
+    }
+    if (stored) {
+      applySettings(stored)
+      return
+    }
+    if (activeConfig) {
+      const toleranceBps = activeConfig.tolerance_bps ?? (activeConfig.tolerance ? parseFloat(activeConfig.tolerance) : undefined)
+      applySettings({
+        routingMode: activeConfig.routing_mode === 'volume_commitment' ? 'volume_commitment' : 'pace_guarded',
+        tolerancePp: toleranceBps != null ? String(toleranceBps / 100) : '5',
+        metric: activeConfig.metric === 'volume' ? 'volume' : 'gmv',
+        currency: activeConfig.currency?.denomination ?? 'USD',
+        amountUnits: activeConfig.currency?.amount_units === 'minor' ? 'minor' : 'major',
+        expectedDailyTraffic: activeConfig.expected_daily_traffic != null ? String(activeConfig.expected_daily_traffic) : '',
+        forecastInterval: activeConfig.forecast_interval_secs != null ? String(activeConfig.forecast_interval_secs) : '',
+      })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settingsKey, activeConfig])
+  function saveMerchantSettings() {
+    if (!settingsKey) return
+    const next: MerchantSettings = { routingMode, tolerancePp, metric, currency, amountUnits, expectedDailyTraffic, forecastInterval }
+    try {
+      window.localStorage.setItem(settingsKey, JSON.stringify(next))
+    } catch {
+      // Nothing to do: the values stay in memory for this session.
+    }
+    setActionSuccess('Merchant settings saved — every new contract document will use them.')
+    closeBuilder()
+  }
+
   const [submitting, setSubmitting] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [actionSuccess, setActionSuccess] = useState<string | null>(null)
@@ -438,16 +504,10 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
     return config
   }
 
+  // Clears the document only; the merchant-level settings are not the document's to reset.
   function resetBuilder() {
     setDocName('')
     setDocDesc('')
-    setRoutingMode('pace_guarded')
-    setTolerancePp('5')
-    setMetric('gmv')
-    setCurrency('USD')
-    setAmountUnits('major')
-    setExpectedDailyTraffic('')
-    setForecastInterval('')
     setContracts([emptyContract()])
   }
 
@@ -530,13 +590,21 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
 
   // ── Views: the document list, or the builder as its own screen (like the rules pages) ────────
   // The builder is addressed by URL (`?contract=new`) so a reload or shared link reopens it.
-  const showBuilder = searchParams.get('contract') === 'new'
-  function openBuilder() {
+  const view = searchParams.get('contract')
+  const showBuilder = view === 'new'
+  const showSettings = view === 'settings'
+  function openView(which: 'new' | 'settings') {
     setSearchParams((prev) => {
       const next = new URLSearchParams(prev)
-      next.set('contract', 'new')
+      next.set('contract', which)
       return next
     })
+  }
+  function openBuilder() {
+    openView('new')
+  }
+  function openSettings() {
+    openView('settings')
   }
   function closeBuilder() {
     setSearchParams((prev) => {
@@ -556,6 +624,138 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
     }
     return true
   })
+
+  const merchantSettingsFields = (
+    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                <div>
+                  {fieldLabel('Routing mode')}
+                  <SearchableSelect
+                    triggerClassName={inputClass}
+                    value={routingMode}
+                    onChange={(v) => setRoutingMode(v as typeof routingMode)}
+                    options={[
+                      { value: 'pace_guarded', label: 'Pace-guarded (auth-rate first)' },
+                      { value: 'volume_commitment', label: 'Volume-commitment first' },
+                    ]}
+                  />
+                </div>
+                <div>
+                  {fieldLabel('Tolerance', 'percentage points')}
+                  <input
+                    className={inputClass}
+                    type="number"
+                    min={0}
+                    step={0.5}
+                    placeholder="5"
+                    value={tolerancePp}
+                    onChange={(e) => setTolerancePp(e.target.value)}
+                  />
+                </div>
+                <div>
+                  {fieldLabel('Metric')}
+                  <SearchableSelect
+                    triggerClassName={inputClass}
+                    value={metric}
+                    onChange={(v) => setMetric(v as typeof metric)}
+                    options={[
+                      { value: 'gmv', label: 'GMV (money processed)' },
+                      { value: 'volume', label: 'Volume (transaction count)' },
+                    ]}
+                  />
+                </div>
+                <div>
+                  {fieldLabel('Currency')}
+                  <Combobox
+                    className={inputClass}
+                    value={currency}
+                    onChange={setCurrency}
+                    options={CURRENCY_SUGGESTIONS}
+                    placeholder="USD"
+                  />
+                </div>
+                <div>
+                  {fieldLabel('Amount units')}
+                  <SearchableSelect
+                    triggerClassName={inputClass}
+                    value={amountUnits}
+                    onChange={(v) => setAmountUnits(v as typeof amountUnits)}
+                    options={[
+                      { value: 'major', label: 'Major (6000000 = $6M)' },
+                      { value: 'minor', label: 'Minor (600000000 = $6M in cents)' },
+                    ]}
+                  />
+                </div>
+                <div>
+                  {fieldLabel('Expected daily traffic', unitHint)}
+                  <input
+                    className={inputClass}
+                    placeholder="800000"
+                    value={expectedDailyTraffic}
+                    onChange={(e) => setExpectedDailyTraffic(e.target.value)}
+                  />
+                </div>
+                <div>
+                  {fieldLabel('Forecast interval', 'seconds, optional')}
+                  <input
+                    className={inputClass}
+                    type="number"
+                    min={60}
+                    placeholder="engine default"
+                    value={forecastInterval}
+                    onChange={(e) => setForecastInterval(e.target.value)}
+                  />
+                </div>
+              </div>
+  )
+
+  if (showSettings) {
+    return (
+      <div className="space-y-6">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <button
+              type="button"
+              onClick={closeBuilder}
+              className="mb-2 inline-flex items-center gap-2 text-sm font-medium text-slate-500 transition-colors hover:text-brand-600 dark:text-[#8d96a8] dark:hover:text-brand-400"
+            >
+              <ArrowLeft size={16} /> Volume Contracts
+            </button>
+            <PageHeading
+              title="Merchant Settings"
+              description="How the engine treats every volume contract for this merchant — routing mode, approval tolerance, units and expected traffic. Applied to each new contract document."
+              className="truncate"
+            />
+          </div>
+        </div>
+
+        <Card>
+          <CardBody>
+            <div className="mb-3 flex items-center gap-2">
+              <SlidersHorizontal size={14} className="text-slate-400 dark:text-[#8a8a93]" />
+              <span className={type.label}>Merchant-level settings</span>
+            </div>
+            {merchantSettingsFields}
+          </CardBody>
+        </Card>
+
+        <div className="flex flex-wrap items-center gap-4">
+          <Button onClick={saveMerchantSettings} disabled={!merchantId || !canEditRouting}>
+            Save settings
+          </Button>
+          <button
+            type="button"
+            onClick={closeBuilder}
+            className="text-sm font-medium text-slate-500 transition-colors hover:text-slate-800 dark:text-[#8d96a8] dark:hover:text-white"
+          >
+            Cancel
+          </button>
+          <p className="max-w-[57ch] text-sm text-slate-500 dark:text-[#78849a]">
+            Existing documents keep the settings they were created with.
+          </p>
+        </div>
+      </div>
+    )
+  }
 
   if (showBuilder) {
     return (
@@ -577,416 +777,342 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
           </div>
         </div>
 
-        <Card>
-          <CardBody>
-            <div className="space-y-6">
-              {/* Document */}
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-                <div>
-                  {fieldLabel('Name')}
-                  <input
-                    className={inputClass}
-                    placeholder="q3_volume_contracts"
-                    value={docName}
-                    onChange={(e) => setDocName(e.target.value)}
-                  />
-                </div>
-                <div>
-                  {fieldLabel('Description')}
-                  <input
-                    className={inputClass}
-                    placeholder="Q3 PSP volume commitments"
-                    value={docDesc}
-                    onChange={(e) => setDocDesc(e.target.value)}
-                  />
-                </div>
+        <div className="space-y-6">
+          {/* Merchant-level settings: set once for the merchant; the values live on their own screen. */}
+          <InsetPanel>
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-2">
+                <SlidersHorizontal size={14} className="text-slate-400 dark:text-[#8a8a93]" />
+                <span className={type.label}>Merchant-level settings</span>
+                <span className="text-sm text-slate-500 dark:text-[#8d96aa]">
+                  {expectedDailyTraffic.trim()
+                    ? '— applied to this document when it is created.'
+                    : '— expected daily traffic is not set yet; the document cannot be created without it.'}
+                </span>
               </div>
+              <Button variant="secondary" size="sm" onClick={openSettings}>
+                Edit settings
+              </Button>
+            </div>
+          </InsetPanel>
 
-              {/* Merchant-level settings */}
-              <InsetPanel>
-                <div className="mb-3 flex items-center gap-2">
-                  <CalendarClock size={14} className="text-slate-400 dark:text-[#8a8a93]" />
-                  <span className={type.label}>Merchant-level settings</span>
+          {/* Document */}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <div>
+              {fieldLabel('Name')}
+              <input
+                className={inputClass}
+                placeholder="q3_volume_contracts"
+                value={docName}
+                onChange={(e) => setDocName(e.target.value)}
+              />
+            </div>
+            <div>
+              {fieldLabel('Description')}
+              <input
+                className={inputClass}
+                placeholder="Q3 PSP volume commitments"
+                value={docDesc}
+                onChange={(e) => setDocDesc(e.target.value)}
+              />
+            </div>
+          </div>
+
+          {/* Per-PSP contracts */}
+          <div className="space-y-4">
+            {contracts.map((contract, contractIdx) => (
+              <InsetPanel key={contract.key}>
+                <div className="mb-3 flex items-center justify-between">
+                  <span className={type.label}>Contract {contractIdx + 1}</span>
+                  {contracts.length > 1 ? (
+                    <button
+                      type="button"
+                      className="text-slate-400 hover:text-red-500"
+                      onClick={() => setContracts((list) => list.filter((c) => c.key !== contract.key))}
+                      aria-label="Remove contract"
+                    >
+                      <Trash2 size={14} />
+                    </button>
+                  ) : null}
                 </div>
+
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                   <div>
-                    {fieldLabel('Routing mode')}
-                    <SearchableSelect
-                      triggerClassName={inputClass}
-                      value={routingMode}
-                      onChange={(v) => setRoutingMode(v as typeof routingMode)}
-                      options={[
-                        { value: 'pace_guarded', label: 'Pace-guarded (auth-rate first)' },
-                        { value: 'volume_commitment', label: 'Volume-commitment first' },
-                      ]}
-                    />
-                  </div>
-                  <div>
-                    {fieldLabel('Tolerance', 'percentage points')}
+                    {fieldLabel('Contract ID')}
                     <input
                       className={inputClass}
-                      type="number"
-                      min={0}
-                      step={0.5}
-                      placeholder="5"
-                      value={tolerancePp}
-                      onChange={(e) => setTolerancePp(e.target.value)}
+                      placeholder="adyen_2026_lumpsum"
+                      value={contract.id}
+                      onChange={(e) => patchContract(contract.key, { id: e.target.value })}
                     />
                   </div>
                   <div>
-                    {fieldLabel('Metric')}
-                    <SearchableSelect
-                      triggerClassName={inputClass}
-                      value={metric}
-                      onChange={(v) => setMetric(v as typeof metric)}
-                      options={[
-                        { value: 'gmv', label: 'GMV (money processed)' },
-                        { value: 'volume', label: 'Volume (transaction count)' },
-                      ]}
-                    />
-                  </div>
-                  <div>
-                    {fieldLabel('Currency')}
+                    {fieldLabel('Connector', 'exact gateway name')}
                     <Combobox
                       className={inputClass}
-                      value={currency}
-                      onChange={setCurrency}
-                      options={CURRENCY_SUGGESTIONS}
-                      placeholder="USD"
+                      value={contract.connector}
+                      onChange={(v) => patchContract(contract.key, { connector: v })}
+                      options={CONNECTOR_SUGGESTIONS}
+                      placeholder="adyen"
                     />
                   </div>
                   <div>
-                    {fieldLabel('Amount units')}
+                    {fieldLabel('Status')}
                     <SearchableSelect
-                      triggerClassName={inputClass}
-                      value={amountUnits}
-                      onChange={(v) => setAmountUnits(v as typeof amountUnits)}
+                  triggerClassName={inputClass}
+                      value={contract.status}
+                      onChange={(v) => patchContract(contract.key, { status: v as 'active' | 'inactive' })}
                       options={[
-                        { value: 'major', label: 'Major (6000000 = $6M)' },
-                        { value: 'minor', label: 'Minor (600000000 = $6M in cents)' },
+                        { value: 'active', label: 'Active' },
+                        { value: 'inactive', label: 'Inactive' },
                       ]}
                     />
                   </div>
                   <div>
-                    {fieldLabel('Expected daily traffic', unitHint)}
-                    <input
-                      className={inputClass}
-                      placeholder="800000"
-                      value={expectedDailyTraffic}
-                      onChange={(e) => setExpectedDailyTraffic(e.target.value)}
+                    {fieldLabel('Billing cycle')}
+                    <SearchableSelect
+                  triggerClassName={inputClass}
+                      value={contract.cycleType}
+                      onChange={(v) => patchContract(contract.key, { cycleType: v as ContractForm['cycleType'] })}
+                      options={[
+                        { value: 'calendar_month', label: 'Calendar month' },
+                        { value: 'calendar_quarter', label: 'Calendar quarter' },
+                        { value: 'calendar_year', label: 'Calendar year' },
+                        { value: 'test_minutes', label: 'Test cycle (minutes)' },
+                      ]}
                     />
                   </div>
                   <div>
-                    {fieldLabel('Forecast interval', 'seconds, optional')}
+                    {fieldLabel('Anchor', ANCHOR_HELP[contract.cycleType])}
                     <input
                       className={inputClass}
                       type="number"
-                      min={60}
-                      placeholder="engine default"
-                      value={forecastInterval}
-                      onChange={(e) => setForecastInterval(e.target.value)}
+                      min={1}
+                      value={contract.anchor}
+                      onChange={(e) => patchContract(contract.key, { anchor: e.target.value })}
+                    />
+                  </div>
+                  {contract.cycleType === 'test_minutes' && (
+                    <div className="sm:col-span-3">
+                      <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">
+                        Testing only. The cycle lasts {contract.anchor || '?'} minutes and each
+                        minute counts as one contract day, so a full period — pacing,
+                        elimination, steering — plays out while you watch. Drive traffic at it
+                        from the Decision Simulator; timezone is ignored.
+                      </p>
+                    </div>
+                  )}
+                  <div>
+                    {fieldLabel('Timezone', 'IANA')}
+                    <Combobox
+                      className={inputClass}
+                      value={contract.timezone}
+                      onChange={(v) => patchContract(contract.key, { timezone: v })}
+                      options={TIMEZONE_SUGGESTIONS}
+                      placeholder="UTC"
                     />
                   </div>
                 </div>
-              </InsetPanel>
 
-              {/* Per-PSP contracts */}
-              <div className="space-y-4">
-                {contracts.map((contract, contractIdx) => (
-                  <InsetPanel key={contract.key}>
-                    <div className="mb-3 flex items-center justify-between">
-                      <span className={type.label}>Contract {contractIdx + 1}</span>
-                      {contracts.length > 1 ? (
-                        <button
-                          type="button"
-                          className="text-slate-400 hover:text-red-500"
-                          onClick={() => setContracts((list) => list.filter((c) => c.key !== contract.key))}
-                          aria-label="Remove contract"
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                      ) : null}
+                <div className="mt-4">
+                  {fieldLabel('Archetype')}
+                  <div className="flex gap-2">
+                    {(
+                      [
+                        ['lumpsum', 'Lumpsum — reward on hitting a target'],
+                        ['tiered', 'Tiered — rebate ladder by threshold'],
+                      ] as const
+                    ).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => patchContract(contract.key, { archetype: value })}
+                        className={`rounded-full border px-4 py-1.5 text-xs font-medium transition-colors ${
+                          contract.archetype === value
+                            ? 'border-brand-600 bg-brand-600 text-white'
+                            : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-[#222226] dark:text-[#9ca7ba] dark:hover:bg-[#151518]'
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {contract.archetype === 'lumpsum' ? (
+                  <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
+                    <div>
+                      {fieldLabel('Target', unitHint)}
+                      <input
+                        className={inputClass}
+                        placeholder="6000000"
+                        value={contract.target}
+                        onChange={(e) => patchContract(contract.key, { target: e.target.value })}
+                      />
                     </div>
-
-                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                    <div>
+                      {fieldLabel('Reward kind')}
+                      <SearchableSelect
+                  triggerClassName={inputClass}
+                        value={contract.rewardKind}
+                        onChange={(v) => patchContract(contract.key, { rewardKind: v as 'flat' | 'percentage' })}
+                        options={[
+                          { value: 'flat', label: 'Flat amount' },
+                          { value: 'percentage', label: 'Percentage rebate' },
+                        ]}
+                      />
+                    </div>
+                    {contract.rewardKind === 'flat' ? (
                       <div>
-                        {fieldLabel('Contract ID')}
+                        {fieldLabel('Flat amount', unitHint)}
                         <input
                           className={inputClass}
-                          placeholder="adyen_2026_lumpsum"
-                          value={contract.id}
-                          onChange={(e) => patchContract(contract.key, { id: e.target.value })}
+                          placeholder="15000"
+                          value={contract.flatAmount}
+                          onChange={(e) => patchContract(contract.key, { flatAmount: e.target.value })}
                         />
                       </div>
+                    ) : (
                       <div>
-                        {fieldLabel('Connector', 'exact gateway name')}
-                        <Combobox
-                          className={inputClass}
-                          value={contract.connector}
-                          onChange={(v) => patchContract(contract.key, { connector: v })}
-                          options={CONNECTOR_SUGGESTIONS}
-                          placeholder="adyen"
-                        />
-                      </div>
-                      <div>
-                        {fieldLabel('Status')}
-                        <SearchableSelect
-                      triggerClassName={inputClass}
-                          value={contract.status}
-                          onChange={(v) => patchContract(contract.key, { status: v as 'active' | 'inactive' })}
-                          options={[
-                            { value: 'active', label: 'Active' },
-                            { value: 'inactive', label: 'Inactive' },
-                          ]}
-                        />
-                      </div>
-                      <div>
-                        {fieldLabel('Billing cycle')}
-                        <SearchableSelect
-                      triggerClassName={inputClass}
-                          value={contract.cycleType}
-                          onChange={(v) => patchContract(contract.key, { cycleType: v as ContractForm['cycleType'] })}
-                          options={[
-                            { value: 'calendar_month', label: 'Calendar month' },
-                            { value: 'calendar_quarter', label: 'Calendar quarter' },
-                            { value: 'calendar_year', label: 'Calendar year' },
-                            { value: 'test_minutes', label: 'Test cycle (minutes)' },
-                          ]}
-                        />
-                      </div>
-                      <div>
-                        {fieldLabel('Anchor', ANCHOR_HELP[contract.cycleType])}
+                        {fieldLabel('Rebate', 'basis points')}
                         <input
                           className={inputClass}
                           type="number"
                           min={1}
-                          value={contract.anchor}
-                          onChange={(e) => patchContract(contract.key, { anchor: e.target.value })}
+                          max={10000}
+                          placeholder="25"
+                          value={contract.rebateBps}
+                          onChange={(e) => patchContract(contract.key, { rebateBps: e.target.value })}
                         />
                       </div>
-                      {contract.cycleType === 'test_minutes' && (
-                        <div className="sm:col-span-3">
-                          <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-400">
-                            Testing only. The cycle lasts {contract.anchor || '?'} minutes and each
-                            minute counts as one contract day, so a full period — pacing,
-                            elimination, steering — plays out while you watch. Drive traffic at it
-                            from the Decision Simulator; timezone is ignored.
-                          </p>
-                        </div>
-                      )}
-                      <div>
-                        {fieldLabel('Timezone', 'IANA')}
-                        <Combobox
-                          className={inputClass}
-                          value={contract.timezone}
-                          onChange={(v) => patchContract(contract.key, { timezone: v })}
-                          options={TIMEZONE_SUGGESTIONS}
-                          placeholder="UTC"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="mt-4">
-                      {fieldLabel('Archetype')}
-                      <div className="flex gap-2">
-                        {(
-                          [
-                            ['lumpsum', 'Lumpsum — reward on hitting a target'],
-                            ['tiered', 'Tiered — rebate ladder by threshold'],
-                          ] as const
-                        ).map(([value, label]) => (
-                          <button
-                            key={value}
-                            type="button"
-                            onClick={() => patchContract(contract.key, { archetype: value })}
-                            className={`rounded-full border px-4 py-1.5 text-xs font-medium transition-colors ${
-                              contract.archetype === value
-                                ? 'border-brand-600 bg-brand-600 text-white'
-                                : 'border-slate-200 text-slate-600 hover:bg-slate-50 dark:border-[#222226] dark:text-[#9ca7ba] dark:hover:bg-[#151518]'
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-
-                    {contract.archetype === 'lumpsum' ? (
-                      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-3">
-                        <div>
-                          {fieldLabel('Target', unitHint)}
-                          <input
-                            className={inputClass}
-                            placeholder="6000000"
-                            value={contract.target}
-                            onChange={(e) => patchContract(contract.key, { target: e.target.value })}
-                          />
-                        </div>
-                        <div>
-                          {fieldLabel('Reward kind')}
-                          <SearchableSelect
-                      triggerClassName={inputClass}
-                            value={contract.rewardKind}
-                            onChange={(v) => patchContract(contract.key, { rewardKind: v as 'flat' | 'percentage' })}
-                            options={[
-                              { value: 'flat', label: 'Flat amount' },
-                              { value: 'percentage', label: 'Percentage rebate' },
-                            ]}
-                          />
-                        </div>
-                        {contract.rewardKind === 'flat' ? (
-                          <div>
-                            {fieldLabel('Flat amount', unitHint)}
+                    )}
+                  </div>
+                ) : (
+                  <div className="mt-4 space-y-3">
+                    {contract.tiers.map((tier, tierIdx) => (
+                      <div
+                        key={tierIdx}
+                        className="rounded-xl border border-slate-200 p-3 dark:border-[#222226]"
+                      >
+                        <div className="mb-2 flex items-center justify-between">
+                          <label className="flex cursor-pointer items-center gap-2 text-[12px] font-medium text-slate-600 dark:text-[#9ca7ba]">
                             <input
-                              className={inputClass}
-                              placeholder="15000"
-                              value={contract.flatAmount}
-                              onChange={(e) => patchContract(contract.key, { flatAmount: e.target.value })}
+                              type="radio"
+                              name={`targeted-${contract.key}`}
+                              checked={tier.targeted}
+                              onChange={() => patchTier(contract.key, tierIdx, { targeted: true })}
+                              disabled={tier.kind === 'marginal'}
+                            />
+                            Targeted tier (the goal the engine steers for)
+                          </label>
+                          {contract.tiers.length > 1 ? (
+                            <button
+                              type="button"
+                              className="text-slate-400 hover:text-red-500"
+                              onClick={() =>
+                                patchContract(contract.key, {
+                                  tiers: contract.tiers.filter((_, i) => i !== tierIdx),
+                                })
+                              }
+                              aria-label="Remove tier"
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          ) : null}
+                        </div>
+                        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
+                          <div>
+                            {fieldLabel('Kind')}
+                            <SearchableSelect
+                  triggerClassName={inputClass}
+                              value={tier.kind}
+                              onChange={(v) =>
+                                patchTier(contract.key, tierIdx, {
+                                  kind: v as 'retroactive' | 'marginal',
+                                  ...(v === 'marginal' ? { targeted: false } : {}),
+                                })
+                              }
+                              options={[
+                                { value: 'retroactive', label: 'Retroactive (whole period)' },
+                                { value: 'marginal', label: 'Marginal (above threshold)' },
+                              ]}
                             />
                           </div>
-                        ) : (
                           <div>
-                            {fieldLabel('Rebate', 'basis points')}
+                            {fieldLabel('Threshold', unitHint)}
+                            <input
+                              className={inputClass}
+                              placeholder="8000000"
+                              value={tier.threshold}
+                              onChange={(e) => patchTier(contract.key, tierIdx, { threshold: e.target.value })}
+                            />
+                          </div>
+                          <div>
+                            {fieldLabel(tier.kind === 'retroactive' ? 'Rebate' : 'Rate', 'bps')}
                             <input
                               className={inputClass}
                               type="number"
                               min={1}
                               max={10000}
-                              placeholder="25"
-                              value={contract.rebateBps}
-                              onChange={(e) => patchContract(contract.key, { rebateBps: e.target.value })}
+                              placeholder="20"
+                              value={tier.bps}
+                              onChange={(e) => patchTier(contract.key, tierIdx, { bps: e.target.value })}
                             />
                           </div>
-                        )}
-                      </div>
-                    ) : (
-                      <div className="mt-4 space-y-3">
-                        {contract.tiers.map((tier, tierIdx) => (
-                          <div
-                            key={tierIdx}
-                            className="rounded-xl border border-slate-200 p-3 dark:border-[#222226]"
-                          >
-                            <div className="mb-2 flex items-center justify-between">
-                              <label className="flex cursor-pointer items-center gap-2 text-[12px] font-medium text-slate-600 dark:text-[#9ca7ba]">
-                                <input
-                                  type="radio"
-                                  name={`targeted-${contract.key}`}
-                                  checked={tier.targeted}
-                                  onChange={() => patchTier(contract.key, tierIdx, { targeted: true })}
-                                  disabled={tier.kind === 'marginal'}
-                                />
-                                Targeted tier (the goal the engine steers for)
-                              </label>
-                              {contract.tiers.length > 1 ? (
-                                <button
-                                  type="button"
-                                  className="text-slate-400 hover:text-red-500"
-                                  onClick={() =>
-                                    patchContract(contract.key, {
-                                      tiers: contract.tiers.filter((_, i) => i !== tierIdx),
-                                    })
-                                  }
-                                  aria-label="Remove tier"
-                                >
-                                  <Trash2 size={13} />
-                                </button>
-                              ) : null}
-                            </div>
-                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-5">
-                              <div>
-                                {fieldLabel('Kind')}
-                                <SearchableSelect
-                      triggerClassName={inputClass}
-                                  value={tier.kind}
-                                  onChange={(v) =>
-                                    patchTier(contract.key, tierIdx, {
-                                      kind: v as 'retroactive' | 'marginal',
-                                      ...(v === 'marginal' ? { targeted: false } : {}),
-                                    })
-                                  }
-                                  options={[
-                                    { value: 'retroactive', label: 'Retroactive (whole period)' },
-                                    { value: 'marginal', label: 'Marginal (above threshold)' },
-                                  ]}
-                                />
-                              </div>
-                              <div>
-                                {fieldLabel('Threshold', unitHint)}
-                                <input
-                                  className={inputClass}
-                                  placeholder="8000000"
-                                  value={tier.threshold}
-                                  onChange={(e) => patchTier(contract.key, tierIdx, { threshold: e.target.value })}
-                                />
-                              </div>
-                              <div>
-                                {fieldLabel(tier.kind === 'retroactive' ? 'Rebate' : 'Rate', 'bps')}
-                                <input
-                                  className={inputClass}
-                                  type="number"
-                                  min={1}
-                                  max={10000}
-                                  placeholder="20"
-                                  value={tier.bps}
-                                  onChange={(e) => patchTier(contract.key, tierIdx, { bps: e.target.value })}
-                                />
-                              </div>
-                              <div>
-                                {fieldLabel('Rebate lag', 'days')}
-                                <input
-                                  className={inputClass}
-                                  type="number"
-                                  min={0}
-                                  max={365}
-                                  value={tier.rebateLagDays}
-                                  onChange={(e) => patchTier(contract.key, tierIdx, { rebateLagDays: e.target.value })}
-                                />
-                              </div>
-                              <div>
-                                {fieldLabel('Settlement')}
-                                <SearchableSelect
-                      triggerClassName={inputClass}
-                                  value={tier.rebateSettlement}
-                                  onChange={(v) =>
-                                    patchTier(contract.key, tierIdx, { rebateSettlement: v as 'cash' | 'credit_note' })
-                                  }
-                                  options={[
-                                    { value: 'cash', label: 'Cash' },
-                                    { value: 'credit_note', label: 'Credit note' },
-                                  ]}
-                                />
-                              </div>
-                            </div>
+                          <div>
+                            {fieldLabel('Rebate lag', 'days')}
+                            <input
+                              className={inputClass}
+                              type="number"
+                              min={0}
+                              max={365}
+                              value={tier.rebateLagDays}
+                              onChange={(e) => patchTier(contract.key, tierIdx, { rebateLagDays: e.target.value })}
+                            />
                           </div>
-                        ))}
-                        <Button
-                          size="sm"
-                          variant="secondary"
-                          onClick={() =>
-                            patchContract(contract.key, { tiers: [...contract.tiers, emptyTier(false)] })
-                          }
-                        >
-                          <Plus size={13} /> Add tier
-                        </Button>
+                          <div>
+                            {fieldLabel('Settlement')}
+                            <SearchableSelect
+                  triggerClassName={inputClass}
+                              value={tier.rebateSettlement}
+                              onChange={(v) =>
+                                patchTier(contract.key, tierIdx, { rebateSettlement: v as 'cash' | 'credit_note' })
+                              }
+                              options={[
+                                { value: 'cash', label: 'Cash' },
+                                { value: 'credit_note', label: 'Credit note' },
+                              ]}
+                            />
+                          </div>
+                        </div>
                       </div>
-                    )}
-                  </InsetPanel>
-                ))}
+                    ))}
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={() =>
+                        patchContract(contract.key, { tiers: [...contract.tiers, emptyTier(false)] })
+                      }
+                    >
+                      <Plus size={13} /> Add tier
+                    </Button>
+                  </div>
+                )}
+              </InsetPanel>
+            ))}
 
-                <Button variant="secondary" onClick={() => setContracts((list) => [...list, emptyContract()])}>
-                  <Plus size={14} /> Add PSP contract
-                </Button>
-              </div>
+            <Button variant="secondary" onClick={() => setContracts((list) => [...list, emptyContract()])}>
+              <Plus size={14} /> Add PSP contract
+            </Button>
+          </div>
+        </div>
 
-            </div>
-          </CardBody>
-        </Card>
 
         <ErrorMessage error={submitError} />
         <div className="flex flex-wrap items-center gap-4">
           <Button
             onClick={handleCreate}
-            disabled={submitting || !merchantId || !docName.trim() || !canEditRouting}
+            disabled={submitting || !merchantId || !docName.trim() || !expectedDailyTraffic.trim() || !canEditRouting}
           >
             {submitting ? <Spinner size={14} /> : null} {submitting ? 'Saving...' : 'Create Contract'}
           </Button>
@@ -1001,7 +1127,9 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
             Cancel
           </button>
           <p className="max-w-[57ch] text-sm text-slate-500 dark:text-[#78849a]">
-            A new document is created inactive — activate it from the contracts list.
+            {expectedDailyTraffic.trim()
+              ? 'A new document is created inactive — activate it from the contracts list.'
+              : 'Set the expected daily traffic under Merchant settings before creating a document.'}
           </p>
         </div>
       </div>
@@ -1024,9 +1152,14 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
             />
           )}
         </div>
-        <Button onClick={openBuilder} disabled={!canEditRouting}>
-          <Plus size={15} /> Create Contract
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" onClick={openSettings} disabled={!canEditRouting}>
+            <SlidersHorizontal size={15} /> Merchant settings
+          </Button>
+          <Button onClick={openBuilder} disabled={!canEditRouting}>
+            <Plus size={15} /> Create Contract
+          </Button>
+        </div>
       </div>
 
       {actionError && <ErrorMessage error={actionError} />}

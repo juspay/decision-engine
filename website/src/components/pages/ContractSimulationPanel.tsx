@@ -163,7 +163,7 @@ export function ContractSimulationPanel({
         ) : (
           <p className="text-xs text-slate-500 dark:text-slate-400">
             Every payment <strong className="tabular-nums">{perPayment.toLocaleString()}</strong> at {tps}/sec
-            — {compact(expectedDaily)} per {isTestCycle ? 'minute' : 'day'}, the contract&apos;s rate — until
+            — {compact(expectedDaily)} per day{isTestCycle ? ' (a minute on this test cycle)' : ''}, the contract&apos;s rate — until
             the cycle closes. More TPS means smaller payments, not more volume; pausing is a real
             traffic drop.
           </p>

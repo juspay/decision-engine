@@ -4,7 +4,6 @@ import {
   BarChart,
   CartesianGrid,
   Customized,
-  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -110,25 +109,67 @@ type ImpactRow = {
   ceded: number
 }
 
-/** One contract day on the day-wise charts: a label plus `<psp>__unaided` / `<psp>__steered` pairs. */
-type DayRow = { day: string } & Record<string, number | string>
+/** One contract day on the day-wise charts: a label plus `<psp>__unaided` / `<psp>__steered` pairs,
+ *  and `<psp>__pace` — what that promise needed *that* day given what had landed before it. */
+type DayRow = { day: string } & Record<string, number | string | undefined>
 
-/** Per-day stacked columns: solid unaided, hatched steered; dashed = each promise's daily pace. */
+type BandScale = ((value: string) => number | undefined) & { bandwidth?: () => number }
+
+/** A dashed segment per PSP across each day's band at that day's required pace; mounted through
+ *  `<Customized>` so it can read the chart's band and value scales. */
+export function PaceMarkers(props: {
+  rows: DayRow[]
+  psps: ImpactRow[]
+  xAxisMap?: Record<string, { scale: BandScale }>
+  yAxisMap?: Record<string, { scale: (value: number) => number | undefined }>
+}) {
+  const { rows, psps, xAxisMap, yAxisMap } = props
+  const xAxis = xAxisMap ? Object.values(xAxisMap)[0] : undefined
+  const yAxis = yAxisMap ? Object.values(yAxisMap)[0] : undefined
+  if (!xAxis || !yAxis) return null
+  const band = xAxis.scale.bandwidth?.() ?? 0
+  if (band <= 0) return null
+  const inset = band * 0.08
+  return (
+    <g>
+      {rows.flatMap((row) =>
+        psps.map((r) => {
+          const value = row[`${r.name}__pace`]
+          if (typeof value !== 'number') return null
+          const x0 = xAxis.scale(row.day)
+          const y = yAxis.scale(value)
+          if (x0 == null || y == null) return null
+          return (
+            <line
+              key={`${row.day}-${r.name}`}
+              x1={x0 + inset}
+              x2={x0 + band - inset}
+              y1={y}
+              y2={y}
+              stroke={r.color}
+              strokeWidth={1.5}
+              strokeDasharray="5 3"
+              opacity={0.75}
+            />
+          )
+        }),
+      )}
+    </g>
+  )
+}
+
+/** Per-day stacked columns: solid unaided, hatched steered; dashed = what each promise needed that day. */
 function DayWiseChart({
   rows,
   psps,
   metric,
   yMax,
-  paceLines,
-  dayWord,
   hatchScope,
 }: {
   rows: DayRow[]
   psps: ImpactRow[]
   metric: Metric
   yMax: number
-  paceLines: Array<{ name: string; color: string; value: number }>
-  dayWord: string
   hatchScope: string
 }) {
   const fmt = fmtFor(metric)
@@ -141,7 +182,7 @@ function DayWiseChart({
           <CartesianGrid vertical={false} stroke="currentColor" opacity={0.08} />
           <XAxis
             dataKey="day"
-            tickFormatter={(d: string) => `${dayWord === 'minute' ? 'Min' : 'Day'} ${d}`}
+            tickFormatter={(d: string) => `Day ${d}`}
             tick={{ fontSize: 11 }}
             stroke="currentColor"
             opacity={0.5}
@@ -159,11 +200,12 @@ function DayWiseChart({
               return (
                 <div style={{ ...CHART_TOOLTIP_STYLE, fontSize: 12, lineHeight: 1.5, minWidth: 230 }}>
                   <p style={{ ...CHART_TOOLTIP_LABEL_STYLE, margin: '0 0 6px' }}>
-                    {dayWord === 'minute' ? 'Minute' : 'Day'} {label}
+                    Day {label}
                   </p>
                   {psps.map((r) => {
                     const unaided = Number(row[`${r.name}__unaided`] ?? 0)
                     const steered = Number(row[`${r.name}__steered`] ?? 0)
+                    const needed = row[`${r.name}__pace`]
                     return (
                       <div key={r.name} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                         <span style={{ width: 8, height: 8, borderRadius: 2, backgroundColor: r.color, flexShrink: 0 }} />
@@ -171,6 +213,7 @@ function DayWiseChart({
                         <span style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>
                           {fmt(unaided + steered)}
                           {steered > 0 && <span style={{ opacity: 0.7 }}> · {fmt(steered)} steered</span>}
+                          {typeof needed === 'number' && <span style={{ opacity: 0.7 }}> · needed {fmt(needed)}</span>}
                         </span>
                       </div>
                     )
@@ -180,14 +223,12 @@ function DayWiseChart({
             }}
           />
           {psps.map((r) => (
-            <Bar key={`${r.name}-unaided`} dataKey={`${r.name}__unaided`} stackId={r.name} fill={r.color} barSize={18} isAnimationActive={false} />
+            <Bar key={`${r.name}-unaided`} dataKey={`${r.name}__unaided`} stackId={r.name} fill={r.color} barSize={26} isAnimationActive={false} />
           ))}
           {psps.map((r) => (
-            <Bar key={`${r.name}-steered`} dataKey={`${r.name}__steered`} stackId={r.name} fill={`url(#${hatch(r.name)})`} barSize={18} radius={[4, 4, 0, 0]} isAnimationActive={false} />
+            <Bar key={`${r.name}-steered`} dataKey={`${r.name}__steered`} stackId={r.name} fill={`url(#${hatch(r.name)})`} barSize={26} radius={[4, 4, 0, 0]} isAnimationActive={false} />
           ))}
-          {paceLines.map((p) => (
-            <ReferenceLine key={p.name} y={p.value} stroke={p.color} strokeDasharray="5 3" strokeWidth={1.5} opacity={0.7} ifOverflow="extendDomain" />
-          ))}
+          {metric === 'volume' && <Customized component={<PaceMarkers rows={rows} psps={psps} />} />}
         </BarChart>
       </ResponsiveContainer>
     </div>
@@ -311,7 +352,7 @@ export function VolumeCommitmentAnalytics() {
   )
   const dayWord = dayUnit(impact.data?.daySecs).word
   // Day-by-day rows for both cycles, one row per contract day with a pair of keys per PSP.
-  const { beforeRows, withRows, dayYMax, paceLines } = useMemo(() => {
+  const { beforeRows, withRows, beforeYMax, withYMax } = useMemo(() => {
     const daysTotal = Math.max(1, impact.data?.daysTotal ?? 1)
     const dayMs = Math.max(1, (impact.data?.daySecs ?? SECS_PER_DAY) * 1000)
     const baselineDays = impact.data?.baselineDays ?? []
@@ -321,9 +362,13 @@ export function VolumeCommitmentAnalytics() {
       metric === 'volume'
         ? { unaided: Math.max(0, p.total - p.steered), steered: p.steered }
         : { unaided: Math.max(0, p.payments - p.steeredPayments), steered: p.steeredPayments }
-    const build = (points: typeof baselineDays, count: number) => {
+    // `markThrough`: the last day that gets a pace marker. Days the cycle has not reached yet
+    // would only show "everything still owed, spread over what is left", which is not a pace
+    // anyone has failed or met yet.
+    const build = (points: typeof baselineDays, count: number, markThrough: number, droppedOn?: Map<string, number>) => {
       const byKey = new Map(points.map((p) => [`${p.connector}:${p.dayIndex}`, p]))
       const rows: DayRow[] = []
+      const deliveredSoFar: Record<string, number> = {}
       for (let i = 0; i < count; i += 1) {
         const row: DayRow = { day: String(i) }
         for (const r of impactRows) {
@@ -331,21 +376,57 @@ export function VolumeCommitmentAnalytics() {
           const v = p ? pick(p) : { unaided: 0, steered: 0 }
           row[`${r.name}__unaided`] = v.unaided
           row[`${r.name}__steered`] = v.steered
+          // What this day had to bring: the volume still owed when it opened, spread over the
+          // days that were left — so a short day raises the bar for the next, a strong one lowers it.
+          // Volume-based regardless of the metric shown; payments have no goal.
+          // Nothing is needed of a promise once the engine has given it up: its marker would
+          // only climb toward the impossible and squash every bar under it.
+          const dropDay = droppedOn?.get(r.name)
+          const remaining = r.goal - (deliveredSoFar[r.name] ?? 0)
+          if (metric === 'volume' && r.goal > 0 && remaining > 0 && i <= markThrough && (dropDay == null || i < dropDay)) {
+            row[`${r.name}__pace`] = remaining / (count - i)
+          }
+          deliveredSoFar[r.name] = (deliveredSoFar[r.name] ?? 0) + (p ? p.total : 0)
         }
         rows.push(row)
       }
       return rows
     }
-    const beforeRows = build(baselineDays, Math.min(daysTotal, baselineSpan))
-    const withRows = build(cycleDays, daysTotal)
-    const pace = metric === 'volume' ? impactRows.map((r) => ({ name: r.name, color: r.color, value: r.goal / daysTotal })) : []
-    const max = Math.max(
-      0,
-      ...pace.map((p) => p.value),
-      ...[...beforeRows, ...withRows].flatMap((row) => impactRows.map((r) => Number(row[`${r.name}__unaided`] ?? 0) + Number(row[`${r.name}__steered`] ?? 0))),
-    )
-    return { beforeRows, withRows, dayYMax: max > 0 ? max * 1.12 : 1, paceLines: pace }
-  }, [impact.data, impactRows, metric])
+    const cycleStartMs = impact.data?.cycle.startMs
+    const currentDay =
+      isPastRun || cycleStartMs == null ? daysTotal - 1 : Math.min(daysTotal - 1, Math.floor((Date.now() - cycleStartMs) / dayMs))
+    const beforeSpan = Math.min(daysTotal, baselineSpan)
+    // The previous cycle is marked only as far as it had traffic; past that, the markers would
+    // just climb toward "everything, on the last day" over an empty chart.
+    const lastBaselineDay = Math.max(-1, ...baselineDays.map((p) => p.dayIndex))
+    const beforeRows = build(baselineDays, beforeSpan, lastBaselineDay)
+    // A drop that did not stick — the PSP was written off (often on lagging numbers in a cycle's
+    // last seconds) but landed its goal anyway — does not erase what it needed on the way there.
+    const droppedOn = new Map<string, number>()
+    if (cycleStartMs != null) {
+      for (const [name, at] of eliminatedAtMs) {
+        const r = impactRows.find((x) => x.name === name)
+        const met = r != null && r.goal > 0 && r.unaided + r.steered >= r.goal
+        if (!met) droppedOn.set(name, Math.max(0, Math.floor((at - cycleStartMs) / dayMs)))
+      }
+    }
+    const withRows = build(cycleDays, daysTotal, currentDay, droppedOn)
+    // Each chart scales to its own bars and markers, with headroom, so a quiet cycle beside a
+    // busy one does not squash the bars of either.
+    const yMaxOf = (rows: DayRow[]) => {
+      const max = Math.max(
+        0,
+        ...rows.flatMap((row) =>
+          impactRows.flatMap((r) => [
+            Number(row[`${r.name}__unaided`] ?? 0) + Number(row[`${r.name}__steered`] ?? 0),
+            Number(row[`${r.name}__pace`] ?? 0),
+          ]),
+        ),
+      )
+      return max > 0 ? max * 1.12 : 1
+    }
+    return { beforeRows, withRows, beforeYMax: yMaxOf(beforeRows), withYMax: yMaxOf(withRows) }
+  }, [impact.data, impactRows, metric, isPastRun, eliminatedAtMs])
 
   // Headline figures for the cycle.
   const totals = useMemo(() => {
@@ -526,11 +607,11 @@ export function VolumeCommitmentAnalytics() {
             </h2>
             <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
               {baseline ? `${formatWhen(baseline.startMs)} → ${formatWhen(baseline.endMs)}` : 'The cycle before this one'}
-              {metric === 'volume' ? ' · dashed = the pace each promise needs per ' + dayWord : ''}
+              {metric === 'volume' ? ' · dashed = what each promise needed that ' + dayWord + ', after what had already landed' : ''}
             </p>
           </CardHeader>
           <CardBody>
-            <DayWiseChart rows={beforeRows} psps={impactRows} metric={metric} yMax={dayYMax} paceLines={paceLines} dayWord={dayWord} hatchScope="before" />
+            <DayWiseChart rows={beforeRows} psps={impactRows} metric={metric} yMax={beforeYMax} hatchScope="before" />
           </CardBody>
         </Card>
 
@@ -545,7 +626,7 @@ export function VolumeCommitmentAnalytics() {
             </p>
           </CardHeader>
           <CardBody>
-            <DayWiseChart rows={withRows} psps={impactRows} metric={metric} yMax={dayYMax} paceLines={paceLines} dayWord={dayWord} hatchScope="with" />
+            <DayWiseChart rows={withRows} psps={impactRows} metric={metric} yMax={withYMax} hatchScope="with" />
           </CardBody>
         </Card>
       </div>

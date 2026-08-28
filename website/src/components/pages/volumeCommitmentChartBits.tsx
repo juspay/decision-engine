@@ -23,9 +23,10 @@ export function bucketsPerDay(daySecs?: number | null) {
   return isTestCycle(daySecs) ? 12 : 24
 }
 
-/** The word for one contract day on axes and captions. */
-export function dayUnit(daySecs?: number | null): { word: 'minute' | 'day'; short: 'Min' | 'Day' } {
-  return isTestCycle(daySecs) ? { word: 'minute', short: 'Min' } : { word: 'day', short: 'Day' }
+/** The word for one contract day on axes and captions. A test cycle's minutes *are* its contract
+ *  days, and are shown as days so a demo reads exactly like production. */
+export function dayUnit(_daySecs?: number | null): { word: 'day'; short: 'Day' } {
+  return { word: 'day', short: 'Day' }
 }
 
 /** When each PSP was first eliminated, within `runId` only (an old cycle's drop must not pin day 0). */

@@ -1,5 +1,8 @@
 //! Per-payment decision: a behind-pace PSP takes the payment if the plan is fresh, its cycle is
 //! open, it is within tolerance, and it wins a roll against its steer rate — stateless by design.
+//! A behind-pace PSP that is already the routing head cannot be steered to (it has the payment),
+//! but it can be steered *from*: it rolls first, and a win keeps the payment out of the reach of
+//! every lower-reward commitment behind it in the plan.
 
 use std::collections::HashMap;
 
@@ -81,8 +84,25 @@ pub fn choose(
             continue;
         };
 
-        // Routing already picked it — nothing to move.
+        // Routing already picked it, so there is nothing to move *to* it. But it is behind, and
+        // every PSP after it in the plan is worth less: let it roll for its share first, and on a
+        // win keep the payment here rather than let a cheaper commitment take it away. On a loss
+        // the rest of the list gets its turn, which is what shares the flow between them.
         if psp.connector == best_psp {
+            if now.timestamp_millis() < psp.period_end_ms && roll() < psp.steer_rate {
+                return keep_routing_choice(
+                    Some(best_psp.clone()),
+                    format!(
+                        "Kept with {}, which is behind on its own volume commitment (worth {:.0}) \
+                         and is taking {:.1}% of eligible payments; no lower-reward commitment may \
+                         steer this payment away from it.",
+                        psp.connector,
+                        psp.reward,
+                        psp.steer_rate * 100.0
+                    ),
+                    steering_count,
+                );
+            }
             continue;
         }
 
@@ -329,5 +349,67 @@ mod tests {
         let outcome = choose(&scores, &plan, noon(), &mut always());
         assert_eq!(outcome.chosen, None);
         assert_eq!(outcome.info.sr_head.as_deref(), Some("behind"));
+    }
+
+    /// The head is behind on the richer commitment and wins its roll: the payment stays with it,
+    /// and the cheaper commitment further down the plan may not take it away.
+    #[test]
+    fn a_behind_head_that_wins_its_roll_keeps_the_payment_from_cheaper_commitments() {
+        let plan = fresh_plan(
+            vec![psp("adyen", 12_000.0, 0.6), psp("stripe", 2_000.0, 1.0)],
+            0.05,
+            noon(),
+        );
+        let scores = scores(&[("adyen", 0.91), ("stripe", 0.91)]);
+
+        let outcome = choose(&scores, &plan, noon(), &mut always());
+        assert_eq!(outcome.chosen, None);
+        assert_eq!(outcome.info.outcome, VolumeSteerOutcome::SrPrevailed);
+        assert_eq!(outcome.info.chosen.as_deref(), Some("adyen"));
+        assert!(outcome.info.reason.contains("Kept with adyen"));
+    }
+
+    /// The head is behind but loses its roll: the cheaper commitment gets its usual turn.
+    #[test]
+    fn a_behind_head_that_loses_its_roll_lets_the_next_commitment_steer() {
+        let plan = fresh_plan(
+            vec![psp("adyen", 12_000.0, 0.6), psp("stripe", 2_000.0, 1.0)],
+            0.05,
+            noon(),
+        );
+        let scores = scores(&[("adyen", 0.91), ("stripe", 0.91)]);
+
+        // First roll (adyen's, the head by name on a tie) loses at 0.7 ≥ 0.6; the second (stripe's) wins at 0.0 < 1.0.
+        let mut rolls = [0.7, 0.0].into_iter();
+        let mut roll = || rolls.next().expect("two rolls");
+        let outcome = choose(&scores, &plan, noon(), &mut roll);
+        assert_eq!(outcome.chosen.as_deref(), Some("stripe"));
+    }
+
+    /// A richer commitment that is *not* the head still outranks the head's own claim: the plan
+    /// order decides, and the head only defends against commitments below it.
+    #[test]
+    fn a_richer_non_head_commitment_still_wins_over_a_behind_head() {
+        let plan = fresh_plan(
+            vec![psp("richest", 20_000.0, 1.0), psp("head", 12_000.0, 1.0)],
+            0.05,
+            noon(),
+        );
+        let scores = scores(&[("head", 0.95), ("richest", 0.92)]);
+
+        let outcome = choose(&scores, &plan, noon(), &mut always());
+        assert_eq!(outcome.chosen.as_deref(), Some("richest"));
+    }
+
+    /// A behind head whose cycle has closed has nothing to defend; it does not consume a roll.
+    #[test]
+    fn a_behind_head_past_its_cycle_end_does_not_hold_the_payment() {
+        let mut head = psp("head", 12_000.0, 1.0);
+        head.period_end_ms = noon().timestamp_millis() - 1;
+        let plan = fresh_plan(vec![head, psp("poor", 2_000.0, 1.0)], 0.05, noon());
+        let scores = scores(&[("head", 0.91), ("poor", 0.91)]);
+
+        let outcome = choose(&scores, &plan, noon(), &mut always());
+        assert_eq!(outcome.chosen.as_deref(), Some("poor"));
     }
 }
