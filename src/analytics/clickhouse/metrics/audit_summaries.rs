@@ -169,7 +169,7 @@ fn raw_summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFra
 
     let source = source.into_fragment();
     let mut builder = BoundQueryBuilder::from_fragment(SqlFragment::with_binds(
-        format!("({})", source.sql()),
+        format!("({}) AS src", source.sql()),
         source.binds().to_vec(),
     ));
     builder.extend_selects([
@@ -180,7 +180,10 @@ fn raw_summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFra
         "min(created_at_ms) AS first_seen_ms".to_string(),
         "max(created_at_ms) AS last_seen_ms".to_string(),
         "count() AS event_count".to_string(),
-        "uniqExact(request_id) AS call_count".to_string(),
+        // Qualified: an unqualified `request_id` here binds to the `argMax(...) AS
+        // request_id` output alias in this same SELECT, which ClickHouse rejects as a
+        // nested aggregate (ILLEGAL_AGGREGATION).
+        "uniqExact(src.request_id) AS call_count".to_string(),
         "argMax(status, created_at_ms) AS latest_status".to_string(),
         "argMax(gateway, created_at_ms) AS latest_gateway".to_string(),
         "argMax(event_stage, created_at_ms) AS latest_stage".to_string(),
@@ -400,7 +403,7 @@ pub async fn load_exact(
 
     let source = source.into_fragment();
     let mut builder = BoundQueryBuilder::from_fragment(SqlFragment::with_binds(
-        format!("({})", source.sql()),
+        format!("({}) AS src", source.sql()),
         source.binds().to_vec(),
     ));
     builder.extend_selects([
@@ -411,7 +414,10 @@ pub async fn load_exact(
         "min(created_at_ms) AS first_seen_ms".to_string(),
         "max(created_at_ms) AS last_seen_ms".to_string(),
         "count() AS event_count".to_string(),
-        "uniqExact(request_id) AS call_count".to_string(),
+        // Qualified: an unqualified `request_id` here binds to the `argMax(...) AS
+        // request_id` output alias in this same SELECT, which ClickHouse rejects as a
+        // nested aggregate (ILLEGAL_AGGREGATION).
+        "uniqExact(src.request_id) AS call_count".to_string(),
         "argMax(status, created_at_ms) AS latest_status".to_string(),
         "argMax(gateway, created_at_ms) AS latest_gateway".to_string(),
         "argMax(event_stage, created_at_ms) AS latest_stage".to_string(),
@@ -471,7 +477,18 @@ mod tests {
         assert!(!fragment.sql().contains("resolved_merchant_id"));
         assert!(fragment
             .sql()
-            .contains("uniqExact(request_id) AS call_count"));
+            .contains("uniqExact(src.request_id) AS call_count"));
+    }
+
+    #[test]
+    fn aggregating_fragments_qualify_the_call_count_column() {
+        // An unqualified `request_id` binds to the `argMax(...) AS request_id` output alias
+        // in the same SELECT, and ClickHouse rejects the resulting nested aggregate with
+        // ILLEGAL_AGGREGATION. Both aggregating fragments must reference the source column.
+        let raw = raw_summary_fragment(&payment_audit_query(), false);
+        assert!(raw.sql().contains(") AS src"));
+        assert!(raw.sql().contains("uniqExact(src.request_id)"));
+        assert!(!raw.sql().contains("uniqExact(request_id)"));
     }
 
     #[test]
