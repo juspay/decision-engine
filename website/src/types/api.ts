@@ -512,6 +512,8 @@ export interface PaymentAuditSummary {
   first_seen_ms: number
   last_seen_ms: number
   event_count: number
+  /** Distinct evaluation calls behind event_count per-entry events; absent on older servers. */
+  call_count?: number
   latest_status?: string | null
   latest_gateway?: string | null
   latest_stage?: string | null

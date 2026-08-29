@@ -209,7 +209,11 @@ async fn summary_fragment(
         return raw_summary_fragment(query, preview_only);
     }
 
-    finalized_summary_fragment(query, preview_only, call_count_state_available(client).await)
+    finalized_summary_fragment(
+        query,
+        preview_only,
+        call_count_state_available(client).await,
+    )
 }
 
 fn exact_lookup_filter(lookup_key: &str) -> FilterClause {
@@ -465,7 +469,9 @@ mod tests {
         assert!(fragment.sql().contains("AS merchant_id"));
         assert!(!fragment.sql().contains("resolved_lookup_key"));
         assert!(!fragment.sql().contains("resolved_merchant_id"));
-        assert!(fragment.sql().contains("uniqExact(request_id) AS call_count"));
+        assert!(fragment
+            .sql()
+            .contains("uniqExact(request_id) AS call_count"));
     }
 
     #[test]
