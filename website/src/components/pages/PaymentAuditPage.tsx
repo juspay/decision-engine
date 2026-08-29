@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { useSearchParams } from 'react-router-dom'
-import { ArrowLeft, RefreshCw, Search as SearchIcon, SlidersHorizontal } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronRight, RefreshCw, Search as SearchIcon, SlidersHorizontal } from 'lucide-react'
 import { fetcher } from '../../lib/api'
 import {
   AnalyticsGatewayScoresResponse,
@@ -759,6 +759,51 @@ export function PaymentAuditPage() {
   const resultRows = auditSearch.data?.results || []
   const totalMatches = auditSearch.data?.total_results || 0
   const totalEvents = timeline.length
+
+  // Events with no request_id share one bucket rather than each looking like its own call.
+  const UNGROUPED_CALL_KEY = '__ungrouped__'
+
+  // ── Timeline grouped by evaluation call ────────────────────────────────────
+  // A batch evaluation records one event per entry, all sharing the call's request
+  // id. Grouping the trace under call headers keeps an SDK init burst readable —
+  // "3 calls" with entries inside — instead of a flat wall of sibling rows.
+  const timelineGroups = useMemo(() => {
+    const groups: { key: string; items: { event: PaymentAuditEvent; index: number }[] }[] = []
+    const groupIndexByKey = new Map<string, number>()
+    timeline.forEach((event, index) => {
+      // request_id only, to match the server's call_count = uniqExact(request_id). Falling
+      // back to per-event ids would show events of unknown provenance as separate calls and
+      // disagree with the count on the Matches row.
+      const key = event.request_id || UNGROUPED_CALL_KEY
+      const existing = groupIndexByKey.get(key)
+      if (existing === undefined) {
+        groupIndexByKey.set(key, groups.length)
+        groups.push({ key, items: [{ event, index }] })
+      } else {
+        groups[existing].items.push({ event, index })
+      }
+    })
+    return groups
+  }, [timeline])
+  // Headers earn their row as soon as any call carries more than one entry — including a
+  // single batch call, which is the common shape and the one this grouping exists for. A
+  // trace of one-entry calls stays flat, as before.
+  const showCallHeaders = timelineGroups.some((group) => group.items.length > 1)
+  const [collapsedCalls, setCollapsedCalls] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    setCollapsedCalls(new Set())
+  }, [selectedKey])
+  const toggleCallCollapsed = (key: string) => {
+    setCollapsedCalls((current) => {
+      const next = new Set(current)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }
   const successCount = auditSearch.data?.total_success ?? resultRows.filter((row) => summaryBadgeVariant(row.latest_status) === 'green').length
   const failureCount = auditSearch.data?.total_failure ?? resultRows.filter((row) => summaryBadgeVariant(row.latest_status) === 'red').length
   const activeGatewayList = Array.from(
@@ -1170,7 +1215,14 @@ export function PaymentAuditPage() {
                   {selectedSummary?.payment_id || selectedSummary?.request_id || selectedSummary?.lookup_key || 'Selected payment'}
                 </h2>
                 <div className="flex shrink-0 items-center gap-2">
-                  <span className="text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">{totalEvents} event{totalEvents === 1 ? '' : 's'}</span>
+                  <span className="text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
+                    {/* Worded from the same facts as the Matches row that opened this trace,
+                        not from whether the collapsible headers are drawn — otherwise a
+                        one-call trace reads "7 events" here and "1 call · 7 entries" there. */}
+                    {totalEvents > timelineGroups.length
+                      ? `${timelineGroups.length} call${timelineGroups.length === 1 ? '' : 's'} · ${totalEvents} entries`
+                      : `${totalEvents} event${totalEvents === 1 ? '' : 's'}`}
+                  </span>
                   {selectedSummary?.latest_status ? (
                     <Badge variant={summaryBadgeVariant(selectedSummary.latest_status)}>
                       {humanizeAuditValue(selectedSummary.latest_status)}
@@ -1229,7 +1281,22 @@ export function PaymentAuditPage() {
                         </span>
                       ) : null}
                       <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
-                        · {row.event_count} event{row.event_count === 1 ? '' : 's'}
+                        {(() => {
+                          // One evaluation call records one event per batch entry, so raw
+                          // event totals read like a call storm. Headline the call count and
+                          // keep entries as the qualifier.
+                          const calls = row.call_count ?? 0
+                          // A server without the call_count migration reports 0. Say "events"
+                          // then — the old, true wording — rather than relabelling an event
+                          // total as a call count, which would overstate the calls made.
+                          if (calls < 1) {
+                            return `· ${row.event_count} event${row.event_count === 1 ? '' : 's'}`
+                          }
+                          const callLabel = `${calls} call${calls === 1 ? '' : 's'}`
+                          return row.event_count > calls
+                            ? `· ${callLabel} · ${row.event_count} entries`
+                            : `· ${callLabel}`
+                        })()}
                       </span>
                     </div>
                     {gatewayPath ? (
@@ -1281,7 +1348,44 @@ export function PaymentAuditPage() {
           ) : (
             <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-3">
               {timeline.length ? (
-                timeline.map((event, index) => {
+                timelineGroups.flatMap((group, groupIdx) => {
+                  const collapsed = showCallHeaders && collapsedCalls.has(group.key)
+                  const firstEvent = group.items[0].event
+                  const entryErrors = group.items.filter(({ event }) => Boolean(event.error_message)).length
+                  const header = showCallHeaders
+                    ? [
+                        <button
+                          key={`call-${group.key}`}
+                          type="button"
+                          onClick={() => toggleCallCollapsed(group.key)}
+                          className="flex w-full items-center gap-2 rounded-xl px-4 py-2 text-left transition-colors hover:bg-slate-50/80 dark:hover:bg-[#13131a]"
+                        >
+                          {collapsed ? (
+                            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-[#8a8a93]" />
+                          ) : (
+                            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-[#8a8a93]" />
+                          )}
+                          <span className="text-[12px] font-semibold uppercase tracking-wide text-slate-400 dark:text-[#8a8a93] leading-[18px]">
+                            {group.key === UNGROUPED_CALL_KEY
+                              ? 'Ungrouped'
+                              : `Call ${groupIdx + 1}`}{' '}
+                            · {group.items.length}{' '}
+                            {group.items.length === 1 ? 'entry' : 'entries'}
+                          </span>
+                          {entryErrors > 0 ? (
+                            <span className="text-[12px] font-medium text-red-600 dark:text-red-400 leading-[18px]">
+                              · {entryErrors} failed
+                            </span>
+                          ) : null}
+                          <span className="ml-auto text-[12px] text-slate-400 dark:text-[#78849a] leading-[18px]">
+                            {formatRelative(firstEvent.created_at_ms)}
+                          </span>
+                        </button>,
+                      ]
+                    : []
+                  const rows = collapsed
+                    ? []
+                    : group.items.map(({ event, index }) => {
                   const selected = selectedEvent?.id === event.id
                   return (
                     <button
@@ -1336,6 +1440,8 @@ export function PaymentAuditPage() {
                       </div>
                     </button>
                   )
+                })
+                  return [...header, ...rows]
                 })
               ) : (
                 <EmptyState

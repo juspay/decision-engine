@@ -304,6 +304,12 @@ pub fn classify_request(method: &Method, path: &str) -> Option<AnalyticsFlowCont
             ApiFlow::RuleBasedRouting,
             FlowType::RoutingEvaluate,
         )),
+        // The batch endpoint mirrors the single one; without this arm it produced no ApiEvent
+        // at all, so batch calls were invisible to the request-level audit.
+        ("POST", ["routing", "evaluate", "batch"]) => Some(AnalyticsFlowContext::new(
+            ApiFlow::RuleBasedRouting,
+            FlowType::RoutingEvaluate,
+        )),
         ("POST", ["rule", "create"]) => Some(AnalyticsFlowContext::new(
             ApiFlow::RuleBasedRouting,
             FlowType::RuleConfigCreate,
@@ -480,6 +486,13 @@ mod tests {
             Some(AnalyticsFlowContext::new(
                 ApiFlow::DynamicRouting,
                 FlowType::DecideGateway,
+            ))
+        );
+        assert_eq!(
+            classify_request(&Method::POST, "/routing/evaluate/batch"),
+            Some(AnalyticsFlowContext::new(
+                ApiFlow::RuleBasedRouting,
+                FlowType::RoutingEvaluate,
             ))
         );
         assert_eq!(

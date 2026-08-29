@@ -428,6 +428,12 @@ pub struct PaymentAuditSummary {
     pub first_seen_ms: i64,
     pub last_seen_ms: i64,
     pub event_count: usize,
+    /// Distinct evaluation calls (by request id) behind `event_count` events. A batch
+    /// evaluation records one event per entry, so this is the number the UI should
+    /// headline; older summary rows without the backing column fall back to
+    /// `event_count`.
+    #[serde(default)]
+    pub call_count: usize,
     pub latest_status: Option<String>,
     pub latest_gateway: Option<String>,
     pub latest_stage: Option<String>,
