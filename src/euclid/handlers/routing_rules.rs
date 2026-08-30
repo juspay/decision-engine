@@ -29,9 +29,8 @@ use crate::euclid::{
 };
 use crate::generics::MeshError;
 use crate::{euclid::types::RoutingAlgorithm, logger, metrics};
-use async_bb8_diesel::AsyncRunQueryDsl;
 use axum::{extract::Path, response::IntoResponse, Json};
-use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods, QueryDsl};
+use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods};
 use error_stack::ResultExt;
 
 use crate::app::get_tenant_app_state;
@@ -622,69 +621,6 @@ async fn no_active_algorithm_response(
     response
 }
 
-/// Whether the profile has any routing rule at all, scoped the same way the active-mapper
-/// lookup is. Separates a profile that deactivated its rules from one the engine has never
-/// been given any -- the two are indistinguishable from the mapper miss alone, but callers
-/// must treat them oppositely: the first is an authoritative "no rule", the second means the
-/// engine simply has nothing to say about this profile.
-async fn profile_has_any_routing_rule(
-    state: &crate::app::TenantAppState,
-    created_by: &str,
-    algorithm_for: Option<&str>,
-) -> bool {
-    let conn = match state.db.get_conn().await {
-        Ok(conn) => conn,
-        Err(error) => {
-            logger::error!(
-                ?error,
-                created_by = %created_by,
-                "routing_evaluate: no connection to check for existing routing rules"
-            );
-            return false;
-        }
-    };
-
-    // A deactivated profile has no cache entry and no active mapper row, so this runs on every
-    // evaluate it makes. Selecting one id keeps it off the row itself, whose `algorithm_data`
-    // holds the whole rule program.
-    let existing: Result<Vec<String>, _> = match algorithm_for {
-        Some(algorithm_for) => {
-            dsl::routing_algorithm
-                .filter(
-                    dsl::created_by
-                        .eq(created_by.to_string())
-                        .and(dsl::algorithm_for.eq(algorithm_for.to_string())),
-                )
-                .select(dsl::id)
-                .limit(1)
-                .get_results_async(&*conn)
-                .await
-        }
-        None => {
-            dsl::routing_algorithm
-                .filter(dsl::created_by.eq(created_by.to_string()))
-                .select(dsl::id)
-                .limit(1)
-                .get_results_async(&*conn)
-                .await
-        }
-    };
-
-    match existing {
-        Ok(found) => !found.is_empty(),
-        Err(error) => {
-            // Reported as "no rules", which routes the caller down the error path it already
-            // took before this check existed.
-            logger::error!(
-                ?error,
-                created_by = %created_by,
-                "routing_evaluate: failed to check for existing routing rules"
-            );
-            false
-        }
-    }
-}
-
 /// Resolves the active routing algorithm for a merchant: Redis cache first, DB with
 /// cache back-fill on a miss. Extracted so the batch endpoint can resolve once and
 /// evaluate many parameter sets against the same algorithm.
@@ -1022,16 +958,16 @@ pub async fn routing_evaluate(
     let algorithm = match resolve_active_algorithm(&state, &payload.created_by, algorithm_for).await
     {
         Ok(algo) => algo,
-        // A profile that has rules but none active has deliberately deactivated them,
-        // and that is an answer rather than a failure: the caller should route by its
-        // fallback. A profile with no rules at all stays an error, so a caller can still
-        // tell that the engine has nothing for it.
+        // No rule to apply is an answer, not a failure: the caller routes by the fallback
+        // it supplied. This covers a profile whose rules are all deactivated and one that
+        // has no rules at all — Hyperswitch treats both the same, and a profile awaiting
+        // migration is reported by the caller, which warns when a cut-over profile gets an
+        // empty result.
         Err(e)
             if matches!(
                 e.get_inner(),
                 EuclidErrors::ActiveRoutingAlgorithmNotFound(_)
-            ) && profile_has_any_routing_rule(&state, &payload.created_by, algorithm_for)
-                .await =>
+            ) =>
         {
             API_REQUEST_COUNTER
                 .with_label_values(&["routing_evaluate", "success"])
@@ -1227,15 +1163,13 @@ pub async fn routing_evaluate_batch(
     let algorithm = match resolve_active_algorithm(&state, &payload.created_by, algorithm_for).await
     {
         Ok(algo) => algo,
-        // Same semantics as the single endpoint: rules exist but none are active is an
-        // authoritative "route by your fallback", answered once per entry so eligibility
+        // Same semantics as the single endpoint, answered once per entry so eligibility
         // narrowing still runs against each entry's own parameters.
         Err(e)
             if matches!(
                 e.get_inner(),
                 EuclidErrors::ActiveRoutingAlgorithmNotFound(_)
-            ) && profile_has_any_routing_rule(&state, &payload.created_by, algorithm_for)
-                .await =>
+            ) =>
         {
             let mut results = Vec::with_capacity(payload.requests.len());
             for entry in payload.requests {
