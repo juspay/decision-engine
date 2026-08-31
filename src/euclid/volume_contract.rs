@@ -258,9 +258,10 @@ pub enum BillingCycleType {
     CalendarMonth,
     CalendarQuarter,
     CalendarYear,
-    /// TESTING: the cycle lasts `anchor` minutes and repeats from the Unix epoch, so a whole
-    /// period plays out while you watch. Each minute counts as one contract "day", so pacing,
-    /// elimination and steering behave exactly as on a calendar cycle — only faster.
+    /// TESTING: the cycle lasts `anchor` minutes and repeats from the contract's activation
+    /// instant (its stamped anchor), so a fresh contract always plays out a whole period while
+    /// you watch. Each minute counts as one contract "day", so pacing, elimination and steering
+    /// behave exactly as on a calendar cycle — only faster.
     TestMinutes,
 }
 

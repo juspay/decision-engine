@@ -501,7 +501,7 @@ mod test_cycle_tests {
         text.parse().expect("valid instant")
     }
 
-    /// A 30-minute test cycle: thirty one-minute contract days, anchored to the epoch.
+    /// A 30-minute test cycle: thirty one-minute contract days, anchored to activation.
     #[test]
     fn a_test_cycle_lasts_its_minutes_with_one_day_per_minute() {
         let cycle = BillingCycle {

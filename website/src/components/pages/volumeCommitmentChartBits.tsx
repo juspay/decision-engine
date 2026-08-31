@@ -41,6 +41,36 @@ export function firstEliminationByConnector(events: CommitmentAuditEvent[], runI
   return out
 }
 
+/** Percent of goal for display. Rounding must never contradict the verdict: a shortfall never
+ *  reads "100%" — within half a point of the goal it keeps one decimal ("99.6%") — and only an
+ *  actually-met goal prints "100%". */
+export function pctOfGoal(achieved: number, goal: number): string {
+  if (!(goal > 0)) return '0'
+  if (achieved >= goal) return '100'
+  const pct = Math.max(0, (achieved / goal) * 100)
+  if (Math.round(pct) >= 100) return Math.min(99.9, Math.floor(pct * 10) / 10).toFixed(1)
+  return Math.round(pct).toString()
+}
+
+/** The achieved amount beside its goal. When compact rounding would print a shortfall as the
+ *  goal itself ("$100/$100" while missed), the achieved side keeps its minor units instead. */
+export function formatAchieved(achieved: number, goal: number, currency?: string | null): string {
+  const compact = formatMoney(achieved, currency)
+  if (achieved >= goal || compact !== formatMoney(goal, currency)) return compact
+  if (!currency) return achieved.toLocaleString()
+  const major = toMajor(achieved, currency)
+  try {
+    return new Intl.NumberFormat('en', {
+      style: 'currency',
+      currency,
+      currencyDisplay: 'narrowSymbol',
+      maximumFractionDigits: 2,
+    }).format(major)
+  } catch {
+    return `${currency} ${major.toLocaleString()}`
+  }
+}
+
 export function compactAmount(value: number) {
   if (!Number.isFinite(value)) return '0'
   if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`

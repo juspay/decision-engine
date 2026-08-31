@@ -3,11 +3,13 @@
 use std::collections::HashMap;
 
 use axum::extract::{Path, Query};
-use axum::http::StatusCode;
-use axum::Json;
+use axum::http::{HeaderMap, StatusCode};
+use axum::{Extension, Json};
 use futures::FutureExt;
+use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
 
+use crate::auth::AuthContext;
 use crate::decider::gatewaydecider::volume_commitment;
 use volume_commitment::controller::{self, RunReport};
 use volume_commitment::volume::{AuditEvent, AuditKind, DayVolume};
@@ -27,11 +29,63 @@ pub struct RunQuery {
     pub merchant_id: Option<String>,
 }
 
+/// True when the request carries the deployment's admin secret — what the scheduler presents.
+/// Checked here as well as in the middleware because the middleware attaches no session to such
+/// a caller, and in api-key compat mode a request with no credentials at all reaches the handler.
+fn presents_admin_secret(headers: &HeaderMap) -> bool {
+    let Some(state) = crate::app::APP_STATE.get() else {
+        return false;
+    };
+    let expected = state.global_config.admin_secret.secret.peek();
+    let provided = headers
+        .get("x-admin-secret")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("");
+    !expected.is_empty() && provided == expected
+}
+
+/// Who may run what: the admin secret may run anything, a session or api key only its own
+/// merchant, and the sweep of every merchant (1 + 2N database reads and N ClickHouse queries,
+/// serial) is the scheduler's alone.
+fn authorize_run(
+    admin: bool,
+    session: Option<&AuthContext>,
+    merchant_id: Option<&str>,
+) -> Result<(), (StatusCode, String)> {
+    if admin {
+        return Ok(());
+    }
+    match (session, merchant_id) {
+        (_, None) => Err((
+            StatusCode::FORBIDDEN,
+            "running a forecast for every merchant needs the admin secret".to_string(),
+        )),
+        (Some(context), Some(merchant_id)) if context.merchant_id == merchant_id => Ok(()),
+        (Some(_), Some(_)) => Err((
+            StatusCode::FORBIDDEN,
+            "this session may only run a forecast for its own merchant".to_string(),
+        )),
+        (None, Some(_)) => Err((
+            StatusCode::UNAUTHORIZED,
+            "running a forecast needs a session, an api key, or the admin secret".to_string(),
+        )),
+    }
+}
+
 /// `POST /volume-commitment/run-forecast` — re-measure, re-decide what to chase, re-mark who is
-/// behind. A merchant with no usable commitments counts as skipped, a panicking one as failed.
+/// behind. A merchant with no usable commitments counts as skipped; one whose delivery could not
+/// be measured, or whose pass panicked, as failed — its previous plan stands.
 pub async fn run_forecast(
+    headers: HeaderMap,
+    session: Option<Extension<AuthContext>>,
     Query(query): Query<RunQuery>,
 ) -> Result<Json<RunReport>, (StatusCode, String)> {
+    authorize_run(
+        presents_admin_secret(&headers),
+        session.as_ref().map(|Extension(context)| context),
+        query.merchant_id.as_deref(),
+    )?;
+
     let Some(deps) = volume_commitment::deps() else {
         // Startup wiring has not run. Worth a real error here: unlike the read view, a caller
         // asking for a run needs to know it did not happen.
@@ -50,8 +104,10 @@ pub async fn run_forecast(
         .await;
 
     let (processed, skipped, failed, merchants) = match outcome {
-        Ok(Some(run)) => (1, 0, 0, vec![run]),
-        Ok(None) => (0, 1, 0, Vec::new()),
+        Ok(Ok(Some(run))) => (1, 0, 0, vec![run]),
+        Ok(Ok(None)) => (0, 1, 0, Vec::new()),
+        // Logged where it happened.
+        Ok(Err(_)) => (0, 0, 1, Vec::new()),
         Err(_) => {
             crate::logger::error!(
                 tag = "volume_commitment",
@@ -162,10 +218,18 @@ pub async fn get_volume_commitment(
         .iter()
         .map(|c| (c.connector.as_str(), c.goal))
         .collect();
+    // Unmeasurable is an error, not zeros: a card reading "0 delivered" against a live plan
+    // would be a lie the merchant acts on.
     let measured = deps
         .volume
         .measure(&merchant_id, &inputs.commitments, math::PACE_WINDOW_DAYS)
-        .await;
+        .await
+        .map_err(|error| {
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                format!("delivered volume cannot be measured right now: {error}"),
+            )
+        })?;
 
     let psps = plan
         .psps
@@ -218,6 +282,28 @@ async fn current_plan(deps: &Deps, inputs: &CommitmentInputs) -> Option<Steering
         .filter(|plan| plan.contract_anchor_ms == inputs.contract_anchor_ms)
 }
 
+/// Whether the stored plan describes the run being viewed. No `run_id` means the live cycle,
+/// and a string that is not a run id falls back to the live cycle exactly as
+/// `commitments_for_run` does — only a real, different run id disqualifies the plan.
+fn plan_covers_run(plan_run_id: &str, run_id: Option<&str>) -> bool {
+    match run_id.filter(|r| math::run_start_ms(r).is_some()) {
+        Some(wanted) => plan_run_id == wanted,
+        None => true,
+    }
+}
+
+/// The stored plan, only when it belongs to the run being viewed: a past run must not borrow the
+/// live plan's eliminated/steering verdicts — they describe a different cycle.
+async fn plan_for_run(
+    deps: &Deps,
+    inputs: &CommitmentInputs,
+    run_id: Option<&str>,
+) -> Option<SteeringPlan> {
+    current_plan(deps, inputs)
+        .await
+        .filter(|plan| plan_covers_run(&plan.run_id, run_id))
+}
+
 /// A live contract with no plan for it yet: active, nothing paced.
 fn pending(merchant_id: String, inputs: &CommitmentInputs) -> VolumeCommitmentView {
     VolumeCommitmentView {
@@ -260,7 +346,8 @@ pub struct ConnectorSeries {
     pub reward: f64,
     /// How the reward is earned — "0.25% rebate", "lump sum".
     pub reward_note: String,
-    /// First day of the cycle, `YYYY-MM-DD` in the contract's zone.
+    /// Instant the cycle opened, RFC 3339 in UTC (the contract's zone shapes the boundary,
+    /// not the rendering).
     pub cycle_start: String,
     /// Cycle close (the next cycle's start), for countdowns and sizing a simulated run.
     pub cycle_end: String,
@@ -339,7 +426,7 @@ pub async fn get_series(
         return Ok(Json(empty()));
     };
 
-    let eliminated: Vec<String> = current_plan(deps, &inputs)
+    let eliminated: Vec<String> = plan_for_run(deps, &inputs, query.run_id.as_deref())
         .await
         .map(|plan| plan.dropped.iter().map(|d| d.connector.clone()).collect())
         .unwrap_or_default();
@@ -570,17 +657,18 @@ pub async fn get_impact(
         return Err(not_active());
     };
 
-    let (eliminated, steering): (Vec<String>, Vec<String>) = current_plan(deps, &inputs)
-        .await
-        .map(|plan| {
-            (
-                plan.dropped.iter().map(|d| d.connector.clone()).collect(),
-                plan.needing_steering()
-                    .map(|p| p.connector.clone())
-                    .collect(),
-            )
-        })
-        .unwrap_or_default();
+    let (eliminated, steering): (Vec<String>, Vec<String>) =
+        plan_for_run(deps, &inputs, query.run_id.as_deref())
+            .await
+            .map(|plan| {
+                (
+                    plan.dropped.iter().map(|d| d.connector.clone()).collect(),
+                    plan.needing_steering()
+                        .map(|p| p.connector.clone())
+                        .collect(),
+                )
+            })
+            .unwrap_or_default();
 
     let commitments = commitments_for_run(&inputs.commitments, query.run_id.as_deref());
     let Some(first) = commitments.first() else {
@@ -687,4 +775,69 @@ pub async fn get_impact(
         baseline_days,
         cycle_days,
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::AuthKind;
+
+    fn session(merchant_id: &str) -> AuthContext {
+        AuthContext {
+            merchant_id: merchant_id.to_string(),
+            auth_kind: AuthKind::Jwt,
+            user_id: None,
+            email: None,
+            role: None,
+            permissions: None,
+        }
+    }
+
+    #[test]
+    fn the_admin_secret_runs_anything() {
+        assert!(authorize_run(true, None, None).is_ok());
+        assert!(authorize_run(true, None, Some("m1")).is_ok());
+        assert!(authorize_run(true, Some(&session("m2")), Some("m1")).is_ok());
+    }
+
+    /// The sweep is the scheduler's: a dashboard user with a write permission must not be able
+    /// to put every merchant's forecast on the main server at once.
+    #[test]
+    fn the_sweep_needs_the_admin_secret() {
+        let refused = authorize_run(false, Some(&session("m1")), None).unwrap_err();
+        assert_eq!(refused.0, StatusCode::FORBIDDEN);
+        let refused = authorize_run(false, None, None).unwrap_err();
+        assert_eq!(refused.0, StatusCode::FORBIDDEN);
+    }
+
+    #[test]
+    fn a_session_runs_only_its_own_merchant() {
+        assert!(authorize_run(false, Some(&session("m1")), Some("m1")).is_ok());
+        let refused = authorize_run(false, Some(&session("m1")), Some("m2")).unwrap_err();
+        assert_eq!(refused.0, StatusCode::FORBIDDEN);
+    }
+
+    /// Api-key compat mode lets an unauthenticated request through the middleware; here it
+    /// still needs to say who it is.
+    #[test]
+    fn no_credentials_at_all_is_refused() {
+        let refused = authorize_run(false, None, Some("m1")).unwrap_err();
+        assert_eq!(refused.0, StatusCode::UNAUTHORIZED);
+    }
+
+    /// A past run must not borrow the live plan's verdicts; the live view and a request for the
+    /// live run itself keep them; garbage run ids fall back to the live view like everywhere else.
+    #[test]
+    fn the_live_plan_speaks_only_for_its_own_run() {
+        assert!(plan_covers_run("vcr_1788189990000", None));
+        assert!(plan_covers_run(
+            "vcr_1788189990000",
+            Some("vcr_1788189990000")
+        ));
+        assert!(!plan_covers_run(
+            "vcr_1788189990000",
+            Some("vcr_1788189810000")
+        ));
+        assert!(plan_covers_run("vcr_1788189990000", Some("abc")));
+    }
 }

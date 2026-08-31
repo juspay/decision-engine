@@ -13,10 +13,17 @@ import {
 } from 'recharts'
 import { CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import { CommitmentConnectorSeries } from '../../types/api'
-import { NEUTRAL_INK, SECS_PER_DAY, bucketsPerDay, dayUnit, formatMoney, formatMoneyExact } from './volumeCommitmentChartBits'
+import { NEUTRAL_INK, SECS_PER_DAY, bucketsPerDay, dayUnit, formatAchieved, formatMoney, formatMoneyExact, pctOfGoal } from './volumeCommitmentChartBits'
 
 /** Where a PSP stands against its promise, as the chart marks it. */
 export type PacingStatus = 'met' | 'steering' | 'on_pace' | 'eliminated' | 'missed' | 'pending'
+
+/** The cumulative volume a PSP must have cleared by the end of the contract day `day` falls in —
+ *  the promise split evenly across the cycle's days. Day 0.4 is inside day 1, so its target is
+ *  one day's share; the chart draws these as a step ladder rather than a continuous ramp. */
+function dayTarget(goal: number, day: number, daysTotal: number) {
+  return (goal * Math.min(daysTotal, Math.floor(day + 1e-9) + 1)) / daysTotal
+}
 
 const DROP_COLOR = '#dc2626'
 const STEER_COLOR = '#d97706'
@@ -72,11 +79,11 @@ function PacingOverlay(props: {
   if (rightEdge == null) return null
   const inView = (day: number) => day >= xLo - 1e-9 && day <= xHi + 1e-9
 
-  // Promise labels: one per PSP where its promise line meets the right edge of the view (its goal
-  // when the whole cycle is on screen), nudged apart when they sit close.
+  // Promise labels: one per PSP where its target ladder meets the right edge of the view (its
+  // goal when the whole cycle is on screen), nudged apart when they sit close.
   const LABEL_GAP = 30
   const labels = metas
-    .map((m) => ({ m, y: y((m.goal * xHi) / daysTotal) ?? offset.top }))
+    .map((m) => ({ m, y: y(dayTarget(m.goal, xHi, daysTotal)) ?? offset.top }))
     .sort((a, b) => a.y - b.y)
   for (let i = 1; i < labels.length; i += 1) {
     if (labels[i].y - labels[i - 1].y < LABEL_GAP) labels[i].y = labels[i - 1].y + LABEL_GAP
@@ -91,8 +98,34 @@ function PacingOverlay(props: {
 
   const biggestSteer = steers.reduce<Steer | null>((best, s) => (best && best.amount >= s.amount ? best : s), null)
 
+  // One marker per PSP per contract day, on the ladder where that day's target is cleared —
+  // thinned when the days are too dense for the markers to stay apart.
+  const dayStep = Math.max(1, Math.ceil(daysTotal / 30))
+
   return (
     <g style={{ fontFamily: 'inherit' }}>
+      {/* Day-end target markers along each ladder. */}
+      {metas.map((m) =>
+        Array.from({ length: daysTotal }, (_, i) => i + 1)
+          .filter((k) => k % dayStep === 0 && k >= xLo - 1e-9 && k <= xHi + 1e-9)
+          .map((k) => {
+            const tx = x(k)
+            const ty = y((m.goal * k) / daysTotal)
+            if (tx == null || ty == null) return null
+            return (
+              <circle
+                key={`target-${m.name}-${k}`}
+                cx={tx}
+                cy={ty}
+                r={2.5}
+                fill="none"
+                stroke={m.color}
+                strokeWidth={1.5}
+                opacity={0.8}
+              />
+            )
+          }),
+      )}
       {/* Drop captions along the top of the plot. */}
       {drops.map((d) => {
         if (!inView(d.day)) return null
@@ -246,7 +279,9 @@ function PacingTooltip({
             <span style={{ fontWeight: 600 }}>{m.name}</span>
             <span style={{ marginLeft: 'auto', fontVariantNumeric: 'tabular-nums' }}>
               {total != null ? `${pending != null ? '~' : ''}${formatMoney(total, currency)}` : '—'}
-              <span style={{ opacity: 0.6 }}> / {promise != null ? formatMoney(promise, currency) : '—'}</span>
+              <span style={{ opacity: 0.6 }}>
+                {' '}/ {promise != null ? formatMoney(promise, currency) : '—'} by {dayLabel.toLowerCase()}&apos;s end
+              </span>
             </span>
           </div>
         )
@@ -255,7 +290,8 @@ function PacingTooltip({
   )
 }
 
-/** Running total per PSP vs its dashed promise, with steer triangles and drop markers; dropped PSPs keep their color. */
+/** Running total per PSP vs its per-day target ladder (the promise split across the cycle's
+ *  days, drawn as dashed steps), with steer triangles and drop markers; dropped PSPs keep their color. */
 export function CommitmentPacingChart({
   connectors,
   currency,
@@ -370,6 +406,8 @@ export function CommitmentPacingChart({
     const dayset = new Set<number>([0, daysTotal, ...(isPastRun ? [] : [nowDay])])
     for (const { nodes } of nodesByName.values()) for (const n of nodes) dayset.add(n.at)
     for (const m of metas) if (m.dropDay != null) dayset.add(m.dropDay)
+    // A row on every day boundary, so the target ladder steps exactly where a day ends.
+    for (let k = 1; k <= daysTotal; k += 1) dayset.add(k)
     const days = [...dayset].sort((a, b) => a - b)
 
     const rows: Record<string, number | undefined>[] = []
@@ -415,7 +453,7 @@ export function CommitmentPacingChart({
         if (!isPastRun && nowDay > m.endDay + 1e-9 && (day === nowDay || Math.abs(day - m.endDay) < 1e-9)) {
           row[`${m.name}__pending`] = m.endTotal + m.pace * (day - m.endDay)
         }
-        row[`${m.name}__promise`] = (m.goal * clampDay(day)) / daysTotal
+        row[`${m.name}__promise`] = dayTarget(m.goal, clampDay(day), daysTotal)
       }
       rows.push(row)
     }
@@ -485,7 +523,7 @@ export function CommitmentPacingChart({
     if (win == null) return { yLo: 0, yHi: yMax, yTicksInView: yTicks }
     const values: number[] = []
     for (const m of metas) {
-      values.push((m.goal * xLo) / daysTotal, (m.goal * xHi) / daysTotal)
+      values.push(dayTarget(m.goal, xLo, daysTotal), dayTarget(m.goal, xHi, daysTotal))
     }
     for (const row of rows) {
       const day = Number(row.day ?? 0)
@@ -585,7 +623,7 @@ export function CommitmentPacingChart({
             {metas.map((m) => (
               <Line
                 key={`${m.name}-promise`}
-                type="linear"
+                type="stepAfter"
                 dataKey={`${m.name}__promise`}
                 stroke={m.color}
                 strokeWidth={1.5}
@@ -664,7 +702,7 @@ export function CommitmentPacingChart({
           ))}
           <span className="inline-flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
             <span className="inline-block h-0 w-4 border-t-[1.5px] border-dashed border-slate-500 dark:border-slate-400" />
-            dashed = each PSP&apos;s promise
+            dashed steps = target to clear by each {dayLabel.toLowerCase()}&apos;s end
           </span>
           {!isPastRun && (
             <span className="inline-flex items-center gap-1.5 text-slate-500 dark:text-slate-400">
@@ -711,7 +749,6 @@ export function CommitmentContractCards({
         const status = statusFor(c.connector)
         const color = colorFor(c.connector, i)
         const achieved = achievedFor(c.connector)
-        const pct = c.goal > 0 ? Math.min(100, (achieved / c.goal) * 100) : 0
         const goalText = formatMoney(c.goal, currency)
         const isRebate = c.rewardNote.includes('%')
         const rebate = isRebate ? c.rewardNote.split(' ')[0] : null
@@ -751,7 +788,7 @@ export function CommitmentContractCards({
               {rebate ? `${rebate} × ${goalText}` : `flat on hitting ${goalText}`}
             </p>
             <p className="mt-1 text-[11px] tabular-nums text-slate-500 dark:text-slate-400">
-              {formatMoney(achieved, currency)} delivered · {pct.toFixed(0)}%
+              {formatAchieved(achieved, c.goal, currency)} delivered · {pctOfGoal(achieved, c.goal)}%
             </p>
           </div>
         )

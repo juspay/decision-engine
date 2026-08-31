@@ -36,8 +36,7 @@ import {
   dayUnit,
   firstEliminationByConnector,
   formatMoney,
-  hatchId,
-} from './volumeCommitmentChartBits'
+  hatchId, pctOfGoal} from './volumeCommitmentChartBits'
 
 /** Stable empty fallbacks, so memos keyed on "no data yet" do not recompute every render. */
 const NO_SERIES: CommitmentConnectorSeries[] = []
@@ -706,7 +705,7 @@ export function VolumeCommitmentAnalytics() {
                       <td className="py-2 pr-3 text-right font-semibold">
                         {fmt(metric === 'volume' ? total : r.unaidedPayments + r.steeredPayments)}
                         {metric === 'volume' && r.goal > 0 && (
-                          <span className="ml-1 font-normal text-slate-400">· {pct(total, r.goal)}</span>
+                          <span className="ml-1 font-normal text-slate-400">· {pctOfGoal(total, r.goal)}%</span>
                         )}
                       </td>
                       <td className="py-2 pr-3 text-right">{compactAmount(r.goal)}</td>
@@ -730,7 +729,7 @@ export function VolumeCommitmentAnalytics() {
         <CardHeader>
           <SurfaceLabel>3 · Cumulative volume vs. each promise</SurfaceLabel>
           <h2 className="mt-2 font-medium text-slate-800 dark:text-white">
-            Solid lines are delivered volume; dashed lines are each PSP&apos;s promise
+            Solid lines are delivered volume; dashed steps are each PSP&apos;s per-day targets
           </h2>
           {isPastRun && (
             <p className="mt-2 text-xs text-amber-600 dark:text-amber-500">
@@ -752,8 +751,9 @@ export function VolumeCommitmentAnalytics() {
             height={480}
           />
           <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-            A solid line tracking below its dashed promise is behind pace — the engine steers a
-            little extra volume there (▲), spread through the day. When not enough traffic remains
+            Each dashed step is the volume a PSP must clear by that day&apos;s end (its promise split
+            across the cycle). A solid line tracking below its ladder is behind pace — the engine
+            steers a little extra volume there (▲), spread through the day. When not enough traffic remains
             to land a commitment the engine drops it (red marker): from there its line is dotted and
             carries natural traffic only, so the rest can still be met.
           </p>

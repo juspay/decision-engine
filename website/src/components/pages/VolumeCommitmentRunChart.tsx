@@ -12,7 +12,9 @@ import {
   SolidSwatch,
   bucketsPerDay,
   firstEliminationByConnector,
+  formatAchieved,
   formatMoney,
+  pctOfGoal,
 } from './volumeCommitmentChartBits'
 
 /** The slice of a simulator row this card reads. */
@@ -198,8 +200,8 @@ export function VolumeCommitmentRunChart({
               <span className="ml-auto whitespace-nowrap tabular-nums text-slate-500 dark:text-slate-400">
                 {r.goal > 0 && (
                   <>
-                    {formatMoney(r.achieved, currency)}/{formatMoney(r.goal, currency)}
-                    {r.status !== 'eliminated' && ` · ${Math.min(100, (r.achieved / r.goal) * 100).toFixed(0)}%`}
+                    {formatAchieved(r.achieved, r.goal, currency)}/{formatMoney(r.goal, currency)}
+                    {r.status !== 'eliminated' && ` · ${pctOfGoal(r.achieved, r.goal)}%`}
                     {' · '}
                   </>
                 )}

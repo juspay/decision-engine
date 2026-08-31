@@ -22,7 +22,7 @@ pub use inputs::{Commitment, CommitmentInputs, InputSource, MeasuredVolume};
 pub use nudge::{NudgeOutcome, VolumeSteerInfo, VolumeSteerOutcome};
 pub use plan::{DroppedPsp, PspPlan, SteeringPlan};
 pub use state::{RedisStateStore, StateStore};
-pub use volume::{ClickHouseVolumeSource, FixtureVolumeSource, VolumeSource};
+pub use volume::{ClickHouseVolumeSource, FixtureVolumeSource, VolumeError, VolumeSource};
 
 /// Per-merchant feature flag; the routing path, the forecaster and the dashboard toggle all read it.
 pub const FEATURE_FLAG: &str = "volume_commitment_routing_enabled";
@@ -44,7 +44,7 @@ pub async fn build_deps(
     config: &crate::config::VolumeCommitmentConfig,
     clickhouse: &crate::config::ClickHouseAnalyticsConfig,
 ) -> Deps {
-    // Without ClickHouse nothing can be measured: every PSP reads as zero-delivered, i.e. behind.
+    // Without ClickHouse nothing can be measured, so no plan is ever built and nothing is steered.
     let volume: Arc<dyn VolumeSource> = if clickhouse.enabled {
         crate::logger::info!(
             tag = "volume_commitment",

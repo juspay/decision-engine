@@ -564,8 +564,9 @@ where
             get(routes::volume_commitment::get_impact),
         )
         // Called by the volume-commitment scheduler when a merchant's forecast comes due. Behind
-        // the same auth as any other write; the scheduler presents the admin secret like any
-        // service-to-service caller.
+        // the same auth as any other write, and the handler narrows further: the admin secret
+        // (which the scheduler presents) may run anything, a session or api key only its own
+        // merchant, and the every-merchant sweep is admin-only.
         .route(
             "/volume-commitment/run-forecast",
             post(routes::volume_commitment::run_forecast),

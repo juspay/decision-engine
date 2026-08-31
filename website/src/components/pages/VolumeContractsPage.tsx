@@ -338,9 +338,7 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
   // ── Builder state ───────────────────────────────────────────────────────────
   const [docName, setDocName] = useState('')
   const [docDesc, setDocDesc] = useState('')
-  const [routingMode, setRoutingMode] = useState<'pace_guarded' | 'volume_commitment'>('pace_guarded')
   const [tolerancePp, setTolerancePp] = useState('5')
-  const [metric, setMetric] = useState<'gmv' | 'volume'>('gmv')
   const [currency, setCurrency] = useState('USD')
   const [amountUnits, setAmountUnits] = useState<'major' | 'minor'>('major')
   const [expectedDailyTraffic, setExpectedDailyTraffic] = useState('')
@@ -353,9 +351,7 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
   // stamped with them (the engine still reads them from the document). Seeded from the active
   // document the first time, so an existing setup carries over.
   type MerchantSettings = {
-    routingMode: 'pace_guarded' | 'volume_commitment'
     tolerancePp: string
-    metric: 'gmv' | 'volume'
     currency: string
     amountUnits: 'major' | 'minor'
     expectedDailyTraffic: string
@@ -368,9 +364,7 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
     return (doc?.algorithm_data ?? doc?.algorithm)?.data as VolumeContractConfig | undefined
   }, [documents, activeDocumentId])
   function applySettings(next: Partial<MerchantSettings>) {
-    if (next.routingMode) setRoutingMode(next.routingMode)
     if (next.tolerancePp != null) setTolerancePp(next.tolerancePp)
-    if (next.metric) setMetric(next.metric)
     if (next.currency != null) setCurrency(next.currency)
     if (next.amountUnits) setAmountUnits(next.amountUnits)
     if (next.expectedDailyTraffic != null) setExpectedDailyTraffic(next.expectedDailyTraffic)
@@ -393,9 +387,7 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
     if (activeConfig) {
       const toleranceBps = activeConfig.tolerance_bps ?? (activeConfig.tolerance ? parseFloat(activeConfig.tolerance) : undefined)
       applySettings({
-        routingMode: activeConfig.routing_mode === 'volume_commitment' ? 'volume_commitment' : 'pace_guarded',
         tolerancePp: toleranceBps != null ? String(toleranceBps / 100) : '5',
-        metric: activeConfig.metric === 'volume' ? 'volume' : 'gmv',
         currency: activeConfig.currency?.denomination ?? 'USD',
         amountUnits: activeConfig.currency?.amount_units === 'minor' ? 'minor' : 'major',
         expectedDailyTraffic: activeConfig.expected_daily_traffic != null ? String(activeConfig.expected_daily_traffic) : '',
@@ -407,7 +399,7 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
   }, [settingsKey, activeConfig])
   function saveMerchantSettings() {
     if (!settingsKey) return
-    const next: MerchantSettings = { routingMode, tolerancePp, metric, currency, amountUnits, expectedDailyTraffic, forecastInterval, steeringInterval }
+    const next: MerchantSettings = { tolerancePp, currency, amountUnits, expectedDailyTraffic, forecastInterval, steeringInterval }
     try {
       window.localStorage.setItem(settingsKey, JSON.stringify(next))
     } catch {
@@ -457,9 +449,11 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
   function buildConfig(): VolumeContractConfig {
     const config: VolumeContractConfig = {
       schema_version: 1,
-      routing_mode: routingMode,
+      // The engine implements only pace-guarded steering measured in money (GMV); the form shows
+      // both fields pre-filled and locked to these values.
+      routing_mode: 'pace_guarded',
       tolerance: `${Math.round(parseFloat(tolerancePp || '0') * 100)}bps`,
-      metric,
+      metric: 'gmv',
       currency: { denomination: currency.trim().toUpperCase(), amount_units: amountUnits },
       expected_daily_traffic: amount(expectedDailyTraffic),
       volume_contracts: contracts.map((c): VolumeContract => {
@@ -592,7 +586,7 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
     )
   }
 
-  const unitHint = metric === 'volume' ? 'transaction count' : `${amountUnits} ${currency.toUpperCase()} units`
+  const unitHint = `${amountUnits} ${currency.toUpperCase()} units`
 
   // ── Views: the document list, or the builder as its own screen (like the rules pages) ────────
   // The builder is addressed by URL (`?contract=new`) so a reload or shared link reopens it.
@@ -634,15 +628,13 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
   const merchantSettingsFields = (
     <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 <div>
-                  {fieldLabel('Routing mode')}
+                  {fieldLabel('Routing mode', 'only supported mode')}
                   <SearchableSelect
                     triggerClassName={inputClass}
-                    value={routingMode}
-                    onChange={(v) => setRoutingMode(v as typeof routingMode)}
-                    options={[
-                      { value: 'pace_guarded', label: 'Pace-guarded (auth-rate first)' },
-                      { value: 'volume_commitment', label: 'Volume-commitment first' },
-                    ]}
+                    value="pace_guarded"
+                    onChange={() => {}}
+                    disabled
+                    options={[{ value: 'pace_guarded', label: 'Pace-guarded (auth-rate first)' }]}
                   />
                 </div>
                 <div>
@@ -658,15 +650,13 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
                   />
                 </div>
                 <div>
-                  {fieldLabel('Metric')}
+                  {fieldLabel('Metric', 'only supported metric')}
                   <SearchableSelect
                     triggerClassName={inputClass}
-                    value={metric}
-                    onChange={(v) => setMetric(v as typeof metric)}
-                    options={[
-                      { value: 'gmv', label: 'GMV (money processed)' },
-                      { value: 'volume', label: 'Volume (transaction count)' },
-                    ]}
+                    value="gmv"
+                    onChange={() => {}}
+                    disabled
+                    options={[{ value: 'gmv', label: 'GMV (money processed)' }]}
                   />
                 </div>
                 <div>

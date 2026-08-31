@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 use super::inputs::CommitmentInputs;
 use super::math::{self, PACE_WINDOW_DAYS};
 use super::plan::{self, PspPlan, SteeringPlan};
+use super::volume::VolumeError;
 use super::Deps;
 use crate::config::VolumeCommitmentConfig;
 use crate::logger;
@@ -73,11 +74,13 @@ pub async fn run_all(deps: &Deps) -> RunReport {
             .catch_unwind()
             .await
         {
-            Ok(Some(run)) => {
+            Ok(Ok(Some(run))) => {
                 report.merchants_processed += 1;
                 report.merchants.push(run);
             }
-            Ok(None) => report.merchants_skipped += 1,
+            Ok(Ok(None)) => report.merchants_skipped += 1,
+            // Already logged where it happened; the previous plan stands.
+            Ok(Err(_)) => report.merchants_failed += 1,
             Err(_) => {
                 report.merchants_failed += 1;
                 logger::error!(
@@ -96,27 +99,48 @@ pub async fn run_all(deps: &Deps) -> RunReport {
     report
 }
 
-/// Run a forecast for one merchant. `None` means it has no commitments we can use.
-pub async fn run_for_merchant(deps: &Deps, merchant_id: &str) -> Option<MerchantRun> {
-    let inputs = deps.inputs.load(merchant_id).await?;
-    let plan = build_plan(deps, &inputs).await;
+/// Run a forecast for one merchant. `Ok(None)` means it has no commitments we can use; `Err`
+/// means delivery could not be measured, so no plan was written.
+pub async fn run_for_merchant(
+    deps: &Deps,
+    merchant_id: &str,
+) -> Result<Option<MerchantRun>, VolumeError> {
+    let Some(inputs) = deps.inputs.load(merchant_id).await else {
+        return Ok(None);
+    };
+    let plan = build_plan(deps, &inputs).await?;
 
-    Some(MerchantRun {
+    Ok(Some(MerchantRun {
         psps_tracked: plan.psps.len(),
         psps_steering: plan.needing_steering().count(),
         psps_dropped: plan.dropped.len(),
         next_run_in_secs: interval_secs(&inputs, &deps.config),
         merchant_id: inputs.merchant_id,
-    })
+    }))
 }
 
 /// Measure, position, choose what to chase, mark who is behind — from scratch every run — then store.
-pub async fn build_plan(deps: &Deps, inputs: &CommitmentInputs) -> SteeringPlan {
+///
+/// An unmeasurable merchant gets no plan at all: the previous one keeps steering until it goes
+/// stale. Building on "nothing delivered" would steer every PSP at its maximum rate and, late in
+/// a cycle, eliminate commitments that are in fact on pace.
+pub async fn build_plan(
+    deps: &Deps,
+    inputs: &CommitmentInputs,
+) -> Result<SteeringPlan, VolumeError> {
     let now = Utc::now();
     let measured = deps
         .volume
         .measure(&inputs.merchant_id, &inputs.commitments, PACE_WINDOW_DAYS)
-        .await;
+        .await
+        .map_err(|error| {
+            logger::error!(
+                tag = "volume_commitment",
+                merchant_id = inputs.merchant_id.as_str(),
+                "forecast skipped, the previous plan stands: {error}"
+            );
+            error
+        })?;
 
     // Where each PSP stands, and the longest horizon any commitment still runs for.
     let starting_pace =
@@ -184,7 +208,7 @@ pub async fn build_plan(deps: &Deps, inputs: &CommitmentInputs) -> SteeringPlan 
     deps.state.store_plan(&inputs.merchant_id, &plan).await;
     audit_plan(&plan);
 
-    plan
+    Ok(plan)
 }
 
 /// Record the run as a domain analytics event so the audit trail survives this process.
@@ -324,5 +348,108 @@ fn log_plan(plan: &SteeringPlan, measured: &super::inputs::MeasuredVolume) {
             psp.reward,
             psp.reason,
         );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Arc;
+
+    use async_trait::async_trait;
+
+    use super::*;
+    use crate::decider::gatewaydecider::volume_commitment::inputs::Commitment;
+    use crate::decider::gatewaydecider::volume_commitment::state::StateStore;
+    use crate::decider::gatewaydecider::volume_commitment::volume::FixtureVolumeSource;
+    use crate::decider::gatewaydecider::volume_commitment::DslInputSource;
+
+    /// Records whether a plan was ever written; every other operation is inert.
+    #[derive(Default)]
+    struct RecordingStore {
+        stored: AtomicBool,
+    }
+
+    #[async_trait]
+    impl StateStore for RecordingStore {
+        async fn load_plan(&self, _merchant_id: &str) -> Option<SteeringPlan> {
+            None
+        }
+        async fn store_plan(&self, _merchant_id: &str, _plan: &SteeringPlan) {
+            self.stored.store(true, Ordering::SeqCst);
+        }
+        async fn clear_plan(&self, _merchant_id: &str) {}
+        async fn try_acquire_run_lease(&self, _merchant_id: &str, _ttl_secs: u64) -> bool {
+            true
+        }
+        async fn release_run_lease(&self, _merchant_id: &str) {}
+        async fn last_run_started_at(&self, _merchant_id: &str) -> Option<i64> {
+            None
+        }
+    }
+
+    fn inputs() -> CommitmentInputs {
+        let now_ms = Utc::now().timestamp_millis();
+        CommitmentInputs {
+            merchant_id: "m1".to_string(),
+            contract_anchor_ms: now_ms,
+            contract_rule_id: "rule".to_string(),
+            tolerance: 0.05,
+            expected_daily_traffic: 1_000.0,
+            forecast_interval_secs: None,
+            currency: None,
+            commitments: vec![Commitment {
+                connector: "adyen".to_string(),
+                goal: 10_000.0,
+                reward: 100.0,
+                reward_note: "lump sum".to_string(),
+                period_start_ms: now_ms,
+                period_end_ms: now_ms + 30 * math::SECS_PER_DAY as i64 * 1000,
+                day_secs: math::SECS_PER_DAY,
+                timezone: "UTC".to_string(),
+            }],
+        }
+    }
+
+    /// A ClickHouse outage (or no ClickHouse at all) must leave the previous plan in place, not
+    /// replace it with one that reads every PSP as owing its whole goal.
+    #[tokio::test]
+    async fn an_unmeasurable_merchant_gets_no_plan() {
+        let store = Arc::new(RecordingStore::default());
+        let deps = Deps {
+            config: VolumeCommitmentConfig::default(),
+            inputs: Arc::new(DslInputSource),
+            state: store.clone(),
+            volume: Arc::new(FixtureVolumeSource::new(HashMap::new())),
+        };
+
+        let outcome = build_plan(&deps, &inputs()).await;
+
+        assert!(matches!(outcome, Err(VolumeError::Unavailable)));
+        assert!(
+            !store.stored.load(Ordering::SeqCst),
+            "no plan may be written"
+        );
+    }
+
+    /// The same inputs with a measurement behind them do produce and store a plan.
+    #[tokio::test]
+    async fn a_measured_merchant_gets_a_plan() {
+        let store = Arc::new(RecordingStore::default());
+        let deps = Deps {
+            config: VolumeCommitmentConfig::default(),
+            inputs: Arc::new(DslInputSource),
+            state: store.clone(),
+            volume: Arc::new(FixtureVolumeSource::new(HashMap::from([(
+                "m1".to_string(),
+                super::super::inputs::MeasuredVolume::default(),
+            )]))),
+        };
+
+        let plan = build_plan(&deps, &inputs()).await.expect("measured");
+
+        assert_eq!(plan.psps.len() + plan.dropped.len(), 1);
+        assert!(store.stored.load(Ordering::SeqCst));
     }
 }

@@ -110,17 +110,27 @@ pub struct WindowTotals {
     pub ceded_volume: f64,
 }
 
+/// Why delivered volume could not be measured. Distinct from "nothing was delivered": a plan
+/// built on an empty measurement would read every PSP as owing its whole goal.
+#[derive(Debug, thiserror::Error)]
+pub enum VolumeError {
+    #[error("no volume source is configured (clickhouse analytics is disabled)")]
+    Unavailable,
+    #[error("could not read routed volume from clickhouse: {0}")]
+    Read(String),
+}
+
 /// Where observed traffic is read from.
 #[async_trait]
 pub trait VolumeSource: Send + Sync {
     /// What each PSP in `commitments` has been sent. Connectors with no traffic are simply absent,
-    /// which the controller reads as zero.
+    /// which the controller reads as zero; a source that cannot answer says so instead.
     async fn measure(
         &self,
         merchant_id: &str,
         commitments: &[Commitment],
         pace_window_days: u32,
-    ) -> MeasuredVolume;
+    ) -> Result<MeasuredVolume, VolumeError>;
 
     /// Volume for each PSP since its cycle started, in `per_day` buckets per contract day (1 =
     /// whole days), ordered by `day`. Empty when nothing can be measured.
@@ -175,7 +185,7 @@ impl ClickHouseVolumeSource {
         day_secs: u64,
         pace_window_days: u32,
         into: &mut MeasuredVolume,
-    ) {
+    ) -> Result<(), VolumeError> {
         let now_ms = chrono::Utc::now().timestamp_millis();
         let day_ms = math::day_ms(day_secs);
         let pace_days = i64::from(pace_window_days.max(1));
@@ -211,19 +221,10 @@ impl ClickHouseVolumeSource {
         connector_filter(&mut builder, connectors);
         builder.extend_group_bys(["gateway"]);
 
-        let rows = match fetch_all::<VolumeRow>(builder.build(&self.client)).await {
-            Ok(rows) => rows,
-            Err(error) => {
-                // Zeroes read as "behind", but nudges stay within tolerance, so the cost is
-                // bounded. Loud, because a persistent failure makes the plan meaningless.
-                logger::error!(
-                    tag = "volume_commitment",
-                    merchant_id = merchant_id,
-                    "could not read routed volume from clickhouse: {error:?}"
-                );
-                return;
-            }
-        };
+        // Not zeroes: an unreadable ClickHouse must not read as "nothing delivered".
+        let rows = fetch_all::<VolumeRow>(builder.build(&self.client))
+            .await
+            .map_err(|error| VolumeError::Read(format!("{error:?}")))?;
 
         // Divide by the days actually queried — a fixed 7 would understate the rate early in a
         // cycle and mid-day, and an understated routing rate reads as a phantom shortfall.
@@ -242,6 +243,7 @@ impl ClickHouseVolumeSource {
             into.steered_today
                 .insert(gateway, nan_to_zero(row.steered_today));
         }
+        Ok(())
     }
 }
 
@@ -252,7 +254,7 @@ impl VolumeSource for ClickHouseVolumeSource {
         merchant_id: &str,
         commitments: &[Commitment],
         pace_window_days: u32,
-    ) -> MeasuredVolume {
+    ) -> Result<MeasuredVolume, VolumeError> {
         let mut measured = MeasuredVolume::default();
 
         let mut by_cycle: HashMap<(i64, u64), Vec<String>> = HashMap::new();
@@ -272,9 +274,9 @@ impl VolumeSource for ClickHouseVolumeSource {
                 pace_window_days,
                 &mut measured,
             )
-            .await;
+            .await?;
         }
-        measured
+        Ok(measured)
     }
 
     async fn daily_series(
@@ -643,7 +645,8 @@ fn elapsed_window_days(now_ms: i64, window_start_ms: i64, pace_days: i64, day_ms
         .clamp(1.0, pace_days as f64)
 }
 
-/// Serves volume handed to it up front; stands in for ClickHouse when analytics is off.
+/// Serves volume handed to it up front; stands in for ClickHouse when analytics is off. A
+/// merchant it was given nothing for is *unmeasurable*, not at zero — no plan is built from it.
 pub struct FixtureVolumeSource {
     merchants: HashMap<String, MeasuredVolume>,
 }
@@ -661,8 +664,11 @@ impl VolumeSource for FixtureVolumeSource {
         merchant_id: &str,
         _commitments: &[Commitment],
         _pace_window_days: u32,
-    ) -> MeasuredVolume {
-        self.merchants.get(merchant_id).cloned().unwrap_or_default()
+    ) -> Result<MeasuredVolume, VolumeError> {
+        self.merchants
+            .get(merchant_id)
+            .cloned()
+            .ok_or(VolumeError::Unavailable)
     }
 
     async fn daily_series(
@@ -720,5 +726,24 @@ mod tests {
     fn a_simulated_window_divides_by_virtual_days() {
         let day_ms = 120_000; // 120s contract days
         assert!((elapsed_window_days(3 * day_ms, 0, 7, day_ms) - 3.0).abs() < 1e-9);
+    }
+
+    /// With analytics off the fixture stands in for ClickHouse; it must refuse rather than
+    /// report zero delivery, or every PSP would be steered at its maximum rate.
+    #[tokio::test]
+    async fn the_fixture_refuses_a_merchant_it_has_no_volume_for() {
+        let mut known = MeasuredVolume::default();
+        known.achieved.insert("stripe".to_string(), 42.0);
+        let source = FixtureVolumeSource::new(HashMap::from([("m1".to_string(), known)]));
+
+        let measured = source
+            .measure("m1", &[], 7)
+            .await
+            .expect("fixture merchant");
+        assert_eq!(measured.achieved_for("stripe"), 42.0);
+        assert!(matches!(
+            source.measure("m2", &[], 7).await,
+            Err(VolumeError::Unavailable)
+        ));
     }
 }

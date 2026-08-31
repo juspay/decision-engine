@@ -1568,6 +1568,18 @@ async fn stamp_contract_activation(
     Ok(())
 }
 
+/// Drop the stored steering plan when a volume contract is deactivated or replaced. The decide
+/// path steers on flag + plan alone, so a plan left behind would keep diverting payments (for up
+/// to its TTL) on a contract every dashboard says is gone. Awaited: the caller's 200 means it.
+async fn clear_volume_commitment_plan(algorithm_for: &str, merchant_id: &str) {
+    if algorithm_for != AlgorithmType::VolumeCommitment.to_string() {
+        return;
+    }
+    if let Some(deps) = crate::decider::gatewaydecider::volume_commitment::deps() {
+        deps.state.clear_plan(merchant_id).await;
+    }
+}
+
 /// Rebuild the plan now (spawned, so activation does not wait on ClickHouse) so a newly activated
 /// contract does not inherit the previous plan's verdicts until the next scheduler tick.
 fn refresh_volume_commitment_plan(algorithm_for: &str, merchant_id: &str) {
@@ -1579,7 +1591,9 @@ fn refresh_volume_commitment_plan(algorithm_for: &str, merchant_id: &str) {
         let Some(deps) = crate::decider::gatewaydecider::volume_commitment::deps() else {
             return;
         };
-        crate::decider::gatewaydecider::volume_commitment::controller::run_for_merchant(
+        // A failure is logged where it happens; the merchant simply has no plan until the
+        // scheduler's next successful run.
+        let _ = crate::decider::gatewaydecider::volume_commitment::controller::run_for_merchant(
             deps,
             &merchant_id,
         )
@@ -1679,6 +1693,9 @@ pub async fn activate_routing_rule(
                         return Err(e);
                     }
                     cache_routing_algorithm(&state, &payload.created_by, &algorithm).await;
+                    // The old document's plan must not steer for the new one.
+                    clear_volume_commitment_plan(&algorithm.algorithm_for, &payload.created_by)
+                        .await;
                     refresh_volume_commitment_plan(&algorithm.algorithm_for, &payload.created_by);
                     API_REQUEST_COUNTER
                         .with_label_values(&["activate_routing_rule", "success"])
@@ -1722,6 +1739,7 @@ pub async fn activate_routing_rule(
                 return Err(e);
             }
             cache_routing_algorithm(&state, &merchant_id_for_cache, &algorithm).await;
+            clear_volume_commitment_plan(&algorithm.algorithm_for, &merchant_id_for_cache).await;
             refresh_volume_commitment_plan(&algorithm.algorithm_for, &merchant_id_for_cache);
             API_REQUEST_COUNTER
                 .with_label_values(&["activate_routing_rule", "success"])
@@ -1818,6 +1836,7 @@ pub async fn deactivate_routing_rule(
                     payload.created_by
                 );
                 invalidate_routing_algorithm_cache(&state, &payload.created_by).await;
+                clear_volume_commitment_plan(&algorithm_for, &payload.created_by).await;
                 API_REQUEST_COUNTER
                     .with_label_values(&["deactivate_routing_rule", "success"])
                     .inc();
