@@ -65,6 +65,8 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub cost_ingestion: CostIngestionConfig,
     #[serde(default)]
+    pub volume_commitment: VolumeCommitmentConfig,
+    #[serde(default)]
     pub sr_auto_calibration: SrAutoCalibrationConfig,
     #[serde(default)]
     pub card_info_service: CardInfoServiceConfig,
@@ -394,7 +396,41 @@ pub struct TenantConfig {
     pub cache_config: CacheConfig,
     pub hypersense: HypersenseConfig,
     pub cost_ingestion: CostIngestionConfig,
+    pub volume_commitment: VolumeCommitmentConfig,
     pub card_info_service: CardInfoServiceConfig,
+}
+
+/// Deployment-level mechanics for volume commitment routing; everything per-merchant arrives
+/// from the contract source instead. Nothing here is a contract term.
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct VolumeCommitmentConfig {
+    /// Expose the scheduler in this process, on its own port.
+    pub enabled: bool,
+    /// Where that port binds — its own listener, exactly as `[metrics]` is.
+    pub server: Server,
+    /// Where the scheduler sends run calls; normally this same process's `[server]`.
+    pub main_server_url: String,
+    /// How often the scheduler wakes. Bounds how late a due job fires; keep well under the
+    /// shortest cadence.
+    pub tick_secs: u64,
+    /// How often a merchant's plan is rebuilt — the only scheduled job. Per-merchant overridable.
+    pub default_forecast_interval_secs: u64,
+}
+
+impl Default for VolumeCommitmentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            server: Server {
+                host: "127.0.0.1".to_string(),
+                port: 9095,
+            },
+            main_server_url: "http://127.0.0.1:8080".to_string(),
+            tick_secs: 30,
+            default_forecast_interval_secs: 3600,
+        }
+    }
 }
 
 /// Configuration for the in-house cost-estimation settlement ingestion pipeline
@@ -553,6 +589,7 @@ impl TenantConfig {
             cache_config: global_config.cache_config.clone(),
             hypersense: global_config.hypersense.clone(),
             cost_ingestion: global_config.cost_ingestion.clone(),
+            volume_commitment: global_config.volume_commitment.clone(),
             card_info_service: global_config.card_info_service.clone(),
         }
     }

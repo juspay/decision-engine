@@ -29,6 +29,7 @@ import * as type from '../ui/typography'
 import { useMerchantFeatures, type KnownFeature } from '../../hooks/useMerchantFeatures'
 import { BucketHedgingTuner } from './BucketHedgingTuner'
 import { CostEstimationPanel } from './CostEstimationPanel'
+import { VolumeContractsPage } from './VolumeContractsPage'
 
 import { PageHeading } from '../ui/PageHeading'
 import { Notice } from '../ui/Notice'
@@ -168,10 +169,10 @@ interface EliminationConfigResponse {
   }
 }
 
-type SRTab = 'autopilot' | 'manual' | 'flags' | 'cost'
-const SR_TABS: readonly SRTab[] = ['autopilot', 'manual', 'flags', 'cost']
+type SRTab = 'autopilot' | 'manual' | 'flags' | 'cost' | 'volume'
+const SR_TABS: readonly SRTab[] = ['autopilot', 'manual', 'flags', 'cost', 'volume']
 /** Tabs laid out as a left rail + content pane, which need the full page width to breathe. */
-const WIDE_TABS: readonly SRTab[] = ['manual', 'cost']
+const WIDE_TABS: readonly SRTab[] = ['manual', 'cost', 'volume']
 
 type ManualSection = 'scoring' | 'elimination' | 'dimensions'
 const MANUAL_SECTIONS: readonly ManualSection[] = ['scoring', 'elimination', 'dimensions']
@@ -405,6 +406,12 @@ export function SRRoutingPage() {
           <button type="button" className={tabClass('manual')} onClick={() => setActiveTab('manual')}>Manual</button>
           <button type="button" className={tabClass('flags')} onClick={() => setActiveTab('flags')}>Feature Flags</button>
           <button type="button" className={tabClass('cost')} onClick={() => setActiveTab('cost')}>Cost Estimation</button>
+          <button type="button" className={`${tabClass('volume')} inline-flex items-center gap-1.5`} onClick={() => setActiveTab('volume')}>
+            Volume Contracts
+            <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-wide text-violet-600 dark:bg-violet-500/15 dark:text-violet-400">
+              Beta
+            </span>
+          </button>
         </nav>
       </div>
 
@@ -604,6 +611,10 @@ export function SRRoutingPage() {
 
           {/* ── Cost Estimation tab ── */}
           {activeTab === 'cost' && <CostEstimationPanel merchantId={merchantId} />}
+
+          {/* ── Volume Contracts tab: the contract editor, hosted here beside the other routing
+              objectives. It keeps its own data hooks; only the page chrome is dropped. ── */}
+          {activeTab === 'volume' && <VolumeContractsPage embedded />}
         </>
       )}
     </div>
@@ -817,6 +828,12 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string; 
     description:
       'Multi-objective routing: alongside approval rate, weighs each PSP\'s expected cost and picks the highest expected-value option. Works with either the Autopilot or Manual scoring config.',
     docsUrl: 'https://docs.hyperswitch.io/integration-guide/workflows/intelligent-routing/routing-strategies/multi-objective-routing',
+  },
+  {
+    feature: 'volume-contracts',
+    title: 'Volume contracts (meet PSP commitments)',
+    description:
+      'Multi-objective routing: keeps approval-rate routing in charge, but when a contracted volume commitment is drifting behind pace, steers a little extra volume to that PSP — only onto payments where it approves about as well, so approvals barely move. Runs alongside Cost savings; when both are on, a behind-pace commitment takes priority for eligible payments.',
   },
 ]
 

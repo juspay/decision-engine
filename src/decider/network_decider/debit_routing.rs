@@ -51,6 +51,7 @@ pub async fn perform_debit_routing(
                         is_rust_based_decider: true,
                         latency: None,
                         multi_objective_info: None,
+                        volume_steer_info: None,
                     });
                 }
             }

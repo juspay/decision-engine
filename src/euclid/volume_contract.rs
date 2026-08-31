@@ -50,7 +50,9 @@ const MAX_TIERS: usize = 20;
 const MAX_TOLERANCE_BPS: u16 = 2000;
 const MAX_RATE_BPS: u32 = 10_000;
 const MAX_REBATE_LAG_DAYS: u16 = 365;
-const MIN_INTERVAL_SECS: u32 = 60;
+/// Low enough that a `test_minutes` cycle can still forecast and release in chunks; production
+/// contracts simply set sane values.
+const MIN_INTERVAL_SECS: u32 = 5;
 const MAX_INTERVAL_SECS: u32 = 604_800; // one week
 
 // ── Document root ─────────────────────────────────────────────────────────────
@@ -240,7 +242,8 @@ pub struct BillingCycle {
     #[serde(rename = "type")]
     pub cycle_type: BillingCycleType,
     /// `calendar_month`: day-of-month 1–30; `calendar_quarter`: month-in-quarter 1–3;
-    /// `calendar_year`: start month 1–12. Range-validated per cycle type on write.
+    /// `calendar_year`: start month 1–12; `test_minutes`: cycle length in minutes 2–240.
+    /// Range-validated per cycle type on write.
     pub anchor: u8,
     /// IANA zone name, e.g. `"America/New_York"`. Validated against the tz database on write.
     pub timezone: String,
@@ -255,6 +258,11 @@ pub enum BillingCycleType {
     CalendarMonth,
     CalendarQuarter,
     CalendarYear,
+    /// TESTING: the cycle lasts `anchor` minutes and repeats from the contract's activation
+    /// instant (its stamped anchor), so a fresh contract always plays out a whole period while
+    /// you watch. Each minute counts as one contract "day", so pacing, elimination and steering
+    /// behave exactly as on a calendar cycle — only faster.
+    TestMinutes,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -832,6 +840,8 @@ fn validate_billing_cycle(
         BillingCycleType::CalendarMonth => 1..=30u8,
         BillingCycleType::CalendarQuarter => 1..=3u8,
         BillingCycleType::CalendarYear => 1..=12u8,
+        // At least two minutes, so the cycle spans more than a single contract day to pace across.
+        BillingCycleType::TestMinutes => 2..=240u8,
     };
     if !anchor_range.contains(&cycle.anchor) {
         errors.push(ValidationErrorDetails::new(

@@ -58,6 +58,7 @@ import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Badge } from '../ui/Badge'
 import { Spinner } from '../ui/Spinner'
 import { ErrorMessage } from '../ui/ErrorMessage'
+import { VolumeCommitmentAnalytics } from './VolumeCommitmentAnalytics'
 import { TimeRangeFilter } from '../ui/TimeRangeFilter'
 import {
   TimeWindow,
@@ -72,11 +73,12 @@ type RoutingFilters = {
   gateways: string[]
 }
 
-type AnalyticsView = 'transactions' | 'rule_based'
-const ANALYTICS_VIEWS: readonly AnalyticsView[] = ['transactions', 'rule_based']
+type AnalyticsView = 'transactions' | 'rule_based' | 'volume_commitments'
+const ANALYTICS_VIEWS: readonly AnalyticsView[] = ['transactions', 'rule_based', 'volume_commitments']
 const ANALYTICS_VIEW_LABELS: Record<AnalyticsView, string> = {
   transactions: 'Multi-objective',
   rule_based: 'Rule based / Volume based',
+  volume_commitments: 'Volume commitments',
 }
 
 type PreviewTraceKey = readonly [
@@ -1641,6 +1643,14 @@ export function AnalyticsPage() {
           >
             {ANALYTICS_VIEW_LABELS.rule_based}
           </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            className={sectionButtonClass(view === 'volume_commitments')}
+            onClick={() => setView('volume_commitments')}
+          >
+            {ANALYTICS_VIEW_LABELS.volume_commitments}
+          </Button>
         </div>
 
         <div className="flex items-center gap-2 justify-self-start xl:justify-self-end">
@@ -2033,6 +2043,8 @@ export function AnalyticsPage() {
         </CardBody>
       </Card>
         </div>
+      ) : view === 'volume_commitments' ? (
+        <VolumeCommitmentAnalytics />
       ) : (
         <div className="space-y-5">
           <Card className="!rounded-2xl">

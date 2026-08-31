@@ -545,6 +545,23 @@ impl RedisConnectionWrapper {
             .change_context(errors::RedisError::IncrementHashFieldFailed)
     }
 
+    /// `INCRBYFLOAT` — atomically add `delta` and return the resulting total.
+    ///
+    /// The returned total is what makes this usable as a shared cap: subtracting `delta` from it
+    /// gives the value the caller would have observed had it held a lock, so concurrent callers
+    /// each see a distinct "before" and only one can be the one that crossed the line.
+    pub async fn increment_key_by_float(
+        &self,
+        key: &str,
+        delta: f64,
+    ) -> Result<f64, errors::RedisError> {
+        self.conn
+            .pool
+            .incr_by_float(key, delta)
+            .await
+            .change_context(errors::RedisError::IncrementHashFieldFailed)
+    }
+
     pub async fn decrement_key(&self, key: &str) -> Result<i64, errors::RedisError> {
         self.conn
             .pool

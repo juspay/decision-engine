@@ -10,6 +10,7 @@ export type KnownFeature =
   | 'elimination'
   | 'auto-calibration'
   | 'autopilot'
+  | 'volume-contracts'
 
 export function useMerchantFeatures(merchantId?: string) {
   const path = merchantId ? `/merchant-account/${merchantId}/features` : null

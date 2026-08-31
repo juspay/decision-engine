@@ -537,32 +537,23 @@ async fn fetch_algorithm_from_db_and_cache(
     #[cfg(feature = "postgres")]
     use crate::storage::schema_pg::routing_algorithm_mapper::dsl as db_mapper_dsl;
 
-    let mapper_result = match algorithm_for {
-        Some(algorithm_for) => {
-            crate::generics::generic_find_one::<
-                <RoutingAlgorithmMapper as HasTable>::Table,
-                _,
-                RoutingAlgorithmMapper,
-            >(
-                &state.db,
-                db_mapper_dsl::created_by
-                    .eq(merchant_id.to_string())
-                    .and(db_mapper_dsl::algorithm_for.eq(algorithm_for.to_string())),
-            )
-            .await
-        }
-        None => {
-            crate::generics::generic_find_one::<
-                <RoutingAlgorithmMapper as HasTable>::Table,
-                _,
-                RoutingAlgorithmMapper,
-            >(
-                &state.db,
-                db_mapper_dsl::created_by.eq(merchant_id.to_string()),
-            )
-            .await
-        }
-    };
+    // The merchant can hold one mapper row per algorithm_for slot (payment, payout, 3DS,
+    // volume_commitment). Callers that omit `algorithm_for` are on the legacy payment flow and
+    // must only ever see the payment row.
+    let mapper_algorithm_for = algorithm_for
+        .map(str::to_string)
+        .unwrap_or_else(|| AlgorithmType::Payment.to_string());
+    let mapper_result = crate::generics::generic_find_one::<
+        <RoutingAlgorithmMapper as HasTable>::Table,
+        _,
+        RoutingAlgorithmMapper,
+    >(
+        &state.db,
+        db_mapper_dsl::created_by
+            .eq(merchant_id.to_string())
+            .and(db_mapper_dsl::algorithm_for.eq(mapper_algorithm_for)),
+    )
+    .await;
 
     // Only a missing mapper row means no rule is active. Any other storage error is the engine
     // failing to answer, and reporting it as ActiveRoutingAlgorithmNotFound would let the
@@ -1555,6 +1546,61 @@ use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
 
+/// Bump `modified_at` on activation of a volume contract — it anchors `test_minutes` cycles (see
+/// `volume_commitment::dsl::active_config`); other rule types keep it as a plain edit timestamp.
+async fn stamp_contract_activation(
+    #[cfg(feature = "mysql")] conn: &crate::storage::MysqlPoolConn,
+    #[cfg(feature = "postgres")] conn: &crate::storage::PgPoolConn,
+    algorithm: &RoutingAlgorithm,
+) -> Result<(), ContainerError<EuclidErrors>> {
+    if algorithm.algorithm_for != AlgorithmType::VolumeCommitment.to_string() {
+        return Ok(());
+    }
+    let now = time::OffsetDateTime::now_utc();
+    let timestamp = time::PrimitiveDateTime::new(now.date(), now.time());
+    crate::generics::generic_update::<<RoutingAlgorithm as HasTable>::Table, _, _>(
+        conn,
+        dsl::id.eq(algorithm.id.clone()),
+        dsl::modified_at.eq(timestamp),
+    )
+    .await
+    .change_context(EuclidErrors::StorageError)?;
+    Ok(())
+}
+
+/// Drop the stored steering plan when a volume contract is deactivated or replaced. The decide
+/// path steers on flag + plan alone, so a plan left behind would keep diverting payments (for up
+/// to its TTL) on a contract every dashboard says is gone. Awaited: the caller's 200 means it.
+async fn clear_volume_commitment_plan(algorithm_for: &str, merchant_id: &str) {
+    if algorithm_for != AlgorithmType::VolumeCommitment.to_string() {
+        return;
+    }
+    if let Some(deps) = crate::decider::gatewaydecider::volume_commitment::deps() {
+        deps.state.clear_plan(merchant_id).await;
+    }
+}
+
+/// Rebuild the plan now (spawned, so activation does not wait on ClickHouse) so a newly activated
+/// contract does not inherit the previous plan's verdicts until the next scheduler tick.
+fn refresh_volume_commitment_plan(algorithm_for: &str, merchant_id: &str) {
+    if algorithm_for != AlgorithmType::VolumeCommitment.to_string() {
+        return;
+    }
+    let merchant_id = merchant_id.to_string();
+    tokio::spawn(async move {
+        let Some(deps) = crate::decider::gatewaydecider::volume_commitment::deps() else {
+            return;
+        };
+        // A failure is logged where it happens; the merchant simply has no plan until the
+        // scheduler's next successful run.
+        let _ = crate::decider::gatewaydecider::volume_commitment::controller::run_for_merchant(
+            deps,
+            &merchant_id,
+        )
+        .await;
+    });
+}
+
 pub async fn activate_routing_rule(
     Json(payload): Json<ActivateRoutingConfigRequest>,
 ) -> Result<(), ContainerError<EuclidErrors>> {
@@ -1641,7 +1687,16 @@ pub async fn activate_routing_rule(
             .change_context(EuclidErrors::StorageError)
             {
                 Ok(_) => {
+                    if let Err(e) = stamp_contract_activation(&conn, &algorithm).await {
+                        update_failure_metrics();
+                        timer.observe_duration();
+                        return Err(e);
+                    }
                     cache_routing_algorithm(&state, &payload.created_by, &algorithm).await;
+                    // The old document's plan must not steer for the new one.
+                    clear_volume_commitment_plan(&algorithm.algorithm_for, &payload.created_by)
+                        .await;
+                    refresh_volume_commitment_plan(&algorithm.algorithm_for, &payload.created_by);
                     API_REQUEST_COUNTER
                         .with_label_values(&["activate_routing_rule", "success"])
                         .inc();
@@ -1657,6 +1712,7 @@ pub async fn activate_routing_rule(
         }
         // Already active with the same algorithm — refresh the cache TTL
         cache_routing_algorithm(&state, &payload.created_by, &algorithm).await;
+        refresh_volume_commitment_plan(&algorithm.algorithm_for, &payload.created_by);
         API_REQUEST_COUNTER
             .with_label_values(&["activate_routing_rule", "success"])
             .inc();
@@ -1677,7 +1733,14 @@ pub async fn activate_routing_rule(
         .change_context(EuclidErrors::StorageError)
     {
         Ok(_) => {
+            if let Err(e) = stamp_contract_activation(&conn, &algorithm).await {
+                update_failure_metrics();
+                timer.observe_duration();
+                return Err(e);
+            }
             cache_routing_algorithm(&state, &merchant_id_for_cache, &algorithm).await;
+            clear_volume_commitment_plan(&algorithm.algorithm_for, &merchant_id_for_cache).await;
+            refresh_volume_commitment_plan(&algorithm.algorithm_for, &merchant_id_for_cache);
             API_REQUEST_COUNTER
                 .with_label_values(&["activate_routing_rule", "success"])
                 .inc();
@@ -1773,6 +1836,7 @@ pub async fn deactivate_routing_rule(
                     payload.created_by
                 );
                 invalidate_routing_algorithm_cache(&state, &payload.created_by).await;
+                clear_volume_commitment_plan(&algorithm_for, &payload.created_by).await;
                 API_REQUEST_COUNTER
                     .with_label_values(&["deactivate_routing_rule", "success"])
                     .inc();

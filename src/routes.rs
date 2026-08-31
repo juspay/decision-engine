@@ -22,3 +22,4 @@ pub mod seed_costs;
 pub mod settlement_webhook;
 pub mod update_gateway_score;
 pub mod update_score;
+pub mod volume_commitment;

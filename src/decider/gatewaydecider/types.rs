@@ -477,6 +477,8 @@ pub struct DeciderState {
     /// overrides the merchant's elimination rule. Absent for control arm and non-tuning experiments.
     pub ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride>,
     pub multi_objective_info: Option<super::multi_objective::MultiObjectiveInfo>,
+    /// Why the volume-commitment nudge did or did not move this payment.
+    pub volume_steer_info: Option<super::volume_commitment::VolumeSteerInfo>,
 }
 
 pub fn initial_decider_state(date_created: String) -> DeciderState {
@@ -522,6 +524,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
         sr_v3_hedging_percent: None,
         gateway_reference_id: None,
         multi_objective_info: None,
+        volume_steer_info: None,
         gateway_scoring_data: GatewayScoringData {
             merchantId: String::new(),
             paymentMethodType: String::new(),
@@ -655,6 +658,9 @@ pub enum GatewayDeciderApproach {
     NtwBasedRouting,
     AbTestStaticAlgorithm,
     SrSelectionMultiObjective,
+    /// A volume-contract nudge moved the payment off the SR head — the volume-driven sibling of
+    /// [`Self::SrSelectionMultiObjective`].
+    SrSelectionVolumeCommitment,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -1378,6 +1384,7 @@ pub struct DecidedGateway {
     pub is_rust_based_decider: bool,
     pub latency: Option<u64>,
     pub multi_objective_info: Option<super::multi_objective::MultiObjectiveInfo>,
+    pub volume_steer_info: Option<super::volume_commitment::VolumeSteerInfo>,
 }
 
 #[derive(Debug, Serialize, Clone, Deserialize)]
@@ -1592,6 +1599,9 @@ impl fmt::Display for GatewayDeciderApproach {
             Self::AbTestStaticAlgorithm => write!(f, "AB_TEST_STATIC_ALGORITHM"),
             Self::SrSelectionMultiObjective => {
                 write!(f, "SR_SELECTION_MULTI_OBJECTIVE")
+            }
+            Self::SrSelectionVolumeCommitment => {
+                write!(f, "SR_SELECTION_VOLUME_COMMITMENT")
             }
         }
     }
