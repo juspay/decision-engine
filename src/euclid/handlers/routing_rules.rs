@@ -568,12 +568,9 @@ async fn fetch_algorithm_from_db_and_cache(
 /// Response for a profile whose rules are all deactivated: the fallback the caller supplied,
 /// echoed back under a status that says the engine answered and has no rule to apply. The
 /// caller can then route by its fallback instead of guessing from a failed evaluation.
-async fn no_active_algorithm_response(
+async fn build_no_active_algorithm_response(
     state: &crate::app::TenantAppState,
     payload: &RoutingRequest,
-    request_id: Option<String>,
-    global_request_id: Option<String>,
-    trace_id: Option<String>,
 ) -> RoutingEvaluateResponse {
     let fallback = payload.fallback_output.clone().unwrap_or_default();
     let output = Output::Priority(fallback.clone());
@@ -593,14 +590,26 @@ async fn no_active_algorithm_response(
     );
     let evaluated_output = narrow_evaluated_output_to_eligible(fallback, &eligible_connectors);
 
-    let response = RoutingEvaluateResponse {
+    RoutingEvaluateResponse {
         payment_id: payload.payment_id.clone(),
         status: "no_active_algorithm".to_string(),
         output: format_output(&output),
         evaluated_output,
         eligible_connectors,
-    };
+    }
+}
 
+/// The single-endpoint wrapper: one entry is the whole call, so building the answer
+/// and recording its preview event stay together. The batch path uses the build half
+/// and records one event for the call instead.
+async fn no_active_algorithm_response(
+    state: &crate::app::TenantAppState,
+    payload: &RoutingRequest,
+    request_id: Option<String>,
+    global_request_id: Option<String>,
+    trace_id: Option<String>,
+) -> RoutingEvaluateResponse {
+    let response = build_no_active_algorithm_response(state, payload).await;
     crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
         crate::analytics::AnalyticsFlowContext::new(
             crate::analytics::ApiFlow::RuleBasedRouting,
@@ -1185,6 +1194,8 @@ pub async fn routing_evaluate_batch(
                 .as_ref()
                 .is_some_and(|fallback| !fallback.is_empty()) =>
         {
+            let call_payment_id = uniform_payment_id(&payload.requests);
+            let mut entry_outcomes = Vec::with_capacity(payload.requests.len());
             let mut results = Vec::with_capacity(payload.requests.len());
             for entry in payload.requests {
                 let entry_payload = RoutingRequest {
@@ -1194,17 +1205,39 @@ pub async fn routing_evaluate_batch(
                     parameters: entry.parameters,
                     algorithm_for: payload.algorithm_for.clone(),
                 };
-                results.push(
-                    no_active_algorithm_response(
-                        &state,
-                        &entry_payload,
-                        request_id.clone(),
-                        global_request_id.clone(),
-                        trace_id.clone(),
-                    )
-                    .await,
-                );
+                let response = build_no_active_algorithm_response(&state, &entry_payload).await;
+                entry_outcomes.push(json!({
+                    "payment_id": response.payment_id,
+                    "payment_method": entry_payload.parameters.get("payment_method"),
+                    "payment_method_type": entry_payload.parameters.get("payment_method_type"),
+                    "status": response.status,
+                    "gateway": preview_gateway(&response),
+                }));
+                results.push(response);
             }
+            // One preview event for the whole call: the batch is one evaluation moment,
+            // and its per-entry answers live in the event's details.
+            crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
+                crate::analytics::AnalyticsFlowContext::new(
+                    crate::analytics::ApiFlow::RuleBasedRouting,
+                    crate::analytics::FlowType::RoutingEvaluatePreview,
+                ),
+                Some(payload.created_by.clone()),
+                call_payment_id,
+                results.first().and_then(preview_gateway),
+                None,
+                Some("no_active_algorithm".to_string()),
+                serialize_batch_analytics_details(
+                    &payload.created_by,
+                    payload.algorithm_for.as_deref(),
+                    &payload.fallback_output,
+                    &entry_outcomes,
+                    0,
+                ),
+                request_id.clone(),
+                global_request_id.clone(),
+                trace_id.clone(),
+            );
             API_REQUEST_COUNTER
                 .with_label_values(&["routing_evaluate_batch", "success"])
                 .inc();
@@ -1229,10 +1262,20 @@ pub async fn routing_evaluate_batch(
             Err(e) => return fail_batch(e.into(), "batch_routing_algorithm_parse_failed"),
         };
 
+    let call_payment_id = uniform_payment_id(&payload.requests);
+    let mut entry_outcomes: Vec<Value> = Vec::with_capacity(payload.requests.len());
+    let mut first_success: Option<(
+        crate::analytics::FlowType,
+        Option<String>,
+        Option<String>,
+        String,
+    )> = None;
+    let mut first_entry_error: Option<(ContainerError<EuclidErrors>, &'static str)> = None;
+    let mut failed_entries: usize = 0;
     let mut results = Vec::with_capacity(payload.requests.len());
     for entry in payload.requests {
         // Each entry is evaluated as if it were a single call sharing the batch's
-        // identity, so per-entry analytics stay comparable with the single endpoint.
+        // identity; its outcome is folded into the one preview event the call records.
         let entry_payload = RoutingRequest {
             payment_id: entry.payment_id,
             created_by: payload.created_by.clone(),
@@ -1243,37 +1286,24 @@ pub async fn routing_evaluate_batch(
 
         match evaluate_algorithm_data(&state, &algorithm, &algorithm_data, &entry_payload).await {
             Ok(outcome) => {
-                let analytics_details = match (&outcome.ab_experiment_id, &outcome.ab_variant_arm) {
-                    (Some(exp_id), Some(arm)) => {
-                        crate::decider::gatewaydecider::ab_test::preview::serialize_analytics_details(
-                            &entry_payload,
-                            &outcome.response,
-                            outcome.rule_name.as_deref(),
-                            exp_id,
-                            arm,
-                        )
-                    }
-                    _ => serialize_routing_evaluate_analytics_details(
-                        &entry_payload,
-                        &outcome.response,
-                        outcome.rule_name.as_deref(),
-                    ),
-                };
-                crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
-                    crate::analytics::AnalyticsFlowContext::new(
-                        crate::analytics::ApiFlow::RuleBasedRouting,
+                if first_success.is_none() {
+                    first_success = Some((
                         outcome.flow_type,
-                    ),
-                    Some(payload.created_by.clone()),
-                    entry_payload.payment_id.clone(),
-                    preview_gateway(&outcome.response),
-                    outcome.rule_name.clone(),
-                    Some(outcome.response.status.clone()),
-                    analytics_details,
-                    request_id.clone(),
-                    global_request_id.clone(),
-                    trace_id.clone(),
-                );
+                        preview_gateway(&outcome.response),
+                        outcome.rule_name.clone(),
+                        outcome.response.status.clone(),
+                    ));
+                }
+                entry_outcomes.push(json!({
+                    "payment_id": outcome.response.payment_id,
+                    "payment_method": entry_payload.parameters.get("payment_method"),
+                    "payment_method_type": entry_payload.parameters.get("payment_method_type"),
+                    "status": outcome.response.status,
+                    "gateway": preview_gateway(&outcome.response),
+                    "rule_name": outcome.rule_name,
+                    "ab_experiment_id": outcome.ab_experiment_id,
+                    "ab_variant_arm": outcome.ab_variant_arm,
+                }));
                 results.push(outcome.response);
             }
             Err((error, stage)) => {
@@ -1283,14 +1313,18 @@ pub async fn routing_evaluate_batch(
                     created_by = %payload.created_by,
                     "routing_evaluate_batch: one entry failed to evaluate"
                 );
-                record_routing_evaluate_preview_error(
-                    &entry_payload,
-                    &error,
-                    stage,
-                    request_id.clone(),
-                    global_request_id.clone(),
-                    trace_id.clone(),
-                );
+                failed_entries += 1;
+                entry_outcomes.push(json!({
+                    "payment_id": entry_payload.payment_id,
+                    "payment_method": entry_payload.parameters.get("payment_method"),
+                    "payment_method_type": entry_payload.parameters.get("payment_method_type"),
+                    "status": "error",
+                    "stage": stage,
+                    "error": error.get_inner().to_string(),
+                }));
+                if first_entry_error.is_none() {
+                    first_entry_error = Some((error, stage));
+                }
                 results.push(RoutingEvaluateResponse {
                     payment_id: entry_payload.payment_id.clone(),
                     status: "error".to_string(),
@@ -1302,6 +1336,53 @@ pub async fn routing_evaluate_batch(
         }
     }
 
+    // One preview event describes the whole call, whatever mix of entry outcomes it
+    // produced -- the per-entry stories live in its details. The flow type comes from
+    // an evaluated entry when one exists, else from the parsed algorithm directly.
+    let (call_flow_type, call_gateway, call_rule_name, ok_status) = first_success.unwrap_or((
+        crate::analytics::refine_routing_evaluate_flow_type(&algorithm_data),
+        None,
+        None,
+        "error".to_string(),
+    ));
+    let call_status = if failed_entries > 0 {
+        "error".to_string()
+    } else {
+        ok_status
+    };
+    crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
+        crate::analytics::AnalyticsFlowContext::new(
+            crate::analytics::ApiFlow::RuleBasedRouting,
+            call_flow_type,
+        ),
+        Some(payload.created_by.clone()),
+        call_payment_id,
+        call_gateway,
+        call_rule_name,
+        Some(call_status),
+        serialize_batch_analytics_details(
+            &payload.created_by,
+            payload.algorithm_for.as_deref(),
+            &payload.fallback_output,
+            &entry_outcomes,
+            failed_entries,
+        ),
+        request_id.clone(),
+        global_request_id.clone(),
+        trace_id.clone(),
+    );
+    // Failed entries also surface once in error analytics, carrying the first
+    // failure's error and stage; the details above name every failed entry.
+    if let Some((error, stage)) = first_entry_error {
+        record_routing_evaluate_preview_error(
+            &batch_error_payload,
+            &error,
+            stage,
+            request_id.clone(),
+            global_request_id.clone(),
+            trace_id.clone(),
+        );
+    }
     API_REQUEST_COUNTER
         .with_label_values(&["routing_evaluate_batch", "success"])
         .inc();
@@ -1309,6 +1390,38 @@ pub async fn routing_evaluate_batch(
         timer.observe_duration();
     }
     Ok(Json(RoutingBatchResponse { results }))
+}
+
+/// The one payment id a batch answers for, when every entry names the same one --
+/// Hyperswitch's session flows do -- so the call-level event stays findable by it.
+fn uniform_payment_id(requests: &[crate::euclid::types::RoutingBatchEntry]) -> Option<String> {
+    let first = requests.first()?.payment_id.clone()?;
+    requests
+        .iter()
+        .all(|entry| entry.payment_id.as_deref() == Some(first.as_str()))
+        .then_some(first)
+}
+
+/// Call-level analytics details for a batch: the shared request fields plus one
+/// compact outcome per entry. Full request/response detail stays with the single
+/// endpoint, where one entry is the whole call -- and a compact shape keeps 50
+/// entries far under the details truncation limit.
+fn serialize_batch_analytics_details(
+    created_by: &str,
+    algorithm_for: Option<&str>,
+    fallback_output: &Option<Vec<ConnectorInfo>>,
+    entries: &[Value],
+    failed_count: usize,
+) -> Option<String> {
+    serde_json::to_string(&json!({
+        "created_by": created_by,
+        "algorithm_for": algorithm_for,
+        "fallback_output": fallback_output,
+        "entry_count": entries.len(),
+        "failed_count": failed_count,
+        "entries": entries,
+    }))
+    .ok()
 }
 
 fn record_routing_evaluate_preview_error(
