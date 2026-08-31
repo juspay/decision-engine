@@ -5,7 +5,8 @@
 //! Each cycle it sweeps every registered pull connector, lists each configured source's ready
 //! reports, and enqueues a `pending` job per report (`source = "poll"`). From there it is identical
 //! to a webhook delivery: the existing `worker` claims the job, downloads, parses, and fits. Enqueue
-//! is idempotent on `(connector, report_id)`, so re-listing an already-ingested report is a no-op.
+//! is idempotent on `(merchant_id, connector, report_id)`, so re-listing an already-ingested report
+//! is a no-op — while two merchants sharing one connector account each get their own job.
 //!
 //! Modeled on `worker::spawn` — a panic-isolated interval loop that runs only where
 //! `cost_ingestion.report_poll_enabled` is set, so a dedicated ingest deployment owns it. Nothing
@@ -93,11 +94,19 @@ async fn run_once() {
             }
         };
         for src in sources {
-            if let Err(e) = poll_source(&creds_store, source.as_ref(), &src.account).await {
+            if let Err(e) = poll_source(
+                &creds_store,
+                source.as_ref(),
+                &src.merchant_id,
+                &src.account,
+            )
+            .await
+            {
                 // One bad source (expired key, API error) must not stop the others.
                 logger::warn!(
                     tag = "report_poller",
-                    "poll of {}/{} failed: {:?}",
+                    "poll of {}/{}/{} failed: {:?}",
+                    src.merchant_id,
                     connector,
                     src.account,
                     e
@@ -111,22 +120,29 @@ async fn run_once() {
 async fn poll_source(
     creds_store: &ConnectorCredsStore,
     source: &dyn SettlementReportSource,
+    merchant_id: &str,
     account: &str,
 ) -> Result<(), super::IngestError> {
     let connector = source.connector();
-    let resolved = creds_store.get(connector, account).await?.ok_or_else(|| {
-        super::IngestError::Storage(format!("no credentials for {connector}/{account}"))
-    })?;
+    let resolved = creds_store
+        .get(merchant_id, connector, account)
+        .await?
+        .ok_or_else(|| {
+            super::IngestError::Storage(format!(
+                "no credentials for {merchant_id}/{connector}/{account}"
+            ))
+        })?;
 
     let ready = source.poll_ready_reports(&resolved.creds).await?;
     let mut enqueued = 0usize;
     for report in ready {
-        // Idempotent on (connector, report_id): already-enqueued reports are skipped.
+        // Idempotent on (merchant_id, connector, report_id): already-enqueued reports are skipped,
+        // while the same report for another merchant sharing this account stays a separate job.
         // `source = "poll"` distinguishes pull-discovered reports from pushed webhooks in history.
         let created = store::enqueue_pending(
             connector,
             account,
-            &resolved.merchant_id,
+            merchant_id,
             &report.report_id,
             &report.report_ref,
             "poll",
@@ -139,7 +155,8 @@ async fn poll_source(
     if enqueued > 0 {
         logger::info!(
             tag = "report_poller",
-            "{}/{}: enqueued {} new report(s)",
+            "{}/{}/{}: enqueued {} new report(s)",
+            merchant_id,
             connector,
             account,
             enqueued
