@@ -23,7 +23,6 @@ struct AuditSummaryRow {
     first_seen_ms: i64,
     last_seen_ms: i64,
     event_count: u64,
-    call_count: u64,
     latest_status: Option<String>,
     latest_gateway: Option<String>,
     latest_stage: Option<String>,
@@ -38,79 +37,7 @@ struct CountRow {
     total_failure: u64,
 }
 
-/// Whether the summary table carries `call_count_state` yet.
-///
-/// The column arrives with `039_audit_call_counts.sh`, and ClickHouse scripts only run
-/// automatically on a fresh volume — so an existing deployment can be running this code
-/// against a table that predates it. Selecting a missing column would fail the whole
-/// Decision Audit query, so the presence is probed and the fragment adapts: before the
-/// migration the list reports event counts, after it, call counts. No deploy ordering to
-/// get right, and nothing to re-run to keep the page working.
-///
-/// Only the *positive* answer is latched. A column is never dropped, so "present" is
-/// permanent and worth caching forever; "absent" is temporary by nature — the normal
-/// deploy order is app first, migration second — and a probe that failed on a ClickHouse
-/// blip must not pin the feature off for the process lifetime. A negative is therefore
-/// re-probed after `CALL_COUNT_PROBE_RETRY`, so the page starts reporting call counts on
-/// its own once 039 lands, with no pod restart.
-static CALL_COUNT_STATE_PRESENT: std::sync::atomic::AtomicBool =
-    std::sync::atomic::AtomicBool::new(false);
-/// Unix-millis deadline before which a negative probe is not repeated. 0 = never probed.
-static CALL_COUNT_PROBE_NOT_BEFORE: std::sync::atomic::AtomicI64 =
-    std::sync::atomic::AtomicI64::new(0);
-const CALL_COUNT_PROBE_RETRY: std::time::Duration = std::time::Duration::from_secs(300);
-
-#[derive(Debug, Clone, Deserialize, Row)]
-struct ColumnPresenceRow {
-    present: u8,
-}
-
-async fn call_count_state_available(client: &clickhouse::Client) -> bool {
-    use std::sync::atomic::Ordering;
-
-    if CALL_COUNT_STATE_PRESENT.load(Ordering::Relaxed) {
-        return true;
-    }
-    let now_ms = crate::analytics::now_ms();
-    if now_ms < CALL_COUNT_PROBE_NOT_BEFORE.load(Ordering::Relaxed) {
-        return false;
-    }
-    // Set the next window before probing, so concurrent requests during a slow or failing
-    // probe do not each fire their own.
-    CALL_COUNT_PROBE_NOT_BEFORE.store(
-        now_ms.saturating_add(CALL_COUNT_PROBE_RETRY.as_millis() as i64),
-        Ordering::Relaxed,
-    );
-
-    let query = client
-        .query(
-            "SELECT count() > 0 AS present FROM system.columns \
-             WHERE database = currentDatabase() AND table = ? AND name = 'call_count_state'",
-        )
-        .bind(PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE);
-    match query.fetch_one::<ColumnPresenceRow>().await {
-        Ok(row) if row.present == 1 => {
-            CALL_COUNT_STATE_PRESENT.store(true, Ordering::Relaxed);
-            true
-        }
-        Ok(_) => false,
-        Err(error) => {
-            // Treat an unreadable system.columns as "absent": the fallback query is always
-            // valid, where the richer one might not be.
-            crate::logger::warn!(
-                ?error,
-                "could not probe call_count_state; audit list will report event counts until the next probe"
-            );
-            false
-        }
-    }
-}
-
-fn finalized_summary_fragment(
-    query: &PaymentAuditQuery,
-    preview_only: bool,
-    has_call_count_state: bool,
-) -> SqlFragment {
+fn finalized_summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFragment {
     let mut builder = BoundQueryBuilder::new(format!("{PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE} FINAL"));
     builder.extend_selects([
         "lookup_key".to_string(),
@@ -120,13 +47,6 @@ fn finalized_summary_fragment(
         "finalizeAggregation(first_seen_ms_state) AS first_seen_ms".to_string(),
         "finalizeAggregation(last_seen_ms_state) AS last_seen_ms".to_string(),
         "finalizeAggregation(event_count_state) AS event_count".to_string(),
-        // Zero makes the caller fall back to the event count, which is what a
-        // pre-migration table can honestly report.
-        if has_call_count_state {
-            "finalizeAggregation(call_count_state) AS call_count".to_string()
-        } else {
-            "toUInt64(0) AS call_count".to_string()
-        },
         "finalizeAggregation(latest_status_state) AS latest_status".to_string(),
         "finalizeAggregation(latest_gateway_state) AS latest_gateway".to_string(),
         "finalizeAggregation(latest_stage_state) AS latest_stage".to_string(),
@@ -169,7 +89,7 @@ fn raw_summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFra
 
     let source = source.into_fragment();
     let mut builder = BoundQueryBuilder::from_fragment(SqlFragment::with_binds(
-        format!("({}) AS src", source.sql()),
+        format!("({})", source.sql()),
         source.binds().to_vec(),
     ));
     builder.extend_selects([
@@ -180,10 +100,6 @@ fn raw_summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFra
         "min(created_at_ms) AS first_seen_ms".to_string(),
         "max(created_at_ms) AS last_seen_ms".to_string(),
         "count() AS event_count".to_string(),
-        // Qualified: an unqualified `request_id` here binds to the `argMax(...) AS
-        // request_id` output alias in this same SELECT, which ClickHouse rejects as a
-        // nested aggregate (ILLEGAL_AGGREGATION).
-        "uniqExact(src.request_id) AS call_count".to_string(),
         "argMax(status, created_at_ms) AS latest_status".to_string(),
         "argMax(gateway, created_at_ms) AS latest_gateway".to_string(),
         "argMax(event_stage, created_at_ms) AS latest_stage".to_string(),
@@ -201,22 +117,12 @@ fn raw_summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFra
     builder.into_fragment()
 }
 
-async fn summary_fragment(
-    client: &clickhouse::Client,
-    query: &PaymentAuditQuery,
-    preview_only: bool,
-) -> SqlFragment {
+fn summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFragment {
     if query.routing_approach.is_some() || query.exclude_routing_approach.is_some() {
-        // The raw fragment reads request_id straight off the events table, so it needs
-        // no migration to report call counts.
         return raw_summary_fragment(query, preview_only);
     }
 
-    finalized_summary_fragment(
-        query,
-        preview_only,
-        call_count_state_available(client).await,
-    )
+    finalized_summary_fragment(query, preview_only)
 }
 
 fn exact_lookup_filter(lookup_key: &str) -> FilterClause {
@@ -288,7 +194,6 @@ fn results_builder(fragment: SqlFragment, query: &PaymentAuditQuery) -> BoundQue
         "first_seen_ms".to_string(),
         "last_seen_ms".to_string(),
         "event_count".to_string(),
-        "call_count".to_string(),
         "latest_status".to_string(),
         "latest_gateway".to_string(),
         "latest_stage".to_string(),
@@ -314,11 +219,6 @@ fn map_rows(rows: Vec<AuditSummaryRow>) -> Vec<PaymentAuditSummary> {
                 first_seen_ms: row.first_seen_ms,
                 last_seen_ms: row.last_seen_ms,
                 event_count: row.event_count as usize,
-                // Passed through as-is: 0 means "not known here" — the summary row predates
-                // the call_count column, or every request_id was NULL. Substituting the event
-                // count would report those events as if each were its own call, overstating
-                // the calls made, so the distinction is left for the caller to render.
-                call_count: row.call_count as usize,
                 latest_status: row.latest_status,
                 latest_gateway: row.latest_gateway,
                 latest_stage: row.latest_stage.map(payment_audit_stage_label),
@@ -338,7 +238,7 @@ pub async fn count(
     query: &PaymentAuditQuery,
     preview_only: bool,
 ) -> Result<(usize, usize, usize), ApiError> {
-    let finalized = summary_fragment(client, query, preview_only).await;
+    let finalized = summary_fragment(query, preview_only);
     let mut builder = BoundQueryBuilder::from_fragment(SqlFragment::with_binds(
         format!("({})", finalized.sql()),
         finalized.binds().to_vec(),
@@ -364,7 +264,7 @@ pub async fn load_page(
     query: &PaymentAuditQuery,
     preview_only: bool,
 ) -> Result<Vec<PaymentAuditSummary>, ApiError> {
-    let finalized = summary_fragment(client, query, preview_only).await;
+    let finalized = summary_fragment(query, preview_only);
     let mut builder = results_builder(finalized, query);
     builder.add_order_by(OrderClause::desc("last_seen_ms"));
     builder.add_order_by(OrderClause::desc("event_count"));
@@ -403,7 +303,7 @@ pub async fn load_exact(
 
     let source = source.into_fragment();
     let mut builder = BoundQueryBuilder::from_fragment(SqlFragment::with_binds(
-        format!("({}) AS src", source.sql()),
+        format!("({})", source.sql()),
         source.binds().to_vec(),
     ));
     builder.extend_selects([
@@ -414,10 +314,6 @@ pub async fn load_exact(
         "min(created_at_ms) AS first_seen_ms".to_string(),
         "max(created_at_ms) AS last_seen_ms".to_string(),
         "count() AS event_count".to_string(),
-        // Qualified: an unqualified `request_id` here binds to the `argMax(...) AS
-        // request_id` output alias in this same SELECT, which ClickHouse rejects as a
-        // nested aggregate (ILLEGAL_AGGREGATION).
-        "uniqExact(src.request_id) AS call_count".to_string(),
         "argMax(status, created_at_ms) AS latest_status".to_string(),
         "argMax(gateway, created_at_ms) AS latest_gateway".to_string(),
         "argMax(event_stage, created_at_ms) AS latest_stage".to_string(),
@@ -462,7 +358,7 @@ mod tests {
 
     #[test]
     fn finalized_summary_fragment_uses_lookup_summary_table() {
-        let fragment = finalized_summary_fragment(&payment_audit_query(), false, true);
+        let fragment = finalized_summary_fragment(&payment_audit_query(), false);
         assert!(fragment.sql().contains(PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE));
         assert!(fragment.sql().contains("FINAL"));
         assert!(!fragment.sql().contains("GROUP BY lookup_key"));
@@ -475,42 +371,6 @@ mod tests {
         assert!(fragment.sql().contains("AS merchant_id"));
         assert!(!fragment.sql().contains("resolved_lookup_key"));
         assert!(!fragment.sql().contains("resolved_merchant_id"));
-        assert!(fragment
-            .sql()
-            .contains("uniqExact(src.request_id) AS call_count"));
-    }
-
-    #[test]
-    fn aggregating_fragments_qualify_the_call_count_column() {
-        // An unqualified `request_id` binds to the `argMax(...) AS request_id` output alias
-        // in the same SELECT, and ClickHouse rejects the resulting nested aggregate with
-        // ILLEGAL_AGGREGATION. Both aggregating fragments must reference the source column.
-        let raw = raw_summary_fragment(&payment_audit_query(), false);
-        assert!(raw.sql().contains(") AS src"));
-        assert!(raw.sql().contains("uniqExact(src.request_id)"));
-        assert!(!raw.sql().contains("uniqExact(request_id)"));
-    }
-
-    #[test]
-    fn both_summary_fragments_expose_call_count() {
-        // load_page selects `call_count` from whichever fragment answers, so each must
-        // produce the column.
-        let finalized = finalized_summary_fragment(&payment_audit_query(), false, true);
-        assert!(finalized
-            .sql()
-            .contains("finalizeAggregation(call_count_state) AS call_count"));
-        let raw = raw_summary_fragment(&payment_audit_query(), false);
-        assert!(raw.sql().contains("AS call_count"));
-    }
-
-    #[test]
-    fn finalized_summary_fragment_omits_call_count_state_before_the_migration() {
-        // A database that has not run 039 yet has no call_count_state column; selecting it
-        // would fail the whole audit query, so the fragment must substitute a literal the
-        // reader interprets as "unknown" (and falls back to the event count).
-        let fragment = finalized_summary_fragment(&payment_audit_query(), false, false);
-        assert!(!fragment.sql().contains("call_count_state"));
-        assert!(fragment.sql().contains("toUInt64(0) AS call_count"));
     }
 
     #[test]

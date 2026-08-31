@@ -273,20 +273,6 @@ check_clickhouse_schema() {
         missing=1
     fi
 
-    # Same drift check for the payment-audit summaries: call_count_state is ADDED to an
-    # already-created analytics_payment_audit_lookup_summaries by the 039 migration. A DB
-    # that ran 025 before the column existed passes the table-existence loop but still needs
-    # 039, and until it runs the Decision Audit reports event counts instead of call counts.
-    local audit_col_query audit_col_result
-    audit_col_query="SELECT%20count()%20FROM%20system.columns%20WHERE%20database%20%3D%20'${CLICKHOUSE_DATABASE}'%20AND%20table%20%3D%20'analytics_payment_audit_lookup_summaries'%20AND%20name%20%3D%20'call_count_state'"
-    audit_col_result=$(curl -fsS \
-        --user "${CLICKHOUSE_USER}:${CLICKHOUSE_PASSWORD}" \
-        "${CLICKHOUSE_HTTP_URL}/?query=${audit_col_query}" 2>/dev/null || echo "0")
-    if [ "$audit_col_result" != "1" ]; then
-        echo "  [missing] ClickHouse column analytics_payment_audit_lookup_summaries.call_count_state (needs 039 migration)"
-        missing=1
-    fi
-
     return "$missing"
 }
 
@@ -642,10 +628,9 @@ if ! check_clickhouse_schema; then
     # clickhouse-data volume. Every one is idempotent and non-destructive — the CREATEs are
     # IF NOT EXISTS, and 038 is ADD COLUMN IF NOT EXISTS + a same-key MODIFY ORDER BY (a metadata-only
     # append) — so re-running against an existing DB heals it without wiping analytics data. 038 is
-    # what upgrades a database that already ran 035/036 before card_product existed. 039 is the
-    # same shape for the payment-audit summaries (ADD COLUMN IF NOT EXISTS plus a materialized-view
-    # rebuild that leaves the summary rows in place). Add new analytics DDL scripts here.
-    for cost_script in 035_cost_model.sh 036_cost_bin_product.sh 037_cost_fee_model_segment.sh 038_cost_card_product.sh 039_audit_call_counts.sh; do
+    # what upgrades a database that already ran 035/036 before card_product existed. Add new cost DDL
+    # scripts here.
+    for cost_script in 035_cost_model.sh 036_cost_bin_product.sh 037_cost_fee_model_segment.sh 038_cost_card_product.sh; do
         if docker compose exec -T clickhouse sh "/docker-entrypoint-initdb.d/${cost_script}" >/dev/null 2>&1; then
             echo "  Ran ${cost_script}."
         else
