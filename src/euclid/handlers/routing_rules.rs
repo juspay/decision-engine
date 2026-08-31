@@ -1106,7 +1106,28 @@ pub async fn routing_evaluate_batch(
         None,
     );
 
-    let mut fail_batch = |err: ContainerError<EuclidErrors>| {
+    // One representative request for the batch: a whole-batch failure has no single entry to
+    // attribute, but without it the audit records a request hit and never an outcome.
+    let batch_error_payload = RoutingRequest {
+        payment_id: None,
+        created_by: payload.created_by.clone(),
+        fallback_output: payload.fallback_output.clone(),
+        parameters: payload
+            .requests
+            .first()
+            .map(|entry| entry.parameters.clone())
+            .unwrap_or_default(),
+        algorithm_for: payload.algorithm_for.clone(),
+    };
+    let mut fail_batch = |err: ContainerError<EuclidErrors>, stage: &'static str| {
+        record_routing_evaluate_preview_error(
+            &batch_error_payload,
+            &err,
+            stage,
+            request_id.clone(),
+            global_request_id.clone(),
+            trace_id.clone(),
+        );
         API_REQUEST_COUNTER
             .with_label_values(&["routing_evaluate_batch", "failure"])
             .inc();
@@ -1139,6 +1160,7 @@ pub async fn routing_evaluate_batch(
                 MAX_BATCH_EVALUATIONS
             ))
             .into(),
+            "batch_size_validation_failed",
         );
     }
 
@@ -1149,12 +1171,12 @@ pub async fn routing_evaluate_batch(
         .ok_or(EuclidErrors::GlobalRoutingConfigsUnavailable)
     {
         Ok(config) => config,
-        Err(e) => return fail_batch(e.into()),
+        Err(e) => return fail_batch(e.into(), "batch_routing_config_unavailable"),
     };
 
     for entry in &payload.requests {
         if let Err(e) = validate_evaluation_parameters(routing_config, &entry.parameters) {
-            return fail_batch(e);
+            return fail_batch(e, "batch_parameter_validation_failed");
         }
     }
 
@@ -1202,7 +1224,7 @@ pub async fn routing_evaluate_batch(
             }
             return Ok(Json(RoutingBatchResponse { results }));
         }
-        Err(e) => return fail_batch(e),
+        Err(e) => return fail_batch(e, "batch_active_routing_lookup_failed"),
     };
 
     let algorithm_data: StaticRoutingAlgorithm =
@@ -1215,7 +1237,7 @@ pub async fn routing_evaluate_batch(
             EuclidErrors::InvalidRequest(format!("Invalid algorithm data format: {}", e))
         }) {
             Ok(data) => data,
-            Err(e) => return fail_batch(e.into()),
+            Err(e) => return fail_batch(e.into(), "batch_routing_algorithm_parse_failed"),
         };
 
     let mut results = Vec::with_capacity(payload.requests.len());
