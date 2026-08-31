@@ -9,7 +9,7 @@ use crate::{
         interpreter::{evaluate_output, InterpreterBackend},
         pm_filter_graph,
         types::{
-            ActivateRoutingConfigRequest, Context, DeactivateRoutingConfigRequest,
+            ActivateRoutingConfigRequest, AlgorithmType, Context, DeactivateRoutingConfigRequest,
             JsonifiedRoutingAlgorithm, KeyDataType, RoutingAlgorithmMapperNew, RoutingBatchRequest,
             RoutingBatchResponse, RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest,
             RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
@@ -53,7 +53,12 @@ use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOT
 const ROUTING_ALGO_CACHE_PREFIX: &str = "DE_routing_algo_eval:";
 
 /// Kept in sync with AlgorithmType (enforced by the test below).
-const ALGORITHM_FOR_VALUES: [&str; 3] = ["payment", "payout", "three_ds_authentication"];
+const ALGORITHM_FOR_VALUES: [&str; 4] = [
+    "payment",
+    "payout",
+    "three_ds_authentication",
+    "volume_commitment",
+];
 
 #[cfg(test)]
 mod cache_key_tests {
@@ -67,12 +72,14 @@ mod cache_key_tests {
             AlgorithmType::Payment,
             AlgorithmType::Payout,
             AlgorithmType::ThreeDsAuthentication,
+            AlgorithmType::VolumeCommitment,
         ];
         for variant in &all {
             match variant {
                 AlgorithmType::Payment
                 | AlgorithmType::Payout
-                | AlgorithmType::ThreeDsAuthentication => {}
+                | AlgorithmType::ThreeDsAuthentication
+                | AlgorithmType::VolumeCommitment => {}
             }
             assert!(ALGORITHM_FOR_VALUES.contains(&variant.to_string().as_str()));
         }
@@ -225,6 +232,28 @@ fn validation_errors_payload(
     serde_json::to_value(ValidationErrorsPayload { validation_errors }).ok()
 }
 
+/// The FIELD_VALIDATION_FAILED response shape of `routing_create`, for reuse by the other
+/// write paths (canonicalization failures, update validation).
+fn field_validation_failure(
+    context: &str,
+    validation_errors: &[ValidationErrorDetails],
+) -> ContainerError<EuclidErrors> {
+    let detailed_error = validation_errors
+        .iter()
+        .map(|e| e.message.clone())
+        .collect::<Vec<_>>()
+        .join("; ");
+    ContainerError::new_with_status_code_and_payload(
+        EuclidErrors::FieldValidationFailed(detailed_error.clone()),
+        axum::http::StatusCode::BAD_REQUEST,
+        ApiErrorResponse::new(
+            "FIELD_VALIDATION_FAILED",
+            format!("{context}: {detailed_error}"),
+            validation_errors_payload(validation_errors),
+        ),
+    )
+}
+
 pub async fn config_sr_dimensions(
     Json(payload): Json<SrDimensionConfig>,
 ) -> Result<Json<String>, ContainerError<EuclidErrors>> {
@@ -357,13 +386,30 @@ pub async fn routing_create(
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
-    // The serde message names the field that did not parse. Dropping it leaves the caller with a
-    // bare 400 and nothing to act on.
-    let mut config: RoutingRule = serde_json::from_value(payload.clone()).map_err(|error| {
-        error_stack::report!(EuclidErrors::InvalidRequest(format!(
-            "could not parse routing rule: {error}"
-        )))
-    })?;
+    // The serde message names the field that did not parse — and serde_path_to_error prefixes
+    // the JSON path to it, which matters for nested documents (volume contracts especially).
+    // Dropping either leaves the caller with a bare 400 and nothing to act on.
+    let mut config: RoutingRule =
+        serde_path_to_error::deserialize(payload.clone()).map_err(|error| {
+            error_stack::report!(EuclidErrors::InvalidRequest(format!(
+                "could not parse routing rule: {error}"
+            )))
+        })?;
+
+    // Volume contracts are stored canonicalized (integer minor-unit amounts, tolerance in bps)
+    // so every future consumer reads one representation.
+    if let StaticRoutingAlgorithm::VolumeContract(contract_config) = &mut config.algorithm {
+        if let Err(errors) = crate::euclid::volume_contract::canonicalize(contract_config) {
+            metrics::API_REQUEST_COUNTER
+                .with_label_values(&["routing_create", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(field_validation_failure(
+                "Volume contract amounts are invalid",
+                &errors,
+            ));
+        }
+    }
     let create_flow_type = crate::analytics::refine_routing_create_flow_type(&config.algorithm);
     let analytics_created_by = config.created_by.clone();
     let analytics_config_name = config.name.clone();
@@ -813,6 +859,19 @@ async fn evaluate_algorithm_data(
                     }
                 }
                 (ir.output, ir.evaluated_output, ir.rule_name)
+            }
+
+            // Only resolvable by asking for the volume_commitment slot (or a legacy type-blind
+            // lookup landing on it); a contract document is not an evaluable routing flow, so
+            // degrade to a clean 400 instead of a parse panic.
+            StaticRoutingAlgorithm::VolumeContract(_) => {
+                return Err((
+                    EuclidErrors::InvalidRequest(
+                        "the resolved algorithm is a volume-commitment configuration; it cannot be evaluated for routing".to_string(),
+                    )
+                    .into(),
+                    "volume_contract_not_evaluable",
+                ))
             }
 
             StaticRoutingAlgorithm::AbTest(ab_data) => {
@@ -1825,9 +1884,43 @@ pub async fn update_routing_rule(
             normalize_rule_value_types(&mut payload.algorithm, routing_config);
         }
 
+        // Update must not be able to store a definition create would reject: canonicalize
+        // volume contracts and re-run the same write-time validation against the slot this row
+        // already occupies (algorithm_for is preserved by this handler).
+        let mut algorithm = payload.algorithm.clone();
+        if let StaticRoutingAlgorithm::VolumeContract(contract_config) = &mut algorithm {
+            if let Err(errors) = crate::euclid::volume_contract::canonicalize(contract_config) {
+                return Err(field_validation_failure(
+                    "Volume contract amounts are invalid",
+                    &errors,
+                ));
+            }
+        }
+        // Legacy rows can hold non-canonical algorithm_for strings (pre-backfill ''); treat
+        // them as the payment default rather than bricking their edits. They can never be
+        // volume-commitment rows — that slot postdates canonical writes — so the pairing
+        // validation below stays sound.
+        let algorithm_for: AlgorithmType = existing.algorithm_for.parse().unwrap_or_default();
+        let rule_for_validation = RoutingRule {
+            rule_id: Some(payload.routing_algorithm_id.clone()),
+            name: payload.name.clone(),
+            description: Some(payload.description.clone()),
+            created_by: payload.created_by.clone(),
+            algorithm,
+            algorithm_for,
+            metadata: None,
+        };
+        let validation = validate_routing_rule(&rule_for_validation, &state.config.routing_config)?;
+        if !validation.is_valid {
+            return Err(field_validation_failure(
+                "Routing rule validation failed",
+                &validation.errors,
+            ));
+        }
+
         let utc_date_time = time::OffsetDateTime::now_utc();
         let timestamp = time::PrimitiveDateTime::new(utc_date_time.date(), utc_date_time.time());
-        let algorithm_data = serde_json::to_string(&payload.algorithm)
+        let algorithm_data = serde_json::to_string(&rule_for_validation.algorithm)
             .change_context(EuclidErrors::FailedToSerializeJsonToString)?;
 
         crate::generics::generic_update::<<RoutingAlgorithm as HasTable>::Table, _, _>(

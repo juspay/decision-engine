@@ -1,6 +1,6 @@
 use super::ast::{Comparison, ComparisonType, IfStatement, Rule, ValueType};
 use super::errors::{EuclidErrors, ValidationErrorDetails};
-use super::types::{KeyDataType, StaticRoutingAlgorithm};
+use super::types::{AlgorithmType, KeyDataType, StaticRoutingAlgorithm};
 use crate::error::ContainerError;
 use crate::euclid::types::{FieldValidationRules, KeyConfig, RoutingRule, TomlConfig};
 use std::collections::HashMap;
@@ -158,11 +158,46 @@ pub fn validate_routing_rule(
         .clone()
         .ok_or_else(|| error_stack::report!(EuclidErrors::GlobalRoutingConfigsUnavailable))?;
 
+    // The volume_commitment activation slot and the volume_contract payload imply each other:
+    // a contract document in the payment slot would reach /routing/evaluate, and a routing
+    // algorithm in the volume_commitment slot would be dead weight.
+    let is_volume_contract = matches!(rule.algorithm, StaticRoutingAlgorithm::VolumeContract(_));
+    if is_volume_contract != matches!(rule.algorithm_for, AlgorithmType::VolumeCommitment) {
+        return Ok(ValidationResult::failure(vec![
+            ValidationErrorDetails::new(
+                "algorithm_for",
+                "invalid_value",
+                if is_volume_contract {
+                    "a volume_contract algorithm requires algorithm_for: volume_commitment"
+                } else {
+                    "algorithm_for: volume_commitment requires a volume_contract algorithm"
+                },
+            ),
+        ]));
+    }
+
     match &rule.algorithm {
         StaticRoutingAlgorithm::Single(_)
         | StaticRoutingAlgorithm::Priority(_)
         | StaticRoutingAlgorithm::VolumeSplit(_)
         | StaticRoutingAlgorithm::AbTest(_) => Ok(ValidationResult::success()),
+        StaticRoutingAlgorithm::VolumeContract(contract_config) => {
+            let validation_errors =
+                crate::euclid::volume_contract::validate_volume_contract_config(contract_config);
+            if validation_errors.is_empty() {
+                Ok(ValidationResult::success())
+            } else {
+                for error in &validation_errors {
+                    crate::logger::warn!(
+                        field = %error.field,
+                        error_type = %error.error_type,
+                        message = %error.message,
+                        "Volume contract validation error"
+                    );
+                }
+                Ok(ValidationResult::failure(validation_errors))
+            }
+        }
         StaticRoutingAlgorithm::Advanced(program) => {
             let mut validation_errors: Vec<ValidationErrorDetails> = Vec::new();
 

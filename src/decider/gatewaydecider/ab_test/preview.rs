@@ -135,6 +135,11 @@ pub async fn evaluate_arm(
                 "Nested ab_test algorithms are not supported".into(),
             )));
         }
+        StaticRoutingAlgorithm::VolumeContract(_) => {
+            return Err(ContainerError::from(EuclidErrors::InvalidRequest(
+                "Volume-commitment configurations cannot be used as an A/B test arm".into(),
+            )));
+        }
     };
 
     Ok(AbTestArmOutput {

@@ -45,6 +45,7 @@ vaultrs = { version = "0.7.2", optional = true }
 bb8 = "0.8"
 rand_distr = "0.4"
 chrono = "0.4"
+chrono-tz = "0.10"
 cpu-time = "1.0.0"
 jemallocator = "0.5"
 jemalloc-ctl = "0.5"
