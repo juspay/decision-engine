@@ -137,7 +137,6 @@ async fn invalidate_routing_algorithm_cache(state: &crate::app::TenantAppState, 
         }
     }
 }
-
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -1137,20 +1136,10 @@ pub async fn routing_evaluate_batch(
         Err(err)
     };
 
-    // A zero-entry batch is a vacuous success, not a client error. Callers (Hyperswitch's
-    // session/PML pre-routing) build entries from the profile's payment methods and dispatch
-    // unconditionally — a card-only profile produces an empty list. Answering 400 here made
-    // every such call log a failed routing event and retry through the single-evaluation
-    // fallback; answering the empty batch with an empty result set keeps the contract
-    // (`results[i]` answers `requests[i]`) and the noise out of both services' logs.
     if payload.requests.is_empty() {
-        API_REQUEST_COUNTER
-            .with_label_values(&["routing_evaluate_batch", "success"])
-            .inc();
-        if let Some(timer) = timer.take() {
-            timer.observe_duration();
-        }
-        return Ok(Json(RoutingBatchResponse { results: vec![] }));
+        return fail_batch(
+            EuclidErrors::InvalidRequest("batch request carries no evaluations".to_string()).into(),
+        );
     }
     if payload.requests.len() > MAX_BATCH_EVALUATIONS {
         return fail_batch(
