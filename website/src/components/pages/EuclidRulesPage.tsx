@@ -69,7 +69,7 @@ export function EuclidRulesPage() {
   const ruleAlgorithms = (allAlgorithms || [])
     .filter((algo) => {
       const algorithm = algo.algorithm_data || algo.algorithm
-      return algorithm?.type !== 'volume_split' && algorithm?.type !== 'ab_test'
+      return algorithm?.type !== 'volume_split' && algorithm?.type !== 'ab_test' && algorithm?.type !== 'volume_contract'
     })
     // Sorted by the same stamp the Last Modified column shows, so the order matches what is read.
     .sort((a, b) => lastModifiedMs(b) - lastModifiedMs(a))
