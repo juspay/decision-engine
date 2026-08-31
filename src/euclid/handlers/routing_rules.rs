@@ -958,16 +958,16 @@ pub async fn routing_evaluate(
     let algorithm = match resolve_active_algorithm(&state, &payload.created_by, algorithm_for).await
     {
         Ok(algo) => algo,
-        // No rule to apply is an answer, not a failure: the caller routes by the fallback
-        // it supplied. This covers a profile whose rules are all deactivated and one that
-        // has no rules at all — Hyperswitch treats both the same, and a profile awaiting
-        // migration is reported by the caller, which warns when a cut-over profile gets an
-        // empty result.
+        // A no-rule profile is an answer rather than a failure when the caller supplied a
+        // fallback to answer with; with nothing to answer with, that stays an error.
         Err(e)
             if matches!(
                 e.get_inner(),
                 EuclidErrors::ActiveRoutingAlgorithmNotFound(_)
-            ) =>
+            ) && payload
+                .fallback_output
+                .as_ref()
+                .is_some_and(|fallback| !fallback.is_empty()) =>
         {
             API_REQUEST_COUNTER
                 .with_label_values(&["routing_evaluate", "success"])
@@ -1169,7 +1169,10 @@ pub async fn routing_evaluate_batch(
             if matches!(
                 e.get_inner(),
                 EuclidErrors::ActiveRoutingAlgorithmNotFound(_)
-            ) =>
+            ) && payload
+                .fallback_output
+                .as_ref()
+                .is_some_and(|fallback| !fallback.is_empty()) =>
         {
             let mut results = Vec::with_capacity(payload.requests.len());
             for entry in payload.requests {

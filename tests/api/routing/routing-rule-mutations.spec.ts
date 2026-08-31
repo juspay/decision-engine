@@ -115,13 +115,25 @@ test.describe('Routing rule mutations (API)', () => {
     expect(evaluated.body.evaluated_output.map((c: any) => c.gateway_name)).not.toContain('stripe')
   })
 
-  test('evaluating for a merchant with no rules at all still errors', async ({ api, merchant }) => {
-    // The opposite state: the engine was never given a rule for this profile, so it has nothing to
-    // say and the caller should fall back to its own configuration. That stays a 400.
+  test('evaluating for a merchant with no rules at all answers with the fallback', async ({ api, merchant }) => {
+    // Indistinguishable to the caller from a profile whose rules are all switched off: both mean
+    // "route by your fallback", so both are answered the same way.
     const evaluated = await api.evaluateRoutingAlgorithm(
       factory.ruleEvaluatePayload(merchant.id, {}, {
         fallback_output: [factory.gatewayConnector('adyen')],
       }),
+      { failOnStatusCode: false },
+    )
+
+    expect(evaluated.status).toBe(200)
+    expect(evaluated.body.status).toBe('no_active_algorithm')
+    expect(evaluated.body.evaluated_output.map((c: any) => c.gateway_name)).toEqual(['adyen'])
+  })
+
+  test('evaluating with no rules and no fallback still errors', async ({ api, merchant }) => {
+    // Nothing to answer with -- a 200 carrying an empty output would read as a decision to nowhere.
+    const evaluated = await api.evaluateRoutingAlgorithm(
+      factory.ruleEvaluatePayload(merchant.id, {}, {}),
       { failOnStatusCode: false },
     )
 
