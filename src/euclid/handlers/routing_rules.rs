@@ -29,9 +29,8 @@ use crate::euclid::{
 };
 use crate::generics::MeshError;
 use crate::{euclid::types::RoutingAlgorithm, logger, metrics};
-use async_bb8_diesel::AsyncRunQueryDsl;
 use axum::{extract::Path, response::IntoResponse, Json};
-use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods, QueryDsl};
+use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods};
 use error_stack::ResultExt;
 
 use crate::app::get_tenant_app_state;
@@ -606,12 +605,9 @@ async fn fetch_algorithm_from_db_and_cache(
 /// Response for a profile whose rules are all deactivated: the fallback the caller supplied,
 /// echoed back under a status that says the engine answered and has no rule to apply. The
 /// caller can then route by its fallback instead of guessing from a failed evaluation.
-async fn no_active_algorithm_response(
+async fn build_no_active_algorithm_response(
     state: &crate::app::TenantAppState,
     payload: &RoutingRequest,
-    request_id: Option<String>,
-    global_request_id: Option<String>,
-    trace_id: Option<String>,
 ) -> RoutingEvaluateResponse {
     let fallback = payload.fallback_output.clone().unwrap_or_default();
     let output = Output::Priority(fallback.clone());
@@ -631,14 +627,26 @@ async fn no_active_algorithm_response(
     );
     let evaluated_output = narrow_evaluated_output_to_eligible(fallback, &eligible_connectors);
 
-    let response = RoutingEvaluateResponse {
+    RoutingEvaluateResponse {
         payment_id: payload.payment_id.clone(),
         status: "no_active_algorithm".to_string(),
         output: format_output(&output),
         evaluated_output,
         eligible_connectors,
-    };
+    }
+}
 
+/// The single-endpoint wrapper: one entry is the whole call, so building the answer
+/// and recording its preview event stay together. The batch path uses the build half
+/// and records one event for the call instead.
+async fn no_active_algorithm_response(
+    state: &crate::app::TenantAppState,
+    payload: &RoutingRequest,
+    request_id: Option<String>,
+    global_request_id: Option<String>,
+    trace_id: Option<String>,
+) -> RoutingEvaluateResponse {
+    let response = build_no_active_algorithm_response(state, payload).await;
     crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
         crate::analytics::AnalyticsFlowContext::new(
             crate::analytics::ApiFlow::RuleBasedRouting,
@@ -656,69 +664,6 @@ async fn no_active_algorithm_response(
     );
 
     response
-}
-
-/// Whether the profile has any routing rule at all, scoped the same way the active-mapper
-/// lookup is. Separates a profile that deactivated its rules from one the engine has never
-/// been given any -- the two are indistinguishable from the mapper miss alone, but callers
-/// must treat them oppositely: the first is an authoritative "no rule", the second means the
-/// engine simply has nothing to say about this profile.
-async fn profile_has_any_routing_rule(
-    state: &crate::app::TenantAppState,
-    created_by: &str,
-    algorithm_for: Option<&str>,
-) -> bool {
-    let conn = match state.db.get_conn().await {
-        Ok(conn) => conn,
-        Err(error) => {
-            logger::error!(
-                ?error,
-                created_by = %created_by,
-                "routing_evaluate: no connection to check for existing routing rules"
-            );
-            return false;
-        }
-    };
-
-    // A deactivated profile has no cache entry and no active mapper row, so this runs on every
-    // evaluate it makes. Selecting one id keeps it off the row itself, whose `algorithm_data`
-    // holds the whole rule program.
-    let existing: Result<Vec<String>, _> = match algorithm_for {
-        Some(algorithm_for) => {
-            dsl::routing_algorithm
-                .filter(
-                    dsl::created_by
-                        .eq(created_by.to_string())
-                        .and(dsl::algorithm_for.eq(algorithm_for.to_string())),
-                )
-                .select(dsl::id)
-                .limit(1)
-                .get_results_async(&*conn)
-                .await
-        }
-        None => {
-            dsl::routing_algorithm
-                .filter(dsl::created_by.eq(created_by.to_string()))
-                .select(dsl::id)
-                .limit(1)
-                .get_results_async(&*conn)
-                .await
-        }
-    };
-
-    match existing {
-        Ok(found) => !found.is_empty(),
-        Err(error) => {
-            // Reported as "no rules", which routes the caller down the error path it already
-            // took before this check existed.
-            logger::error!(
-                ?error,
-                created_by = %created_by,
-                "routing_evaluate: failed to check for existing routing rules"
-            );
-            false
-        }
-    }
 }
 
 /// Resolves the active routing algorithm for a merchant: Redis cache first, DB with
@@ -907,9 +852,9 @@ async fn evaluate_algorithm_data(
                 (ir.output, ir.evaluated_output, ir.rule_name)
             }
 
-            // Only reachable when a caller explicitly evaluates the `volume_commitment` slot (the
-            // legacy lookup is payment-scoped); kept as a guard so a mis-slotted document degrades
-            // to a clean 400 instead of a parse panic.
+            // Only resolvable by asking for the volume_commitment slot (or a legacy type-blind
+            // lookup landing on it); a contract document is not an evaluable routing flow, so
+            // degrade to a clean 400 instead of a parse panic.
             StaticRoutingAlgorithm::VolumeContract(_) => {
                 return Err((
                     EuclidErrors::InvalidRequest(
@@ -1071,16 +1016,16 @@ pub async fn routing_evaluate(
     let algorithm = match resolve_active_algorithm(&state, &payload.created_by, algorithm_for).await
     {
         Ok(algo) => algo,
-        // A profile that has rules but none active has deliberately deactivated them,
-        // and that is an answer rather than a failure: the caller should route by its
-        // fallback. A profile with no rules at all stays an error, so a caller can still
-        // tell that the engine has nothing for it.
+        // A no-rule profile is an answer rather than a failure when the caller supplied a
+        // fallback to answer with; with nothing to answer with, that stays an error.
         Err(e)
             if matches!(
                 e.get_inner(),
                 EuclidErrors::ActiveRoutingAlgorithmNotFound(_)
-            ) && profile_has_any_routing_rule(&state, &payload.created_by, algorithm_for)
-                .await =>
+            ) && payload
+                .fallback_output
+                .as_ref()
+                .is_some_and(|fallback| !fallback.is_empty()) =>
         {
             API_REQUEST_COUNTER
                 .with_label_values(&["routing_evaluate", "success"])
@@ -1219,7 +1164,28 @@ pub async fn routing_evaluate_batch(
         None,
     );
 
-    let mut fail_batch = |err: ContainerError<EuclidErrors>| {
+    // One representative request for the batch: a whole-batch failure has no single entry to
+    // attribute, but without it the audit records a request hit and never an outcome.
+    let batch_error_payload = RoutingRequest {
+        payment_id: None,
+        created_by: payload.created_by.clone(),
+        fallback_output: payload.fallback_output.clone(),
+        parameters: payload
+            .requests
+            .first()
+            .map(|entry| entry.parameters.clone())
+            .unwrap_or_default(),
+        algorithm_for: payload.algorithm_for.clone(),
+    };
+    let mut fail_batch = |err: ContainerError<EuclidErrors>, stage: &'static str| {
+        record_routing_evaluate_preview_error(
+            &batch_error_payload,
+            &err,
+            stage,
+            request_id.clone(),
+            global_request_id.clone(),
+            trace_id.clone(),
+        );
         API_REQUEST_COUNTER
             .with_label_values(&["routing_evaluate_batch", "failure"])
             .inc();
@@ -1229,10 +1195,20 @@ pub async fn routing_evaluate_batch(
         Err(err)
     };
 
+    // A zero-entry batch is a vacuous success, not a client error. Callers (Hyperswitch's
+    // session/PML pre-routing) build entries from the profile's payment methods and dispatch
+    // unconditionally — a card-only profile produces an empty list. Answering 400 here made
+    // every such call log a failed routing event and retry through the single-evaluation
+    // fallback; answering the empty batch with an empty result set keeps the contract
+    // (`results[i]` answers `requests[i]`) and the noise out of both services' logs.
     if payload.requests.is_empty() {
-        return fail_batch(
-            EuclidErrors::InvalidRequest("batch request carries no evaluations".to_string()).into(),
-        );
+        API_REQUEST_COUNTER
+            .with_label_values(&["routing_evaluate_batch", "success"])
+            .inc();
+        if let Some(timer) = timer.take() {
+            timer.observe_duration();
+        }
+        return Ok(Json(RoutingBatchResponse { results: vec![] }));
     }
     if payload.requests.len() > MAX_BATCH_EVALUATIONS {
         return fail_batch(
@@ -1242,6 +1218,7 @@ pub async fn routing_evaluate_batch(
                 MAX_BATCH_EVALUATIONS
             ))
             .into(),
+            "batch_size_validation_failed",
         );
     }
 
@@ -1252,12 +1229,12 @@ pub async fn routing_evaluate_batch(
         .ok_or(EuclidErrors::GlobalRoutingConfigsUnavailable)
     {
         Ok(config) => config,
-        Err(e) => return fail_batch(e.into()),
+        Err(e) => return fail_batch(e.into(), "batch_routing_config_unavailable"),
     };
 
     for entry in &payload.requests {
         if let Err(e) = validate_evaluation_parameters(routing_config, &entry.parameters) {
-            return fail_batch(e);
+            return fail_batch(e, "batch_parameter_validation_failed");
         }
     }
 
@@ -1266,16 +1243,19 @@ pub async fn routing_evaluate_batch(
     let algorithm = match resolve_active_algorithm(&state, &payload.created_by, algorithm_for).await
     {
         Ok(algo) => algo,
-        // Same semantics as the single endpoint: rules exist but none are active is an
-        // authoritative "route by your fallback", answered once per entry so eligibility
+        // Same semantics as the single endpoint, answered once per entry so eligibility
         // narrowing still runs against each entry's own parameters.
         Err(e)
             if matches!(
                 e.get_inner(),
                 EuclidErrors::ActiveRoutingAlgorithmNotFound(_)
-            ) && profile_has_any_routing_rule(&state, &payload.created_by, algorithm_for)
-                .await =>
+            ) && payload
+                .fallback_output
+                .as_ref()
+                .is_some_and(|fallback| !fallback.is_empty()) =>
         {
+            let call_payment_id = uniform_payment_id(&payload.requests);
+            let mut entry_outcomes = Vec::with_capacity(payload.requests.len());
             let mut results = Vec::with_capacity(payload.requests.len());
             for entry in payload.requests {
                 let entry_payload = RoutingRequest {
@@ -1285,17 +1265,39 @@ pub async fn routing_evaluate_batch(
                     parameters: entry.parameters,
                     algorithm_for: payload.algorithm_for.clone(),
                 };
-                results.push(
-                    no_active_algorithm_response(
-                        &state,
-                        &entry_payload,
-                        request_id.clone(),
-                        global_request_id.clone(),
-                        trace_id.clone(),
-                    )
-                    .await,
-                );
+                let response = build_no_active_algorithm_response(&state, &entry_payload).await;
+                entry_outcomes.push(json!({
+                    "payment_id": response.payment_id,
+                    "payment_method": entry_payload.parameters.get("payment_method"),
+                    "payment_method_type": entry_payload.parameters.get("payment_method_type"),
+                    "status": response.status,
+                    "gateway": preview_gateway(&response),
+                }));
+                results.push(response);
             }
+            // One preview event for the whole call: the batch is one evaluation moment,
+            // and its per-entry answers live in the event's details.
+            crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
+                crate::analytics::AnalyticsFlowContext::new(
+                    crate::analytics::ApiFlow::RuleBasedRouting,
+                    crate::analytics::FlowType::RoutingEvaluatePreview,
+                ),
+                Some(payload.created_by.clone()),
+                call_payment_id,
+                results.first().and_then(preview_gateway),
+                None,
+                Some("no_active_algorithm".to_string()),
+                serialize_batch_analytics_details(
+                    &payload.created_by,
+                    payload.algorithm_for.as_deref(),
+                    &payload.fallback_output,
+                    &entry_outcomes,
+                    0,
+                ),
+                request_id.clone(),
+                global_request_id.clone(),
+                trace_id.clone(),
+            );
             API_REQUEST_COUNTER
                 .with_label_values(&["routing_evaluate_batch", "success"])
                 .inc();
@@ -1304,7 +1306,7 @@ pub async fn routing_evaluate_batch(
             }
             return Ok(Json(RoutingBatchResponse { results }));
         }
-        Err(e) => return fail_batch(e),
+        Err(e) => return fail_batch(e, "batch_active_routing_lookup_failed"),
     };
 
     let algorithm_data: StaticRoutingAlgorithm =
@@ -1317,13 +1319,23 @@ pub async fn routing_evaluate_batch(
             EuclidErrors::InvalidRequest(format!("Invalid algorithm data format: {}", e))
         }) {
             Ok(data) => data,
-            Err(e) => return fail_batch(e.into()),
+            Err(e) => return fail_batch(e.into(), "batch_routing_algorithm_parse_failed"),
         };
 
+    let call_payment_id = uniform_payment_id(&payload.requests);
+    let mut entry_outcomes: Vec<Value> = Vec::with_capacity(payload.requests.len());
+    let mut first_success: Option<(
+        crate::analytics::FlowType,
+        Option<String>,
+        Option<String>,
+        String,
+    )> = None;
+    let mut first_entry_error: Option<(ContainerError<EuclidErrors>, &'static str)> = None;
+    let mut failed_entries: usize = 0;
     let mut results = Vec::with_capacity(payload.requests.len());
     for entry in payload.requests {
         // Each entry is evaluated as if it were a single call sharing the batch's
-        // identity, so per-entry analytics stay comparable with the single endpoint.
+        // identity; its outcome is folded into the one preview event the call records.
         let entry_payload = RoutingRequest {
             payment_id: entry.payment_id,
             created_by: payload.created_by.clone(),
@@ -1334,37 +1346,24 @@ pub async fn routing_evaluate_batch(
 
         match evaluate_algorithm_data(&state, &algorithm, &algorithm_data, &entry_payload).await {
             Ok(outcome) => {
-                let analytics_details = match (&outcome.ab_experiment_id, &outcome.ab_variant_arm) {
-                    (Some(exp_id), Some(arm)) => {
-                        crate::decider::gatewaydecider::ab_test::preview::serialize_analytics_details(
-                            &entry_payload,
-                            &outcome.response,
-                            outcome.rule_name.as_deref(),
-                            exp_id,
-                            arm,
-                        )
-                    }
-                    _ => serialize_routing_evaluate_analytics_details(
-                        &entry_payload,
-                        &outcome.response,
-                        outcome.rule_name.as_deref(),
-                    ),
-                };
-                crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
-                    crate::analytics::AnalyticsFlowContext::new(
-                        crate::analytics::ApiFlow::RuleBasedRouting,
+                if first_success.is_none() {
+                    first_success = Some((
                         outcome.flow_type,
-                    ),
-                    Some(payload.created_by.clone()),
-                    entry_payload.payment_id.clone(),
-                    preview_gateway(&outcome.response),
-                    outcome.rule_name.clone(),
-                    Some(outcome.response.status.clone()),
-                    analytics_details,
-                    request_id.clone(),
-                    global_request_id.clone(),
-                    trace_id.clone(),
-                );
+                        preview_gateway(&outcome.response),
+                        outcome.rule_name.clone(),
+                        outcome.response.status.clone(),
+                    ));
+                }
+                entry_outcomes.push(json!({
+                    "payment_id": outcome.response.payment_id,
+                    "payment_method": entry_payload.parameters.get("payment_method"),
+                    "payment_method_type": entry_payload.parameters.get("payment_method_type"),
+                    "status": outcome.response.status,
+                    "gateway": preview_gateway(&outcome.response),
+                    "rule_name": outcome.rule_name,
+                    "ab_experiment_id": outcome.ab_experiment_id,
+                    "ab_variant_arm": outcome.ab_variant_arm,
+                }));
                 results.push(outcome.response);
             }
             Err((error, stage)) => {
@@ -1374,14 +1373,18 @@ pub async fn routing_evaluate_batch(
                     created_by = %payload.created_by,
                     "routing_evaluate_batch: one entry failed to evaluate"
                 );
-                record_routing_evaluate_preview_error(
-                    &entry_payload,
-                    &error,
-                    stage,
-                    request_id.clone(),
-                    global_request_id.clone(),
-                    trace_id.clone(),
-                );
+                failed_entries += 1;
+                entry_outcomes.push(json!({
+                    "payment_id": entry_payload.payment_id,
+                    "payment_method": entry_payload.parameters.get("payment_method"),
+                    "payment_method_type": entry_payload.parameters.get("payment_method_type"),
+                    "status": "error",
+                    "stage": stage,
+                    "error": error.get_inner().to_string(),
+                }));
+                if first_entry_error.is_none() {
+                    first_entry_error = Some((error, stage));
+                }
                 results.push(RoutingEvaluateResponse {
                     payment_id: entry_payload.payment_id.clone(),
                     status: "error".to_string(),
@@ -1393,6 +1396,53 @@ pub async fn routing_evaluate_batch(
         }
     }
 
+    // One preview event describes the whole call, whatever mix of entry outcomes it
+    // produced -- the per-entry stories live in its details. The flow type comes from
+    // an evaluated entry when one exists, else from the parsed algorithm directly.
+    let (call_flow_type, call_gateway, call_rule_name, ok_status) = first_success.unwrap_or((
+        crate::analytics::refine_routing_evaluate_flow_type(&algorithm_data),
+        None,
+        None,
+        "error".to_string(),
+    ));
+    let call_status = if failed_entries > 0 {
+        "error".to_string()
+    } else {
+        ok_status
+    };
+    crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
+        crate::analytics::AnalyticsFlowContext::new(
+            crate::analytics::ApiFlow::RuleBasedRouting,
+            call_flow_type,
+        ),
+        Some(payload.created_by.clone()),
+        call_payment_id,
+        call_gateway,
+        call_rule_name,
+        Some(call_status),
+        serialize_batch_analytics_details(
+            &payload.created_by,
+            payload.algorithm_for.as_deref(),
+            &payload.fallback_output,
+            &entry_outcomes,
+            failed_entries,
+        ),
+        request_id.clone(),
+        global_request_id.clone(),
+        trace_id.clone(),
+    );
+    // Failed entries also surface once in error analytics, carrying the first
+    // failure's error and stage; the details above name every failed entry.
+    if let Some((error, stage)) = first_entry_error {
+        record_routing_evaluate_preview_error(
+            &batch_error_payload,
+            &error,
+            stage,
+            request_id.clone(),
+            global_request_id.clone(),
+            trace_id.clone(),
+        );
+    }
     API_REQUEST_COUNTER
         .with_label_values(&["routing_evaluate_batch", "success"])
         .inc();
@@ -1400,6 +1450,38 @@ pub async fn routing_evaluate_batch(
         timer.observe_duration();
     }
     Ok(Json(RoutingBatchResponse { results }))
+}
+
+/// The one payment id a batch answers for, when every entry names the same one --
+/// Hyperswitch's session flows do -- so the call-level event stays findable by it.
+fn uniform_payment_id(requests: &[crate::euclid::types::RoutingBatchEntry]) -> Option<String> {
+    let first = requests.first()?.payment_id.clone()?;
+    requests
+        .iter()
+        .all(|entry| entry.payment_id.as_deref() == Some(first.as_str()))
+        .then_some(first)
+}
+
+/// Call-level analytics details for a batch: the shared request fields plus one
+/// compact outcome per entry. Full request/response detail stays with the single
+/// endpoint, where one entry is the whole call -- and a compact shape keeps 50
+/// entries far under the details truncation limit.
+fn serialize_batch_analytics_details(
+    created_by: &str,
+    algorithm_for: Option<&str>,
+    fallback_output: &Option<Vec<ConnectorInfo>>,
+    entries: &[Value],
+    failed_count: usize,
+) -> Option<String> {
+    serde_json::to_string(&json!({
+        "created_by": created_by,
+        "algorithm_for": algorithm_for,
+        "fallback_output": fallback_output,
+        "entry_count": entries.len(),
+        "failed_count": failed_count,
+        "entries": entries,
+    }))
+    .ok()
 }
 
 fn record_routing_evaluate_preview_error(

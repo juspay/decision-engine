@@ -1,11 +1,9 @@
-DROP DATABASE IF EXISTS jdb;
-CREATE DATABASE jdb;
+CREATE DATABASE IF NOT EXISTS jdb;
 USE jdb;
 
 SET FOREIGN_KEY_CHECKS = 0;
 
-DROP TABLE IF EXISTS gateway_bank_emi_support_v2;
-CREATE TABLE gateway_bank_emi_support_v2 (
+CREATE TABLE IF NOT EXISTS gateway_bank_emi_support_v2 (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     version BIGINT NOT NULL,
     gateway VARCHAR(255) NOT NULL,
@@ -20,8 +18,7 @@ CREATE TABLE gateway_bank_emi_support_v2 (
     last_updated DATETIME
 );
 
-DROP TABLE IF EXISTS gateway_outage;
-CREATE TABLE gateway_outage (
+CREATE TABLE IF NOT EXISTS gateway_outage (
     id VARCHAR(255) PRIMARY KEY,
     version INT NOT NULL,
     end_time DATETIME NOT NULL,
@@ -38,8 +35,7 @@ CREATE TABLE gateway_outage (
     metadata TEXT
 );
 
-DROP TABLE IF EXISTS merchant_priority_logic;
-CREATE TABLE merchant_priority_logic (
+CREATE TABLE IF NOT EXISTS merchant_priority_logic (
     id VARCHAR(255) PRIMARY KEY,
     version BIGINT NOT NULL,
     date_created DATETIME NOT NULL,
@@ -53,8 +49,7 @@ CREATE TABLE merchant_priority_logic (
     is_active_logic bit(1) NOT NULL
 );
 
-DROP TABLE IF EXISTS tenant_config;
-CREATE TABLE tenant_config (
+CREATE TABLE IF NOT EXISTS tenant_config (
     id VARCHAR(255) PRIMARY KEY,
     type VARCHAR(255) NOT NULL,
     module_key VARCHAR(255) NOT NULL,
@@ -67,8 +62,7 @@ CREATE TABLE tenant_config (
     country_code_alpha_3 VARCHAR(3)
 );
 
-DROP TABLE IF EXISTS card_brand_routes;
-CREATE TABLE card_brand_routes (
+CREATE TABLE IF NOT EXISTS card_brand_routes (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     card_brand TEXT NOT NULL,
     date_created DATETIME NOT NULL,
@@ -78,8 +72,7 @@ CREATE TABLE card_brand_routes (
     preferred_gateway TEXT NOT NULL
 );
 
-DROP TABLE IF EXISTS issuer_routes;
-CREATE TABLE issuer_routes (
+CREATE TABLE IF NOT EXISTS issuer_routes (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     issuer TEXT NOT NULL,
     merchant_id TEXT NOT NULL,
@@ -89,8 +82,7 @@ CREATE TABLE issuer_routes (
     last_updated DATETIME NOT NULL
 );
 
-DROP TABLE IF EXISTS merchant_gateway_account_sub_info;
-CREATE TABLE merchant_gateway_account_sub_info (
+CREATE TABLE IF NOT EXISTS merchant_gateway_account_sub_info (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     merchant_gateway_account_id BIGINT NOT NULL,
     sub_info_type TEXT NOT NULL,
@@ -100,8 +92,7 @@ CREATE TABLE merchant_gateway_account_sub_info (
     disabled bit(1) NOT NULL
 );
 
-DROP TABLE IF EXISTS gateway_payment_method_flow;
-CREATE TABLE gateway_payment_method_flow (
+CREATE TABLE IF NOT EXISTS gateway_payment_method_flow (
     id TEXT NOT NULL,
     gateway_payment_flow_id TEXT NOT NULL,
     payment_method_id BIGINT,
@@ -120,8 +111,7 @@ CREATE TABLE gateway_payment_method_flow (
     PRIMARY KEY (id(255))
 );
 
-DROP TABLE IF EXISTS merchant_iframe_preferences;
-CREATE TABLE merchant_iframe_preferences (
+CREATE TABLE IF NOT EXISTS merchant_iframe_preferences (
     id INT AUTO_INCREMENT PRIMARY KEY,
     merchant_id TEXT NOT NULL,
     dynamic_switching_enabled bit(1),
@@ -131,8 +121,7 @@ CREATE TABLE merchant_iframe_preferences (
     card_brand_routing_enabled bit(1)
 );
 
-DROP TABLE IF EXISTS token_bin_info;
-CREATE TABLE token_bin_info (
+CREATE TABLE IF NOT EXISTS token_bin_info (
     token_bin TEXT NOT NULL,
     card_bin TEXT NOT NULL,
     provider TEXT NOT NULL,
@@ -140,8 +129,7 @@ CREATE TABLE token_bin_info (
     last_updated DATETIME
 );
 
-DROP TABLE IF EXISTS txn_offer_detail;
-CREATE TABLE txn_offer_detail (
+CREATE TABLE IF NOT EXISTS txn_offer_detail (
     id TEXT NOT NULL,
     txn_detail_id TEXT NOT NULL,
     offer_id TEXT NOT NULL,
@@ -154,8 +142,7 @@ CREATE TABLE txn_offer_detail (
     PRIMARY KEY (id(255))
 );
 
-DROP TABLE IF EXISTS merchant_gateway_card_info;
-CREATE TABLE merchant_gateway_card_info (
+CREATE TABLE IF NOT EXISTS merchant_gateway_card_info (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     disabled bit(1) NOT NULL,
     gateway_card_info_id BIGINT NOT NULL,
@@ -164,8 +151,7 @@ CREATE TABLE merchant_gateway_card_info (
     merchant_gateway_account_id BIGINT
 );
 
-DROP TABLE IF EXISTS merchant_account;
-CREATE TABLE merchant_account (
+CREATE TABLE IF NOT EXISTS merchant_account (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     merchant_id TEXT,
     date_created DATETIME NOT NULL,
@@ -190,8 +176,7 @@ CREATE TABLE merchant_account (
     merchant_category_code TEXT
 );
 
-DROP TABLE IF EXISTS merchant_gateway_payment_method_flow;
-CREATE TABLE merchant_gateway_payment_method_flow (
+CREATE TABLE IF NOT EXISTS merchant_gateway_payment_method_flow (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     gateway_payment_method_flow_id TEXT NOT NULL,
     merchant_gateway_account_id BIGINT NOT NULL,
@@ -202,8 +187,7 @@ CREATE TABLE merchant_gateway_payment_method_flow (
     gateway_bank_code TEXT
 );
 
-DROP TABLE IF EXISTS txn_offer;
-CREATE TABLE txn_offer (
+CREATE TABLE IF NOT EXISTS txn_offer (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     version BIGINT NOT NULL,
     discount_amount BIGINT NOT NULL,
@@ -212,8 +196,7 @@ CREATE TABLE txn_offer (
     txn_detail_id BIGINT NOT NULL
 );
 
-DROP TABLE IF EXISTS isin_routes;
-CREATE TABLE isin_routes (
+CREATE TABLE IF NOT EXISTS isin_routes (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     isin TEXT NOT NULL,
     merchant_id TEXT NOT NULL,
@@ -223,16 +206,14 @@ CREATE TABLE isin_routes (
     last_updated DATETIME NOT NULL
 );
 
-DROP TABLE IF EXISTS feature;
-CREATE TABLE feature (
+CREATE TABLE IF NOT EXISTS feature (
     id INT AUTO_INCREMENT PRIMARY KEY,
     enabled bit(1) NOT NULL,
     name TEXT NOT NULL,
     merchant_id TEXT NULL
 );
 
-DROP TABLE IF EXISTS merchant_config;
-CREATE TABLE merchant_config (
+CREATE TABLE IF NOT EXISTS merchant_config (
     id TEXT NOT NULL,
     merchant_account_id BIGINT NOT NULL,
     config_category TEXT NOT NULL,
@@ -244,8 +225,7 @@ CREATE TABLE merchant_config (
     PRIMARY KEY (id(255))
 );
 
-DROP TABLE IF EXISTS service_configuration;
-CREATE TABLE service_configuration (
+CREATE TABLE IF NOT EXISTS service_configuration (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     name TEXT NOT NULL,
     value TEXT NULL,
@@ -254,8 +234,7 @@ CREATE TABLE service_configuration (
     new_value_status TEXT NULL
 );
 
-DROP TABLE IF EXISTS payment_method;
-CREATE TABLE payment_method (
+CREATE TABLE IF NOT EXISTS payment_method (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     date_created DATETIME NOT NULL,
     last_updated DATETIME NOT NULL,
@@ -269,8 +248,7 @@ CREATE TABLE payment_method (
     dsl TEXT NULL
 );
 
-DROP TABLE IF EXISTS txn_card_info;
-CREATE TABLE txn_card_info (
+CREATE TABLE IF NOT EXISTS txn_card_info (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     txn_id TEXT NOT NULL,
     card_isin TEXT NULL,
@@ -287,8 +265,7 @@ CREATE TABLE txn_card_info (
     partition_key DATETIME NULL
 );
 
-DROP TABLE IF EXISTS txn_detail;
-CREATE TABLE txn_detail (
+CREATE TABLE IF NOT EXISTS txn_detail (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     order_id TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -320,8 +297,7 @@ CREATE TABLE txn_detail (
     txn_amount_breakup TEXT
 );
 
-DROP TABLE IF EXISTS card_info;
-CREATE TABLE card_info (
+CREATE TABLE IF NOT EXISTS card_info (
     card_isin TEXT NOT NULL,
     card_switch_provider TEXT NOT NULL,
     card_type TEXT,
@@ -333,8 +309,7 @@ CREATE TABLE card_info (
     PRIMARY KEY (card_isin(255))
 );
 
-DROP TABLE IF EXISTS gateway_card_info;
-CREATE TABLE gateway_card_info (
+CREATE TABLE IF NOT EXISTS gateway_card_info (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     isin TEXT,
     gateway TEXT,
@@ -346,23 +321,20 @@ CREATE TABLE gateway_card_info (
     payment_method_type TEXT
 );
 
-DROP TABLE IF EXISTS juspay_bank_code;
-CREATE TABLE juspay_bank_code (
+CREATE TABLE IF NOT EXISTS juspay_bank_code (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     bank_code TEXT NOT NULL,
     bank_name TEXT NOT NULL
 );
 
-DROP TABLE IF EXISTS emi_bank_code;
-CREATE TABLE emi_bank_code (
+CREATE TABLE IF NOT EXISTS emi_bank_code (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     emi_bank TEXT NOT NULL,
     juspay_bank_code_id BIGINT NOT NULL,
     last_updated DATETIME
 );
 
-DROP TABLE IF EXISTS gateway_bank_emi_support;
-CREATE TABLE gateway_bank_emi_support (
+CREATE TABLE IF NOT EXISTS gateway_bank_emi_support (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     gateway TEXT NOT NULL,
     bank TEXT NOT NULL,
@@ -370,8 +342,7 @@ CREATE TABLE gateway_bank_emi_support (
     scope TEXT
 );
 
-DROP TABLE IF EXISTS user_eligibility_info;
-CREATE TABLE user_eligibility_info (
+CREATE TABLE IF NOT EXISTS user_eligibility_info (
     id TEXT NOT NULL,
     flow_type TEXT NOT NULL,
     identifier_name TEXT NOT NULL,
@@ -381,8 +352,7 @@ CREATE TABLE user_eligibility_info (
     PRIMARY KEY (id(255))
 );
 
-DROP TABLE IF EXISTS merchant_gateway_account;
-CREATE TABLE merchant_gateway_account (
+CREATE TABLE IF NOT EXISTS merchant_gateway_account (
     id BIGINT PRIMARY KEY AUTO_INCREMENT,
     account_details TEXT NOT NULL,
     gateway TEXT NOT NULL,
@@ -397,8 +367,7 @@ CREATE TABLE merchant_gateway_account (
     supported_txn_type TEXT
 );
 
-DROP TABLE IF EXISTS tenant_config_filter;
-CREATE TABLE tenant_config_filter (
+CREATE TABLE IF NOT EXISTS tenant_config_filter (
     id VARCHAR(255) NOT NULL PRIMARY KEY,
     filter_group_id VARCHAR(255) NOT NULL,
     dimension_value VARCHAR(255) NOT NULL,
@@ -406,8 +375,7 @@ CREATE TABLE tenant_config_filter (
     tenant_config_id VARCHAR(255) NOT NULL
 );
 
-DROP TABLE IF EXISTS routing_algorithm;
-CREATE TABLE routing_algorithm (
+CREATE TABLE IF NOT EXISTS routing_algorithm (
     id VARCHAR(255) NOT NULL PRIMARY KEY,
     created_by VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL,
@@ -418,8 +386,7 @@ CREATE TABLE routing_algorithm (
 );
 SET FOREIGN_KEY_CHECKS = 1;
 
-DROP TABLE IF EXISTS co_badged_cards_info_test;
-CREATE TABLE co_badged_cards_info_test (
+CREATE TABLE IF NOT EXISTS co_badged_cards_info_test (
     id VARCHAR(64) PRIMARY KEY,
     card_bin_min BIGINT NOT NULL,
     card_bin_max BIGINT NOT NULL,

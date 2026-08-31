@@ -156,6 +156,7 @@ export interface VolumeContractConfig {
   currency: { denomination: string; amount_units?: 'major' | 'minor' }
   expected_daily_traffic: VolumeContractAmount
   forecast_interval_secs?: number
+  steering_interval_secs?: number
   volume_contracts: VolumeContract[]
 }
 

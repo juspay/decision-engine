@@ -75,18 +75,23 @@ export function OnboardingPage() {
   }
 
   return (
-    <div className="dark relative min-h-screen overflow-hidden bg-white text-slate-900 dark:bg-[#030507] dark:text-white">
+    <div className="relative min-h-screen overflow-hidden bg-white text-slate-900 dark:bg-[#030507] dark:text-white">
       <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(180deg,_rgba(255,255,255,1),_rgba(248,250,252,1))] dark:bg-[linear-gradient(180deg,_rgba(3,5,7,1),_rgba(5,8,12,1))]" />
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,_rgba(59,130,246,0.06),_transparent_24%),radial-gradient(circle_at_78%_20%,_rgba(14,165,233,0.04),_transparent_18%),radial-gradient(circle_at_50%_100%,_rgba(14,165,233,0.03),_transparent_24%)] dark:bg-[radial-gradient(circle_at_20%_22%,_rgba(56,189,248,0.05),_transparent_24%),radial-gradient(circle_at_74%_18%,_rgba(59,130,246,0.04),_transparent_18%),radial-gradient(circle_at_50%_100%,_rgba(14,165,233,0.03),_transparent_24%)]" />
       <div className="pointer-events-none absolute inset-0 opacity-[0.05] dark:opacity-[0.08] [background-image:linear-gradient(rgba(148,163,184,0.08)_1px,transparent_1px),linear-gradient(90deg,rgba(148,163,184,0.08)_1px,transparent_1px)] [background-size:56px_56px]" />
 
       <div className="relative z-10 grid min-h-screen lg:grid-cols-[1.08fr_0.92fr]">
-        <section className="flex min-h-[42vh] flex-col border-b border-slate-200 dark:border-white/6 lg:min-h-screen lg:border-b-0 lg:border-r lg:border-[#1d1d23] px-6 py-8 sm:px-10 lg:px-14 lg:py-12 xl:px-16">
+        <section className="flex min-h-[42vh] flex-col border-b border-slate-200 dark:border-white/6 lg:min-h-screen lg:border-b-0 lg:border-r lg:border-slate-200 lg:dark:border-[#1d1d23] px-6 py-8 sm:px-10 lg:px-14 lg:py-12 xl:px-16">
           <div className="pt-2">
+            <img
+              src={`${assetBaseUrl}logo/decision-engine-light.svg`}
+              alt="Juspay Decision Engine"
+              className="h-10 w-auto dark:hidden sm:h-11"
+            />
             <img
               src={`${assetBaseUrl}logo/decision-engine-dark.svg`}
               alt="Juspay Decision Engine"
-              className="h-10 w-auto sm:h-11"
+              className="hidden h-10 w-auto dark:block sm:h-11"
             />
           </div>
 
@@ -139,7 +144,7 @@ export function OnboardingPage() {
                       value={merchantName}
                       onChange={(e) => setMerchantName(e.target.value)}
                       placeholder="e.g. Acme Corp"
-                      className="h-16 w-full rounded-2xl border border-slate-200 bg-white pl-12 pr-5 text-[15px] text-slate-900 outline-none transition-all placeholder:text-slate-500 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-white dark:placeholder:text-[#6e7684] dark:focus:border-blue-500 leading-[22px]"
+                      className="h-16 w-full rounded-2xl border border-slate-200 bg-white pl-12 pr-5 text-[15px] text-slate-900 outline-none transition-all placeholder:text-slate-500 focus:border-blue-500 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-white dark:placeholder:text-[#6e7684] dark:focus:border-blue-500 leading-[22px]"
                     />
                   </div>
                 </Field>

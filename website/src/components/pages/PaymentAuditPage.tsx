@@ -1,11 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { useSearchParams } from 'react-router-dom'
 import { ArrowLeft, RefreshCw, Search as SearchIcon, SlidersHorizontal } from 'lucide-react'
 import { fetcher } from '../../lib/api'
 import {
   AnalyticsGatewayScoresResponse,
-  AnalyticsRange,
   AnalyticsRangeValue,
   PaymentAuditEvent,
   PaymentAuditResponse,
@@ -17,10 +16,17 @@ import { Spinner } from '../ui/Spinner'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Card as GlassCard, InsetPanel } from '../ui/Card'
 import { CopyButton } from '../ui/CopyButton'
-import { DateTimePicker } from '../ui/DateTimePicker'
+import { TimeRangeFilter } from '../ui/TimeRangeFilter'
+import {
+  TimeWindow,
+  customWindowFrom,
+  fromDateTimeInputValue,
+  parseRange,
+  presetWindow,
+  toDateTimeInputValue,
+} from '../../lib/timeRange'
 
 import { PageHeading } from '../ui/PageHeading'
-const RANGE_OPTIONS: AnalyticsRangeValue[] = ['15m', '1h', '12h', '1d', '1w', 'custom']
 const STATUS_OPTIONS = [
   { value: '', label: 'Any status' },
   { value: 'success', label: 'Success' },
@@ -58,11 +64,6 @@ const AUDIT_MODE_LABELS: Record<AuditMode, string> = {
   transactions: 'Multi-objective',
   rule_based: 'Rule based / Volume based',
   debit_routing: 'Debit routing',
-}
-
-type TimeWindow = {
-  start_ms: number
-  end_ms: number
 }
 
 const EMPTY_FILTERS: AuditFilters = {
@@ -162,12 +163,6 @@ function buildAuditUrl(
   return qs ? `${path}?${qs}` : path
 }
 
-function parseRange(value: string | null): AnalyticsRangeValue {
-  if (value === 'custom') return value
-  if (value === '15m' || value === '1h' || value === '12h' || value === '1d' || value === '1w') return value
-  return '1d'
-}
-
 function parseAuditMode(value: string | null): AuditMode {
   if (value === 'debit_routing') return 'debit_routing'
   return value === 'rule_based' ? 'rule_based' : 'transactions'
@@ -191,38 +186,6 @@ function parseFilters(searchParams: URLSearchParams): AuditFilters {
     flowType: searchParams.get('flow_type') || searchParams.get('event_type') || '',
     errorCode: searchParams.get('error_code') || '',
   })
-}
-
-function presetWindow(range: AnalyticsRange) {
-  const now = Date.now()
-  const duration =
-    range === '15m'
-      ? 15 * 60 * 1000
-      : range === '1h'
-        ? 60 * 60 * 1000
-        : range === '12h'
-          ? 12 * 60 * 60 * 1000
-          : range === '1d'
-            ? 24 * 60 * 60 * 1000
-            : 7 * 24 * 60 * 60 * 1000
-
-  return {
-    start_ms: now - duration,
-    end_ms: now,
-  }
-}
-
-function toDateTimeInputValue(timestampMs: number) {
-  const date = new Date(timestampMs)
-  const pad = (value: number) => value.toString().padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-    date.getHours(),
-  )}:${pad(date.getMinutes())}`
-}
-
-function fromDateTimeInputValue(value: string) {
-  const timestamp = new Date(value).getTime()
-  return Number.isFinite(timestamp) ? timestamp : null
 }
 
 function formatDateTime(ms: number) {
@@ -372,7 +335,7 @@ function sectionButtonClass(active: boolean) {
 }
 
 function fieldClassName() {
-  return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[13px] text-slate-700 outline-none transition placeholder:text-slate-500 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7] dark:placeholder:text-[#555f6e]'
+  return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[13px] text-slate-700 outline-none transition placeholder:text-slate-500 focus:border-brand-500 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7] dark:placeholder:text-[#555f6e]'
 }
 
 function fieldSelectClassName() {
@@ -673,36 +636,12 @@ export function PaymentAuditPage() {
   const [customEnd, setCustomEnd] = useState(() =>
     toDateTimeInputValue(initialCustomWindow.end_ms),
   )
-  const [customRangeOpen, setCustomRangeOpen] = useState(false)
-  const timeRangeControlRef = useRef<HTMLDivElement | null>(null)
   const pageSize = 12
 
-  const customWindow = useMemo(() => {
-    if (range !== 'custom') return undefined
-    const start_ms = fromDateTimeInputValue(customStart)
-    const end_ms = fromDateTimeInputValue(customEnd)
-    const now = Date.now()
-    if (start_ms === null || end_ms === null || end_ms <= start_ms || start_ms > now || end_ms > now) return undefined
-    return { start_ms, end_ms }
-  }, [customEnd, customStart, range])
-
-  useEffect(() => {
-    if (!customRangeOpen) return
-    function handlePointerDown(event: MouseEvent) {
-      if (!timeRangeControlRef.current?.contains(event.target as Node)) {
-        setCustomRangeOpen(false)
-      }
-    }
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') setCustomRangeOpen(false)
-    }
-    document.addEventListener('mousedown', handlePointerDown)
-    document.addEventListener('keydown', handleEscape)
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown)
-      document.removeEventListener('keydown', handleEscape)
-    }
-  }, [customRangeOpen])
+  const customWindow = useMemo(
+    () => (range === 'custom' ? customWindowFrom(customStart, customEnd) : undefined),
+    [customEnd, customStart, range],
+  )
 
   const auditPath = mode === 'rule_based' ? '/analytics/preview-trace' : '/analytics/payment-audit'
   const modeRoutingApproach = routingApproachForMode(mode)
@@ -979,7 +918,6 @@ export function PaymentAuditPage() {
     setPage(nextPage)
     setTrailFocused(false)
     setSelectedEventId(null)
-    setCustomRangeOpen(nextRange === 'custom')
     if (nextRange !== 'custom') {
       const preset = presetWindow(nextRange)
       setCustomStart(toDateTimeInputValue(preset.start_ms))
@@ -992,6 +930,24 @@ export function PaymentAuditPage() {
       appliedFilters,
       selectedKey,
       nextCustomWindow,
+    )
+  }
+
+  /** A custom window arrives with both ends at once, so the query and the URL update together. */
+  function applyCustomWindow(nextStart: string, nextEnd: string) {
+    const nextPage = 1
+    setCustomStart(nextStart)
+    setCustomEnd(nextEnd)
+    setPage(nextPage)
+    setTrailFocused(false)
+    setSelectedEventId(null)
+    syncSearch(
+      mode,
+      'custom',
+      nextPage,
+      appliedFilters,
+      selectedKey,
+      customWindowFrom(nextStart, nextEnd),
     )
   }
 
@@ -1052,44 +1008,13 @@ export function PaymentAuditPage() {
         </div>
 
         <div className="flex items-center gap-2 justify-self-start xl:justify-self-end">
-          <div ref={timeRangeControlRef} className="relative">
-            <div className="flex items-center gap-1 rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#161b24]">
-              {RANGE_OPTIONS.map((value) => (
-                <Button
-                  key={value}
-                  size="sm"
-                  variant="secondary"
-                  className={sectionButtonClass(range === value)}
-                  onClick={() => updateRange(value)}
-                >
-                  {value === 'custom' ? 'Custom' : value}
-                </Button>
-              ))}
-            </div>
-            {range === 'custom' && customRangeOpen ? (
-              <div className="absolute right-0 top-[calc(100%+10px)] z-[90] w-[min(92vw,560px)] rounded-[24px] border border-slate-200 bg-white/95 p-4 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.45)] backdrop-blur dark:border-[#2a303a] dark:bg-[#11151d]/95 dark:shadow-[0_24px_70px_-40px_rgba(0,0,0,0.7)]">
-                <div className="flex items-center justify-between gap-4">
-                  <p className="text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">Select time range</p>
-                  <Button size="sm" variant="ghost" onClick={() => setCustomRangeOpen(false)}>Close</Button>
-                </div>
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  <div>
-                    <p className="mb-2 text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">Start time</p>
-                    <DateTimePicker className="w-full" value={customStart} onChange={setCustomStart} />
-                  </div>
-                  <div>
-                    <p className="mb-2 text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">End time</p>
-                    <DateTimePicker className="w-full" value={customEnd} onChange={setCustomEnd} />
-                  </div>
-                </div>
-                {!customWindow ? (
-                  <p className="mt-3 text-[13px] text-red-600 leading-[18px]">
-                    Choose an end time after the start time. Future dates are not available.
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
+          <TimeRangeFilter
+            range={range}
+            customStart={customStart}
+            customEnd={customEnd}
+            onRangeChange={updateRange}
+            onCustomChange={applyCustomWindow}
+          />
           <Button
             size="sm"
             variant="secondary"

@@ -344,7 +344,7 @@ export function BucketHedgingTuner() {
   const ov = overlayCfg[overlay]
 
   const numCls =
-    'w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm font-semibold text-slate-800 focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100'
+    'w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm font-semibold text-slate-800 focus:outline-none focus:border-brand-500 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100'
 
   return (
     <div className="space-y-5">

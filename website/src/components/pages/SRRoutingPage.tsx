@@ -36,7 +36,7 @@ import { Notice } from '../ui/Notice'
 /** One input treatment for the config forms, so fields don't drift apart field by field. */
 const configInputClass =
   'w-full rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm ' +
-  'focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]'
+  'focus:outline-none focus:border-brand-500 dark:border-[#222226]'
 
 // Ensures a stored value is always selectable in a dropdown, even when it isn't in the known
 // option list (e.g. auto-calibration writes the casing live txns use, "CARD"/"CREDIT", while the
@@ -549,7 +549,7 @@ export function SRRoutingPage() {
                                       <span className={lockedTextCls} title={lockedTitle}>{methodType || '—'}</span>
                                     </>
                                   ) : (
-                                    <select {...register(`subLevelInputConfig.${idx}.paymentMethodType`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg pl-2 pr-7 py-1 text-sm min-w-[6rem] focus:outline-none focus:ring-1 focus:ring-brand-500">
+                                    <select {...register(`subLevelInputConfig.${idx}.paymentMethodType`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg pl-2 pr-7 py-1 text-sm min-w-[6rem] focus:outline-none focus:border-brand-500">
                                       {typeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
                                     </select>
                                   )}
@@ -561,18 +561,18 @@ export function SRRoutingPage() {
                                       <span className={lockedTextCls} title={lockedTitle}>{method || '—'}</span>
                                     </>
                                   ) : (
-                                    <select {...register(`subLevelInputConfig.${idx}.paymentMethod`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg pl-2 pr-7 py-1 text-sm min-w-[6rem] focus:outline-none focus:ring-1 focus:ring-brand-500">
+                                    <select {...register(`subLevelInputConfig.${idx}.paymentMethod`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg pl-2 pr-7 py-1 text-sm min-w-[6rem] focus:outline-none focus:border-brand-500">
                                       {methodOptions.map((m) => <option key={m} value={m}>{m}</option>)}
                                     </select>
                                   )}
                                 </td>
-                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.cardNetwork`)} /><span className={lockedTextCls} title={lockedTitle}>{dimText(row?.cardNetwork)}</span></>) : (<input type="text" {...register(`subLevelInputConfig.${idx}.cardNetwork`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500" />)}</td>
-                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.currency`)} /><span className={lockedTextCls} title={lockedTitle}>{dimText(row?.currency)}</span></>) : (<input type="text" {...register(`subLevelInputConfig.${idx}.currency`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" />)}</td>
-                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.country`)} /><span className={lockedTextCls} title={lockedTitle}>{dimText(row?.country)}</span></>) : (<input type="text" {...register(`subLevelInputConfig.${idx}.country`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" />)}</td>
-                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.authType`)} /><span className={lockedTextCls} title={lockedTitle}>{dimText(row?.authType)}</span></>) : (<input type="text" {...register(`subLevelInputConfig.${idx}.authType`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500" />)}</td>
-                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.bucketSize`)} /><span className={lockedTextCls} title={lockedTitle}>{numText(row?.bucketSize)}</span></>) : (<input type="number" {...register(`subLevelInputConfig.${idx}.bucketSize`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" />)}</td>
-                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.hedgingPercent`)} /><span className={lockedTextCls} title={lockedTitle}>{numText(row?.hedgingPercent)}</span></>) : (<input type="number" step="0.1" {...register(`subLevelInputConfig.${idx}.hedgingPercent`)} placeholder="—" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:ring-1 focus:ring-brand-500" />)}</td>
-                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.latencyThreshold`)} /><span className={lockedTextCls} title={lockedTitle}>{numText(row?.latencyThreshold)}</span></>) : (<input type="number" {...register(`subLevelInputConfig.${idx}.latencyThreshold`)} placeholder="—" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:ring-1 focus:ring-brand-500" />)}</td>
+                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.cardNetwork`)} /><span className={lockedTextCls} title={lockedTitle}>{dimText(row?.cardNetwork)}</span></>) : (<input type="text" {...register(`subLevelInputConfig.${idx}.cardNetwork`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:border-brand-500" />)}</td>
+                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.currency`)} /><span className={lockedTextCls} title={lockedTitle}>{dimText(row?.currency)}</span></>) : (<input type="text" {...register(`subLevelInputConfig.${idx}.currency`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:border-brand-500" />)}</td>
+                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.country`)} /><span className={lockedTextCls} title={lockedTitle}>{dimText(row?.country)}</span></>) : (<input type="text" {...register(`subLevelInputConfig.${idx}.country`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:border-brand-500" />)}</td>
+                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.authType`)} /><span className={lockedTextCls} title={lockedTitle}>{dimText(row?.authType)}</span></>) : (<input type="text" {...register(`subLevelInputConfig.${idx}.authType`)} placeholder="Any" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:border-brand-500" />)}</td>
+                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.bucketSize`)} /><span className={lockedTextCls} title={lockedTitle}>{numText(row?.bucketSize)}</span></>) : (<input type="number" {...register(`subLevelInputConfig.${idx}.bucketSize`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:border-brand-500" />)}</td>
+                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.hedgingPercent`)} /><span className={lockedTextCls} title={lockedTitle}>{numText(row?.hedgingPercent)}</span></>) : (<input type="number" step="0.1" {...register(`subLevelInputConfig.${idx}.hedgingPercent`)} placeholder="—" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-20 focus:outline-none focus:border-brand-500" />)}</td>
+                                <td className="px-4 py-2">{autopilotOwned ? (<><input type="hidden" {...register(`subLevelInputConfig.${idx}.latencyThreshold`)} /><span className={lockedTextCls} title={lockedTitle}>{numText(row?.latencyThreshold)}</span></>) : (<input type="number" {...register(`subLevelInputConfig.${idx}.latencyThreshold`)} placeholder="—" className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg px-2 py-1 w-24 focus:outline-none focus:border-brand-500" />)}</td>
                                 <td className="px-4 py-2">{autopilotOwned ? (<span className="text-slate-500 dark:text-slate-400" title="Managed by Autopilot — turn Autopilot off to remove"><Trash2 size={14} /></span>) : (<button type="button" onClick={() => removeSubLevelOverride(idx)} className="text-slate-500 hover:text-red-600"><Trash2 size={14} /></button>)}</td>
                               </tr>
                             )
@@ -985,13 +985,12 @@ function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
                       <Info className="h-4 w-4" />
                     </a>
                   )}
+                  {/* Only the on state gets a badge — the Enable button already says a flag is off. */}
                   {features.isLoading ? (
                     <Badge variant="gray">Checking</Badge>
                   ) : enabled ? (
                     <Badge variant="green">Enabled</Badge>
-                  ) : (
-                    <Badge variant="gray">Disabled</Badge>
-                  )}
+                  ) : null}
                 </div>
                 <p className={`mt-1 ${type.hint} max-w-[68ch]`}>{description}</p>
               </div>

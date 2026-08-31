@@ -16,6 +16,21 @@ function resolveApiPath(path: string) {
   return `${API_BASE_PATH}${normalizedPath}`
 }
 
+/**
+ * Absolute URL for a backend path, for showing a caller-facing endpoint (a connector webhook, say)
+ * that someone will paste elsewhere — a relative path means nothing to a connector calling in from
+ * outside. Same origin and prefix the dashboard's own calls use, so it holds wherever the page is
+ * served from: the Vite proxy in dev (including through a tunnel), the gateway once deployed.
+ * `VITE_PUBLIC_API_BASE_URL` overrides it when external callers arrive at a different host.
+ */
+export function publicApiUrl(path: string) {
+  const override = import.meta.env.VITE_PUBLIC_API_BASE_URL?.trim()
+  if (override) {
+    return `${override.replace(/\/$/, '')}${path.startsWith('/') ? path : `/${path}`}`
+  }
+  return `${window.location.origin}${resolveApiPath(path)}`
+}
+
 // function logRequest(method: string, path: string, body?: unknown) {
 //   if (!DEBUG_API) return
 //   console.log('\n' + '='.repeat(80))

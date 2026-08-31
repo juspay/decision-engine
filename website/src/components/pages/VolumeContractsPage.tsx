@@ -174,6 +174,7 @@ function documentSettings(config: VolumeContractConfig) {
     { label: 'Currency', value: config.currency?.denomination ?? '—' },
     { label: 'Expected daily traffic', value: formatMoney(Number(config.expected_daily_traffic ?? 0), currency) },
     { label: 'Forecast interval', value: config.forecast_interval_secs ? `${config.forecast_interval_secs}s` : 'default' },
+    { label: 'Steering interval', value: config.steering_interval_secs ? `${config.steering_interval_secs}s` : 'default' },
     { label: 'Billing cycle', value: summarizeCycle(config) },
   ]
 }
@@ -205,7 +206,7 @@ function ContractDocumentDetail({ config }: { config: VolumeContractConfig | und
   const lines = commitmentLines(config)
   return (
     <div className="space-y-4">
-      <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4 lg:grid-cols-7">
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-4 lg:grid-cols-8">
         {documentSettings(config).map((item) => (
           <div key={item.label} className="min-w-0">
             <dt className="text-[11px] font-medium uppercase tracking-wide text-slate-400 dark:text-[#78849a]">{item.label}</dt>
@@ -344,6 +345,7 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
   const [amountUnits, setAmountUnits] = useState<'major' | 'minor'>('major')
   const [expectedDailyTraffic, setExpectedDailyTraffic] = useState('')
   const [forecastInterval, setForecastInterval] = useState('')
+  const [steeringInterval, setSteeringInterval] = useState('')
   const [contracts, setContracts] = useState<ContractForm[]>([emptyContract()])
 
   // ── Merchant-level settings live outside the document builder ────────────────────────────
@@ -358,6 +360,7 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
     amountUnits: 'major' | 'minor'
     expectedDailyTraffic: string
     forecastInterval: string
+    steeringInterval: string
   }
   const settingsKey = merchantId ? `vc_merchant_settings_${merchantId}` : null
   const activeConfig = useMemo(() => {
@@ -372,6 +375,7 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
     if (next.amountUnits) setAmountUnits(next.amountUnits)
     if (next.expectedDailyTraffic != null) setExpectedDailyTraffic(next.expectedDailyTraffic)
     if (next.forecastInterval != null) setForecastInterval(next.forecastInterval)
+    if (next.steeringInterval != null) setSteeringInterval(next.steeringInterval)
   }
   useEffect(() => {
     if (!settingsKey) return
@@ -396,13 +400,14 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
         amountUnits: activeConfig.currency?.amount_units === 'minor' ? 'minor' : 'major',
         expectedDailyTraffic: activeConfig.expected_daily_traffic != null ? String(activeConfig.expected_daily_traffic) : '',
         forecastInterval: activeConfig.forecast_interval_secs != null ? String(activeConfig.forecast_interval_secs) : '',
+        steeringInterval: activeConfig.steering_interval_secs != null ? String(activeConfig.steering_interval_secs) : '',
       })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [settingsKey, activeConfig])
   function saveMerchantSettings() {
     if (!settingsKey) return
-    const next: MerchantSettings = { routingMode, tolerancePp, metric, currency, amountUnits, expectedDailyTraffic, forecastInterval }
+    const next: MerchantSettings = { routingMode, tolerancePp, metric, currency, amountUnits, expectedDailyTraffic, forecastInterval, steeringInterval }
     try {
       window.localStorage.setItem(settingsKey, JSON.stringify(next))
     } catch {
@@ -501,6 +506,7 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
       }),
     }
     if (forecastInterval.trim()) config.forecast_interval_secs = parseInt(forecastInterval, 10)
+    if (steeringInterval.trim()) config.steering_interval_secs = parseInt(steeringInterval, 10)
     return config
   }
 
@@ -703,6 +709,17 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
                     placeholder="engine default"
                     value={forecastInterval}
                     onChange={(e) => setForecastInterval(e.target.value)}
+                  />
+                </div>
+                <div>
+                  {fieldLabel('Steering interval', 'seconds, optional')}
+                  <input
+                    className={inputClass}
+                    type="number"
+                    min={60}
+                    placeholder="engine default"
+                    value={steeringInterval}
+                    onChange={(e) => setSteeringInterval(e.target.value)}
                   />
                 </div>
               </div>

@@ -446,13 +446,13 @@ export function RuleEvaluationPanel({
                         placeholder="Metadata key"
                         value={param.metadataKey || ''}
                         onChange={e => updateRuleParamMetadataKey(idx, e.target.value)}
-                        className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:border-brand-500"
                       />
                       <input
                         placeholder="Metadata value"
                         value={param.value}
                         onChange={e => updateRuleParam(idx, 'value', e.target.value)}
-                        className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:border-brand-500"
                       />
                     </div>
                   )}

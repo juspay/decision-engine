@@ -81,6 +81,9 @@ pub struct VolumeContractConfig {
     /// Per-merchant override of the forecast cadence; omit to use the engine's global default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forecast_interval_secs: Option<u32>,
+    /// Per-merchant override of the steering cadence; omit to use the engine's global default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub steering_interval_secs: Option<u32>,
     pub volume_contracts: Vec<VolumeContract>,
 }
 
@@ -730,7 +733,10 @@ pub fn validate_volume_contract_config(
         &mut errors,
     );
 
-    for (field, interval) in [("forecast_interval_secs", config.forecast_interval_secs)] {
+    for (field, interval) in [
+        ("forecast_interval_secs", config.forecast_interval_secs),
+        ("steering_interval_secs", config.steering_interval_secs),
+    ] {
         if let Some(secs) = interval {
             if !(MIN_INTERVAL_SECS..=MAX_INTERVAL_SECS).contains(&secs) {
                 errors.push(ValidationErrorDetails::new(
@@ -1025,6 +1031,7 @@ mod tests {
         assert_eq!(config.metric, CommitmentMetric::Gmv);
         assert_eq!(config.currency.amount_units, AmountUnits::Minor);
         assert_eq!(config.forecast_interval_secs, None);
+        assert_eq!(config.steering_interval_secs, None);
         let contract = &config.volume_contracts[0];
         assert_eq!(contract.status, ContractStatus::Active);
         assert_eq!(contract.billing_cycle.proration, Proration::FullPeriod);
@@ -1272,6 +1279,9 @@ mod tests {
         let mut config = parse_ok(lumpsum_doc());
         config.forecast_interval_secs = Some(1);
         assert_single_error(&config, "out_of_range", "forecast_interval_secs");
+        let mut config = parse_ok(lumpsum_doc());
+        config.steering_interval_secs = Some(10_000_000);
+        assert_single_error(&config, "out_of_range", "steering_interval_secs");
 
         // Bad id / connector.
         let mut config = parse_ok(lumpsum_doc());

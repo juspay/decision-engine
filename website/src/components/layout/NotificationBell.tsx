@@ -45,7 +45,7 @@ export function NotificationBell() {
   const recentEvents = events.slice(0, 8)
 
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div className="relative shrink-0" ref={dropdownRef}>
       <button
         onClick={() => setOpen((v) => !v)}
         aria-label="Routing events"

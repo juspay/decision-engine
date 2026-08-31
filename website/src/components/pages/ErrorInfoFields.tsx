@@ -38,7 +38,7 @@ interface ErrorInfoFieldsProps {
 }
 
 const inputClass =
-  'w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500 text-slate-800 dark:text-slate-100 placeholder-slate-500'
+  'w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-brand-500 text-slate-800 dark:text-slate-100 placeholder-slate-500'
 const labelClass = 'block text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1'
 
 export function penalizedByUnifiedMessage(message: string | undefined | null): boolean | null {

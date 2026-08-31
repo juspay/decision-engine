@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { takeDashboardRoute } from '../lib/dashboardHandoff'
 import { Link, useLocation, useNavigate } from 'react-router-dom'
 import {
   ArrowRight,
@@ -107,7 +108,9 @@ export function AuthPage() {
 
   useEffect(() => {
     if (!hasHydrated || !token || loading) return
-    navigate('/', { replace: true })
+    // A dashboard hand-off whose one-time code failed lands here; send the user where they were
+    // headed rather than to the overview.
+    navigate(takeDashboardRoute() ?? '/', { replace: true })
   }, [hasHydrated, loading, navigate, token])
 
   useEffect(() => {
@@ -499,7 +502,7 @@ function FieldInput({
       <input
         {...props}
         ref={inputRef}
-        className={`h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.12)] outline-none transition placeholder:text-slate-500 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-white dark:shadow-none ${icon ? 'pl-12' : ''} ${className}`}
+        className={`h-14 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.12)] outline-none transition placeholder:text-slate-500 focus:border-brand-500 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-white dark:shadow-none ${icon ? 'pl-12' : ''} ${className}`}
       />
     </div>
   )
