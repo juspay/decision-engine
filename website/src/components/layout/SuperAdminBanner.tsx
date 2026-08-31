@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { ShieldCheck, LogOut } from 'lucide-react'
-import { useAuthStore } from '../../store/authStore'
+import { useAuthStore, type MerchantInfo } from '../../store/authStore'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiFetch } from '../../lib/api'
 
@@ -10,7 +10,7 @@ interface ExitResponse {
   email: string
   merchant_id: string
   role: string
-  merchants: { merchant_id: string; merchant_name: string; role: string }[]
+  merchants: MerchantInfo[]
 }
 
 // Shown only during a super-admin view session. Makes it unmistakable that the dashboard belongs to
@@ -21,6 +21,12 @@ export function SuperAdminBanner() {
   const [exiting, setExiting] = useState(false)
 
   if (!user?.isSuperAdminView) return null
+
+  // The names the admin searched by, not the scope id they had to paste — the id is still one hover
+  // away, and stays the label for a scope with no ancestry to name.
+  const scopeLabel = [user.hierarchy?.hs_merchant_name, user.hierarchy?.profile_name]
+    .filter(Boolean)
+    .join(' / ') || user.merchantId
 
   async function handleExit() {
     if (exiting) return
@@ -49,10 +55,15 @@ export function SuperAdminBanner() {
   }
 
   return (
-    <div className="flex h-9 shrink-0 items-center justify-center gap-3 bg-amber-500 px-4 text-[12.5px] font-medium text-amber-950">
-      <span className="flex items-center gap-1.5">
+    <div
+      title={`Scope id  ${user.merchantId}`}
+      className="flex h-9 shrink-0 items-center justify-center gap-3 bg-amber-500 px-4 text-[12.5px] font-medium text-amber-950 leading-[17px]"
+    >
+      <span className="flex min-w-0 items-center gap-1.5">
         <ShieldCheck size={14} className="shrink-0" />
-        Viewing <span className="font-semibold">{user.merchantId}</span> as platform super admin
+        Viewing
+        <span className="min-w-0 truncate font-semibold">{scopeLabel}</span>
+        as platform super admin
       </span>
       <button
         onClick={handleExit}

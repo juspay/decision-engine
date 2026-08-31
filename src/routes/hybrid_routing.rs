@@ -56,14 +56,16 @@ fn log_serializable_response<T: Serialize>(label: &str, value: &T) {
     }
 }
 
-/// Extracts ordered connector blobs from static routing output.
+/// The client-facing connector list for a static routing result. A straight clone of
+/// `evaluated_output`, which is already the routing answer — selection at the head, eligible
+/// fallbacks behind it (see `routing_evaluate`).
 ///
-/// Order is preserved intentionally because static routing can return
-/// connector priority, and dynamic routing consumes this as candidate order.
+/// Not `eligible_connectors`, which is what the rule *could* pick, in declaration order, not what
+/// it *chose*.
 fn extract_static_eligible_gateways(
     response: &crate::euclid::types::RoutingEvaluateResponse,
 ) -> Vec<ConnectorInfo> {
-    response.eligible_connectors.clone()
+    response.evaluated_output.clone()
 }
 
 fn extract_gateway_names(connectors: &[ConnectorInfo]) -> Vec<String> {

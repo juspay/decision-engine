@@ -20,13 +20,15 @@ import {
 } from '../../types/api'
 import { ShieldAlert, PowerOff, Plus, FlaskConical, CheckCircle2, XCircle, Clock, AlertTriangle, Sliders, Pencil, Trash2, Info, GitCompare, Copy } from 'lucide-react'
 import * as type from '../ui/typography'
-import { RuleBreakdown } from './EuclidRulesPage'
+import { RuleBreakdown } from '../routing/euclid/RuleBreakdown'
 import { validateABTestForm } from '../../features/routing/abTesting/schema'
 import { toABTestCreatePayload } from '../../features/routing/abTesting/payload'
 import { toABTestFormValues } from '../../features/routing/abTesting/state'
 import { ABTestFormValues, ABTestExperimentType, SrConfigOverrideForm, DEFAULT_VARIANT_SR_CONFIG, SR_STRATEGY_LABELS, SrStrategy } from '../../features/routing/abTesting/types'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 
+import { PageHeading } from '../ui/PageHeading'
+import { Notice } from '../ui/Notice'
 const SAMPLE_SIZE_PRESETS = [1000, 5000, 10000, 50000]
 
 const EXPERIMENT_TYPE_HELP: Record<ABTestExperimentType, string> = {
@@ -49,7 +51,7 @@ function hasCostArm(abData?: ABTestAlgorithmData): boolean {
 
 function KindBadge({ kind }: { kind: ABTestExperimentType }) {
   if (kind === 'sr_config_tuning') return (
-    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300">
+    <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-violet-100 text-violet-700 dark:bg-violet-900/30 dark:text-violet-300 leading-4">
       <Sliders size={9} /> SR Config Tuning
     </span>
   )
@@ -94,7 +96,7 @@ function ArmRuleDetail({ algorithmId, algorithms }: { algorithmId: string; algor
           </span>
         ))}
       </div>
-    ) : <p className="text-sm text-slate-400 italic">No connectors configured.</p>
+    ) : <p className="text-sm text-slate-500 italic">No connectors configured.</p>
   }
   if (type === 'volume_split') {
     const splits = (Array.isArray(data) ? data : []) as { split: number; output: { gateway_name: string } }[]
@@ -106,7 +108,7 @@ function ArmRuleDetail({ algorithmId, algorithms }: { algorithmId: string; algor
           </span>
         ))}
       </div>
-    ) : <p className="text-sm text-slate-400 italic">No splits configured.</p>
+    ) : <p className="text-sm text-slate-500 italic">No splits configured.</p>
   }
   if (type === 'single') {
     const conn = data as { gateway_name: string } | undefined
@@ -114,7 +116,7 @@ function ArmRuleDetail({ algorithmId, algorithms }: { algorithmId: string; algor
       <span className="rounded-full bg-slate-100 dark:bg-[#1a1f2a] px-2 py-0.5 text-xs font-medium text-slate-600 dark:text-[#8090a8]">
         {conn.gateway_name}
       </span>
-    ) : <p className="text-sm text-slate-400 italic">No connector configured.</p>
+    ) : <p className="text-sm text-slate-500 italic">No connector configured.</p>
   }
   return null
 }
@@ -129,7 +131,7 @@ function InfoHint({ text }: { text: string }) {
     <span
       tabIndex={0}
       aria-label={text}
-      className="inline-flex cursor-help align-middle text-slate-400 hover:text-slate-600 focus:text-slate-600 focus:outline-none dark:text-slate-500 dark:hover:text-slate-300 dark:focus:text-slate-300"
+      className="inline-flex cursor-help align-middle text-slate-500 hover:text-slate-600 focus:text-slate-600 focus:outline-none dark:text-slate-400 dark:hover:text-slate-300 dark:focus:text-slate-300 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-500/60"
       onMouseEnter={e => setCoords({ x: e.clientX, y: e.clientY })}
       onMouseLeave={() => setCoords(null)}
       onFocus={e => { const r = e.currentTarget.getBoundingClientRect(); setCoords({ x: r.left + r.width / 2, y: r.bottom }) }}
@@ -160,7 +162,7 @@ function InfoHint({ text }: { text: string }) {
 function FieldLabel({ children, hint, required }: { children: ReactNode; hint?: string; required?: boolean }) {
   return (
     <label className={`mb-1.5 flex items-center gap-1 ${type.label}`}>
-      {children}{required && <span className="text-slate-400">*</span>}
+      {children}{required && <span className="text-slate-500">*</span>}
       {hint && <InfoHint text={hint} />}
     </label>
   )
@@ -169,7 +171,7 @@ function FieldLabel({ children, hint, required }: { children: ReactNode; hint?: 
 /** One input/select treatment for the experiment form, so fields don't drift apart field by field. */
 const fieldCls =
   'border border-slate-200 bg-transparent rounded-lg px-3 py-1.5 text-sm ' +
-  'focus:outline-none focus:ring-1 focus:ring-brand-500 dark:border-[#222226]'
+  'focus:outline-none focus:border-brand-500 dark:border-[#222226]'
 
 // Visually separates the create form's three groups (what you're comparing / traffic & duration /
 // safety) with a hairline divider. No headings: each field labels itself and the arms are already
@@ -259,7 +261,7 @@ function ArmSelector({ label, help, accent, algorithms, value, excludeId, allowe
       <div className="mb-2 flex items-center gap-1.5">
         <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${accent
           ? 'bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'
-          : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>
+          : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-200'} leading-4`}>
           {label}
         </span>
         <InfoHint text={help} />
@@ -282,7 +284,7 @@ function ArmSelector({ label, help, accent, algorithms, value, excludeId, allowe
         </select>
       )}
       {configs.length === 1 && (
-        <p className="mt-1.5 text-[13px] text-slate-500 dark:text-[#8d96aa]">Using <span className="font-medium text-slate-600 dark:text-slate-300">{configs[0].name}</span></p>
+        <p className="mt-1.5 text-[13px] text-slate-500 dark:text-[#8d96aa] leading-[18px]">Using <span className="font-medium text-slate-600 dark:text-slate-300">{configs[0].name}</span></p>
       )}
       {value && !isSrStrategy(value) && (
         <div className="mt-2 rounded-lg border border-slate-100 dark:border-[#1a1f2a] bg-slate-50/60 dark:bg-[#0a0a0f]/60 p-2">
@@ -291,7 +293,7 @@ function ArmSelector({ label, help, accent, algorithms, value, excludeId, allowe
       )}
       {value && isSrStrategy(value) && (
         <div className="mt-2 rounded-lg border border-slate-100 dark:border-[#1a1f2a] bg-slate-50/60 dark:bg-[#0a0a0f]/60 p-2">
-          <p className="text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] mb-1.5">Base SR config</p>
+          <p className="text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] mb-1.5 leading-4">Base SR config</p>
           <LiveSrConfigPanel
             hedging={liveSrConfig.hedging}
             elimination={liveSrConfig.elimination}
@@ -402,26 +404,26 @@ function LiveSrConfigPanel({ hedging, elimination, bucketSize, autopilotSegmentC
 }) {
   return (
     <div className="space-y-1.5">
-      <div className="flex items-center justify-between text-[13px]">
+      <div className="flex items-center justify-between text-[13px] leading-[18px]">
         <span className="text-slate-500">Hedging %</span>
         <span className="font-medium text-slate-700 dark:text-slate-300">
-          {hedging !== null ? `${hedging}%` : <span className="text-slate-400 italic">Uses default</span>}
+          {hedging !== null ? `${hedging}%` : <span className="text-slate-500 italic">Uses default</span>}
         </span>
       </div>
-      <div className="flex items-center justify-between text-[13px]">
+      <div className="flex items-center justify-between text-[13px] leading-[18px]">
         <span className="text-slate-500">Elimination threshold</span>
         <span className="font-medium text-slate-700 dark:text-slate-300">
-          {elimination !== null ? `Drops below ${(elimination * 100).toFixed(0)}% score` : <span className="text-slate-400 italic">Uses default</span>}
+          {elimination !== null ? `Drops below ${(elimination * 100).toFixed(0)}% score` : <span className="text-slate-500 italic">Uses default</span>}
         </span>
       </div>
-      <div className="flex items-center justify-between text-[13px]">
+      <div className="flex items-center justify-between text-[13px] leading-[18px]">
         <span className="text-slate-500">Bucket size</span>
         <span className="font-medium text-slate-700 dark:text-slate-300">
-          {bucketSize !== null ? `${bucketSize} requests` : <span className="text-slate-400 italic">Uses default</span>}
+          {bucketSize !== null ? `${bucketSize} requests` : <span className="text-slate-500 italic">Uses default</span>}
         </span>
       </div>
       {honorsAutopilot && autopilotFeatureOn && (
-        <p className="flex items-center gap-1 text-[12px] text-amber-600 dark:text-amber-400 pt-1.5 mt-0.5 border-t border-slate-100 dark:border-[#1e2330]">
+        <p className="flex items-center gap-1 text-[12px] text-amber-700 dark:text-amber-400 pt-1.5 mt-0.5 border-t border-slate-100 dark:border-[#1e2330] leading-4">
           Auto-tunes bucket size and hedging % per segment, based on your traffic volume.
           <InfoHint text={
             autopilotSegmentCount > 0
@@ -431,7 +433,7 @@ function LiveSrConfigPanel({ hedging, elimination, bucketSize, autopilotSegmentC
         </p>
       )}
       {honorsAutopilot && !autopilotFeatureOn && autopilotSegmentCount > 0 && (
-        <p className="flex items-center gap-1 text-[12px] text-slate-400 pt-1.5 mt-0.5 border-t border-slate-100 dark:border-[#1e2330]">
+        <p className="flex items-center gap-1 text-[12px] text-slate-500 pt-1.5 mt-0.5 border-t border-slate-100 dark:border-[#1e2330] leading-4">
           Autopilot is off — {autopilotSegmentCount} segment{autopilotSegmentCount === 1 ? '' : 's'} from earlier tuning
           <InfoHint text={`Autopilot (auto-calibration) is currently disabled for this merchant. ${autopilotSegmentCount} segment${autopilotSegmentCount === 1 ? '' : 's'} still carry values it tuned before being turned off, but nothing is being actively adjusted right now — every transaction uses the base config shown above.`} />
         </p>
@@ -463,7 +465,7 @@ function ConfidenceBanner({ verdict }: { verdict: string }) {
     return (
       <div className="flex items-start gap-2.5 rounded-xl border border-slate-300 bg-slate-50 px-4 py-3 dark:border-slate-600/40 dark:bg-slate-500/10">
         <Info size={16} className="mt-0.5 shrink-0 text-slate-500 dark:text-slate-400" />
-        <p className="text-[13px] text-slate-700 dark:text-slate-300">
+        <p className="text-[13px] text-slate-700 dark:text-slate-300 leading-[18px]">
           <span className="font-medium text-slate-900 dark:text-slate-100">Sample target reached — no significant difference.</span>{' '}
           Control and variant are statistically tied: the delta below sits within the 95% confidence
           interval, so neither strategy is a proven winner. Collecting more traffic won't change this
@@ -475,8 +477,8 @@ function ConfidenceBanner({ verdict }: { verdict: string }) {
   }
   return (
     <div className="flex items-start gap-2.5 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
-      <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
-      <p className="text-[13px] text-amber-800 dark:text-amber-300/90">
+      <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-700 dark:text-amber-400" />
+      <p className="text-[13px] text-amber-800 dark:text-amber-300/90 leading-[18px]">
         <span className="font-medium text-amber-900 dark:text-amber-200">Not statistically significant yet.</span>{' '}
         The deltas below are still within noise — let the experiment reach its sample target before drawing conclusions.
       </p>
@@ -489,7 +491,7 @@ function ArmTh({ label, pct, accent }: { label: string; pct: number; accent?: bo
   return (
     <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${accent
       ? 'bg-brand-100 text-brand-700 dark:bg-brand-900/40 dark:text-brand-300'
-      : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-200'}`}>
+      : 'bg-slate-200 text-slate-600 dark:bg-slate-700 dark:text-slate-200'} leading-4`}>
       {label} · {pct}%
     </span>
   )
@@ -508,8 +510,8 @@ function ConfigComparisonTable({ abData, isTuning, controlPct, variantPct, live,
 }) {
   const controlSr = abData.control_algorithm_id === 'sr_routing'
   const variantSr = abData.variant_algorithm_id === 'sr_routing'
-  const muted = (t: string) => <span className="italic text-slate-400">{t}</span>
-  const dash = <span className="text-slate-300 dark:text-slate-600">—</span>
+  const muted = (t: string) => <span className="italic text-slate-500">{t}</span>
+  const dash = <span className="text-slate-500 dark:text-slate-400">—</span>
   const emphasis = (v: ReactNode) => <span className="font-medium text-brand-600 dark:text-brand-400">{v}</span>
   const elimText = (e: number) => `Drops below ${(e * 100).toFixed(0)}% score`
 
@@ -560,7 +562,7 @@ function ConfigComparisonTable({ abData, isTuning, controlPct, variantPct, live,
       <table className="w-full min-w-[520px] text-sm">
         <thead>
           <tr className="border-b border-slate-200 bg-slate-50 text-left dark:border-[#222226] dark:bg-[#0c0c10]">
-            <th className="w-[28%] px-4 py-2.5 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa]">Attribute</th>
+            <th className="w-[28%] px-4 py-2.5 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">Attribute</th>
             <th className="px-4 py-2.5"><ArmTh label="Control" pct={controlPct} /></th>
             <th className="px-4 py-2.5"><ArmTh label="Variant" pct={variantPct} accent /></th>
           </tr>
@@ -568,7 +570,7 @@ function ConfigComparisonTable({ abData, isTuning, controlPct, variantPct, live,
         <tbody>
           {rows.map((r, i) => (
             <tr key={r.label} className={i > 0 ? 'border-t border-slate-100 dark:border-[#1a1a22]' : ''}>
-              <td className="px-4 py-2.5 align-top text-[13px] font-medium text-slate-500 dark:text-[#8d96aa]">{r.label}</td>
+              <td className="px-4 py-2.5 align-top text-[13px] font-medium text-slate-500 dark:text-[#8d96aa] leading-[18px]">{r.label}</td>
               <td className="px-4 py-2.5 align-top text-slate-700 dark:text-slate-200">{r.control}</td>
               <td className="px-4 py-2.5 align-top text-slate-700 dark:text-slate-200">{r.variant}</td>
             </tr>
@@ -594,11 +596,11 @@ function MetricsComparisonTable({ results, controlPct, variantPct, costKind, sig
   const tcsDelta = (v.total_cost_saved ?? 0) - (c.total_cost_saved ?? 0)
   // Colour a delta only once the verdict is real — otherwise an early, noisy number would read as a win.
   const deltaCls = (d: number) => !significant
-    ? 'text-slate-400 dark:text-slate-500'
-    : d > 0 ? 'text-emerald-600 dark:text-emerald-400' : d < 0 ? 'text-red-500' : 'text-slate-500'
+    ? 'text-slate-500 dark:text-slate-400'
+    : d > 0 ? 'text-emerald-700 dark:text-emerald-400' : d < 0 ? 'text-red-600' : 'text-slate-500'
   const num = 'px-4 py-2.5 text-right text-slate-700 dark:text-slate-200'
   const metricCell = (label: string, sub: string) => (
-    <td className="px-4 py-2.5"><span className="font-medium text-slate-700 dark:text-slate-200">{label}</span> <span className="text-[12px] text-slate-400">{sub}</span></td>
+    <td className="px-4 py-2.5"><span className="font-medium text-slate-700 dark:text-slate-200">{label}</span> <span className="text-[12px] text-slate-500 leading-4">{sub}</span></td>
   )
 
   return (
@@ -606,10 +608,10 @@ function MetricsComparisonTable({ results, controlPct, variantPct, costKind, sig
       <table className="w-full min-w-[520px] text-sm [font-variant-numeric:tabular-nums]">
         <thead>
           <tr className="border-b border-slate-200 bg-slate-50 text-left dark:border-[#222226] dark:bg-[#0c0c10]">
-            <th className="px-4 py-2.5 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa]">Metric</th>
+            <th className="px-4 py-2.5 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">Metric</th>
             <th className="px-4 py-2.5 text-right"><ArmTh label="Control" pct={controlPct} /></th>
             <th className="px-4 py-2.5 text-right"><ArmTh label="Variant" pct={variantPct} accent /></th>
-            <th className="px-4 py-2.5 text-right text-[12px] font-medium text-slate-500 dark:text-[#8d96aa]">Delta</th>
+            <th className="px-4 py-2.5 text-right text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">Delta</th>
           </tr>
         </thead>
         <tbody>
@@ -629,19 +631,19 @@ function MetricsComparisonTable({ results, controlPct, variantPct, costKind, sig
             {metricCell('Transactions', 'count')}
             <td className={num}>{c.transaction_count.toLocaleString()}</td>
             <td className={num}>{v.transaction_count.toLocaleString()}</td>
-            <td className="px-4 py-2.5 text-right text-slate-300 dark:text-slate-600">—</td>
+            <td className="px-4 py-2.5 text-right text-slate-500 dark:text-slate-400">—</td>
           </tr>
           <tr className="border-t border-slate-100 dark:border-[#1a1a22]">
             {metricCell('Outcome', 'success / fail')}
-            <td className="px-4 py-2.5 text-right"><span className="text-emerald-600 dark:text-emerald-400">{c.success_count.toLocaleString()}</span> <span className="text-slate-300 dark:text-slate-600">/</span> <span className="text-red-500">{c.failure_count.toLocaleString()}</span></td>
-            <td className="px-4 py-2.5 text-right"><span className="text-emerald-600 dark:text-emerald-400">{v.success_count.toLocaleString()}</span> <span className="text-slate-300 dark:text-slate-600">/</span> <span className="text-red-500">{v.failure_count.toLocaleString()}</span></td>
-            <td className="px-4 py-2.5 text-right text-slate-300 dark:text-slate-600">—</td>
+            <td className="px-4 py-2.5 text-right"><span className="text-emerald-700 dark:text-emerald-400">{c.success_count.toLocaleString()}</span> <span className="text-slate-500 dark:text-slate-400">/</span> <span className="text-red-600">{c.failure_count.toLocaleString()}</span></td>
+            <td className="px-4 py-2.5 text-right"><span className="text-emerald-700 dark:text-emerald-400">{v.success_count.toLocaleString()}</span> <span className="text-slate-500 dark:text-slate-400">/</span> <span className="text-red-600">{v.failure_count.toLocaleString()}</span></td>
+            <td className="px-4 py-2.5 text-right text-slate-500 dark:text-slate-400">—</td>
           </tr>
           {costKind && (
             <tr className="border-t border-slate-100 dark:border-[#1a1a22]">
               {metricCell('Cost saved', 'TCS')}
-              <td className="px-4 py-2.5 text-right text-sky-600 dark:text-sky-400">{c.total_cost_saved != null ? c.total_cost_saved.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</td>
-              <td className="px-4 py-2.5 text-right text-sky-600 dark:text-sky-400">{v.total_cost_saved != null ? v.total_cost_saved.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</td>
+              <td className="px-4 py-2.5 text-right text-sky-700 dark:text-sky-400">{c.total_cost_saved != null ? c.total_cost_saved.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</td>
+              <td className="px-4 py-2.5 text-right text-sky-700 dark:text-sky-400">{v.total_cost_saved != null ? v.total_cost_saved.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</td>
               <td className={`px-4 py-2.5 text-right font-medium ${deltaCls(tcsDelta)}`}>{`${tcsDelta > 0 ? '+' : ''}${tcsDelta.toLocaleString(undefined, { maximumFractionDigits: 2 })}`}</td>
             </tr>
           )}
@@ -851,8 +853,8 @@ function ExperimentDetailPanel({
                 key={s.label}
                 className={`min-w-[8rem] pr-6 ${i > 0 ? 'border-l border-slate-200 pl-6 dark:border-[#222226]' : ''}`}
               >
-                <p className="text-[12px] text-slate-400 dark:text-[#8d96aa]">{s.label}</p>
-                <p className="mt-0.5 text-[15px] font-semibold text-slate-800 dark:text-slate-100 [font-variant-numeric:tabular-nums]">{s.value}</p>
+                <p className="text-[12px] text-slate-500 dark:text-[#8d96aa] leading-4">{s.label}</p>
+                <p className="mt-0.5 text-[15px] font-semibold text-slate-800 dark:text-slate-100 [font-variant-numeric:tabular-nums] leading-[22px]">{s.value}</p>
               </div>
             ))}
           </div>
@@ -862,9 +864,9 @@ function ExperimentDetailPanel({
         {results && (
           <div className="mt-5 space-y-2 border-t border-slate-100 pt-4 dark:border-[#1a1a22]">
             <div className="flex items-end justify-between">
-              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400 dark:text-[#8d96aa]">Transactions collected</p>
-              <p className="text-[15px] font-semibold text-slate-800 dark:text-slate-100 [font-variant-numeric:tabular-nums]">
-                {totalTxns.toLocaleString()} <span className="text-slate-400">/ {minSample.toLocaleString()}</span>
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500 dark:text-[#8d96aa] leading-4">Transactions collected</p>
+              <p className="text-[15px] font-semibold text-slate-800 dark:text-slate-100 [font-variant-numeric:tabular-nums] leading-[22px]">
+                {totalTxns.toLocaleString()} <span className="text-slate-500">/ {minSample.toLocaleString()}</span>
               </p>
             </div>
             <div className="h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-[#232833]">
@@ -873,7 +875,7 @@ function ExperimentDetailPanel({
                 style={{ width: `${progress}%` }}
               />
             </div>
-            <p className="text-[12px] text-slate-400">
+            <p className="text-[12px] text-slate-500 max-w-[57ch] leading-4">
               {progress}% of the {minSample.toLocaleString()}-transaction target{remainingEta ? ` · ${remainingEta}` : ''}
             </p>
           </div>
@@ -902,14 +904,14 @@ function ExperimentDetailPanel({
         <div className="flex items-center justify-between">
           <div>
             <h3 className={type.heading}>Results</h3>
-            <p className="mt-0.5 text-[12px] text-slate-400">Updates every 60 seconds</p>
+            <p className="mt-0.5 text-[12px] text-slate-500 leading-4">Updates every 60 seconds</p>
           </div>
           {results && <VerdictChip verdict={results.verdict} />}
         </div>
         {isLoading && !results ? (
-          <div className="flex items-center gap-2 text-sm text-slate-400"><Spinner size={14} /> Loading stats…</div>
+          <div className="flex items-center gap-2 text-sm text-slate-500"><Spinner size={14} /> Loading stats…</div>
         ) : !results ? (
-          <p className="text-sm italic text-slate-400">
+          <p className="text-sm italic text-slate-500">
             Stats unavailable — analytics pipeline may not be configured in this environment.
           </p>
         ) : (
@@ -925,10 +927,10 @@ function ExperimentDetailPanel({
               significant={significant}
             />
             {results.verdict === 'guardrail_breached' && (
-              <div className="flex items-center gap-2 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-600 dark:border-red-800 dark:bg-red-900/20 dark:text-red-400">
+              <Notice tone="danger">
                 <ShieldAlert size={12} />
                 Variant auth rate dropped {Math.abs(results.delta_pp).toFixed(2)}pp below control — beyond the {abData?.guardrail_threshold_pp}pp guardrail. Consider stopping the experiment.
-              </div>
+              </Notice>
             )}
           </div>
         )}
@@ -939,7 +941,7 @@ function ExperimentDetailPanel({
         <div className="flex items-center justify-between">
           <div>
             <h3 className={type.heading}>Transactions</h3>
-            <p className="mt-0.5 text-[12px] text-slate-400">
+            <p className="mt-0.5 text-[12px] text-slate-500 leading-4">
               {txnData ? `${txnData.total.toLocaleString()} decisions` : 'Loading…'}
             </p>
           </div>
@@ -963,7 +965,7 @@ function ExperimentDetailPanel({
               <tbody>
                 {!txnData?.transactions.length ? (
                   <tr>
-                    <td colSpan={6} className="px-4 py-8 text-base text-slate-400 text-center">
+                    <td colSpan={6} className="px-4 py-8 text-base text-slate-500 text-center">
                       {txnsLoading ? 'Loading…' : 'No transactions logged yet for this experiment.'}
                     </td>
                   </tr>
@@ -982,7 +984,7 @@ function ExperimentDetailPanel({
                         <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${txn.variant_arm === 'control'
                             ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
                             : 'bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300'
-                          }`}>
+                          } leading-4`}>
                           {txn.variant_arm === 'control' ? 'Control' : 'Variant'}
                         </span>
                       </td>
@@ -997,16 +999,16 @@ function ExperimentDetailPanel({
                       </td>
                       <td className="px-4 py-3">
                         {txn.status === 'success' ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">success</span>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400 leading-4">success</span>
                         ) : txn.status === 'failure' ? (
-                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400">failure</span>
+                          <span className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 leading-4">failure</span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400" title="Payment was routed but no outcome was recorded — counted against auth rate">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 leading-4" title="Payment was routed but no outcome was recorded — counted against auth rate">
                             <Clock size={9} /> no outcome
                           </span>
                         )}
                       </td>
-                      <td className="px-4 py-3 text-sm text-slate-400 whitespace-nowrap">
+                      <td className="px-4 py-3 text-sm text-slate-500 whitespace-nowrap">
                         {formatTime(txn.created_at_ms)}
                       </td>
                     </tr>
@@ -1033,7 +1035,7 @@ function ExperimentDetailPanel({
                     </button>
                     {buildPageList(txnPage, totalPages).map((page, idx) => (
                       page === null
-                        ? <span key={`ellipsis-${idx}`} className="px-1 text-sm text-slate-400">…</span>
+                        ? <span key={`ellipsis-${idx}`} className="px-1 text-sm text-slate-500">…</span>
                         : <button
                           key={page}
                           type="button"
@@ -1078,7 +1080,7 @@ interface SrArmEditorProps {
 function SrArmEditor({ label, splitPct, config, onChange }: SrArmEditorProps) {
   return (
     <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 bg-brand-50/30 dark:bg-brand-900/10 px-4 py-4 space-y-3">
-      <span className="inline-flex items-center rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700 dark:bg-brand-900/40 dark:text-brand-300">
+      <span className="inline-flex items-center rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 leading-4">
         {label} ({splitPct}%)
       </span>
 
@@ -1187,7 +1189,7 @@ function CreateForm({
               value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
             />
-            <p className="mt-1.5 text-[13px] text-slate-500 dark:text-[#8d96aa]">
+            <p className="mt-1.5 text-[13px] text-slate-500 dark:text-[#8d96aa] leading-[18px]">
               Only the name can be changed. To test a different routing setup, create a new experiment.
             </p>
           </div>
@@ -1210,8 +1212,8 @@ function CreateForm({
                 {/* Helper text in a dedicated info box, so it reads as guidance rather than floating
                     muted text under the control. */}
                 <div className="mt-2.5 flex items-start gap-2 rounded-lg bg-slate-50 px-3 py-2 dark:bg-[#14181f]">
-                  <Info size={14} className="mt-0.5 shrink-0 text-slate-400" />
-                  <p className="text-[13px] text-slate-500 dark:text-[#9ca7ba]">
+                  <Info size={14} className="mt-0.5 shrink-0 text-slate-500" />
+                  <p className="text-[13px] text-slate-500 dark:text-[#9ca7ba] leading-[18px]">
                     {EXPERIMENT_TYPE_HELP[form.experimentType]}
                   </p>
                 </div>
@@ -1258,26 +1260,26 @@ function CreateForm({
                   {/* Control — live config, non-editable */}
                   <div className="rounded-xl border border-slate-200 dark:border-[#222226] bg-slate-50/50 dark:bg-[#0c0c10] px-4 py-4 space-y-3">
                     <div className="flex items-center gap-2">
-                      <span className="inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-200">
+                      <span className="inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-200 leading-4">
                         Control ({100 - form.variantSplitPct}%)
                       </span>
-                      <span className="text-[12px] text-slate-400">current config</span>
+                      <span className="text-[12px] text-slate-500 leading-4">current config</span>
                     </div>
                     <div className="space-y-2.5">
                       <div>
-                        <p className="text-[13px] text-slate-500 mb-0.5">Hedging %</p>
+                        <p className="text-[13px] text-slate-500 mb-0.5 leading-[18px]">Hedging %</p>
                         <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                          {liveHedging !== null ? `${liveHedging}%` : <span className="text-slate-400 italic text-xs">Uses default</span>}
+                          {liveHedging !== null ? `${liveHedging}%` : <span className="text-slate-500 italic text-xs">Uses default</span>}
                         </p>
                       </div>
                       <div>
-                        <p className="text-[13px] text-slate-500 mb-0.5">Elimination threshold</p>
+                        <p className="text-[13px] text-slate-500 mb-0.5 leading-[18px]">Elimination threshold</p>
                         <p className="text-sm font-medium text-slate-700 dark:text-slate-300">
-                          {liveElimination !== null ? `Drops below ${(liveElimination * 100).toFixed(0)}% score` : <span className="text-slate-400 italic text-xs">Uses default</span>}
+                          {liveElimination !== null ? `Drops below ${(liveElimination * 100).toFixed(0)}% score` : <span className="text-slate-500 italic text-xs">Uses default</span>}
                         </p>
                       </div>
                     </div>
-                    <p className="text-[12px] text-slate-400 pt-1 border-t border-slate-100 dark:border-[#1e2330]">
+                    <p className="text-[12px] text-slate-500 pt-1 border-t border-slate-100 dark:border-[#1e2330] leading-4">
                       Edit in <span className="font-medium">SR Routing → Scoring / Elimination</span>
                     </p>
                   </div>
@@ -1298,9 +1300,9 @@ function CreateForm({
               <div>
                 <div className="mb-2 flex items-center justify-between">
                   <span className={type.label}>Traffic allocation</span>
-                  <span className="text-[13px] tabular-nums text-slate-500 dark:text-slate-400">
+                  <span className="text-[13px] tabular-nums text-slate-500 dark:text-slate-400 leading-[18px]">
                     {100 - form.variantSplitPct}% control
-                    <span className="mx-1.5 text-slate-300 dark:text-slate-600">/</span>
+                    <span className="mx-1.5 text-slate-500 dark:text-slate-400">/</span>
                     <span className="font-semibold text-brand-600 dark:text-brand-400">{form.variantSplitPct}% variant</span>
                   </span>
                 </div>
@@ -1355,7 +1357,7 @@ function CreateForm({
                     <input
                       type="text" inputMode="numeric" autoFocus
                       placeholder="Custom"
-                      className="w-24 rounded-md bg-transparent px-2.5 py-1.5 text-xs tabular-nums focus:outline-none focus:ring-1 focus:ring-brand-500"
+                      className="w-24 rounded-md bg-transparent px-2.5 py-1.5 text-xs tabular-nums focus:outline-none focus:border-brand-500"
                       value={form.minSampleSize ? form.minSampleSize.toLocaleString() : ''}
                       onChange={e => setForm(f => ({ ...f, minSampleSize: Number(e.target.value.replace(/[^\d]/g, '')) }))}
                     />
@@ -1668,10 +1670,7 @@ export function ABTestingPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-lg font-semibold text-slate-900 dark:text-white">A/B Testing</h1>
-          <p className={`mt-0.5 ${type.subheading}`}>
-            Compare routing strategies on live traffic with statistical significance.
-          </p>
+          <PageHeading title="A/B Testing" description="Compare routing strategies on live traffic with statistical significance." />
         </div>
         {/* Only offer "New experiment" when the form isn't already open — otherwise it's a third
             door to an action the on-screen form already is (see the empty-state copy below). */}
@@ -1689,12 +1688,12 @@ export function ABTestingPage() {
           state has loaded. */}
       {activeAbTest && features.data && !realPaymentsOn && (
         <div className="flex flex-wrap items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 dark:border-amber-500/30 dark:bg-amber-500/10">
-          <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-600 dark:text-amber-400" />
+          <AlertTriangle size={18} className="mt-0.5 shrink-0 text-amber-700 dark:text-amber-400" />
           <div className="min-w-0 flex-1">
             <p className="text-sm font-medium text-amber-900 dark:text-amber-200">
               “{activeAbTest.name}” is active but not collecting results
             </p>
-            <p className="mt-0.5 text-[13px] text-amber-800/90 dark:text-amber-300/90">
+            <p className="mt-0.5 text-[13px] text-amber-800/90 dark:text-amber-300/90 max-w-[57ch] leading-[18px]">
               “A/B test on real payments” is off, so live traffic isn’t being split between the arms. Turn it back on to resume recording stats.
             </p>
           </div>
@@ -1728,9 +1727,9 @@ export function ABTestingPage() {
           {/* Left: experiment list */}
           <div className="space-y-1">
             {!merchantId ? (
-              <p className="px-2 py-2 text-base text-slate-400">Set merchant ID to load experiments.</p>
+              <p className="px-2 py-2 text-base text-slate-500">Set merchant ID to load experiments.</p>
             ) : !allAlgorithms ? (
-              <p className="px-2 py-2 text-sm text-slate-400">Loading…</p>
+              <p className="px-2 py-2 text-sm text-slate-500">Loading…</p>
             ) : (
               <div className="rounded-xl border border-slate-200 dark:border-[#222226] overflow-hidden">
                 {savedAbTests.map((algo, idx) => {
@@ -1759,13 +1758,13 @@ export function ABTestingPage() {
                           {algo.name}
                         </p>
                         {isActive && (
-                          <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400">
+                          <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded-full text-[11px] font-semibold bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-400 leading-4">
                             ● Active
                           </span>
                         )}
                       </div>
                       {abData && (
-                        <p className="text-[13px] text-slate-500 dark:text-[#8d96aa] mt-0.5 truncate">
+                        <p className="text-[13px] text-slate-500 dark:text-[#8d96aa] mt-0.5 truncate max-w-[57ch] leading-[18px]">
                           {kind === 'sr_config_tuning'
                             ? 'SR config tuning'
                             : `${armLabel(abData.control_algorithm_id, abData.control_sr_config, algorithmName)} → ${armLabel(abData.variant_algorithm_id, abData.variant_sr_config, algorithmName)}`
@@ -1816,7 +1815,7 @@ export function ABTestingPage() {
 
             {rightPanelContent === 'empty' && (
               <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 dark:border-[#222226] py-16 text-center">
-                <FlaskConical size={26} className="text-slate-300 dark:text-slate-600 mb-2" />
+                <FlaskConical size={26} className="text-slate-500 dark:text-slate-400 mb-2" />
                 <p className="text-base text-slate-500">Select an experiment to view details</p>
               </div>
             )}

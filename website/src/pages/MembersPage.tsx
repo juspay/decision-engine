@@ -3,6 +3,7 @@ import { UserPlus, Users, Copy, Check, Loader2, Eye, EyeOff } from 'lucide-react
 import { apiErrorMessage, apiFetch } from '../lib/api'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
 
+import { PageHeading } from '../components/ui/PageHeading'
 interface MemberInfo {
   user_id: string
   email: string
@@ -22,7 +23,7 @@ function RoleBadge({ role }: { role: string }) {
       ? 'bg-violet-50 text-violet-700 dark:bg-violet-950/40 dark:text-violet-300'
       : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
   return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold capitalize ${colors}`}>
+    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold capitalize ${colors} leading-4`}>
       {role}
     </span>
   )
@@ -43,11 +44,11 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={copy}
-      className="ml-1.5 inline-flex items-center justify-center w-6 h-6 rounded text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+      className="ml-1.5 inline-flex items-center justify-center w-6 h-6 rounded text-slate-500 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
       title={copied ? 'Copied' : 'Copy'}
       aria-label={copied ? 'Copied' : 'Copy'}
     >
-      {copied ? <Check size={13} className="text-green-500" /> : <Copy size={13} />}
+      {copied ? <Check size={13} className="text-green-700" /> : <Copy size={13} />}
     </button>
   )
 }
@@ -104,9 +105,7 @@ export function MembersPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-8 px-4 py-8">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-white">
-          Members
-        </h1>
+        <PageHeading title="Members" />
       </div>
 
       {/* Invite form */}
@@ -124,12 +123,12 @@ export function MembersPage() {
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               placeholder="colleague@example.com"
-              className="h-10 flex-1 rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-white dark:placeholder:text-[#6e7684] dark:focus:border-blue-500"
+              className="h-10 flex-1 rounded-xl border border-slate-200 bg-white px-3.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-500 focus:border-blue-500 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-white dark:placeholder:text-[#6e7684] dark:focus:border-blue-500"
             />
             <select
               value={role}
               onChange={(e) => setRole(e.target.value)}
-              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-slate-200"
+              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-500 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-slate-200"
             >
               <option value="member">Member</option>
               <option value="admin">Admin</option>
@@ -167,7 +166,7 @@ export function MembersPage() {
                     </code>
                     <button
                       onClick={() => setShowPassword((v) => !v)}
-                      className="ml-1.5 inline-flex items-center justify-center w-6 h-6 rounded text-amber-600 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200 transition-colors"
+                      className="ml-1.5 inline-flex items-center justify-center w-6 h-6 rounded text-amber-700 hover:text-amber-800 dark:text-amber-400 dark:hover:text-amber-200 transition-colors"
                       title={showPassword ? 'Hide password' : 'Show password'}
                       aria-label={showPassword ? 'Hide password' : 'Show password'}
                     >
@@ -189,33 +188,33 @@ export function MembersPage() {
       {/* Members list */}
       <div className="rounded-2xl border border-slate-200 bg-white dark:border-[#1d2029] dark:bg-[#0c0e14]">
         <div className="flex items-center gap-2.5 border-b border-slate-100 px-6 py-4 dark:border-[#1a1d25]">
-          <Users size={18} className="text-slate-400" />
+          <Users size={18} className="text-slate-500" />
           <h2 className="text-base font-semibold text-slate-900 dark:text-white">Current members</h2>
           {!loadingMembers && (
-            <span className="ml-auto text-xs text-slate-400">{members.length} member{members.length !== 1 ? 's' : ''}</span>
+            <span className="ml-auto text-xs text-slate-500">{members.length} member{members.length !== 1 ? 's' : ''}</span>
           )}
         </div>
 
         {loadingMembers ? (
-          <div className="flex items-center justify-center py-12 text-slate-400">
+          <div className="flex items-center justify-center py-12 text-slate-500">
             <Loader2 size={20} className="animate-spin" />
           </div>
         ) : membersError ? (
-          <div className="px-6 py-8 text-center text-sm text-red-500">{membersError}</div>
+          <div className="px-6 py-8 text-center text-sm text-red-600">{membersError}</div>
         ) : members.length === 0 ? (
-          <div className="px-6 py-8 text-center text-sm text-slate-400">No members yet</div>
+          <div className="px-6 py-8 text-center text-sm text-slate-500">No members yet</div>
         ) : (
           <ul className="divide-y divide-slate-100 dark:divide-[#1a1d25]">
             {members.map((m) => (
               <li key={m.user_id} className="flex items-center gap-4 px-6 py-3.5">
-                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-600 text-[11px] font-semibold text-white">
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-brand-600 text-[11px] font-semibold text-white leading-4">
                   {m.email.slice(0, 2).toUpperCase()}
                 </div>
                 <div className="min-w-0 flex-1">
                   <p className="truncate text-sm font-medium text-slate-800 dark:text-slate-200">
                     {m.email}
                   </p>
-                  <p className="truncate text-xs text-slate-400">{m.user_id}</p>
+                  <p className="truncate text-xs text-slate-500">{m.user_id}</p>
                 </div>
                 <RoleBadge role={m.role} />
               </li>

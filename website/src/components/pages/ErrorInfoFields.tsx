@@ -38,8 +38,8 @@ interface ErrorInfoFieldsProps {
 }
 
 const inputClass =
-  'w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-brand-500 text-slate-800 dark:text-slate-100 placeholder-slate-400'
-const labelClass = 'block text-[10px] font-semibold uppercase tracking-wider text-slate-400 dark:text-slate-500 mb-1'
+  'w-full bg-slate-50 dark:bg-[#0d0d13] border border-slate-200 dark:border-[#222226] rounded-lg px-2.5 py-1.5 text-xs focus:outline-none focus:border-brand-500 text-slate-800 dark:text-slate-100 placeholder-slate-500'
+const labelClass = 'block text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-1'
 
 export function penalizedByUnifiedMessage(message: string | undefined | null): boolean | null {
   switch (message) {
@@ -62,7 +62,7 @@ export function penalizedByUnifiedMessage(message: string | undefined | null): b
 function decisionBadgeClass(decision: string) {
   switch (decision.toLowerCase()) {
     case 'decline': return 'bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400'
-    case 'retry': return 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400'
+    case 'retry': return 'bg-amber-50 text-amber-700 dark:bg-amber-950/40 dark:text-amber-400'
     case 'step_up':
     case 'challenge': return 'bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-400'
     case 'success':
@@ -126,27 +126,27 @@ export function ErrorInfoFields({ info, onChange, rules, connector, showClassifi
         className="w-full flex items-center justify-between gap-2 px-2.5 py-2 bg-slate-50 dark:bg-[#0d0d13] hover:bg-slate-100 dark:hover:bg-[#111118] transition-colors"
       >
         <div className="flex items-center gap-1.5 min-w-0 flex-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 shrink-0">
+          <span className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 shrink-0 leading-4">
             Decline Error
           </span>
           {info.error_code ? (
-            <span className="font-mono text-[10px] text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/30 px-1.5 py-0.5 rounded shrink-0">
+            <span className="font-mono text-[11px] text-brand-600 dark:text-brand-400 bg-brand-50 dark:bg-brand-900/30 px-1.5 py-0.5 rounded shrink-0 leading-4">
               {info.error_code}
             </span>
           ) : (
-            <span className="text-[10px] text-slate-400 dark:text-slate-600">not set</span>
+            <span className="text-[11px] text-slate-500 dark:text-slate-400 leading-4">not set</span>
           )}
           {showClassification && classification?.decision && (
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0 ${decisionBadgeClass(classification.decision)}`}>
+            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold shrink-0 ${decisionBadgeClass(classification.decision)} leading-4`}>
               {classification.decision}
             </span>
           )}
           {showClassification && classification?.penalized != null && (
-            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold shrink-0 ${
+            <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold shrink-0 ${
               classification.penalized
                 ? 'bg-red-50 text-red-600 dark:bg-red-950/40 dark:text-red-400'
                 : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-300'
-            }`}>
+            } leading-4`}>
               <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${classification.penalized ? 'bg-red-500' : 'bg-emerald-500'}`} />
               {classification.penalized ? 'Penalized' : 'Penalty skipped'}
             </span>
@@ -158,13 +158,13 @@ export function ErrorInfoFields({ info, onChange, rules, connector, showClassifi
               <span
                 role="button"
                 onClick={e => { e.stopPropagation(); onChange({ error_code: '', error_message: '', issuer_error_code: '', card_network: '' }) }}
-                className="rounded p-0.5 text-slate-400 hover:text-red-400 transition-colors"
+                className="rounded p-0.5 text-slate-500 hover:text-red-600 transition-colors"
               >
                 <RotateCcw size={11} />
               </span>
             </Tooltip>
           )}
-          <ChevronDown size={13} className={`text-slate-400 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
+          <ChevronDown size={13} className={`text-slate-500 transition-transform duration-200 ${open ? 'rotate-180' : ''}`} />
         </div>
       </button>
 
@@ -173,13 +173,13 @@ export function ErrorInfoFields({ info, onChange, rules, connector, showClassifi
         <div className="px-2.5 py-2.5 space-y-2 border-t border-slate-200 dark:border-[#222226]">
           {/* Unified message strip */}
           {classification?.unifiedMessage && (
-            <div className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border-l-2 text-[10px] ${
+            <div className={`flex items-center gap-2 px-2.5 py-1.5 rounded-lg border-l-2 text-[11px] ${
               classification.penalized === true
                 ? 'bg-red-50 border-red-400 text-red-700 dark:bg-red-950/20 dark:border-red-600 dark:text-red-400'
                 : classification.penalized === false
                   ? 'bg-emerald-50 border-emerald-400 text-emerald-700 dark:bg-emerald-950/20 dark:border-emerald-600 dark:text-emerald-300'
                   : 'bg-slate-50 border-slate-300 text-slate-500 dark:bg-[#111118] dark:border-slate-600 dark:text-slate-400'
-            }`}>
+            } leading-4`}>
               <span>{classification.unifiedMessage}</span>
             </div>
           )}

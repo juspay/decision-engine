@@ -14,6 +14,7 @@ import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
 import {
   AnalyticsRange,
+  AnalyticsRangeValue,
   AnalyticsOverviewResponse,
   AnalyticsRoutingStatsResponse,
   RoutingAlgorithm,
@@ -23,30 +24,21 @@ import { Badge } from '../ui/Badge'
 import { Card as GlassCard, SurfaceLabel } from '../ui/Card'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
+import { TimeRangeFilter } from '../ui/TimeRangeFilter'
+import {
+  customWindowFrom,
+  formatWindowBound,
+  presetWindow,
+  toDateTimeInputValue,
+} from '../../lib/timeRange'
 
-const OVERVIEW_RANGE_OPTIONS: {
-  value: AnalyticsRange
-  label: string
-  detail: string
-  badge: string
-  summaryLabel: string
-}[] = [
-  { value: '15m', label: '15m', detail: 'Last 15 mins', badge: 'Live 15m', summaryLabel: 'Errors last 15 mins' },
-  { value: '1h', label: '1h', detail: 'Last hour', badge: 'Live 1h', summaryLabel: 'Errors last hour' },
-  { value: '12h', label: '12h', detail: 'Last 12 hours', badge: 'Live 12h', summaryLabel: 'Errors last 12 hours' },
-  { value: '1d', label: '1 day', detail: 'Last 1 day', badge: 'Live 1d', summaryLabel: 'Errors last 1 day' },
-  { value: '1w', label: '1 week', detail: 'Last 1 week', badge: 'Live 1w', summaryLabel: 'Errors last 1 week' },
-]
-
-function useHealth() {
-  const { data, error } = useSWR<{ message: string }>(
-    '/health',
-    fetcher,
-    { revalidateOnFocus: false, shouldRetryOnError: false },
-  )
-  if (data) return 'up' as const
-  if (error) return 'down' as const
-  return 'loading' as const
+import { PageHeading } from '../ui/PageHeading'
+const PRESET_WINDOW_COPY: Record<AnalyticsRange, { detail: string; badge: string }> = {
+  '15m': { detail: 'Last 15 mins', badge: 'Live 15m' },
+  '1h': { detail: 'Last hour', badge: 'Live 1h' },
+  '12h': { detail: 'Last 12 hours', badge: 'Live 12h' },
+  '1d': { detail: 'Last 1 day', badge: 'Live 1d' },
+  '1w': { detail: 'Last 1 week', badge: 'Live 1w' },
 }
 
 function formatCompactNumber(value: number | undefined) {
@@ -61,12 +53,6 @@ function formatPercent(value: number | undefined) {
   return `${value.toFixed(value >= 100 ? 0 : 1)}%`
 }
 
-function healthLabel(status: 'up' | 'down' | 'loading') {
-  if (status === 'up') return 'Live'
-  if (status === 'down') return 'Needs attention'
-  return 'Checking'
-}
-
 function timeAgo(ms: number) {
   const diff = Date.now() - ms
   if (diff < 60_000) return 'just now'
@@ -76,8 +62,8 @@ function timeAgo(ms: number) {
 }
 
 function scoreColor(score: number) {
-  if (score >= 0.85) return { dot: 'bg-emerald-500', text: 'text-emerald-600 dark:text-emerald-400' }
-  if (score >= 0.70) return { dot: 'bg-amber-500', text: 'text-amber-600 dark:text-amber-400' }
+  if (score >= 0.85) return { dot: 'bg-emerald-500', text: 'text-emerald-700 dark:text-emerald-400' }
+  if (score >= 0.70) return { dot: 'bg-amber-500', text: 'text-amber-700 dark:text-amber-400' }
   return { dot: 'bg-red-500', text: 'text-red-600 dark:text-red-400' }
 }
 
@@ -140,8 +126,16 @@ export function OverviewPage() {
   const { merchantId } = useMerchantStore()
   const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
   const effectiveMerchantId = merchantId || authMerchantId
-  const health = useHealth()
-  const [range, setRange] = useState<AnalyticsRange>('1d')
+  const [range, setRange] = useState<AnalyticsRangeValue>('1d')
+  const [customStart, setCustomStart] = useState(() =>
+    toDateTimeInputValue(presetWindow('1d').start_ms),
+  )
+  const [customEnd, setCustomEnd] = useState(() => toDateTimeInputValue(Date.now()))
+
+  const customWindow = useMemo(
+    () => (range === 'custom' ? customWindowFrom(customStart, customEnd) : undefined),
+    [customEnd, customStart, range],
+  )
 
   const { data: activeAlgorithms } = useSWR<RoutingAlgorithm[]>(
     effectiveMerchantId ? `/routing/list/active/${effectiveMerchantId}` : null,
@@ -157,8 +151,15 @@ export function OverviewPage() {
   const debitRoutingFlag = useDebitRoutingFlag(effectiveMerchantId)
   const merchantFeatures = useMerchantFeatures(effectiveMerchantId || undefined)
 
-  const analyticsOverviewUrl = `/analytics/overview?range=${range}`
-  const analyticsRoutingUrl = `/analytics/routing-stats?range=${range}`
+  // A half-picked custom window has no bounds to query with, so both requests wait for it.
+  const windowQuery =
+    range === 'custom'
+      ? customWindow
+        ? `range=1h&start_ms=${customWindow.start_ms}&end_ms=${customWindow.end_ms}`
+        : null
+      : `range=${range}`
+  const analyticsOverviewUrl = windowQuery ? `/analytics/overview?${windowQuery}` : null
+  const analyticsRoutingUrl = windowQuery ? `/analytics/routing-stats?${windowQuery}` : null
 
   const analyticsOverview = useSWR<AnalyticsOverviewResponse>(analyticsOverviewUrl, fetcher, {
     shouldRetryOnError: false,
@@ -218,7 +219,14 @@ export function OverviewPage() {
 
   const topGateway = gatewayUsage[0]?.gateway || analyticsOverview.data?.top_scores?.[0]?.gateway
   const selectedWindow =
-    OVERVIEW_RANGE_OPTIONS.find((option) => option.value === range) || OVERVIEW_RANGE_OPTIONS[1]
+    range === 'custom'
+      ? {
+          detail: customWindow
+            ? `${formatWindowBound(customWindow.start_ms)} — ${formatWindowBound(customWindow.end_ms)}`
+            : 'Custom window',
+          badge: 'Custom',
+        }
+      : PRESET_WINDOW_COPY[range]
   // Multi-objective is set up when either the merchant saved a manual successRate
   // config on /routing/sr (a merchant-specific /rule/get response — the same
   // condition that page uses) or turned on Autopilot mode there (the `autopilot`
@@ -293,55 +301,32 @@ export function OverviewPage() {
   return (
     <div className="space-y-6 px-5 sm:px-6 lg:px-8 xl:px-10">
       <header className="relative flex flex-wrap items-start justify-between gap-4">
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">Overview</h1>
-          {(analyticsOverview.data?.merchant_id || effectiveMerchantId) ? (
+        <PageHeading
+          title="Overview"
+          badge={(analyticsOverview.data?.merchant_id || effectiveMerchantId) ? (
             <Badge variant="blue">{analyticsOverview.data?.merchant_id || effectiveMerchantId}</Badge>
           ) : null}
-        </div>
+        />
 
         <div className="flex flex-wrap items-center gap-2 md:justify-end">
-          <span
-            className={`inline-flex flex-shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-medium ${
-              health === 'up'
-                ? 'border-emerald-300/35 bg-emerald-500/12 text-emerald-700 dark:border-emerald-400/35 dark:bg-emerald-500/15 dark:text-emerald-200'
-                : health === 'down'
-                  ? 'border-red-300/35 bg-red-500/12 text-red-700 dark:border-red-400/35 dark:bg-red-500/15 dark:text-red-200'
-                  : 'border-amber-300/35 bg-amber-500/12 text-amber-700 dark:border-amber-400/35 dark:bg-amber-500/15 dark:text-amber-200'
-            }`}
-          >
-            <span className="relative inline-flex h-2.5 w-2.5 shrink-0 items-center justify-center">
-              <span
-                className={`absolute h-2 w-2 rounded-full ${health === 'up' ? 'bg-emerald-500' : health === 'down' ? 'bg-red-500' : 'bg-amber-500'} ${
-                  health === 'up' ? 'animate-ping' : ''
-                }`}
-              />
-              <span
-                className={`relative h-2 w-2 rounded-full ${health === 'up' ? 'bg-emerald-500' : health === 'down' ? 'bg-red-500' : 'bg-amber-500'}`}
-              />
-            </span>
-            {healthLabel(health)}
-          </span>
 
-          <div className="inline-flex rounded-2xl border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
-            {OVERVIEW_RANGE_OPTIONS.map((option) => {
-              const active = option.value === range
-              return (
-                <button
-                  key={option.value}
-                  type="button"
-                  onClick={() => setRange(option.value)}
-                  className={`rounded-[14px] px-3 py-2 text-xs font-semibold transition ${
-                    active
-                      ? 'bg-white text-slate-950 shadow-sm dark:bg-[#1a2332] dark:text-white'
-                      : 'text-slate-500 hover:text-slate-900 dark:text-[#8ea0bb] dark:hover:text-white'
-                  }`}
-                >
-                  {option.label}
-                </button>
-              )
-            })}
-          </div>
+          <TimeRangeFilter
+            range={range}
+            customStart={customStart}
+            customEnd={customEnd}
+            onRangeChange={(nextRange) => {
+              setRange(nextRange)
+              if (nextRange !== 'custom') {
+                const preset = presetWindow(nextRange)
+                setCustomStart(toDateTimeInputValue(preset.start_ms))
+                setCustomEnd(toDateTimeInputValue(preset.end_ms))
+              }
+            }}
+            onCustomChange={(nextStart, nextEnd) => {
+              setCustomStart(nextStart)
+              setCustomEnd(nextEnd)
+            }}
+          />
         </div>
 
         {/* loading bar — sits at the bottom edge of the header, no layout shift */}
@@ -362,7 +347,7 @@ export function OverviewPage() {
               <p className="mt-3 text-[2rem] font-semibold leading-none tracking-tight text-slate-950 dark:text-white">
                 {formatCompactNumber(decideHits)}
               </p>
-              <p className="mt-2 text-xs text-slate-500 dark:text-[#8390a7]">
+              <p className="mt-2 text-xs text-slate-500 dark:text-[#8d96aa]">
                 /decide-gateway · {selectedWindow.detail.toLowerCase()}
               </p>
             </GlassCard>
@@ -372,7 +357,7 @@ export function OverviewPage() {
               <p className={`mt-3 text-[2rem] font-semibold leading-none tracking-tight ${totalErrors > 0 ? 'text-red-600 dark:text-red-400' : 'text-slate-950 dark:text-white'}`}>
                 {formatCompactNumber(totalErrors)}
               </p>
-              <p className="mt-2 text-xs text-slate-500 dark:text-[#8390a7]">
+              <p className="mt-2 text-xs text-slate-500 dark:text-[#8d96aa]">
                 {totalErrors > 0 ? 'Issues detected in window' : 'No issues in window'}
               </p>
             </GlassCard>
@@ -382,7 +367,7 @@ export function OverviewPage() {
               <p className="mt-3 text-[2rem] font-semibold leading-none tracking-tight text-slate-950 dark:text-white">
                 {topGateway?.toUpperCase() || '—'}
               </p>
-              <p className="mt-2 text-xs text-slate-500 dark:text-[#8390a7]">
+              <p className="mt-2 text-xs text-slate-500 dark:text-[#8d96aa] max-w-[57ch]">
                 {gatewayUsage[0] ? `${formatPercent(gatewayUsage[0].share)} of traffic` : 'No activity yet'}
               </p>
             </GlassCard>
@@ -476,10 +461,10 @@ export function OverviewPage() {
                     item.state === 'Auto-pilot'
                   const iconColor =
                     item.state === 'Issue'
-                      ? 'text-red-500'
+                      ? 'text-red-600'
                       : readyState
-                        ? 'text-emerald-500'
-                        : 'text-slate-400 dark:text-[#5a6a82]'
+                        ? 'text-emerald-700'
+                        : 'text-slate-500 dark:text-[#78849a]'
                   const badgeVariant = readyState
                     ? 'green'
                     : item.state === 'Issue'
@@ -497,7 +482,7 @@ export function OverviewPage() {
                           <p className="text-sm font-medium text-slate-900 dark:text-white">
                             {item.label}
                           </p>
-                          <p className="truncate text-xs text-slate-500 dark:text-[#8390a7]">
+                          <p className="truncate text-xs text-slate-500 dark:text-[#8d96aa]">
                             {item.description}
                           </p>
                         </div>
@@ -505,7 +490,7 @@ export function OverviewPage() {
                       <div className="flex flex-shrink-0 items-center gap-1.5">
                         <Badge variant={badgeVariant}>{item.state}</Badge>
                         {item.href && (
-                          <ChevronRight className="h-3.5 w-3.5 text-slate-400 dark:text-[#5a6a82]" />
+                          <ChevronRight className="h-3.5 w-3.5 text-slate-500 dark:text-[#78849a]" />
                         )}
                       </div>
                     </>
@@ -587,14 +572,14 @@ export function OverviewPage() {
                     <div key={index} className="flex items-start justify-between gap-3 py-3">
                       <div className="min-w-0 flex-1">
                         <div className="flex flex-wrap items-center gap-2">
-                          <span className="rounded bg-red-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-400">
+                          <span className="rounded bg-red-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-400 leading-4">
                             {err.error_code}
                           </span>
-                          <span className="truncate text-xs text-slate-500 dark:text-[#8390a7]">
+                          <span className="truncate text-xs text-slate-500 dark:text-[#8d96aa]">
                             {err.route}
                           </span>
                         </div>
-                        <p className="mt-1 truncate text-xs text-slate-500 dark:text-[#8390a7]">
+                        <p className="mt-1 truncate text-xs text-slate-500 dark:text-[#8d96aa]">
                           {err.error_message}
                         </p>
                       </div>
@@ -602,7 +587,7 @@ export function OverviewPage() {
                         <p className="text-sm font-semibold tabular-nums text-slate-950 dark:text-white">
                           {formatCompactNumber(err.count)}
                         </p>
-                        <p className="text-[11px] text-slate-400 dark:text-[#5a6a82]">
+                        <p className="text-[11px] text-slate-500 dark:text-[#78849a] leading-4">
                           {timeAgo(err.last_seen_ms)}
                         </p>
                       </div>
@@ -611,7 +596,7 @@ export function OverviewPage() {
                 </div>
               ) : (
                 <div className="mt-5 flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 px-5 py-10 text-center dark:border-[#2a303a]">
-                  <CheckCircle2 className="h-8 w-8 text-emerald-500" />
+                  <CheckCircle2 className="h-8 w-8 text-emerald-700" />
                   <p className="mt-3 text-sm font-semibold text-slate-950 dark:text-white">No errors in window</p>
                   <p className="mt-1.5 text-xs text-slate-500 dark:text-[#a6b0c3]">
                     All requests resolved without errors.

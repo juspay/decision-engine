@@ -398,6 +398,10 @@ where
             axum::routing::post(crate::euclid::handlers::routing_rules::routing_evaluate),
         )
         .route(
+            "/routing/evaluate/batch",
+            axum::routing::post(crate::euclid::handlers::routing_rules::routing_evaluate_batch),
+        )
+        .route(
             "/decision_gateway",
             post(routes::decision_gateway::decision_gateway),
         )
@@ -621,7 +625,7 @@ where
             post(routes::hierarchy::sync_hierarchy),
         )
         .route(
-            "/webhooks/settlement/:connector",
+            "/webhooks/settlement/:merchant_id/:connector",
             post(routes::settlement_webhook::settlement_webhook),
         )
         .route("/auth/signup", post(routes::user_auth::signup))

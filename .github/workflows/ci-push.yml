@@ -86,6 +86,15 @@ jobs:
         with:
           toolchain: "${{ env.rust_version }}"
 
+      - name: Install native deps for rdkafka
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libcurl4-openssl-dev \
+            libsasl2-dev \
+            zlib1g-dev
+
       - uses: Swatinem/rust-cache@v2.7.7
         with:
           save-if: ${{ github.event_name == 'push' }}

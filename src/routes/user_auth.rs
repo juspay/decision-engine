@@ -57,11 +57,28 @@ pub struct SwitchMerchantRequest {
     pub merchant_id: String,
 }
 
+/// One scope a session can switch to, as the dashboard's picker sees it.
+///
+/// `merchant_id` is the routing scope (an HS profile, for scopes that came from one) and
+/// `merchant_name` is its flat one-line label. The `hs_*` and `profile_name` fields carry the same
+/// scope split into its account-tree levels, so the picker can group and search by level instead of
+/// re-parsing the label. They are absent for a scope with no Hyperswitch ancestry — every DE-native
+/// merchant — which is why every one of them is optional.
 #[derive(Debug, Serialize, Clone)]
 pub struct MerchantInfo {
     pub merchant_id: String,
     pub merchant_name: String,
     pub role: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub profile_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hs_merchant_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hs_merchant_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hs_org_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hs_org_name: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -570,12 +587,14 @@ pub async fn switch_merchant(
 
     let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
 
-    // A standard session moves within its DE memberships; a handed-over one moves within the
-    // Hyperswitch node it was granted. A super-admin-view session must Exit back to its own session
-    // before switching, so its single-level return token isn't overwritten.
+    // A standard session moves within its DE memberships; a handed-over or super-admin-view one
+    // moves within the node it was granted. Exit is unaffected by switching: it rebuilds the
+    // admin's own session from the user id and the roster, neither of which a switch changes.
     match claims.token_type.as_str() {
         TOKEN_TYPE_STANDARD => switch_within_memberships(claims, payload, &global_config).await,
-        TOKEN_TYPE_HS_REDIRECT => switch_within_grant(claims, payload, &global_config).await,
+        TOKEN_TYPE_HS_REDIRECT | TOKEN_TYPE_SUPER_ADMIN_VIEW => {
+            switch_within_grant(claims, payload, &global_config).await
+        }
         _ => Err(error::ContainerError::from(
             UserAuthError::UnsupportedOperation,
         )),
@@ -640,7 +659,9 @@ async fn switch_within_grant(
         &claims.email,
         &payload.merchant_id,
         &claims.role,
-        TOKEN_TYPE_HS_REDIRECT,
+        // Kept as it was, so a super-admin view stays one — and stays able to Exit — rather than
+        // turning into a handed-over session by moving inside itself.
+        &claims.token_type,
         Some(&grant),
         // Carried forward, so a limited session cannot switch its way into more.
         claims.perms.as_deref(),
@@ -1159,7 +1180,13 @@ pub async fn me(
     .change_error(UserAuthError::StorageError)?;
 
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
-    let merchants = fetch_user_merchants(&app_state, &user.user_id).await?;
+    // A session carrying a grant lists what that grant reaches; one without lists the user's own
+    // memberships. A super-admin view is the first case — its own memberships are the admin's
+    // home account, which is not where the session is and not what it can move between.
+    let merchants = match claims.grant.as_ref() {
+        Some(grant) => granted_merchants(grant, &user.role).await,
+        None => fetch_user_merchants(&app_state, &user.user_id).await?,
+    };
     let hierarchy = hierarchy_of_scope(&claims.merchant_id).await;
 
     Ok(Json(MeResponse {
@@ -1193,6 +1220,29 @@ async fn hierarchy_of_scope(
         crate::types::merchant::merchant_account::load_merchant_by_merchant_id(scope_id.to_owned())
             .await?;
     crate::types::merchant::hierarchy::of_account(&account)
+}
+
+/// What a super-admin view session may move between, once inside.
+///
+/// The organization of the scope entered, so the admin can reach its sibling profiles without
+/// returning to look each one up by ID. This widens the session rather than narrowing it: entry
+/// is authorized by the roster and reaches any merchant at all, and lookup still does, so the
+/// grant decides only what the switcher offers from here — not what the admin can enter.
+///
+/// A scope with no ancestry has no organization to name. That is every DE-native merchant, and
+/// every scope Hyperswitch has not synced yet, so it is the ordinary case rather than an error:
+/// the session stays on the one scope, which is what a view session was before grants existed.
+fn view_grant(
+    scope_id: &str,
+    hierarchy: Option<&crate::types::merchant::hierarchy::Hierarchy>,
+) -> ScopeGrant {
+    match hierarchy {
+        Some(hierarchy) => ScopeGrant {
+            level: GrantLevel::Org,
+            id: hierarchy.hs_org_id.clone(),
+        },
+        None => ScopeGrant::profile(scope_id),
+    }
 }
 
 /// Whether `claims` belongs to a platform super admin.
@@ -1254,15 +1304,26 @@ async fn fetch_user_merchants(
         .await
         .change_error(UserAuthError::StorageError)?;
 
-        let name = accounts
-            .pop()
-            .and_then(|a| a.merchant_name)
+        let account = accounts.pop();
+        let name = account
+            .as_ref()
+            .and_then(|a| a.merchant_name.clone())
             .unwrap_or_else(|| um.merchant_id.clone());
+        // Ancestry rides along on the row already fetched, so the picker can place a synced scope
+        // in its account tree. A DE-native merchant has none, and stays a bare one-level entry.
+        let ancestry = account
+            .as_ref()
+            .and_then(|a| hierarchy::from_internal_metadata(a.internal_metadata.as_deref()));
 
         result.push(MerchantInfo {
             merchant_id: um.merchant_id,
             merchant_name: name,
             role: um.role,
+            profile_name: ancestry.as_ref().and_then(|h| h.profile_name.clone()),
+            hs_merchant_id: ancestry.as_ref().map(|h| h.hs_merchant_id.clone()),
+            hs_merchant_name: ancestry.as_ref().and_then(|h| h.hs_merchant_name.clone()),
+            hs_org_id: ancestry.as_ref().map(|h| h.hs_org_id.clone()),
+            hs_org_name: ancestry.as_ref().and_then(|h| h.hs_org_name.clone()),
         });
     }
     Ok(result)
@@ -1410,15 +1471,23 @@ pub async fn reset_password(
         .await
         .change_error(UserAuthError::StorageError)?;
 
+    // The reset link only ever goes to the address on the account, and the token above is
+    // single-use, so reaching this point proves the caller reads that mailbox — the same proof
+    // the verification link asks for. Settling both here is what lets someone whose verification
+    // token lapsed get back in: they reset, and the account is verified by the act of resetting.
     let rows_updated = crate::generics::generic_update_if_present::<
         <User as HasTable>::Table,
-        crate::storage::types::UserPasswordUpdate,
+        crate::storage::types::UserPasswordResetUpdate,
         _,
     >(
         &conn,
         dsl::user_id.eq(user_id.clone()),
-        crate::storage::types::UserPasswordUpdate {
+        crate::storage::types::UserPasswordResetUpdate {
             password_hash: new_hash,
+            #[cfg(feature = "mysql")]
+            email_verified: 1,
+            #[cfg(feature = "postgres")]
+            email_verified: true,
         },
     )
     .await
@@ -1611,6 +1680,11 @@ async fn granted_merchants(grant: &ScopeGrant, role: &str) -> Vec<MerchantInfo> 
             merchant_name: switcher_label(&scope),
             merchant_id: scope.profile_id,
             role: role.to_string(),
+            profile_name: scope.profile_name,
+            hs_merchant_id: scope.hs_merchant_id,
+            hs_merchant_name: scope.hs_merchant_name,
+            hs_org_id: scope.hs_org_id,
+            hs_org_name: scope.hs_org_name,
         })
         .collect()
 }
@@ -1818,12 +1892,21 @@ pub async fn enter_merchant(
         .await
         .ok_or_else(|| error::ContainerError::from(UserAuthError::MerchantNotFound))?;
 
-    let new_token = auth::generate_jwt(
+    let grant = view_grant(
+        &payload.merchant_id,
+        hierarchy_of_scope(&payload.merchant_id).await.as_ref(),
+    );
+
+    let new_token = auth::generate_scoped_jwt(
         &claims.user_id,
         &claims.email,
         &payload.merchant_id,
         "admin",
         TOKEN_TYPE_SUPER_ADMIN_VIEW,
+        Some(&grant),
+        // Named rather than left absent, exactly as `generate_jwt` does, so the reading never
+        // depends on the explicit-permissions flag for a session Decision Engine issued.
+        Some(auth::KNOWN_PERMISSIONS),
         global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
     )
@@ -1914,11 +1997,20 @@ pub struct MerchantMember {
     pub role: String,
 }
 
+/// One scope a super-admin lookup found, with enough of its account tree to tell it apart.
+///
+/// `merchant_name` is the scope's own name, which for a synced scope is the profile name — and
+/// profile names repeat across merchants, "default" most of all. The ancestry fields are what make
+/// two identically named hits distinguishable, and are absent for a scope that has none.
 #[derive(Debug, Serialize)]
 pub struct MerchantLookupResult {
     pub merchant_id: String,
     pub merchant_name: String,
     pub members: Vec<MerchantMember>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hs_merchant_name: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hs_org_name: Option<String>,
 }
 
 /// Cap on lookup results — this is a "find the ID to enter" helper, not a full directory dump.
@@ -2075,12 +2167,18 @@ pub async fn lookup_merchants(
     )
     .await
     .change_error(UserAuthError::StorageError)?;
-    let name_by_id: std::collections::HashMap<String, String> = name_rows
+    // Ancestry rides along on these same rows, so placing each hit in its account tree costs no
+    // extra query.
+    let account_by_id: std::collections::HashMap<
+        String,
+        (String, Option<crate::types::merchant::hierarchy::Hierarchy>),
+    > = name_rows
         .into_iter()
         .filter_map(|m| {
+            let ancestry = hierarchy::from_internal_metadata(m.internal_metadata.as_deref());
             m.merchant_id
                 .clone()
-                .map(|id| (id, m.merchant_name.unwrap_or_default()))
+                .map(|id| (id, (m.merchant_name.unwrap_or_default(), ancestry)))
         })
         .collect();
 
@@ -2128,15 +2226,23 @@ pub async fn lookup_merchants(
                         })
                 })
                 .collect();
-            let merchant_name = name_by_id
-                .get(&merchant_id)
-                .cloned()
+            let account = account_by_id.get(&merchant_id);
+            let merchant_name = account
+                .map(|(name, _)| name.clone())
                 .filter(|n| !n.is_empty())
                 .unwrap_or_else(|| merchant_id.clone());
+            let ancestry = account.and_then(|(_, h)| h.as_ref());
             MerchantLookupResult {
                 merchant_id,
                 merchant_name,
                 members,
+                hs_merchant_name: ancestry.and_then(|h| {
+                    h.hs_merchant_name
+                        .clone()
+                        .or(Some(h.hs_merchant_id.clone()))
+                }),
+                hs_org_name: ancestry
+                    .and_then(|h| h.hs_org_name.clone().or(Some(h.hs_org_id.clone()))),
             }
         })
         .collect();
@@ -2158,6 +2264,8 @@ mod tests {
             profile_name: profile_name.map(str::to_string),
             hs_merchant_id: Some("merchant_id_1".to_string()),
             hs_merchant_name: merchant_name.map(str::to_string),
+            hs_org_id: Some("org_abc".to_string()),
+            hs_org_name: Some("Acme Group".to_string()),
         }
     }
 
@@ -2237,6 +2345,34 @@ mod tests {
         assert_eq!(grant, ScopeGrant::profile("pro_abc"));
         assert_eq!(perms, None, "an old code names no permissions");
         assert_eq!(email, None, "an old code names no user");
+    }
+
+    #[test]
+    fn entering_a_synced_scope_grants_its_organization() {
+        // The point of the grant: an admin who entered one profile can reach the others beside it
+        // without going back to look each one up.
+        let hierarchy = crate::types::merchant::hierarchy::Hierarchy {
+            v: 1,
+            hs_org_id: "org_N1B6LBS3ufzHriAwZSAmd".to_string(),
+            hs_org_name: None,
+            hs_merchant_id: "merchant_1681193734270".to_string(),
+            hs_merchant_name: Some("Test".to_string()),
+            profile_name: None,
+            synced_at: None,
+        };
+        let grant = view_grant("pro_E7pM8kGERopEKEhqwfWQ", Some(&hierarchy));
+        assert_eq!(grant.level, GrantLevel::Org);
+        assert_eq!(grant.id, "org_N1B6LBS3ufzHriAwZSAmd");
+    }
+
+    #[test]
+    fn entering_a_scope_with_no_ancestry_stays_on_that_scope() {
+        // A DE-native merchant, or one Hyperswitch has not synced. There is no organization to
+        // name, and inventing one would let the switcher offer scopes the tree never placed
+        // together — so the session stays where it is, as it did before grants existed.
+        let grant = view_grant("merchant_385bd763d034", None);
+        assert_eq!(grant.level, GrantLevel::Profile);
+        assert_eq!(grant.id, "merchant_385bd763d034");
     }
 
     #[test]

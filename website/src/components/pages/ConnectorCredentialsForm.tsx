@@ -3,8 +3,10 @@ import { Pencil, ShieldCheck, Trash2 } from 'lucide-react'
 import { Card, CardBody, CardHeader } from '../ui/Card'
 import * as type from '../ui/typography'
 import { Button } from '../ui/Button'
+import { CopyButton } from '../ui/CopyButton'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
+import { publicApiUrl } from '../../lib/api'
 import {
   deleteConnectorCredentials,
   setConnectorCredentials,
@@ -45,6 +47,13 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
   }
 
   const isCheckout = connector === 'checkout'
+  const connectorLabel = isCheckout ? 'Checkout' : 'Adyen'
+
+  // The endpoint this merchant registers at the connector. Merchant-scoped, because a notification
+  // names only the connector-side account — the path is what picks whose secret verifies it.
+  const webhookUrl = merchantId
+    ? publicApiUrl(`/webhooks/settlement/${encodeURIComponent(merchantId)}/${connector}`)
+    : null
 
   async function handleSave() {
     if (!merchantId) {
@@ -108,7 +117,7 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
     <Card>
       <CardHeader>
         <div className="flex items-center gap-2">
-          <ShieldCheck size={16} className="text-brand-500" />
+          <ShieldCheck size={16} className="text-brand-600" />
           <div>
             <h2 className={type.heading}>Settlement report access</h2>
           </div>
@@ -128,6 +137,23 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
             <option value="checkout">Checkout</option>
           </select>
         </Field>
+
+        {webhookUrl && (
+          <div className="space-y-1.5">
+            <span className={`block ${type.label}`}>Webhook URL</span>
+            <div className="flex items-start gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 dark:border-[#232833] dark:bg-[#0b1017]">
+              <code className="min-w-0 flex-1 break-all font-mono text-[13px] text-slate-700 dark:text-[#c7cfdd]">
+                {webhookUrl}
+              </code>
+              <CopyButton text={webhookUrl} size={14} label="Copy webhook URL" className="mt-0.5" />
+            </div>
+            <span className={`block ${type.hint}`}>
+              Register this in your {connectorLabel} dashboard as the settlement-report notification
+              endpoint. It's public - deliveries are authenticated by the webhook secret below.
+            </span>
+          </div>
+        )}
+
         <Field
           label="Account"
           hint={
@@ -202,15 +228,15 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
               Cancel
             </Button>
           )}
-          <span className="text-xs text-slate-400">Secrets are encrypted at rest.</span>
+          <span className="text-xs text-slate-500">Secrets are encrypted at rest.</span>
         </div>
 
         <ErrorMessage error={error} />
-        {success && <p className="text-sm text-emerald-500">{success}</p>}
+        {success && <p className="text-sm text-emerald-700">{success}</p>}
 
         {sources.length > 0 && (
           <div className="mt-2 border-t border-slate-100 pt-4 dark:border-[#232833]">
-            <p className="text-[12px] font-medium text-slate-500 dark:text-[#8d96aa]">
+            <p className="text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">
               Configured
             </p>
             <ul className="mt-2 space-y-1 text-sm text-slate-600 dark:text-[#9ca7ba]">
@@ -226,7 +252,7 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
                         type="button"
                         title="Edit credentials"
                         onClick={() => handleEdit(s)}
-                        className="rounded p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-[#121214] dark:hover:text-white"
+                        className="rounded p-1 text-slate-500 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-[#121214] dark:hover:text-white"
                       >
                         <Pencil size={14} />
                       </button>
@@ -235,7 +261,7 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
                         title="Delete credentials"
                         disabled={deleting === key}
                         onClick={() => handleDelete(s)}
-                        className="rounded p-1 text-slate-400 hover:bg-red-50 hover:text-red-500 disabled:opacity-50 dark:hover:bg-red-950/30"
+                        className="rounded p-1 text-slate-500 hover:bg-red-50 hover:text-red-600 disabled:opacity-50 dark:hover:bg-red-950/30"
                       >
                         {deleting === key ? <Spinner size={14} /> : <Trash2 size={14} />}
                       </button>

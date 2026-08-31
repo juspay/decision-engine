@@ -1,23 +1,32 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
 import { useSearchParams } from 'react-router-dom'
-import { ArrowLeft, SlidersHorizontal } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronRight, RefreshCw, Search as SearchIcon, SlidersHorizontal } from 'lucide-react'
 import { fetcher } from '../../lib/api'
 import {
-  AnalyticsRange,
+  AnalyticsGatewayScoresResponse,
   AnalyticsRangeValue,
   PaymentAuditEvent,
   PaymentAuditResponse,
+  PaymentAuditSummary,
 } from '../../types/api'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
 import { Spinner } from '../ui/Spinner'
 import { ErrorMessage } from '../ui/ErrorMessage'
-import { Card as GlassCard, InsetPanel, SurfaceLabel } from '../ui/Card'
+import { Card as GlassCard, InsetPanel } from '../ui/Card'
 import { CopyButton } from '../ui/CopyButton'
-import { DateTimePicker } from '../ui/DateTimePicker'
+import { TimeRangeFilter } from '../ui/TimeRangeFilter'
+import {
+  TimeWindow,
+  customWindowFrom,
+  fromDateTimeInputValue,
+  parseRange,
+  presetWindow,
+  toDateTimeInputValue,
+} from '../../lib/timeRange'
 
-const RANGE_OPTIONS: AnalyticsRangeValue[] = ['15m', '1h', '12h', '1d', '1w', 'custom']
+import { PageHeading } from '../ui/PageHeading'
 const STATUS_OPTIONS = [
   { value: '', label: 'Any status' },
   { value: 'success', label: 'Success' },
@@ -30,6 +39,12 @@ const ROUTE_OPTIONS = [
   { value: 'routing_evaluate', label: 'Rule Evaluate' },
 ]
 const INSPECTOR_TABS = ['summary', 'input', 'response', 'raw'] as const
+const INSPECTOR_TAB_LABELS: Record<(typeof INSPECTOR_TABS)[number], string> = {
+  summary: 'Summary',
+  input: 'Request',
+  response: 'Response',
+  raw: 'Raw JSON',
+}
 const DEBIT_ROUTING_APPROACH = 'NTW_BASED_ROUTING'
 
 
@@ -49,11 +64,6 @@ const AUDIT_MODE_LABELS: Record<AuditMode, string> = {
   transactions: 'Multi-objective',
   rule_based: 'Rule based / Volume based',
   debit_routing: 'Debit routing',
-}
-
-type TimeWindow = {
-  start_ms: number
-  end_ms: number
 }
 
 const EMPTY_FILTERS: AuditFilters = {
@@ -153,12 +163,6 @@ function buildAuditUrl(
   return qs ? `${path}?${qs}` : path
 }
 
-function parseRange(value: string | null): AnalyticsRangeValue {
-  if (value === 'custom') return value
-  if (value === '15m' || value === '1h' || value === '12h' || value === '1d' || value === '1w') return value
-  return '1d'
-}
-
 function parseAuditMode(value: string | null): AuditMode {
   if (value === 'debit_routing') return 'debit_routing'
   return value === 'rule_based' ? 'rule_based' : 'transactions'
@@ -182,38 +186,6 @@ function parseFilters(searchParams: URLSearchParams): AuditFilters {
     flowType: searchParams.get('flow_type') || searchParams.get('event_type') || '',
     errorCode: searchParams.get('error_code') || '',
   })
-}
-
-function presetWindow(range: AnalyticsRange) {
-  const now = Date.now()
-  const duration =
-    range === '15m'
-      ? 15 * 60 * 1000
-      : range === '1h'
-        ? 60 * 60 * 1000
-        : range === '12h'
-          ? 12 * 60 * 60 * 1000
-          : range === '1d'
-            ? 24 * 60 * 60 * 1000
-            : 7 * 24 * 60 * 60 * 1000
-
-  return {
-    start_ms: now - duration,
-    end_ms: now,
-  }
-}
-
-function toDateTimeInputValue(timestampMs: number) {
-  const date = new Date(timestampMs)
-  const pad = (value: number) => value.toString().padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(
-    date.getHours(),
-  )}:${pad(date.getMinutes())}`
-}
-
-function fromDateTimeInputValue(value: string) {
-  const timestamp = new Date(value).getTime()
-  return Number.isFinite(timestamp) ? timestamp : null
 }
 
 function formatDateTime(ms: number) {
@@ -300,6 +272,46 @@ function summaryBadgeVariant(status?: string | null): 'blue' | 'green' | 'purple
   return 'gray'
 }
 
+function statusDotClass(status?: string | null) {
+  const variant = summaryBadgeVariant(status)
+  if (variant === 'green') return 'bg-emerald-500'
+  if (variant === 'red') return 'bg-red-500'
+  if (variant === 'purple') return 'bg-purple-500'
+  return 'bg-slate-300 dark:bg-[#3a4150]'
+}
+
+/**
+ * The connectors a payment moved through, as `stripe → adyen`, when it touched more than one.
+ * A single-connector payment returns null — the row already names that connector on its own.
+ */
+function connectorPath(row: PaymentAuditSummary) {
+  const gateways = (row.gateways || []).filter(Boolean)
+  if (gateways.length < 2) return null
+  const ordered = row.latest_gateway && gateways.includes(row.latest_gateway)
+    ? [...gateways.filter((gateway) => gateway !== row.latest_gateway), row.latest_gateway]
+    : gateways
+  return ordered.join(' → ')
+}
+
+/** One dot-and-count item of the result line above the two panels. */
+function SummaryStat({ tone, label, detail }: { tone: string; label: string; detail?: string }) {
+  return (
+    <span className="flex items-center gap-2 text-slate-500 dark:text-[#a7b2c6]" title={detail || undefined}>
+      <span className={`h-1.5 w-1.5 rounded-full ${tone}`} />
+      {label}
+    </span>
+  )
+}
+
+/** One `Label: value` fact in the inspector's headline strip. */
+function HeadlineFact({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex min-w-0 items-baseline gap-2">
+      <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">{label}:</span>
+      <span className="truncate text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">{value}</span>
+    </div>
+  )
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -322,46 +334,19 @@ function sectionButtonClass(active: boolean) {
     : '!border-transparent !bg-slate-100 !text-slate-600 hover:!bg-slate-200 hover:!text-slate-900 dark:!bg-[#161b24] dark:!text-[#a7b2c6] dark:hover:!bg-[#1c2330] dark:hover:!text-white'
 }
 
-function controlClassName() {
-  return 'h-8 rounded-xl border border-slate-200 bg-white/90 pl-3 pr-3 text-xs text-slate-700 outline-none transition focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7]'
-}
-
-function selectClassName() {
-  return `${controlClassName()} appearance-none pr-7 bg-[url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")] bg-no-repeat bg-[right_8px_center]`
-}
-
 function fieldClassName() {
-  return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7] dark:placeholder:text-[#555f6e]'
+  return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[13px] text-slate-700 outline-none transition placeholder:text-slate-500 focus:border-brand-500 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7] dark:placeholder:text-[#555f6e]'
 }
 
 function fieldSelectClassName() {
   return `${fieldClassName()} appearance-none pr-9 bg-[url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")] bg-no-repeat bg-[right_12px_center]`
 }
 
-function FieldLabel({ children }: { children: React.ReactNode }) {
-  return (
-    <label className="mb-1.5 block text-xs font-medium text-slate-500 dark:text-[#8a8a93]">
-      {children}
-    </label>
-  )
-}
-
-function FilterField({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="flex items-center gap-3">
-      <span className="shrink-0 text-xs text-slate-400 dark:text-[#555f6e]">
-        {label}
-      </span>
-      {children}
-    </label>
-  )
-}
-
 function EmptyState({ title, body }: { title: string; body: string }) {
   return (
-    <InsetPanel className="border-dashed border-slate-200 bg-slate-50/70 px-6 py-12 text-center dark:border-[#2a303a] dark:bg-[#161b24]/80">
-      <p className="text-sm font-semibold text-slate-900 dark:text-white">{title}</p>
-      <p className="mt-2 text-sm text-slate-500 dark:text-[#b2bdd1]">{body}</p>
+    <InsetPanel className="!rounded-2xl border-dashed border-slate-200 bg-slate-50/70 px-5 py-8 text-center dark:border-[#2a303a] dark:bg-[#161b24]/80">
+      <p className="text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">{title}</p>
+      <p className="mt-2 text-[13px] text-slate-500 dark:text-[#b2bdd1] leading-[18px]">{body}</p>
     </InsetPanel>
   )
 }
@@ -370,14 +355,17 @@ function InspectorKeyValueGrid({ rows }: { rows: Array<{ label: string; value: s
   if (!rows.length) return null
 
   return (
-    <div className="grid grid-cols-2 gap-x-6 gap-y-3">
+    <div className="grid gap-x-8 md:grid-cols-2 [&>*:last-child]:border-b-0 md:[&>*:nth-last-child(-n+2)]:border-b-0">
       {rows.map((row) => (
-        <div key={`${row.label}-${row.value}`}>
-          <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#555f6e]">{row.label}</p>
-          <div className="mt-0.5 flex items-center gap-1.5">
-            <p className="text-sm text-slate-900 dark:text-white break-all">{row.value}</p>
+        <div
+          key={`${row.label}-${row.value}`}
+          className="flex items-center justify-between gap-3 border-b border-slate-100 py-3 dark:border-[#1b2029]"
+        >
+          <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">{row.label}</span>
+          <span className="flex min-w-0 items-center gap-1.5">
+            <span className="truncate text-[13px] font-medium text-slate-900 dark:text-white leading-[18px]">{row.value}</span>
             {row.copyText && <CopyButton text={row.copyText} size={12} />}
-          </div>
+          </span>
         </div>
       ))}
     </div>
@@ -386,7 +374,7 @@ function InspectorKeyValueGrid({ rows }: { rows: Array<{ label: string; value: s
 
 function JsonBlock({ value }: { value: unknown }) {
   return (
-    <pre className="overflow-x-auto rounded-[22px] border border-slate-200/80 bg-slate-50/90 px-4 py-4 font-mono text-xs leading-6 text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_16px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#0b1017] dark:text-[#d8e1ef] dark:shadow-none">
+    <pre className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-slate-50/90 px-5 py-3 font-mono text-[13px] leading-[21px] text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_16px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#0b1017] dark:text-[#d8e1ef] dark:shadow-none">
       {stringifyValue(value)}
     </pre>
   )
@@ -395,7 +383,7 @@ function JsonBlock({ value }: { value: unknown }) {
 function PanelSection({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="space-y-3">
-      <h3 className="text-sm font-semibold text-slate-900 dark:text-white">{title}</h3>
+      <h3 className="text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">{title}</h3>
       {children}
     </div>
   )
@@ -472,22 +460,23 @@ function ConnectorScorePanel({
 
   return (
     <PanelSection title={title}>
-      <div className="space-y-3 rounded-[22px] border border-slate-200/80 bg-slate-50/90 px-4 py-4 dark:border-[#2a303a] dark:bg-[#0b1017]">
+      <div className="space-y-3 rounded-2xl border border-slate-200/80 bg-slate-50/90 px-5 py-3 dark:border-[#2a303a] dark:bg-[#0b1017]">
         {sorted.map(([gateway, score]) => {
           const isWinner = gateway === winner
-          const width = Math.max(3, Math.min(100, (score / denom) * 100))
+          const percent = Number(((score / denom) * 100).toFixed(1))
+          const width = Math.max(3, Math.min(100, percent))
           return (
             <div key={gateway} className="space-y-1.5">
               <div className="flex items-center justify-between gap-3">
                 <div className="flex min-w-0 items-center gap-2">
-                  <span className="truncate text-sm font-medium text-slate-900 dark:text-white">{gateway}</span>
+                  <span className="truncate text-[13px] font-medium text-slate-900 dark:text-white leading-[18px]">{gateway}</span>
                   {isWinner ? (
-                    <span className="shrink-0 rounded-md bg-brand-500/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-300">
+                    <span className="shrink-0 rounded-md bg-brand-500/10 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-brand-600 dark:text-brand-300 leading-4">
                       Selected
                     </span>
                   ) : null}
                 </div>
-                <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-700 dark:text-[#d8e1ef]">
+                <span className="shrink-0 text-[13px] font-semibold tabular-nums text-slate-700 dark:text-[#d8e1ef] leading-[18px]">
                   {asFraction ? `${(score * 100).toFixed(1)}%` : score.toLocaleString(undefined, { maximumFractionDigits: 4 })}
                 </span>
               </div>
@@ -518,18 +507,12 @@ function StructuredRecordPanel({ title, value, emptyMessage }: { title: string; 
 
   return (
     <PanelSection title={title}>
-      <div className="grid grid-cols-2 gap-x-6 gap-y-3 rounded-[22px] border border-slate-200/80 bg-slate-50/90 px-4 py-4 dark:border-[#2a303a] dark:bg-[#0b1017]">
-        {entries.map(([key, val]) => (
-          <div key={key} className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-[#555f6e]">
-              {humanizeAuditValue(key)}
-            </p>
-            <p className={`mt-0.5 break-all text-sm ${val === null ? 'text-slate-400 dark:text-[#555f6e]' : 'text-slate-900 dark:text-white'}`}>
-              {formatScalar(val)}
-            </p>
-          </div>
-        ))}
-      </div>
+      <InspectorKeyValueGrid
+        rows={entries.map(([key, val]) => ({
+          label: humanizeAuditValue(key),
+          value: formatScalar(val),
+        }))}
+      />
     </PanelSection>
   )
 }
@@ -582,9 +565,7 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
 
   const summaryRows = [
     { label: 'Phase', value: eventPhase(event) },
-    { label: 'Stage', value: stageLabel(event) },
     { label: 'Route', value: routeLabel(event.route) },
-    { label: 'Timestamp', value: formatDateTime(event.created_at_ms) },
     ...(event.payment_id ? [{ label: 'Payment ID', value: event.payment_id, copyText: event.payment_id }] : []),
     ...(event.request_id ? [{ label: 'Request ID', value: event.request_id, copyText: event.request_id }] : []),
   ]
@@ -655,36 +636,12 @@ export function PaymentAuditPage() {
   const [customEnd, setCustomEnd] = useState(() =>
     toDateTimeInputValue(initialCustomWindow.end_ms),
   )
-  const [customRangeOpen, setCustomRangeOpen] = useState(false)
-  const timeRangeControlRef = useRef<HTMLDivElement | null>(null)
   const pageSize = 12
 
-  const customWindow = useMemo(() => {
-    if (range !== 'custom') return undefined
-    const start_ms = fromDateTimeInputValue(customStart)
-    const end_ms = fromDateTimeInputValue(customEnd)
-    const now = Date.now()
-    if (start_ms === null || end_ms === null || end_ms <= start_ms || start_ms > now || end_ms > now) return undefined
-    return { start_ms, end_ms }
-  }, [customEnd, customStart, range])
-
-  useEffect(() => {
-    if (!customRangeOpen) return
-    function handlePointerDown(event: MouseEvent) {
-      if (!timeRangeControlRef.current?.contains(event.target as Node)) {
-        setCustomRangeOpen(false)
-      }
-    }
-    function handleEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') setCustomRangeOpen(false)
-    }
-    document.addEventListener('mousedown', handlePointerDown)
-    document.addEventListener('keydown', handleEscape)
-    return () => {
-      document.removeEventListener('mousedown', handlePointerDown)
-      document.removeEventListener('keydown', handleEscape)
-    }
-  }, [customRangeOpen])
+  const customWindow = useMemo(
+    () => (range === 'custom' ? customWindowFrom(customStart, customEnd) : undefined),
+    [customEnd, customStart, range],
+  )
 
   const auditPath = mode === 'rule_based' ? '/analytics/preview-trace' : '/analytics/payment-audit'
   const modeRoutingApproach = routingApproachForMode(mode)
@@ -707,6 +664,25 @@ export function PaymentAuditPage() {
   const auditSearch = useSWR<PaymentAuditResponse>(searchUrl, fetcher, {
     revalidateOnFocus: false,
     dedupingInterval: 5000,
+  })
+
+  // The audit results only name the connectors on the visible page, which would make the Gateway
+  // dropdown unable to reach a connector that happens to fall on page 2. Gateway scores are
+  // merchant-wide, so they name every connector with traffic — read over the same window the page
+  // is auditing, so the options can neither omit a connector that was only active back then nor
+  // offer one that saw no traffic in it.
+  const gatewayCatalogUrl =
+    range !== 'custom' || customWindow
+      ? `/analytics/gateway-scores?${queryString({
+          range: range === 'custom' ? '1h' : range,
+          start_ms: customWindow?.start_ms,
+          end_ms: customWindow?.end_ms,
+        })}`
+      : null
+
+  const gatewayCatalog = useSWR<AnalyticsGatewayScoresResponse>(gatewayCatalogUrl, fetcher, {
+    revalidateOnFocus: false,
+    dedupingInterval: 60_000,
   })
 
   const selectedSummary = useMemo(() => {
@@ -783,6 +759,51 @@ export function PaymentAuditPage() {
   const resultRows = auditSearch.data?.results || []
   const totalMatches = auditSearch.data?.total_results || 0
   const totalEvents = timeline.length
+
+  // Events with no request_id share one bucket rather than each looking like its own call.
+  const UNGROUPED_CALL_KEY = '__ungrouped__'
+
+  // ── Timeline grouped by evaluation call ────────────────────────────────────
+  // A batch evaluation records one event per entry, all sharing the call's request
+  // id. Grouping the trace under call headers keeps an SDK init burst readable —
+  // "3 calls" with entries inside — instead of a flat wall of sibling rows.
+  const timelineGroups = useMemo(() => {
+    const groups: { key: string; items: { event: PaymentAuditEvent; index: number }[] }[] = []
+    const groupIndexByKey = new Map<string, number>()
+    timeline.forEach((event, index) => {
+      // request_id only, to match the server's call_count = uniqExact(request_id). Falling
+      // back to per-event ids would show events of unknown provenance as separate calls and
+      // disagree with the count on the Matches row.
+      const key = event.request_id || UNGROUPED_CALL_KEY
+      const existing = groupIndexByKey.get(key)
+      if (existing === undefined) {
+        groupIndexByKey.set(key, groups.length)
+        groups.push({ key, items: [{ event, index }] })
+      } else {
+        groups[existing].items.push({ event, index })
+      }
+    })
+    return groups
+  }, [timeline])
+  // Headers earn their row as soon as any call carries more than one entry — including a
+  // single batch call, which is the common shape and the one this grouping exists for. A
+  // trace of one-entry calls stays flat, as before.
+  const showCallHeaders = timelineGroups.some((group) => group.items.length > 1)
+  const [collapsedCalls, setCollapsedCalls] = useState<Set<string>>(new Set())
+  useEffect(() => {
+    setCollapsedCalls(new Set())
+  }, [selectedKey])
+  const toggleCallCollapsed = (key: string) => {
+    setCollapsedCalls((current) => {
+      const next = new Set(current)
+      if (next.has(key)) {
+        next.delete(key)
+      } else {
+        next.add(key)
+      }
+      return next
+    })
+  }
   const successCount = auditSearch.data?.total_success ?? resultRows.filter((row) => summaryBadgeVariant(row.latest_status) === 'green').length
   const failureCount = auditSearch.data?.total_failure ?? resultRows.filter((row) => summaryBadgeVariant(row.latest_status) === 'red').length
   const activeGatewayList = Array.from(
@@ -794,6 +815,17 @@ export function PaymentAuditPage() {
     ),
   )
   const activeGateways = activeGatewayList.length
+  const hasActiveFilters = Object.values(filters).some(Boolean)
+  const gatewayOptions = Array.from(
+    new Set(
+      [
+        ...(gatewayCatalog.data?.snapshots || []).map((snapshot) => snapshot.gateway),
+        ...activeGatewayList,
+        // A gateway supplied by URL stays selectable even if it has gone quiet since.
+        appliedFilters.gateway,
+      ].filter(Boolean),
+    ),
+  ).sort((left, right) => left.localeCompare(right))
   const content = mode === 'rule_based'
     ? {
         title: 'Decision Audit',
@@ -883,6 +915,18 @@ export function PaymentAuditPage() {
     syncSearch(mode, range, nextPage, normalizedFilters, undefined, customWindow)
   }
 
+  /** Dropdown filters apply on change — the redesigned bar has no Search button to press. */
+  function applyDropdownFilter(field: 'gateway' | 'status' | 'route', value: string) {
+    const nextPage = 1
+    const normalizedFilters = normalizeAuditFilters({ ...filters, [field]: value })
+    setPage(nextPage)
+    setTrailFocused(false)
+    setSelectedEventId(null)
+    setFilters(normalizedFilters)
+    setAppliedFilters(normalizedFilters)
+    syncSearch(mode, range, nextPage, normalizedFilters, undefined, customWindow)
+  }
+
   function clearFilters() {
     const nextPage = 1
     const clearedFilters = {
@@ -919,7 +963,6 @@ export function PaymentAuditPage() {
     setPage(nextPage)
     setTrailFocused(false)
     setSelectedEventId(null)
-    setCustomRangeOpen(nextRange === 'custom')
     if (nextRange !== 'custom') {
       const preset = presetWindow(nextRange)
       setCustomStart(toDateTimeInputValue(preset.start_ms))
@@ -932,6 +975,24 @@ export function PaymentAuditPage() {
       appliedFilters,
       selectedKey,
       nextCustomWindow,
+    )
+  }
+
+  /** A custom window arrives with both ends at once, so the query and the URL update together. */
+  function applyCustomWindow(nextStart: string, nextEnd: string) {
+    const nextPage = 1
+    setCustomStart(nextStart)
+    setCustomEnd(nextEnd)
+    setPage(nextPage)
+    setTrailFocused(false)
+    setSelectedEventId(null)
+    syncSearch(
+      mode,
+      'custom',
+      nextPage,
+      appliedFilters,
+      selectedKey,
+      customWindowFrom(nextStart, nextEnd),
     )
   }
 
@@ -968,293 +1029,293 @@ export function PaymentAuditPage() {
   }
 
 
+  // Full-height column so the two panels fill the shell (78px top bar + main's vertical padding)
+  // and scroll internally, as they did before the header moved into the page.
   return (
-    <div className="space-y-6">
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <div className="space-y-2">
-          <div className="flex flex-wrap items-center gap-2">
-            <h1 className="text-2xl font-semibold text-slate-900 dark:text-white">{content.title}</h1>
-          </div>
+    <div className="flex min-h-[620px] flex-col gap-5 xl:h-[calc(100vh-140px)]">
+      {/* The mock draws these controls in an app-wide bar; the shell already owns that strip, so the
+          mode tabs and time range live at the top of the page's own content instead. */}
+      <div className="grid grid-cols-1 items-center gap-3 xl:grid-cols-[1fr_auto_1fr]">
+        <PageHeading title={content.title} />
+
+        <div className="inline-flex max-w-full flex-wrap items-center gap-1 justify-self-start rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d] xl:justify-self-center">
+          {(Object.keys(AUDIT_MODE_LABELS) as AuditMode[]).map((value) => (
+            <Button
+              key={value}
+              size="sm"
+              variant="secondary"
+              className={sectionButtonClass(mode === value)}
+              onClick={() => updateMode(value)}
+            >
+              {AUDIT_MODE_LABELS[value]}
+            </Button>
+          ))}
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Button size="sm" variant="ghost" onClick={refreshAll}>
-            Refresh
+        <div className="flex items-center gap-2 justify-self-start xl:justify-self-end">
+          <TimeRangeFilter
+            range={range}
+            customStart={customStart}
+            customEnd={customEnd}
+            onRangeChange={updateRange}
+            onCustomChange={applyCustomWindow}
+          />
+          <Button
+            size="sm"
+            variant="secondary"
+            onClick={refreshAll}
+            aria-label="Refresh"
+            title="Refresh"
+            className="!h-9 !px-3"
+          >
+            <RefreshCw className="h-4 w-4" />
           </Button>
-          <div ref={timeRangeControlRef} className="relative">
-            <div className="flex items-center gap-1 rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#161b24]">
-              {RANGE_OPTIONS.map((value) => (
-                <Button
-                  key={value}
-                  size="sm"
-                  variant="secondary"
-                  className={sectionButtonClass(range === value)}
-                  onClick={() => updateRange(value)}
-                >
-                  {value}
-                </Button>
-              ))}
-            </div>
-            {range === 'custom' && customRangeOpen ? (
-              <div className="absolute right-0 top-[calc(100%+10px)] z-[90] w-[min(92vw,560px)] rounded-[24px] border border-slate-200 bg-white/95 p-4 shadow-[0_24px_70px_-40px_rgba(15,23,42,0.45)] backdrop-blur dark:border-[#2a303a] dark:bg-[#11151d]/95 dark:shadow-[0_24px_70px_-40px_rgba(0,0,0,0.7)]">
-                <div className="flex items-center justify-between gap-4">
-                  <p className="text-sm font-semibold text-slate-900 dark:text-white">Select time range</p>
-                  <Button size="sm" variant="ghost" onClick={() => setCustomRangeOpen(false)}>Close</Button>
-                </div>
-                <div className="mt-4 grid gap-3 md:grid-cols-2">
-                  <div>
-                    <p className="mb-1.5 text-xs font-medium text-slate-500 dark:text-[#8a8a93]">Start time</p>
-                    <DateTimePicker className="w-full" value={customStart} onChange={setCustomStart} />
-                  </div>
-                  <div>
-                    <p className="mb-1.5 text-xs font-medium text-slate-500 dark:text-[#8a8a93]">End time</p>
-                    <DateTimePicker className="w-full" value={customEnd} onChange={setCustomEnd} />
-                  </div>
-                </div>
-                {!customWindow ? (
-                  <p className="mt-3 text-xs text-red-500">
-                    Choose an end time after the start time. Future dates are not available.
-                  </p>
-                ) : null}
-              </div>
-            ) : null}
-          </div>
         </div>
       </div>
 
-      <div className="space-y-4">
-        <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
-          <Button
-            size="sm"
-            variant="secondary"
-            className={sectionButtonClass(mode === 'transactions')}
-            onClick={() => updateMode('transactions')}
-          >
-            {AUDIT_MODE_LABELS.transactions}
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            className={sectionButtonClass(mode === 'rule_based')}
-            onClick={() => updateMode('rule_based')}
-          >
-            {AUDIT_MODE_LABELS.rule_based}
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            className={sectionButtonClass(mode === 'debit_routing')}
-            onClick={() => updateMode('debit_routing')}
-          >
-            {AUDIT_MODE_LABELS.debit_routing}
-          </Button>
+      <form
+        className="flex flex-wrap items-center gap-3"
+        onSubmit={(e) => { e.preventDefault(); applyFilters() }}
+      >
+        <div className={`relative ${showAdvancedFilters ? 'min-w-[240px] flex-1' : 'min-w-[300px] flex-[1.618]'}`}>
+          <SearchIcon className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500 dark:text-[#78849a]" />
+          <input
+            className={`${fieldClassName()} pl-11 ${hasActiveFilters ? 'pr-20' : ''}`}
+            value={filters.paymentId || filters.requestId}
+            onChange={(event) => updateFilter('paymentId', event.target.value)}
+            placeholder={
+              mode === 'rule_based'
+                ? 'Search by decision payment ID or request ID…'
+                : 'Search by payment ID or request ID…'
+            }
+            aria-label={mode === 'rule_based' ? 'Decision payment ID' : 'Payment ID'}
+          />
+          {hasActiveFilters ? (
+            <button
+              type="button"
+              onClick={clearFilters}
+              className="absolute right-4 top-1/2 -translate-y-1/2 text-[13px] font-medium text-brand-600 transition hover:text-brand-600 dark:text-brand-400 leading-[18px]"
+            >
+              Clear
+            </button>
+          ) : null}
         </div>
 
-        <form
-          className="flex flex-wrap items-end gap-3"
-          onSubmit={(e) => { e.preventDefault(); applyFilters() }}
-        >
-          <div className="min-w-[280px] flex-[1.4]">
-            <FieldLabel>{mode === 'rule_based' ? 'Decision payment ID' : 'Payment ID'}</FieldLabel>
-            <input
-              className={fieldClassName()}
-              value={filters.paymentId || filters.requestId}
-              onChange={(event) => updateFilter('paymentId', event.target.value)}
-              placeholder={mode === 'rule_based' ? 'Decision payment ID' : 'PaymentID'}
-            />
-          </div>
-          <div className="min-w-[180px] flex-1">
-            <FieldLabel>Gateway</FieldLabel>
-            <input
-              className={fieldClassName()}
-              value={filters.gateway}
-              onChange={(event) => updateFilter('gateway', event.target.value)}
-              placeholder="Any gateway"
-            />
-          </div>
-          <div className="min-w-[160px] flex-1">
-            <FieldLabel>Status</FieldLabel>
+        <div className="flex min-w-[300px] flex-1 items-center gap-3">
+        {showAdvancedFilters && mode === 'transactions' ? (
+          <div className="flex-1">
             <select
               className={fieldSelectClassName()}
-              value={filters.status}
-              onChange={(event) => updateFilter('status', event.target.value)}
+              value={filters.route}
+              onChange={(event) => applyDropdownFilter('route', event.target.value)}
+              aria-label="Route"
             >
-              {STATUS_OPTIONS.map((option) => (
+              {ROUTE_OPTIONS.map((option) => (
                 <option key={option.value || 'all'} value={option.value}>
                   {option.label}
                 </option>
               ))}
             </select>
           </div>
-          <Button type="submit" className="h-11 min-w-[88px]">
-            Search
-          </Button>
-          <Button variant="ghost" onClick={clearFilters} className="h-11">
-            Clear
-          </Button>
-          <Button
-            type="button"
-            variant="secondary"
-            onClick={() => setShowAdvancedFilters((value) => !value)}
-            aria-label="More filters"
-            title="More filters"
-            className={`h-11 !px-3 ${showAdvancedFilters ? '!text-brand-600 dark:!text-brand-400' : ''}`}
-          >
-            <SlidersHorizontal className="h-4 w-4" />
-          </Button>
-        </form>
-
-        {showAdvancedFilters ? (
-          <GlassCard className="p-4">
-            <div className={`grid gap-3 md:grid-cols-2 ${mode === 'transactions' ? 'xl:grid-cols-3' : 'xl:grid-cols-2'}`}>
-              {mode === 'transactions' ? (
-                <FilterField label="Route">
-                  <select className={selectClassName()} value={filters.route} onChange={(event) => updateFilter('route', event.target.value)}>
-                    {ROUTE_OPTIONS.map((option) => (
-                      <option key={option.value || 'all'} value={option.value}>
-                        {option.label}
-                      </option>
-                    ))}
-                  </select>
-                </FilterField>
-              ) : null}
-              <FilterField label="Error Code">
-                <input
-                  className={controlClassName()}
-                  value={filters.errorCode}
-                  onChange={(event) => updateFilter('errorCode', event.target.value)}
-                  placeholder="Error code"
-                />
-              </FilterField>
-            </div>
-          </GlassCard>
         ) : null}
-      </div>
+        {showAdvancedFilters ? (
+          <div className="flex-1">
+            <input
+              className={fieldClassName()}
+              value={filters.errorCode}
+              onChange={(event) => updateFilter('errorCode', event.target.value)}
+              placeholder="Error code"
+              aria-label="Error code"
+            />
+          </div>
+        ) : null}
+        <div className="flex-1">
+          <select
+            className={fieldSelectClassName()}
+            value={filters.gateway}
+            onChange={(event) => applyDropdownFilter('gateway', event.target.value)}
+            aria-label="Gateway"
+          >
+            <option value="">Any gateway</option>
+            {gatewayOptions.map((gateway) => (
+              <option key={gateway} value={gateway}>
+                {gateway}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <div className="flex-1">
+          <select
+            className={fieldSelectClassName()}
+            value={filters.status}
+            onChange={(event) => applyDropdownFilter('status', event.target.value)}
+            aria-label="Status"
+          >
+            {STATUS_OPTIONS.map((option) => (
+              <option key={option.value || 'all'} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => setShowAdvancedFilters((value) => !value)}
+          aria-label="More filters"
+          title="More filters"
+          className={`h-11 !px-3 ${showAdvancedFilters ? '!text-brand-600 dark:!text-brand-600' : ''}`}
+        >
+          <SlidersHorizontal className="h-4 w-4" />
+        </Button>
+        </div>
+        {/* The redesigned bar has no Search button; this keeps Enter submitting the text fields. */}
+        <button type="submit" className="sr-only">Search</button>
+      </form>
 
       <ErrorMessage error={error} />
 
-      {loading && (
-        <div className="flex items-center gap-2 text-sm text-slate-500 dark:text-[#8a8a93]">
-          <Spinner size={16} />
-          Loading decision audit data…
-        </div>
-      )}
+      <div className="flex flex-wrap items-center gap-x-5 gap-y-2 text-[13px] leading-[18px]">
+        {loading ? (
+          <span className="flex items-center gap-2 text-slate-500 dark:text-[#8a8a93]">
+            <Spinner size={14} />
+            Loading decision audit data…
+          </span>
+        ) : (
+          <span className="font-semibold text-slate-900 dark:text-white">
+            {totalMatches.toLocaleString()} {totalMatches === 1 ? 'match' : 'matches'} found
+          </span>
+        )}
+        {auditSearch.data ? (
+          <>
+            <span className="h-4 w-px bg-slate-200 dark:bg-[#2a303a]" />
+            <SummaryStat tone="bg-emerald-500" label={`${successCount.toLocaleString()} successful ${successCount === 1 ? 'selection' : 'selections'}`} />
+            <SummaryStat tone="bg-red-500" label={`${failureCount.toLocaleString()} ${failureCount === 1 ? 'failure' : 'failures'}`} />
+            <SummaryStat
+              tone="bg-brand-500"
+              label={`${activeGateways} ${activeGateways === 1 ? 'connector' : 'connectors'}`}
+              detail={activeGatewayList.slice(0, 3).join(', ')}
+            />
+          </>
+        ) : null}
+      </div>
 
-      {auditSearch.data ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <GlassCard className="flex items-center gap-3 px-5 py-4">
-            <span className="text-2xl font-bold tabular-nums text-slate-900 dark:text-white">
-              {totalMatches.toLocaleString()}
-            </span>
-            <span className="text-sm font-medium text-slate-500 dark:text-[#8a8a93]">Matches</span>
-          </GlassCard>
-          <GlassCard className="flex items-center gap-3 px-5 py-4">
-            <span className="text-2xl font-bold tabular-nums text-emerald-600 dark:text-emerald-400">
-              {successCount.toLocaleString()}
-            </span>
-            <Badge variant="green">Success</Badge>
-          </GlassCard>
-          <GlassCard className="flex items-center gap-3 px-5 py-4">
-            <span className="text-2xl font-bold tabular-nums text-red-600 dark:text-red-400">
-              {failureCount.toLocaleString()}
-            </span>
-            <Badge variant="red">Failure</Badge>
-          </GlassCard>
-          <GlassCard className="flex items-center gap-3 px-5 py-4">
-            <span className="text-2xl font-bold tabular-nums text-slate-900 dark:text-white">
-              {activeGateways}
-            </span>
-            <div className="min-w-0">
-              <p className="text-sm font-medium text-slate-500 dark:text-[#8a8a93]">Connectors</p>
-              {activeGatewayList.length > 0 ? (
-                <p className="truncate text-xs text-slate-400 dark:text-[#555f6e]">
-                  {activeGatewayList.slice(0, 3).join(', ')}
-                </p>
-              ) : null}
-            </div>
-          </GlassCard>
-        </div>
-      ) : null}
-
-      <div className="grid gap-4 xl:grid-cols-[minmax(360px,0.74fr)_minmax(0,1.26fr)] xl:h-[calc(100vh-110px)]">
-        <GlassCard className="h-full overflow-hidden">
-          <div className="shrink-0 border-b border-slate-200 px-5 py-3 dark:border-[#2a303a]">
-            {trailFocused ? (
-              <>
-                <Button size="sm" variant="secondary" onClick={returnToResults} className="mb-3">
-                  <ArrowLeft className="h-3.5 w-3.5" />
-                  Back to results
-                </Button>
-                <div className="flex items-center justify-between gap-3">
-                  <h2 className="truncate text-base font-semibold text-slate-900 dark:text-white">
-                    {selectedSummary?.payment_id || selectedSummary?.request_id || selectedSummary?.lookup_key || 'Selected payment'}
-                  </h2>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <span className="text-xs text-slate-400 dark:text-[#555f6e]">{totalEvents} event{totalEvents === 1 ? '' : 's'}</span>
-                    {selectedSummary?.latest_status ? (
-                      <Badge variant={summaryBadgeVariant(selectedSummary.latest_status)}>
-                        {humanizeAuditValue(selectedSummary.latest_status)}
-                      </Badge>
-                    ) : null}
-                  </div>
+      <div className="grid min-h-0 flex-1 gap-5 xl:grid-cols-[minmax(360px,1fr)_minmax(0,1.618fr)]">
+        <GlassCard className="h-full overflow-hidden !rounded-2xl">
+          {trailFocused ? (
+            <div className="shrink-0 border-b border-slate-200 px-5 py-3 dark:border-[#2a303a]">
+              <Button size="sm" variant="secondary" onClick={returnToResults} className="mb-3">
+                <ArrowLeft className="h-3.5 w-3.5" />
+                Back to results
+              </Button>
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="truncate text-[21px] font-semibold leading-tight text-slate-900 dark:text-white">
+                  {selectedSummary?.payment_id || selectedSummary?.request_id || selectedSummary?.lookup_key || 'Selected payment'}
+                </h2>
+                <div className="flex shrink-0 items-center gap-2">
+                  <span className="text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
+                    {/* Worded from the same facts as the Matches row that opened this trace,
+                        not from whether the collapsible headers are drawn — otherwise a
+                        one-call trace reads "7 events" here and "1 call · 7 entries" there. */}
+                    {totalEvents > timelineGroups.length
+                      ? `${timelineGroups.length} call${timelineGroups.length === 1 ? '' : 's'} · ${totalEvents} entries`
+                      : `${totalEvents} event${totalEvents === 1 ? '' : 's'}`}
+                  </span>
+                  {selectedSummary?.latest_status ? (
+                    <Badge variant={summaryBadgeVariant(selectedSummary.latest_status)}>
+                      {humanizeAuditValue(selectedSummary.latest_status)}
+                    </Badge>
+                  ) : null}
                 </div>
-              </>
-            ) : (
-              <SurfaceLabel>{content.matchingLabel}</SurfaceLabel>
-            )}
-          </div>
+              </div>
+            </div>
+          ) : null}
 
           {!trailFocused ? (
             <>
-            <div className="flex-1 space-y-2 overflow-y-auto p-3">
+            <div className="shrink-0 flex items-center justify-between gap-3 px-5 pb-3 pt-5">
+              <h2 className="truncate text-[21px] font-semibold leading-tight text-slate-900 dark:text-white">
+                {content.matchingLabel}
+              </h2>
+              <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
+                {resultRows.length} of {totalMatches.toLocaleString()}
+              </span>
+            </div>
+            <div className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto border-t border-slate-100 dark:divide-[#1b2029] dark:border-[#1b2029]">
               {resultRows.length > 0 ? resultRows.map((row) => {
                 const isSelected = selectedSummary?.lookup_key === row.lookup_key
+                const gatewayPath = connectorPath(row)
                 return (
                 <button
                   key={row.lookup_key}
                   type="button"
                   onClick={() => selectSummary(row.lookup_key, row.event_count)}
-                  className={`relative w-full overflow-hidden rounded-2xl border px-4 py-3 text-left transition-all ${
+                  className={`relative w-full px-5 py-3 text-left transition-colors ${
                     isSelected
-                      ? 'border-brand-300 bg-brand-50 dark:border-brand-500/40 dark:bg-[#161b24]'
-                      : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50/80 dark:border-[#23232a] dark:bg-[#0e1117] dark:hover:border-[#2a303a] dark:hover:bg-[#13131a]'
+                      ? 'bg-brand-50/70 dark:bg-[#161b24]'
+                      : 'hover:bg-slate-50/80 dark:hover:bg-[#13131a]'
                   }`}
                 >
                   {isSelected && (
-                    <span className="absolute inset-y-2 left-0 w-[3px] rounded-full bg-brand-500" />
+                    <span className="absolute inset-y-0 left-0 w-[3px] bg-brand-500" />
                   )}
                   <div className="flex items-start justify-between gap-3">
-                    <p className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-900 dark:text-white">
+                    <p className="min-w-0 flex-1 truncate font-mono text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">
                       {row.payment_id || row.request_id || row.lookup_key}
                     </p>
-                    <span className="shrink-0 text-[11px] text-slate-400 dark:text-[#555f6e]">
+                    <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
                       {formatRelative(row.last_seen_ms)}
                     </span>
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-3">
                     <div className="flex min-w-0 items-center gap-2">
+                      <span
+                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(row.latest_status)}`}
+                        title={humanizeAuditValue(row.latest_status) || 'Unknown'}
+                      />
                       {row.latest_gateway ? (
-                        <span className="shrink-0 rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-600 dark:bg-[#1e2330] dark:text-[#a7b2c6]">
+                        <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#a7b2c6] leading-[18px]">
                           {row.latest_gateway}
                         </span>
                       ) : null}
-                      <span className="truncate text-xs text-slate-400 dark:text-[#555f6e]">
-                        {row.event_count} event{row.event_count === 1 ? '' : 's'}
+                      <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
+                        {(() => {
+                          // One evaluation call records one event per batch entry, so raw
+                          // event totals read like a call storm. Headline the call count and
+                          // keep entries as the qualifier.
+                          const calls = row.call_count ?? 0
+                          // A server without the call_count migration reports 0. Say "events"
+                          // then — the old, true wording — rather than relabelling an event
+                          // total as a call count, which would overstate the calls made.
+                          if (calls < 1) {
+                            return `· ${row.event_count} event${row.event_count === 1 ? '' : 's'}`
+                          }
+                          const callLabel = `${calls} call${calls === 1 ? '' : 's'}`
+                          return row.event_count > calls
+                            ? `· ${callLabel} · ${row.event_count} entries`
+                            : `· ${callLabel}`
+                        })()}
                       </span>
                     </div>
-                    <Badge variant={summaryBadgeVariant(row.latest_status)}>
-                      {humanizeAuditValue(row.latest_status) || 'Unknown'}
-                    </Badge>
+                    {gatewayPath ? (
+                      <span className="shrink-0 truncate rounded-md bg-orange-500/10 px-2 py-0.5 text-[13px] font-medium text-orange-600 ring-1 ring-inset ring-orange-500/20 dark:text-orange-300 leading-[18px]">
+                        {gatewayPath}
+                      </span>
+                    ) : null}
                   </div>
                 </button>
               )}) : (
-                <EmptyState
-                  title={content.noMatchesTitle}
-                  body={content.noMatchesBody}
-                />
+                <div className="p-5">
+                  <EmptyState
+                    title={content.noMatchesTitle}
+                    body={content.noMatchesBody}
+                  />
+                </div>
               )}
             </div>
-            <div className="shrink-0 flex items-center gap-2 border-t border-slate-200 px-4 py-3 dark:border-[#2a303a]">
+            <div className="shrink-0 flex items-center gap-2 border-t border-slate-200 px-5 py-3 dark:border-[#2a303a]">
               <Button
                 size="sm"
                 variant="secondary"
@@ -1281,70 +1342,107 @@ export function PaymentAuditPage() {
               >
                 Next
               </Button>
-              <span className="ml-auto text-xs text-slate-400 dark:text-[#555f6e]">Page {page}</span>
+              <span className="ml-auto text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">Page {page}</span>
             </div>
             </>
           ) : (
-            <div className="flex-1 space-y-1.5 overflow-y-auto p-3">
+            <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto p-3">
               {timeline.length ? (
-                <>
-                  {timeline.map((event, index) => {
-                    const selected = selectedEvent?.id === event.id
-                    return (
-                      <button
-                        key={event.id}
-                        type="button"
-                        onClick={() => {
-                          setSelectedEventId(event.id)
-                          setInspectorTab('summary')
-                        }}
-                        className={`relative w-full overflow-hidden rounded-2xl px-4 py-3 text-left transition-all ${
+                timelineGroups.flatMap((group, groupIdx) => {
+                  const collapsed = showCallHeaders && collapsedCalls.has(group.key)
+                  const firstEvent = group.items[0].event
+                  const entryErrors = group.items.filter(({ event }) => Boolean(event.error_message)).length
+                  const header = showCallHeaders
+                    ? [
+                        <button
+                          key={`call-${group.key}`}
+                          type="button"
+                          onClick={() => toggleCallCollapsed(group.key)}
+                          className="flex w-full items-center gap-2 rounded-xl px-4 py-2 text-left transition-colors hover:bg-slate-50/80 dark:hover:bg-[#13131a]"
+                        >
+                          {collapsed ? (
+                            <ChevronRight className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-[#8a8a93]" />
+                          ) : (
+                            <ChevronDown className="h-3.5 w-3.5 shrink-0 text-slate-400 dark:text-[#8a8a93]" />
+                          )}
+                          <span className="text-[12px] font-semibold uppercase tracking-wide text-slate-400 dark:text-[#8a8a93] leading-[18px]">
+                            {group.key === UNGROUPED_CALL_KEY
+                              ? 'Ungrouped'
+                              : `Call ${groupIdx + 1}`}{' '}
+                            · {group.items.length}{' '}
+                            {group.items.length === 1 ? 'entry' : 'entries'}
+                          </span>
+                          {entryErrors > 0 ? (
+                            <span className="text-[12px] font-medium text-red-600 dark:text-red-400 leading-[18px]">
+                              · {entryErrors} failed
+                            </span>
+                          ) : null}
+                          <span className="ml-auto text-[12px] text-slate-400 dark:text-[#78849a] leading-[18px]">
+                            {formatRelative(firstEvent.created_at_ms)}
+                          </span>
+                        </button>,
+                      ]
+                    : []
+                  const rows = collapsed
+                    ? []
+                    : group.items.map(({ event, index }) => {
+                  const selected = selectedEvent?.id === event.id
+                  return (
+                    <button
+                      key={event.id}
+                      type="button"
+                      onClick={() => {
+                        setSelectedEventId(event.id)
+                        setInspectorTab('summary')
+                      }}
+                      className={`relative w-full overflow-hidden rounded-2xl px-4 py-3 text-left transition-all ${
+                        selected
+                          ? 'bg-brand-50 dark:bg-[#161b24]'
+                          : 'hover:bg-slate-50/80 dark:hover:bg-[#13131a]'
+                      }`}
+                    >
+                      {selected && (
+                        <span className="absolute inset-y-2.5 left-0 w-[3px] rounded-full bg-brand-500" />
+                      )}
+                      <div className="flex items-start gap-3">
+                        <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[13px] font-bold ${
                           selected
-                            ? 'bg-brand-50 dark:bg-[#161b24]'
-                            : 'hover:bg-slate-50/80 dark:hover:bg-[#13131a]'
-                        }`}
-                      >
-                        {selected && (
-                          <span className="absolute inset-y-2.5 left-0 w-[3px] rounded-full bg-brand-500" />
-                        )}
-                        <div className="flex items-start gap-3">
-                          <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[11px] font-bold ${
-                            selected
-                              ? 'bg-brand-500/15 text-brand-500 dark:text-brand-400'
-                              : 'bg-slate-100 text-slate-500 dark:bg-[#1e2330] dark:text-[#8a8a93]'
-                          }`}>
-                            {index + 1}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <p className="truncate text-sm font-semibold text-slate-900 dark:text-white">
-                              {stageLabel(event)}
-                            </p>
-                            <p className="mt-0.5 truncate text-xs text-slate-400 dark:text-[#555f6e]">
-                              {compactMeta([
-                                event.gateway || null,
-                                event.routing_approach || null,
-                                event.payment_method_type || null,
-                              ])}
-                            </p>
-                            {event.error_message ? (
-                              <p className="mt-1 truncate text-xs text-red-500 dark:text-red-400">
-                                {event.error_message}
-                              </p>
-                            ) : null}
-                          </div>
-                          <div className="shrink-0 space-y-1 text-right">
-                            <p className="text-[11px] text-slate-400 dark:text-[#555f6e]">{formatRelative(event.created_at_ms)}</p>
-                            {event.status ? (
-                              <Badge variant={summaryBadgeVariant(event.status)}>
-                                {humanizeAuditValue(event.status)}
-                              </Badge>
-                            ) : null}
-                          </div>
+                            ? 'bg-brand-500/15 text-brand-500 dark:text-brand-400'
+                            : 'bg-slate-100 text-slate-500 dark:bg-[#1e2330] dark:text-[#8a8a93]'
+                        } leading-[18px]`}>
+                          {index + 1}
                         </div>
-                      </button>
-                    )
-                  })}
-                </>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">
+                            {stageLabel(event)}
+                          </p>
+                          <p className="mt-2 truncate text-[13px] text-slate-500 dark:text-[#78849a] max-w-[57ch] leading-[18px]">
+                            {compactMeta([
+                              event.gateway || null,
+                              event.routing_approach || null,
+                              event.payment_method_type || null,
+                            ])}
+                          </p>
+                          {event.error_message ? (
+                            <p className="mt-2 truncate text-[13px] text-red-600 dark:text-red-400 leading-[18px]">
+                              {event.error_message}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="shrink-0 space-y-1 text-right">
+                          <p className="text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">{formatRelative(event.created_at_ms)}</p>
+                          {event.status ? (
+                            <Badge variant={summaryBadgeVariant(event.status)}>
+                              {humanizeAuditValue(event.status)}
+                            </Badge>
+                          ) : null}
+                        </div>
+                      </div>
+                    </button>
+                  )
+                })
+                  return [...header, ...rows]
+                })
               ) : (
                 <EmptyState
                   title="No timeline selected yet"
@@ -1355,63 +1453,54 @@ export function PaymentAuditPage() {
           )}
         </GlassCard>
 
-        <GlassCard className="h-full overflow-hidden">
-          <div className="shrink-0 border-b border-slate-200 px-5 py-3 dark:border-[#2a303a]">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-sm font-semibold text-slate-900 dark:text-white">
-                {selectedEvent ? stageLabel(selectedEvent) : 'No event selected'}
-              </h2>
-              {selectedEvent?.status ? (
-                <Badge variant={summaryBadgeVariant(selectedEvent.status)}>
-                  {humanizeAuditValue(selectedEvent.status)}
-                </Badge>
-              ) : null}
-            </div>
-          </div>
-
-          <div className="flex-1 overflow-y-auto space-y-4 p-4">
-            {selectedEvent && inspectorModel ? (
-              <>
-                <div className="grid gap-3 md:grid-cols-3">
-                  <InsetPanel className="px-4 py-3">
-                    <SurfaceLabel>Gateway</SurfaceLabel>
-                    <p className="mt-2 text-base font-semibold text-slate-900 dark:text-[#7da6ff]">
-                      {selectedEvent.gateway || 'Unknown'}
-                    </p>
-                  </InsetPanel>
-                  <InsetPanel className="px-4 py-3">
-                    <SurfaceLabel>Outcome</SurfaceLabel>
-                    <p className="mt-2 text-base font-semibold text-slate-900 dark:text-[#34d399]">
-                      {humanizeAuditValue(selectedEvent.status) || 'Unknown'}
-                    </p>
-                  </InsetPanel>
-                  <InsetPanel className="px-4 py-3">
-                    <SurfaceLabel>Time</SurfaceLabel>
-                    <p className="mt-2 text-sm font-semibold text-slate-900 dark:text-white">
-                      {formatDateTime(selectedEvent.created_at_ms)}
-                    </p>
-                  </InsetPanel>
+        <GlassCard className="h-full overflow-hidden !rounded-2xl">
+          {selectedEvent && inspectorModel ? (
+            <>
+              <div className="shrink-0 space-y-2 px-5 pb-0 pt-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <h2 className="truncate font-mono text-[21px] font-semibold leading-tight text-slate-900 dark:text-white">
+                      {selectedEvent.payment_id || selectedEvent.request_id || stageLabel(selectedEvent)}
+                    </h2>
+                    {selectedEvent.payment_id || selectedEvent.request_id ? (
+                      <CopyButton text={selectedEvent.payment_id || selectedEvent.request_id || ''} size={14} />
+                    ) : null}
+                  </div>
+                  {selectedEvent.status ? (
+                    <Badge variant={summaryBadgeVariant(selectedEvent.status)}>
+                      {humanizeAuditValue(selectedEvent.status)}
+                    </Badge>
+                  ) : null}
                 </div>
 
-                <div className="inline-flex max-w-full flex-wrap items-center gap-1 rounded-full border border-slate-200 bg-slate-100/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
+                {/* Outcome is not repeated here — the badge above it already carries the status. */}
+                <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
+                  <HeadlineFact label="Gateway" value={selectedEvent.gateway || 'Unknown'} />
+                  <HeadlineFact label="Stage" value={stageLabel(selectedEvent)} />
+                  <HeadlineFact label="Time" value={formatDateTime(selectedEvent.created_at_ms)} />
+                </div>
+
+                <div className="!mt-5 flex flex-wrap items-center gap-5 border-b border-slate-200 dark:border-[#2a303a]">
                   {INSPECTOR_TABS.map((tab) => (
                     <button
                       key={tab}
                       type="button"
                       onClick={() => setInspectorTab(tab)}
-                      className={`rounded-full px-4 py-1.5 text-xs font-semibold transition ${
+                      className={`-mb-px border-b-2 pb-3 text-[13px] font-medium transition ${
                         inspectorTab === tab
-                          ? 'bg-white text-slate-900 shadow-sm dark:bg-[#161b24] dark:text-white'
-                          : 'text-slate-500 hover:text-slate-900 dark:text-[#a7b2c6] dark:hover:text-white'
-                      }`}
+                          ? 'border-brand-500 text-brand-600 dark:text-brand-400'
+                          : 'border-transparent text-slate-500 hover:text-slate-900 dark:text-[#a7b2c6] dark:hover:text-white'
+                      } leading-[18px]`}
                     >
-                      {tab === 'summary' ? 'Summary' : tab === 'input' ? 'Input' : tab === 'response' ? 'Response' : 'Raw JSON'}
+                      {INSPECTOR_TAB_LABELS[tab]}
                     </button>
                   ))}
                 </div>
+              </div>
 
+              <div className="min-h-0 flex-1 space-y-5 overflow-y-auto px-5 py-5">
                 {inspectorTab === 'summary' ? (
-                  <div className="space-y-4">
+                  <div className="space-y-5">
                     {selectedEventIsDecision ? (
                       <ConnectorScorePanel
                         title="Connector scores"
@@ -1422,7 +1511,7 @@ export function PaymentAuditPage() {
                     ) : null}
                     {inspectorModel.summaryRows.length ? (
                       <div className="space-y-3">
-                        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">Decision metadata</h3>
+                        <h3 className="text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">Decision metadata</h3>
                         <InspectorKeyValueGrid rows={inspectorModel.summaryRows} />
                       </div>
                     ) : null}
@@ -1443,7 +1532,7 @@ export function PaymentAuditPage() {
 
                 {inspectorTab === 'input' ? (
                   <InspectorJsonPanel
-                    title="Input"
+                    title="Request"
                     value={inspectorModel.requestPayload}
                     emptyMessage="No dedicated request payload was captured for this event."
                   />
@@ -1464,15 +1553,16 @@ export function PaymentAuditPage() {
                     emptyMessage="No raw payload is available for this event."
                   />
                 ) : null}
-
-              </>
-            ) : (
+              </div>
+            </>
+          ) : (
+            <div className="min-h-0 flex-1 overflow-y-auto p-4">
               <EmptyState
                 title="No event selected"
                 body="Select a timeline event to view scores, routing details, request payload, and response payload."
               />
-            )}
-          </div>
+            </div>
+          )}
         </GlassCard>
       </div>
     </div>

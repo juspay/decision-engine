@@ -2,13 +2,16 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="favicon.svg" />
-    <link rel="shortcut icon" href="favicon.svg" />
-    <link rel="apple-touch-icon" href="favicon.svg" />
+    <!-- Vite substitutes the configured base here, making these absolute. A relative href resolves
+         against the current route's directory instead, so deep routes like
+         /routing/rules/new would ask for a favicon that is not there. -->
+    <link rel="icon" type="image/svg+xml" href="/decision-engine/favicon.svg" />
+    <link rel="shortcut icon" href="/decision-engine/favicon.svg" />
+    <link rel="apple-touch-icon" href="/decision-engine/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Juspay Decision Engine Dashboard</title>
-    <script type="module" crossorigin src="/decision-engine/assets/index-DQTxaRok.js"></script>
-    <link rel="stylesheet" crossorigin href="/decision-engine/assets/index-w50BUj6t.css">
+    <script type="module" crossorigin src="/decision-engine/assets/index-Cz_Pgiyl.js"></script>
+    <link rel="stylesheet" crossorigin href="/decision-engine/assets/index-CeLs54_n.css">
   </head>
   <body>
     <div id="root"></div>

@@ -7,6 +7,8 @@ import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 
+import { PageHeading } from '../ui/PageHeading'
+import { Notice } from '../ui/Notice'
 export function DebitRoutingPage() {
   const { merchantId } = useMerchantStore()
   const {
@@ -47,13 +49,13 @@ export function DebitRoutingPage() {
   return (
     <div className="max-w-3xl space-y-6">
       <div>
-        <h1 className="text-lg font-semibold text-slate-900 dark:text-white">Network / Debit Routing</h1>
+        <PageHeading title="Network / Debit Routing" />
       </div>
 
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
-            <Network size={16} className="text-brand-500" />
+            <Network size={16} className="text-brand-600" />
             <div>
               <SurfaceLabel>Debit routing access</SurfaceLabel>
               <h2 className="mt-2 font-medium text-slate-800 dark:text-white">Debit Routing Runtime Access</h2>
@@ -62,9 +64,9 @@ export function DebitRoutingPage() {
         </CardHeader>
         <CardBody className="space-y-5">
           {!merchantId && (
-            <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-700">
+            <Notice tone="warning">
               Set a merchant ID in the top bar to load debit routing access.
-            </p>
+            </Notice>
           )}
 
           {merchantId && isLoading ? (
@@ -76,13 +78,13 @@ export function DebitRoutingPage() {
             <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-5 dark:border-[#232833] dark:bg-[#0b1017]">
               <div className="flex flex-wrap items-center justify-between gap-4">
                 <div>
-                  <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-400 dark:text-[#6d768a]">
+                  <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500 dark:text-[#78849a] leading-4">
                     Current state
                   </p>
                   <p className="mt-1 text-lg font-semibold text-slate-900 dark:text-white">
                     {isEnabled ? 'Enabled' : 'Disabled'}
                   </p>
-                  <p className="mt-0.5 text-[13px] text-slate-500 dark:text-[#9ca7ba]">
+                  <p className="mt-0.5 text-[13px] text-slate-500 dark:text-[#9ca7ba] leading-[18px]">
                     {data?.merchant_id || merchantId || 'No merchant selected'}
                   </p>
                 </div>
@@ -113,7 +115,7 @@ export function DebitRoutingPage() {
               (flagError instanceof Error ? flagError.message : flagError ? 'Failed to load debit routing flag' : null)
             }
           />
-          {success && <p className="text-sm text-emerald-500">{success}</p>}
+          {success && <p className="text-sm text-emerald-700">{success}</p>}
         </CardBody>
       </Card>
 

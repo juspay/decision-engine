@@ -18,6 +18,47 @@ env:
   RUST_BACKTRACE: short
 
 jobs:
+  # Which of this PR's files decide whether the expensive jobs below have anything to say. The
+  # Rust and spell checks run on everything and are not gated; the end-to-end suite boots the API,
+  # the dashboard and four datastores, so it is asked for by path rather than run by default.
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      e2e: ${{ steps.filter.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            # Everything the E2E job builds, boots or runs. Listed wide on purpose: an extra run
+            # costs a runner, a missed one costs a regression that reaches main.
+            e2e:
+              # The API binary under test, and what it is built and configured from
+              - 'src/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'config/**'
+              # The schema it is migrated onto
+              - 'migrations_pg/**'
+              - 'diesel_pg.toml'
+              - 'justfile'
+              # The dashboard the UI project drives
+              - 'website/**'
+              # The suite itself, and the toolchain that type-checks and runs it
+              - 'tests/**'
+              - 'playwright.config.ts'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'tsconfig.json'
+              # The datastores it starts, and this workflow
+              - 'docker-compose*.y*ml'
+              - '.github/workflows/ci-pr.yml'
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
@@ -157,6 +198,8 @@ jobs:
 
   e2e-playwright:
     name: E2E (Playwright)
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
