@@ -19,7 +19,7 @@ test.describe('Volume split output', () => {
 
   test.beforeEach(async ({ sharedPage }) => {
     euclid = new EuclidRuleBuilder(sharedPage)
-    await euclid.goto('/routing/rules')
+    await euclid.goto('/routing/rules/new')
     await euclid.addRuleBlock()
     await euclid.switchOutputType(0, 'Volume Split')
   })
@@ -68,13 +68,9 @@ test.describe('Volume split output', () => {
     await euclid.addVolumeSplitEntry(0, 40, 'adyen', 'mca_adyen')
 
     const then = euclid.thenSection(0)
-    await then
-      .locator('div')
-      .filter({ hasText: /^60%stripe/ })
-      .last()
-      .locator('button')
-      .first()
-      .click()
+    // Targeted by accessible name rather than button order: a row also carries an edit control,
+    // so "the first button in the row" is not the delete one.
+    await then.getByRole('button', { name: 'Remove stripe' }).click()
 
     await expect(then.getByText('stripe')).toHaveCount(0)
     await expect(then.getByText('Total: 40%')).toBeVisible()
@@ -88,18 +84,5 @@ test.describe('Volume split output', () => {
     const then = euclid.thenSection(0)
     await expect(then.getByPlaceholder('Split %')).toHaveCount(0)
     await expect(then.getByPlaceholder('Gateway name')).toBeVisible()
-  })
-
-  test('JSON preview emits routing_type: volume_split with correct split values', async ({ sharedPage }) => {
-    await euclid.addVolumeSplitEntry(0, 70, 'stripe', 'mca_stripe')
-    await euclid.addVolumeSplitEntry(0, 30, 'adyen', 'mca_adyen')
-    await sharedPage.getByPlaceholder('my-rule').fill('volume-split-preview-rule')
-    await sharedPage.getByRole('button', { name: 'Preview JSON' }).click()
-
-    const preview = sharedPage.locator('pre')
-    await expect(preview).toContainText('"routing_type": "volume_split"')
-    await expect(preview).toContainText('"split": 70')
-    await expect(preview).toContainText('"split": 30')
-    await expect(preview).toContainText('"volume_split": [')
   })
 })

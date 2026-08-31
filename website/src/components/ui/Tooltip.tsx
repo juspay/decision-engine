@@ -42,7 +42,7 @@ export function Tooltip({ text, children }: TooltipProps) {
       {visible && createPortal(
         <span
           style={style}
-          className="pointer-events-none rounded-md bg-slate-800 dark:bg-slate-700 px-2 py-1 text-[11px] text-white shadow-md whitespace-nowrap"
+          className="pointer-events-none rounded-md bg-slate-800 dark:bg-slate-700 px-2 py-1 text-[11px] text-white shadow-md whitespace-nowrap leading-4"
         >
           {text}
         </span>,

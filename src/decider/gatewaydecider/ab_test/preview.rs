@@ -48,7 +48,7 @@ pub async fn evaluate_arm(
                 ))
             })?;
         let out_enum = Output::Single(chosen.clone());
-        let (_, evaluated) = evaluate_output(&out_enum).map_err(|_| {
+        let evaluated = evaluate_output(&out_enum).map_err(|_| {
             ContainerError::from(EuclidErrors::FailedToEvaluateOutput(
                 "ab_test sr routing arm evaluation".into(),
             ))
@@ -83,7 +83,7 @@ pub async fn evaluate_arm(
     let (output, evaluated_output, rule_name) = match arm_algorithm_data {
         StaticRoutingAlgorithm::Single(conn) => {
             let out_enum = Output::Single(*conn.clone());
-            let (_, eval) = evaluate_output(&out_enum).map_err(|_| {
+            let eval = evaluate_output(&out_enum).map_err(|_| {
                 ContainerError::from(EuclidErrors::FailedToEvaluateOutput(format!(
                     "ab_test arm single: {}",
                     conn.gateway_name
@@ -97,7 +97,7 @@ pub async fn evaluate_arm(
         }
         StaticRoutingAlgorithm::Priority(connectors) => {
             let out_enum = Output::Priority(connectors.clone());
-            let (_, eval) = evaluate_output(&out_enum).map_err(|_| {
+            let eval = evaluate_output(&out_enum).map_err(|_| {
                 ContainerError::from(EuclidErrors::FailedToEvaluateOutput(
                     "ab_test arm priority".into(),
                 ))
@@ -106,7 +106,7 @@ pub async fn evaluate_arm(
         }
         StaticRoutingAlgorithm::VolumeSplit(splits) => {
             let out_enum = Output::VolumeSplit(splits.clone());
-            let (_, eval) = evaluate_output(&out_enum).map_err(|_| {
+            let eval = evaluate_output(&out_enum).map_err(|_| {
                 ContainerError::from(EuclidErrors::FailedToEvaluateOutput(
                     "ab_test arm volume_split".into(),
                 ))
@@ -125,7 +125,7 @@ pub async fn evaluate_arm(
                 if let Some(fallback) = payload.fallback_output.clone() {
                     ir.rule_name = Some("default_fallback".to_string());
                     ir.output = Output::Priority(fallback.clone());
-                    ir.evaluated_output = vec![fallback.into_iter().next().unwrap_or_default()];
+                    ir.evaluated_output = fallback;
                 }
             }
             (ir.output, ir.evaluated_output, ir.rule_name)

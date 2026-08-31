@@ -22,7 +22,7 @@ test.describe('End-to-end creation', () => {
   test.beforeEach(async ({ authedPage }) => {
     ruleName = factory.ruleName('adv_rule')
     euclid = new EuclidRuleBuilder(authedPage)
-    await euclid.goto('/routing/rules')
+    await euclid.goto('/routing/rules/new')
     await euclid.addRuleBlock()
   })
 
@@ -32,7 +32,8 @@ test.describe('End-to-end creation', () => {
     await page.getByRole('button', { name: 'Create Rule' }).click()
     const { status, requestBody, body } = await call
     expect(status, `POST /routing/create failed: ${JSON.stringify(body)}`).toBe(200)
-    await expect(page.getByText('Rule created')).toBeVisible()
+    // A successful create returns to the rules list.
+    await expect(page.getByRole('heading', { name: 'Rule-Based Routing' })).toBeVisible()
     return requestBody
   }
 

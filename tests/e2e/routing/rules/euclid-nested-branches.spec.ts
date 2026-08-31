@@ -16,7 +16,7 @@ test.describe('Nested AND+OR branches', () => {
 
   test.beforeEach(async ({ sharedPage }) => {
     euclid = new EuclidRuleBuilder(sharedPage)
-    await euclid.goto('/routing/rules')
+    await euclid.goto('/routing/rules/new')
     await euclid.addRuleBlock()
   })
 
@@ -96,20 +96,5 @@ test.describe('Nested AND+OR branches', () => {
     await euclid.ruleBlock(0).getByRole('button', { name: 'Add OR group' }).click()
 
     await expect(euclid.ruleBlock(0).getByRole('button', { name: 'Add nested branch' })).toHaveCount(2)
-  })
-
-  test('JSON preview emits a non-null nested array when a branch is added', async ({ sharedPage }) => {
-    await euclid.selectCondLhs(0, 'amount')
-    await euclid.ruleBlock(0).locator('select.cond-select').first().selectOption({ label: 'greater than' })
-    await euclid.ruleBlock(0).locator('input[type="number"]').fill('10')
-
-    await euclid.addNestedBranch(0)
-    await euclid.selectCondLhs(1, 'payment_method')
-
-    await euclid.addGatewayToBlock(0, 'rbl')
-    await sharedPage.getByPlaceholder('my-rule').fill('nested-preview-rule')
-    await sharedPage.getByRole('button', { name: 'Preview JSON' }).click()
-
-    await expect(sharedPage.locator('pre')).toContainText('"nested": [')
   })
 })

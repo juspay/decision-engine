@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Navigate, Outlet } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import useSWR from 'swr'
-import { useAuthStore, type AccountHierarchy, type Permission } from '../../store/authStore'
+import { useAuthStore, type AccountHierarchy, type MerchantInfo, type Permission } from '../../store/authStore'
 import { useMerchantStore } from '../../store/merchantStore'
 import { fetcher } from '../../lib/api'
 import { refreshSessionScopedSWRCache } from '../../lib/swrCache'
@@ -15,11 +15,7 @@ interface MeResponse {
   email_verified: boolean
   is_super_admin: boolean
   is_super_admin_view: boolean
-  merchants: Array<{
-    merchant_id: string
-    merchant_name: string
-    role: string
-  }>
+  merchants: MerchantInfo[]
   permissions?: Permission[]
   hierarchy?: AccountHierarchy
 }

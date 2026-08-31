@@ -1,18 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/authStore'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiFetch } from '../../lib/api'
-import { ChevronDown, Building2, Check, Plus, ShieldCheck, ArrowRight } from 'lucide-react'
+import { ChevronDown, ShieldCheck, ArrowRight } from 'lucide-react'
 import { NotificationBell } from './NotificationBell'
 import { GlobalSearch } from './GlobalSearch'
-
-interface SwitchMerchantResponse {
-  token: string
-  merchant_id: string
-  role: string
-  merchants: { merchant_id: string; merchant_name: string; role: string }[]
-}
+import { ScopeSwitcher } from './ScopeSwitcher'
 
 interface EnterMerchantResponse {
   token: string
@@ -31,15 +24,13 @@ interface LookupResult {
   merchant_id: string
   merchant_name: string
   members: LookupMember[]
+  hs_merchant_name?: string
+  hs_org_name?: string
 }
 
 export function TopBar() {
-  const navigate = useNavigate()
-  const { user, merchants, updateMerchant, setAuth } = useAuthStore()
+  const { user, setAuth } = useAuthStore()
   const { setMerchantId } = useMerchantStore()
-  const [merchantOpen, setMerchantOpen] = useState(false)
-  const [switching, setSwitching] = useState<string | null>(null)
-  const dropdownRef = useRef<HTMLDivElement>(null)
   const [superAdminOpen, setSuperAdminOpen] = useState(false)
   const [enterId, setEnterId] = useState('')
   const [entering, setEntering] = useState(false)
@@ -51,9 +42,6 @@ export function TopBar() {
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setMerchantOpen(false)
-      }
       if (superAdminRef.current && !superAdminRef.current.contains(e.target as Node)) {
         setSuperAdminOpen(false)
       }
@@ -122,34 +110,6 @@ export function TopBar() {
     }
   }
 
-  async function handleSwitchMerchant(merchantId: string) {
-    if (merchantId === user?.merchantId || switching) return
-    setSwitching(merchantId)
-    try {
-      const res = await apiFetch<SwitchMerchantResponse>('/auth/switch-merchant', {
-        method: 'POST',
-        body: JSON.stringify({ merchant_id: merchantId }),
-      })
-      updateMerchant(res.token, res.merchant_id, res.merchants)
-      setMerchantId(res.merchant_id)
-      setMerchantOpen(false)
-    } catch {
-      // ignore
-    } finally {
-      setSwitching(null)
-    }
-  }
-
-  const currentMerchant = merchants.find((m) => m.merchant_id === user?.merchantId)
-
-  // A handed-over session's list is the scopes Hyperswitch granted it, which always includes the
-  // one it is already on. A single entry therefore means there is nothing to switch between, and
-  // the read-only context chip is the honest control; a DE session's list works the other way,
-  // where one membership is still a switcher.
-  const canSwitchMerchant =
-    !user?.isSuperAdminView && merchants.length > (user?.isRedirectSession ? 1 : 0)
-  const showAccountContext = !!user?.hierarchy && !canSwitchMerchant
-
   return (
     <header className="flex h-[78px] shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-6 transition-colors duration-300 dark:border-[#22262f] dark:bg-[#06080d] relative z-10">
       <div className="flex-1" />
@@ -162,25 +122,25 @@ export function TopBar() {
         <GlobalSearch />
       </div>
 
-      <div className="flex flex-1 items-center justify-end gap-2">
+      <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
         <NotificationBell />
 
         {/* Super-admin: enter any merchant by ID. Hidden inside a view session — Exit first (via the
             banner) so the single-level session model stays intact. */}
         {user?.isSuperAdmin && !user?.isSuperAdminView && (
-          <div className="relative" ref={superAdminRef}>
+          <div className="relative shrink-0" ref={superAdminRef}>
             <button
               onClick={() => setSuperAdminOpen((v) => !v)}
-              className="flex items-center gap-2 h-8 px-3 rounded-lg border border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 hover:bg-amber-100 dark:hover:bg-amber-500/20 transition-colors text-amber-700 dark:text-amber-300"
+              className="flex items-center gap-2 h-8 px-3 whitespace-nowrap rounded-lg border border-amber-300/70 dark:border-amber-500/30 bg-amber-50 dark:bg-amber-500/10 hover:bg-amber-100 dark:hover:bg-amber-500/20 transition-colors text-amber-700 dark:text-amber-300"
             >
               <ShieldCheck size={13} className="shrink-0" />
-              <span className="text-[12px] font-medium">Super admin</span>
+              <span className="text-[12px] font-medium leading-4">Super admin</span>
               <ChevronDown size={12} className="shrink-0" />
             </button>
 
             {superAdminOpen && (
               <div className="absolute right-0 top-10 w-80 bg-white dark:bg-[#0c0c10] border border-[#e6e6ee] dark:border-[#1a1a24] rounded-lg shadow-lg p-3 z-50">
-                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500 mb-2">
+                <p className="text-[11px] font-semibold uppercase tracking-widest text-slate-500 dark:text-slate-400 mb-2 leading-4">
                   View a merchant dashboard
                 </p>
 
@@ -190,15 +150,15 @@ export function TopBar() {
                   onChange={(e) => setLookupQuery(e.target.value)}
                   placeholder="Search by email or merchant name"
                   autoFocus
-                  className="w-full h-8 px-2.5 rounded-md border border-[#e6e6ee] dark:border-[#1a1a24] bg-white dark:bg-[#121218] text-[13px] text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-400/40"
+                  className="w-full h-8 px-2.5 rounded-md border border-[#e6e6ee] dark:border-[#1a1a24] bg-white dark:bg-[#121218] text-[13px] text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-brand-500 leading-[18px]"
                 />
 
                 {lookupQuery.trim() && (
                   <div className="mt-2 max-h-64 overflow-y-auto">
                     {searching && lookupResults.length === 0 ? (
-                      <p className="px-1 py-2 text-[12px] text-slate-400">Searching…</p>
+                      <p className="px-1 py-2 text-[12px] text-slate-500 leading-4">Searching…</p>
                     ) : lookupResults.length === 0 ? (
-                      <p className="px-1 py-2 text-[12px] text-slate-400">No matches.</p>
+                      <p className="px-1 py-2 text-[12px] text-slate-500 leading-4">No matches.</p>
                     ) : (
                       lookupResults.map((m) => (
                         <button
@@ -207,12 +167,20 @@ export function TopBar() {
                           disabled={entering}
                           className="w-full text-left px-2 py-2 rounded-md hover:bg-slate-50 dark:hover:bg-[#13131a] transition-colors disabled:opacity-50"
                         >
-                          <p className="text-[13px] font-medium text-slate-700 dark:text-slate-200 truncate">
+                          {/* Where this scope sits, above its own name: a search for "default"
+                              returns one row per merchant, and the parent is the only thing
+                              telling them apart. */}
+                          {(m.hs_org_name || m.hs_merchant_name) && (
+                            <p className="text-[11px] text-slate-500 truncate leading-4">
+                              {[m.hs_org_name, m.hs_merchant_name].filter(Boolean).join(' › ')}
+                            </p>
+                          )}
+                          <p className="text-[13px] font-medium text-slate-700 dark:text-slate-200 truncate leading-[18px]">
                             {m.merchant_name}
                           </p>
-                          <p className="text-[11px] text-slate-400 truncate">{m.merchant_id}</p>
+                          <p className="text-[11px] text-slate-500 truncate leading-4">{m.merchant_id}</p>
                           {m.members.length > 0 && (
-                            <p className="text-[11px] text-slate-400 truncate">
+                            <p className="text-[11px] text-slate-500 truncate leading-4">
                               {m.members.map((mem) => mem.email).join(', ')}
                             </p>
                           )}
@@ -229,15 +197,15 @@ export function TopBar() {
                     onChange={(e) => { setEnterId(e.target.value); setEnterError(null) }}
                     onKeyDown={(e) => { if (e.key === 'Enter') handleEnterMerchant(enterId.trim()) }}
                     placeholder="…or paste an exact merchant ID"
-                    className="w-full h-8 px-2.5 rounded-md border border-[#e6e6ee] dark:border-[#1a1a24] bg-white dark:bg-[#121218] text-[13px] text-slate-700 dark:text-slate-200 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-amber-400/40"
+                    className="w-full h-8 px-2.5 rounded-md border border-[#e6e6ee] dark:border-[#1a1a24] bg-white dark:bg-[#121218] text-[13px] text-slate-700 dark:text-slate-200 placeholder:text-slate-500 focus:outline-none focus:border-brand-500 leading-[18px]"
                   />
                   {enterError && (
-                    <p className="mt-1.5 text-[11px] text-red-500">{enterError}</p>
+                    <p className="mt-1.5 text-[11px] text-red-600 leading-4">{enterError}</p>
                   )}
                   <button
                     onClick={() => handleEnterMerchant(enterId.trim())}
                     disabled={!enterId.trim() || entering}
-                    className="mt-2 w-full flex items-center justify-center gap-1.5 h-8 rounded-md bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-[13px] font-medium text-white"
+                    className="mt-2 w-full flex items-center justify-center gap-1.5 h-8 rounded-md bg-amber-600 hover:bg-amber-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-[13px] font-medium text-white leading-[18px]"
                   >
                     {entering ? 'Entering…' : (<>Enter dashboard <ArrowRight size={13} /></>)}
                   </button>
@@ -247,86 +215,7 @@ export function TopBar() {
           </div>
         )}
 
-        {/* Account context for a scope that came from Hyperswitch, shown wherever there is no
-            switcher to carry it. Read-only: Hyperswitch owns this tree, and it is changed there,
-            not here. */}
-        {showAccountContext && user?.hierarchy && (
-          <div
-            className="flex items-center gap-2 h-8 px-3 rounded-lg border border-[#e6e6ee] dark:border-[#1a1a24] bg-white dark:bg-[#121218] text-slate-700 dark:text-slate-300"
-            title={`Organization ${user.hierarchy.hs_org_name ?? user.hierarchy.hs_org_id}\nMerchant ${user.hierarchy.hs_merchant_id}\nProfile ${user.merchantId}`}
-          >
-            <Building2 size={13} className="text-slate-400 shrink-0" />
-            <span className="text-[12px] font-medium max-w-[160px] truncate">
-              {user.hierarchy.hs_merchant_name ?? user.hierarchy.hs_merchant_id}
-            </span>
-            {user.hierarchy.profile_name && (
-              <>
-                <span className="text-slate-300 dark:text-slate-600">/</span>
-                <span className="text-[12px] max-w-[120px] truncate text-slate-500 dark:text-slate-400">
-                  {user.hierarchy.profile_name}
-                </span>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Merchant switcher */}
-        {canSwitchMerchant && (
-          <div className="relative" ref={dropdownRef}>
-            <button
-              onClick={() => setMerchantOpen((v) => !v)}
-              className="flex items-center gap-2 h-8 px-3 rounded-lg border border-[#e6e6ee] dark:border-[#1a1a24] bg-white dark:bg-[#121218] hover:bg-slate-50 dark:hover:bg-[#18181f] transition-colors text-slate-700 dark:text-slate-300"
-            >
-              <Building2 size={13} className="text-slate-400 shrink-0" />
-              <span className="text-[12px] font-medium max-w-[140px] truncate">
-                {currentMerchant?.merchant_name ?? user?.merchantId ?? 'Select merchant'}
-              </span>
-              <ChevronDown size={12} className="text-slate-400 shrink-0" />
-            </button>
-
-            {merchantOpen && (
-              <div className="absolute right-0 top-10 w-60 bg-white dark:bg-[#0c0c10] border border-[#e6e6ee] dark:border-[#1a1a24] rounded-lg shadow-lg py-1 z-50">
-                <p className="px-3 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-slate-400 dark:text-slate-500">
-                  {user?.isRedirectSession ? 'Profiles' : 'Merchants'}
-                </p>
-                {merchants.map((m) => (
-                  <button
-                    key={m.merchant_id}
-                    onClick={() => handleSwitchMerchant(m.merchant_id)}
-                    disabled={switching === m.merchant_id}
-                    className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 dark:hover:bg-[#13131a] transition-colors text-left"
-                  >
-                    <div className="w-6 h-6 rounded-md bg-brand-50 flex items-center justify-center shrink-0">
-                      <Building2 size={12} className="text-brand-600" />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <p className="text-[13px] font-medium text-slate-700 dark:text-slate-300 truncate">
-                        {m.merchant_name}
-                      </p>
-                      <p className="text-[11px] text-slate-400 truncate">{m.merchant_id}</p>
-                    </div>
-                    {m.merchant_id === user?.merchantId && (
-                      <Check size={13} className="text-brand-600 shrink-0" />
-                    )}
-                  </button>
-                ))}
-                {/* Hyperswitch creates the profiles a handed-over session can reach, so onboarding
-                    one here would produce a scope its own account tree does not know about. */}
-                {!user?.isRedirectSession && (
-                  <div className="border-t border-[#e6e6ee] dark:border-[#1a1a24] mt-1 pt-1">
-                    <button
-                      onClick={() => { setMerchantOpen(false); navigate('/onboarding') }}
-                      className="w-full flex items-center gap-2.5 px-3 py-2 hover:bg-slate-50 dark:hover:bg-[#13131a] transition-colors text-left text-brand-600"
-                    >
-                      <Plus size={13} />
-                      <span className="text-[13px] font-medium">Add merchant</span>
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-        )}
+        <ScopeSwitcher />
       </div>
     </header>
   )

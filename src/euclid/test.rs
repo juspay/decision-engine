@@ -1005,11 +1005,11 @@ mod tests {
             let ctx = Context::new(HashMap::from([
                 (
                     "metadata".to_string(),
-                    Some(metadata_value("cohort", "eu-west")),
+                    Some(metadata_value("order_source", "mobile_app")),
                 ),
                 (
-                    "cohort".to_string(),
-                    Some(metadata_value("cohort", "eu-west")),
+                    "order_source".to_string(),
+                    Some(metadata_value("order_source", "mobile_app")),
                 ),
                 (
                     "customer_id".to_string(),
@@ -1018,7 +1018,7 @@ mod tests {
             ]));
 
             assert_eq!(
-                matched_rule(&program_matching("cohort", "eu-west"), &ctx),
+                matched_rule(&program_matching("order_source", "mobile_app"), &ctx),
                 Some("metadata_rule".to_string())
             );
             assert_eq!(

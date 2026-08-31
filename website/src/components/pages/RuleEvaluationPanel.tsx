@@ -14,6 +14,7 @@ import {
 } from '../../types/api'
 import { ChevronDown, ChevronUp, Code, Play, Plus, Trash2 } from 'lucide-react'
 
+import { Notice } from '../ui/Notice'
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -354,7 +355,7 @@ export function RuleEvaluationPanel({
 
         <CardBody className="space-y-3 !px-5 !py-4">
           {!merchantId && (
-            <p className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded px-3 py-2">
+            <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-3 py-2">
               Set a merchant ID in the top bar first.
             </p>
           )}
@@ -367,7 +368,7 @@ export function RuleEvaluationPanel({
 
           {activeAbTest && (
             <div className="flex items-start gap-2 px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200 dark:bg-amber-900/20 dark:border-amber-700/40">
-              <span className="text-amber-500 mt-0.5 shrink-0">⚠</span>
+              <span className="text-amber-700 mt-0.5 shrink-0">⚠</span>
               <p className="text-xs text-amber-700 dark:text-amber-300 leading-relaxed">
                 <span className="font-semibold">A/B experiment "{activeAbTest.name}" is active.</span>{' '}
                 Results reflect whichever arm is assigned to the simulated payment ID — this mirrors real traffic. Stop the experiment to see baseline routing.
@@ -378,11 +379,11 @@ export function RuleEvaluationPanel({
           {/* Parameters */}
           <div className="space-y-2">
             <div className="flex items-center gap-2 flex-wrap">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-[#4e5870]">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-[#78849a] leading-4">
                 Parameters
               </p>
               {prefillSourceName && (
-                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
+                <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[11px] font-medium bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-300 leading-4">
                   ⚗ Prefilled from: {prefillSourceName}
                 </span>
               )}
@@ -403,7 +404,7 @@ export function RuleEvaluationPanel({
                         routingKeyNames.map(name => <option key={name} value={name}>{name}</option>)
                       )}
                     </select>
-                    <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2.5 py-2.5 text-[11px] font-bold text-slate-300 dark:text-[#3a4258] select-none">=</span>
+                    <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2.5 py-2.5 text-[11px] font-bold text-slate-500 dark:text-[#3a4258] select-none leading-4">=</span>
                     {param.type === 'enum_variant' ? (
                       <select
                         value={param.value}
@@ -430,11 +431,11 @@ export function RuleEvaluationPanel({
                         className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none"
                       />
                     ) : (
-                      <span className="flex-1 px-3 py-2.5 text-sm text-slate-400 dark:text-[#3a4258] italic">see below</span>
+                      <span className="flex-1 px-3 py-2.5 text-sm text-slate-500 dark:text-[#78849a] italic">see below</span>
                     )}
                     <button
                       onClick={() => removeRuleParam(idx)}
-                      className="shrink-0 px-2.5 py-2.5 text-slate-300 dark:text-[#2a3040] hover:text-red-400 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="shrink-0 px-2.5 py-2.5 text-slate-500 dark:text-[#78849a] hover:text-red-600 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                     >
                       <Trash2 size={13} />
                     </button>
@@ -445,13 +446,13 @@ export function RuleEvaluationPanel({
                         placeholder="Metadata key"
                         value={param.metadataKey || ''}
                         onChange={e => updateRuleParamMetadataKey(idx, e.target.value)}
-                        className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:border-brand-500"
                       />
                       <input
                         placeholder="Metadata value"
                         value={param.value}
                         onChange={e => updateRuleParam(idx, 'value', e.target.value)}
-                        className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:ring-1 focus:ring-brand-500"
+                        className="flex-1 rounded-lg border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] px-3 py-2 text-sm text-slate-600 dark:text-[#a8b4c8] focus:outline-none focus:border-brand-500"
                       />
                     </div>
                   )}
@@ -461,7 +462,7 @@ export function RuleEvaluationPanel({
             <button
               onClick={addRuleParam}
               disabled={routingConfigUnavailable || routingKeysLoading || routingKeyNames.length === 0}
-              className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               <Plus size={12} /> Add Parameter
             </button>
@@ -469,13 +470,13 @@ export function RuleEvaluationPanel({
 
           {/* Fallback Gateways */}
           <div className="space-y-2">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-400 dark:text-[#4e5870]">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-[#78849a] leading-4">
               Fallback Gateways
             </p>
             <div className="space-y-1.5">
               {fallbackConnectors.map((connector, idx) => (
                 <div key={idx} className="group flex items-center gap-0 rounded-xl border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] overflow-hidden transition-shadow hover:shadow-sm">
-                  <span className="shrink-0 flex items-center justify-center w-8 self-stretch bg-slate-50 dark:bg-[#10131c] border-r border-slate-100 dark:border-[#1e2330] text-[10px] font-bold text-slate-300 dark:text-[#3a4258] select-none">
+                  <span className="shrink-0 flex items-center justify-center w-8 self-stretch bg-slate-50 dark:bg-[#10131c] border-r border-slate-100 dark:border-[#1e2330] text-[11px] font-bold text-slate-500 dark:text-[#3a4258] select-none leading-4">
                     {idx + 1}
                   </span>
                   <input
@@ -484,7 +485,7 @@ export function RuleEvaluationPanel({
                     onChange={e => updateFallbackConnector(idx, 'gateway_name', e.target.value)}
                     className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-[#c8d0de] focus:outline-none"
                   />
-                  <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2 py-2.5 text-[11px] font-bold text-slate-300 dark:text-[#3a4258] select-none">/</span>
+                  <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2 py-2.5 text-[11px] font-bold text-slate-500 dark:text-[#3a4258] select-none leading-4">/</span>
                   <input
                     placeholder="gateway id (optional)"
                     value={connector.gateway_id || ''}
@@ -493,7 +494,7 @@ export function RuleEvaluationPanel({
                   />
                   <button
                     onClick={() => removeFallbackConnector(idx)}
-                    className="shrink-0 px-2.5 py-2.5 text-slate-300 dark:text-[#2a3040] hover:text-red-400 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                    className="shrink-0 px-2.5 py-2.5 text-slate-500 dark:text-[#78849a] hover:text-red-600 dark:hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                   >
                     <Trash2 size={13} />
                   </button>
@@ -502,7 +503,7 @@ export function RuleEvaluationPanel({
             </div>
             <button
               onClick={addFallbackConnector}
-              className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-500 hover:bg-brand-50 dark:hover:bg-brand-500/10 transition-colors"
+              className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10 transition-colors"
             >
               <Plus size={12} /> Add Gateway
             </button>
@@ -512,13 +513,13 @@ export function RuleEvaluationPanel({
         <div className="border-t border-slate-200 dark:border-[#2a303a] px-5 py-4 space-y-3">
           <ErrorMessage error={error} />
           {setupNeeded && (
-            <div className="rounded-lg border border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10 px-3 py-2.5 text-xs text-amber-700 dark:text-amber-300">
+            <Notice tone="warning">
               <p className="font-semibold mb-1">Configure rule-based routing first</p>
-              <p className="mb-2">Rule evaluation needs an active rule-based strategy before it can return a policy decision.</p>
+              <p className="mb-2 max-w-[57ch]">Rule evaluation needs an active rule-based strategy before it can return a policy decision.</p>
               <Button size="sm" variant="secondary" onClick={() => navigate('/routing/rules')}>
                 Configure routing
               </Button>
-            </div>
+            </Notice>
           )}
           <Button
             onClick={runEvaluation}
@@ -555,7 +556,7 @@ export function RuleEvaluationPanel({
 
                 {ruleResult.output.type === 'single' && ruleResult.output.connector && (
                   <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-3">
-                    <p className="text-xs text-slate-400 mb-1">Selected gateway_name</p>
+                    <p className="text-xs text-slate-500 mb-1">Selected gateway_name</p>
                     <p className="text-lg font-semibold">{ruleResult.output.connector.gateway_name}</p>
                     {ruleResult.output.connector.gateway_id && (
                       <p className="text-xs text-slate-500">gateway_id: {ruleResult.output.connector.gateway_id}</p>
@@ -565,7 +566,7 @@ export function RuleEvaluationPanel({
 
                 {ruleResult.output.type === 'priority' && ruleResult.output.connectors && (
                   <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-3">
-                    <p className="text-xs text-slate-400 mb-2">Priority gateway_name list</p>
+                    <p className="text-xs text-slate-500 mb-2">Priority gateway_name list</p>
                     <div className="space-y-1">
                       {ruleResult.output.connectors.map((gw, idx) => (
                         <div key={idx} className="flex items-center gap-2 text-sm">
@@ -580,7 +581,7 @@ export function RuleEvaluationPanel({
 
                 {ruleResult.output.type === 'volume_split' && (
                   <div className="border-t border-slate-200 dark:border-[#1c1c24] pt-3">
-                    <p className="text-xs text-slate-400 mb-2">Volume Split Result</p>
+                    <p className="text-xs text-slate-500 mb-2">Volume Split Result</p>
                     <p className="text-sm text-slate-600">See Volume Split tab for detailed visualization.</p>
                   </div>
                 )}
@@ -612,8 +613,8 @@ export function RuleEvaluationPanel({
         ) : (
           <Card>
             <CardBody className="py-16 text-center">
-              <Play size={32} className="text-gray-300 mx-auto mb-3" />
-              <p className="text-slate-400 text-sm">
+              <Play size={32} className="text-gray-500 mx-auto mb-3" />
+              <p className="text-slate-500 text-sm">
                 Configure rule parameters and click "Evaluate Rules" to test routing.
               </p>
             </CardBody>

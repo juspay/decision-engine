@@ -5,6 +5,7 @@ import { Card, CardBody, CardHeader } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
 
+import { PageHeading } from '../components/ui/PageHeading'
 function getPasswordPolicyError(password: string): string | null {
   if (password.length < 10) return 'Use at least 10 characters.'
   if (!/[A-Z]/.test(password)) return 'Add at least one uppercase letter.'
@@ -55,13 +56,10 @@ export function AccountPage() {
     <div className="mx-auto max-w-lg px-4 py-10">
       <div className="mb-8 flex items-center gap-3">
         <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-brand-500/10">
-          <KeyRound size={20} className="text-brand-500" />
+          <KeyRound size={20} className="text-brand-600" />
         </div>
         <div>
-          <h1 className="text-xl font-semibold tracking-tight text-slate-950 dark:text-white">
-            Account
-          </h1>
-          <p className="text-sm text-slate-500 dark:text-[#8a94a7]">Manage your account security</p>
+          <PageHeading title="Account" description="Manage your account security" />
         </div>
       </div>
 
@@ -136,12 +134,12 @@ function PasswordField({
           value={value}
           onChange={e => onChange(e.target.value)}
           required
-          className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 pr-11 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-white"
+          className="h-12 w-full rounded-xl border border-slate-200 bg-white px-4 pr-11 text-sm text-slate-950 outline-none transition placeholder:text-slate-500 focus:border-brand-500 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-white"
         />
         <button
           type="button"
           onClick={onToggleShow}
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 transition-colors hover:text-slate-700 dark:hover:text-slate-200"
+          className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 transition-colors hover:text-slate-700 dark:hover:text-slate-200"
           aria-label={show ? 'Hide password' : 'Show password'}
         >
           {show ? <Eye size={17} /> : <EyeOff size={17} />}

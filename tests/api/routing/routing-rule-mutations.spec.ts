@@ -86,6 +86,60 @@ test.describe('Routing rule mutations (API)', () => {
     expect(all.body.some((r: any) => r.id === ruleId)).toBe(true)
   })
 
+  test('evaluating after deactivation answers with the caller\'s fallback', async ({ api, merchant }) => {
+    const m = merchant.id
+    const created = await api.createRoutingAlgorithm(
+      factory.singleRoutingPayload(m, { name: factory.ruleName('mutate_eval_off'), gateway: 'stripe' }),
+    )
+    const ruleId = created.body.rule_id
+    await api.activateRoutingAlgorithm(m, ruleId)
+
+    await api.raw('POST', '/routing/deactivate', {
+      body: { created_by: m, routing_algorithm_id: ruleId },
+    })
+
+    const evaluated = await api.evaluateRoutingAlgorithm(
+      factory.ruleEvaluatePayload(m, {}, { fallback_output: [factory.gatewayConnector('adyen')] }),
+      { failOnStatusCode: false },
+    )
+
+    // A merchant who switched their rules off has an answer coming — route by the fallback —
+    // rather than an error a caller would read as "engine unavailable" and paper over with its
+    // own stale copy of the rule.
+    expect(evaluated.status).toBe(200)
+    expect(evaluated.body.status).toBe('no_active_algorithm')
+    expect(evaluated.body.output.type).toBe('priority')
+    expect(evaluated.body.evaluated_output.map((c: any) => c.gateway_name)).toEqual(['adyen'])
+    expect(evaluated.body.eligible_connectors.map((c: any) => c.gateway_name)).toEqual(['adyen'])
+    // The rule the merchant deactivated is gone from the answer entirely.
+    expect(evaluated.body.evaluated_output.map((c: any) => c.gateway_name)).not.toContain('stripe')
+  })
+
+  test('evaluating for a merchant with no rules at all answers with the fallback', async ({ api, merchant }) => {
+    // Indistinguishable to the caller from a profile whose rules are all switched off: both mean
+    // "route by your fallback", so both are answered the same way.
+    const evaluated = await api.evaluateRoutingAlgorithm(
+      factory.ruleEvaluatePayload(merchant.id, {}, {
+        fallback_output: [factory.gatewayConnector('adyen')],
+      }),
+      { failOnStatusCode: false },
+    )
+
+    expect(evaluated.status).toBe(200)
+    expect(evaluated.body.status).toBe('no_active_algorithm')
+    expect(evaluated.body.evaluated_output.map((c: any) => c.gateway_name)).toEqual(['adyen'])
+  })
+
+  test('evaluating with no rules and no fallback still errors', async ({ api, merchant }) => {
+    // Nothing to answer with -- a 200 carrying an empty output would read as a decision to nowhere.
+    const evaluated = await api.evaluateRoutingAlgorithm(
+      factory.ruleEvaluatePayload(merchant.id, {}, {}),
+      { failOnStatusCode: false },
+    )
+
+    expect(evaluated.status).toBe(400)
+  })
+
   test('deleting an inactive rule removes it from the list', async ({ api, merchant }) => {
     const m = merchant.id
     const created = await api.createRoutingAlgorithm(

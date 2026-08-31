@@ -106,6 +106,50 @@ pub fn get_keys_by_type(config: &TomlConfig) -> HashMap<String, Vec<String>> {
     result
 }
 
+/// Coerces condition values to the representation their key's configured data type expects.
+///
+/// Hyperswitch's rule migration serializes numeric-looking literals as `number` values even for
+/// keys this service declares as `str_value` (`card_bin`, `extended_card_bin`), so those rules
+/// would be rejected by [`validate_routing_rule`] and — if stored as-is — could never match at
+/// evaluation time, since the interpreter only compares `str_value` against `str_value`. Any
+/// length/regex constraints on the key still apply to the coerced string during validation.
+pub fn normalize_rule_value_types(algorithm: &mut StaticRoutingAlgorithm, config: &TomlConfig) {
+    let StaticRoutingAlgorithm::Advanced(program) = algorithm else {
+        return;
+    };
+    for rule in &mut program.rules {
+        for statement in &mut rule.statements {
+            normalize_statement_value_types(statement, config);
+        }
+    }
+}
+
+fn normalize_statement_value_types(statement: &mut IfStatement, config: &TomlConfig) {
+    for condition in &mut statement.condition {
+        normalize_condition_value_type(condition, config);
+    }
+    if let Some(nested) = &mut statement.nested {
+        for nested_statement in nested {
+            normalize_statement_value_types(nested_statement, config);
+        }
+    }
+}
+
+fn normalize_condition_value_type(condition: &mut Comparison, config: &TomlConfig) {
+    let is_str_value_key = config
+        .keys
+        .keys
+        .get(&condition.lhs)
+        .is_some_and(|key_config| key_config.data_type == KeyDataType::StrValue);
+    if !is_str_value_key {
+        return;
+    }
+
+    if let ValueType::Number(number) = &condition.value {
+        condition.value = ValueType::StrValue(number.to_string());
+    }
+}
+
 pub fn validate_routing_rule(
     rule: &RoutingRule,
     config: &Option<TomlConfig>,
@@ -546,5 +590,169 @@ pub fn validate_string_value(
         Ok(())
     } else {
         Err(errors.join("; "))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::euclid::types::KeysConfig;
+    use serde_json::json;
+    use std::collections::BTreeMap;
+
+    fn key_config(data_type: KeyDataType) -> KeyConfig {
+        KeyConfig {
+            data_type,
+            values: None,
+            min_value: None,
+            max_value: None,
+            min_length: None,
+            max_length: None,
+            exact_length: None,
+            regex: None,
+        }
+    }
+
+    fn routing_config() -> TomlConfig {
+        let mut keys = BTreeMap::new();
+        keys.insert(
+            "card_bin".to_string(),
+            KeyConfig {
+                exact_length: Some(6),
+                regex: Some("^[0-9]{6}$".to_string()),
+                ..key_config(KeyDataType::StrValue)
+            },
+        );
+        keys.insert(
+            "extended_card_bin".to_string(),
+            KeyConfig {
+                exact_length: Some(8),
+                regex: Some("^[0-9]{8}$".to_string()),
+                ..key_config(KeyDataType::StrValue)
+            },
+        );
+        keys.insert("amount".to_string(), key_config(KeyDataType::Integer));
+        TomlConfig {
+            keys: KeysConfig { keys },
+        }
+    }
+
+    /// A rule in the shape Hyperswitch's migration sends: BIN conditions carrying `number`
+    /// literals for keys this service declares as `str_value`.
+    fn migrated_rule(card_bin_value: serde_json::Value) -> RoutingRule {
+        serde_json::from_value(json!({
+            "name": "migrated rule",
+            "created_by": "merchant_1",
+            "algorithm": {
+                "type": "advanced",
+                "data": {
+                    "globals": {},
+                    "default_selection": {
+                        "priority": [{"gateway_name": "stripe", "gateway_id": null}]
+                    },
+                    "metadata": null,
+                    "rules": [{
+                        "name": "rule_1",
+                        "routing_type": "priority",
+                        "output": {"priority": [{"gateway_name": "adyen", "gateway_id": null}]},
+                        "statements": [{
+                            "condition": [
+                                {
+                                    "lhs": "card_bin",
+                                    "comparison": "equal",
+                                    "value": card_bin_value,
+                                    "metadata": {}
+                                },
+                                {
+                                    "lhs": "amount",
+                                    "comparison": "greater_than",
+                                    "value": {"type": "number", "value": 100},
+                                    "metadata": {}
+                                }
+                            ],
+                            "nested": [{
+                                "condition": [{
+                                    "lhs": "extended_card_bin",
+                                    "comparison": "equal",
+                                    "value": {"type": "number", "value": 41111111u64},
+                                    "metadata": {}
+                                }],
+                                "nested": null
+                            }]
+                        }]
+                    }]
+                }
+            }
+        }))
+        .expect("migrated rule payload should deserialize")
+    }
+
+    #[test]
+    fn normalize_coerces_numbers_to_strings_for_str_value_keys() {
+        let mut rule = migrated_rule(json!({"type": "number", "value": 411111}));
+
+        normalize_rule_value_types(&mut rule.algorithm, &routing_config());
+
+        let StaticRoutingAlgorithm::Advanced(program) = &rule.algorithm else {
+            panic!("expected advanced algorithm");
+        };
+        let statement = &program.rules[0].statements[0];
+        assert_eq!(
+            statement.condition[0].value,
+            ValueType::StrValue("411111".to_string())
+        );
+        // Integer-typed keys keep their numeric values.
+        assert_eq!(statement.condition[1].value, ValueType::Number(100));
+        // Nested statements are normalized too.
+        let nested = statement.nested.as_ref().expect("nested statements");
+        assert_eq!(
+            nested[0].condition[0].value,
+            ValueType::StrValue("41111111".to_string())
+        );
+    }
+
+    #[test]
+    fn migrated_rule_with_numeric_bins_passes_validation_after_normalization() {
+        let mut rule = migrated_rule(json!({"type": "number", "value": 411111}));
+        let config = Some(routing_config());
+
+        let before = validate_routing_rule(&rule, &config).expect("validation should run");
+        assert!(!before.is_valid);
+        assert!(before
+            .to_error_message()
+            .contains("expected str_value, got number"));
+
+        normalize_rule_value_types(&mut rule.algorithm, config.as_ref().expect("config"));
+
+        let after = validate_routing_rule(&rule, &config).expect("validation should run");
+        assert!(after.is_valid, "unexpected errors: {:?}", after.errors);
+    }
+
+    #[test]
+    fn coerced_values_are_still_checked_against_key_constraints() {
+        // A 5-digit BIN is invalid regardless of representation; coercion must not mask that.
+        let mut rule = migrated_rule(json!({"type": "number", "value": 41111}));
+        let config = Some(routing_config());
+
+        normalize_rule_value_types(&mut rule.algorithm, config.as_ref().expect("config"));
+
+        let result = validate_routing_rule(&rule, &config).expect("validation should run");
+        assert!(!result.is_valid);
+        assert!(result.to_error_message().contains("expected 6 characters"));
+    }
+
+    #[test]
+    fn normalize_leaves_str_value_conditions_untouched() {
+        let mut rule = migrated_rule(json!({"type": "str_value", "value": "411111"}));
+
+        normalize_rule_value_types(&mut rule.algorithm, &routing_config());
+
+        let StaticRoutingAlgorithm::Advanced(program) = &rule.algorithm else {
+            panic!("expected advanced algorithm");
+        };
+        assert_eq!(
+            program.rules[0].statements[0].condition[0].value,
+            ValueType::StrValue("411111".to_string())
+        );
     }
 }

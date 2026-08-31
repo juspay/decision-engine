@@ -1,4 +1,4 @@
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
 import { useEffect, useState } from 'react'
 import { AnalyticsPage } from './components/pages/AnalyticsPage'
 import { DecisionExplorerPage } from './components/pages/DecisionExplorerPage'
@@ -6,6 +6,8 @@ import { DecisionSimulatorPage } from './components/pages/DecisionSimulatorPage'
 import { DebitRoutingPage } from './components/pages/DebitRoutingPage'
 import { EuclidRulesPage } from './components/pages/EuclidRulesPage'
 import { VolumeContractsPage } from './components/pages/VolumeContractsPage'
+import { EuclidRuleBuilderPage } from './components/pages/EuclidRuleBuilderPage'
+import { VolumeSplitBuilderPage } from './components/pages/VolumeSplitBuilderPage'
 import { OverviewPage } from './components/pages/OverviewPage'
 import { PaymentAuditPage } from './components/pages/PaymentAuditPage'
 import { RoutingEventsPage } from './components/pages/RoutingEventsPage'
@@ -27,6 +29,7 @@ import { signupEnabled, simulatorEnabled } from './lib/appConfig'
 import { useAuthStore } from './store/authStore'
 import { useMerchantStore } from './store/merchantStore'
 import { apiPost } from './lib/api'
+import { stampDashboardHandoffScope, takeDashboardRoute } from './lib/dashboardHandoff'
 
 interface ExchangeResponse {
   token: string
@@ -36,13 +39,17 @@ interface ExchangeResponse {
   role: string
 }
 
-// Module-scoped guard: the one-time SSO code must be exchanged exactly once, even under
-// React StrictMode's double-invoked effects (the code is single-use — a second exchange 401s).
-let hsSsoExchangeStarted = false
+// The one-time SSO code must be exchanged exactly once, even under React StrictMode's
+// double-invoked effects (the code is single-use — a second exchange 401s). Holding the in-flight
+// promise rather than a boolean matters: with a boolean, StrictMode's second effect run took the
+// "already started" branch and opened the gate while the exchange was still in flight, so <Routes>
+// mounted with no token, AuthGuard replaced the URL with /login, and the deep-linked path was lost.
+let hsSsoExchange: Promise<ExchangeResponse | null> | null = null
 
 export default function App() {
   const setAuth = useAuthStore((s) => s.setAuth)
   const setMerchantId = useMerchantStore((s) => s.setMerchantId)
+  const navigate = useNavigate()
   // Hold the app on a loader while an SSO `?code=` is being exchanged. Without this, <Routes>
   // (and AuthGuard) render immediately; AuthGuard's child effect navigates to /login and strips
   // the code from the URL before this parent effect can read it, so the exchange never fires.
@@ -51,48 +58,66 @@ export default function App() {
   )
 
   useEffect(() => {
-    const params = new URLSearchParams(window.location.search)
-    const code = params.get('code')
-    if (!code || hsSsoExchangeStarted) {
+    const code = new URLSearchParams(window.location.search).get('code')
+    if (!code) {
       setExchangingCode(false)
       return
     }
-    hsSsoExchangeStarted = true
 
     const stripCode = () => {
-      // Strip the code from the URL so it doesn't linger in the address bar or history.
+      // Strip the code from the URL so it doesn't linger in the address bar or history. Carry the
+      // existing history state over — it holds React Router's {usr, key, idx}, and nulling it
+      // corrupts the router's history bookkeeping for the rest of the session.
+      const params = new URLSearchParams(window.location.search)
       params.delete('code')
       const newSearch = params.toString()
       const newUrl = window.location.pathname + (newSearch ? `?${newSearch}` : '')
-      window.history.replaceState(null, '', newUrl)
+      window.history.replaceState(window.history.state, '', newUrl)
     }
 
-    void (async () => {
-      try {
-        // Redeem the one-time code for a session token. The token is only ever returned in this
-        // POST response body — it never appears in the URL.
-        const res = await apiPost<ExchangeResponse>(
-          '/auth/admin/merchant-token/exchange',
-          { code },
-        )
-        const merchantId = res.merchant_id ?? ''
-        setAuth(res.token, {
-          userId: res.user_id ?? '',
-          email: res.email ?? '',
-          merchantId,
-          role: res.role ?? 'admin',
-          isRedirectSession: true,
-        })
-        if (merchantId) setMerchantId(merchantId)
-      } catch {
+    // Redeem the one-time code for a session token. The token is only ever returned in this POST
+    // response body — it never appears in the URL.
+    if (!hsSsoExchange) {
+      hsSsoExchange = apiPost<ExchangeResponse>('/auth/admin/merchant-token/exchange', { code })
         // Invalid / expired / already-used code — leave the user unauthenticated and let
         // AuthGuard redirect to login.
+        .catch(() => null)
+    }
+
+    // Both StrictMode runs await the same exchange; only the mounted one commits its result.
+    let active = true
+    void hsSsoExchange.then((res) => {
+      if (!active) return
+      // Whatever happens in here, the loader has to come down and the spent code has to leave the
+      // URL — a throw that skipped those would strand the tab on "signing you in" with no way back.
+      try {
+        if (res) {
+          const merchantId = res.merchant_id ?? ''
+          setAuth(res.token, {
+            userId: res.user_id ?? '',
+            email: res.email ?? '',
+            merchantId,
+            role: res.role ?? 'admin',
+            isRedirectSession: true,
+          })
+          if (merchantId) {
+            setMerchantId(merchantId)
+            stampDashboardHandoffScope(merchantId)
+          }
+        }
+        // Restore where the dashboard meant to land. This runs before <Routes> mounts, so AuthGuard
+        // never sees the pre-navigation location and AuthPage never gets to bounce us to "/".
+        const route = res ? takeDashboardRoute() : null
+        if (route) navigate(route, { replace: true })
       } finally {
         stripCode()
         setExchangingCode(false)
       }
-    })()
-  }, [setAuth, setMerchantId])
+    })
+    return () => {
+      active = false
+    }
+  }, [setAuth, setMerchantId, navigate])
 
   if (exchangingCode) {
     return (
@@ -116,7 +141,11 @@ export default function App() {
           <Route path="routing" element={<RoutingHubPage />} />
           <Route path="routing/sr" element={<SRRoutingPage />} />
           <Route path="routing/rules" element={<EuclidRulesPage />} />
+          <Route path="routing/rules/new" element={<EuclidRuleBuilderPage />} />
+          <Route path="routing/rules/:id/edit" element={<EuclidRuleBuilderPage />} />
           <Route path="routing/volume" element={<VolumeSplitPage />} />
+          <Route path="routing/volume/new" element={<VolumeSplitBuilderPage />} />
+          <Route path="routing/volume/:id/edit" element={<VolumeSplitBuilderPage />} />
           <Route path="routing/debit" element={<DebitRoutingPage />} />
           <Route path="routing/volume-contracts" element={<VolumeContractsPage />} />
           {/* Cost Estimation moved into the Multi Objective page as a tab; keep the

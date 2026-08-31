@@ -81,7 +81,7 @@ export function ForgotPasswordPage() {
             {sentMessage ? (
               <div className="space-y-6 text-center">
                 <div className="mx-auto flex h-16 w-16 items-center justify-center rounded-full bg-emerald-500/10">
-                  <CheckCircle size={28} className="text-emerald-500" />
+                  <CheckCircle size={28} className="text-emerald-700" />
                 </div>
                 <div className="space-y-2">
                   <h1 className="text-2xl font-semibold tracking-tight text-slate-950 dark:text-white">
@@ -102,7 +102,7 @@ export function ForgotPasswordPage() {
                   <h1 className="text-2xl font-semibold tracking-tight text-slate-950 dark:text-white sm:text-[1.75rem]">
                     Forgot your password?
                   </h1>
-                  <p className="mt-3 text-sm leading-6 text-slate-500 dark:text-[#8a94a7]">
+                  <p className="mt-3 text-sm leading-6 text-slate-500 dark:text-[#8a94a7] mx-auto max-w-[57ch]">
                     Enter the email tied to your account and we&rsquo;ll send you a link to reset your
                     password.
                   </p>
@@ -114,7 +114,7 @@ export function ForgotPasswordPage() {
                       Email
                     </span>
                     <div className="relative">
-                      <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 dark:text-[#667085]">
+                      <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 dark:text-[#78849a]">
                         <Mail size={16} />
                       </span>
                       <input
@@ -124,7 +124,7 @@ export function ForgotPasswordPage() {
                         placeholder="name@company.com"
                         required
                         autoFocus
-                        className="h-14 w-full rounded-2xl border border-slate-200 bg-white pl-12 pr-4 text-sm text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.12)] outline-none transition placeholder:text-slate-400 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-white dark:shadow-none"
+                        className="h-14 w-full rounded-2xl border border-slate-200 bg-white pl-12 pr-4 text-sm text-slate-950 shadow-[0_12px_30px_-24px_rgba(15,23,42,0.12)] outline-none transition placeholder:text-slate-500 focus:border-brand-500 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-white dark:shadow-none"
                       />
                     </div>
                   </label>
@@ -167,7 +167,7 @@ export function ForgotPasswordPage() {
           </div>
         </div>
 
-        <footer className="px-6 py-5 text-center text-xs text-slate-400 dark:text-[#525866]">
+        <footer className="px-6 py-5 text-center text-xs text-slate-500 dark:text-[#78849a]">
           Juspay Decision Engine
         </footer>
       </div>
