@@ -264,3 +264,22 @@ pub fn evaluate_output(output: &Output) -> RoutingResult<Vec<ConnectorInfo>> {
         Output::VolumeSplitPriority(splits) => perform_volume_split_priority(splits.clone()),
     }
 }
+
+pub fn apply_default_fallback(
+    ir: &mut types::BackendOutput,
+    fallback_output: Option<&[ConnectorInfo]>,
+) {
+    if ir.rule_name.is_some() {
+        return;
+    }
+
+    let Some(fallback) = fallback_output.filter(|connectors| !connectors.is_empty()) else {
+        return;
+    };
+
+    crate::logger::debug!("Default fallback triggered: Overriding with fallback connector");
+
+    ir.rule_name = Some("default_fallback".to_string());
+    ir.output = Output::Priority(fallback.to_vec());
+    ir.evaluated_output = fallback.to_vec();
+}
