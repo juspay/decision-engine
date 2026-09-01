@@ -6,7 +6,7 @@ use crate::{
     error::ApiErrorResponse,
     euclid::{
         ast::{ConnectorInfo, Output, ValueType},
-        interpreter::{apply_default_fallback, evaluate_output, InterpreterBackend},
+        interpreter::{evaluate_output, InterpreterBackend},
         pm_filter_graph,
         types::{
             ActivateRoutingConfigRequest, Context, DeactivateRoutingConfigRequest,
@@ -15,8 +15,8 @@ use crate::{
             RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
         },
         utils::{
-            generate_random_id, is_valid_enum_value, normalize_rule_value_types,
-            validate_routing_rule,
+            apply_default_fallback, generate_random_id, is_valid_enum_value,
+            normalize_rule_value_types, validate_routing_rule,
         },
     },
     types::service_configuration::{find_config_by_name, insert_config, update_config},

@@ -11,8 +11,9 @@ use crate::{
     euclid::{
         ast::{ConnectorInfo, Output},
         errors::EuclidErrors,
-        interpreter::{apply_default_fallback, evaluate_output, InterpreterBackend},
+        interpreter::{evaluate_output, InterpreterBackend},
         types::{Context, RoutingAlgorithm, RoutingRequest, StaticRoutingAlgorithm},
+        utils::apply_default_fallback,
     },
 };
 use diesel::{associations::HasTable, ExpressionMethods};

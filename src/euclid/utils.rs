@@ -1,8 +1,13 @@
-use super::ast::{Comparison, ComparisonType, IfStatement, Rule, ValueType};
+use super::ast::{
+    Comparison, ComparisonType, ConnectorInfo, IfStatement, Output, Rule, ValueType, VolumeSplit,
+};
 use super::errors::{EuclidErrors, ValidationErrorDetails};
-use super::types::{KeyDataType, StaticRoutingAlgorithm};
+use super::interpreter::{RoutingError, RoutingResult};
+use super::types::{BackendOutput, KeyDataType, StaticRoutingAlgorithm};
 use crate::error::ContainerError;
 use crate::euclid::types::{FieldValidationRules, KeyConfig, RoutingRule, TomlConfig};
+use rand::distributions::WeightedIndex;
+use rand::prelude::*;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -555,6 +560,36 @@ pub fn validate_string_value(
         Ok(())
     } else {
         Err(errors.join("; "))
+    }
+}
+
+pub(crate) fn sample_split_winner_first<T>(
+    mut splits: Vec<VolumeSplit<T>>,
+) -> RoutingResult<Vec<T>> {
+    let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
+    let weighted_index =
+        WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
+    let mut rng = rand::thread_rng();
+    let idx = weighted_index.sample(&mut rng);
+
+    if idx >= splits.len() {
+        return Err(RoutingError::VolumeSplitFailed);
+    }
+    let winner = splits.remove(idx);
+    splits.insert(0, winner);
+
+    Ok(splits.into_iter().map(|split| split.output).collect())
+}
+
+pub fn apply_default_fallback(ir: &mut BackendOutput, fallback_output: Option<&[ConnectorInfo]>) {
+    if ir.rule_name.is_none() {
+        if let Some(fallback) = fallback_output.filter(|connectors| !connectors.is_empty()) {
+            crate::logger::debug!("Default fallback triggered: Overriding with fallback connector");
+
+            ir.rule_name = Some("default_fallback".to_string());
+            ir.output = Output::Priority(fallback.to_vec());
+            ir.evaluated_output = fallback.to_vec();
+        }
     }
 }
 

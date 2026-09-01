@@ -1,7 +1,6 @@
 use crate::euclid::ast::{Output, VolumeSplit};
+use crate::euclid::utils::sample_split_winner_first;
 use crate::euclid::{ast, types};
-use rand::distributions::WeightedIndex;
-use rand::prelude::*;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -218,23 +217,7 @@ impl fmt::Display for RoutingError {
     }
 }
 impl Error for RoutingError {}
-type RoutingResult<T> = Result<T, RoutingError>;
-
-fn sample_split_winner_first<T>(mut splits: Vec<VolumeSplit<T>>) -> RoutingResult<Vec<T>> {
-    let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
-    let weighted_index =
-        WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
-    let mut rng = rand::thread_rng();
-    let idx = weighted_index.sample(&mut rng);
-
-    if idx >= splits.len() {
-        return Err(RoutingError::VolumeSplitFailed);
-    }
-    let winner = splits.remove(idx);
-    splits.insert(0, winner);
-
-    Ok(splits.into_iter().map(|split| split.output).collect())
-}
+pub(crate) type RoutingResult<T> = Result<T, RoutingError>;
 
 pub fn perform_volume_split(
     splits: Vec<VolumeSplit<ConnectorInfo>>,
@@ -262,20 +245,5 @@ pub fn evaluate_output(output: &Output) -> RoutingResult<Vec<ConnectorInfo>> {
         Output::Priority(connectors) => Ok(connectors.clone()),
         Output::VolumeSplit(splits) => perform_volume_split(splits.clone()),
         Output::VolumeSplitPriority(splits) => perform_volume_split_priority(splits.clone()),
-    }
-}
-
-pub fn apply_default_fallback(
-    ir: &mut types::BackendOutput,
-    fallback_output: Option<&[ConnectorInfo]>,
-) {
-    if ir.rule_name.is_none() {
-        if let Some(fallback) = fallback_output.filter(|connectors| !connectors.is_empty()) {
-            crate::logger::debug!("Default fallback triggered: Overriding with fallback connector");
-
-            ir.rule_name = Some("default_fallback".to_string());
-            ir.output = Output::Priority(fallback.to_vec());
-            ir.evaluated_output = fallback.to_vec();
-        }
     }
 }
