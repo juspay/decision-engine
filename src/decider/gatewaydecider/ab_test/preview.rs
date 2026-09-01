@@ -48,11 +48,12 @@ pub async fn evaluate_arm(
                 ))
             })?;
         let out_enum = Output::Single(chosen.clone());
-        let evaluated = evaluate_output(&out_enum, payload.payment_id.as_deref()).map_err(|_| {
-            ContainerError::from(EuclidErrors::FailedToEvaluateOutput(
-                "ab_test sr routing arm evaluation".into(),
-            ))
-        })?;
+        let evaluated =
+            evaluate_output(&out_enum, payload.payment_id.as_deref()).map_err(|_| {
+                ContainerError::from(EuclidErrors::FailedToEvaluateOutput(
+                    "ab_test sr routing arm evaluation".into(),
+                ))
+            })?;
         return Ok(AbTestArmOutput {
             output: out_enum,
             evaluated_output: evaluated,
@@ -115,13 +116,14 @@ pub async fn evaluate_arm(
         }
         StaticRoutingAlgorithm::Advanced(program) => {
             let ctx = Context::new(payload.parameters.clone());
-            let mut ir = InterpreterBackend::eval_program(&program, &ctx, payload.payment_id.as_deref())
-                .map_err(|e| {
-                ContainerError::from(EuclidErrors::InvalidRequest(format!(
-                    "AB test arm interpreter error: {:?}",
-                    e.error_type
-                )))
-            })?;
+            let mut ir =
+                InterpreterBackend::eval_program(&program, &ctx, payload.payment_id.as_deref())
+                    .map_err(|e| {
+                        ContainerError::from(EuclidErrors::InvalidRequest(format!(
+                            "AB test arm interpreter error: {:?}",
+                            e.error_type
+                        )))
+                    })?;
             if default_output_present && ir.output == program.default_selection {
                 if let Some(fallback) = payload.fallback_output.clone() {
                     ir.rule_name = Some("default_fallback".to_string());

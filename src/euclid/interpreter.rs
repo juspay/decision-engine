@@ -302,9 +302,7 @@ pub fn evaluate_output(output: &Output, seed: Option<&str>) -> RoutingResult<Vec
         Output::Single(connector) => Ok(vec![connector.clone()]),
         Output::Priority(connectors) => Ok(connectors.clone()),
         Output::VolumeSplit(splits) => perform_volume_split(splits.clone(), seed),
-        Output::VolumeSplitPriority(splits) => {
-            perform_volume_split_priority(splits.clone(), seed)
-        }
+        Output::VolumeSplitPriority(splits) => perform_volume_split_priority(splits.clone(), seed),
     }
 }
 
