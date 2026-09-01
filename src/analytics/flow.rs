@@ -88,7 +88,11 @@ pub enum FlowType {
     RoutingEvaluateError,
     RoutingCreateAbTest,
     RoutingEvaluateAbTest,
+    RoutingCreateVolumeContract,
+    RoutingEvaluateVolumeContract,
     AutopilotCalibration,
+    /// A volume-commitment forecast run: the plan snapshot, including eliminations.
+    VolumeCommitmentForecast,
 }
 
 impl FlowType {
@@ -155,7 +159,10 @@ impl FlowType {
             Self::RoutingEvaluateError => "routing_evaluate_error",
             Self::RoutingCreateAbTest => "routing_create_ab_test",
             Self::RoutingEvaluateAbTest => "routing_evaluate_ab_test",
+            Self::RoutingCreateVolumeContract => "routing_create_volume_contract",
+            Self::RoutingEvaluateVolumeContract => "routing_evaluate_volume_contract",
             Self::AutopilotCalibration => "autopilot_calibration",
+            Self::VolumeCommitmentForecast => "volume_commitment_forecast",
         }
     }
 }
@@ -384,6 +391,7 @@ pub fn refine_routing_create_flow_type(algorithm: &StaticRoutingAlgorithm) -> Fl
         StaticRoutingAlgorithm::VolumeSplit(_) => FlowType::RoutingCreateVolumeSplit,
         StaticRoutingAlgorithm::Advanced(_) => FlowType::RoutingCreateAdvanced,
         StaticRoutingAlgorithm::AbTest(_) => FlowType::RoutingCreateAbTest,
+        StaticRoutingAlgorithm::VolumeContract(_) => FlowType::RoutingCreateVolumeContract,
     }
 }
 
@@ -394,6 +402,7 @@ pub fn refine_routing_evaluate_flow_type(algorithm: &StaticRoutingAlgorithm) -> 
         StaticRoutingAlgorithm::VolumeSplit(_) => FlowType::RoutingEvaluateVolumeSplit,
         StaticRoutingAlgorithm::Advanced(_) => FlowType::RoutingEvaluateAdvanced,
         StaticRoutingAlgorithm::AbTest(_) => FlowType::RoutingEvaluateAbTest,
+        StaticRoutingAlgorithm::VolumeContract(_) => FlowType::RoutingEvaluateVolumeContract,
     }
 }
 

@@ -12,6 +12,7 @@ export interface DecideGatewayResponse {
   is_scheduled_outage: boolean
   debit_routing_output?: DebitRoutingOutput | null
   multi_objective_info?: MultiObjectiveInfo | null
+  volume_steer_info?: VolumeSteerInfo | null
   latency: number | null
 }
 
@@ -108,6 +109,56 @@ export type RoutingAlgorithmData =
   | GatewayConnector               // single
   | EuclidAlgorithmData            // advanced
   | ABTestAlgorithmData            // ab_test
+  | VolumeContractConfig           // volume_contract
+
+// ── Volume-commitment contracts (algorithm_for: 'volume_commitment') ──────────
+// Amounts are sent as integers or decimal strings; the backend canonicalizes to
+// integer minor currency units (and tolerance to basis points) on write.
+export type VolumeContractAmount = number | string
+
+export interface VolumeContractTier {
+  kind: 'retroactive' | 'marginal'
+  rate: { rebate_bps: number } | { rate_bps: number }
+  threshold: VolumeContractAmount
+  targeted?: boolean
+  rebate_lag_days?: number
+  rebate_settlement?: 'cash' | 'credit_note'
+}
+
+export type VolumeContractReward =
+  | { kind: 'flat'; value: { flat_amount: VolumeContractAmount } }
+  | { kind: 'percentage'; value: { rebate_bps: number } }
+
+export type VolumeContractTerms =
+  | { archetype: 'lumpsum'; terms: { target: VolumeContractAmount; reward: VolumeContractReward } }
+  | { archetype: 'min_commitment'; terms: { floor: VolumeContractAmount; reward: VolumeContractReward; overage_rate_bps?: number } }
+  | { archetype: 'tiered'; terms: { tiers: VolumeContractTier[] } }
+
+export type VolumeContract = {
+  id: string
+  connector: string
+  status?: 'active' | 'inactive'
+  billing_cycle: {
+    type: 'calendar_month' | 'calendar_quarter' | 'calendar_year' | 'test_minutes'
+    anchor: number
+    timezone: string
+    proration?: 'full_period'
+  }
+} & VolumeContractTerms
+
+export interface VolumeContractConfig {
+  schema_version?: number
+  routing_mode: 'pace_guarded' | 'volume_commitment'
+  /** Write accepts "5pp" / "550bps" / plain bps; stored documents read back as tolerance_bps. */
+  tolerance_bps?: number
+  tolerance?: string
+  metric?: 'gmv' | 'volume'
+  currency: { denomination: string; amount_units?: 'major' | 'minor' }
+  expected_daily_traffic: VolumeContractAmount
+  forecast_interval_secs?: number
+  steering_interval_secs?: number
+  volume_contracts: VolumeContract[]
+}
 
 export interface EuclidRule {
   name: string
@@ -151,12 +202,12 @@ export interface RoutingAlgorithm {
   modified_at?: string
   // Backend returns algorithm_data, not algorithm
   algorithm_data?: {
-    type: 'priority' | 'volume_split' | 'single' | 'advanced' | 'ab_test'
+    type: 'priority' | 'volume_split' | 'single' | 'advanced' | 'ab_test' | 'volume_contract'
     data: RoutingAlgorithmData
   }
   // For convenience, map algorithm_data to algorithm in the component
   algorithm?: {
-    type: 'priority' | 'volume_split' | 'single' | 'advanced' | 'ab_test'
+    type: 'priority' | 'volume_split' | 'single' | 'advanced' | 'ab_test' | 'volume_contract'
     data: RoutingAlgorithmData
   }
 }
@@ -512,8 +563,6 @@ export interface PaymentAuditSummary {
   first_seen_ms: number
   last_seen_ms: number
   event_count: number
-  /** Distinct evaluation calls behind event_count per-entry events; absent on older servers. */
-  call_count?: number
   latest_status?: string | null
   latest_gateway?: string | null
   latest_stage?: string | null
@@ -625,4 +674,172 @@ export interface PaymentAuditResponse {
   total_failure: number
   results: PaymentAuditSummary[]
   timeline: PaymentAuditEvent[]
+}
+
+/** One PSP's pacing state against its volume commitment. */
+export interface PspPacing {
+  connector: string
+  goal: number
+  achieved: number
+  gap: number
+  pace: number
+  srVolume: number
+  floorPerDay: number
+  /** Share of eligible payments currently being diverted here, 0..=1. */
+  steerRate: number
+  steeredToday: number
+  reward: number
+  steering: boolean
+}
+
+/** A commitment the controller stopped chasing, with the reason why. */
+export interface EliminatedPspView {
+  connector: string
+  /** Volume sent so far this cycle — still counted after the drop. */
+  achieved: number
+  gap: number
+  reward: number
+  reason: string
+}
+
+export interface VolumeCommitmentView {
+  merchantId: string
+  active: boolean
+  computedAtEpochSecs?: number | null
+  tolerance?: number | null
+  /** Total volume the merchant expects per day, from the contract document. */
+  expectedDailyTraffic?: number | null
+  /** How long one contract day lasts in seconds — 86400 for calendar cycles, 60 on a test cycle. */
+  daySecs?: number | null
+  /** Routing rule holding the active contract, so the dashboard can act on it. */
+  ruleId?: string | null
+  rewardAtStake: number
+  psps: PspPacing[]
+  eliminated: EliminatedPspView[]
+}
+
+/** One PSP-day of delivered volume on the commitment chart. */
+export interface CommitmentDayVolume {
+  connector: string
+  dayIndex: number
+  /** Where in the cycle the bucket starts, in fractional contract days. */
+  day: number
+  total: number
+  steered: number
+  /** Payments behind `total` / `steered`. */
+  payments: number
+  steeredPayments: number
+}
+
+/** One PSP's chart series: the promise it races and its per-day delivery. */
+export interface CommitmentConnectorSeries {
+  connector: string
+  goal: number
+  reward: number
+  /** How the reward is earned — "0.25% rebate", "lump sum". */
+  rewardNote: string
+  cycleStart: string
+  /** When the cycle closes — the next one's start. */
+  cycleEnd: string
+  daysTotal: number
+  eliminated: boolean
+  points: CommitmentDayVolume[]
+}
+
+export interface CommitmentSeriesResponse {
+  merchantId: string
+  /** ISO-4217 code the amounts are in, when the contract states one. */
+  currency?: string | null
+  /** Seconds in one contract day — the unit `points[].day` counts in. */
+  daySecs?: number | null
+  connectors: CommitmentConnectorSeries[]
+}
+
+export type CommitmentAuditKind = 'forecast' | 'steered' | 'eliminated'
+
+/** One entry in the volume-commitment audit trail. */
+export interface CommitmentAuditEvent {
+  atEpochMs: number
+  kind: CommitmentAuditKind
+  /** The contract execution this entry belongs to. */
+  runId?: string
+  connector?: string
+  message: string
+  amount?: number
+}
+
+/** One execution of a contract — a single billing cycle, start to close. */
+export interface CommitmentRunSummary {
+  runId: string
+  startedAtEpochMs: number
+  lastActivityEpochMs: number
+  forecasts: number
+  steers: number
+  eliminations: number
+  isCurrent: boolean
+}
+
+export interface CommitmentAuditResponse {
+  merchantId: string
+  runs: CommitmentRunSummary[]
+  events: CommitmentAuditEvent[]
+}
+
+/** Payments and volume one PSP received in a window. */
+export interface CommitmentImpactSlice {
+  payments: number
+  volume: number
+}
+
+/** One PSP's before-and-after under the contract. */
+export interface CommitmentConnectorImpact {
+  connector: string
+  goal: number
+  reward: number
+  eliminated: boolean
+  steering: boolean
+  /** Everything it received in the previous cycle. */
+  before: CommitmentImpactSlice
+  /** Everything it received in the cycle — `unaided + steered`. */
+  withContract: CommitmentImpactSlice
+  /** The part normal routing sent by itself. */
+  unaided: CommitmentImpactSlice
+  /** The part the nudge moved here to meet the commitment. */
+  steered: CommitmentImpactSlice
+  /** What routing would have sent here but the nudge moved to a PSP behind on its commitment. */
+  ceded: CommitmentImpactSlice
+}
+
+export interface CommitmentImpactWindow {
+  startMs: number
+  endMs: number
+}
+
+/** The story of a contract: each PSP's traffic in the previous cycle next to this one. */
+export interface CommitmentImpactResponse {
+  merchantId: string
+  contractSinceMs: number
+  cycle: CommitmentImpactWindow
+  daysTotal: number
+  daySecs: number
+  baseline: CommitmentImpactWindow
+  connectors: CommitmentConnectorImpact[]
+  /** Day-by-day delivery per PSP across the previous cycle, days counted from its start. */
+  baselineDays: CommitmentDayVolume[]
+  /** The same across the cycle, days counted from the cycle's start. */
+  cycleDays: CommitmentDayVolume[]
+}
+
+/** Why the volume-commitment nudge did or did not move a payment, on the decide response. */
+export interface VolumeSteerInfo {
+  outcome: 'STEERED' | 'SR_PREVAILED'
+  reason: string
+  srHead?: string | null
+  chosen?: string | null
+  srGapConceded?: number | null
+  /** Share of eligible payments the chosen PSP was set to take when the roll happened. */
+  steerRate?: number | null
+  steeringCount: number
+  /** The contract execution this steer belongs to. */
+  runId?: string | null
 }

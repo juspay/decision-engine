@@ -154,5 +154,12 @@ pub async fn evaluate_static_arm(
             );
             None
         }
+        StaticRoutingAlgorithm::VolumeContract(_) => {
+            logger::error!(
+                "ab_test evaluator: arm '{}' is a volume-commitment configuration, not an algorithm — skipping",
+                algorithm_id
+            );
+            None
+        }
     }
 }

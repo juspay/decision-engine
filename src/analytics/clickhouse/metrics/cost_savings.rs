@@ -17,8 +17,7 @@ const COST_SAVED_BPS_EXPR: &str =
     "JSONExtractFloat(assumeNotNull(details), 'response', 'multi_objective_info', 'costSavedBps')";
 const MO_OUTCOME_EXPR: &str =
     "JSONExtractString(assumeNotNull(details), 'response', 'multi_objective_info', 'outcome')";
-const PAYMENT_AMOUNT_EXPR: &str =
-    "JSONExtractFloat(assumeNotNull(details), 'request', 'paymentInfo', 'amount')";
+use crate::analytics::clickhouse::common::PAYMENT_AMOUNT_EXPR;
 // Currency lives in the request JSON, not the top-level `currency` column (which is NULL for
 // /decide-gateway events).
 const PAYMENT_CURRENCY_EXPR: &str =

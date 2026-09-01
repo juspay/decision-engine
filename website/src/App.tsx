@@ -146,6 +146,7 @@ export default function App() {
           <Route path="routing/volume/new" element={<VolumeSplitBuilderPage />} />
           <Route path="routing/volume/:id/edit" element={<VolumeSplitBuilderPage />} />
           <Route path="routing/debit" element={<DebitRoutingPage />} />
+          <Route path="routing/volume-contracts" element={<Navigate to="/routing/sr?tab=volume" replace />} />
           {/* Cost Estimation moved into the Multi Objective page as a tab; keep the
               old path working for bookmarks/links. */}
           <Route path="routing/cost" element={<Navigate to="/routing/sr?tab=cost" replace />} />

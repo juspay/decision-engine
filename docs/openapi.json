@@ -2930,7 +2930,7 @@
           "Routing Rules"
         ],
         "summary": "Create routing rule",
-        "description": "Create a new Euclid declarative routing rule for a merchant. Supports `advanced` (full Euclid DSL), `priority` (ordered gateway list), `single` (fixed gateway), and `volume_split` (percentage-based distribution) algorithm types.",
+        "description": "Create a new Euclid declarative routing rule for a merchant. Supports `advanced` (full Euclid DSL), `priority` (ordered gateway list), `single` (fixed gateway), `volume_split` (percentage-based distribution), `ab_test`, and `volume_contract` (volume-commitment contract document, stored in the dedicated `algorithm_for: volume_commitment` slot; not evaluable by /routing/evaluate) algorithm types.",
         "requestBody": {
           "required": true,
           "content": {
@@ -3009,6 +3009,85 @@
                       "data": {
                         "gateway_name": "stripe",
                         "gateway_id": null
+                      }
+                    }
+                  }
+                },
+                "volume_contract": {
+                  "summary": "Volume-commitment contract document",
+                  "value": {
+                    "name": "q3-volume-contracts",
+                    "description": "Q3 PSP volume commitments",
+                    "created_by": "test_merchant",
+                    "algorithm_for": "volume_commitment",
+                    "algorithm": {
+                      "type": "volume_contract",
+                      "data": {
+                        "schema_version": 1,
+                        "routing_mode": "pace_guarded",
+                        "tolerance": "5pp",
+                        "metric": "gmv",
+                        "currency": {
+                          "denomination": "USD",
+                          "amount_units": "major"
+                        },
+                        "expected_daily_traffic": 800000,
+                        "forecast_interval_secs": 86400,
+                        "steering_interval_secs": 3600,
+                        "volume_contracts": [
+                          {
+                            "id": "adyen_2026_lumpsum",
+                            "connector": "adyen",
+                            "status": "active",
+                            "billing_cycle": {
+                              "type": "calendar_month",
+                              "anchor": 1,
+                              "timezone": "America/New_York",
+                              "proration": "full_period"
+                            },
+                            "archetype": "lumpsum",
+                            "terms": {
+                              "target": 6000000,
+                              "reward": {
+                                "kind": "flat",
+                                "value": {
+                                  "flat_amount": 15000
+                                }
+                              }
+                            }
+                          },
+                          {
+                            "id": "stripe_2026_tiered",
+                            "connector": "stripe",
+                            "billing_cycle": {
+                              "type": "calendar_month",
+                              "anchor": 1,
+                              "timezone": "UTC"
+                            },
+                            "archetype": "tiered",
+                            "terms": {
+                              "tiers": [
+                                {
+                                  "kind": "retroactive",
+                                  "rate": {
+                                    "rebate_bps": 20
+                                  },
+                                  "threshold": 8000000,
+                                  "targeted": true
+                                },
+                                {
+                                  "kind": "retroactive",
+                                  "rate": {
+                                    "rebate_bps": 25
+                                  },
+                                  "threshold": 10000000,
+                                  "rebate_lag_days": 30,
+                                  "rebate_settlement": "credit_note"
+                                }
+                              ]
+                            }
+                          }
+                        ]
                       }
                     }
                   }
@@ -5632,9 +5711,11 @@
             "enum": [
               "payment",
               "payout",
-              "three_ds_authentication"
+              "three_ds_authentication",
+              "volume_commitment"
             ],
-            "default": "payment"
+            "default": "payment",
+            "description": "Activation slot for the rule. `payment` rules are evaluated by /routing/evaluate; `volume_commitment` holds the merchant's volume-contract configuration document and is required iff `algorithm.type` is `volume_contract`."
           },
           "algorithm": {
             "$ref": "#/components/schemas/RoutingAlgorithm"
@@ -5662,12 +5743,13 @@
               "single",
               "volume_split",
               "advanced",
-              "ab_test"
+              "ab_test",
+              "volume_contract"
             ],
             "example": "priority"
           },
           "data": {
-            "description": "Depends on type: array of ConnectorInfo ({gateway_name, gateway_id}) for `priority`, single ConnectorInfo for `single`, array of {split, connectors} for `volume_split`, Euclid AST Program for `advanced`, A/B experiment config for `ab_test`."
+            "description": "Depends on type: array of ConnectorInfo ({gateway_name, gateway_id}) for `priority`, single ConnectorInfo for `single`, array of {split, connectors} for `volume_split`, Euclid AST Program for `advanced`, A/B experiment config for `ab_test`, VolumeContractConfig document for `volume_contract` (requires `algorithm_for: volume_commitment`). The document declares one metric (gmv|volume) and one currency; merchant-level fields expected_daily_traffic (required) and forecast/steering_interval_secs (optional overrides) sit beside the per-PSP contracts; a tiered contract marks exactly one retroactive tier `targeted: true`. Amounts are canonicalized to integer minor currency units and tolerance to basis points on write; no derived values are stored — goal/reward/period-end resolution is the consumer's job."
           }
         }
       },

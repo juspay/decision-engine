@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { ArrowRightLeft, BellRing, Target, TrendingDown, SlidersHorizontal } from 'lucide-react'
+import { ArrowRightLeft, BellRing, SlidersHorizontal } from 'lucide-react'
 import { describeRoutingEvent, useRoutingEvents } from '../../hooks/useRoutingEvents'
 import { AnalyticsRangeValue, RoutingEvent, RoutingEventType } from '../../types/api'
 import { Badge } from '../ui/Badge'
@@ -14,13 +14,14 @@ const PRESET_OPTIONS: { value: AnalyticsRangeValue; label: string }[] = [
   { value: '1w', label: 'Last 1 week' },
 ]
 
-const EVENT_TYPE_META: Record<
-  RoutingEventType,
-  { label: string; badge: 'blue' | 'green' | 'orange' | 'purple'; icon: React.ElementType }
+/**
+ * Only the event types the feed can actually carry. Auth-band crossings are switched off
+ * server-side (`resolve_auth_band` always returns Off), so they are not offered as filters.
+ */
+const EVENT_TYPE_META: Partial<
+  Record<RoutingEventType, { label: string; badge: 'blue' | 'purple'; icon: React.ElementType }>
 > = {
   leader_changed: { label: 'Leader change', badge: 'blue', icon: ArrowRightLeft },
-  gateway_entered_auth_band: { label: 'Entered auth band', badge: 'green', icon: Target },
-  gateway_exited_auth_band: { label: 'Exited auth band', badge: 'orange', icon: TrendingDown },
   calibration_applied: { label: 'Autopilot tuning', badge: 'purple', icon: SlidersHorizontal },
 }
 
@@ -65,7 +66,7 @@ export function RoutingEventsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
-          <PageHeading title="Routing events" description="Live changes in success-rate based routing — leader flips and gateways entering or exiting the auth band." />
+          <PageHeading title="Routing events" description="Live changes in success-rate based routing — leader flips, plus autopilot retunes where self-tuning is on." />
         </div>
         <div className="flex items-center gap-2">
           {unseenCount > 0 && (
@@ -93,6 +94,7 @@ export function RoutingEventsPage() {
       <div className="flex flex-wrap items-center gap-2">
         {ALL_EVENT_TYPES.map((type) => {
           const meta = EVENT_TYPE_META[type]
+          if (!meta) return null
           const active = activeTypes.has(type)
           return (
             <button
@@ -150,6 +152,7 @@ export function RoutingEventsPage() {
             <ul className="divide-y divide-slate-100 dark:divide-[#1a1f2a]">
               {visibleEvents.map((event) => {
                 const meta = EVENT_TYPE_META[event.event_type]
+                if (!meta) return null
                 return (
                   <li key={event.id} className="flex items-start gap-4 px-6 py-4">
                     <div className="mt-0.5 shrink-0">

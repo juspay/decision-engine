@@ -12,3 +12,4 @@ pub mod runner;
 pub mod types;
 pub mod utils;
 pub mod validators;
+pub mod volume_commitment;

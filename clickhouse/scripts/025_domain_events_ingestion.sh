@@ -110,9 +110,6 @@ CREATE TABLE IF NOT EXISTS analytics_payment_audit_lookup_summaries (
     first_seen_ms_state AggregateFunction(min, Int64),
     last_seen_ms_state AggregateFunction(max, Int64),
     event_count_state AggregateFunction(sum, UInt64),
-    -- Distinct evaluation calls (request_id), as opposed to per-entry events: one batch
-    -- evaluation writes one event per entry, so event_count alone reads like a call storm.
-    call_count_state AggregateFunction(uniq, Nullable(String)),
     payment_id_state AggregateFunction(argMax, Nullable(String), Int64),
     request_id_state AggregateFunction(argMax, Nullable(String), Int64),
     merchant_id_state AggregateFunction(argMax, Nullable(String), Int64),
@@ -250,7 +247,6 @@ SELECT
     minState(created_at_ms) AS first_seen_ms_state,
     maxState(created_at_ms) AS last_seen_ms_state,
     sumState(toUInt64(1)) AS event_count_state,
-    uniqState(request_id) AS call_count_state,
     argMaxState(payment_id, created_at_ms) AS payment_id_state,
     argMaxState(request_id, created_at_ms) AS request_id_state,
     argMaxState(merchant_id, created_at_ms) AS merchant_id_state,

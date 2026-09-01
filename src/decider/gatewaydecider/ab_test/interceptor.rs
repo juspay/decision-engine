@@ -162,6 +162,7 @@ pub async fn intercept(dreq: &DomainDeciderRequestForApiCallV2) -> AbTestInterce
                     is_rust_based_decider: true,
                     latency: None,
                     multi_objective_info: None,
+                    volume_steer_info: None,
                 }),
                 experiment_id,
                 variant_arm: arm.to_string(),

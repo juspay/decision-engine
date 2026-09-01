@@ -9,7 +9,7 @@ use crate::{
         interpreter::{evaluate_output, InterpreterBackend},
         pm_filter_graph,
         types::{
-            ActivateRoutingConfigRequest, Context, DeactivateRoutingConfigRequest,
+            ActivateRoutingConfigRequest, AlgorithmType, Context, DeactivateRoutingConfigRequest,
             JsonifiedRoutingAlgorithm, KeyDataType, RoutingAlgorithmMapperNew, RoutingBatchRequest,
             RoutingBatchResponse, RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest,
             RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
@@ -53,7 +53,12 @@ use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOT
 const ROUTING_ALGO_CACHE_PREFIX: &str = "DE_routing_algo_eval:";
 
 /// Kept in sync with AlgorithmType (enforced by the test below).
-const ALGORITHM_FOR_VALUES: [&str; 3] = ["payment", "payout", "three_ds_authentication"];
+const ALGORITHM_FOR_VALUES: [&str; 4] = [
+    "payment",
+    "payout",
+    "three_ds_authentication",
+    "volume_commitment",
+];
 
 #[cfg(test)]
 mod cache_key_tests {
@@ -67,12 +72,14 @@ mod cache_key_tests {
             AlgorithmType::Payment,
             AlgorithmType::Payout,
             AlgorithmType::ThreeDsAuthentication,
+            AlgorithmType::VolumeCommitment,
         ];
         for variant in &all {
             match variant {
                 AlgorithmType::Payment
                 | AlgorithmType::Payout
-                | AlgorithmType::ThreeDsAuthentication => {}
+                | AlgorithmType::ThreeDsAuthentication
+                | AlgorithmType::VolumeCommitment => {}
             }
             assert!(ALGORITHM_FOR_VALUES.contains(&variant.to_string().as_str()));
         }
@@ -137,7 +144,6 @@ async fn invalidate_routing_algorithm_cache(state: &crate::app::TenantAppState, 
         }
     }
 }
-
 use serde::Serialize;
 use serde_json::{json, Value};
 
@@ -224,6 +230,28 @@ fn validation_errors_payload(
     validation_errors: &[ValidationErrorDetails],
 ) -> Option<serde_json::Value> {
     serde_json::to_value(ValidationErrorsPayload { validation_errors }).ok()
+}
+
+/// The FIELD_VALIDATION_FAILED response shape of `routing_create`, for reuse by the other
+/// write paths (canonicalization failures, update validation).
+fn field_validation_failure(
+    context: &str,
+    validation_errors: &[ValidationErrorDetails],
+) -> ContainerError<EuclidErrors> {
+    let detailed_error = validation_errors
+        .iter()
+        .map(|e| e.message.clone())
+        .collect::<Vec<_>>()
+        .join("; ");
+    ContainerError::new_with_status_code_and_payload(
+        EuclidErrors::FieldValidationFailed(detailed_error.clone()),
+        axum::http::StatusCode::BAD_REQUEST,
+        ApiErrorResponse::new(
+            "FIELD_VALIDATION_FAILED",
+            format!("{context}: {detailed_error}"),
+            validation_errors_payload(validation_errors),
+        ),
+    )
 }
 
 pub async fn config_sr_dimensions(
@@ -358,13 +386,30 @@ pub async fn routing_create(
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
-    // The serde message names the field that did not parse. Dropping it leaves the caller with a
-    // bare 400 and nothing to act on.
-    let mut config: RoutingRule = serde_json::from_value(payload.clone()).map_err(|error| {
-        error_stack::report!(EuclidErrors::InvalidRequest(format!(
-            "could not parse routing rule: {error}"
-        )))
-    })?;
+    // The serde message names the field that did not parse — and serde_path_to_error prefixes
+    // the JSON path to it, which matters for nested documents (volume contracts especially).
+    // Dropping either leaves the caller with a bare 400 and nothing to act on.
+    let mut config: RoutingRule =
+        serde_path_to_error::deserialize(payload.clone()).map_err(|error| {
+            error_stack::report!(EuclidErrors::InvalidRequest(format!(
+                "could not parse routing rule: {error}"
+            )))
+        })?;
+
+    // Volume contracts are stored canonicalized (integer minor-unit amounts, tolerance in bps)
+    // so every future consumer reads one representation.
+    if let StaticRoutingAlgorithm::VolumeContract(contract_config) = &mut config.algorithm {
+        if let Err(errors) = crate::euclid::volume_contract::canonicalize(contract_config) {
+            metrics::API_REQUEST_COUNTER
+                .with_label_values(&["routing_create", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(field_validation_failure(
+                "Volume contract amounts are invalid",
+                &errors,
+            ));
+        }
+    }
     let create_flow_type = crate::analytics::refine_routing_create_flow_type(&config.algorithm);
     let analytics_created_by = config.created_by.clone();
     let analytics_config_name = config.name.clone();
@@ -492,32 +537,23 @@ async fn fetch_algorithm_from_db_and_cache(
     #[cfg(feature = "postgres")]
     use crate::storage::schema_pg::routing_algorithm_mapper::dsl as db_mapper_dsl;
 
-    let mapper_result = match algorithm_for {
-        Some(algorithm_for) => {
-            crate::generics::generic_find_one::<
-                <RoutingAlgorithmMapper as HasTable>::Table,
-                _,
-                RoutingAlgorithmMapper,
-            >(
-                &state.db,
-                db_mapper_dsl::created_by
-                    .eq(merchant_id.to_string())
-                    .and(db_mapper_dsl::algorithm_for.eq(algorithm_for.to_string())),
-            )
-            .await
-        }
-        None => {
-            crate::generics::generic_find_one::<
-                <RoutingAlgorithmMapper as HasTable>::Table,
-                _,
-                RoutingAlgorithmMapper,
-            >(
-                &state.db,
-                db_mapper_dsl::created_by.eq(merchant_id.to_string()),
-            )
-            .await
-        }
-    };
+    // The merchant can hold one mapper row per algorithm_for slot (payment, payout, 3DS,
+    // volume_commitment). Callers that omit `algorithm_for` are on the legacy payment flow and
+    // must only ever see the payment row.
+    let mapper_algorithm_for = algorithm_for
+        .map(str::to_string)
+        .unwrap_or_else(|| AlgorithmType::Payment.to_string());
+    let mapper_result = crate::generics::generic_find_one::<
+        <RoutingAlgorithmMapper as HasTable>::Table,
+        _,
+        RoutingAlgorithmMapper,
+    >(
+        &state.db,
+        db_mapper_dsl::created_by
+            .eq(merchant_id.to_string())
+            .and(db_mapper_dsl::algorithm_for.eq(mapper_algorithm_for)),
+    )
+    .await;
 
     // Only a missing mapper row means no rule is active. Any other storage error is the engine
     // failing to answer, and reporting it as ActiveRoutingAlgorithmNotFound would let the
@@ -569,12 +605,9 @@ async fn fetch_algorithm_from_db_and_cache(
 /// Response for a profile whose rules are all deactivated: the fallback the caller supplied,
 /// echoed back under a status that says the engine answered and has no rule to apply. The
 /// caller can then route by its fallback instead of guessing from a failed evaluation.
-async fn no_active_algorithm_response(
+async fn build_no_active_algorithm_response(
     state: &crate::app::TenantAppState,
     payload: &RoutingRequest,
-    request_id: Option<String>,
-    global_request_id: Option<String>,
-    trace_id: Option<String>,
 ) -> RoutingEvaluateResponse {
     let fallback = payload.fallback_output.clone().unwrap_or_default();
     let output = Output::Priority(fallback.clone());
@@ -594,14 +627,26 @@ async fn no_active_algorithm_response(
     );
     let evaluated_output = narrow_evaluated_output_to_eligible(fallback, &eligible_connectors);
 
-    let response = RoutingEvaluateResponse {
+    RoutingEvaluateResponse {
         payment_id: payload.payment_id.clone(),
         status: "no_active_algorithm".to_string(),
         output: format_output(&output),
         evaluated_output,
         eligible_connectors,
-    };
+    }
+}
 
+/// The single-endpoint wrapper: one entry is the whole call, so building the answer
+/// and recording its preview event stay together. The batch path uses the build half
+/// and records one event for the call instead.
+async fn no_active_algorithm_response(
+    state: &crate::app::TenantAppState,
+    payload: &RoutingRequest,
+    request_id: Option<String>,
+    global_request_id: Option<String>,
+    trace_id: Option<String>,
+) -> RoutingEvaluateResponse {
+    let response = build_no_active_algorithm_response(state, payload).await;
     crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
         crate::analytics::AnalyticsFlowContext::new(
             crate::analytics::ApiFlow::RuleBasedRouting,
@@ -790,6 +835,19 @@ async fn evaluate_algorithm_data(
                 apply_default_fallback(&mut ir, payload.fallback_output.as_deref());
 
                 (ir.output, ir.evaluated_output, ir.rule_name)
+            }
+
+            // Only resolvable by asking for the volume_commitment slot (or a legacy type-blind
+            // lookup landing on it); a contract document is not an evaluable routing flow, so
+            // degrade to a clean 400 instead of a parse panic.
+            StaticRoutingAlgorithm::VolumeContract(_) => {
+                return Err((
+                    EuclidErrors::InvalidRequest(
+                        "the resolved algorithm is a volume-commitment configuration; it cannot be evaluated for routing".to_string(),
+                    )
+                    .into(),
+                    "volume_contract_not_evaluable",
+                ))
             }
 
             StaticRoutingAlgorithm::AbTest(ab_data) => {
@@ -1090,7 +1148,28 @@ pub async fn routing_evaluate_batch(
         None,
     );
 
-    let mut fail_batch = |err: ContainerError<EuclidErrors>| {
+    // One representative request for the batch: a whole-batch failure has no single entry to
+    // attribute, but without it the audit records a request hit and never an outcome.
+    let batch_error_payload = RoutingRequest {
+        payment_id: None,
+        created_by: payload.created_by.clone(),
+        fallback_output: payload.fallback_output.clone(),
+        parameters: payload
+            .requests
+            .first()
+            .map(|entry| entry.parameters.clone())
+            .unwrap_or_default(),
+        algorithm_for: payload.algorithm_for.clone(),
+    };
+    let mut fail_batch = |err: ContainerError<EuclidErrors>, stage: &'static str| {
+        record_routing_evaluate_preview_error(
+            &batch_error_payload,
+            &err,
+            stage,
+            request_id.clone(),
+            global_request_id.clone(),
+            trace_id.clone(),
+        );
         API_REQUEST_COUNTER
             .with_label_values(&["routing_evaluate_batch", "failure"])
             .inc();
@@ -1123,6 +1202,7 @@ pub async fn routing_evaluate_batch(
                 MAX_BATCH_EVALUATIONS
             ))
             .into(),
+            "batch_size_validation_failed",
         );
     }
 
@@ -1133,12 +1213,12 @@ pub async fn routing_evaluate_batch(
         .ok_or(EuclidErrors::GlobalRoutingConfigsUnavailable)
     {
         Ok(config) => config,
-        Err(e) => return fail_batch(e.into()),
+        Err(e) => return fail_batch(e.into(), "batch_routing_config_unavailable"),
     };
 
     for entry in &payload.requests {
         if let Err(e) = validate_evaluation_parameters(routing_config, &entry.parameters) {
-            return fail_batch(e);
+            return fail_batch(e, "batch_parameter_validation_failed");
         }
     }
 
@@ -1158,6 +1238,8 @@ pub async fn routing_evaluate_batch(
                 .as_ref()
                 .is_some_and(|fallback| !fallback.is_empty()) =>
         {
+            let call_payment_id = uniform_payment_id(&payload.requests);
+            let mut entry_outcomes = Vec::with_capacity(payload.requests.len());
             let mut results = Vec::with_capacity(payload.requests.len());
             for entry in payload.requests {
                 let entry_payload = RoutingRequest {
@@ -1167,17 +1249,39 @@ pub async fn routing_evaluate_batch(
                     parameters: entry.parameters,
                     algorithm_for: payload.algorithm_for.clone(),
                 };
-                results.push(
-                    no_active_algorithm_response(
-                        &state,
-                        &entry_payload,
-                        request_id.clone(),
-                        global_request_id.clone(),
-                        trace_id.clone(),
-                    )
-                    .await,
-                );
+                let response = build_no_active_algorithm_response(&state, &entry_payload).await;
+                entry_outcomes.push(json!({
+                    "payment_id": response.payment_id,
+                    "payment_method": entry_payload.parameters.get("payment_method"),
+                    "payment_method_type": entry_payload.parameters.get("payment_method_type"),
+                    "status": response.status,
+                    "gateway": preview_gateway(&response),
+                }));
+                results.push(response);
             }
+            // One preview event for the whole call: the batch is one evaluation moment,
+            // and its per-entry answers live in the event's details.
+            crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
+                crate::analytics::AnalyticsFlowContext::new(
+                    crate::analytics::ApiFlow::RuleBasedRouting,
+                    crate::analytics::FlowType::RoutingEvaluatePreview,
+                ),
+                Some(payload.created_by.clone()),
+                call_payment_id,
+                results.first().and_then(preview_gateway),
+                None,
+                Some("no_active_algorithm".to_string()),
+                serialize_batch_analytics_details(
+                    &payload.created_by,
+                    payload.algorithm_for.as_deref(),
+                    &payload.fallback_output,
+                    &entry_outcomes,
+                    0,
+                ),
+                request_id.clone(),
+                global_request_id.clone(),
+                trace_id.clone(),
+            );
             API_REQUEST_COUNTER
                 .with_label_values(&["routing_evaluate_batch", "success"])
                 .inc();
@@ -1186,7 +1290,7 @@ pub async fn routing_evaluate_batch(
             }
             return Ok(Json(RoutingBatchResponse { results }));
         }
-        Err(e) => return fail_batch(e),
+        Err(e) => return fail_batch(e, "batch_active_routing_lookup_failed"),
     };
 
     let algorithm_data: StaticRoutingAlgorithm =
@@ -1199,13 +1303,23 @@ pub async fn routing_evaluate_batch(
             EuclidErrors::InvalidRequest(format!("Invalid algorithm data format: {}", e))
         }) {
             Ok(data) => data,
-            Err(e) => return fail_batch(e.into()),
+            Err(e) => return fail_batch(e.into(), "batch_routing_algorithm_parse_failed"),
         };
 
+    let call_payment_id = uniform_payment_id(&payload.requests);
+    let mut entry_outcomes: Vec<Value> = Vec::with_capacity(payload.requests.len());
+    let mut first_success: Option<(
+        crate::analytics::FlowType,
+        Option<String>,
+        Option<String>,
+        String,
+    )> = None;
+    let mut first_entry_error: Option<(ContainerError<EuclidErrors>, &'static str)> = None;
+    let mut failed_entries: usize = 0;
     let mut results = Vec::with_capacity(payload.requests.len());
     for entry in payload.requests {
         // Each entry is evaluated as if it were a single call sharing the batch's
-        // identity, so per-entry analytics stay comparable with the single endpoint.
+        // identity; its outcome is folded into the one preview event the call records.
         let entry_payload = RoutingRequest {
             payment_id: entry.payment_id,
             created_by: payload.created_by.clone(),
@@ -1216,37 +1330,24 @@ pub async fn routing_evaluate_batch(
 
         match evaluate_algorithm_data(&state, &algorithm, &algorithm_data, &entry_payload).await {
             Ok(outcome) => {
-                let analytics_details = match (&outcome.ab_experiment_id, &outcome.ab_variant_arm) {
-                    (Some(exp_id), Some(arm)) => {
-                        crate::decider::gatewaydecider::ab_test::preview::serialize_analytics_details(
-                            &entry_payload,
-                            &outcome.response,
-                            outcome.rule_name.as_deref(),
-                            exp_id,
-                            arm,
-                        )
-                    }
-                    _ => serialize_routing_evaluate_analytics_details(
-                        &entry_payload,
-                        &outcome.response,
-                        outcome.rule_name.as_deref(),
-                    ),
-                };
-                crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
-                    crate::analytics::AnalyticsFlowContext::new(
-                        crate::analytics::ApiFlow::RuleBasedRouting,
+                if first_success.is_none() {
+                    first_success = Some((
                         outcome.flow_type,
-                    ),
-                    Some(payload.created_by.clone()),
-                    entry_payload.payment_id.clone(),
-                    preview_gateway(&outcome.response),
-                    outcome.rule_name.clone(),
-                    Some(outcome.response.status.clone()),
-                    analytics_details,
-                    request_id.clone(),
-                    global_request_id.clone(),
-                    trace_id.clone(),
-                );
+                        preview_gateway(&outcome.response),
+                        outcome.rule_name.clone(),
+                        outcome.response.status.clone(),
+                    ));
+                }
+                entry_outcomes.push(json!({
+                    "payment_id": outcome.response.payment_id,
+                    "payment_method": entry_payload.parameters.get("payment_method"),
+                    "payment_method_type": entry_payload.parameters.get("payment_method_type"),
+                    "status": outcome.response.status,
+                    "gateway": preview_gateway(&outcome.response),
+                    "rule_name": outcome.rule_name,
+                    "ab_experiment_id": outcome.ab_experiment_id,
+                    "ab_variant_arm": outcome.ab_variant_arm,
+                }));
                 results.push(outcome.response);
             }
             Err((error, stage)) => {
@@ -1256,14 +1357,18 @@ pub async fn routing_evaluate_batch(
                     created_by = %payload.created_by,
                     "routing_evaluate_batch: one entry failed to evaluate"
                 );
-                record_routing_evaluate_preview_error(
-                    &entry_payload,
-                    &error,
-                    stage,
-                    request_id.clone(),
-                    global_request_id.clone(),
-                    trace_id.clone(),
-                );
+                failed_entries += 1;
+                entry_outcomes.push(json!({
+                    "payment_id": entry_payload.payment_id,
+                    "payment_method": entry_payload.parameters.get("payment_method"),
+                    "payment_method_type": entry_payload.parameters.get("payment_method_type"),
+                    "status": "error",
+                    "stage": stage,
+                    "error": error.get_inner().to_string(),
+                }));
+                if first_entry_error.is_none() {
+                    first_entry_error = Some((error, stage));
+                }
                 results.push(RoutingEvaluateResponse {
                     payment_id: entry_payload.payment_id.clone(),
                     status: "error".to_string(),
@@ -1275,6 +1380,53 @@ pub async fn routing_evaluate_batch(
         }
     }
 
+    // One preview event describes the whole call, whatever mix of entry outcomes it
+    // produced -- the per-entry stories live in its details. The flow type comes from
+    // an evaluated entry when one exists, else from the parsed algorithm directly.
+    let (call_flow_type, call_gateway, call_rule_name, ok_status) = first_success.unwrap_or((
+        crate::analytics::refine_routing_evaluate_flow_type(&algorithm_data),
+        None,
+        None,
+        "error".to_string(),
+    ));
+    let call_status = if failed_entries > 0 {
+        "error".to_string()
+    } else {
+        ok_status
+    };
+    crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
+        crate::analytics::AnalyticsFlowContext::new(
+            crate::analytics::ApiFlow::RuleBasedRouting,
+            call_flow_type,
+        ),
+        Some(payload.created_by.clone()),
+        call_payment_id,
+        call_gateway,
+        call_rule_name,
+        Some(call_status),
+        serialize_batch_analytics_details(
+            &payload.created_by,
+            payload.algorithm_for.as_deref(),
+            &payload.fallback_output,
+            &entry_outcomes,
+            failed_entries,
+        ),
+        request_id.clone(),
+        global_request_id.clone(),
+        trace_id.clone(),
+    );
+    // Failed entries also surface once in error analytics, carrying the first
+    // failure's error and stage; the details above name every failed entry.
+    if let Some((error, stage)) = first_entry_error {
+        record_routing_evaluate_preview_error(
+            &batch_error_payload,
+            &error,
+            stage,
+            request_id.clone(),
+            global_request_id.clone(),
+            trace_id.clone(),
+        );
+    }
     API_REQUEST_COUNTER
         .with_label_values(&["routing_evaluate_batch", "success"])
         .inc();
@@ -1282,6 +1434,38 @@ pub async fn routing_evaluate_batch(
         timer.observe_duration();
     }
     Ok(Json(RoutingBatchResponse { results }))
+}
+
+/// The one payment id a batch answers for, when every entry names the same one --
+/// Hyperswitch's session flows do -- so the call-level event stays findable by it.
+fn uniform_payment_id(requests: &[crate::euclid::types::RoutingBatchEntry]) -> Option<String> {
+    let first = requests.first()?.payment_id.clone()?;
+    requests
+        .iter()
+        .all(|entry| entry.payment_id.as_deref() == Some(first.as_str()))
+        .then_some(first)
+}
+
+/// Call-level analytics details for a batch: the shared request fields plus one
+/// compact outcome per entry. Full request/response detail stays with the single
+/// endpoint, where one entry is the whole call -- and a compact shape keeps 50
+/// entries far under the details truncation limit.
+fn serialize_batch_analytics_details(
+    created_by: &str,
+    algorithm_for: Option<&str>,
+    fallback_output: &Option<Vec<ConnectorInfo>>,
+    entries: &[Value],
+    failed_count: usize,
+) -> Option<String> {
+    serde_json::to_string(&json!({
+        "created_by": created_by,
+        "algorithm_for": algorithm_for,
+        "fallback_output": fallback_output,
+        "entry_count": entries.len(),
+        "failed_count": failed_count,
+        "entries": entries,
+    }))
+    .ok()
 }
 
 fn record_routing_evaluate_preview_error(
@@ -1345,6 +1529,61 @@ fn record_routing_evaluate_preview_error(
 use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
+
+/// Bump `modified_at` on activation of a volume contract — it anchors `test_minutes` cycles (see
+/// `volume_commitment::dsl::active_config`); other rule types keep it as a plain edit timestamp.
+async fn stamp_contract_activation(
+    #[cfg(feature = "mysql")] conn: &crate::storage::MysqlPoolConn,
+    #[cfg(feature = "postgres")] conn: &crate::storage::PgPoolConn,
+    algorithm: &RoutingAlgorithm,
+) -> Result<(), ContainerError<EuclidErrors>> {
+    if algorithm.algorithm_for != AlgorithmType::VolumeCommitment.to_string() {
+        return Ok(());
+    }
+    let now = time::OffsetDateTime::now_utc();
+    let timestamp = time::PrimitiveDateTime::new(now.date(), now.time());
+    crate::generics::generic_update::<<RoutingAlgorithm as HasTable>::Table, _, _>(
+        conn,
+        dsl::id.eq(algorithm.id.clone()),
+        dsl::modified_at.eq(timestamp),
+    )
+    .await
+    .change_context(EuclidErrors::StorageError)?;
+    Ok(())
+}
+
+/// Drop the stored steering plan when a volume contract is deactivated or replaced. The decide
+/// path steers on flag + plan alone, so a plan left behind would keep diverting payments (for up
+/// to its TTL) on a contract every dashboard says is gone. Awaited: the caller's 200 means it.
+async fn clear_volume_commitment_plan(algorithm_for: &str, merchant_id: &str) {
+    if algorithm_for != AlgorithmType::VolumeCommitment.to_string() {
+        return;
+    }
+    if let Some(deps) = crate::decider::gatewaydecider::volume_commitment::deps() {
+        deps.state.clear_plan(merchant_id).await;
+    }
+}
+
+/// Rebuild the plan now (spawned, so activation does not wait on ClickHouse) so a newly activated
+/// contract does not inherit the previous plan's verdicts until the next scheduler tick.
+fn refresh_volume_commitment_plan(algorithm_for: &str, merchant_id: &str) {
+    if algorithm_for != AlgorithmType::VolumeCommitment.to_string() {
+        return;
+    }
+    let merchant_id = merchant_id.to_string();
+    tokio::spawn(async move {
+        let Some(deps) = crate::decider::gatewaydecider::volume_commitment::deps() else {
+            return;
+        };
+        // A failure is logged where it happens; the merchant simply has no plan until the
+        // scheduler's next successful run.
+        let _ = crate::decider::gatewaydecider::volume_commitment::controller::run_for_merchant(
+            deps,
+            &merchant_id,
+        )
+        .await;
+    });
+}
 
 pub async fn activate_routing_rule(
     Json(payload): Json<ActivateRoutingConfigRequest>,
@@ -1432,7 +1671,16 @@ pub async fn activate_routing_rule(
             .change_context(EuclidErrors::StorageError)
             {
                 Ok(_) => {
+                    if let Err(e) = stamp_contract_activation(&conn, &algorithm).await {
+                        update_failure_metrics();
+                        timer.observe_duration();
+                        return Err(e);
+                    }
                     cache_routing_algorithm(&state, &payload.created_by, &algorithm).await;
+                    // The old document's plan must not steer for the new one.
+                    clear_volume_commitment_plan(&algorithm.algorithm_for, &payload.created_by)
+                        .await;
+                    refresh_volume_commitment_plan(&algorithm.algorithm_for, &payload.created_by);
                     API_REQUEST_COUNTER
                         .with_label_values(&["activate_routing_rule", "success"])
                         .inc();
@@ -1448,6 +1696,7 @@ pub async fn activate_routing_rule(
         }
         // Already active with the same algorithm — refresh the cache TTL
         cache_routing_algorithm(&state, &payload.created_by, &algorithm).await;
+        refresh_volume_commitment_plan(&algorithm.algorithm_for, &payload.created_by);
         API_REQUEST_COUNTER
             .with_label_values(&["activate_routing_rule", "success"])
             .inc();
@@ -1468,7 +1717,14 @@ pub async fn activate_routing_rule(
         .change_context(EuclidErrors::StorageError)
     {
         Ok(_) => {
+            if let Err(e) = stamp_contract_activation(&conn, &algorithm).await {
+                update_failure_metrics();
+                timer.observe_duration();
+                return Err(e);
+            }
             cache_routing_algorithm(&state, &merchant_id_for_cache, &algorithm).await;
+            clear_volume_commitment_plan(&algorithm.algorithm_for, &merchant_id_for_cache).await;
+            refresh_volume_commitment_plan(&algorithm.algorithm_for, &merchant_id_for_cache);
             API_REQUEST_COUNTER
                 .with_label_values(&["activate_routing_rule", "success"])
                 .inc();
@@ -1564,6 +1820,7 @@ pub async fn deactivate_routing_rule(
                     payload.created_by
                 );
                 invalidate_routing_algorithm_cache(&state, &payload.created_by).await;
+                clear_volume_commitment_plan(&algorithm_for, &payload.created_by).await;
                 API_REQUEST_COUNTER
                     .with_label_values(&["deactivate_routing_rule", "success"])
                     .inc();
@@ -1675,9 +1932,43 @@ pub async fn update_routing_rule(
             normalize_rule_value_types(&mut payload.algorithm, routing_config);
         }
 
+        // Update must not be able to store a definition create would reject: canonicalize
+        // volume contracts and re-run the same write-time validation against the slot this row
+        // already occupies (algorithm_for is preserved by this handler).
+        let mut algorithm = payload.algorithm.clone();
+        if let StaticRoutingAlgorithm::VolumeContract(contract_config) = &mut algorithm {
+            if let Err(errors) = crate::euclid::volume_contract::canonicalize(contract_config) {
+                return Err(field_validation_failure(
+                    "Volume contract amounts are invalid",
+                    &errors,
+                ));
+            }
+        }
+        // Legacy rows can hold non-canonical algorithm_for strings (pre-backfill ''); treat
+        // them as the payment default rather than bricking their edits. They can never be
+        // volume-commitment rows — that slot postdates canonical writes — so the pairing
+        // validation below stays sound.
+        let algorithm_for: AlgorithmType = existing.algorithm_for.parse().unwrap_or_default();
+        let rule_for_validation = RoutingRule {
+            rule_id: Some(payload.routing_algorithm_id.clone()),
+            name: payload.name.clone(),
+            description: Some(payload.description.clone()),
+            created_by: payload.created_by.clone(),
+            algorithm,
+            algorithm_for,
+            metadata: None,
+        };
+        let validation = validate_routing_rule(&rule_for_validation, &state.config.routing_config)?;
+        if !validation.is_valid {
+            return Err(field_validation_failure(
+                "Routing rule validation failed",
+                &validation.errors,
+            ));
+        }
+
         let utc_date_time = time::OffsetDateTime::now_utc();
         let timestamp = time::PrimitiveDateTime::new(utc_date_time.date(), utc_date_time.time());
-        let algorithm_data = serde_json::to_string(&payload.algorithm)
+        let algorithm_data = serde_json::to_string(&rule_for_validation.algorithm)
             .change_context(EuclidErrors::FailedToSerializeJsonToString)?;
 
         crate::generics::generic_update::<<RoutingAlgorithm as HasTable>::Table, _, _>(

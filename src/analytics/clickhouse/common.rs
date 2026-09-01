@@ -43,6 +43,11 @@ pub const PAYMENT_AUDIT_DYNAMIC_FLOW_TYPES: &[FlowType] = &[
     FlowType::UpdateScoreLegacyError,
 ];
 
+/// Payment amount on a decide event, inside the `details` JSON. Shared by every metric that
+/// sums volume so the request shape has one place to move.
+pub const PAYMENT_AMOUNT_EXPR: &str =
+    "JSONExtractFloat(assumeNotNull(details), 'request', 'paymentInfo', 'amount')";
+
 pub async fn fetch_all<T>(query: Query) -> Result<Vec<T>, ApiError>
 where
     T: Row + for<'de> Deserialize<'de>,

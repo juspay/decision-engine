@@ -404,6 +404,7 @@ pub async fn run_decider_flow(
                     is_rust_based_decider: deciderParams.dpShouldConsumeResult.unwrap_or(false),
                     latency: None,
                     multi_objective_info: None,
+                    volume_steer_info: None,
                 })
             } else {
                 decider_flow
@@ -734,6 +735,7 @@ pub async fn run_decider_flow(
                                     .unwrap_or(false),
                                 latency: None,
                                 multi_objective_info: None,
+                                volume_steer_info: None,
                             })
                         }
                         None => Err((

@@ -217,7 +217,7 @@ impl fmt::Display for RoutingError {
     }
 }
 impl Error for RoutingError {}
-pub(crate) type RoutingResult<T> = Result<T, RoutingError>;
+type RoutingResult<T> = Result<T, RoutingError>;
 
 pub fn perform_volume_split(
     splits: Vec<VolumeSplit<ConnectorInfo>>,
