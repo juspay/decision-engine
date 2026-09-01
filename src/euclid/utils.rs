@@ -3,11 +3,9 @@ use super::ast::{
 };
 use super::errors::{EuclidErrors, ValidationErrorDetails};
 use super::interpreter::RoutingError;
-use super::types::{BackendOutput, KeyDataType, StaticRoutingAlgorithm};
+use super::types::{AlgorithmType, BackendOutput, KeyDataType, StaticRoutingAlgorithm};
 use crate::error::ContainerError;
-use crate::euclid::types::{
-    AlgorithmType, FieldValidationRules, KeyConfig, RoutingRule, TomlConfig,
-};
+use crate::euclid::types::{FieldValidationRules, KeyConfig, RoutingRule, TomlConfig};
 use rand::distributions::WeightedIndex;
 use rand::prelude::*;
 use std::collections::HashMap;
@@ -600,7 +598,7 @@ pub fn validate_string_value(
     }
 }
 
-pub(crate) fn sample_split_winner_first<T>(
+pub fn sample_split_winner_first<T>(
     mut splits: Vec<VolumeSplit<T>>,
 ) -> Result<Vec<T>, RoutingError> {
     let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
