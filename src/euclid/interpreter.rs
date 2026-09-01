@@ -169,13 +169,14 @@ impl InterpreterBackend {
     pub fn eval_program(
         program: &ast::Program,
         ctx: &types::Context,
+        seed: Option<&str>,
     ) -> Result<types::BackendOutput, types::InterpreterError> {
         for rule in &program.rules {
             let res = Self::eval_rule(rule, ctx, &program.globals)?;
 
             if res {
                 let evaluated_output =
-                    evaluate_output(&rule.output).map_err(|e| types::InterpreterError {
+                    evaluate_output(&rule.output, seed).map_err(|e| types::InterpreterError {
                         error_type: types::InterpreterErrorType::OutputEvaluationFailed(format!(
                             "{:?}",
                             e
@@ -191,11 +192,12 @@ impl InterpreterBackend {
         }
 
         // If no rule matched, evaluate default selection
-        let evaluated_output =
-            evaluate_output(&program.default_selection).map_err(|e| types::InterpreterError {
+        let evaluated_output = evaluate_output(&program.default_selection, seed).map_err(|e| {
+            types::InterpreterError {
                 error_type: types::InterpreterErrorType::OutputEvaluationFailed(format!("{:?}", e)),
                 metadata: HashMap::new(),
-            })?;
+            }
+        })?;
 
         Ok(types::BackendOutput {
             rule_name: None,
@@ -220,12 +222,49 @@ impl fmt::Display for RoutingError {
 impl Error for RoutingError {}
 type RoutingResult<T> = Result<T, RoutingError>;
 
-fn sample_split_winner_first<T>(mut splits: Vec<VolumeSplit<T>>) -> RoutingResult<Vec<T>> {
-    let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
-    let weighted_index =
-        WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
-    let mut rng = rand::thread_rng();
-    let idx = weighted_index.sample(&mut rng);
+/// djb2 hash of the volume-split seed. Byte-identical with the A/B arm assignment
+/// (`ab_test::common::assign_arm` / `ab_test::evaluator`) and with Hyperswitch's
+/// seeded volume split (hyperswitch `crates/router/src/core/payments/routing.rs`,
+/// `seeded_volume_split_index`): both sides must land on the same winner for the
+/// same payment, so this hash is a cross-repo contract — do not change it alone.
+fn djb2_seed_hash(seed: &str) -> u64 {
+    seed.bytes().fold(5381u64, |acc, b| {
+        acc.wrapping_mul(33).wrapping_add(u64::from(b))
+    })
+}
+
+fn sample_split_winner_first<T>(
+    mut splits: Vec<VolumeSplit<T>>,
+    seed: Option<&str>,
+) -> RoutingResult<Vec<T>> {
+    let idx = match seed {
+        // Deterministic per seed: djb2 slot over the cumulative weights, walked in
+        // declaration order. Every evaluation of the same payment picks the same
+        // winner, so the SDK's concurrent PML/session/config calls — and retries —
+        // cannot disagree with each other or with Hyperswitch's local evaluation.
+        Some(seed) => {
+            let total_weight: u64 = splits.iter().map(|sp| u64::from(sp.split)).sum();
+            if total_weight == 0 {
+                return Err(RoutingError::VolumeSplitFailed);
+            }
+            let slot = djb2_seed_hash(seed) % total_weight;
+            let mut cumulative = 0u64;
+            splits
+                .iter()
+                .position(|split| {
+                    cumulative += u64::from(split.split);
+                    slot < cumulative
+                })
+                .ok_or(RoutingError::VolumeSplitFailed)?
+        }
+        None => {
+            let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
+            let weighted_index =
+                WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
+            let mut rng = rand::thread_rng();
+            weighted_index.sample(&mut rng)
+        }
+    };
 
     if idx >= splits.len() {
         return Err(RoutingError::VolumeSplitFailed);
@@ -238,14 +277,16 @@ fn sample_split_winner_first<T>(mut splits: Vec<VolumeSplit<T>>) -> RoutingResul
 
 pub fn perform_volume_split(
     splits: Vec<VolumeSplit<ConnectorInfo>>,
+    seed: Option<&str>,
 ) -> RoutingResult<Vec<ConnectorInfo>> {
-    sample_split_winner_first(splits)
+    sample_split_winner_first(splits, seed)
 }
 
 pub fn perform_volume_split_priority(
     splits: Vec<VolumeSplit<Vec<ConnectorInfo>>>,
+    seed: Option<&str>,
 ) -> RoutingResult<Vec<ConnectorInfo>> {
-    Ok(sample_split_winner_first(splits)?
+    Ok(sample_split_winner_first(splits, seed)?
         .into_iter()
         .flatten()
         .fold(Vec::new(), |mut ordered, connector| {
@@ -256,11 +297,99 @@ pub fn perform_volume_split_priority(
         }))
 }
 
-pub fn evaluate_output(output: &Output) -> RoutingResult<Vec<ConnectorInfo>> {
+pub fn evaluate_output(output: &Output, seed: Option<&str>) -> RoutingResult<Vec<ConnectorInfo>> {
     match output {
         Output::Single(connector) => Ok(vec![connector.clone()]),
         Output::Priority(connectors) => Ok(connectors.clone()),
-        Output::VolumeSplit(splits) => perform_volume_split(splits.clone()),
-        Output::VolumeSplitPriority(splits) => perform_volume_split_priority(splits.clone()),
+        Output::VolumeSplit(splits) => perform_volume_split(splits.clone(), seed),
+        Output::VolumeSplitPriority(splits) => {
+            perform_volume_split_priority(splits.clone(), seed)
+        }
+    }
+}
+
+#[cfg(test)]
+mod seeded_volume_split_tests {
+    use super::*;
+
+    fn splits(weights: &[u8]) -> Vec<VolumeSplit<ConnectorInfo>> {
+        weights
+            .iter()
+            .enumerate()
+            .map(|(i, w)| VolumeSplit {
+                split: *w,
+                output: ConnectorInfo {
+                    gateway_name: format!("gw_{i}"),
+                    gateway_id: None,
+                },
+            })
+            .collect()
+    }
+
+    // Cross-repo contract: Hyperswitch's seeded_volume_split_index test asserts the
+    // same vector. If this changes, the two engines stop agreeing per payment.
+    #[test]
+    fn djb2_matches_the_cross_repo_vector() {
+        assert_eq!(
+            djb2_seed_hash("pay_nZwbogscgFwIanlGnUxw"),
+            10501740297535541692
+        );
+        assert_eq!(djb2_seed_hash(""), 5381);
+    }
+
+    #[test]
+    fn same_seed_always_picks_the_same_winner() {
+        let first = perform_volume_split(splits(&[50, 50]), Some("pay_abc123")).unwrap();
+        for _ in 0..100 {
+            let again = perform_volume_split(splits(&[50, 50]), Some("pay_abc123")).unwrap();
+            assert_eq!(again, first);
+        }
+    }
+
+    #[test]
+    fn winner_moves_to_front_and_rest_keep_declaration_order() {
+        // djb2("pay_z") % 100 selects a definite slot; whatever wins, the remaining
+        // entries must keep their original relative order.
+        let out = perform_volume_split(splits(&[10, 20, 30, 40]), Some("pay_z")).unwrap();
+        let rest: Vec<_> = out[1..].iter().map(|c| c.gateway_name.clone()).collect();
+        let mut expected: Vec<_> = (0..4)
+            .map(|i| format!("gw_{i}"))
+            .filter(|name| *name != out[0].gateway_name)
+            .collect();
+        expected.sort_by_key(|name| name.clone());
+        let mut rest_sorted = rest.clone();
+        rest_sorted.sort();
+        assert_eq!(rest_sorted, expected);
+        assert_eq!(rest, {
+            let mut in_order: Vec<_> = (0..4).map(|i| format!("gw_{i}")).collect();
+            in_order.retain(|name| *name != out[0].gateway_name);
+            in_order
+        });
+    }
+
+    #[test]
+    fn seeded_split_respects_weights_across_many_payments() {
+        // 80/20 split over 10k distinct payment ids should land near 80/20 —
+        // the hash spreads payments uniformly over the weight range.
+        let mut first_wins = 0u32;
+        for i in 0..10_000 {
+            let seed = format!("pay_{i}");
+            let out = perform_volume_split(splits(&[80, 20]), Some(&seed)).unwrap();
+            if out[0].gateway_name == "gw_0" {
+                first_wins += 1;
+            }
+        }
+        assert!((7_500..=8_500).contains(&first_wins), "got {first_wins}");
+    }
+
+    #[test]
+    fn zero_total_weight_errors_instead_of_dividing_by_zero() {
+        assert!(perform_volume_split(splits(&[0, 0]), Some("pay_x")).is_err());
+    }
+
+    #[test]
+    fn unseeded_path_still_works() {
+        let out = perform_volume_split(splits(&[50, 50]), None).unwrap();
+        assert_eq!(out.len(), 2);
     }
 }
