@@ -62,7 +62,27 @@ const USEFUL_RESPONSE_HEADERS: &[&str] = &[
     "cf-ray",
 ];
 
-const RESPONSE_BODY_SNIPPET_MAX_CHARS: usize = 2048;
+const RESPONSE_BODY_SNIPPET_MAX_BYTES: usize = 2048;
+
+/// Reads at most `RESPONSE_BODY_SNIPPET_MAX_BYTES` of the response body, chunk by chunk,
+/// so an arbitrarily large upstream error page never gets buffered whole.
+async fn read_body_snippet(mut response: reqwest::Response) -> Option<String> {
+    let mut buf: Vec<u8> = Vec::new();
+    while buf.len() < RESPONSE_BODY_SNIPPET_MAX_BYTES {
+        match response.chunk().await {
+            Ok(Some(chunk)) => {
+                let remaining = RESPONSE_BODY_SNIPPET_MAX_BYTES - buf.len();
+                buf.extend_from_slice(&chunk[..chunk.len().min(remaining)]);
+            }
+            Ok(None) | Err(_) => break,
+        }
+    }
+    if buf.is_empty() {
+        None
+    } else {
+        Some(String::from_utf8_lossy(&buf).into_owned())
+    }
+}
 
 fn useful_response_headers(headers: &reqwest::header::HeaderMap) -> serde_json::Value {
     serde_json::Value::Object(
@@ -79,11 +99,13 @@ fn useful_response_headers(headers: &reqwest::header::HeaderMap) -> serde_json::
 }
 
 /// Ships a failed lookup to ClickHouse (via the analytics domain-event queue) so the
-/// cards-API dependency can be monitored and alerted on from Grafana.
+/// cards-API dependency can be monitored and alerted on from Grafana. `endpoint` must be
+/// the BIN-free base URL: the BIN already rides the typed `card_is_in` column, so the
+/// `details` payload stays free of sensitive-data duplication.
 #[allow(clippy::too_many_arguments)]
 fn record_lookup_failure(
     bin: &str,
-    url: &str,
+    endpoint: &str,
     error_code: String,
     error_message: &str,
     latency_ms: u64,
@@ -92,8 +114,7 @@ fn record_lookup_failure(
     response_body: Option<String>,
 ) {
     let details = serde_json::json!({
-        "bin": bin,
-        "url": url,
+        "endpoint": endpoint,
         "status_code": status_code,
         "latency_ms": latency_ms,
         "response_headers": response_headers,
@@ -145,7 +166,8 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
         return None;
     }
 
-    let url = format!("{}/{}", cfg.base_url.trim_end_matches('/'), bin);
+    let endpoint = cfg.base_url.trim_end_matches('/');
+    let url = format!("{}/{}", endpoint, bin);
     let fut = client()
         .get(&url)
         .header("api-key", cfg.api_key.peek().as_str())
@@ -162,13 +184,15 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
                 bin,
                 e
             );
+            let status_code = e.status().map(|status| status.as_u16());
             record_lookup_failure(
                 &bin,
-                &url,
+                endpoint,
                 "REQUEST_ERROR".to_string(),
-                &e.to_string(),
+                // without_url: reqwest embeds the full URL (and thus the BIN) in messages.
+                &e.without_url().to_string(),
                 started.elapsed().as_millis() as u64,
-                e.status().map(|status| status.as_u16()),
+                status_code,
                 None,
                 None,
             );
@@ -183,7 +207,7 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
             );
             record_lookup_failure(
                 &bin,
-                &url,
+                endpoint,
                 "TIMEOUT".to_string(),
                 &format!("no response within {}ms", cfg.timeout_ms),
                 cfg.timeout_ms,
@@ -200,14 +224,10 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
 
     if !status.is_success() {
         logger::warn!(tag = "cardInfoApi", "non-2xx for bin {}: {}", bin, status);
-        let body_snippet = response
-            .text()
-            .await
-            .ok()
-            .map(|body| body.chars().take(RESPONSE_BODY_SNIPPET_MAX_CHARS).collect());
+        let body_snippet = read_body_snippet(response).await;
         record_lookup_failure(
             &bin,
-            &url,
+            endpoint,
             status.as_u16().to_string(),
             "non-2xx response from cards API",
             started.elapsed().as_millis() as u64,
@@ -224,9 +244,9 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
             logger::warn!(tag = "cardInfoApi", "parse error for bin {}: {:?}", bin, e);
             record_lookup_failure(
                 &bin,
-                &url,
+                endpoint,
                 "PARSE_ERROR".to_string(),
-                &e.to_string(),
+                &e.without_url().to_string(),
                 started.elapsed().as_millis() as u64,
                 Some(status.as_u16()),
                 Some(response_headers),
