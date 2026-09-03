@@ -46,10 +46,10 @@ fn client() -> &'static reqwest::Client {
     })
 }
 
-/// Response headers worth keeping on failure rows: request correlation (`x-request-id`),
-/// throttling (`retry-after`), upstream latency (`x-envoy-upstream-service-time`), and
-/// enough envelope info (`content-type`, `server`, `via`, `date`) to tell an origin
-/// error from a proxy/LB one.
+/// Response headers worth keeping on the failure log line: request correlation
+/// (`x-request-id`), throttling (`retry-after`), upstream latency
+/// (`x-envoy-upstream-service-time`), and enough envelope info (`content-type`,
+/// `server`, `via`, `date`) to tell an origin error from a proxy/LB one.
 const USEFUL_RESPONSE_HEADERS: &[&str] = &[
     "content-type",
     "content-length",
@@ -98,35 +98,28 @@ fn useful_response_headers(headers: &reqwest::header::HeaderMap) -> serde_json::
     )
 }
 
-/// Ships a failed lookup to ClickHouse (via the analytics domain-event queue) so the
-/// cards-API dependency can be monitored and alerted on from Grafana. `endpoint` must be
-/// the BIN-free base URL: the BIN already rides the typed `card_is_in` column, so the
-/// `details` payload stays free of sensitive-data duplication.
-#[allow(clippy::too_many_arguments)]
-fn record_lookup_failure(
-    bin: &str,
-    endpoint: &str,
-    error_code: String,
-    error_message: &str,
-    latency_ms: u64,
-    status_code: Option<u16>,
-    response_headers: Option<serde_json::Value>,
-    response_body: Option<String>,
-) {
-    let details = serde_json::json!({
-        "endpoint": endpoint,
-        "status_code": status_code,
-        "latency_ms": latency_ms,
-        "response_headers": response_headers,
-        "response_body": response_body,
-    });
-    crate::analytics::DomainAnalyticsEvent::record_card_info_lookup_failure(
-        Some(bin.to_string()),
-        error_code,
-        error_message.to_string(),
-        Some(details.to_string()),
-        Some(latency_ms as f64),
-    );
+/// The upstream's own error code (e.g. Hyperswitch's "IR_31") from an error body like
+/// `{"error":{"code":"IR_31",...}}`. Bounded-cardinality, so safe as a metric label.
+fn upstream_error_code(body: Option<&str>) -> String {
+    body.and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
+        .as_ref()
+        .and_then(|value| value.pointer("/error/code"))
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or_default()
+        .to_string()
+}
+
+/// Records a failed lookup on the Prometheus metrics VictoriaMetrics scrapes
+/// (`card_info_lookup_failures_total` + latency histogram). Both labels are
+/// bounded-cardinality; the unbounded forensics (request id, headers, body) go on the
+/// WARN log line at the call site instead.
+fn record_lookup_failure(error_code: &str, upstream_code: &str, latency_ms: u64) {
+    crate::metrics::CARD_INFO_LOOKUP_FAILURE_COUNTER
+        .with_label_values(&[error_code, upstream_code])
+        .inc();
+    crate::metrics::CARD_INFO_LOOKUP_FAILURE_LATENCY_HISTOGRAM
+        .with_label_values(&[error_code])
+        .observe(latency_ms as f64 / 1000.0);
 }
 
 /// Normalizes a raw card BIN for the cards API, which supports IIN lookups from 6 up to 8
@@ -178,43 +171,28 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
     let response = match tokio::time::timeout(Duration::from_millis(cfg.timeout_ms), fut).await {
         Ok(Ok(r)) => r,
         Ok(Err(e)) => {
+            let latency_ms = started.elapsed().as_millis() as u64;
             logger::warn!(
                 tag = "cardInfoApi",
-                "request error for bin {}: {:?}",
-                bin,
-                e
-            );
-            let status_code = e.status().map(|status| status.as_u16());
-            record_lookup_failure(
-                &bin,
                 endpoint,
-                "REQUEST_ERROR".to_string(),
+                latency_ms,
                 // without_url: reqwest embeds the full URL (and thus the BIN) in messages.
-                &e.without_url().to_string(),
-                started.elapsed().as_millis() as u64,
-                status_code,
-                None,
-                None,
+                error = %e.without_url(),
+                "request error for bin {}",
+                bin,
             );
+            record_lookup_failure("REQUEST_ERROR", "", latency_ms);
             return None;
         }
         Err(_) => {
             logger::warn!(
                 tag = "cardInfoApi",
+                endpoint,
                 "timeout after {}ms for bin {}",
                 cfg.timeout_ms,
                 bin
             );
-            record_lookup_failure(
-                &bin,
-                endpoint,
-                "TIMEOUT".to_string(),
-                &format!("no response within {}ms", cfg.timeout_ms),
-                cfg.timeout_ms,
-                None,
-                None,
-                None,
-            );
+            record_lookup_failure("TIMEOUT", "", cfg.timeout_ms);
             return None;
         }
     };
@@ -223,35 +201,38 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
     let response_headers = useful_response_headers(response.headers());
 
     if !status.is_success() {
-        logger::warn!(tag = "cardInfoApi", "non-2xx for bin {}: {}", bin, status);
+        let latency_ms = started.elapsed().as_millis() as u64;
         let body_snippet = read_body_snippet(response).await;
-        record_lookup_failure(
-            &bin,
+        let upstream_code = upstream_error_code(body_snippet.as_deref());
+        logger::warn!(
+            tag = "cardInfoApi",
             endpoint,
-            status.as_u16().to_string(),
-            "non-2xx response from cards API",
-            started.elapsed().as_millis() as u64,
-            Some(status.as_u16()),
-            Some(response_headers),
-            body_snippet,
+            latency_ms,
+            upstream_code,
+            response_headers = %response_headers,
+            response_body = body_snippet.as_deref().unwrap_or(""),
+            "non-2xx for bin {}: {}",
+            bin,
+            status,
         );
+        record_lookup_failure(&status.as_u16().to_string(), &upstream_code, latency_ms);
         return None;
     }
 
     match response.json::<CardInfoResponse>().await {
         Ok(body) => map_response_to_card_info(body),
         Err(e) => {
-            logger::warn!(tag = "cardInfoApi", "parse error for bin {}: {:?}", bin, e);
-            record_lookup_failure(
-                &bin,
+            let latency_ms = started.elapsed().as_millis() as u64;
+            logger::warn!(
+                tag = "cardInfoApi",
                 endpoint,
-                "PARSE_ERROR".to_string(),
-                &e.without_url().to_string(),
-                started.elapsed().as_millis() as u64,
-                Some(status.as_u16()),
-                Some(response_headers),
-                None,
+                latency_ms,
+                response_headers = %response_headers,
+                error = %e.without_url(),
+                "parse error for bin {}",
+                bin,
             );
+            record_lookup_failure("PARSE_ERROR", "", latency_ms);
             None
         }
     }

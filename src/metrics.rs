@@ -88,6 +88,24 @@ lazy_static! {
         exponential_buckets(0.001, 2.0, 12).unwrap()
     ).unwrap();
 
+    /// Count of failed outbound card-info (BIN metadata) lookups. Both labels are
+    /// bounded-cardinality: `error_code` is an HTTP status ("404") or
+    /// TIMEOUT/REQUEST_ERROR/PARSE_ERROR; `upstream_code` is the error code from the
+    /// cards API's error body (e.g. "IR_31"), or empty when there is none.
+    pub static ref CARD_INFO_LOOKUP_FAILURE_COUNTER: IntCounterVec = register_int_counter_vec!(
+        "card_info_lookup_failures_total",
+        "Count of failed outbound card-info (BIN) lookups grouped by error code and upstream error code",
+        &["error_code", "upstream_code"]
+    ).unwrap();
+
+    /// Latency of failed outbound card-info lookups (timeouts land at the configured cap)
+    pub static ref CARD_INFO_LOOKUP_FAILURE_LATENCY_HISTOGRAM: HistogramVec = register_histogram_vec!(
+        "card_info_lookup_failure_latency_seconds",
+        "Latency of failed outbound card-info (BIN) lookups grouped by error code",
+        &["error_code"],
+        exponential_buckets(0.001, 2.0, 12).unwrap()
+    ).unwrap();
+
 }
 
 pub async fn metrics_handler() -> error_stack::Result<String, MetricsError> {

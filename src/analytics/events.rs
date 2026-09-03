@@ -377,32 +377,6 @@ impl DomainAnalyticsEvent {
         }
     }
 
-    /// A failed outbound card-info (BIN metadata) lookup. `error_code` carries the HTTP
-    /// status ("404") or a transport kind ("TIMEOUT"/"REQUEST_ERROR"/"PARSE_ERROR"),
-    /// `average_latency` the call latency in ms (typed column, so Grafana can chart it
-    /// without JSON parsing), and `details` the URL plus selected response headers/body.
-    pub fn card_info_lookup_failure(
-        flow: AnalyticsFlowContext,
-        route: AnalyticsRoute,
-        card_is_in: Option<String>,
-        error_code: String,
-        error_message: String,
-        details: Option<String>,
-        latency_ms: Option<f64>,
-        created_at_ms: i64,
-    ) -> Self {
-        Self {
-            card_is_in,
-            event_stage: Some(crate::analytics::models::CARD_INFO_LOOKUP_STAGE.to_string()),
-            status: Some("failure".to_string()),
-            error_code: Some(error_code),
-            error_message: Some(error_message),
-            average_latency: latency_ms,
-            details,
-            ..Self::base(flow, route, created_at_ms)
-        }
-    }
-
     #[allow(clippy::too_many_arguments)]
     pub fn operation(
         flow: AnalyticsFlowContext,
