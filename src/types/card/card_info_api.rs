@@ -46,26 +46,10 @@ fn client() -> &'static reqwest::Client {
     })
 }
 
-/// Response headers worth keeping on the failure log line: request correlation
-/// (`x-request-id`), throttling (`retry-after`), upstream latency
-/// (`x-envoy-upstream-service-time`), and enough envelope info (`content-type`,
-/// `server`, `via`, `date`) to tell an origin error from a proxy/LB one.
-const USEFUL_RESPONSE_HEADERS: &[&str] = &[
-    "content-type",
-    "content-length",
-    "date",
-    "server",
-    "via",
-    "x-request-id",
-    "retry-after",
-    "x-envoy-upstream-service-time",
-    "cf-ray",
-];
 
 const RESPONSE_BODY_SNIPPET_MAX_BYTES: usize = 2048;
 
-/// Reads at most `RESPONSE_BODY_SNIPPET_MAX_BYTES` of the response body, chunk by chunk,
-/// so an arbitrarily large upstream error page never gets buffered whole.
+
 async fn read_body_snippet(mut response: reqwest::Response) -> Option<String> {
     let mut buf: Vec<u8> = Vec::new();
     while buf.len() < RESPONSE_BODY_SNIPPET_MAX_BYTES {
@@ -84,18 +68,15 @@ async fn read_body_snippet(mut response: reqwest::Response) -> Option<String> {
     }
 }
 
-fn useful_response_headers(headers: &reqwest::header::HeaderMap) -> serde_json::Value {
-    serde_json::Value::Object(
-        USEFUL_RESPONSE_HEADERS
-            .iter()
-            .filter_map(|name| {
-                headers
-                    .get(*name)
-                    .and_then(|value| value.to_str().ok())
-                    .map(|value| ((*name).to_string(), serde_json::Value::from(value)))
-            })
-            .collect(),
-    )
+/// The upstream's `x-request-id` response header, for correlating a failure with the
+/// cards API's own logs. The decision engine's request id is already on the log line via
+/// the request span (see `utils::record_fields_from_header`), so a WARN carries both.
+fn upstream_request_id(headers: &reqwest::header::HeaderMap) -> String {
+    headers
+        .get("x-request-id")
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default()
+        .to_string()
 }
 
 
@@ -179,17 +160,14 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
         .header("x-tenant-id", cfg.tenant_id.as_str())
         .send();
 
-    let started = std::time::Instant::now();
     let response = match tokio::time::timeout(Duration::from_millis(cfg.timeout_ms), fut).await {
         Ok(Ok(r)) => r,
         Ok(Err(e)) => {
-            let latency_ms = started.elapsed().as_millis() as u64;
             // without_url: reqwest embeds the full URL (and thus the BIN) in messages.
             let error_message = e.without_url().to_string();
             logger::warn!(
                 tag = "cardInfoApi",
                 endpoint,
-                latency_ms,
                 error = %error_message,
                 "request error for bin {}",
                 bin,
@@ -215,19 +193,17 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
     };
 
     let status = response.status();
-    let response_headers = useful_response_headers(response.headers());
+    let upstream_request_id = upstream_request_id(response.headers());
 
     if !status.is_success() {
-        let latency_ms = started.elapsed().as_millis() as u64;
         let body_snippet = read_body_snippet(response).await;
         let (upstream_code, upstream_message) = upstream_error(body_snippet.as_deref());
         logger::warn!(
             tag = "cardInfoApi",
             endpoint,
-            latency_ms,
+            upstream_request_id,
             upstream_code,
             upstream_message,
-            response_headers = %response_headers,
             response_body = body_snippet.as_deref().unwrap_or(""),
             "non-2xx for bin {}: {}",
             bin,
@@ -244,13 +220,11 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
     match response.json::<CardInfoResponse>().await {
         Ok(body) => map_response_to_card_info(body),
         Err(e) => {
-            let latency_ms = started.elapsed().as_millis() as u64;
             let error_message = e.without_url().to_string();
             logger::warn!(
                 tag = "cardInfoApi",
                 endpoint,
-                latency_ms,
-                response_headers = %response_headers,
+                upstream_request_id,
                 error = %error_message,
                 "parse error for bin {}",
                 bin,
