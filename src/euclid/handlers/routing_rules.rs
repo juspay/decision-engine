@@ -15,8 +15,8 @@ use crate::{
             RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
         },
         utils::{
-            generate_random_id, is_valid_enum_value, normalize_rule_value_types,
-            validate_routing_rule,
+            apply_default_fallback, generate_random_id, is_valid_enum_value,
+            normalize_rule_value_types, validate_routing_rule,
         },
     },
     types::service_configuration::{find_config_by_name, insert_config, update_config},
@@ -762,10 +762,6 @@ async fn evaluate_algorithm_data(
     algorithm_data: &StaticRoutingAlgorithm,
     payload: &RoutingRequest,
 ) -> Result<EvaluationOutcome, (ContainerError<EuclidErrors>, &'static str)> {
-    let default_output_present = payload
-        .fallback_output
-        .as_ref()
-        .is_some_and(|output| !output.is_empty());
     let parameters = &payload.parameters;
 
     let mut preview_flow_type = crate::analytics::refine_routing_evaluate_flow_type(algorithm_data);
@@ -836,19 +832,8 @@ async fn evaluate_algorithm_data(
                     )
                 })?;
 
-                // Check if fallback is enabled
-                if default_output_present && ir.output == program.default_selection {
-                    logger::debug!(
-                        "Default fallback triggered: Overriding with fallback connector"
-                    );
+                apply_default_fallback(&mut ir, payload.fallback_output.as_deref());
 
-                    // Replace output with fallback connector from request
-                    if let Some(fallback_connector) = payload.fallback_output.clone() {
-                        ir.rule_name = Some("default_fallback".to_string());
-                        ir.output = Output::Priority(fallback_connector.clone());
-                        ir.evaluated_output = fallback_connector;
-                    }
-                }
                 (ir.output, ir.evaluated_output, ir.rule_name)
             }
 
@@ -889,7 +874,6 @@ async fn evaluate_algorithm_data(
                     arm,
                     arm_algorithm_id,
                     payload,
-                    default_output_present,
                     &state.db,
                 )
                 .await;
