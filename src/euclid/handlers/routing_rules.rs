@@ -1129,8 +1129,14 @@ pub async fn routing_evaluate_batch(
         .map(str::to_string);
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
+    // The batch shares one payment across its entries (Hyperswitch sends the same
+    // payment_id on every entry). Log it so batch traffic is searchable by payment_id
+    // in the logs, matching the single `/routing/evaluate` receipt — without it, a
+    // batch call is only findable by profile and timestamp. `None` for an empty batch,
+    // which carries no entry and hence no payment to attribute.
     logger::debug!(
         created_by = %payload.created_by,
+        payment_id = ?uniform_payment_id(&payload.requests),
         entry_count = payload.requests.len(),
         "Received batch routing evaluation request"
     );
