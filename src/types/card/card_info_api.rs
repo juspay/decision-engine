@@ -98,28 +98,47 @@ fn useful_response_headers(headers: &reqwest::header::HeaderMap) -> serde_json::
     )
 }
 
-/// The upstream's own error code (e.g. Hyperswitch's "IR_31") from an error body like
-/// `{"error":{"code":"IR_31",...}}`. Bounded-cardinality, so safe as a metric label.
-fn upstream_error_code(body: Option<&str>) -> String {
-    body.and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok())
-        .as_ref()
-        .and_then(|value| value.pointer("/error/code"))
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or_default()
-        .to_string()
+/// Longest error message kept as a metric label; a guard against label-cardinality
+/// blowup from an unexpectedly chatty error source.
+const ERROR_MESSAGE_LABEL_MAX_CHARS: usize = 120;
+
+
+fn upstream_error(body: Option<&str>) -> (String, String) {
+    let parsed = body.and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok());
+    let field = |pointer: &str| {
+        parsed
+            .as_ref()
+            .and_then(|value| value.pointer(pointer))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or_default()
+            .to_string()
+    };
+    (field("/error/code"), field("/error/message"))
 }
 
-/// Records a failed lookup on the Prometheus metrics VictoriaMetrics scrapes
-/// (`card_info_lookup_failures_total` + latency histogram). Both labels are
-/// bounded-cardinality; the unbounded forensics (request id, headers, body) go on the
-/// WARN log line at the call site instead.
-fn record_lookup_failure(error_code: &str, upstream_code: &str, latency_ms: u64) {
+/// Strips the per-failure varying parts out of an error message so it stays a
+/// bounded-cardinality metric label: serde's " at line N column M" suffix, and anything
+/// past `ERROR_MESSAGE_LABEL_MAX_CHARS`.
+fn sanitize_error_message(message: &str) -> String {
+    let message = message
+        .split_once(" at line ")
+        .map(|(head, _)| head)
+        .unwrap_or(message);
+    message.chars().take(ERROR_MESSAGE_LABEL_MAX_CHARS).collect()
+}
+
+/// Counts a failed lookup on the Prometheus metric VictoriaMetrics scrapes
+/// (`card_info_lookup_failures_total`). All labels are bounded-cardinality; the
+/// unbounded forensics (request id, headers, body, latency) go on the WARN log line at
+/// the call site instead.
+fn record_lookup_failure(error_code: &str, upstream_code: &str, error_message: &str) {
     crate::metrics::CARD_INFO_LOOKUP_FAILURE_COUNTER
-        .with_label_values(&[error_code, upstream_code])
+        .with_label_values(&[
+            error_code,
+            upstream_code,
+            sanitize_error_message(error_message).as_str(),
+        ])
         .inc();
-    crate::metrics::CARD_INFO_LOOKUP_FAILURE_LATENCY_HISTOGRAM
-        .with_label_values(&[error_code])
-        .observe(latency_ms as f64 / 1000.0);
 }
 
 /// Normalizes a raw card BIN for the cards API, which supports IIN lookups from 6 up to 8
@@ -172,16 +191,17 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
         Ok(Ok(r)) => r,
         Ok(Err(e)) => {
             let latency_ms = started.elapsed().as_millis() as u64;
+            // without_url: reqwest embeds the full URL (and thus the BIN) in messages.
+            let error_message = e.without_url().to_string();
             logger::warn!(
                 tag = "cardInfoApi",
                 endpoint,
                 latency_ms,
-                // without_url: reqwest embeds the full URL (and thus the BIN) in messages.
-                error = %e.without_url(),
+                error = %error_message,
                 "request error for bin {}",
                 bin,
             );
-            record_lookup_failure("REQUEST_ERROR", "", latency_ms);
+            record_lookup_failure("REQUEST_ERROR", "", &error_message);
             return None;
         }
         Err(_) => {
@@ -192,7 +212,11 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
                 cfg.timeout_ms,
                 bin
             );
-            record_lookup_failure("TIMEOUT", "", cfg.timeout_ms);
+            record_lookup_failure(
+                "TIMEOUT",
+                "",
+                &format!("no response within {}ms", cfg.timeout_ms),
+            );
             return None;
         }
     };
@@ -203,19 +227,24 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
     if !status.is_success() {
         let latency_ms = started.elapsed().as_millis() as u64;
         let body_snippet = read_body_snippet(response).await;
-        let upstream_code = upstream_error_code(body_snippet.as_deref());
+        let (upstream_code, upstream_message) = upstream_error(body_snippet.as_deref());
         logger::warn!(
             tag = "cardInfoApi",
             endpoint,
             latency_ms,
             upstream_code,
+            upstream_message,
             response_headers = %response_headers,
             response_body = body_snippet.as_deref().unwrap_or(""),
             "non-2xx for bin {}: {}",
             bin,
             status,
         );
-        record_lookup_failure(&status.as_u16().to_string(), &upstream_code, latency_ms);
+        record_lookup_failure(
+            &status.as_u16().to_string(),
+            &upstream_code,
+            &upstream_message,
+        );
         return None;
     }
 
@@ -223,16 +252,17 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
         Ok(body) => map_response_to_card_info(body),
         Err(e) => {
             let latency_ms = started.elapsed().as_millis() as u64;
+            let error_message = e.without_url().to_string();
             logger::warn!(
                 tag = "cardInfoApi",
                 endpoint,
                 latency_ms,
                 response_headers = %response_headers,
-                error = %e.without_url(),
+                error = %error_message,
                 "parse error for bin {}",
                 bin,
             );
-            record_lookup_failure("PARSE_ERROR", "", latency_ms);
+            record_lookup_failure("PARSE_ERROR", "", &error_message);
             None
         }
     }
