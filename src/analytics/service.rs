@@ -1,5 +1,5 @@
 use crate::analytics::events::DomainAnalyticsEvent;
-use crate::analytics::flow::{AnalyticsFlowContext, AnalyticsRoute};
+use crate::analytics::flow::{AnalyticsFlowContext, AnalyticsRoute, ApiFlow, FlowType};
 use crate::analytics::models::*;
 use crate::error;
 use crate::metrics::{ANALYTICS_EVENT_COUNTER, ROUTING_DECISION_COUNTER, ROUTING_RULE_HIT_COUNTER};
@@ -380,6 +380,30 @@ impl DomainAnalyticsEvent {
             status,
             details,
             event_stage,
+            now_ms(),
+        )
+        .emit();
+    }
+
+    /// Emit a failed outbound card-info (BIN metadata) lookup for ClickHouse-backed
+    /// monitoring. Fire-and-forget via the shared domain-event queue (no-op when the
+    /// analytics write path is disabled). The lookup runs inside decide-gateway
+    /// processing, hence the DecideGateway route/flow context.
+    pub fn record_card_info_lookup_failure(
+        card_is_in: Option<String>,
+        error_code: String,
+        error_message: String,
+        details: Option<String>,
+        latency_ms: Option<f64>,
+    ) {
+        Self::card_info_lookup_failure(
+            AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::CardInfoLookupError),
+            AnalyticsRoute::DecideGateway,
+            card_is_in,
+            error_code,
+            error_message,
+            details,
+            latency_ms,
             now_ms(),
         )
         .emit();

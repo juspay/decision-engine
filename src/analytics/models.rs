@@ -615,6 +615,11 @@ pub const MAX_ROUTING_EVENTS_LIMIT: usize = 200;
 /// shared by the emit path (`record_autopilot_calibration`) and the query path.
 pub const AUTOPILOT_CALIBRATION_STAGE: &str = "autopilot_calibration";
 
+/// `event_stage` marker on the domain-event rows emitted when an outbound card-info
+/// (BIN metadata) lookup fails; the Grafana/ClickHouse alert queries filter by it
+/// together with `flow_type = 'card_info_lookup_error'`.
+pub const CARD_INFO_LOOKUP_STAGE: &str = "card_info_lookup";
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum RoutingEventType {

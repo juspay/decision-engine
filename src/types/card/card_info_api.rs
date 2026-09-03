@@ -46,6 +46,68 @@ fn client() -> &'static reqwest::Client {
     })
 }
 
+/// Response headers worth keeping on failure rows: request correlation (`x-request-id`),
+/// throttling (`retry-after`), upstream latency (`x-envoy-upstream-service-time`), and
+/// enough envelope info (`content-type`, `server`, `via`, `date`) to tell an origin
+/// error from a proxy/LB one.
+const USEFUL_RESPONSE_HEADERS: &[&str] = &[
+    "content-type",
+    "content-length",
+    "date",
+    "server",
+    "via",
+    "x-request-id",
+    "retry-after",
+    "x-envoy-upstream-service-time",
+    "cf-ray",
+];
+
+const RESPONSE_BODY_SNIPPET_MAX_CHARS: usize = 2048;
+
+fn useful_response_headers(headers: &reqwest::header::HeaderMap) -> serde_json::Value {
+    serde_json::Value::Object(
+        USEFUL_RESPONSE_HEADERS
+            .iter()
+            .filter_map(|name| {
+                headers
+                    .get(*name)
+                    .and_then(|value| value.to_str().ok())
+                    .map(|value| ((*name).to_string(), serde_json::Value::from(value)))
+            })
+            .collect(),
+    )
+}
+
+/// Ships a failed lookup to ClickHouse (via the analytics domain-event queue) so the
+/// cards-API dependency can be monitored and alerted on from Grafana.
+#[allow(clippy::too_many_arguments)]
+fn record_lookup_failure(
+    bin: &str,
+    url: &str,
+    error_code: String,
+    error_message: &str,
+    latency_ms: u64,
+    status_code: Option<u16>,
+    response_headers: Option<serde_json::Value>,
+    response_body: Option<String>,
+) {
+    let details = serde_json::json!({
+        "bin": bin,
+        "url": url,
+        "status_code": status_code,
+        "latency_ms": latency_ms,
+        "response_headers": response_headers,
+        "response_body": response_body,
+    });
+    crate::analytics::DomainAnalyticsEvent::record_card_info_lookup_failure(
+        Some(bin.to_string()),
+        error_code,
+        error_message.to_string(),
+        Some(details.to_string()),
+        Some(latency_ms as f64),
+    );
+}
+
 /// Normalizes a raw card BIN for the cards API, which supports IIN lookups from 6 up to 8
 fn normalize_bin(bin: &str) -> String {
     let digits: String = bin.chars().filter(char::is_ascii_digit).collect();
@@ -90,6 +152,7 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
         .header("x-tenant-id", cfg.tenant_id.as_str())
         .send();
 
+    let started = std::time::Instant::now();
     let response = match tokio::time::timeout(Duration::from_millis(cfg.timeout_ms), fut).await {
         Ok(Ok(r)) => r,
         Ok(Err(e)) => {
@@ -98,6 +161,16 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
                 "request error for bin {}: {:?}",
                 bin,
                 e
+            );
+            record_lookup_failure(
+                &bin,
+                &url,
+                "REQUEST_ERROR".to_string(),
+                &e.to_string(),
+                started.elapsed().as_millis() as u64,
+                e.status().map(|status| status.as_u16()),
+                None,
+                None,
             );
             return None;
         }
@@ -108,16 +181,39 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
                 cfg.timeout_ms,
                 bin
             );
+            record_lookup_failure(
+                &bin,
+                &url,
+                "TIMEOUT".to_string(),
+                &format!("no response within {}ms", cfg.timeout_ms),
+                cfg.timeout_ms,
+                None,
+                None,
+                None,
+            );
             return None;
         }
     };
 
-    if !response.status().is_success() {
-        logger::warn!(
-            tag = "cardInfoApi",
-            "non-2xx for bin {}: {}",
-            bin,
-            response.status()
+    let status = response.status();
+    let response_headers = useful_response_headers(response.headers());
+
+    if !status.is_success() {
+        logger::warn!(tag = "cardInfoApi", "non-2xx for bin {}: {}", bin, status);
+        let body_snippet = response
+            .text()
+            .await
+            .ok()
+            .map(|body| body.chars().take(RESPONSE_BODY_SNIPPET_MAX_CHARS).collect());
+        record_lookup_failure(
+            &bin,
+            &url,
+            status.as_u16().to_string(),
+            "non-2xx response from cards API",
+            started.elapsed().as_millis() as u64,
+            Some(status.as_u16()),
+            Some(response_headers),
+            body_snippet,
         );
         return None;
     }
@@ -126,6 +222,16 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
         Ok(body) => map_response_to_card_info(body),
         Err(e) => {
             logger::warn!(tag = "cardInfoApi", "parse error for bin {}: {:?}", bin, e);
+            record_lookup_failure(
+                &bin,
+                &url,
+                "PARSE_ERROR".to_string(),
+                &e.to_string(),
+                started.elapsed().as_millis() as u64,
+                Some(status.as_u16()),
+                Some(response_headers),
+                None,
+            );
             None
         }
     }

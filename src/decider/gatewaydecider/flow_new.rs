@@ -133,11 +133,12 @@ pub async fn decider_full_payload_hs_function(
                 logger::debug!(
                     action = "binEnrichmentFromCardInfo",
                     tag = "binEnrichmentFromCardInfo",
-                    "Enriched card attributes from card_info for bin {:?}: card_type={:?}, card_program={:?}, card_issuer_country={:?}",
+                    "Enriched card attributes from card_info for bin {:?}: card_type={:?}, card_program={:?}, card_issuer_country={:?}, cardSwitchProvider={:?}",
                     update_txn_card_info.card_isin,
                     update_txn_card_info.card_type,
                     update_txn_card_info.card_program,
                     update_txn_card_info.card_issuer_country,
+                    update_txn_card_info.cardSwitchProvider,
                 );
             }
             None => {
