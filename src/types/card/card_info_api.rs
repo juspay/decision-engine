@@ -98,8 +98,7 @@ fn useful_response_headers(headers: &reqwest::header::HeaderMap) -> serde_json::
     )
 }
 
-/// Longest error message kept as a metric label; a guard against label-cardinality
-/// blowup from an unexpectedly chatty error source.
+
 const ERROR_MESSAGE_LABEL_MAX_CHARS: usize = 120;
 
 
@@ -116,9 +115,7 @@ fn upstream_error(body: Option<&str>) -> (String, String) {
     (field("/error/code"), field("/error/message"))
 }
 
-/// Strips the per-failure varying parts out of an error message so it stays a
-/// bounded-cardinality metric label: serde's " at line N column M" suffix, and anything
-/// past `ERROR_MESSAGE_LABEL_MAX_CHARS`.
+
 fn sanitize_error_message(message: &str) -> String {
     let message = message
         .split_once(" at line ")
@@ -127,10 +124,6 @@ fn sanitize_error_message(message: &str) -> String {
     message.chars().take(ERROR_MESSAGE_LABEL_MAX_CHARS).collect()
 }
 
-/// Counts a failed lookup on the Prometheus metric VictoriaMetrics scrapes
-/// (`card_info_lookup_failures_total`). All labels are bounded-cardinality; the
-/// unbounded forensics (request id, headers, body, latency) go on the WARN log line at
-/// the call site instead.
 fn record_lookup_failure(error_code: &str, upstream_code: &str, error_message: &str) {
     crate::metrics::CARD_INFO_LOOKUP_FAILURE_COUNTER
         .with_label_values(&[
