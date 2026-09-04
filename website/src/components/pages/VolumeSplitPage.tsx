@@ -17,6 +17,7 @@ import { SplitBreakdown } from '../routing/volumeSplit/SplitBreakdown'
 
 import { PageHeading } from '../ui/PageHeading'
 import { Notice } from '../ui/Notice'
+import { FEATURE_FLAGS } from '../../lib/featureFlags'
 type StatusFilter = 'all' | 'active' | 'inactive'
 
 /** "stripe 50% / adyen 50%" — the row's one-line view of where traffic goes. */
@@ -357,14 +358,18 @@ export function VolumeSplitPage() {
                               onSelect: () => navigate(`/routing/volume/new?cloneFrom=${algo.id}`),
                               disabled: !canEditRouting,
                             },
-                            {
-                              label: 'Delete',
-                              icon: Trash2,
-                              tone: 'danger',
-                              onSelect: () => setPendingDeleteId(algo.id),
-                              disabled: Boolean(lockedReason),
-                              hint: lockedReason,
-                            },
+                            ...(FEATURE_FLAGS.RULE_DELETION
+                              ? [
+                                  {
+                                    label: 'Delete',
+                                    icon: Trash2,
+                                    tone: 'danger' as const,
+                                    onSelect: () => setPendingDeleteId(algo.id),
+                                    disabled: Boolean(lockedReason),
+                                    hint: lockedReason,
+                                  },
+                                ]
+                              : []),
                           ]}
                         />
                       </td>
