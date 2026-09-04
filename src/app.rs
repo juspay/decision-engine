@@ -377,10 +377,13 @@ where
             "/routing/update",
             axum::routing::post(crate::euclid::handlers::routing_rules::update_routing_rule),
         )
-        .route(
-            "/routing/delete",
-            axum::routing::post(crate::euclid::handlers::routing_rules::delete_routing_rule),
-        )
+        // Rule deletion is disabled for parity with the Hyperswitch dashboard, which
+        // cannot delete routing rules yet (juspay/hyperswitch-control-center#5495,
+        // item 4). Re-enable by uncommenting once both dashboards can offer it.
+        // .route(
+        //     "/routing/delete",
+        //     axum::routing::post(crate::euclid::handlers::routing_rules::delete_routing_rule),
+        // )
         .route(
             "/routing/list/:created_by",
             axum::routing::post(

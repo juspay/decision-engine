@@ -145,6 +145,8 @@ export interface GatewayOption {
   name: string
   /** The connector's merchant connector account id, when the dashboard handed one over. */
   gatewayId?: string
+  /** The merchant's own label for the account, when the dashboard handed one over. */
+  label?: string
 }
 
 /**
@@ -173,10 +175,18 @@ export function gatewayOptions(
     const pickedIds = new Set(alreadyPickedIds.filter(Boolean))
     return handoff
       .filter((connector) => !pickedIds.has(connector.merchant_connector_id))
-      .map((connector) => ({
-        name: connector.connector_name,
-        gatewayId: connector.merchant_connector_id,
-      }))
+      .map((connector) => {
+        // The label is the merchant's own name for the account, so it is what tells two accounts
+        // of one connector apart. When it just repeats the connector name it adds nothing — drop
+        // it so the option does not read "stripe stripe".
+        const label =
+          typeof connector.connector_label === 'string' ? connector.connector_label.trim() : ''
+        return {
+          name: connector.connector_name,
+          gatewayId: connector.merchant_connector_id,
+          label: label && label !== connector.connector_name ? label : undefined,
+        }
+      })
   }
 
   const seen = new Set<string>()
