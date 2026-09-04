@@ -41,6 +41,18 @@ pub const DEFAULT_MAX_NEW_CUSTOMERS_PER_WINDOW: i64 = 1_000_000;
 const SC_STICKY_KEY_TTL: &str = "STICKY_ROUTING_KEY_TTL";
 const SC_MAX_COMBOS: &str = "STICKY_ROUTING_MAX_COMBOS_PER_CUSTOMER";
 
+/// FeatureConf key gating sticky writes/reads per merchant — the ops kill switch.
+pub const STICKY_ROUTING_FEATURE: &str = "sticky_routing_enabled";
+/// NX guard key `sticky_gw_lock_{merchant}_{payment}`: at most one sticky write per payment
+/// inside this window, deduping duplicate/retried feedback. Deliberately short — a lifecycle
+/// status past the window re-increments the same succeeding connector, inflating magnitude
+/// uniformly (ranking holds), which is cheaper than a 90-day lock key per payment.
+pub const STICKY_WRITE_LOCK_TTL_SECS: i64 = 1800;
+
+pub fn write_lock_key(merchant_id: &str, payment_id: &str) -> String {
+    format!("sticky_gw_lock_{merchant_id}_{payment_id}")
+}
+
 fn sc_merchant_budget_key(merchant_id: &str) -> String {
     format!("STICKY_ROUTING_MAX_CUSTOMERS_{merchant_id}")
 }
@@ -180,8 +192,8 @@ fn sticky_key(merchant_id: &str, customer_id: &str) -> String {
 fn combo_key(payment_method: &str, payment_method_type: &str) -> String {
     format!(
         "{}:{}",
-        sanitize(payment_method),
-        sanitize(payment_method_type)
+        canonical_dimension(payment_method),
+        canonical_dimension(payment_method_type)
     )
 }
 
@@ -207,7 +219,14 @@ fn decode_field(field: &str) -> Option<(String, String, String)> {
 
 // ':' is the field separator, so it can never appear inside a component.
 fn sanitize(part: &str) -> String {
-    part.replace(':', "_")
+    part.trim().replace(':', "_")
+}
+
+// pm/pmt arrive from two sources (feedback payload verbatim; decide-time snapshot uppercased),
+// so they are case-folded here or the same combo fragments across fields. The connector is NOT
+// case-folded: the read path must compare it verbatim against the caller's eligible list.
+fn canonical_dimension(part: &str) -> String {
+    sanitize(part).to_uppercase()
 }
 
 fn sorted_desc(entries: impl Iterator<Item = (String, i64)>) -> Vec<(String, i64)> {
@@ -378,6 +397,26 @@ mod tests {
         assert_eq!(
             decode_field(&field),
             Some(("PM_WITH_COLONS".into(), "PMT".into(), "CON".into()))
+        );
+    }
+
+    #[test]
+    fn pm_and_pmt_case_fold_but_connector_stays_verbatim() {
+        // Payload-sourced ("interac"/"rtp") and snapshot-sourced ("INTERAC"/"RTP") writes
+        // must land on the same field, or one customer's combo fragments.
+        assert_eq!(
+            encode_field("interac", "rtp", "gigadat"),
+            "INTERAC:RTP:gigadat"
+        );
+        assert_eq!(
+            encode_field(" INTERAC ", "RTP", "gigadat"),
+            "INTERAC:RTP:gigadat"
+        );
+        let raw = HashMap::from([("INTERAC:RTP:gigadat".to_string(), "2".to_string())]);
+        let data = StickyData::from_raw(raw);
+        assert_eq!(
+            data.connectors_for_combo("interac", "rtp"),
+            vec![("gigadat".to_string(), 2)]
         );
     }
 
