@@ -522,6 +522,15 @@ async fn maybe_record_sticky_success(
     };
     match write {
         Ok(outcome) => {
+            let label = match outcome {
+                crate::sticky_routing::StickyWriteOutcome::Recorded { .. } => "recorded",
+                crate::sticky_routing::StickyWriteOutcome::SkippedOverBudget => "over_budget",
+                crate::sticky_routing::StickyWriteOutcome::Decremented => "decremented",
+                crate::sticky_routing::StickyWriteOutcome::SkippedNoHabit => "no_habit",
+            };
+            crate::metrics::STICKY_ROUTING_WRITE_COUNTER
+                .with_label_values(&[label])
+                .inc();
             logger::info!(
                 action = "sticky_routing",
                 merchant_id = %api_payload.merchant_id,
@@ -531,6 +540,9 @@ async fn maybe_record_sticky_success(
             );
         }
         Err(error) => {
+            crate::metrics::STICKY_ROUTING_WRITE_COUNTER
+                .with_label_values(&["write_error"])
+                .inc();
             logger::error!(
                 action = "sticky_routing",
                 merchant_id = %api_payload.merchant_id,
