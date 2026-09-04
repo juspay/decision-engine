@@ -550,6 +550,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             udfs: None,
             udfs_consumed_for_routing: None,
             gatewayReferenceId: None,
+            customerId: None,
         },
         ab_test_sr_override: None,
     }
@@ -582,6 +583,10 @@ pub struct GatewayScoringData {
     pub gatewayReferenceId: Option<String>,
     pub udfs: Option<UDFs>,
     pub udfs_consumed_for_routing: Option<String>,
+    /// Customer behind the payment, stashed so the feedback path can key sticky-routing
+    /// counts. Default keeps snapshots written before this field deserializing.
+    #[serde(default)]
+    pub customerId: Option<String>,
 }
 
 impl GatewayScoringData {
@@ -661,6 +666,8 @@ pub enum GatewayDeciderApproach {
     /// A volume-contract nudge moved the payment off the SR head — the volume-driven sibling of
     /// [`Self::SrSelectionMultiObjective`].
     SrSelectionVolumeCommitment,
+    /// Sticky routing pinned the customer's proven connector over the SR pick.
+    StickyRouting,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -980,6 +987,11 @@ pub struct DomainDeciderRequestForApiCallV2 {
     pub elimination_enabled: Option<bool>,
     #[serde(default)]
     pub enable_multi_objective: Option<bool>,
+    /// Sticky-routing eligibility for this payment. Absent defaults to eligible; the
+    /// per-merchant kill switch and customer presence still gate the actual override.
+    /// `/routing/hybrid` sets it from the static rule outcome (explicit order => false).
+    #[serde(default)]
+    pub sticky_routing: Option<bool>,
 }
 
 pub fn deserialize_optional_udfs_to_hashmap<'de, D>(
@@ -1603,6 +1615,7 @@ impl fmt::Display for GatewayDeciderApproach {
             Self::SrSelectionVolumeCommitment => {
                 write!(f, "SR_SELECTION_VOLUME_COMMITMENT")
             }
+            Self::StickyRouting => write!(f, "STICKY_ROUTING"),
         }
     }
 }

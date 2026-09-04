@@ -130,6 +130,11 @@ pub async fn hybrid_routing_evaluate(
 
     let is_empty_request = static_routing_request.is_none() && dynamic_routing_request.is_none();
 
+    // Profile identity survives the request move below; needed for the sticky gate.
+    let static_profile = static_routing_request
+        .as_ref()
+        .map(|req| (req.created_by.clone(), req.algorithm_for.clone()));
+
     let (static_routing_response, static_routing_error, static_fallback_gateways) =
         match static_routing_request {
             Some(req) => {
@@ -155,6 +160,37 @@ pub async fn hybrid_routing_evaluate(
         .clone()
         .or(static_fallback_gateways);
 
+    // Sticky gate from the static outcome: an explicit priority/straight-through order
+    // disables sticky; a volume split defers to the active algorithm's own metadata config.
+    // No active rule (there is no algorithm whose metadata could answer) and no static step
+    // both leave the caller's flag standing — the merchant-level kill switch still governs.
+    let sticky_gate = match static_routing_response.as_ref() {
+        Some(response) if response.status == "no_active_algorithm" => None,
+        Some(response) => {
+            let output_type = response
+                .output
+                .get("type")
+                .and_then(|value| value.as_str())
+                .unwrap_or_default();
+            if matches!(output_type, "volume_split" | "volume_split_priority") {
+                let (created_by, algorithm_for) = static_profile.clone().unwrap_or_default();
+                let state = crate::app::get_tenant_app_state().await;
+                Some(
+                    crate::euclid::handlers::routing_rules::active_sticky_config(
+                        &state,
+                        &created_by,
+                        algorithm_for.as_deref(),
+                    )
+                    .await
+                    .enabled,
+                )
+            } else {
+                Some(false)
+            }
+        }
+        None => None,
+    };
+
     let dynamic_eval_result = match dynamic_routing_request {
         Some(mut req) => {
             // Request-provided dynamic list has precedence.
@@ -168,6 +204,9 @@ pub async fn hybrid_routing_evaluate(
                 .clone()
                 .map(|connectors| extract_gateway_names(&connectors));
             req.eligible_gateway_list = request_eligible_gateways.or(fallback_eligible_gateways);
+            if let Some(gate) = sticky_gate {
+                req.sticky_routing = Some(req.sticky_routing.unwrap_or(true) && gate);
+            }
             Some(decider_full_payload_hs_function(req, Instant::now()).await)
         }
         None => None,
