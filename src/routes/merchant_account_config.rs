@@ -55,6 +55,9 @@ pub enum KnownFeature {
     Autopilot,
     /// Volume-commitment steering — a secondary objective that runs alongside cost savings.
     VolumeContracts,
+    /// Sticky routing kill switch — the merchant-level gate ANDed over the per-algorithm
+    /// `metadata.sticky_routing` config on both the feedback-write and decide-read paths.
+    StickyRouting,
 }
 
 impl KnownFeature {
@@ -68,6 +71,7 @@ impl KnownFeature {
             Self::SrAutoCalibration,
             Self::Autopilot,
             Self::VolumeContracts,
+            Self::StickyRouting,
         ]
     }
 
@@ -81,6 +85,7 @@ impl KnownFeature {
             "auto-calibration" => Some(Self::SrAutoCalibration),
             "autopilot" => Some(Self::Autopilot),
             "volume-contracts" => Some(Self::VolumeContracts),
+            "sticky-routing" => Some(Self::StickyRouting),
             _ => None,
         }
     }
@@ -100,6 +105,9 @@ impl KnownFeature {
             Self::VolumeContracts => {
                 crate::decider::gatewaydecider::volume_commitment::FEATURE_FLAG
             }
+            // The same key the feedback write and decide read check, so this toggle
+            // drives sticky routing directly.
+            Self::StickyRouting => crate::sticky_routing::STICKY_ROUTING_FEATURE,
         }
     }
 
