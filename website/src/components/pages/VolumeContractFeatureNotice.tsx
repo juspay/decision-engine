@@ -58,10 +58,15 @@ function linesOf(view: VolumeCommitmentView): Line[] {
 /** "day 31 of 31" — which contract day the cycle is on right now. */
 function cyclePosition(view: VolumeCommitmentView): string | null {
   if (!view.cycleStart || !view.daysTotal) return null
+  const startedAt = Date.parse(view.cycleStart)
+  if (Number.isNaN(startedAt)) return null
   const daySecs = view.daySecs ?? SECS_PER_DAY
-  const elapsed = (Date.now() - Date.parse(view.cycleStart)) / (daySecs * 1000)
+  const elapsed = (Date.now() - startedAt) / (daySecs * 1000)
   const unit = isTestCycle(daySecs) ? 'minute' : 'day'
-  return `${unit} ${Math.min(Math.floor(elapsed) + 1, view.daysTotal)} of ${view.daysTotal}`
+  // A cycle is on its first day from the moment it opens, and on its last until it closes: the
+  // clamp keeps a not-yet-open cycle off "day 0" and a stale one off a day past its own length.
+  const day = Math.min(Math.max(Math.floor(elapsed) + 1, 1), view.daysTotal)
+  return `${unit} ${day} of ${view.daysTotal}`
 }
 
 function formatCycleEnd(cycleEnd?: string | null): string | null {

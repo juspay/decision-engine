@@ -62,7 +62,11 @@ pub async fn load(
             "toUInt64(count()) AS payments".to_string(),
             format!("toUInt64(countIf({steered})) AS steered_payments"),
         ]);
-        base_filters(&mut builder, &query.merchant_id, FlowType::DecideGatewayDecision);
+        base_filters(
+            &mut builder,
+            &query.merchant_id,
+            FlowType::DecideGatewayDecision,
+        );
         builder.add_filter(FilterClause::raw(format!(
             "created_at_ms >= {cycle_start_ms}"
         )));

@@ -279,7 +279,10 @@ mod steering_marks {
         late.period_end_ms = late.period_start_ms + 10 * DAY_MS;
         let mut psps = vec![late];
         mark_who_needs_steering(&mut psps, now);
-        assert!(!psps[0].needs_steering, "half a day in, the rate is not a rate");
+        assert!(
+            !psps[0].needs_steering,
+            "half a day in, the rate is not a rate"
+        );
     }
 
     /// The richest commitment sorts first, so it wins a payment two of them could take.

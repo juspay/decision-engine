@@ -39,7 +39,11 @@ pub async fn load(
     // Forecast runs, which carry the eliminations — one event per controller run.
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
     builder.extend_selects(["created_at_ms".to_string(), "details".to_string()]);
-    base_filters(&mut builder, merchant_id, FlowType::VolumeCommitmentForecast);
+    base_filters(
+        &mut builder,
+        merchant_id,
+        FlowType::VolumeCommitmentForecast,
+    );
     builder.add_order_by(OrderClause::desc("created_at_ms"));
     builder.set_limit(Some(query.audit_limit));
     match fetch_all::<ForecastEventRow>(builder.build(client)).await {

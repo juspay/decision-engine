@@ -160,8 +160,7 @@ impl ClickHouseVolumeSource {
         // Divide by the days actually queried — a fixed 7 would understate the rate early in a
         // cycle and mid-day, and an understated routing rate reads as a phantom shortfall.
         let pace_days_covered = elapsed_window_days(now_ms, pace_start_ms, pace_days, day_ms);
-        let traffic_days_covered =
-            elapsed_window_days(now_ms, traffic_start_ms, pace_days, day_ms);
+        let traffic_days_covered = elapsed_window_days(now_ms, traffic_start_ms, pace_days, day_ms);
         let recent_days_covered =
             elapsed_window_days(now_ms, recent_start_ms, RECENT_TRAFFIC_DAYS, day_ms);
         let mut group_daily = 0.0;
@@ -176,8 +175,10 @@ impl ClickHouseVolumeSource {
             }
             into.achieved
                 .insert(gateway.clone(), nan_to_zero(row.achieved));
-            into.pace
-                .insert(gateway.clone(), nan_to_zero(row.pace_total) / pace_days_covered);
+            into.pace.insert(
+                gateway.clone(),
+                nan_to_zero(row.pace_total) / pace_days_covered,
+            );
             into.routing_gives_daily.insert(
                 gateway.clone(),
                 nan_to_zero(row.unaided_total) / pace_days_covered,
@@ -242,7 +243,6 @@ impl VolumeSource for ClickHouseVolumeSource {
         }
         Ok(measured)
     }
-
 }
 
 /// Float aggregates are non-nullable and can come back NaN/inf; every consumer wants zero.

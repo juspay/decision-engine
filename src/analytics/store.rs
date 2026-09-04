@@ -2,10 +2,10 @@ use async_trait::async_trait;
 
 use crate::analytics::events::{ApiEvent, DomainAnalyticsEvent};
 use crate::analytics::models::{
-    CommitmentAnalytics, CommitmentAnalyticsQuery, CommitmentImpactData,
     AnalyticsCostSavingsResponse, AnalyticsDecisionResponse, AnalyticsGatewayScoresResponse,
     AnalyticsLogSummariesResponse, AnalyticsOverviewResponse, AnalyticsQuery,
-    AnalyticsRoutingStatsResponse, ExperimentResultsQuery, ExperimentResultsResponse,
+    AnalyticsRoutingStatsResponse, CommitmentAnalytics, CommitmentAnalyticsQuery,
+    CommitmentImpactData, ExperimentResultsQuery, ExperimentResultsResponse,
     ExperimentTransactionsQuery, ExperimentTransactionsResponse, PaymentAuditQuery,
     PaymentAuditResponse, RoutingEventsQuery, RoutingEventsResponse,
 };

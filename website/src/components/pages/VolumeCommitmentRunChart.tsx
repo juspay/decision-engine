@@ -238,6 +238,10 @@ export function VolumeCommitmentRunChart({
     [audit.events, currentRunId],
   )
 
+  // Once the cycle has closed there is no more traffic to come, so a commitment short of its goal
+  // has missed it rather than being behind on it.
+  const cycleOver = Boolean(cycleEndMs) && secondsLeft === 0
+
   const rows = useMemo<Row[]>(() => {
     const psps = pacing.data?.psps ?? []
     const eliminated = pacing.data?.eliminated ?? []
@@ -265,13 +269,15 @@ export function VolumeCommitmentRunChart({
         0
       const status: PacingStatus = goal > 0 && achieved >= goal
         ? 'met'
-        : dropped
-          ? 'eliminated'
-          : live
-            ? live.steering
-              ? 'steering'
-              : 'on_pace'
-            : 'pending'
+        : cycleOver
+          ? 'missed'
+          : dropped
+            ? 'eliminated'
+            : live
+              ? live.steering
+                ? 'steering'
+                : 'on_pace'
+              : 'pending'
       // The gate that stopped this commitment most often. One reason, not a tally: the row is a
       // line of text, and the dominant gate is the one that explains the zero.
       let noneEligible: string | undefined
@@ -315,7 +321,7 @@ export function VolumeCommitmentRunChart({
         blockedBy,
       }
     })
-  }, [pacing.data, connectors, results, colorFor])
+  }, [pacing.data, connectors, results, colorFor, cycleOver])
 
   const statusFor = useCallback(
     (name: string): PacingStatus => rows.find((r) => r.name === name)?.status ?? 'pending',
@@ -327,7 +333,6 @@ export function VolumeCommitmentRunChart({
   )
 
   // ── Driving traffic at the contract ─────────────────────────────────────────────────────
-  const cycleOver = Boolean(cycleEndMs) && secondsLeft === 0
   const contractDaySecs = dashboard.pacing?.daySecs ?? SECS_PER_DAY
   const expectedDaily = dashboard.pacing?.expectedDailyTraffic ?? 0
   // Volume rate is a contract term: `expectedDaily` per contract day, however many payments carry

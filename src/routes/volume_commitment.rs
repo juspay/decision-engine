@@ -9,11 +9,11 @@ use futures::FutureExt;
 use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
 
-use crate::auth::AuthContext;
 use crate::analytics::models::{
     CommitmentAnalytics, CommitmentAnalyticsQuery, CommitmentAuditEvent, CommitmentAuditKind,
     CommitmentDayVolume, CommitmentWindow,
 };
+use crate::auth::AuthContext;
 use crate::decider::gatewaydecider::volume_commitment;
 use volume_commitment::controller::{self, RunReport};
 use volume_commitment::{math, Commitment, CommitmentInputs, Deps, SteeringPlan};
@@ -246,7 +246,11 @@ fn view_from_plan(
         tolerance: Some(plan.tolerance),
         // Folded from `0.0` rather than summed: `f64`'s additive identity is `-0.0`, so an empty
         // sum serializes as `-0.0` — a signed zero reward reads as a defect on the wire.
-        reward_at_stake: plan.psps.iter().map(|p| p.reward).fold(0.0, |total, r| total + r),
+        reward_at_stake: plan
+            .psps
+            .iter()
+            .map(|p| p.reward)
+            .fold(0.0, |total, r| total + r),
         measured_daily_traffic: measured.total_daily,
         measurement_available: !measured.measurement_failed,
         psps: plan
@@ -533,7 +537,6 @@ fn commitments_for_run(commitments: &[Commitment], run_id: Option<&str>) -> Vec<
         None => commitments.to_vec(),
     }
 }
-
 
 /// The analytics read store, or `None` when analytics is not wired — every commitment read then
 /// degrades to "nothing measured" rather than failing the dashboard.

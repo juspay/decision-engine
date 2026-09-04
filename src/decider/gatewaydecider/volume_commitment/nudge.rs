@@ -407,7 +407,10 @@ mod tests {
 
             let outcome = choose(&scores, &plan, noon(), &mut always());
 
-            assert_eq!(gate_of(&outcome, "behind"), Some(SteerBlock::OutsideTolerance));
+            assert_eq!(
+                gate_of(&outcome, "behind"),
+                Some(SteerBlock::OutsideTolerance)
+            );
         }
 
         /// Eligible in every respect and simply unlucky — the one gate that says the plan is
@@ -447,7 +450,10 @@ mod tests {
             let outcome = choose(&scores, &plan, noon(), &mut always());
 
             assert_eq!(outcome.chosen.as_deref(), Some("poor"));
-            assert_eq!(gate_of(&outcome, "rich"), Some(SteerBlock::OutsideTolerance));
+            assert_eq!(
+                gate_of(&outcome, "rich"),
+                Some(SteerBlock::OutsideTolerance)
+            );
             assert_eq!(gate_of(&outcome, "poor"), None, "the winner is not blocked");
         }
     }

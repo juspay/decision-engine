@@ -1463,7 +1463,10 @@ mod shipped_samples {
     #[test]
     fn every_shipped_sample_would_be_accepted_by_the_write_path() {
         let samples = shipped();
-        assert!(!samples.is_empty(), "development.toml ships the demo library");
+        assert!(
+            !samples.is_empty(),
+            "development.toml ships the demo library"
+        );
         for sample in &samples {
             // Development permits test cycles, which is what these templates declare.
             let errors = validate_volume_contract_config(&sample.contract, true);
@@ -1572,9 +1575,12 @@ mod shipped_samples {
         assert!(s.targets.iter().sum::<u64>() > s.cycle_volume);
         assert!(s.targets.iter().all(|&t| t > s.unaided_share));
         assert!(
-            s.rebates.iter().collect::<std::collections::HashSet<_>>().len() > 1,
+            s.rebates
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                > 1,
             "identical rewards give the ranking nothing to rank on"
         );
     }
-
 }

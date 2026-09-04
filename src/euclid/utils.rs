@@ -192,11 +192,10 @@ pub fn validate_routing_rule(
             // caller. Absent deps — the feature never started — is the closed answer.
             let allow_test_cycles = crate::decider::gatewaydecider::volume_commitment::deps()
                 .is_some_and(|deps| deps.config.allow_test_cycles);
-            let validation_errors =
-                crate::euclid::volume_contract::validate_volume_contract_config(
-                    contract_config,
-                    allow_test_cycles,
-                );
+            let validation_errors = crate::euclid::volume_contract::validate_volume_contract_config(
+                contract_config,
+                allow_test_cycles,
+            );
             if validation_errors.is_empty() {
                 Ok(ValidationResult::success())
             } else {

@@ -239,8 +239,7 @@ pub async fn compute_plan(
     // forecast is a thin basis for that: the estimate behind it follows a rate, and rates move.
     // So the verdict has to repeat. A commitment reading unreachable for the first time is kept
     // for one more interval and merely flagged; if the next forecast agrees, it drops.
-    let flagged_unreachable: Vec<String> =
-        verdict.iter().map(|d| d.connector.clone()).collect();
+    let flagged_unreachable: Vec<String> = verdict.iter().map(|d| d.connector.clone()).collect();
     let (dropped, reprieved): (Vec<_>, Vec<_>) = verdict
         .into_iter()
         .partition(|d| previously_flagged.contains(&d.connector));
@@ -336,7 +335,10 @@ fn rate_for(
     let elapsed_ms = ((now.timestamp_millis() - psp.period_start_ms).max(0) as f64) % day_ms;
     let day_remaining = ((day_ms - elapsed_ms) / day_ms).clamp(0.0, 1.0);
 
-    math::steer_rate((shortfall - already).max(0.0), daily_traffic * day_remaining)
+    math::steer_rate(
+        (shortfall - already).max(0.0),
+        daily_traffic * day_remaining,
+    )
 }
 
 /// One commitment's position: what is owed, what each remaining day must bring, and what routing
@@ -559,7 +561,10 @@ mod tests {
 
         let plan = settled_plan(&deps, &state, &inputs).await;
 
-        assert!(plan.psps.is_empty(), "unreachable on the traffic that exists");
+        assert!(
+            plan.psps.is_empty(),
+            "unreachable on the traffic that exists"
+        );
         assert_eq!(plan.dropped.len(), 1);
         assert!(
             plan.dropped[0].reason.contains("25000"),
@@ -605,7 +610,10 @@ mod tests {
 
         let plan = settled_plan(&deps, &state, &inputs).await;
 
-        assert!(plan.psps.is_empty(), "200_000 a day against 100_000 flowing");
+        assert!(
+            plan.psps.is_empty(),
+            "200_000 a day against 100_000 flowing"
+        );
     }
 
     /// A drop is permanent in effect, so one forecast is not enough to order it. The first
@@ -621,7 +629,9 @@ mod tests {
         let (deps, _state) = deps_with(measured);
         let inputs = inputs_at(0.5, 30, 6_000_000.0);
 
-        let (plan, _measured) = compute_plan(&deps, &inputs).await.expect("fixture measures");
+        let (plan, _measured) = compute_plan(&deps, &inputs)
+            .await
+            .expect("fixture measures");
 
         assert_eq!(plan.psps.len(), 1, "kept for one more forecast");
         assert!(plan.dropped.is_empty(), "not dropped on a single reading");
@@ -641,13 +651,21 @@ mod tests {
         let (deps, state) = deps_with(measured);
         let inputs = inputs_at(0.5, 30, 6_000_000.0);
 
-        let (mut stale, _) = compute_plan(&deps, &inputs).await.expect("fixture measures");
+        let (mut stale, _) = compute_plan(&deps, &inputs)
+            .await
+            .expect("fixture measures");
         stale.run_id = "some-other-run".to_string();
         *state.previous.lock().expect("not poisoned") = Some(stale);
 
-        let (plan, _measured) = compute_plan(&deps, &inputs).await.expect("fixture measures");
+        let (plan, _measured) = compute_plan(&deps, &inputs)
+            .await
+            .expect("fixture measures");
 
-        assert_eq!(plan.psps.len(), 1, "the stale flag must not confirm anything");
+        assert_eq!(
+            plan.psps.len(),
+            1,
+            "the stale flag must not confirm anything"
+        );
         assert!(plan.dropped.is_empty());
     }
 
@@ -657,7 +675,9 @@ mod tests {
         let (deps, _state) = deps_with(MeasuredVolume::default());
         let inputs = inputs_at(0.5, 30, 6_000_000.0);
 
-        let (plan, _measured) = compute_plan(&deps, &inputs).await.expect("fixture measures");
+        let (plan, _measured) = compute_plan(&deps, &inputs)
+            .await
+            .expect("fixture measures");
 
         assert_eq!(plan.psps.len(), 1, "kept on the declared 120M a day");
         assert!(plan.dropped.is_empty());
@@ -670,7 +690,9 @@ mod tests {
         let (deps, state) = deps_with(measured_with(99_311.0));
         let inputs = inputs_at(30.49, 31, 600_000_000.0);
 
-        let (_plan, _measured) = compute_plan(&deps, &inputs).await.expect("fixture measures");
+        let (_plan, _measured) = compute_plan(&deps, &inputs)
+            .await
+            .expect("fixture measures");
 
         assert_eq!(state.stores.load(Ordering::SeqCst), 0);
     }
@@ -697,7 +719,9 @@ mod tests {
         let (deps, _state) = deps_with(measured_with(0.0));
         let inputs = inputs_at(0.5, 31, 600_000_000.0);
 
-        let (plan, _measured) = compute_plan(&deps, &inputs).await.expect("fixture measures");
+        let (plan, _measured) = compute_plan(&deps, &inputs)
+            .await
+            .expect("fixture measures");
 
         assert!(plan.dropped.is_empty(), "30 days left is ample");
         assert_eq!(plan.psps.len(), 1);
