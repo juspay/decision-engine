@@ -1129,12 +1129,7 @@ pub async fn routing_evaluate_batch(
         .map(str::to_string);
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
-    // The batch shares one payment across its entries (Hyperswitch sends the same
-    // payment_id on every entry). Resolve it once and carry it through every log line
-    // and analytics event this call emits, matching the single `/routing/evaluate`
-    // path — without it the batch is findable only by profile and timestamp, and its
-    // ClickHouse events (request hit, whole-batch error) store no payment_id at all.
-    // `None` for an empty batch, which carries no entry and hence no payment.
+    // Shared across entries; carried through every log line and analytics event below.
     let batch_payment_id = uniform_payment_id(&payload.requests);
     logger::debug!(
         created_by = %payload.created_by,
