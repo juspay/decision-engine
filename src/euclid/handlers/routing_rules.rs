@@ -1130,13 +1130,15 @@ pub async fn routing_evaluate_batch(
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
     // The batch shares one payment across its entries (Hyperswitch sends the same
-    // payment_id on every entry). Log it so batch traffic is searchable by payment_id
-    // in the logs, matching the single `/routing/evaluate` receipt — without it, a
-    // batch call is only findable by profile and timestamp. `None` for an empty batch,
-    // which carries no entry and hence no payment to attribute.
+    // payment_id on every entry). Resolve it once and carry it through every log line
+    // and analytics event this call emits, matching the single `/routing/evaluate`
+    // path — without it the batch is findable only by profile and timestamp, and its
+    // ClickHouse events (request hit, whole-batch error) store no payment_id at all.
+    // `None` for an empty batch, which carries no entry and hence no payment.
+    let batch_payment_id = uniform_payment_id(&payload.requests);
     logger::debug!(
         created_by = %payload.created_by,
-        payment_id = ?uniform_payment_id(&payload.requests),
+        payment_id = ?batch_payment_id,
         entry_count = payload.requests.len(),
         "Received batch routing evaluation request"
     );
@@ -1147,7 +1149,7 @@ pub async fn routing_evaluate_batch(
         ),
         crate::analytics::AnalyticsRoute::RoutingEvaluate,
         Some(payload.created_by.clone()),
-        None,
+        batch_payment_id.clone(),
         request_id.clone(),
         global_request_id.clone(),
         trace_id.clone(),
@@ -1157,7 +1159,7 @@ pub async fn routing_evaluate_batch(
     // One representative request for the batch: a whole-batch failure has no single entry to
     // attribute, but without it the audit records a request hit and never an outcome.
     let batch_error_payload = RoutingRequest {
-        payment_id: None,
+        payment_id: batch_payment_id.clone(),
         created_by: payload.created_by.clone(),
         fallback_output: payload.fallback_output.clone(),
         parameters: payload
@@ -1244,7 +1246,7 @@ pub async fn routing_evaluate_batch(
                 .as_ref()
                 .is_some_and(|fallback| !fallback.is_empty()) =>
         {
-            let call_payment_id = uniform_payment_id(&payload.requests);
+            let call_payment_id = batch_payment_id.clone();
             let mut entry_outcomes = Vec::with_capacity(payload.requests.len());
             let mut results = Vec::with_capacity(payload.requests.len());
             for entry in payload.requests {
@@ -1312,7 +1314,7 @@ pub async fn routing_evaluate_batch(
             Err(e) => return fail_batch(e.into(), "batch_routing_algorithm_parse_failed"),
         };
 
-    let call_payment_id = uniform_payment_id(&payload.requests);
+    let call_payment_id = batch_payment_id.clone();
     let mut entry_outcomes: Vec<Value> = Vec::with_capacity(payload.requests.len());
     let mut first_success: Option<(
         crate::analytics::FlowType,
