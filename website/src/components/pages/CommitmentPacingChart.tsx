@@ -558,8 +558,7 @@ function PacingTooltip({
   )
 }
 
-/** Running total per PSP vs its per-day target ladder (the promise split across the cycle's
- *  days, drawn as dashed steps), with steer triangles and drop markers; dropped PSPs keep their color. */
+/** Running total per PSP vs its dashed promise, with steer triangles and drop markers; dropped PSPs keep their color. */
 export function CommitmentPacingChart({
   connectors,
   currency,
@@ -1012,7 +1011,7 @@ export function CommitmentPacingChart({
             {metas.map((m) => (
               <Line
                 key={`${m.name}-promise`}
-                type="stepAfter"
+                type="linear"
                 dataKey={`${m.name}__promise`}
                 stroke={m.color}
                 strokeWidth={1.5}

@@ -497,16 +497,23 @@ export function VolumeCommitmentRunChart({
               <SolidSwatch color={r.color} />
               <span className="min-w-0 truncate font-medium text-slate-800 dark:text-white">{r.name}</span>
               <StatusBadge row={r} />
-              <span className="ml-auto whitespace-nowrap tabular-nums text-slate-500 dark:text-slate-400">
+              {/* The counts are held together, but the line as a whole wraps: the eligibility
+                  reason is a sentence, and holding that unbroken pushes it over the column beside
+                  it rather than onto a second line of its own. */}
+              <span className="ml-auto min-w-0 tabular-nums text-slate-500 dark:text-slate-400">
                 {r.goal > 0 && (
                   <>
-                    {formatAchieved(r.achieved, r.goal, currency)}/{formatMoney(r.goal, currency)}
-                    {r.status !== 'eliminated' && ` · ${pctOfGoal(r.achieved, r.goal)}%`}
+                    <span className="whitespace-nowrap">
+                      {formatAchieved(r.achieved, r.goal, currency)}/{formatMoney(r.goal, currency)}
+                      {r.status !== 'eliminated' && ` · ${pctOfGoal(r.achieved, r.goal)}%`}
+                    </span>
                     {' · '}
                   </>
                 )}
-                {r.auth} by approval · {r.steered} steered in
-                {r.ceded > 0 ? ` · ${r.ceded} ceded` : ''}
+                <span className="whitespace-nowrap">
+                  {r.auth} by approval · {r.steered} steered in
+                  {r.ceded > 0 ? ` · ${r.ceded} ceded` : ''}
+                </span>
                 {r.noneEligible && (
                   <span className="text-amber-600 dark:text-amber-500">
                     {' · '}0 eligible: {r.noneEligible}
