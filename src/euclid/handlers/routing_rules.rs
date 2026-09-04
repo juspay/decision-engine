@@ -472,27 +472,13 @@ pub async fn routing_create(
         }
     }
 
-    // Sticky config rides the algorithm row; reject a malformed one here rather than have
-    // evaluate silently read it as disabled.
-    if let Some(sticky) = config
-        .metadata
-        .as_ref()
-        .and_then(|meta| meta.get(crate::sticky_routing::ALGO_METADATA_STICKY_KEY))
-    {
-        if let Err(error) =
-            serde_json::from_value::<crate::sticky_routing::StickyRoutingConfig>(sticky.clone())
-        {
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["routing_create", "failure"])
-                .inc();
-            timer.observe_duration();
-            let message = format!("invalid metadata.sticky_routing: {error}");
-            return Err(ContainerError::new_with_status_code_and_payload(
-                EuclidErrors::FieldValidationFailed(message.clone()),
-                axum::http::StatusCode::BAD_REQUEST,
-                ApiErrorResponse::new("FIELD_VALIDATION_FAILED", message, None),
-            ));
-        }
+    // Sticky config rides the algorithm row; reject a malformed one at save time.
+    if let Err(err) = validate_sticky_metadata(config.metadata.as_ref()) {
+        metrics::API_REQUEST_COUNTER
+            .with_label_values(&["routing_create", "failure"])
+            .inc();
+        timer.observe_duration();
+        return Err(err);
     }
 
     let utc_date_time = time::OffsetDateTime::now_utc();
@@ -744,6 +730,28 @@ async fn resolve_active_algorithm(
             fetch_algorithm_from_db_and_cache(state, created_by, algorithm_for).await
         }
     }
+}
+
+/// A malformed `metadata.sticky_routing` must be rejected at write time rather than have
+/// evaluate silently read it as disabled. Shared by create and update.
+fn validate_sticky_metadata(
+    metadata: Option<&serde_json::Value>,
+) -> Result<(), ContainerError<EuclidErrors>> {
+    if let Some(sticky) =
+        metadata.and_then(|meta| meta.get(crate::sticky_routing::ALGO_METADATA_STICKY_KEY))
+    {
+        if let Err(error) =
+            serde_json::from_value::<crate::sticky_routing::StickyRoutingConfig>(sticky.clone())
+        {
+            let message = format!("invalid metadata.sticky_routing: {error}");
+            return Err(ContainerError::new_with_status_code_and_payload(
+                EuclidErrors::FieldValidationFailed(message.clone()),
+                axum::http::StatusCode::BAD_REQUEST,
+                ApiErrorResponse::new("FIELD_VALIDATION_FAILED", message, None),
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// Sticky config of the profile's ACTIVE algorithm — cache-first, one Redis GET on a warm
@@ -2028,6 +2036,8 @@ pub async fn update_routing_rule(
             ));
         }
 
+        validate_sticky_metadata(payload.metadata.as_ref())?;
+
         let utc_date_time = time::OffsetDateTime::now_utc();
         let timestamp = time::PrimitiveDateTime::new(utc_date_time.date(), utc_date_time.time());
         let algorithm_data = serde_json::to_string(&rule_for_validation.algorithm)
@@ -2045,6 +2055,24 @@ pub async fn update_routing_rule(
         )
         .await
         .change_context(EuclidErrors::StorageError)?;
+
+        // Metadata is replace-on-Some, untouched-on-None — dashboard sends the full object.
+        if let Some(metadata) = payload.metadata.clone() {
+            #[cfg(feature = "postgres")]
+            let metadata_value = Some(metadata);
+            #[cfg(feature = "mysql")]
+            let metadata_value = Some(
+                serde_json::to_string(&metadata)
+                    .change_context(EuclidErrors::FailedToSerializeJsonToString)?,
+            );
+            crate::generics::generic_update::<<RoutingAlgorithm as HasTable>::Table, _, _>(
+                &conn,
+                dsl::id.eq(payload.routing_algorithm_id.clone()),
+                dsl::metadata.eq(metadata_value),
+            )
+            .await
+            .change_context(EuclidErrors::StorageError)?;
+        }
 
         invalidate_routing_algorithm_cache(&state, &payload.created_by).await;
 

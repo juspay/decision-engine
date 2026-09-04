@@ -273,6 +273,8 @@ pub struct JsonifiedRoutingAlgorithm {
     pub description: String,
     pub algorithm_data: serde_json::Value,
     pub algorithm_for: String,
+    /// Row metadata (e.g. `sticky_routing`), surfaced so the dashboard can show current config.
+    pub metadata: Option<serde_json::Value>,
     pub created_at: PrimitiveDateTime,
     pub modified_at: PrimitiveDateTime,
 }
@@ -281,6 +283,14 @@ impl From<RoutingAlgorithm> for JsonifiedRoutingAlgorithm {
     fn from(ra: RoutingAlgorithm) -> Self {
         let algorithm_data: serde_json::Value =
             serde_json::from_str(&ra.algorithm_data).unwrap_or_else(|_| serde_json::Value::Null);
+        #[cfg(feature = "postgres")]
+        let metadata = ra.metadata;
+        #[cfg(feature = "mysql")]
+        let metadata = ra
+            .metadata
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+            .filter(|value| !value.is_null());
 
         Self {
             id: ra.id,
@@ -289,6 +299,7 @@ impl From<RoutingAlgorithm> for JsonifiedRoutingAlgorithm {
             description: ra.description,
             algorithm_data,
             algorithm_for: ra.algorithm_for,
+            metadata,
             created_at: ra.created_at,
             modified_at: ra.modified_at,
         }
@@ -357,6 +368,9 @@ pub struct UpdateRoutingConfigRequest {
     #[serde(default)]
     pub description: String,
     pub algorithm: StaticRoutingAlgorithm,
+    /// Replaces the row's metadata when present; absent leaves it untouched (back-compat).
+    #[serde(default)]
+    pub metadata: Option<serde_json::Value>,
 }
 
 #[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]
