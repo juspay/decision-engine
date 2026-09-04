@@ -27,6 +27,13 @@ pub use volume::{ClickHouseVolumeSource, FixtureVolumeSource, VolumeError, Volum
 /// Per-merchant feature flag; the routing path, the forecaster and the dashboard toggle all read it.
 pub const FEATURE_FLAG: &str = "volume_commitment_routing_enabled";
 
+/// The `routing_approach` a diverted decision is stamped with. Analytics needs the value to tell
+/// steered volume from unaided, and takes it from here rather than depending on the decider.
+pub fn steered_approach() -> String {
+    crate::decider::gatewaydecider::types::GatewayDeciderApproach::SrSelectionVolumeCommitment
+        .to_string()
+}
+
 /// What this feature needs from outside: the promise, the delivery, and somewhere to keep state.
 pub struct Deps {
     /// Deployment settings — cadence defaults, where the main server is.

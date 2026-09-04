@@ -58,7 +58,7 @@ export function formatAchieved(achieved: number, goal: number, currency?: string
   const compact = formatMoney(achieved, currency)
   if (achieved >= goal || compact !== formatMoney(goal, currency)) return compact
   if (!currency) return achieved.toLocaleString()
-  const major = toMajor(achieved, currency)
+  const major = toMajorUnits(achieved, currency)
   try {
     return new Intl.NumberFormat('en', {
       style: 'currency',
@@ -130,10 +130,19 @@ export function DashSwatch() {
 /** Currencies whose minor unit is the major unit — no cents to divide away. */
 const ZERO_DECIMAL = new Set(['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'HUF', 'UGX', 'XAF', 'XOF'])
 
-/** Stored minor units → major units for display. */
-function toMajor(minor: number, currency: string) {
+/**
+ * Contract amounts → the units payments are actually denominated in.
+ *
+ * Every figure the volume-commitment API returns is in the document's canonical minor units,
+ * while a payment reaches `/decide-gateway` in major ones. Display uses this; so does the
+ * simulator, which has to turn a contract's daily rate back into a ticket size it can send.
+ * A `metric: volume` contract counts transactions and has no currency, so nothing is converted.
+ */
+export function toMajorUnits(minor: number, currency?: string | null) {
+  if (!currency) return minor
   return ZERO_DECIMAL.has(currency) ? minor : minor / 100
 }
+
 
 /** The narrow symbol for a currency code, or the code itself when Intl does not know it. */
 function currencySymbol(currency: string) {
@@ -150,7 +159,7 @@ function currencySymbol(currency: string) {
 export function formatMoney(minor: number, currency?: string | null) {
   if (!Number.isFinite(minor)) minor = 0
   if (!currency) return compactAmount(minor)
-  const major = toMajor(minor, currency)
+  const major = toMajorUnits(minor, currency)
   const abs = Math.abs(major)
   const symbol = currencySymbol(currency)
   const sign = major < 0 ? '-' : ''
@@ -164,7 +173,7 @@ export function formatMoney(minor: number, currency?: string | null) {
 export function formatMoneyExact(minor: number, currency?: string | null) {
   if (!Number.isFinite(minor)) minor = 0
   if (!currency) return Math.round(minor).toLocaleString()
-  const major = toMajor(minor, currency)
+  const major = toMajorUnits(minor, currency)
   try {
     return new Intl.NumberFormat('en', {
       style: 'currency',

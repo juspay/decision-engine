@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use super::plan::SteeringPlan;
+use super::plan::{PspPlan, SteeringPlan};
 
 /// Whether this payment was moved.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -19,6 +19,40 @@ pub enum VolumeSteerOutcome {
     Steered,
     /// Normal routing kept the payment.
     SrPrevailed,
+}
+
+/// Why a commitment that wanted this payment did not get it.
+///
+/// A steer rate is a share of the payments a commitment is *allowed* to take, and most payments
+/// reach none of them: routing has already chosen the commitment, or never offered it, or the
+/// approval gap costs more than the commitment is worth. Without a name for each of those, a plan
+/// set to divert most of what it may looks identical to one diverting nothing.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum SteerBlock {
+    /// Routing had already picked this PSP, so there was nothing to move to it. It keeps the
+    /// payment — this is a commitment being served, not one being denied.
+    AlreadyChosen,
+    /// Routing did not offer this PSP for this payment at all.
+    NotOffered,
+    /// Its cycle closed; volume sent now would land in the next period.
+    CycleClosed,
+    /// It approves too much worse than the best PSP for what the commitment is worth. The
+    /// document's tolerance is a ceiling; a thin reward affords far less of it.
+    OutsideTolerance,
+    /// Eligible, but the plan only takes `steer_rate` of these and this one lost the draw.
+    LostRoll,
+    /// A gate written by a newer version than this one is reading.
+    #[serde(other)]
+    Unknown,
+}
+
+/// One commitment that wanted this payment, and the gate that stopped it.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockedCommitment {
+    pub connector: String,
+    pub gate: SteerBlock,
 }
 
 /// Why this payment was or was not moved. Shown on the decide response.
@@ -40,6 +74,10 @@ pub struct VolumeSteerInfo {
     pub steering_count: usize,
     /// The contract execution this steer belongs to, so it files under the right run.
     pub run_id: Option<String>,
+    /// Every commitment that wanted this payment and did not get it, with the gate that stopped
+    /// it. Empty when nothing was behind, or when the first commitment considered took it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub blocked: Vec<BlockedCommitment>,
 }
 
 /// The decision for one payment.
@@ -77,50 +115,75 @@ pub fn choose(
         );
     }
 
+    // Why each commitment that wanted this payment did not get it, in the order they were asked.
+    let mut blocked: Vec<BlockedCommitment> = Vec::new();
+    let block = |connector: &str, gate: SteerBlock| BlockedCommitment {
+        connector: connector.to_string(),
+        gate,
+    };
+
     // The list is ordered by reward, so the first PSP that passes every check is the best one.
     for psp in plan.needing_steering() {
         // Not in the score map means routing already ruled it out for this payment.
         let Some(&score) = scores.get(&psp.connector) else {
+            blocked.push(block(&psp.connector, SteerBlock::NotOffered));
             continue;
         };
 
-        // Routing already picked it, so there is nothing to move *to* it. But it is behind, and
-        // every PSP after it in the plan is worth less: let it roll for its share first, and on a
-        // win keep the payment here rather than let a cheaper commitment take it away. On a loss
-        // the rest of the list gets its turn, which is what shares the flow between them.
+        // Routing already picked it, so there is nothing to move *to* it — but it is behind, and
+        // the list is ordered by reward, so every commitment still to come is worth less. It keeps
+        // the payment outright.
+        //
+        // Not a roll: `steer_rate` is the share of eligible flow a commitment must *divert* when
+        // it is not the head, and a head is already receiving these payments for nothing. Rolling
+        // it here would ration a claim that costs nothing to honour, and hand the remainder to a
+        // commitment worth less — which is how a 2bps rebate came to take volume from a 3750bps
+        // one. Richer commitments are unaffected: they sit earlier in the list and have had their
+        // turn before this point.
         if psp.connector == best_psp {
-            if now.timestamp_millis() < psp.period_end_ms && roll() < psp.steer_rate {
-                return keep_routing_choice(
-                    Some(best_psp.clone()),
-                    format!(
-                        "Kept with {}, which is behind on its own volume commitment (worth {:.0}) \
-                         and is taking {:.1}% of eligible payments; no lower-reward commitment may \
-                         steer this payment away from it.",
-                        psp.connector,
-                        psp.reward,
-                        psp.steer_rate * 100.0
-                    ),
-                    steering_count,
-                );
+            // Its cycle has closed, so extra volume cannot rescue it: it has no claim left, and
+            // the commitments below it may still bid for the payment.
+            if now.timestamp_millis() >= psp.period_end_ms {
+                blocked.push(block(&psp.connector, SteerBlock::CycleClosed));
+                continue;
             }
-            continue;
+            blocked.push(block(&psp.connector, SteerBlock::AlreadyChosen));
+            return keep_routing_choice_with(
+                Some(best_psp.clone()),
+                format!(
+                    "Kept with {}, which routing already chose and which is behind on its own \
+                     volume commitment (worth {:.0}); no lower-reward commitment may steer this \
+                     payment away from it.",
+                    psp.connector, psp.reward
+                ),
+                steering_count,
+                blocked,
+            );
         }
 
         // The cycle this commitment was owed to has closed; volume sent now counts toward the
         // next one, so there is nothing left to rescue here.
         if now.timestamp_millis() >= psp.period_end_ms {
+            blocked.push(block(&psp.connector, SteerBlock::CycleClosed));
             continue;
         }
 
-        // Approves too much worse than the best PSP.
+        // Approves too much worse than the best PSP — or worse than this commitment can afford.
+        // Conceding `a` of approval costs about `a * amount` of expected authorized volume, while
+        // landing the commitment pays `reward / remaining` of that same amount, so the two are
+        // directly comparable. The document's tolerance is the ceiling; reward density is what
+        // this commitment is actually worth paying, and for a thin rebate that is far less.
         let approval_given_up = (best_score - score).max(0.0);
-        if approval_given_up > plan.tolerance {
+        let affordable = plan.tolerance.min(reward_density(psp));
+        if approval_given_up > affordable {
+            blocked.push(block(&psp.connector, SteerBlock::OutsideTolerance));
             continue;
         }
 
         // The forecast already decided how much of the eligible flow this PSP should take. All
         // that is left is to roll for it — no counter to read, nothing to write back.
         if roll() >= psp.steer_rate {
+            blocked.push(block(&psp.connector, SteerBlock::LostRoll));
             continue;
         }
 
@@ -138,7 +201,7 @@ pub fn choose(
                     psp.steer_rate * 100.0,
                     approval_given_up,
                     best_psp,
-                    plan.tolerance
+                    affordable
                 ),
                 sr_head: Some(best_psp),
                 chosen: Some(psp.connector.clone()),
@@ -146,6 +209,8 @@ pub fn choose(
                 steer_rate: Some(psp.steer_rate),
                 steering_count,
                 run_id: Some(plan.run_id.clone()),
+                // The richer commitments asked before this one, and why each missed.
+                blocked,
             },
         };
     }
@@ -157,7 +222,17 @@ pub fn choose(
          steering rate; normal routing keeps this payment."
             .to_string()
     };
-    keep_routing_choice(Some(best_psp), reason, steering_count)
+    keep_routing_choice_with(Some(best_psp), reason, steering_count, blocked)
+}
+
+/// Reward earned per unit of volume still owed — the most approval a commitment can give up on a
+/// payment before the steer costs more than the reward it is chasing. Rises as the goal nears,
+/// which is right: the last volume before a threshold is what actually wins the reward.
+fn reward_density(psp: &PspPlan) -> f64 {
+    if psp.remaining <= 0.0 {
+        return 0.0;
+    }
+    psp.reward / psp.remaining
 }
 
 /// Leave the payment where normal routing put it.
@@ -165,6 +240,16 @@ fn keep_routing_choice(
     best_psp: Option<String>,
     reason: String,
     steering_count: usize,
+) -> NudgeOutcome {
+    keep_routing_choice_with(best_psp, reason, steering_count, Vec::new())
+}
+
+/// As `keep_routing_choice`, carrying the commitments that wanted the payment and why each missed.
+fn keep_routing_choice_with(
+    best_psp: Option<String>,
+    reason: String,
+    steering_count: usize,
+    blocked: Vec<BlockedCommitment>,
 ) -> NudgeOutcome {
     NudgeOutcome {
         chosen: None,
@@ -178,6 +263,7 @@ fn keep_routing_choice(
             steer_rate: None,
             steering_count,
             run_id: None,
+            blocked,
         },
     }
 }
@@ -216,6 +302,8 @@ mod tests {
         PspPlan {
             connector: connector.to_string(),
             reward,
+            goal: 1_000.0,
+            achieved: 0.0,
             remaining: 1_000.0,
             needed_daily: 200.0,
             routing_gives_daily: 50.0,
@@ -237,6 +325,7 @@ mod tests {
             tolerance,
             psps,
             dropped: Vec::new(),
+            flagged_unreachable: Vec::new(),
         }
     }
 
@@ -281,6 +370,86 @@ mod tests {
         let outcome = choose(&scores, &plan, noon(), &mut always());
         assert_eq!(outcome.chosen, None);
         assert_eq!(outcome.info.outcome, VolumeSteerOutcome::SrPrevailed);
+    }
+
+    /// Every gate has to be named, or a plan diverting most of what it may looks the same as one
+    /// diverting nothing — which is exactly how "Steering · 62% of eligible" came to sit beside
+    /// zero steered payments with no way to tell why.
+    mod gates {
+        use super::*;
+
+        fn gate_of(outcome: &NudgeOutcome, connector: &str) -> Option<SteerBlock> {
+            outcome
+                .info
+                .blocked
+                .iter()
+                .find(|b| b.connector == connector)
+                .map(|b| b.gate)
+        }
+
+        /// The commitment routing already picked keeps the payment. Nothing was denied it — this
+        /// is a commitment being served, and counting it as blocked would read as a failure.
+        #[test]
+        fn the_routing_head_is_recorded_as_already_chosen() {
+            let plan = fresh_plan(vec![psp("behind", 1_000.0, 1.0)], 0.05, noon());
+            let scores = scores(&[("behind", 0.95), ("other", 0.90)]);
+
+            let outcome = choose(&scores, &plan, noon(), &mut always());
+
+            assert_eq!(outcome.chosen, None);
+            assert_eq!(gate_of(&outcome, "behind"), Some(SteerBlock::AlreadyChosen));
+        }
+
+        #[test]
+        fn an_approval_gap_wider_than_the_budget_is_recorded_as_tolerance() {
+            let plan = fresh_plan(vec![psp("behind", 1_000.0, 1.0)], 0.05, noon());
+            let scores = scores(&[("best", 0.95), ("behind", 0.89)]); // gap 0.06 > 0.05
+
+            let outcome = choose(&scores, &plan, noon(), &mut always());
+
+            assert_eq!(gate_of(&outcome, "behind"), Some(SteerBlock::OutsideTolerance));
+        }
+
+        /// Eligible in every respect and simply unlucky — the one gate that says the plan is
+        /// working and the rate is the only thing holding volume back.
+        #[test]
+        fn losing_the_draw_is_recorded_as_such() {
+            let plan = fresh_plan(vec![psp("behind", 1_000.0, 0.2)], 0.05, noon());
+            let scores = scores(&[("best", 0.95), ("behind", 0.92)]);
+
+            let outcome = choose(&scores, &plan, noon(), &mut never());
+
+            assert_eq!(gate_of(&outcome, "behind"), Some(SteerBlock::LostRoll));
+        }
+
+        #[test]
+        fn a_psp_routing_never_offered_is_recorded_as_not_offered() {
+            let plan = fresh_plan(vec![psp("behind", 1_000.0, 1.0)], 0.05, noon());
+            let scores = scores(&[("best", 0.95), ("other", 0.90)]);
+
+            let outcome = choose(&scores, &plan, noon(), &mut always());
+
+            assert_eq!(gate_of(&outcome, "behind"), Some(SteerBlock::NotOffered));
+        }
+
+        /// A payment that *was* steered still reports the commitments asked before the winner, so
+        /// a richer one losing out is visible rather than silent.
+        #[test]
+        fn a_steered_payment_still_names_who_was_passed_over() {
+            let rich = psp("rich", 1_000.0, 1.0);
+            // Reward density 0.05 — it can afford the 0.01 gap below; `rich` cannot afford 0.15.
+            let mut poor = psp("poor", 50.0, 1.0);
+            poor.remaining = 1_000.0;
+            let plan = fresh_plan(vec![rich, poor], 0.05, noon());
+            // `rich` is far enough off the best score to be unaffordable; `poor` is not.
+            let scores = scores(&[("best", 0.95), ("rich", 0.80), ("poor", 0.94)]);
+
+            let outcome = choose(&scores, &plan, noon(), &mut always());
+
+            assert_eq!(outcome.chosen.as_deref(), Some("poor"));
+            assert_eq!(gate_of(&outcome, "rich"), Some(SteerBlock::OutsideTolerance));
+            assert_eq!(gate_of(&outcome, "poor"), None, "the winner is not blocked");
+        }
     }
 
     /// The roll is what replaces the old daily counter: a payment that loses it stays put.
@@ -351,10 +520,10 @@ mod tests {
         assert_eq!(outcome.info.sr_head.as_deref(), Some("behind"));
     }
 
-    /// The head is behind on the richer commitment and wins its roll: the payment stays with it,
+    /// The head is behind on the richer commitment: the payment stays with it,
     /// and the cheaper commitment further down the plan may not take it away.
     #[test]
-    fn a_behind_head_that_wins_its_roll_keeps_the_payment_from_cheaper_commitments() {
+    fn a_behind_head_keeps_the_payment_from_cheaper_commitments() {
         let plan = fresh_plan(
             vec![psp("adyen", 12_000.0, 0.6), psp("stripe", 2_000.0, 1.0)],
             0.05,
@@ -369,21 +538,53 @@ mod tests {
         assert!(outcome.info.reason.contains("Kept with adyen"));
     }
 
-    /// The head is behind but loses its roll: the cheaper commitment gets its usual turn.
+    /// A behind head is not rationed by its own steer rate. That rate is the share of flow it
+    /// would have to *divert* if it were not the head; payments it already holds cost nothing to
+    /// keep, so a low rate must not hand them to a commitment worth less.
     #[test]
-    fn a_behind_head_that_loses_its_roll_lets_the_next_commitment_steer() {
+    fn a_behind_head_keeps_the_payment_however_the_roll_falls() {
         let plan = fresh_plan(
-            vec![psp("adyen", 12_000.0, 0.6), psp("stripe", 2_000.0, 1.0)],
+            vec![psp("adyen", 12_000.0, 0.01), psp("stripe", 2_000.0, 1.0)],
             0.05,
             noon(),
         );
         let scores = scores(&[("adyen", 0.91), ("stripe", 0.91)]);
 
-        // First roll (adyen's, the head by name on a tie) loses at 0.7 ≥ 0.6; the second (stripe's) wins at 0.0 < 1.0.
-        let mut rolls = [0.7, 0.0].into_iter();
-        let mut roll = || rolls.next().expect("two rolls");
-        let outcome = choose(&scores, &plan, noon(), &mut roll);
-        assert_eq!(outcome.chosen.as_deref(), Some("stripe"));
+        // Even on a roll that loses every rate, the cheaper commitment gets nothing.
+        let outcome = choose(&scores, &plan, noon(), &mut never());
+        assert_eq!(outcome.chosen, None);
+        assert_eq!(outcome.info.chosen.as_deref(), Some("adyen"));
+        assert!(outcome.info.reason.contains("Kept with adyen"));
+    }
+
+    /// A commitment paying 2bps of the volume it still owes must not buy that volume with 1pp of
+    /// approval: the steer would cost about fifty times the rebate it is chasing. This is the
+    /// trade that let a $12 commitment take payments from a $15,000 one.
+    #[test]
+    fn a_thin_rebate_will_not_pay_for_approval() {
+        let mut thin = psp("thin", 0.0, 1.0);
+        thin.remaining = 6_000_000.0;
+        thin.reward = 1_200.0; // 2 bps of what is still owed
+        let plan = fresh_plan(vec![thin], 0.05, noon());
+        let scores = scores(&[("best", 0.95), ("thin", 0.94)]); // gives up 1pp
+
+        let outcome = choose(&scores, &plan, noon(), &mut always());
+        assert_eq!(outcome.chosen, None);
+        assert_eq!(outcome.info.outcome, VolumeSteerOutcome::SrPrevailed);
+    }
+
+    /// The same 1pp is cheap for a commitment whose rebate is worth a large share of the volume,
+    /// so a rich commitment still spends the tolerance it is given.
+    #[test]
+    fn a_rich_rebate_still_pays_the_tolerance() {
+        let mut rich = psp("rich", 0.0, 1.0);
+        rich.remaining = 4_000_000.0;
+        rich.reward = 1_500_000.0; // 3750 bps of what is still owed
+        let plan = fresh_plan(vec![rich], 0.05, noon());
+        let scores = scores(&[("best", 0.95), ("rich", 0.94)]);
+
+        let outcome = choose(&scores, &plan, noon(), &mut always());
+        assert_eq!(outcome.chosen.as_deref(), Some("rich"));
     }
 
     /// A richer commitment that is *not* the head still outranks the head's own claim: the plan

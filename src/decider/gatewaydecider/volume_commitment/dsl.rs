@@ -14,8 +14,8 @@ use crate::app::get_tenant_app_state;
 use crate::euclid::types::StaticRoutingAlgorithm;
 use crate::euclid::types::{AlgorithmType, RoutingAlgorithm, RoutingAlgorithmMapper};
 use crate::euclid::volume_contract::{
-    Amount, BillingCycle, BillingCycleType, CommitmentMetric, ContractStatus, ContractTerms,
-    Reward, RoutingMode, TierRate, VolumeContract, VolumeContractConfig,
+    minor_unit_exponent, Amount, BillingCycle, BillingCycleType, CommitmentMetric, ContractStatus,
+    ContractTerms, Reward, RoutingMode, TierRate, VolumeContract, VolumeContractConfig,
 };
 use crate::feedback::constants::kvRedis;
 use crate::logger;
@@ -37,10 +37,11 @@ pub struct DslInputSource;
 
 #[async_trait]
 impl InputSource for DslInputSource {
-    async fn load(&self, merchant_id: &str) -> Option<CommitmentInputs> {
-        if !feature_on(merchant_id).await {
-            return None;
-        }
+    async fn feature_enabled(&self, merchant_id: &str) -> bool {
+        feature_on(merchant_id).await
+    }
+
+    async fn load_configured(&self, merchant_id: &str) -> Option<CommitmentInputs> {
         let (config, anchor_ms, rule_id) = active_config(merchant_id).await?;
         to_commitment_inputs(merchant_id, &config, anchor_ms, rule_id)
     }
@@ -175,6 +176,12 @@ fn to_commitment_inputs(
         // Counts are not money: no currency, so the dashboard shows plain numbers.
         currency: matches!(config.metric, CommitmentMetric::Gmv)
             .then(|| config.currency.denomination.to_string()),
+        amount_scale: match config.metric {
+            CommitmentMetric::Gmv => {
+                10f64.powi(minor_unit_exponent(&config.currency.denomination) as i32)
+            }
+            CommitmentMetric::Volume => 1.0,
+        },
         commitments,
     })
 }
@@ -400,6 +407,50 @@ mod tests {
             DateTime::from_timestamp_millis(ms).map(|dt| dt.with_timezone(&tz).date_naive())
         };
         Some((as_date(w.start_ms)?, as_date(w.end_ms)?))
+    }
+
+    /// One paceable document, in whatever currency and metric the caller asks for.
+    fn config_for(currency: &str, metric: &str) -> VolumeContractConfig {
+        serde_json::from_value(serde_json::json!({
+            "schema_version": 1,
+            "routing_mode": "pace_guarded",
+            "tolerance_bps": 500,
+            "metric": metric,
+            "currency": { "denomination": currency, "amount_units": "minor" },
+            "expected_daily_traffic": 120_000_000u64,
+            "volume_contracts": [{
+                "id": "c1",
+                "connector": "adyen",
+                "status": "active",
+                "billing_cycle": {
+                    "type": "calendar_month", "anchor": 1,
+                    "timezone": "UTC", "proration": "full_period",
+                },
+                "archetype": "lumpsum",
+                "terms": {
+                    "target": 6_000_000u64,
+                    "reward": { "kind": "flat", "value": { "flat_amount": 1200u64 } },
+                },
+            }],
+        }))
+        .expect("a valid contract document")
+    }
+
+    /// Delivered volume is read off `/decide-gateway` amounts, which arrive in major currency
+    /// units, while the document stores every goal in minor ones. The flattener carries the factor
+    /// between them so the comparison is made on one scale — and there is no factor to carry for a
+    /// contract that counts transactions.
+    #[test]
+    fn the_amount_scale_follows_the_contract_currency() {
+        let scale_of = |currency: &str, metric: &str| {
+            to_commitment_inputs("m1", &config_for(currency, metric), 0, "r1".to_string())
+                .expect("a paceable document")
+                .amount_scale
+        };
+        assert_eq!(scale_of("USD", "gmv"), 100.0);
+        assert_eq!(scale_of("JPY", "gmv"), 1.0);
+        assert_eq!(scale_of("BHD", "gmv"), 1000.0);
+        assert_eq!(scale_of("USD", "volume"), 1.0);
     }
 
     #[test]

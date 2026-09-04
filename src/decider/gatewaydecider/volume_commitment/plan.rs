@@ -2,12 +2,20 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::math;
+
 /// One PSP's position against its commitment.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PspPlan {
     pub connector: String,
     /// What the merchant earns if this commitment is met.
     pub reward: f64,
+    /// What this commitment promises over the whole cycle.
+    #[serde(default)]
+    pub goal: f64,
+    /// What has landed on it so far this cycle.
+    #[serde(default)]
+    pub achieved: f64,
     /// Volume still owed.
     pub remaining: f64,
     /// Volume needed each day from now on.
@@ -55,6 +63,11 @@ pub struct SteeringPlan {
     pub psps: Vec<PspPlan>,
     /// Commitments we gave up on.
     pub dropped: Vec<DroppedPsp>,
+    /// Commitments that read unreachable on this forecast, whether or not they were dropped for
+    /// it. A drop is only recorded when the verdict repeats, so this is what the next forecast
+    /// checks against — see `compute_plan`.
+    #[serde(default)]
+    pub flagged_unreachable: Vec<String>,
 }
 
 impl SteeringPlan {
@@ -108,8 +121,9 @@ pub fn choose_commitments_to_keep(
     (kept, dropped)
 }
 
-/// Drop only commitments whose daily need exceeds total daily traffic; used alone through the
-/// first contract day, when the budget pass would be noise.
+/// Drop only commitments whose daily need exceeds total daily traffic — measured traffic where
+/// there is any, else the contract's declared figure. Used alone through the first contract day,
+/// when the budget pass would be noise.
 pub fn drop_unreachable(psps: Vec<PspPlan>, daily_traffic: f64) -> (Vec<PspPlan>, Vec<DroppedPsp>) {
     let (unreachable, kept): (Vec<PspPlan>, Vec<PspPlan>) = psps
         .into_iter()
@@ -118,7 +132,7 @@ pub fn drop_unreachable(psps: Vec<PspPlan>, daily_traffic: f64) -> (Vec<PspPlan>
         .into_iter()
         .map(|psp| DroppedPsp {
             reason: format!(
-                "needs {:.0} a day but the merchant only expects {:.0} a day in total, \
+                "needs {:.0} a day but only {:.0} a day is flowing across all PSPs, \
                  so this commitment cannot be met and is not chased",
                 psp.needed_daily, daily_traffic
             ),
@@ -138,13 +152,149 @@ fn by_reward_desc(a: &PspPlan, b: &PspPlan) -> std::cmp::Ordering {
         .then_with(|| a.connector.cmp(&b.connector))
 }
 
+impl PspPlan {
+    /// Volume the promise expects to have landed by `now_ms`, pacing evenly across the cycle.
+    fn promised_by(&self, now_ms: i64) -> f64 {
+        let span = (self.period_end_ms - self.period_start_ms).max(1);
+        let elapsed = (now_ms - self.period_start_ms).clamp(0, span);
+        self.goal * (elapsed as f64 / span as f64)
+    }
+
+    /// Whether a whole contract day has passed, so `routing_gives_daily` is a rate rather than a
+    /// fraction of one presented as a rate.
+    fn rate_is_measurable(&self, now_ms: i64) -> bool {
+        now_ms.saturating_sub(self.period_start_ms) >= math::day_ms(self.day_secs)
+    }
+
+    /// Whether normal routing is leaving this commitment short.
+    ///
+    /// The settled answer is the forward-looking rate test: at what routing sends here unaided,
+    /// does the remainder arrive before the cycle closes?
+    ///
+    /// Inside the first contract day it cannot be asked. `routing_gives_daily` is measured over
+    /// the window since the cycle opened and divided by a *whole* contract day — the divisor has
+    /// a floor of one, because a smaller one would turn a few seconds of traffic into an enormous
+    /// extrapolated rate. The cost is the other direction: minutes of real traffic are reported as
+    /// a day's worth, so every commitment reads as starved however busy the merchant is, and the
+    /// engine spends approval-rate tolerance closing a gap that does not exist. It corrects itself
+    /// within the day, which is what made it easy to miss.
+    ///
+    /// So until there is a day to divide by, ask what the evidence can answer: has less arrived
+    /// than the promise expects by now? That still catches a commitment receiving nothing — its
+    /// achieved stays at zero while the promise's expectation climbs — without inventing a
+    /// shortfall for one that is merely young.
+    fn is_behind(&self, now_ms: i64) -> bool {
+        if self.rate_is_measurable(now_ms) {
+            self.routing_gives_daily < self.needed_daily
+        } else {
+            self.achieved < self.promised_by(now_ms)
+        }
+    }
+}
+
 /// Mark who is short, and order by reward so the biggest wins a contested payment.
-pub fn mark_who_needs_steering(psps: &mut [PspPlan]) {
+pub fn mark_who_needs_steering(psps: &mut [PspPlan], now_ms: i64) {
     for psp in psps.iter_mut() {
-        psp.needs_steering = psp.routing_gives_daily < psp.needed_daily;
+        psp.needs_steering = psp.is_behind(now_ms);
     }
 
     psps.sort_by(by_reward_desc);
+}
+
+#[cfg(test)]
+mod steering_marks {
+    use super::*;
+
+    const DAY_MS: i64 = math::SECS_PER_DAY as i64 * 1_000;
+
+    /// A commitment on a ten-contract-day cycle opening at epoch zero.
+    fn paced(goal: f64, achieved: f64, routing_gives_daily: f64, needed_daily: f64) -> PspPlan {
+        PspPlan {
+            connector: "adyen".to_string(),
+            reward: 100.0,
+            goal,
+            achieved,
+            remaining: math::remaining(goal, achieved),
+            needed_daily,
+            routing_gives_daily,
+            needs_steering: false,
+            steer_rate: 0.0,
+            period_start_ms: 0,
+            period_end_ms: 10 * DAY_MS,
+            day_secs: math::SECS_PER_DAY,
+        }
+    }
+
+    /// The case that spent approval-rate tolerance for nothing. Seven tenths into the first
+    /// contract day, `routing_gives_daily` is the traffic so far divided by a *whole* day, so a
+    /// PSP running four times ahead of its promise still reads as delivering almost none of it.
+    #[test]
+    fn a_busy_psp_is_not_steered_to_inside_its_first_contract_day() {
+        let now = DAY_MS * 7 / 10;
+        // $20k has landed against the $4.55k the promise expects by now — comfortably ahead. The
+        // measured rate says otherwise only because it is not yet a rate.
+        let mut psps = vec![paced(65_000.0, 20_000.0, 900.0, 6_500.0)];
+        mark_who_needs_steering(&mut psps, now);
+        assert!(!psps[0].needs_steering);
+    }
+
+    /// Genuine starvation still shows inside the first day: nothing has arrived while the promise
+    /// expects some. Suppressing the rate test must not suppress the engine.
+    #[test]
+    fn a_psp_receiving_nothing_is_steered_to_inside_its_first_contract_day() {
+        let now = DAY_MS * 7 / 10;
+        let mut psps = vec![paced(65_000.0, 0.0, 0.0, 6_500.0)];
+        mark_who_needs_steering(&mut psps, now);
+        assert!(psps[0].needs_steering);
+    }
+
+    /// Once a contract day has passed the rate governs, and it looks forward: a PSP ahead on
+    /// cumulative volume whose traffic has dried up is still short of what the rest needs. The
+    /// cumulative test alone would not catch this, which is why it does not replace the rate one.
+    #[test]
+    fn the_rate_test_governs_once_a_contract_day_has_passed() {
+        let now = DAY_MS * 3;
+        // $25k against the $19.5k expected by day three — ahead. But routing now sends a tenth of
+        // the $6.5k a day the remainder needs.
+        let mut psps = vec![paced(65_000.0, 25_000.0, 650.0, 6_500.0)];
+        mark_who_needs_steering(&mut psps, now);
+        assert!(psps[0].needs_steering);
+    }
+
+    #[test]
+    fn a_psp_routing_already_covers_is_left_alone() {
+        let now = DAY_MS * 3;
+        let mut psps = vec![paced(65_000.0, 25_000.0, 9_000.0, 6_500.0)];
+        mark_who_needs_steering(&mut psps, now);
+        assert!(!psps[0].needs_steering);
+    }
+
+    /// The switch is the first contract day, not the first day of the axis: a commitment whose own
+    /// cycle opened later is still inside its first day when older ones are past theirs.
+    #[test]
+    fn the_switch_follows_each_commitments_own_cycle() {
+        let now = DAY_MS * 3;
+        let mut late = paced(65_000.0, 20_000.0, 900.0, 6_500.0);
+        late.period_start_ms = DAY_MS * 3 - DAY_MS / 2;
+        late.period_end_ms = late.period_start_ms + 10 * DAY_MS;
+        let mut psps = vec![late];
+        mark_who_needs_steering(&mut psps, now);
+        assert!(!psps[0].needs_steering, "half a day in, the rate is not a rate");
+    }
+
+    /// The richest commitment sorts first, so it wins a payment two of them could take.
+    #[test]
+    fn the_marker_orders_by_reward() {
+        let now = DAY_MS * 3;
+        let mut cheap = paced(65_000.0, 0.0, 0.0, 6_500.0);
+        cheap.connector = "stripe".to_string();
+        cheap.reward = 10.0;
+        let rich = paced(65_000.0, 0.0, 0.0, 6_500.0);
+        let mut psps = vec![cheap, rich];
+        mark_who_needs_steering(&mut psps, now);
+        assert_eq!(psps[0].connector, "adyen");
+        assert!(psps.iter().all(|p| p.needs_steering));
+    }
 }
 
 #[cfg(test)]
@@ -155,6 +305,10 @@ mod tests {
         PspPlan {
             connector: connector.to_string(),
             reward,
+            // A goal already delivered in full, so the cumulative cold-start test never fires and
+            // these cases exercise the rate test they were written for.
+            goal: remaining,
+            achieved: remaining,
             remaining,
             needed_daily,
             routing_gives_daily: 0.0,

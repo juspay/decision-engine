@@ -704,21 +704,72 @@ export interface EliminatedPspView {
 
 export interface VolumeCommitmentView {
   merchantId: string
+  /** A contract document is live *and* the feature is on — i.e. payments are being paced. */
   active: boolean
+  /** A contract document is activated, whether or not the feature is switched on. */
+  contractConfigured: boolean
+  /** The merchant's volume-contract routing flag. Off means nothing is steered. */
+  featureEnabled: boolean
   computedAtEpochSecs?: number | null
   tolerance?: number | null
-  /** Total volume the merchant expects per day, from the contract document. */
+  /** Total volume the merchant expects per day, from the contract document — a declaration. */
   expectedDailyTraffic?: number | null
+  /** Total volume per day actually flowing across every PSP; what feasibility and steer rates
+   *  are judged against. A wide gap from `expectedDailyTraffic` means the declaration is wrong. */
+  measuredDailyTraffic?: number | null
   /** How long one contract day lasts in seconds — 86400 for calendar cycles, 60 on a test cycle. */
   daySecs?: number | null
   /** Routing rule holding the active contract, so the dashboard can act on it. */
   ruleId?: string | null
   rewardAtStake: number
+  /** RFC 3339 bounds of the billing cycle these commitments race. */
+  cycleStart?: string | null
+  cycleEnd?: string | null
+  /** Contract days in the cycle — minutes on a test cycle. */
+  daysTotal?: number | null
+  /** ISO-4217 code every amount here is denominated in, for rendering major units. */
+  currency?: string | null
+  /** False when a measurement query failed: positions are floors, not readings. */
+  measurementAvailable: boolean
   psps: PspPacing[]
   eliminated: EliminatedPspView[]
 }
 
 /** One PSP-day of delivered volume on the commitment chart. */
+/**
+ * Why a commitment that wanted a payment did not get it. `UNKNOWN` covers a gate written by a
+ * newer backend than this build knows about.
+ */
+export type SteerBlock =
+  | 'ALREADY_CHOSEN'
+  | 'NOT_OFFERED'
+  | 'CYCLE_CLOSED'
+  | 'OUTSIDE_TOLERANCE'
+  | 'LOST_ROLL'
+  | 'UNKNOWN'
+
+/** One commitment that wanted a payment, and the gate that stopped it. */
+export interface BlockedCommitment {
+  connector: string
+  gate: SteerBlock
+}
+
+/** A demo contract template the deployment offers, ready to load into the builder. */
+export interface VolumeContractSample {
+  id: string
+  title: string
+  /** One line: the situation the contract puts the engine in. */
+  summary: string
+  /** What the dashboard should show if the engine is working. */
+  expectedOutcome: string
+  contract: VolumeContractConfig
+}
+
+export interface VolumeContractSamplesResponse {
+  merchantId: string
+  samples: VolumeContractSample[]
+}
+
 export interface CommitmentDayVolume {
   connector: string
   dayIndex: number
@@ -842,4 +893,14 @@ export interface VolumeSteerInfo {
   steeringCount: number
   /** The contract execution this steer belongs to. */
   runId?: string | null
+  /** Every commitment that wanted this payment and did not get it, with the gate that stopped it.
+   *  Absent when nothing was behind, or the first commitment considered took it. */
+  blocked?: BlockedCommitment[]
+}
+
+/** Pacing, series and audit for one merchant, composed server-side into a single request. */
+export interface CommitmentDashboardResponse {
+  pacing: VolumeCommitmentView
+  series: CommitmentSeriesResponse
+  audit: CommitmentAuditResponse
 }

@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Bar,
   BarChart,
@@ -16,10 +16,8 @@ import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import {
-  useVolumeCommitment,
-  useVolumeCommitmentAudit,
+  useVolumeCommitmentDashboard,
   useVolumeCommitmentImpact,
-  useVolumeCommitmentSeries,
 } from '../../hooks/useVolumeCommitment'
 import { CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import { CommitmentAuditEvent, CommitmentConnectorImpact, CommitmentConnectorSeries } from '../../types/api'
@@ -32,7 +30,6 @@ import {
   SECS_PER_DAY,
   SolidSwatch,
   bucketsPerDay,
-  compactAmount,
   dayUnit,
   firstEliminationByConnector,
   formatMoney,
@@ -86,9 +83,10 @@ function pct(part: number, whole: number) {
 
 type Metric = 'volume' | 'payments'
 
-/** The formatter a metric's numbers read in. */
-function fmtFor(metric: Metric) {
-  return metric === 'volume' ? compactAmount : formatCount
+/** The formatter a metric's numbers read in. GMV is money in the contract's canonical minor
+ *  units, so it goes through the same formatter as every other amount on this page. */
+function fmtFor(metric: Metric, currency?: string | null) {
+  return metric === 'volume' ? (value: number) => formatMoney(value, currency) : formatCount
 }
 
 /** One row of the before / with-contract charts. */
@@ -162,16 +160,18 @@ function DayWiseChart({
   rows,
   psps,
   metric,
+  currency,
   yMax,
   hatchScope,
 }: {
   rows: DayRow[]
   psps: ImpactRow[]
   metric: Metric
+  currency?: string | null
   yMax: number
   hatchScope: string
 }) {
-  const fmt = fmtFor(metric)
+  const fmt = fmtFor(metric, currency)
   const hatch = (name: string) => hatchId(hatchScope, name)
   return (
     <div className="h-72 w-full">
@@ -253,15 +253,23 @@ export function VolumeCommitmentAnalytics() {
   const [selectedRun, setSelectedRun] = useState<string | undefined>(undefined)
   const [metric, setMetric] = useState<Metric>('volume')
 
-  const pacing = useVolumeCommitment(merchantId)
-  // Sub-day buckets so running totals curve within a day.
-  const perDay = bucketsPerDay(pacing.data?.daySecs)
-  const series = useVolumeCommitmentSeries(merchantId, selectedRun, { perDay })
-  const audit = useVolumeCommitmentAudit(merchantId, selectedRun)
+  // Pacing, series and audit arrive together; impact is its own read because it spans two cycles
+  // and only this page asks for it.
+  const [daySecs, setDaySecs] = useState<number | null | undefined>(undefined)
+  const dashboard = useVolumeCommitmentDashboard(merchantId, {
+    runId: selectedRun,
+    // Sub-day buckets so running totals curve within a day.
+    perDay: bucketsPerDay(daySecs),
+  })
+  useEffect(() => {
+    if (dashboard.pacing?.daySecs !== undefined) setDaySecs(dashboard.pacing.daySecs)
+  }, [dashboard.pacing?.daySecs])
+  const pacing = { data: dashboard.pacing }
+  const audit = { runs: dashboard.runs, events: dashboard.events }
   const impact = useVolumeCommitmentImpact(merchantId, selectedRun)
 
-  const connectors = series.data?.connectors ?? NO_SERIES
-  const currency = series.data?.currency
+  const connectors = dashboard.series?.connectors ?? NO_SERIES
+  const currency = dashboard.series?.currency
   // Color by contract position, shared by every chart and table on the page.
   const colorIndex = useMemo(
     () => new Map(connectors.map((c, i) => [c.connector, i] as const)),
@@ -444,8 +452,8 @@ export function VolumeCommitmentAnalytics() {
   }, [impactRows, impactConnectors, isPastRun, eliminatedInRun])
 
   if (!merchantId) return <ErrorMessage error="Set a merchant ID to view volume commitments." />
-  if (pacing.error || series.error) return <ErrorMessage error="Could not load volume-commitment analytics." />
-  if (pacing.isLoading || series.isLoading) {
+  if (dashboard.error) return <ErrorMessage error="Could not load volume-commitment analytics." />
+  if (dashboard.isLoading) {
     return (
       <div className="flex justify-center py-10">
         <Spinner />
@@ -610,7 +618,7 @@ export function VolumeCommitmentAnalytics() {
             </p>
           </CardHeader>
           <CardBody>
-            <DayWiseChart rows={beforeRows} psps={impactRows} metric={metric} yMax={beforeYMax} hatchScope="before" />
+            <DayWiseChart rows={beforeRows} psps={impactRows} metric={metric} currency={currency} yMax={beforeYMax} hatchScope="before" />
           </CardBody>
         </Card>
 
@@ -625,7 +633,7 @@ export function VolumeCommitmentAnalytics() {
             </p>
           </CardHeader>
           <CardBody>
-            <DayWiseChart rows={withRows} psps={impactRows} metric={metric} yMax={withYMax} hatchScope="with" />
+            <DayWiseChart rows={withRows} psps={impactRows} metric={metric} currency={currency} yMax={withYMax} hatchScope="with" />
           </CardBody>
         </Card>
       </div>
@@ -672,7 +680,7 @@ export function VolumeCommitmentAnalytics() {
                   const total = r.unaided + r.steered
                   const status = statusFor(r.name)
                   const live = byConnector.get(r.name)
-                  const fmt = fmtFor(metric)
+                  const fmt = fmtFor(metric, currency)
                   return (
                     <tr key={r.name} className="border-t border-slate-100 dark:border-slate-800">
                       <td className="py-2 pr-3">
@@ -708,8 +716,8 @@ export function VolumeCommitmentAnalytics() {
                           <span className="ml-1 font-normal text-slate-400">· {pctOfGoal(total, r.goal)}%</span>
                         )}
                       </td>
-                      <td className="py-2 pr-3 text-right">{compactAmount(r.goal)}</td>
-                      <td className="py-2 text-right">{compactAmount(c?.reward ?? 0)}</td>
+                      <td className="py-2 pr-3 text-right">{formatMoney(r.goal, currency)}</td>
+                      <td className="py-2 text-right">{formatMoney(c?.reward ?? 0, currency)}</td>
                     </tr>
                   )
                 })}
@@ -742,7 +750,7 @@ export function VolumeCommitmentAnalytics() {
           <CommitmentPacingChart
             connectors={connectors}
             currency={currency}
-            daySecs={series.data?.daySecs}
+            daySecs={dashboard.series?.daySecs}
             colorFor={pacingColorFor}
             statusFor={statusFor}
             eliminatedAtMs={eliminatedAtMs}
@@ -751,11 +759,14 @@ export function VolumeCommitmentAnalytics() {
             height={480}
           />
           <p className="mt-3 text-xs text-slate-500 dark:text-slate-400">
-            Each dashed step is the volume a PSP must clear by that day&apos;s end (its promise split
-            across the cycle). A solid line tracking below its ladder is behind pace — the engine
-            steers a little extra volume there (▲), spread through the day. When not enough traffic remains
-            to land a commitment the engine drops it (red marker): from there its line is dotted and
-            carries natural traffic only, so the rest can still be met.
+            A solid line tracking below its dashed promise is behind pace — the engine steers a
+            little extra volume there (▲), spread through the day. The shaded wedge under each line
+            is what steering added: its floor is where that PSP would have stood on approval-rate
+            routing alone. A PSP behind its promise also carries a steeper dash from the tip of its
+            line to its goal — the pace it needs from here, which is what the engine steers to.
+            When not enough traffic remains to land a commitment the engine drops it (red marker):
+            from there its line is dotted and carries natural traffic only, so the rest can still be
+            met.
           </p>
         </CardBody>
       </Card>
@@ -789,7 +800,7 @@ export function VolumeCommitmentAnalytics() {
                       <p className="mt-0.5 text-xs tabular-nums text-slate-400 dark:text-slate-500">
                         {new Date(event.atEpochMs).toLocaleString()}
                         {event.connector ? ` · ${event.connector}` : ''}
-                        {event.amount != null ? ` · ${compactAmount(event.amount)}` : ''}
+                        {event.amount != null ? ` · ${formatMoney(event.amount, currency)}` : ''}
                         {selectedRun === undefined && event.runId ? ` · ${event.runId}` : ''}
                       </p>
                     </div>

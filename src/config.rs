@@ -416,6 +416,37 @@ pub struct VolumeCommitmentConfig {
     pub tick_secs: u64,
     /// How often a merchant's plan is rebuilt — the only scheduled job. Per-merchant overridable.
     pub default_forecast_interval_secs: u64,
+    /// Whether `test_minutes` billing cycles may be written. A contract whose "day" lasts sixty
+    /// seconds is a demo device, meaningless against real billing, so it is off unless a
+    /// deployment's own config turns it on.
+    #[serde(default)]
+    pub allow_test_cycles: bool,
+    /// The demo contract library — whole documents, not a recipe for building them, so a
+    /// deployment tunes a scenario without a build. A config that lists none (the default, and
+    /// what production ships) serves none: that empty list *is* the production gate.
+    #[serde(default)]
+    pub samples: Vec<SampleScenario>,
+}
+
+/// One demo contract a merchant can activate to watch a single engine behaviour happen on
+/// purpose: the document verbatim, plus what a reader should watch for.
+///
+/// The document is the same shape the contract builder writes, so a sample is a template and
+/// nothing more — once activated it is an ordinary contract, paced by the ordinary engine.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+// Read from TOML in snake_case like every other config key; served to the dashboard in
+// camelCase like every other API field.
+#[serde(deny_unknown_fields, rename_all(serialize = "camelCase"))]
+pub struct SampleScenario {
+    /// Stable identifier, used as a key and a deep link.
+    pub id: String,
+    pub title: String,
+    /// One line: the situation the contract puts the engine in.
+    pub summary: String,
+    /// What the dashboard should show if the engine is working.
+    pub expected_outcome: String,
+    /// The contract itself, exactly as it would be stored.
+    pub contract: crate::euclid::volume_contract::VolumeContractConfig,
 }
 
 impl Default for VolumeCommitmentConfig {
@@ -429,6 +460,10 @@ impl Default for VolumeCommitmentConfig {
             main_server_url: "http://127.0.0.1:8080".to_string(),
             tick_secs: 30,
             default_forecast_interval_secs: 3600,
+            // `config/` ships only `development.toml`, so a deployment whose config omits this
+            // key must land on production behaviour, not on demo behaviour.
+            allow_test_cycles: false,
+            samples: Vec::new(),
         }
     }
 }

@@ -702,6 +702,7 @@ fn parse_decimal(s: &str) -> Result<(String, String), String> {
 /// are already guaranteed by the type definitions above.
 pub fn validate_volume_contract_config(
     config: &VolumeContractConfig,
+    allow_test_cycles: bool,
 ) -> Vec<ValidationErrorDetails> {
     let mut errors = Vec::new();
 
@@ -815,7 +816,12 @@ pub fn validate_volume_contract_config(
             ));
         }
 
-        validate_billing_cycle(&contract.billing_cycle, &path("billing_cycle"), &mut errors);
+        validate_billing_cycle(
+            &contract.billing_cycle,
+            &path("billing_cycle"),
+            allow_test_cycles,
+            &mut errors,
+        );
         validate_terms(&contract.terms, &path("terms"), &mut errors);
 
         if contract.scope.is_some() {
@@ -833,8 +839,20 @@ pub fn validate_volume_contract_config(
 fn validate_billing_cycle(
     cycle: &BillingCycle,
     path: &str,
+    allow_test_cycles: bool,
     errors: &mut Vec<ValidationErrorDetails>,
 ) {
+    // A `test_minutes` cycle exists to make a whole period play out while someone watches. Against
+    // real billing it is meaningless, so only a deployment that says so may store one.
+    if cycle.cycle_type == BillingCycleType::TestMinutes && !allow_test_cycles {
+        errors.push(ValidationErrorDetails::new(
+            format!("{path}.type"),
+            "not_permitted",
+            "test_minutes billing cycles are not available in this environment; \
+             use calendar_month, calendar_quarter or calendar_year",
+        ));
+    }
+
     let anchor_range = match cycle.cycle_type {
         // 1–30 per the PRD; February clamping is the evaluation layer's concern.
         BillingCycleType::CalendarMonth => 1..=30u8,
@@ -1118,13 +1136,42 @@ mod tests {
             "overage_rate_bps": 65
         });
         let config = parse_ok(doc);
-        let errors = validate_volume_contract_config(&config);
+        let errors = validate_volume_contract_config(&config, true);
         assert!(
             errors
                 .iter()
                 .any(|e| e.error_type == "not_enabled" && e.message.contains("min_commitment")),
             "errors were: {errors:?}"
         );
+    }
+
+    /// A `test_minutes` cycle is a demo device: a contract day lasting sixty seconds means nothing
+    /// against real billing, so only a deployment that opts in may store one.
+    #[test]
+    fn test_minutes_cycles_need_the_environments_permission() {
+        let mut doc = lumpsum_doc();
+        doc["volume_contracts"][0]["billing_cycle"] =
+            serde_json::json!({ "type": "test_minutes", "anchor": 10, "timezone": "UTC" });
+        let config = parse_ok(doc);
+
+        assert!(
+            validate_volume_contract_config(&config, true).is_empty(),
+            "a permitting environment should accept it"
+        );
+        let errors = validate_volume_contract_config(&config, false);
+        assert!(
+            errors
+                .iter()
+                .any(|e| e.error_type == "not_permitted" && e.field.ends_with("billing_cycle.type")),
+            "errors were: {errors:?}"
+        );
+    }
+
+    /// The gate is on the cycle type alone — a calendar contract is unaffected by it.
+    #[test]
+    fn calendar_cycles_are_unaffected_by_the_test_cycle_gate() {
+        let config = parse_ok(lumpsum_doc());
+        assert!(validate_volume_contract_config(&config, false).is_empty());
     }
 
     #[test]
@@ -1226,7 +1273,7 @@ mod tests {
     }
 
     fn assert_single_error(config: &VolumeContractConfig, error_type: &str, field_part: &str) {
-        let errors = validate_volume_contract_config(config);
+        let errors = validate_volume_contract_config(config, true);
         assert!(
             errors
                 .iter()
@@ -1240,7 +1287,7 @@ mod tests {
         // A canonical, valid document passes.
         let mut config = parse_ok(lumpsum_doc());
         canonicalize(&mut config).unwrap();
-        assert!(validate_volume_contract_config(&config).is_empty());
+        assert!(validate_volume_contract_config(&config, true).is_empty());
 
         // Unsupported schema version.
         let mut config = parse_ok(lumpsum_doc());
@@ -1370,9 +1417,9 @@ mod tests {
             { "kind": "marginal", "rate": { "rate_bps": 60 }, "threshold": 2000u64 }
         ]));
         assert!(
-            validate_volume_contract_config(&config).is_empty(),
+            validate_volume_contract_config(&config, true).is_empty(),
             "errors: {:?}",
-            validate_volume_contract_config(&config)
+            validate_volume_contract_config(&config, true)
         );
     }
 
@@ -1384,4 +1431,150 @@ mod tests {
         let config = parse_ok(doc);
         assert_single_error(&config, "out_of_range", "rebate_bps");
     }
+}
+
+#[cfg(test)]
+mod shipped_samples {
+    use super::validate_volume_contract_config;
+    use crate::config::SampleScenario;
+
+    /// The demo templates this deployment ships. They are config now, so the config is the thing
+    /// that has to be tested: a sample the write path would reject reads to a merchant as an offer
+    /// and fails on activation for a reason they did nothing to cause.
+    fn shipped() -> Vec<SampleScenario> {
+        // Deserialized through the real config type, not a stand-in, so this also proves the
+        // shipped file still loads at startup — a malformed template would otherwise take the
+        // whole process down rather than just its own card.
+        #[derive(serde::Deserialize)]
+        struct Root {
+            volume_commitment: crate::config::VolumeCommitmentConfig,
+        }
+        let toml = std::fs::read_to_string(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/config/development.toml"
+        ))
+        .expect("development.toml is readable");
+        toml::from_str::<Root>(&toml)
+            .expect("the volume_commitment config section parses")
+            .volume_commitment
+            .samples
+    }
+
+    #[test]
+    fn every_shipped_sample_would_be_accepted_by_the_write_path() {
+        let samples = shipped();
+        assert!(!samples.is_empty(), "development.toml ships the demo library");
+        for sample in &samples {
+            // Development permits test cycles, which is what these templates declare.
+            let errors = validate_volume_contract_config(&sample.contract, true);
+            assert!(
+                errors.is_empty(),
+                "sample {} failed validation: {errors:?}",
+                sample.id
+            );
+        }
+    }
+
+    /// What each scenario needs of the traffic its cycle carries.
+    ///
+    /// A scenario is only what it claims to be if its targets sit in the right place relative to
+    /// that traffic *and* to what one connector receives of it. The second half matters as much as
+    /// the first: the simulator routes only to the connectors a contract names, so a lone
+    /// commitment receives every payment, and a target under the total is then met unaided however
+    /// large it is. A steering scenario written that way steers nothing.
+    struct Shape {
+        /// Traffic the whole cycle carries, in minor units.
+        cycle_volume: u64,
+        /// What one connector receives of it, on an even split — the most a commitment can expect
+        /// without help.
+        unaided_share: u64,
+        targets: Vec<u64>,
+        rebates: Vec<u32>,
+    }
+
+    fn shape_of(sample: &SampleScenario) -> Shape {
+        let contract = &sample.contract;
+        let days = u64::from(contract.volume_contracts[0].billing_cycle.anchor);
+        let cycle_volume = contract
+            .expected_daily_traffic
+            .as_canonical()
+            .expect("canonical traffic")
+            * days;
+        let terms: Vec<_> = contract
+            .volume_contracts
+            .iter()
+            .filter_map(|c| match &c.terms {
+                super::ContractTerms::Lumpsum(terms) => Some(terms),
+                _ => None,
+            })
+            .collect();
+        Shape {
+            cycle_volume,
+            unaided_share: cycle_volume / contract.volume_contracts.len() as u64,
+            targets: terms
+                .iter()
+                .filter_map(|t| t.target.as_canonical())
+                .collect(),
+            rebates: terms
+                .iter()
+                .filter_map(|t| match &t.reward {
+                    super::Reward::Percentage(r) => Some(r.rebate_bps),
+                    super::Reward::Flat(_) => None,
+                })
+                .collect(),
+        }
+    }
+
+    fn shape(id: &str) -> Shape {
+        let samples = shipped();
+        let sample = samples
+            .iter()
+            .find(|s| s.id == id)
+            .unwrap_or_else(|| panic!("sample {id} is shipped"));
+        shape_of(sample)
+    }
+
+    /// Routing has to have somewhere else to send a payment, or "it steered" and "it declined to
+    /// steer" look identical on the chart — both are just one connector receiving everything.
+    #[test]
+    fn scenarios_about_routings_choices_offer_more_than_one_connector() {
+        for id in ["saved_by_steering", "reward_ranked"] {
+            assert!(
+                shape(id).targets.len() > 1,
+                "{id} needs a second connector for traffic to move between"
+            );
+        }
+    }
+
+    /// Saved by steering: out of reach unaided, inside reach once volume can be moved.
+    #[test]
+    fn saved_by_steering_needs_more_than_one_connector_receives() {
+        let s = shape("saved_by_steering");
+        let biggest = *s.targets.iter().max().expect("a commitment");
+        assert!(
+            biggest > s.unaided_share,
+            "a target under the unaided share is met without steering"
+        );
+        assert!(
+            biggest < s.cycle_volume,
+            "a target over the cycle's traffic cannot be met even with steering"
+        );
+        // The other commitment is the source, so it must never be behind and competing.
+        let smallest = *s.targets.iter().min().expect("a commitment");
+        assert!(smallest < s.unaided_share / 2);
+    }
+
+    /// Two commitments, one budget: together they outrun the cycle, and they pay differently — so
+    /// the engine has both a reason to drop one and a basis for choosing which.
+    #[test]
+    fn reward_ranked_overcommits_the_cycle_at_two_different_prices() {
+        let s = shape("reward_ranked");
+        assert!(s.targets.iter().sum::<u64>() > s.cycle_volume);
+        assert!(s.targets.iter().all(|&t| t > s.unaided_share));
+        assert!(
+            s.rebates.iter().collect::<std::collections::HashSet<_>>().len() > 1,
+            "identical rewards give the ranking nothing to rank on"
+        );
+    }
+
 }
