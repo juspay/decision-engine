@@ -1242,9 +1242,14 @@ pub fn isRoutingApproachInSRV2(maybe_text: Option<String>) -> bool {
 // (`SR_SELECTION_MULTI_OBJECTIVE`) carries no "V3" token, so match it explicitly —
 // otherwise producer isolation silently drops every cost-routed outcome and the
 // chosen gateway's score never moves on success or failure.
+// STICKY_ROUTING is the same shape: the pin re-picks among SRv3-scored candidates
+// (its health veto reads the SRv3 map), so its outcomes must keep feeding the
+// producer or a pinned connector's score freezes and the veto can never trip.
 pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
     match maybe_text {
-        Some(text) => text.contains("V3") || text.contains("MULTI_OBJECTIVE"),
+        Some(text) => {
+            text.contains("V3") || text.contains("MULTI_OBJECTIVE") || text.contains("STICKY")
+        }
         None => false,
     }
 }
@@ -1256,9 +1261,15 @@ pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
 // (cost) routing is also off-policy: it deliberately picks a *non-top*, SR-equivalent
 // (cheaper) PSP, which is exploration of that PSP. Treat it as explore too, otherwise
 // cost-routed outcomes are excluded from scoring whenever explore/exploit is enabled.
+// Every applied sticky pin carries the STICKY_ROUTING label (agreeing or diverging), so
+// pinned outcomes must keep updating scores here too — freezing a pinned connector's
+// window would blind the health veto. Divergent pins are off-policy like multi-objective;
+// the agreeing case trades a little estimator purity for an unambiguous caller label.
 pub fn is_routing_approach_in_explore(maybe_text: Option<String>) -> bool {
     match maybe_text {
-        Some(text) => text.contains("HEDGING") || text.contains("MULTI_OBJECTIVE"),
+        Some(text) => {
+            text.contains("HEDGING") || text.contains("MULTI_OBJECTIVE") || text.contains("STICKY")
+        }
         None => false,
     }
 }
@@ -1587,6 +1598,8 @@ mod tests {
         assert!(is_routing_approach_in_srv3(Some(
             "SR_SELECTION_MULTI_OBJECTIVE".into()
         )));
+        // Sticky pins re-pick among SRv3 candidates — same rule.
+        assert!(is_routing_approach_in_srv3(Some("STICKY_ROUTING".into())));
     }
 
     #[test]
@@ -1606,6 +1619,10 @@ mod tests {
         // Cost estimation picks a non-top, SR-equivalent PSP — off-policy exploration.
         assert!(is_routing_approach_in_explore(Some(
             "SR_SELECTION_MULTI_OBJECTIVE".into()
+        )));
+        // Sticky-labeled outcomes always update scores — the health veto needs live windows.
+        assert!(is_routing_approach_in_explore(Some(
+            "STICKY_ROUTING".into()
         )));
     }
 

@@ -254,6 +254,7 @@ pub async fn decider_full_payload_hs_function(
             cpu_start,
             ab_test_sr_override,
             dreq_.enable_multi_objective,
+            dreq_.sticky_routing,
         )
         .await;
 
@@ -298,6 +299,7 @@ async fn perform_hybrid_routing(
         cpu_start,
         None,
         dreq_.enable_multi_objective,
+        dreq_.sticky_routing,
     )
     .await;
 
@@ -377,6 +379,7 @@ pub async fn run_decider_flow(
     cpu_start: Instant,
     ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride>,
     enable_multi_objective_override: Option<bool>,
+    sticky_routing_override: Option<bool>,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let txnCreationTime = deciderParams
         .dpTxnDetail
@@ -750,6 +753,96 @@ pub async fn run_decider_flow(
                                         T::GatewayDeciderApproach::SrSelectionVolumeCommitment;
                                 }
                                 decider_flow.writer.volume_steer_info = Some(outcome.info);
+                            }
+                        }
+                    }
+
+                    // Sticky routing runs last: pin the customer's proven connector over the
+                    // SR/cost/volume pick — and over the default ordering when SR is off, so
+                    // the precedence is sticky > SR > default. Explicit orders (priority
+                    // logic, merchant preference, downtime relabels) and hedging exploration
+                    // stay untouched. Fails open on any miss.
+                    let sticky_allowed = sticky_routing_override.unwrap_or(true)
+                        && !hedging_on
+                        && matches!(
+                            decider_flow.writer.gwDeciderApproach,
+                            T::GatewayDeciderApproach::SrSelection
+                                | T::GatewayDeciderApproach::SrSelectionV2Routing
+                                | T::GatewayDeciderApproach::SrSelectionV3Routing
+                                | T::GatewayDeciderApproach::SrSelectionMultiObjective
+                                | T::GatewayDeciderApproach::SrSelectionVolumeCommitment
+                                | T::GatewayDeciderApproach::Default
+                        );
+                    if sticky_allowed {
+                        let scoring_data = decider_flow.writer.gateway_scoring_data.clone();
+                        if let Some(customer_id) = scoring_data.customerId.clone() {
+                            if is_feature_enabled(
+                                crate::sticky_routing::STICKY_ROUTING_FEATURE.to_string(),
+                                merchant_id_text.clone(),
+                                kvRedis(),
+                            )
+                            .await
+                            {
+                                match crate::sticky_routing::read_sticky_data(
+                                    &merchant_id_text,
+                                    &customer_id,
+                                )
+                                .await
+                                {
+                                    Ok(Some(sticky_data)) => {
+                                        // Health veto: never resurrect a connector the outage/
+                                        // elimination penalties just buried.
+                                        let min_score = maxScore.unwrap_or(0.0)
+                                            * crate::sticky_routing::sticky_min_score_ratio().await;
+                                        let pick = sticky_data
+                                            .connectors_for_combo(
+                                                &scoring_data.paymentMethod,
+                                                &scoring_data.paymentMethodType,
+                                            )
+                                            .into_iter()
+                                            .find(|(gateway, _)| {
+                                                currentGatewayScoreMap
+                                                    .get(gateway)
+                                                    .is_some_and(|score| *score >= min_score)
+                                            });
+                                        if let Some((sticky_gateway, success_count)) = pick {
+                                            logger::info!(
+                                                action = "sticky_routing",
+                                                tag = "sticky_routing",
+                                                "sticky pin {} ({} successes) over {:?}",
+                                                sticky_gateway,
+                                                success_count,
+                                                decidedGateway
+                                            );
+                                            // Every applied pin reports STICKY_ROUTING — a
+                                            // returning customer's repeat combo reading as SR
+                                            // would confuse callers. The SRv3 scoring gates
+                                            // admit the label, so pinned outcomes keep feeding
+                                            // the windows either way; agree-vs-diverge stays
+                                            // visible in the sticky decision metrics.
+                                            if decidedGateway.as_ref() != Some(&sticky_gateway) {
+                                                decidedGateway = Some(sticky_gateway);
+                                                // Recompute fallbacks around the sticky winner,
+                                                // and drop the now-superseded cost/volume claims
+                                                // so analytics can't credit a pick that didn't
+                                                // reach the customer.
+                                                cost_fallbacks_override = None;
+                                                decider_flow.writer.multi_objective_info = None;
+                                                decider_flow.writer.volume_steer_info = None;
+                                            }
+                                            decider_flow.writer.gwDeciderApproach =
+                                                T::GatewayDeciderApproach::StickyRouting;
+                                        }
+                                    }
+                                    Ok(None) => {}
+                                    Err(error) => {
+                                        logger::warn!(
+                                            action = "sticky_routing",
+                                            tag = "sticky_routing",
+                                            "sticky read failed, using SR pick: {error}"
+                                        );
+                                    }
+                                }
                             }
                         }
                     }
