@@ -9,6 +9,8 @@ export interface VolumeSplitRuleFormValues {
   description?: string
   ruleName: string
   gateways: VolumeSplitGatewayFormEntry[]
+  /** Writes metadata.sticky_routing.enabled on the saved rule. */
+  stickyRouting: boolean
 }
 
 export interface VolumeSplitGatewayOutput {
