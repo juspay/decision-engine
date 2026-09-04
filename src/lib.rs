@@ -47,6 +47,7 @@ pub mod middleware;
 pub mod redis;
 pub mod routes;
 pub mod sr_auto_calibration;
+pub mod sticky_routing;
 pub mod storage;
 pub mod tenant;
 pub mod types;

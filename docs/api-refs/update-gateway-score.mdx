@@ -19,9 +19,19 @@ curl --location "$BASE_URL/update-gateway-score" \
     "gatewayReferenceId": null,
     "status": "CHARGED",
     "paymentId": "sr_001",
-    "enforceDynamicRoutingFailure": null
+    "enforceDynamicRoutingFailure": null,
+    "customerId": "cust_123",
+    "paymentMethod": "INTERAC",
+    "paymentMethodType": "RTP"
   }'
 ```
+
+`customerId`, `paymentMethod`, and `paymentMethodType` are optional and feed sticky-routing
+success counts (per-merchant flag `sticky_routing_enabled`). When absent they are recovered
+from the decide-time snapshot, which expires 30 minutes after the decide call — send them
+explicitly if your success webhooks can arrive later than that. Echo the decide call's
+`paymentInfo` values: `paymentMethod`/`paymentMethodType` are matched case-insensitively,
+while `customerId` must match byte-exactly.
 
 ## Response
 
