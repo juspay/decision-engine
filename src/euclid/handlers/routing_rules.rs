@@ -47,7 +47,7 @@ use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOT
 // Key  : DE_routing_algo_eval:{merchant_id}:{algorithm_for} — one entry per transaction
 //        type. The legacy type-blind key (no suffix) still serves callers that omit
 //        `algorithm_for` and is dropped on activate/deactivate (type-ambiguous content).
-// Value: JSON { id, algorithm_data }
+// Value: JSON { id, algorithm_data, metadata }
 // TTL  : cache_config.service_config_ttl (default 300s)
 
 const ROUTING_ALGO_CACHE_PREFIX: &str = "DE_routing_algo_eval:";
@@ -91,6 +91,9 @@ mod cache_key_tests {
 struct CachedRoutingAlgorithm {
     id: String,
     algorithm_data: String,
+    /// Absent in entries cached before this field existed — reads as None until the TTL refill.
+    #[serde(default)]
+    metadata: Option<serde_json::Value>,
 }
 
 fn routing_algo_cache_key(merchant_id: &str, algorithm_for: Option<&str>) -> String {
@@ -108,6 +111,14 @@ async fn cache_routing_algorithm_under_key(
     let value = CachedRoutingAlgorithm {
         id: algorithm.id.clone(),
         algorithm_data: algorithm.algorithm_data.clone(),
+        #[cfg(feature = "postgres")]
+        metadata: algorithm.metadata.clone(),
+        #[cfg(feature = "mysql")]
+        metadata: algorithm
+            .metadata
+            .as_deref()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(raw).ok())
+            .filter(|value| !value.is_null()),
     };
     let ttl = state.config.cache_config.service_config_ttl;
     if let Err(e) = state.redis_conn.set_key_with_ttl(&key, value, ttl).await {
@@ -461,6 +472,15 @@ pub async fn routing_create(
         }
     }
 
+    // Sticky config rides the algorithm row; reject a malformed one at save time.
+    if let Err(err) = validate_sticky_metadata(config.metadata.as_ref()) {
+        metrics::API_REQUEST_COUNTER
+            .with_label_values(&["routing_create", "failure"])
+            .inc();
+        timer.observe_duration();
+        return Err(err);
+    }
+
     let utc_date_time = time::OffsetDateTime::now_utc();
     let timestamp = time::PrimitiveDateTime::new(utc_date_time.date(), utc_date_time.time());
 
@@ -692,7 +712,13 @@ async fn resolve_active_algorithm(
                 created_by: created_by.to_string(),
                 name: String::new(),
                 description: String::new(),
-                metadata: None,
+                #[cfg(feature = "postgres")]
+                metadata: cached.metadata,
+                #[cfg(feature = "mysql")]
+                metadata: cached
+                    .metadata
+                    .as_ref()
+                    .and_then(|value| serde_json::to_string(value).ok()),
                 algorithm_data: cached.algorithm_data,
                 algorithm_for: String::new(),
                 created_at: time::PrimitiveDateTime::MIN,
@@ -703,6 +729,50 @@ async fn resolve_active_algorithm(
             // Cache miss or stale entry — fetch from DB and back-fill
             fetch_algorithm_from_db_and_cache(state, created_by, algorithm_for).await
         }
+    }
+}
+
+/// A malformed `metadata.sticky_routing` must be rejected at write time rather than have
+/// evaluate silently read it as disabled. Shared by create and update.
+fn validate_sticky_metadata(
+    metadata: Option<&serde_json::Value>,
+) -> Result<(), ContainerError<EuclidErrors>> {
+    if let Some(sticky) =
+        metadata.and_then(|meta| meta.get(crate::sticky_routing::ALGO_METADATA_STICKY_KEY))
+    {
+        if let Err(error) =
+            serde_json::from_value::<crate::sticky_routing::StickyRoutingConfig>(sticky.clone())
+        {
+            let message = format!("invalid metadata.sticky_routing: {error}");
+            return Err(ContainerError::new_with_status_code_and_payload(
+                EuclidErrors::FieldValidationFailed(message.clone()),
+                axum::http::StatusCode::BAD_REQUEST,
+                ApiErrorResponse::new("FIELD_VALIDATION_FAILED", message, None),
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Sticky config of the profile's ACTIVE algorithm — cache-first, one Redis GET on a warm
+/// cache. Any miss (no active algorithm, unreadable metadata) reads as disabled.
+pub async fn active_sticky_config(
+    state: &crate::app::TenantAppState,
+    created_by: &str,
+    algorithm_for: Option<&str>,
+) -> crate::sticky_routing::StickyRoutingConfig {
+    match resolve_active_algorithm(state, created_by, algorithm_for).await {
+        Ok(algorithm) => {
+            #[cfg(feature = "postgres")]
+            let metadata = algorithm.metadata;
+            #[cfg(feature = "mysql")]
+            let metadata: Option<serde_json::Value> = algorithm
+                .metadata
+                .as_deref()
+                .and_then(|raw| serde_json::from_str(raw).ok());
+            crate::sticky_routing::config_from_algorithm_metadata(metadata.as_ref())
+        }
+        Err(_) => Default::default(),
     }
 }
 
@@ -1969,6 +2039,8 @@ pub async fn update_routing_rule(
             ));
         }
 
+        validate_sticky_metadata(payload.metadata.as_ref())?;
+
         let utc_date_time = time::OffsetDateTime::now_utc();
         let timestamp = time::PrimitiveDateTime::new(utc_date_time.date(), utc_date_time.time());
         let algorithm_data = serde_json::to_string(&rule_for_validation.algorithm)
@@ -1986,6 +2058,24 @@ pub async fn update_routing_rule(
         )
         .await
         .change_context(EuclidErrors::StorageError)?;
+
+        // Metadata is replace-on-Some, untouched-on-None — dashboard sends the full object.
+        if let Some(metadata) = payload.metadata.clone() {
+            #[cfg(feature = "postgres")]
+            let metadata_value = Some(metadata);
+            #[cfg(feature = "mysql")]
+            let metadata_value = Some(
+                serde_json::to_string(&metadata)
+                    .change_context(EuclidErrors::FailedToSerializeJsonToString)?,
+            );
+            crate::generics::generic_update::<<RoutingAlgorithm as HasTable>::Table, _, _>(
+                &conn,
+                dsl::id.eq(payload.routing_algorithm_id.clone()),
+                dsl::metadata.eq(metadata_value),
+            )
+            .await
+            .change_context(EuclidErrors::StorageError)?;
+        }
 
         invalidate_routing_algorithm_cache(&state, &payload.created_by).await;
 

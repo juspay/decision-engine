@@ -2035,6 +2035,7 @@ pub fn get_default_gateway_scoring_data(
         udfs,
         udfs_consumed_for_routing: None,
         gatewayReferenceId: gatewayRefId,
+        customerId: None,
     }
 }
 
@@ -2109,6 +2110,12 @@ pub async fn get_gateway_scoring_data(
         Some(decider_flow.get().dpOrder.udfs.clone()),
         is_legacy_decider_flow,
     );
+    default_gateway_scoring_data.customerId = decider_flow
+        .get()
+        .dpOrder
+        .customerId
+        .clone()
+        .map(|customer| customer.0);
     let updated_gateway_scoring_data = match txn_card_info.paymentMethodType.as_str() {
         UPI => {
             let handle_and_package_based_routing = is_feature_enabled(

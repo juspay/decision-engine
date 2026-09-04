@@ -198,6 +198,8 @@ export interface RoutingAlgorithm {
   description: string
   created_by: string
   algorithm_for: string
+  /** Row metadata (e.g. sticky_routing config); returned by the list endpoints. */
+  metadata?: Record<string, unknown> | null
   created_at?: string
   modified_at?: string
   // Backend returns algorithm_data, not algorithm

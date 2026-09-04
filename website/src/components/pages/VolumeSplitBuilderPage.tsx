@@ -12,7 +12,7 @@ import { useCanEditRouting } from '../../store/authStore'
 import { apiPost } from '../../lib/api'
 import { RoutingAlgorithm } from '../../types/api'
 import { VolumeSplitGatewayFormEntry } from '../../features/routing/volumeSplit/types'
-import { toVolumeSplitCreatePayload, toVolumeSplitAlgorithm } from '../../features/routing/volumeSplit/payload'
+import { toVolumeSplitCreatePayload, toVolumeSplitAlgorithm, toRuleMetadata } from '../../features/routing/volumeSplit/payload'
 import { toVolumeSplitRuleDetailsState } from '../../features/routing/volumeSplit/state'
 import {
   collectVolumeSplitErrors,
@@ -61,6 +61,7 @@ export function VolumeSplitBuilderPage() {
 
   const [ruleName, setRuleName] = useState('')
   const [ruleDesc, setRuleDesc] = useState('')
+  const [stickyRouting, setStickyRouting] = useState(false)
   const [gateways, setGateways] = useState<VolumeSplitGatewayFormEntry[]>(() => createInitialGateways())
   const [saving, setSaving] = useState(false)
   // Field-level problems render at their own control; `error` is only for things with no field to
@@ -95,13 +96,19 @@ export function VolumeSplitBuilderPage() {
     const details = toVolumeSplitRuleDetailsState(sourceRule)
     if (!details) return
     seededFrom.current = sourceRule.id
+    const sourceSticky = Boolean(
+      (sourceRule.metadata as { sticky_routing?: { enabled?: boolean } } | null | undefined)
+        ?.sticky_routing?.enabled
+    )
     setRuleName(isEdit ? details.name : `copy-of-${details.name}`)
     setRuleDesc(details.description && details.description !== 'N/A' ? details.description : '')
+    setStickyRouting(sourceSticky)
     if (details.gateways.length > 0) setGateways(details.gateways)
     seededForm.current = JSON.stringify([
       (isEdit ? details.name : `copy-of-${details.name}`).trim(),
       details.description && details.description !== 'N/A' ? details.description : '',
       details.gateways.length > 0 ? details.gateways : gateways,
+      sourceSticky,
     ])
   }, [sourceRule, isEdit])
 
@@ -109,7 +116,7 @@ export function VolumeSplitBuilderPage() {
   // actually changed — an untouched copy would just be rule sprawl.
   const isDirty =
     seededForm.current !== null &&
-    seededForm.current !== JSON.stringify([ruleName.trim(), ruleDesc, gateways])
+    seededForm.current !== JSON.stringify([ruleName.trim(), ruleDesc, gateways, stickyRouting])
 
   // A fork keeps the merchant's own name if they renamed it, otherwise it must not collide with the
   // rule it came from — nothing enforces name uniqueness on the way in.
@@ -151,6 +158,7 @@ export function VolumeSplitBuilderPage() {
   function handleClear() {
     setRuleName('')
     setRuleDesc('')
+    setStickyRouting(false)
     setGateways(createInitialGateways())
     setError(null)
     setFieldErrors({ gateways: {} })
@@ -162,7 +170,7 @@ export function VolumeSplitBuilderPage() {
 
     // Collect every problem before returning, so one save reports all of them rather than making
     // the reader rediscover the next one on each attempt.
-    const nextFieldErrors = collectVolumeSplitErrors({ ruleName, description: ruleDesc, gateways })
+    const nextFieldErrors = collectVolumeSplitErrors({ ruleName, description: ruleDesc, gateways, stickyRouting })
     setFieldErrors(nextFieldErrors)
     if (hasVolumeSplitErrors(nextFieldErrors)) {
       setError('Fix the highlighted fields before saving.')
@@ -180,6 +188,7 @@ export function VolumeSplitBuilderPage() {
           name: ruleName.trim(),
           description: ruleDesc,
           algorithm: toVolumeSplitAlgorithm(gateways),
+          metadata: toRuleMetadata(stickyRouting, sourceRule?.metadata),
         })
       } else {
         // The backend refuses to update an active algorithm, so saving one forks it. The live rule
@@ -187,8 +196,14 @@ export function VolumeSplitBuilderPage() {
         await apiPost<RoutingAlgorithm>(
           '/routing/create',
           toVolumeSplitCreatePayload(
-            { ruleName: isEditingActiveRule ? forkName : ruleName, description: ruleDesc, gateways },
+            {
+              ruleName: isEditingActiveRule ? forkName : ruleName,
+              description: ruleDesc,
+              gateways,
+              stickyRouting,
+            },
             merchantId,
+            sourceRule?.metadata,
           )
         )
       }
@@ -268,6 +283,18 @@ export function VolumeSplitBuilderPage() {
                     placeholder="Optional description"
                     className="min-w-0 flex-1 rounded-lg border border-slate-200 bg-transparent px-3.5 py-2.5 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226]"
                   />
+                </div>
+                <div className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3.5 py-2.5 dark:border-[#222226]">
+                  <div className="min-w-0">
+                    <p className="text-[13px] font-semibold text-slate-700 dark:text-slate-300">
+                      Sticky routing
+                    </p>
+                    <p className="text-xs text-slate-500 dark:text-[#8d96a8]">
+                      Pin returning customers to the connector of their last successful payment for
+                      this method. Also requires the merchant-level sticky-routing feature.
+                    </p>
+                  </div>
+                  <StickySwitch on={stickyRouting} onClick={() => setStickyRouting((v) => !v)} />
                 </div>
               </div>
 
@@ -457,5 +484,26 @@ export function VolumeSplitBuilderPage() {
         </aside>
       </div>
     </div>
+  )
+}
+
+function StickySwitch({ on, onClick }: { on: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      aria-label="Sticky routing"
+      onClick={onClick}
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors ${
+        on ? 'bg-brand-500' : 'bg-slate-300 dark:bg-slate-600'
+      }`}
+    >
+      <span
+        className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+          on ? 'translate-x-6' : 'translate-x-1'
+        }`}
+      />
+    </button>
   )
 }
