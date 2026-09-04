@@ -1246,9 +1246,14 @@ pub fn isRoutingApproachInSRV2(maybe_text: Option<String>) -> bool {
 // (`SR_SELECTION_MULTI_OBJECTIVE`) carries no "V3" token, so match it explicitly —
 // otherwise producer isolation silently drops every cost-routed outcome and the
 // chosen gateway's score never moves on success or failure.
+// STICKY_ROUTING is the same shape: the pin re-picks among SRv3-scored candidates
+// (its health veto reads the SRv3 map), so its outcomes must keep feeding the
+// producer or a pinned connector's score freezes and the veto can never trip.
 pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
     match maybe_text {
-        Some(text) => text.contains("V3") || text.contains("MULTI_OBJECTIVE"),
+        Some(text) => {
+            text.contains("V3") || text.contains("MULTI_OBJECTIVE") || text.contains("STICKY")
+        }
         None => false,
     }
 }
@@ -1260,9 +1265,14 @@ pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
 // (cost) routing is also off-policy: it deliberately picks a *non-top*, SR-equivalent
 // (cheaper) PSP, which is exploration of that PSP. Treat it as explore too, otherwise
 // cost-routed outcomes are excluded from scoring whenever explore/exploit is enabled.
+// A sticky pin only carries the STICKY_ROUTING label when it *diverged* from the SR
+// head (the on-policy agreeing case keeps its SR label), so a sticky-labeled outcome
+// is off-policy exploration of a non-top PSP — same rationale as multi-objective.
 pub fn is_routing_approach_in_explore(maybe_text: Option<String>) -> bool {
     match maybe_text {
-        Some(text) => text.contains("HEDGING") || text.contains("MULTI_OBJECTIVE"),
+        Some(text) => {
+            text.contains("HEDGING") || text.contains("MULTI_OBJECTIVE") || text.contains("STICKY")
+        }
         None => false,
     }
 }
@@ -1591,6 +1601,8 @@ mod tests {
         assert!(is_routing_approach_in_srv3(Some(
             "SR_SELECTION_MULTI_OBJECTIVE".into()
         )));
+        // Sticky pins re-pick among SRv3 candidates — same rule.
+        assert!(is_routing_approach_in_srv3(Some("STICKY_ROUTING".into())));
     }
 
     #[test]
@@ -1610,6 +1622,10 @@ mod tests {
         // Cost estimation picks a non-top, SR-equivalent PSP — off-policy exploration.
         assert!(is_routing_approach_in_explore(Some(
             "SR_SELECTION_MULTI_OBJECTIVE".into()
+        )));
+        // A sticky label only exists when the pin diverged from the head — off-policy.
+        assert!(is_routing_approach_in_explore(Some(
+            "STICKY_ROUTING".into()
         )));
     }
 

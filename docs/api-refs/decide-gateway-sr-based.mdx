@@ -19,8 +19,10 @@ curl --location "$BASE_URL/decide-gateway" \
     "rankingAlgorithm": "SR_BASED_ROUTING",
     "eliminationEnabled": true,
     "enableMultiObjective": false,
+    "stickyRouting": true,
     "paymentInfo": {
       "paymentId": "sr_001",
+      "customerId": "cust_123",
       "amount": 1000,
       "currency": "USD",
       "country": "US",
@@ -33,6 +35,14 @@ curl --location "$BASE_URL/decide-gateway" \
     }
   }'
 ```
+
+`stickyRouting` and `paymentInfo.customerId` are optional. When the merchant's
+`sticky_routing_enabled` flag is on and a `customerId` is present, the engine pins the
+customer's most-successful connector for this payment-method combo over the SR pick —
+unless the connector's current score fell below the health threshold (outage/elimination),
+or `stickyRouting` is `false` (send `false` when your own static routing matched an
+explicit priority order). `/routing/hybrid` sets the flag automatically from the static
+rule outcome. A sticky pin reports `"routing_approach": "STICKY_ROUTING"`.
 
 ## Response
 

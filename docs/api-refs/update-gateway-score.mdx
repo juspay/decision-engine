@@ -29,9 +29,9 @@ curl --location "$BASE_URL/update-gateway-score" \
 `customerId`, `paymentMethod`, and `paymentMethodType` are optional and feed sticky-routing
 success counts (per-merchant flag `sticky_routing_enabled`). When absent they are recovered
 from the decide-time snapshot, which expires 30 minutes after the decide call — send them
-explicitly if your success webhooks can arrive later than that. Send the same values as the
-decide call's `paymentInfo`; they are matched case-insensitively. For UPI, send the payment
-source object (e.g. `UPI_COLLECT`) as `paymentMethod`, matching what the engine keys by.
+explicitly if your success webhooks can arrive later than that. Echo the decide call's
+`paymentInfo` values: `paymentMethod`/`paymentMethodType` are matched case-insensitively,
+while `customerId` must match byte-exactly.
 
 ## Response
 

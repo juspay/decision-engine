@@ -746,6 +746,28 @@ async fn resolve_active_algorithm(
     }
 }
 
+/// Sticky config of the profile's ACTIVE algorithm — cache-first, one Redis GET on a warm
+/// cache. Any miss (no active algorithm, unreadable metadata) reads as disabled.
+pub async fn active_sticky_config(
+    state: &crate::app::TenantAppState,
+    created_by: &str,
+    algorithm_for: Option<&str>,
+) -> crate::sticky_routing::StickyRoutingConfig {
+    match resolve_active_algorithm(state, created_by, algorithm_for).await {
+        Ok(algorithm) => {
+            #[cfg(feature = "postgres")]
+            let metadata = algorithm.metadata;
+            #[cfg(feature = "mysql")]
+            let metadata: Option<serde_json::Value> = algorithm
+                .metadata
+                .as_deref()
+                .and_then(|raw| serde_json::from_str(raw).ok());
+            crate::sticky_routing::config_from_algorithm_metadata(metadata.as_ref())
+        }
+        Err(_) => Default::default(),
+    }
+}
+
 /// Validates evaluation parameters against the global routing key config. Shared by the
 /// single and batch evaluate handlers; behaviour is identical to the original inline
 /// validation in `routing_evaluate`.

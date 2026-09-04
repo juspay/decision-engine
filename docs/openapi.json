@@ -5338,6 +5338,13 @@
           "enableMultiObjective": {
             "type": "boolean",
             "description": "Per-request override for the multi-objective (cost-aware) post-step. true forces it on, false forces it off; omitted falls back to the merchant's multi_objective_routing_enabled feature flag."
+          },
+          "stickyRouting": {
+            "type": [
+              "boolean",
+              "null"
+            ],
+            "description": "Sticky-routing eligibility for this payment. false disables the sticky override (send it when your own static routing matched an explicit priority order); true or omitted leaves it eligible, still gated by the merchant's sticky_routing_enabled flag and a customerId in paymentInfo. /routing/hybrid sets this automatically from the static rule outcome."
           }
         }
       },

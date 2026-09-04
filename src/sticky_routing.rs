@@ -40,6 +40,19 @@ pub const DEFAULT_MAX_NEW_CUSTOMERS_PER_WINDOW: i64 = 1_000_000;
 /// Service-configuration overrides, read through the same cache chain as the SR score TTLs.
 const SC_STICKY_KEY_TTL: &str = "STICKY_ROUTING_KEY_TTL";
 const SC_MAX_COMBOS: &str = "STICKY_ROUTING_MAX_COMBOS_PER_CUSTOMER";
+const SC_MIN_SCORE_RATIO: &str = "STICKY_ROUTING_MIN_SCORE_RATIO";
+
+/// Health veto divider: the sticky connector's post-elimination score must be at least this
+/// fraction of the top score, or the pin is skipped — outage/eliminated connectors sit far
+/// below the top after the penalty passes, so the pin cannot resurrect them.
+pub const DEFAULT_STICKY_MIN_SCORE_RATIO: f64 = 0.5;
+
+pub async fn sticky_min_score_ratio() -> f64 {
+    findByNameFromRedis::<f64>(SC_MIN_SCORE_RATIO.to_string())
+        .await
+        .filter(|ratio| (0.0..=1.0).contains(ratio))
+        .unwrap_or(DEFAULT_STICKY_MIN_SCORE_RATIO)
+}
 
 /// FeatureConf key gating sticky writes/reads per merchant — the ops kill switch.
 pub const STICKY_ROUTING_FEATURE: &str = "sticky_routing_enabled";
@@ -185,8 +198,14 @@ pub async fn delete_sticky_data(merchant_id: &str, customer_id: &str) -> RedisRe
     Ok(())
 }
 
+// Trim only — customer ids stay case-sensitive (folding could merge distinct customers),
+// so feedback must echo the decide call's customerId byte-exactly (documented in api-refs).
 fn sticky_key(merchant_id: &str, customer_id: &str) -> String {
-    format!("{STICKY_KEY_PREFIX}{merchant_id}_{customer_id}")
+    format!(
+        "{STICKY_KEY_PREFIX}{}_{}",
+        merchant_id.trim(),
+        customer_id.trim()
+    )
 }
 
 fn combo_key(payment_method: &str, payment_method_type: &str) -> String {
