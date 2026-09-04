@@ -447,6 +447,120 @@ pub fn invalid_request_error(detail: &str, e: &impl std::fmt::Display) -> T::Err
     }
 }
 
+/// Sticky-routing success write. Returns true when handling is complete (recorded, deduped,
+/// disabled, or an ineligible status) and false when the customer/pm context is missing and a
+/// second pass with the GatewayScoringData snapshot should retry. Never fails the feedback call.
+async fn maybe_record_sticky_success(
+    api_payload: &FT::UpdateScorePayload,
+    snapshot: Option<&GatewayScoringData>,
+) -> bool {
+    // Narrow first-success set — deliberately NOT txn_success_states(), whose post-auth
+    // lifecycle states (VOIDED, AUTO_REFUNDED, CAPTURE_FAILED, ...) would let a late
+    // lifecycle webhook re-count an earlier attempt's connector.
+    if !matches!(
+        api_payload.status,
+        TS::Charged | TS::Authorized | TS::PartialCharged
+    ) {
+        return true;
+    }
+    let customer_id = api_payload
+        .customer_id
+        .clone()
+        .or_else(|| snapshot.and_then(|data| data.customerId.clone()));
+    let payment_method = api_payload
+        .payment_method
+        .clone()
+        .or_else(|| snapshot.map(|data| data.paymentMethod.clone()));
+    let payment_method_type = api_payload
+        .payment_method_type
+        .clone()
+        .or_else(|| snapshot.map(|data| data.paymentMethodType.clone()));
+    let (Some(customer_id), Some(payment_method), Some(payment_method_type)) =
+        (customer_id, payment_method, payment_method_type)
+    else {
+        // Context incomplete: ask for the snapshot pass; on the snapshot pass itself, give up.
+        return snapshot.is_some();
+    };
+    if !is_feature_enabled(
+        crate::sticky_routing::STICKY_ROUTING_FEATURE.to_string(),
+        api_payload.merchant_id.clone(),
+        C::kvRedis(),
+    )
+    .await
+    {
+        return true;
+    }
+    // At most one write per payment per lock window: dedupes duplicate webhooks and
+    // orchestrator retries. A later lifecycle status past the window (e.g. capture hours
+    // after auth) adds a second increment to the same succeeding connector — magnitude
+    // inflates uniformly across a merchant's connectors, so the count RANKING holds.
+    let app_state = get_tenant_app_state().await;
+    let lock_key =
+        crate::sticky_routing::write_lock_key(&api_payload.merchant_id, &api_payload.payment_id);
+    match app_state
+        .redis_conn
+        .set_key_if_not_exists(
+            &lock_key,
+            "1",
+            crate::sticky_routing::STICKY_WRITE_LOCK_TTL_SECS,
+        )
+        .await
+    {
+        Ok(false) => {
+            crate::metrics::STICKY_ROUTING_WRITE_COUNTER
+                .with_label_values(&["duplicate"])
+                .inc();
+            return true;
+        }
+        Ok(true) => {}
+        // Lock unreadable: prefer counting a success over dropping it.
+        Err(error) => {
+            logger::warn!(
+                action = "sticky_routing",
+                "sticky write lock failed for {lock_key}, writing anyway: {error}"
+            );
+        }
+    }
+    match crate::sticky_routing::record_success(
+        &api_payload.merchant_id,
+        &customer_id,
+        &payment_method,
+        &payment_method_type,
+        &api_payload.gateway,
+    )
+    .await
+    {
+        Ok(outcome) => {
+            let label = match outcome {
+                crate::sticky_routing::StickyWriteOutcome::Recorded { .. } => "recorded",
+                crate::sticky_routing::StickyWriteOutcome::SkippedOverBudget => "over_budget",
+            };
+            crate::metrics::STICKY_ROUTING_WRITE_COUNTER
+                .with_label_values(&[label])
+                .inc();
+            logger::info!(
+                action = "sticky_routing",
+                merchant_id = %api_payload.merchant_id,
+                payment_id = %api_payload.payment_id,
+                gateway = %api_payload.gateway,
+                "sticky success recorded: {outcome:?}"
+            );
+        }
+        Err(error) => {
+            crate::metrics::STICKY_ROUTING_WRITE_COUNTER
+                .with_label_values(&["write_error"])
+                .inc();
+            logger::error!(
+                action = "sticky_routing",
+                merchant_id = %api_payload.merchant_id,
+                payment_id = %api_payload.payment_id,
+                "sticky success write failed: {error}"
+            );
+        }
+    }
+    true
+}
+
 pub async fn check_and_update_gateway_score_(
     api_payload: FT::UpdateScorePayload,
 ) -> Result<String, T::ErrorResponse> {
@@ -463,6 +577,11 @@ pub async fn check_and_update_gateway_score_(
         is_success,
     )
     .await;
+
+    // Sticky-routing write, same placement rationale: when the payload carries
+    // customer + pm context it must not be gated on the scoring-data snapshot,
+    // so a success webhook landing after the snapshot's 30-min TTL still counts.
+    let sticky_done = maybe_record_sticky_success(&api_payload, None).await;
 
     // GSM-based scoring filter: skip penalization for failures where the gateway
     // is healthy (user/issuer-originated errors). Gated per merchant so it can be
@@ -504,7 +623,9 @@ pub async fn check_and_update_gateway_score_(
                     .map(|g| (&g.unified_message, &g.decision)),
             );
             if let Some(gsm_info) = gsm_lookup_result {
-                if is_gateway_healthy_failure(&gsm_info) {
+                // Failures only: a success must never early-return here — it still needs
+                // the SR reward and the snapshot-fallback sticky pass below.
+                if !is_success && is_gateway_healthy_failure(&gsm_info) {
                     logger::info!(
                         action = "GSM_SCORING_FILTER_SKIP",
                         tag = "GSM_SCORING_FILTER_SKIP",
@@ -547,6 +668,11 @@ pub async fn check_and_update_gateway_score_(
 
     match m_gateway_scoring_data {
         Ok(gateway_scoring_data) => {
+            // Second sticky pass for callers that sent no customer/pm fields —
+            // the snapshot supplies them.
+            if !sticky_done {
+                maybe_record_sticky_success(&api_payload, Some(&gateway_scoring_data)).await;
+            }
             // Extract transaction details and card info from the API payload
             let txn_detail: TxnDetail = match Fbu::get_txn_detail_from_api_payload(
                 api_payload.clone(),
@@ -1135,9 +1261,14 @@ pub fn isRoutingApproachInSRV2(maybe_text: Option<String>) -> bool {
 // (`SR_SELECTION_MULTI_OBJECTIVE`) carries no "V3" token, so match it explicitly —
 // otherwise producer isolation silently drops every cost-routed outcome and the
 // chosen gateway's score never moves on success or failure.
+// STICKY_ROUTING is the same shape: the pin re-picks among SRv3-scored candidates
+// (its health veto reads the SRv3 map), so its outcomes must keep feeding the
+// producer or a pinned connector's score freezes and the veto can never trip.
 pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
     match maybe_text {
-        Some(text) => text.contains("V3") || text.contains("MULTI_OBJECTIVE"),
+        Some(text) => {
+            text.contains("V3") || text.contains("MULTI_OBJECTIVE") || text.contains("STICKY")
+        }
         None => false,
     }
 }
@@ -1149,9 +1280,14 @@ pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
 // (cost) routing is also off-policy: it deliberately picks a *non-top*, SR-equivalent
 // (cheaper) PSP, which is exploration of that PSP. Treat it as explore too, otherwise
 // cost-routed outcomes are excluded from scoring whenever explore/exploit is enabled.
+// A sticky pin only carries the STICKY_ROUTING label when it *diverged* from the SR
+// head (the on-policy agreeing case keeps its SR label), so a sticky-labeled outcome
+// is off-policy exploration of a non-top PSP — same rationale as multi-objective.
 pub fn is_routing_approach_in_explore(maybe_text: Option<String>) -> bool {
     match maybe_text {
-        Some(text) => text.contains("HEDGING") || text.contains("MULTI_OBJECTIVE"),
+        Some(text) => {
+            text.contains("HEDGING") || text.contains("MULTI_OBJECTIVE") || text.contains("STICKY")
+        }
         None => false,
     }
 }
@@ -1480,6 +1616,8 @@ mod tests {
         assert!(is_routing_approach_in_srv3(Some(
             "SR_SELECTION_MULTI_OBJECTIVE".into()
         )));
+        // Sticky pins re-pick among SRv3 candidates — same rule.
+        assert!(is_routing_approach_in_srv3(Some("STICKY_ROUTING".into())));
     }
 
     #[test]
@@ -1499,6 +1637,10 @@ mod tests {
         // Cost estimation picks a non-top, SR-equivalent PSP — off-policy exploration.
         assert!(is_routing_approach_in_explore(Some(
             "SR_SELECTION_MULTI_OBJECTIVE".into()
+        )));
+        // A sticky label only exists when the pin diverged from the head — off-policy.
+        assert!(is_routing_approach_in_explore(Some(
+            "STICKY_ROUTING".into()
         )));
     }
 
