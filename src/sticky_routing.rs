@@ -43,6 +43,9 @@ pub const DEFAULT_MAX_NEW_CUSTOMERS_PER_WINDOW: i64 = 1_000_000;
 const SC_STICKY_KEY_TTL: &str = "STICKY_ROUTING_KEY_TTL";
 const SC_MAX_COMBOS: &str = "STICKY_ROUTING_MAX_COMBOS_PER_CUSTOMER";
 
+/// FeatureConf key gating sticky writes/reads per merchant — the ops kill switch.
+pub const STICKY_ROUTING_FEATURE: &str = "sticky_routing_enabled";
+
 fn sc_merchant_budget_key(merchant_id: &str) -> String {
     format!("STICKY_ROUTING_MAX_CUSTOMERS_{merchant_id}")
 }
