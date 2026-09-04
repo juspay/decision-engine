@@ -447,6 +447,105 @@ pub fn invalid_request_error(detail: &str, e: &impl std::fmt::Display) -> T::Err
     }
 }
 
+/// Sticky-routing success write. Returns true when handling is complete (recorded, deduped,
+/// disabled, or an ineligible status) and false when the customer/pm context is missing and a
+/// second pass with the GatewayScoringData snapshot should retry. Never fails the feedback call.
+async fn maybe_record_sticky_success(
+    api_payload: &FT::UpdateScorePayload,
+    snapshot: Option<&GatewayScoringData>,
+) -> bool {
+    // Narrow first-success set — deliberately NOT txn_success_states(), whose post-auth
+    // lifecycle states (VOIDED, AUTO_REFUNDED, CAPTURE_FAILED, ...) would let a late
+    // lifecycle webhook re-count an earlier attempt's connector.
+    if !matches!(
+        api_payload.status,
+        TS::Charged | TS::Authorized | TS::PartialCharged
+    ) {
+        return true;
+    }
+    let customer_id = api_payload
+        .customer_id
+        .clone()
+        .or_else(|| snapshot.and_then(|data| data.customerId.clone()));
+    let payment_method = api_payload
+        .payment_method
+        .clone()
+        .or_else(|| snapshot.map(|data| data.paymentMethod.clone()));
+    let payment_method_type = api_payload
+        .payment_method_type
+        .clone()
+        .or_else(|| snapshot.map(|data| data.paymentMethodType.clone()));
+    let (Some(customer_id), Some(payment_method), Some(payment_method_type)) =
+        (customer_id, payment_method, payment_method_type)
+    else {
+        // Context incomplete: ask for the snapshot pass; on the snapshot pass itself, give up.
+        return snapshot.is_some();
+    };
+    if !is_feature_enabled(
+        crate::sticky_routing::STICKY_ROUTING_FEATURE.to_string(),
+        api_payload.merchant_id.clone(),
+        C::kvRedis(),
+    )
+    .await
+    {
+        return true;
+    }
+    // At most one write per payment per lock window: dedupes duplicate webhooks and
+    // orchestrator retries. A later lifecycle status past the window (e.g. capture hours
+    // after auth) adds a second increment to the same succeeding connector — magnitude
+    // inflates uniformly across a merchant's connectors, so the count RANKING holds.
+    let app_state = get_tenant_app_state().await;
+    let lock_key =
+        crate::sticky_routing::write_lock_key(&api_payload.merchant_id, &api_payload.payment_id);
+    match app_state
+        .redis_conn
+        .set_key_if_not_exists(
+            &lock_key,
+            "1",
+            crate::sticky_routing::STICKY_WRITE_LOCK_TTL_SECS,
+        )
+        .await
+    {
+        Ok(false) => return true,
+        Ok(true) => {}
+        // Lock unreadable: prefer counting a success over dropping it.
+        Err(error) => {
+            logger::warn!(
+                action = "sticky_routing",
+                "sticky write lock failed for {lock_key}, writing anyway: {error}"
+            );
+        }
+    }
+    match crate::sticky_routing::record_success(
+        &api_payload.merchant_id,
+        &customer_id,
+        &payment_method,
+        &payment_method_type,
+        &api_payload.gateway,
+    )
+    .await
+    {
+        Ok(outcome) => {
+            logger::info!(
+                action = "sticky_routing",
+                merchant_id = %api_payload.merchant_id,
+                payment_id = %api_payload.payment_id,
+                gateway = %api_payload.gateway,
+                "sticky success recorded: {outcome:?}"
+            );
+        }
+        Err(error) => {
+            logger::error!(
+                action = "sticky_routing",
+                merchant_id = %api_payload.merchant_id,
+                payment_id = %api_payload.payment_id,
+                "sticky success write failed: {error}"
+            );
+        }
+    }
+    true
+}
+
 pub async fn check_and_update_gateway_score_(
     api_payload: FT::UpdateScorePayload,
 ) -> Result<String, T::ErrorResponse> {
@@ -463,6 +562,11 @@ pub async fn check_and_update_gateway_score_(
         is_success,
     )
     .await;
+
+    // Sticky-routing write, same placement rationale: when the payload carries
+    // customer + pm context it must not be gated on the scoring-data snapshot,
+    // so a success webhook landing after the snapshot's 30-min TTL still counts.
+    let sticky_done = maybe_record_sticky_success(&api_payload, None).await;
 
     // GSM-based scoring filter: skip penalization for failures where the gateway
     // is healthy (user/issuer-originated errors). Gated per merchant so it can be
@@ -504,7 +608,9 @@ pub async fn check_and_update_gateway_score_(
                     .map(|g| (&g.unified_message, &g.decision)),
             );
             if let Some(gsm_info) = gsm_lookup_result {
-                if is_gateway_healthy_failure(&gsm_info) {
+                // Failures only: a success must never early-return here — it still needs
+                // the SR reward and the snapshot-fallback sticky pass below.
+                if !is_success && is_gateway_healthy_failure(&gsm_info) {
                     logger::info!(
                         action = "GSM_SCORING_FILTER_SKIP",
                         tag = "GSM_SCORING_FILTER_SKIP",
@@ -547,6 +653,11 @@ pub async fn check_and_update_gateway_score_(
 
     match m_gateway_scoring_data {
         Ok(gateway_scoring_data) => {
+            // Second sticky pass for callers that sent no customer/pm fields —
+            // the snapshot supplies them.
+            if !sticky_done {
+                maybe_record_sticky_success(&api_payload, Some(&gateway_scoring_data)).await;
+            }
             // Extract transaction details and card info from the API payload
             let txn_detail: TxnDetail = match Fbu::get_txn_detail_from_api_payload(
                 api_payload.clone(),

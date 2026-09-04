@@ -550,6 +550,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             udfs: None,
             udfs_consumed_for_routing: None,
             gatewayReferenceId: None,
+            customerId: None,
         },
         ab_test_sr_override: None,
     }
@@ -582,6 +583,10 @@ pub struct GatewayScoringData {
     pub gatewayReferenceId: Option<String>,
     pub udfs: Option<UDFs>,
     pub udfs_consumed_for_routing: Option<String>,
+    /// Customer behind the payment, stashed so the feedback path can key sticky-routing
+    /// counts. Default keeps snapshots written before this field deserializing.
+    #[serde(default)]
+    pub customerId: Option<String>,
 }
 
 impl GatewayScoringData {

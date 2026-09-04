@@ -5600,6 +5600,30 @@
               "null"
             ],
             "description": "Set by the orchestrator when this call is a smart-retry attempt."
+          },
+          "customerId": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "cust_123",
+            "description": "Customer behind the payment; enables sticky-routing success accumulation. Optional — recovered from the decide-time snapshot when absent, but required for feedback arriving more than 30 minutes after the decide call."
+          },
+          "paymentMethod": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "INTERAC",
+            "description": "Payment method for the sticky-routing write when the decide-time snapshot has expired. Snapshot fallback when absent."
+          },
+          "paymentMethodType": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "example": "RTP",
+            "description": "Payment method type; same role as paymentMethod."
           }
         }
       },
