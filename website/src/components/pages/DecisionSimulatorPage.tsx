@@ -15,10 +15,9 @@ import { useMerchantStore } from '../../store/merchantStore'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { useAuthStore } from '../../store/authStore'
 import { apiErrorStatus, apiPost, fetcher } from '../../lib/api'
-import { ContractSimulationPanel } from './ContractSimulationPanel'
 import { VolumeCommitmentRunChart } from './VolumeCommitmentRunChart'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
-import { DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RankedPsp, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
+import { BlockedCommitment, DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RankedPsp, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
@@ -326,6 +325,8 @@ interface SimulationResult {
   // approval-rate routing had picked. Drives the per-PSP steering chart above the results.
   steerOutcome?: 'STEERED' | 'SR_PREVAILED' | null
   steerSrHead?: string | null
+  /** Commitments that wanted this payment and the gate that stopped each. */
+  steerBlocked?: BlockedCommitment[] | null
 }
 
 // Soft, sentence-case stat label (vs the all-caps SurfaceLabel) for the cost/auth summary.
@@ -2527,6 +2528,7 @@ export function DecisionSimulatorPage() {
         cardScenario: variant?.label,
         steerOutcome: decideRes.volume_steer_info?.outcome ?? null,
         steerSrHead: decideRes.volume_steer_info?.srHead ?? null,
+        steerBlocked: decideRes.volume_steer_info?.blocked ?? null,
       }
     }
 
@@ -3957,8 +3959,10 @@ export function DecisionSimulatorPage() {
       >
         <div className={`flex flex-col gap-6 min-w-0 ${activeTab === 'batch' ? 'lg:min-h-0' : 'self-start'}`}>
         {activeTab === 'batch' && (
-          <ContractSimulationPanel
+          <VolumeCommitmentRunChart
             merchantId={effectiveMerchantId}
+            results={simulationResults}
+            colorFor={colorForGateway}
             isSimulating={isSimulating}
             tps={simulationConfig.tps}
             onContractGone={() => setContractPaceMs(0)}
@@ -3980,13 +3984,6 @@ export function DecisionSimulatorPage() {
                 totalPayments: String(totalPayments),
               }))
             }}
-          />
-        )}
-        {activeTab === 'batch' && (
-          <VolumeCommitmentRunChart
-            merchantId={effectiveMerchantId}
-            results={simulationResults}
-            colorFor={colorForGateway}
           />
         )}
         {activeTab === 'batch' && (

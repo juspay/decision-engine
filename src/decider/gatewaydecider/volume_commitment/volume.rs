@@ -10,10 +10,8 @@ use serde::Deserialize;
 
 use super::inputs::{Commitment, MeasuredVolume};
 use super::math;
-use crate::analytics::clickhouse::common::{
-    fetch_all, DOMAIN_TABLE, PAYMENT_AMOUNT_EXPR as AMOUNT_EXPR,
-};
-use crate::analytics::clickhouse::query::{BoundQueryBuilder, FilterClause, OrderClause};
+use crate::analytics::clickhouse::common::{fetch_all, payment_amount_expr, DOMAIN_TABLE};
+use crate::analytics::clickhouse::query::{BoundQueryBuilder, FilterClause};
 use crate::analytics::flow::FlowType;
 use crate::config::ClickHouseAnalyticsConfig;
 use crate::decider::gatewaydecider::types::GatewayDeciderApproach;
@@ -43,73 +41,6 @@ fn base_filters(builder: &mut BoundQueryBuilder, merchant_id: &str, flow: FlowTy
     )));
 }
 
-/// Restrict to the contract's connectors; a no-op on an empty list (callers never pass one).
-fn connector_filter(builder: &mut BoundQueryBuilder, connectors: &[String]) {
-    if let Some(filter) = FilterClause::in_list("gateway", connectors) {
-        builder.add_filter(filter);
-    }
-}
-
-/// One PSP's volume on one day of its cycle, for the pacing chart.
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct DayVolume {
-    pub connector: String,
-    /// Days since the PSP's cycle started (0 = the first day).
-    pub day_index: u32,
-    /// Where in the cycle this bucket starts, in (fractional) contract days — `day_index` with
-    /// the sub-day resolution the caller asked for, so an intraday chart can plot it.
-    pub day: f64,
-    /// Everything delivered that day.
-    pub total: f64,
-    /// Of that, what the nudge moved.
-    pub steered: f64,
-    /// Payments behind `total`.
-    pub payments: u64,
-    /// Payments behind `steered`.
-    pub steered_payments: u64,
-}
-
-/// What kind of audit entry an event is.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum AuditKind {
-    Forecast,
-    Steered,
-    Eliminated,
-}
-
-/// One entry in the audit trail, reconstructed from the analytics events in ClickHouse — so it
-/// covers real payments and survives restarts.
-#[derive(Debug, Clone, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct AuditEvent {
-    pub at_epoch_ms: i64,
-    pub kind: AuditKind,
-    /// The contract execution this entry belongs to. `None` on events written before runs were
-    /// named, which group under an "earlier activity" bucket rather than being dropped.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub run_id: Option<String>,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub connector: Option<String>,
-    pub message: String,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub amount: Option<f64>,
-}
-
-/// Per-PSP window totals: `steered_*` moved *to* it by the nudge, `ceded_*` moved *away* from it.
-#[derive(Debug, Clone, Default, serde::Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct WindowTotals {
-    pub connector: String,
-    pub payments: u64,
-    pub volume: f64,
-    pub steered_payments: u64,
-    pub steered_volume: f64,
-    pub ceded_payments: u64,
-    pub ceded_volume: f64,
-}
-
 /// Why delivered volume could not be measured. Distinct from "nothing was delivered": a plan
 /// built on an empty measurement would read every PSP as owing its whole goal.
 #[derive(Debug, thiserror::Error)]
@@ -121,39 +52,20 @@ pub enum VolumeError {
 }
 
 /// Where observed traffic is read from.
+///
+/// Only what the forecast needs: everything the dashboard reads goes through the analytics read
+/// store, so this stays the decisioning dependency it is (and stays easy to fake in tests).
 #[async_trait]
 pub trait VolumeSource: Send + Sync {
-    /// What each PSP in `commitments` has been sent. Connectors with no traffic are simply absent,
-    /// which the controller reads as zero; a source that cannot answer says so instead.
+    /// What each PSP has been sent this cycle, and how fast, over `pace_window_days`. Amounts
+    /// come back on the contract's own scale, so `amount_scale` is applied to every measurement.
     async fn measure(
         &self,
         merchant_id: &str,
         commitments: &[Commitment],
         pace_window_days: u32,
+        amount_scale: f64,
     ) -> Result<MeasuredVolume, VolumeError>;
-
-    /// Volume for each PSP since its cycle started, in `per_day` buckets per contract day (1 =
-    /// whole days), ordered by `day`. Empty when nothing can be measured.
-    async fn daily_series(
-        &self,
-        merchant_id: &str,
-        commitments: &[Commitment],
-        per_day: u32,
-    ) -> Vec<DayVolume>;
-
-    /// The audit trail, newest first: forecasts and eliminations from the controller's events,
-    /// steer chunks from the decide events themselves.
-    async fn audit_events(&self, merchant_id: &str, limit: u64) -> Vec<AuditEvent>;
-
-    /// Per-connector totals in `[start_ms, end_ms)`, split into unaided / steered-in / ceded;
-    /// absent when no traffic.
-    async fn window_totals(
-        &self,
-        merchant_id: &str,
-        connectors: &[String],
-        start_ms: i64,
-        end_ms: i64,
-    ) -> Vec<WindowTotals>;
 }
 
 /// Reads routed volume out of the analytics events in ClickHouse.
@@ -184,64 +96,115 @@ impl ClickHouseVolumeSource {
         cycle_start_ms: i64,
         day_secs: u64,
         pace_window_days: u32,
+        amount_scale: f64,
         into: &mut MeasuredVolume,
     ) -> Result<(), VolumeError> {
         let now_ms = chrono::Utc::now().timestamp_millis();
         let day_ms = math::day_ms(day_secs);
         let pace_days = i64::from(pace_window_days.max(1));
-        // The pace window is the recent slice of the cycle, never wider than the cycle itself —
-        // averaging over days before the cycle began would understate a young commitment's rate.
-        let start_of_today_ms =
-            cycle_start_ms + math::day_index(cycle_start_ms, now_ms, day_secs) * day_ms;
-        let pace_start_ms = start_of_today_ms
-            .saturating_sub(pace_days.saturating_sub(1) * day_ms)
-            .max(cycle_start_ms);
+        let Windows {
+            today_start_ms,
+            traffic_start_ms,
+            recent_start_ms,
+            pace_start_ms,
+        } = windows(cycle_start_ms, now_ms, day_secs, pace_days);
+        // One query covers both windows, so it opens at whichever starts first: the cycle, which
+        // bounds what a commitment has delivered, or the traffic average, which may predate it.
+        let from_ms = cycle_start_ms.min(traffic_start_ms).min(recent_start_ms);
         let unaided = &*UNAIDED_PRED;
         let steered = &*STEERED_PRED;
+        // Traffic carries major currency units; the goals this is compared against are in minor.
+        let amount = payment_amount_expr(amount_scale);
 
         let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
         builder.extend_selects([
             "gateway".to_string(),
-            format!("sum({AMOUNT_EXPR}) AS achieved"),
-            format!("sumIf({AMOUNT_EXPR}, created_at_ms >= {pace_start_ms}) AS pace_total"),
+            format!("sumIf({amount}, created_at_ms >= {cycle_start_ms}) AS achieved"),
+            format!("sumIf({amount}, created_at_ms >= {pace_start_ms}) AS pace_total"),
             format!(
-                "sumIf({AMOUNT_EXPR}, created_at_ms >= {pace_start_ms} AND {unaided}) \
+                "sumIf({amount}, created_at_ms >= {pace_start_ms} AND {unaided}) \
                  AS unaided_total"
             ),
             // Today's running steered total, measured from the start of the contract day.
             format!(
-                "sumIf({AMOUNT_EXPR}, created_at_ms >= {start_of_today_ms} AND {steered}) \
+                "sumIf({amount}, created_at_ms >= {today_start_ms} AND {steered}) \
                  AS steered_today"
             ),
+            // Every PSP the merchant routed to, over a window of its own — see `windows`.
+            format!("sumIf({amount}, created_at_ms >= {traffic_start_ms}) AS traffic_total"),
+            // The same flow over a short recent window — what feasibility extrapolates from.
+            format!("sumIf({amount}, created_at_ms >= {recent_start_ms}) AS recent_total"),
         ]);
         base_filters(&mut builder, merchant_id, FlowType::DecideGatewayDecision);
-        builder.add_filter(FilterClause::raw(format!(
-            "created_at_ms >= {cycle_start_ms}"
-        )));
-        connector_filter(&mut builder, connectors);
+        builder.add_filter(FilterClause::raw(format!("created_at_ms >= {from_ms}")));
+        // Deliberately unfiltered by connector: the per-PSP maps below still only take the
+        // contract's own connectors, but the total traffic steering can draw on is every PSP the
+        // merchant routed to, not just the ones under contract.
         builder.extend_group_bys(["gateway"]);
 
-        // Not zeroes: an unreadable ClickHouse must not read as "nothing delivered".
-        let rows = fetch_all::<VolumeRow>(builder.build(&self.client))
-            .await
-            .map_err(|error| VolumeError::Read(format!("{error:?}")))?;
+        let rows = match fetch_all::<VolumeRow>(builder.build(&self.client)).await {
+            Ok(rows) => rows,
+            Err(error) => {
+                // Zeroes read as "behind", but nudges stay within tolerance, so the cost is
+                // bounded. Loud, because a persistent failure makes the plan meaningless.
+                logger::error!(
+                    tag = "volume_commitment",
+                    merchant_id = merchant_id,
+                    "could not read routed volume from clickhouse: {error:?}"
+                );
+                into.measurement_failed = true;
+                return Err(VolumeError::Read(format!("{error:?}")));
+            }
+        };
 
         // Divide by the days actually queried — a fixed 7 would understate the rate early in a
         // cycle and mid-day, and an understated routing rate reads as a phantom shortfall.
-        let window_days = elapsed_window_days(now_ms, pace_start_ms, pace_days, day_ms);
+        let pace_days_covered = elapsed_window_days(now_ms, pace_start_ms, pace_days, day_ms);
+        let traffic_days_covered = elapsed_window_days(now_ms, traffic_start_ms, pace_days, day_ms);
+        let recent_days_covered =
+            elapsed_window_days(now_ms, recent_start_ms, RECENT_TRAFFIC_DAYS, day_ms);
+        let mut group_daily = 0.0;
+        let mut group_recent_daily = 0.0;
         for row in rows {
             let Some(gateway) = row.gateway else { continue };
+            // Every gateway counts toward the traffic total, contracted or not.
+            group_daily += nan_to_zero(row.traffic_total) / traffic_days_covered;
+            group_recent_daily += nan_to_zero(row.recent_total) / recent_days_covered;
+            if !connectors.iter().any(|c| c == &gateway) {
+                continue;
+            }
             into.achieved
                 .insert(gateway.clone(), nan_to_zero(row.achieved));
-            into.pace
-                .insert(gateway.clone(), nan_to_zero(row.pace_total) / window_days);
+            into.pace.insert(
+                gateway.clone(),
+                nan_to_zero(row.pace_total) / pace_days_covered,
+            );
             into.routing_gives_daily.insert(
                 gateway.clone(),
-                nan_to_zero(row.unaided_total) / window_days,
+                nan_to_zero(row.unaided_total) / pace_days_covered,
             );
             // Not divided: this is today's running total, not a rate.
             into.steered_today
                 .insert(gateway, nan_to_zero(row.steered_today));
+        }
+
+        // Commitments sharing a cycle are measured in one group; a document mixing cycles runs
+        // this more than once over near-identical windows, each estimating the same merchant-wide
+        // flow. Keep the largest rather than adding them, which would count the traffic twice.
+        if group_daily > 0.0 {
+            into.total_daily = Some(match into.total_daily {
+                Some(existing) => existing.max(group_daily),
+                None => group_daily,
+            });
+        }
+        // Only once the short window is a window. Before a whole contract day has passed it is a
+        // slice of one divided by a full day, which understates the rate — the very failure the
+        // wide window exists to avoid, and not one to reintroduce here.
+        if group_recent_daily > 0.0 && now_ms.saturating_sub(recent_start_ms) >= day_ms {
+            into.recent_daily = Some(match into.recent_daily {
+                Some(existing) => existing.max(group_recent_daily),
+                None => group_recent_daily,
+            });
         }
         Ok(())
     }
@@ -254,6 +217,7 @@ impl VolumeSource for ClickHouseVolumeSource {
         merchant_id: &str,
         commitments: &[Commitment],
         pace_window_days: u32,
+        amount_scale: f64,
     ) -> Result<MeasuredVolume, VolumeError> {
         let mut measured = MeasuredVolume::default();
 
@@ -272,255 +236,12 @@ impl VolumeSource for ClickHouseVolumeSource {
                 cycle_start_ms,
                 day_secs,
                 pace_window_days,
+                amount_scale,
                 &mut measured,
             )
             .await?;
         }
         Ok(measured)
-    }
-
-    async fn daily_series(
-        &self,
-        merchant_id: &str,
-        commitments: &[Commitment],
-        per_day: u32,
-    ) -> Vec<DayVolume> {
-        let mut series = Vec::new();
-        let per_day = i64::from(per_day.max(1));
-
-        let mut by_cycle: HashMap<(i64, i64, u64), Vec<String>> = HashMap::new();
-        for commitment in commitments {
-            by_cycle
-                .entry((
-                    commitment.period_start_ms,
-                    commitment.period_end_ms,
-                    commitment.day_secs,
-                ))
-                .or_default()
-                .push(commitment.connector.clone());
-        }
-
-        for ((cycle_start_ms, cycle_end_ms, day_secs), connectors) in by_cycle {
-            let day_ms = math::day_ms(day_secs);
-            // Buckets of a contract day (or a slice of one); the bucket index is turned back into
-            // whole days and a fractional position below.
-            let bucket_ms = (day_ms / per_day).max(1);
-            let steered = &*STEERED_PRED;
-
-            let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
-            builder.extend_selects([
-                "gateway".to_string(),
-                format!(
-                    "toInt64(intDiv(created_at_ms - {cycle_start_ms}, {bucket_ms})) AS day_index"
-                ),
-                format!("sum({AMOUNT_EXPR}) AS total"),
-                format!("sumIf({AMOUNT_EXPR}, {steered}) AS steered"),
-                "toUInt64(count()) AS payments".to_string(),
-                format!("toUInt64(countIf({steered})) AS steered_payments"),
-            ]);
-            base_filters(&mut builder, merchant_id, FlowType::DecideGatewayDecision);
-            builder.add_filter(FilterClause::raw(format!(
-                "created_at_ms >= {cycle_start_ms}"
-            )));
-            // Bounded above too, or later cycles' traffic lands in a past cycle's last bucket.
-            builder.add_filter(FilterClause::raw(format!("created_at_ms < {cycle_end_ms}")));
-            connector_filter(&mut builder, &connectors);
-            builder.extend_group_bys(["gateway", "day_index"]);
-
-            match fetch_all::<DayVolumeRow>(builder.build(&self.client)).await {
-                Ok(rows) => {
-                    for row in rows {
-                        let Some(gateway) = row.gateway else { continue };
-                        let Ok(day_index) = u32::try_from(row.day_index / per_day) else {
-                            continue;
-                        };
-                        series.push(DayVolume {
-                            connector: gateway,
-                            day_index,
-                            day: row.day_index as f64 / per_day as f64,
-                            total: nan_to_zero(row.total),
-                            steered: nan_to_zero(row.steered),
-                            payments: row.payments,
-                            steered_payments: row.steered_payments,
-                        });
-                    }
-                }
-                Err(error) => {
-                    logger::error!(
-                        tag = "volume_commitment",
-                        merchant_id = merchant_id,
-                        "could not read the daily volume series from clickhouse: {error:?}"
-                    );
-                }
-            }
-        }
-        series.sort_by(|a, b| a.day.total_cmp(&b.day));
-        series
-    }
-
-    async fn audit_events(&self, merchant_id: &str, limit: u64) -> Vec<AuditEvent> {
-        let mut events = Vec::new();
-
-        // Forecast runs (which carry the eliminations) — one event per controller run.
-        let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
-        builder.extend_selects(["created_at_ms".to_string(), "details".to_string()]);
-        base_filters(
-            &mut builder,
-            merchant_id,
-            FlowType::VolumeCommitmentForecast,
-        );
-        builder.add_order_by(OrderClause::desc("created_at_ms"));
-        builder.set_limit(Some(limit));
-        match fetch_all::<ForecastEventRow>(builder.build(&self.client)).await {
-            Ok(rows) => {
-                for row in rows {
-                    events.extend(forecast_row_to_events(&row));
-                }
-            }
-            Err(error) => logger::error!(
-                tag = "volume_commitment",
-                merchant_id = merchant_id,
-                "could not read forecast audit events from clickhouse: {error:?}"
-            ),
-        }
-
-        // Steer chunks — the decide events the nudge diverted, with the reason it recorded.
-        let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
-        builder.extend_selects([
-            "created_at_ms".to_string(),
-            "gateway".to_string(),
-            format!("{AMOUNT_EXPR} AS amount"),
-            "JSONExtractString(assumeNotNull(details), 'response', 'volume_steer_info', 'reason') \
-             AS reason"
-                .to_string(),
-            "JSONExtractString(assumeNotNull(details), 'response', 'volume_steer_info', 'runId') \
-             AS run_id"
-                .to_string(),
-        ]);
-        base_filters(&mut builder, merchant_id, FlowType::DecideGatewayDecision);
-        builder.add_filter(FilterClause::raw(STEERED_PRED.clone()));
-        builder.add_order_by(OrderClause::desc("created_at_ms"));
-        builder.set_limit(Some(limit));
-        match fetch_all::<SteerEventRow>(builder.build(&self.client)).await {
-            Ok(rows) => {
-                for row in rows {
-                    events.push(AuditEvent {
-                        at_epoch_ms: row.created_at_ms,
-                        kind: AuditKind::Steered,
-                        run_id: (!row.run_id.is_empty()).then(|| row.run_id.clone()),
-                        message: if row.reason.is_empty() {
-                            format!(
-                                "Steered a payment of {:.0} to {}.",
-                                row.amount,
-                                row.gateway.as_deref().unwrap_or("?")
-                            )
-                        } else {
-                            row.reason
-                        },
-                        connector: row.gateway,
-                        amount: Some(row.amount),
-                    });
-                }
-            }
-            Err(error) => logger::error!(
-                tag = "volume_commitment",
-                merchant_id = merchant_id,
-                "could not read steer audit events from clickhouse: {error:?}"
-            ),
-        }
-
-        events.sort_by_key(|e| std::cmp::Reverse(e.at_epoch_ms));
-        events.truncate(usize::try_from(limit).unwrap_or(usize::MAX));
-        events
-    }
-
-    async fn window_totals(
-        &self,
-        merchant_id: &str,
-        connectors: &[String],
-        start_ms: i64,
-        end_ms: i64,
-    ) -> Vec<WindowTotals> {
-        if connectors.is_empty() || end_ms <= start_ms {
-            return Vec::new();
-        }
-        let steered = &*STEERED_PRED;
-        let window_filters = |builder: &mut BoundQueryBuilder| {
-            base_filters(builder, merchant_id, FlowType::DecideGatewayDecision);
-            builder.add_filter(FilterClause::raw(format!("created_at_ms >= {start_ms}")));
-            builder.add_filter(FilterClause::raw(format!("created_at_ms < {end_ms}")));
-        };
-
-        let mut by_connector: HashMap<String, WindowTotals> = HashMap::new();
-
-        // What landed on each PSP, and how much of it the nudge put there.
-        let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
-        builder.extend_selects([
-            "gateway".to_string(),
-            "toUInt64(count()) AS payments".to_string(),
-            format!("sum({AMOUNT_EXPR}) AS volume"),
-            format!("toUInt64(countIf({steered})) AS steered_payments"),
-            format!("sumIf({AMOUNT_EXPR}, {steered}) AS steered_volume"),
-        ]);
-        window_filters(&mut builder);
-        connector_filter(&mut builder, connectors);
-        builder.extend_group_bys(["gateway"]);
-        match fetch_all::<WindowRow>(builder.build(&self.client)).await {
-            Ok(rows) => {
-                for row in rows {
-                    let Some(gateway) = row.gateway else { continue };
-                    let entry = by_connector.entry(gateway.clone()).or_default();
-                    entry.connector = gateway;
-                    entry.payments = row.payments;
-                    entry.volume = nan_to_zero(row.volume);
-                    entry.steered_payments = row.steered_payments;
-                    entry.steered_volume = nan_to_zero(row.steered_volume);
-                }
-            }
-            Err(error) => {
-                logger::error!(
-                    tag = "volume_commitment",
-                    merchant_id = merchant_id,
-                    "could not read window totals from clickhouse: {error:?}"
-                );
-                return Vec::new();
-            }
-        }
-
-        // What each PSP gave up: steered decisions name the PSP routing had picked (`srHead`).
-        let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
-        builder.extend_selects([
-            "JSONExtractString(assumeNotNull(details), 'response', 'volume_steer_info', 'srHead') \
-             AS sr_head"
-                .to_string(),
-            "toUInt64(count()) AS payments".to_string(),
-            format!("sum({AMOUNT_EXPR}) AS volume"),
-        ]);
-        window_filters(&mut builder);
-        builder.add_filter(FilterClause::raw(steered.clone()));
-        builder.extend_group_bys(["sr_head"]);
-        match fetch_all::<CededRow>(builder.build(&self.client)).await {
-            Ok(rows) => {
-                for row in rows {
-                    if row.sr_head.is_empty() || !connectors.contains(&row.sr_head) {
-                        continue;
-                    }
-                    let entry = by_connector.entry(row.sr_head.clone()).or_default();
-                    entry.connector = row.sr_head;
-                    entry.ceded_payments = row.payments;
-                    entry.ceded_volume = nan_to_zero(row.volume);
-                }
-            }
-            Err(error) => logger::error!(
-                tag = "volume_commitment",
-                merchant_id = merchant_id,
-                "could not read ceded volume from clickhouse: {error:?}"
-            ),
-        }
-
-        let mut totals: Vec<WindowTotals> = by_connector.into_values().collect();
-        totals.sort_by(|a, b| a.connector.cmp(&b.connector));
-        totals
     }
 }
 
@@ -533,83 +254,6 @@ fn nan_to_zero(value: f64) -> f64 {
     }
 }
 
-/// One stored forecast event into audit entries: the run itself, then one entry per elimination.
-fn forecast_row_to_events(row: &ForecastEventRow) -> Vec<AuditEvent> {
-    let details: serde_json::Value = row
-        .details
-        .as_deref()
-        .and_then(|d| serde_json::from_str(d).ok())
-        .unwrap_or_default();
-    let tracked = details["tracked"].as_u64().unwrap_or(0);
-    let steering: Vec<&str> = details["steering"]
-        .as_array()
-        .map(|a| a.iter().filter_map(|v| v.as_str()).collect())
-        .unwrap_or_default();
-
-    let run_id = details["runId"].as_str().map(str::to_string);
-
-    let mut events = vec![AuditEvent {
-        at_epoch_ms: row.created_at_ms,
-        kind: AuditKind::Forecast,
-        run_id: run_id.clone(),
-        connector: None,
-        message: if steering.is_empty() {
-            format!("Forecast: {tracked} commitment(s) tracked, all on pace — nothing to steer.")
-        } else {
-            format!(
-                "Forecast: {tracked} commitment(s) tracked; {} behind pace and steering ({}).",
-                steering.len(),
-                steering.join(", ")
-            )
-        },
-        amount: None,
-    }];
-
-    for dropped in details["dropped"].as_array().into_iter().flatten() {
-        let connector = dropped["connector"].as_str().unwrap_or("?");
-        events.push(AuditEvent {
-            at_epoch_ms: row.created_at_ms,
-            kind: AuditKind::Eliminated,
-            run_id: run_id.clone(),
-            connector: Some(connector.to_string()),
-            message: format!(
-                "{connector} eliminated: {}",
-                dropped["reason"].as_str().unwrap_or("no reason recorded")
-            ),
-            amount: None,
-        });
-    }
-    events
-}
-
-/// One row of the forecast audit query.
-#[derive(Debug, Deserialize, Row)]
-struct ForecastEventRow {
-    created_at_ms: i64,
-    details: Option<String>,
-}
-
-/// One row of the steer audit query.
-#[derive(Debug, Deserialize, Row)]
-struct SteerEventRow {
-    created_at_ms: i64,
-    gateway: Option<String>,
-    amount: f64,
-    reason: String,
-    run_id: String,
-}
-
-/// One row of the daily series query.
-#[derive(Debug, Deserialize, Row)]
-struct DayVolumeRow {
-    gateway: Option<String>,
-    day_index: i64,
-    total: f64,
-    steered: f64,
-    payments: u64,
-    steered_payments: u64,
-}
-
 /// `sum`/`sumIf` over `JSONExtractFloat` are non-nullable Float64 (NaN when nothing matched), so
 /// these must be `f64` — `Option<f64>` fails to decode and takes the whole query down.
 #[derive(Debug, Deserialize, Row)]
@@ -619,25 +263,61 @@ struct VolumeRow {
     pace_total: f64,
     unaided_total: f64,
     steered_today: f64,
+    traffic_total: f64,
+    recent_total: f64,
 }
 
-/// One row of the window-totals query.
-#[derive(Debug, Deserialize, Row)]
-struct WindowRow {
-    gateway: Option<String>,
-    payments: u64,
-    volume: f64,
-    steered_payments: u64,
-    steered_volume: f64,
+/// The lower bounds one measurement query reads from.
+///
+/// Two averages, two windows, because they answer different questions.
+///
+/// A commitment's own progress belongs to its cycle, so `pace_start_ms` never opens before the
+/// cycle does: the days before it hold none of this commitment's volume, and averaging them in
+/// would report a young commitment as running slower than it is.
+///
+/// The merchant's total flow is not a property of the cycle. It is the traffic steering has to
+/// divert from, and it does not reset at a billing boundary, so `traffic_start_ms` is a plain
+/// trailing window free to predate the cycle. Clamping it to the cycle as well meant a contract
+/// read on its first day saw only the hours since the cycle opened, called that a whole day's
+/// flow, and wrote off every commitment needing more than those few hours would supply —
+/// including ones that needed a couple of percent of what the merchant really does.
+///
+/// That wide window answers "how much does this merchant do?", which is stable and wants history.
+/// It is the wrong answer to "how much will arrive between now and the cycle close?", which is
+/// what feasibility extrapolates and which follows the *current* rate. On a merchant whose volume
+/// is climbing, a window spanning the whole cycle so far reports about half the rate now flowing,
+/// and a commitment needing more than that half is written off while it is comfortably reachable.
+/// `recent_start_ms` is the short window that question gets.
+struct Windows {
+    /// Start of the contract day `now` falls in.
+    today_start_ms: i64,
+    /// Where the merchant-wide traffic average opens.
+    traffic_start_ms: i64,
+    /// Where the short recent-rate window opens — what feasibility extrapolates from.
+    recent_start_ms: i64,
+    /// Where a commitment's own pace average opens.
+    pace_start_ms: i64,
 }
 
-/// One row of the ceded-volume query: what a PSP lost to steering, keyed by routing's own pick.
-#[derive(Debug, Deserialize, Row)]
-struct CededRow {
-    sr_head: String,
-    payments: u64,
-    volume: f64,
+fn windows(cycle_start_ms: i64, now_ms: i64, day_secs: u64, pace_days: i64) -> Windows {
+    let day_ms = math::day_ms(day_secs);
+    let today_start_ms =
+        cycle_start_ms + math::day_index(cycle_start_ms, now_ms, day_secs) * day_ms;
+    let traffic_start_ms =
+        today_start_ms.saturating_sub(pace_days.saturating_sub(1).max(0) * day_ms);
+    Windows {
+        today_start_ms,
+        traffic_start_ms,
+        // Ends at now, not at the start of the contract day: a rate meant to track a change has
+        // to include the change.
+        recent_start_ms: now_ms.saturating_sub(RECENT_TRAFFIC_DAYS * day_ms),
+        pace_start_ms: traffic_start_ms.max(cycle_start_ms),
+    }
 }
+
+/// Contract days the short recent-rate window spans. Two, so a single quiet day cannot halve the
+/// estimate, and short enough to follow a rate that is still moving.
+const RECENT_TRAFFIC_DAYS: i64 = 2;
 
 /// Contract days the query covered, floored at one (sub-day rates are noise) and capped at the pace window.
 fn elapsed_window_days(now_ms: i64, window_start_ms: i64, pace_days: i64, day_ms: i64) -> f64 {
@@ -664,34 +344,12 @@ impl VolumeSource for FixtureVolumeSource {
         merchant_id: &str,
         _commitments: &[Commitment],
         _pace_window_days: u32,
+        _amount_scale: f64,
     ) -> Result<MeasuredVolume, VolumeError> {
         self.merchants
             .get(merchant_id)
             .cloned()
             .ok_or(VolumeError::Unavailable)
-    }
-
-    async fn daily_series(
-        &self,
-        _merchant_id: &str,
-        _commitments: &[Commitment],
-        _per_day: u32,
-    ) -> Vec<DayVolume> {
-        Vec::new()
-    }
-
-    async fn audit_events(&self, _merchant_id: &str, _limit: u64) -> Vec<AuditEvent> {
-        Vec::new()
-    }
-
-    async fn window_totals(
-        &self,
-        _merchant_id: &str,
-        _connectors: &[String],
-        _start_ms: i64,
-        _end_ms: i64,
-    ) -> Vec<WindowTotals> {
-        Vec::new()
     }
 }
 
@@ -721,6 +379,55 @@ mod tests {
         assert_eq!(elapsed_window_days(30 * DAY_MS, 0, 7, DAY_MS), 7.0);
     }
 
+    /// The case that wrote off a reachable commitment: a contract read hours into its first day.
+    /// The cycle holds only those hours, but the merchant's flow has a week of history behind it,
+    /// and it is the flow that decides what a commitment can still be given.
+    #[test]
+    fn the_traffic_window_reaches_back_past_a_young_cycle() {
+        let cycle_start = 100 * DAY_MS;
+        let now = cycle_start + DAY_MS / 4;
+        let w = windows(cycle_start, now, math::SECS_PER_DAY, 7);
+
+        assert_eq!(w.today_start_ms, cycle_start);
+        // A commitment has delivered nothing before its cycle, so its own pace starts there.
+        assert_eq!(w.pace_start_ms, cycle_start);
+        // The merchant was routing payments all week, so the flow is read over the whole week.
+        assert_eq!(w.traffic_start_ms, cycle_start - 6 * DAY_MS);
+        assert!((elapsed_window_days(now, w.traffic_start_ms, 7, DAY_MS) - 6.25).abs() < 1e-9);
+    }
+
+    /// The recent-rate window ends at `now`, not at the start of the contract day: a rate meant
+    /// to follow a change has to include the change. It is also independent of the cycle — the
+    /// question it answers is about traffic, not about a billing period.
+    #[test]
+    fn the_recent_window_is_a_short_trailing_slice_ending_now() {
+        let cycle_start = 100 * DAY_MS;
+        let now = cycle_start + 6 * DAY_MS + DAY_MS / 3;
+        let w = windows(cycle_start, now, math::SECS_PER_DAY, 7);
+
+        assert_eq!(w.recent_start_ms, now - RECENT_TRAFFIC_DAYS * DAY_MS);
+        // Two contract days, so a single quiet one cannot halve the estimate.
+        assert!(
+            (elapsed_window_days(now, w.recent_start_ms, RECENT_TRAFFIC_DAYS, DAY_MS) - 2.0).abs()
+                < 1e-9
+        );
+        // Much shorter than the window the merchant's overall size is read from.
+        assert!(w.recent_start_ms > w.traffic_start_ms);
+    }
+
+    /// Once a cycle is older than the pace window there is nothing to reach back for, and the two
+    /// windows are the same trailing week.
+    #[test]
+    fn a_mature_cycle_reads_both_over_the_same_week() {
+        let cycle_start = 100 * DAY_MS;
+        let now = cycle_start + 20 * DAY_MS + DAY_MS / 2;
+        let w = windows(cycle_start, now, math::SECS_PER_DAY, 7);
+
+        assert_eq!(w.today_start_ms, cycle_start + 20 * DAY_MS);
+        assert_eq!(w.traffic_start_ms, cycle_start + 14 * DAY_MS);
+        assert_eq!(w.pace_start_ms, w.traffic_start_ms);
+    }
+
     /// Compressed days divide by the compressed day length, not the calendar one.
     #[test]
     fn a_simulated_window_divides_by_virtual_days() {
@@ -737,12 +444,12 @@ mod tests {
         let source = FixtureVolumeSource::new(HashMap::from([("m1".to_string(), known)]));
 
         let measured = source
-            .measure("m1", &[], 7)
+            .measure("m1", &[], 7, 1.0)
             .await
             .expect("fixture merchant");
         assert_eq!(measured.achieved_for("stripe"), 42.0);
         assert!(matches!(
-            source.measure("m2", &[], 7).await,
+            source.measure("m2", &[], 7, 1.0).await,
             Err(VolumeError::Unavailable)
         ));
     }

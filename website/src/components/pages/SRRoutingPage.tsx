@@ -30,6 +30,7 @@ import { useMerchantFeatures, type KnownFeature } from '../../hooks/useMerchantF
 import { BucketHedgingTuner } from './BucketHedgingTuner'
 import { CostEstimationPanel } from './CostEstimationPanel'
 import { VolumeContractsPage } from './VolumeContractsPage'
+import { VolumeContractFeatureNotice } from './VolumeContractFeatureNotice'
 
 import { PageHeading } from '../ui/PageHeading'
 import { Notice } from '../ui/Notice'
@@ -993,6 +994,11 @@ function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
                   ) : null}
                 </div>
                 <p className={`mt-1 ${type.hint} max-w-[68ch]`}>{description}</p>
+                {feature === 'volume-contracts' && (
+                  // Renders only when a contract is live and this flag is off — the one feature
+                  // here whose effect depends on configuration made on another page.
+                  <VolumeContractFeatureNotice merchantId={merchantId} className="mt-3" />
+                )}
               </div>
               <div>
                 {enabled ? (

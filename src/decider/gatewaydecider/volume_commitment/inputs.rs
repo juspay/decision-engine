@@ -22,6 +22,12 @@ pub struct CommitmentInputs {
     pub forecast_interval_secs: Option<u64>,
     /// ISO-4217 code every amount in the document is denominated in, for display.
     pub currency: Option<String>,
+    /// Multiplier that puts a measured payment amount on the scale the goals below are held at.
+    /// Traffic reaches `/decide-gateway` in major currency units — that is how the simulator, the
+    /// cost tiles and the analytics pages all read it — while the contract DSL canonicalizes every
+    /// goal, reward and daily-traffic figure to minor units. `1.0` for a contract that counts
+    /// transactions, where there is no currency and so no conversion to make.
+    pub amount_scale: f64,
     pub commitments: Vec<Commitment>,
 }
 
@@ -67,6 +73,20 @@ pub struct MeasuredVolume {
     pub routing_gives_daily: HashMap<String, f64>,
     /// Volume the nudge has already steered here this contract day; subtracted from the shortfall to close the loop.
     pub steered_today: HashMap<String, f64>,
+    /// Total volume per day across *every* PSP over the pace window — the flow steering actually
+    /// has to divert from, as opposed to the flow the contract declares. `None` before any traffic
+    /// has been measured, when only the declaration is available.
+    pub total_daily: Option<f64>,
+    /// The same flow over a short recent window. `total_daily` answers "how much does this
+    /// merchant do", which wants history; this answers "how much will arrive before the cycle
+    /// closes", which follows the current rate. Feasibility uses this where it exists — `None`
+    /// until the short window spans a whole contract day, before which it is not yet a rate.
+    pub recent_daily: Option<f64>,
+    /// Set when a measurement query failed, leaving the maps below what was really delivered.
+    /// The forecast loop ignores it — unmeasured reads as behind, and nudges stay inside
+    /// tolerance — but anything that *reports* a position to a merchant must not present
+    /// an unread cycle as an empty one.
+    pub measurement_failed: bool,
 }
 
 impl MeasuredVolume {
@@ -96,8 +116,19 @@ impl MeasuredVolume {
 /// Where commitments come from — the contract DSL in production, a stub in tests.
 #[async_trait]
 pub trait InputSource: Send + Sync {
-    /// One merchant's commitments, or None if it has none we can use.
-    async fn load(&self, merchant_id: &str) -> Option<CommitmentInputs>;
+    /// Whether volume-contract routing is switched on for this merchant.
+    async fn feature_enabled(&self, merchant_id: &str) -> bool;
+    /// One merchant's commitments as configured, whether or not the feature is on. Only
+    /// dashboard surfaces that must tell "no contract" apart from "contract live but feature
+    /// off" call this; anything that acts on a commitment calls `load`.
+    async fn load_configured(&self, merchant_id: &str) -> Option<CommitmentInputs>;
+    /// What routing acts on: one merchant's commitments while the feature is on, else None.
+    async fn load(&self, merchant_id: &str) -> Option<CommitmentInputs> {
+        if !self.feature_enabled(merchant_id).await {
+            return None;
+        }
+        self.load_configured(merchant_id).await
+    }
     /// Every merchant with commitments, checked on each pass of the background loop.
     async fn list_active(&self) -> Vec<String>;
 }

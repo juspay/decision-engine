@@ -126,8 +126,78 @@ enabled = true
 default_forecast_interval_secs = 60
 # Where the scheduler calls when a forecast comes due. Normally this same process's [server].
 main_server_url = "http://127.0.0.1:8080"
-# How often the scheduler wakes. Keep well under the shortest cadence above.
+# How often the scheduler wakes. Keep well under the shortest cadence above — a due job cannot
+# fire sooner than the next tick, so a tick coarser than the interval throws the interval away.
 tick_secs = 10
+# May a contract declare a `test_minutes` billing cycle, whose "day" lasts sixty seconds? A demo
+# device, meaningless against real billing. Defaults off, so production needs no key at all.
+allow_test_cycles = true
+
+# ── Demo contract templates ───────────────────────────────────────────────────────────────────
+[[volume_commitment.samples]]
+id = "saved_by_steering"
+title = "Would have missed — now makes it"
+summary = "A commitment just out of reach of unaided routing, which steering closes."
+expected_outcome = """
+Watch adyen. Routing splits traffic roughly evenly, so adyen arrives at about $50k on its own \
+against a $65k promise — it starts behind and flips to "Steering", taking the difference from \
+stripe, whose own $5k promise was met in the first minute. The shaded wedge under adyen's line is \
+the volume the engine added; the commitment lands by the cycle close."""
+
+[volume_commitment.samples.contract]
+routing_mode = "pace_guarded"
+tolerance_bps = 500
+expected_daily_traffic = 1000000
+forecast_interval_secs = 5
+currency = { denomination = "USD" }
+
+# $65,000 — more than the ~$50,000 an even split gives adyen, so it cannot get there unaided, and
+# well under the $100,000 the cycle carries, so steering can close the gap.
+[[volume_commitment.samples.contract.volume_contracts]]
+id = "saved-by-steering"
+connector = "adyen"
+billing_cycle = { type = "test_minutes", anchor = 10, timezone = "UTC" }
+archetype = "lumpsum"
+terms = { target = 6500000, reward = { kind = "percentage", value = { rebate_bps = 150 } } }
+
+# The traffic adyen is steered from. $5,000 is met within the first contract minute, so this
+# commitment is never itself behind and never competes for the steering budget.
+[[volume_commitment.samples.contract.volume_contracts]]
+id = "saved-by-steering-source"
+connector = "stripe"
+billing_cycle = { type = "test_minutes", anchor = 10, timezone = "UTC" }
+archetype = "lumpsum"
+terms = { target = 500000, reward = { kind = "percentage", value = { rebate_bps = 150 } } }
+
+[[volume_commitment.samples]]
+id = "reward_ranked"
+title = "Two commitments, one traffic budget"
+summary = "Two promises that cannot both be met, paying very different rewards."
+expected_outcome = """
+Together these ask for more traffic than the cycle has. The engine keeps the one worth more — the \
+2% commitment — and drops the 0.25% one, rather than steering both into missing."""
+
+[volume_commitment.samples.contract]
+routing_mode = "pace_guarded"
+tolerance_bps = 500
+expected_daily_traffic = 1000000
+forecast_interval_secs = 5
+currency = { denomination = "USD" }
+
+# $70,000 each against $100,000 of traffic: together 1.4x what exists, so one has to give.
+[[volume_commitment.samples.contract.volume_contracts]]
+id = "contested-rich"
+connector = "adyen"
+billing_cycle = { type = "test_minutes", anchor = 10, timezone = "UTC" }
+archetype = "lumpsum"
+terms = { target = 7000000, reward = { kind = "percentage", value = { rebate_bps = 200 } } }
+
+[[volume_commitment.samples.contract.volume_contracts]]
+id = "contested-cheap"
+connector = "stripe"
+billing_cycle = { type = "test_minutes", anchor = 10, timezone = "UTC" }
+archetype = "lumpsum"
+terms = { target = 7000000, reward = { kind = "percentage", value = { rebate_bps = 25 } } }
 
 # The scheduler's own listener. GET /schedule shows the timing; GET /health is a liveness probe.
 [volume_commitment.server]

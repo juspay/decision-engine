@@ -48,6 +48,17 @@ pub const PAYMENT_AUDIT_DYNAMIC_FLOW_TYPES: &[FlowType] = &[
 pub const PAYMENT_AMOUNT_EXPR: &str =
     "JSONExtractFloat(assumeNotNull(details), 'request', 'paymentInfo', 'amount')";
 
+/// The same amount multiplied onto the caller's own scale, for callers that compare traffic
+/// against figures held in a different unit. `scale` of `1.0` reads the amount as it arrives,
+/// which is what every metric that only reports traffic back wants.
+pub fn payment_amount_expr(scale: f64) -> String {
+    if scale == 1.0 {
+        PAYMENT_AMOUNT_EXPR.to_string()
+    } else {
+        format!("({PAYMENT_AMOUNT_EXPR} * {scale})")
+    }
+}
+
 pub async fn fetch_all<T>(query: Query) -> Result<Vec<T>, ApiError>
 where
     T: Row + for<'de> Deserialize<'de>,

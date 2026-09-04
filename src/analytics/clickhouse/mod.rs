@@ -75,6 +75,20 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         endpoints::overview::load(&self.client, query).await
     }
 
+    async fn volume_commitment(
+        &self,
+        query: &CommitmentAnalyticsQuery,
+    ) -> Result<CommitmentAnalytics, ApiError> {
+        Ok(endpoints::volume_commitment::load(&self.client, query).await)
+    }
+
+    async fn volume_commitment_impact(
+        &self,
+        query: &CommitmentAnalyticsQuery,
+    ) -> Result<CommitmentImpactData, ApiError> {
+        Ok(endpoints::volume_commitment::load_impact(&self.client, query).await)
+    }
+
     async fn gateway_scores(
         &self,
         query: &AnalyticsQuery,

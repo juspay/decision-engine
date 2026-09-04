@@ -10,3 +10,4 @@ pub mod preview_trace;
 pub mod routing_events;
 pub mod routing_stats;
 pub mod segment_traffic;
+pub mod volume_commitment;

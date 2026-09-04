@@ -67,6 +67,19 @@ pub fn query_bucket_select_expr(query: &AnalyticsQuery, start_ms: i64, end_ms: i
     )
 }
 
+/// Bucket index counted from an arbitrary origin in fixed units, rather than from the wall clock.
+///
+/// Every other metric buckets by calendar time, which is what a time-range dashboard wants. A
+/// billing cycle is not calendar time: its buckets are numbered from the instant the cycle opened,
+/// and one "day" lasts `unit_ms` — 24 hours on a calendar cycle, a minute on a test cycle, so the
+/// same pacing plays out faster without the query changing. `origin_ms` is where index 0 opens.
+pub fn origin_bucket_select_expr(origin_ms: i64, unit_ms: i64) -> String {
+    format!(
+        "toInt64(intDiv(created_at_ms - {origin_ms}, {})) AS bucket_index",
+        unit_ms.max(1)
+    )
+}
+
 pub fn payment_audit_range(query: &PaymentAuditQuery) -> String {
     match query.range {
         AnalyticsRange::M15 => "15m".to_string(),
