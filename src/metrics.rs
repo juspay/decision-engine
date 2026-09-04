@@ -43,6 +43,21 @@ lazy_static! {
         &["rule_name"]
     ).unwrap();
 
+    /// Sticky-routing decide-time outcomes, counted only when the feature engaged (flag on,
+    /// customer present): overridden / pinned_agreeing / vetoed / no_state / read_error.
+    pub static ref STICKY_ROUTING_DECISION_COUNTER: IntCounterVec = register_int_counter_vec!(
+        "sticky_routing_decisions_total",
+        "Sticky-routing decide-time outcomes",
+        &["outcome"]
+    ).unwrap();
+
+    /// Sticky-routing feedback-write outcomes: recorded / over_budget / duplicate / write_error.
+    pub static ref STICKY_ROUTING_WRITE_COUNTER: IntCounterVec = register_int_counter_vec!(
+        "sticky_routing_writes_total",
+        "Sticky-routing feedback-write outcomes",
+        &["outcome"]
+    ).unwrap();
+
     /// Count of analytics events captured by flow type
     pub static ref ANALYTICS_EVENT_COUNTER: IntCounterVec = register_int_counter_vec!(
         "analytics_events_total",

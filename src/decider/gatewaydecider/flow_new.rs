@@ -792,17 +792,27 @@ pub async fn run_decider_flow(
                                         // elimination penalties just buried.
                                         let min_score = maxScore.unwrap_or(0.0)
                                             * crate::sticky_routing::sticky_min_score_ratio().await;
-                                        let pick = sticky_data
-                                            .connectors_for_combo(
-                                                &scoring_data.paymentMethod,
-                                                &scoring_data.paymentMethodType,
-                                            )
-                                            .into_iter()
-                                            .find(|(gateway, _)| {
-                                                currentGatewayScoreMap
-                                                    .get(gateway)
-                                                    .is_some_and(|score| *score >= min_score)
-                                            });
+                                        let candidates = sticky_data.connectors_for_combo(
+                                            &scoring_data.paymentMethod,
+                                            &scoring_data.paymentMethodType,
+                                        );
+                                        let had_candidates = !candidates.is_empty();
+                                        let pick = candidates.into_iter().find(|(gateway, _)| {
+                                            currentGatewayScoreMap
+                                                .get(gateway)
+                                                .is_some_and(|score| *score >= min_score)
+                                        });
+                                        if pick.is_none() {
+                                            // Counts existed but every connector failed the
+                                            // eligibility/health filter — the veto did its job.
+                                            crate::metrics::STICKY_ROUTING_DECISION_COUNTER
+                                                .with_label_values(&[if had_candidates {
+                                                    "vetoed"
+                                                } else {
+                                                    "no_state"
+                                                }])
+                                                .inc();
+                                        }
                                         if let Some((sticky_gateway, success_count)) = pick {
                                             logger::info!(
                                                 action = "sticky_routing",
@@ -827,11 +837,25 @@ pub async fn run_decider_flow(
                                                 decider_flow.writer.volume_steer_info = None;
                                                 decider_flow.writer.gwDeciderApproach =
                                                     T::GatewayDeciderApproach::StickyRouting;
+                                                crate::metrics::STICKY_ROUTING_DECISION_COUNTER
+                                                    .with_label_values(&["overridden"])
+                                                    .inc();
+                                            } else {
+                                                crate::metrics::STICKY_ROUTING_DECISION_COUNTER
+                                                    .with_label_values(&["pinned_agreeing"])
+                                                    .inc();
                                             }
                                         }
                                     }
-                                    Ok(None) => {}
+                                    Ok(None) => {
+                                        crate::metrics::STICKY_ROUTING_DECISION_COUNTER
+                                            .with_label_values(&["no_state"])
+                                            .inc();
+                                    }
                                     Err(error) => {
+                                        crate::metrics::STICKY_ROUTING_DECISION_COUNTER
+                                            .with_label_values(&["read_error"])
+                                            .inc();
                                         logger::warn!(
                                             action = "sticky_routing",
                                             tag = "sticky_routing",
