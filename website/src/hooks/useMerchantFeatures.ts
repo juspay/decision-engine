@@ -11,6 +11,7 @@ export type KnownFeature =
   | 'auto-calibration'
   | 'autopilot'
   | 'volume-contracts'
+  | 'sticky-routing'
 
 export function useMerchantFeatures(merchantId?: string) {
   const path = merchantId ? `/merchant-account/${merchantId}/features` : null
