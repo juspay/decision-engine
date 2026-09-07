@@ -61,9 +61,13 @@ type BadgeVariant = 'green' | 'gray' | 'blue' | 'purple' | 'orange'
 interface StageView {
   badge: string
   variant: BadgeVariant
-  /** Greyed out: this stage never runs for this merchant as configured. */
+  /**
+   * Not configured for this merchant: the stage is omitted from the rail entirely. The stack
+   * board above stays the discovery surface — it lists every layer with a Configure link, and
+   * the stage joins the flow as soon as its configuration lands.
+   */
   dim: boolean
-  /** A short config fact shown in place of the badge when the stage is live, e.g. "3 rules". */
+  /** A short config fact shown next to the badge when the stage is live, e.g. "3 rules". */
   detail?: string
 }
 
@@ -183,6 +187,8 @@ const STAGES: StageDef[] = [
     runsWhen: 'Only when a preferred gateway is present on the payment itself.',
     configuredBy: 'Set per order by your integration — the dashboard cannot know it in advance.',
     api: 'payment_info.preferred_gateway on POST /decide-gateway',
+    // Always request-supplied, never merchant-configured, so it never joins the rail; the stack
+    // board's Overrides row is where it stays discoverable.
     view: () => ({ badge: 'Per payment', variant: 'blue', dim: true }),
   },
   {
@@ -598,11 +604,14 @@ function FlowRail({
   return (
     <div>
       {GROUP_ORDER.map((group) => {
-        const stages = STAGES.filter((stage) => stage.group === group)
-        const anyLive = stages.some((stage) => !stage.view(stack, connectorCount).dim)
+        // Only stages that actually run for this merchant are drawn; a whole group can vanish.
+        const stages = STAGES.filter(
+          (stage) => stage.group === group && !stage.view(stack, connectorCount).dim,
+        )
+        if (stages.length === 0) return null
         return (
           <div key={group}>
-            <p className={`${type.labelSmall} relative z-[2] pb-2 pt-3 ${anyLive ? '' : 'opacity-40'}`}>{group}</p>
+            <p className={`${type.labelSmall} relative z-[2] pb-2 pt-3`}>{group}</p>
             {stages.map((stage) => {
               const gapKind = !firstGapRendered
                 ? 'fan'
@@ -672,13 +681,11 @@ function StageRow({
             : 'border-slate-200 hover:border-slate-300 dark:border-[#1e2535] dark:hover:border-[#3a4150]'
         } bg-white dark:bg-[#161b24]`}
       >
-        {/* Dim the contents, not the wrapper: wrapper opacity would make the card background
-            translucent and the lane ribbons would bleed through the text. */}
         <button
           type="button"
           onClick={onToggle}
           aria-expanded={open}
-          className={`flex w-full items-center gap-2.5 px-4 py-2.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]/40 ${view.dim ? 'opacity-50' : ''}`}
+          className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]/40"
         >
           <span
             className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border ${
@@ -693,7 +700,7 @@ function StageRow({
           </span>
           <span className="text-[13px] font-semibold text-slate-900 dark:text-white">{stage.name}</span>
           <span className="ml-auto flex flex-shrink-0 items-center gap-2">
-            {view.detail && !view.dim ? (
+            {view.detail ? (
               <span className="hidden font-mono text-[11px] text-brand-700 dark:text-[#93c5fd] sm:inline">
                 {view.detail}
               </span>
@@ -706,7 +713,7 @@ function StageRow({
           </span>
         </button>
         {open ? (
-          <div className={`border-t border-slate-100 bg-slate-50/60 px-4 py-3 dark:border-[#1e2535] dark:bg-black/15 ${view.dim ? 'opacity-70' : ''}`}>
+          <div className="border-t border-slate-100 bg-slate-50/60 px-4 py-3 dark:border-[#1e2535] dark:bg-black/15">
             <p className={type.body}>{stage.what}</p>
             <StageLiveDetail stage={stage} stack={stack} overflow={overflow} loadFailed={loadFailed} />
             <dl className="mt-3 space-y-1.5">
