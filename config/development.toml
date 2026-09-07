@@ -3,13 +3,16 @@ enabled = true
 level = "DEBUG"
 log_format = "default"
 
+[log.telemetry]
+metrics_enabled = false # push metrics to the OpenTelemetry collector over OTLP/gRPC; oneclick.sh and the compose monitoring profile turn this on
+ignore_errors = true    # log and continue if the OTLP exporter cannot be built
+otel_exporter_otlp_endpoint = "http://localhost:4317" # OTLP/gRPC address of the OpenTelemetry collector
+otel_exporter_otlp_timeout = 10000 # milliseconds per export request (exporter default)
+metrics_export_interval_secs = 5   # how often the collected metrics are pushed
+
 [server]
 host = "127.0.0.1"
 port = 8080
-
-[metrics]
-host = "127.0.0.1"
-port = 9094
 
 [limit]
 request_count = 1

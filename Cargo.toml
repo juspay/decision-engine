@@ -49,8 +49,10 @@ chrono-tz = "0.10"
 cpu-time = "1.0.0"
 jemallocator = "0.5"
 jemalloc-ctl = "0.5"
-prometheus = "0.13"
-lazy_static = "1.4"
+# OpenTelemetry metrics pushed over OTLP to the otel-collector, as Hyperswitch does; `internal-logs` surfaces export failures in tracing.
+opentelemetry = { version = "0.27.1", default-features = false, features = ["metrics", "internal-logs"] }
+opentelemetry_sdk = { version = "0.27.1", default-features = false, features = ["metrics", "rt-tokio", "internal-logs"] }
+opentelemetry-otlp = { version = "0.27.0", default-features = false, features = ["grpc-tonic", "metrics", "internal-logs"] }
 zstd = { version = "0.12", optional = true }
 
 async-bb8-diesel = { git = "https://github.com/jarnura/async-bb8-diesel", rev = "53b4ab901aab7635c8215fd1c2d542c8db443094" }
@@ -122,6 +124,7 @@ regex = "1.10"
 # -------------------------------------
 
 [dev-dependencies]
+opentelemetry_sdk = { version = "0.27.1", default-features = false, features = ["metrics", "rt-tokio", "internal-logs", "testing"] }
 rand = "0.8.5"
 rand_distr = "0.4"
 criterion = "0.5.1"
