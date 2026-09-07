@@ -366,15 +366,16 @@ export function DecisionFlowPage() {
   const laneModel = deriveLanes(stack)
   const loading =
     activeLoading || srLoading || elimLoading || debitRoutingFlag.isLoading || merchantFeatures.isLoading
-  // A /rule/get 404 means "not configured"; anything else — and any failure of the other reads —
-  // means the page doesn't actually know the merchant's state and must not claim it does.
+  // A 404 on any of these reads means "nothing configured for this merchant" — the legitimate
+  // starting state. Anything else means the page doesn't actually know the merchant's state and
+  // must not claim it does.
   const isRealError = (error: unknown) => Boolean(error) && apiErrorStatus(error) !== 404
   const loadFailed =
-    Boolean(activeError) ||
+    isRealError(activeError) ||
     isRealError(srError) ||
     isRealError(elimError) ||
-    Boolean(merchantFeatures.error) ||
-    Boolean(debitRoutingFlag.error)
+    isRealError(merchantFeatures.error) ||
+    isRealError(debitRoutingFlag.error)
 
   return (
     <div className="mx-auto max-w-[1060px] space-y-6 px-5 sm:px-6 lg:px-8 xl:px-10">
