@@ -285,3 +285,23 @@
     @apply rounded-md bg-slate-100/80 dark:bg-white/[0.06];
   }
 }
+
+/* Decision Flow lanes: each connector ribbon draws itself in top-to-bottom. pathLength=100 on the
+   SVG path normalizes every ribbon to the same dash budget regardless of its true length. */
+.de-lane-draw {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: de-lane-draw 0.7s ease-out forwards;
+}
+
+@keyframes de-lane-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .de-lane-draw {
+    animation-duration: 0s;
+  }
+}

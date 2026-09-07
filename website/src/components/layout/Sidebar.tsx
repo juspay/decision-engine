@@ -3,6 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
   GitBranch,
+  Workflow,
   TrendingUp,
   BookOpen,
   PieChart,
@@ -142,6 +143,7 @@ export function Sidebar() {
         </div>
 
         <SideLink to="/routing" icon={GitBranch} end selectedPath={selectedPath} onNavigate={setPendingPath}>Routing Hub</SideLink>
+        <SideLink to="/routing/flow" icon={Workflow} indent isNew selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Flow</SideLink>
         <SideLink to="/routing/sr" icon={TrendingUp} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Multi Objective</SideLink>
         <SideLink to="/routing/rules" icon={BookOpen} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Rule-Based</SideLink>
         <SideLink to="/routing/volume" icon={PieChart} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Volume Split</SideLink>
@@ -256,6 +258,7 @@ function SideLink({
   end,
   indent,
   beta,
+  isNew,
   selectedPath,
   onNavigate,
 }: {
@@ -265,6 +268,7 @@ function SideLink({
   end?: boolean
   indent?: boolean
   beta?: boolean
+  isNew?: boolean
   selectedPath: string
   onNavigate?: (path: string) => void
 }) {
@@ -309,6 +313,11 @@ function SideLink({
       {beta && (
         <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:bg-violet-500/15 dark:text-violet-400 leading-4">
           Beta
+        </span>
+      )}
+      {isNew && (
+        <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-sky-600 dark:bg-sky-500/15 dark:text-sky-300 leading-4">
+          New
         </span>
       )}
     </button>

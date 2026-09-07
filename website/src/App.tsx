@@ -11,6 +11,7 @@ import { OverviewPage } from './components/pages/OverviewPage'
 import { PaymentAuditPage } from './components/pages/PaymentAuditPage'
 import { RoutingEventsPage } from './components/pages/RoutingEventsPage'
 import { RoutingHubPage } from './components/pages/RoutingHubPage'
+import { DecisionFlowPage } from './components/pages/DecisionFlowPage'
 import { SRRoutingPage } from './components/pages/SRRoutingPage'
 import { VolumeSplitPage } from './components/pages/VolumeSplitPage'
 import { ABTestingPage } from './components/pages/ABTestingPage'
@@ -138,6 +139,7 @@ export default function App() {
         <Route element={<AppShell />}>
           <Route index element={<OverviewPage />} />
           <Route path="routing" element={<RoutingHubPage />} />
+          <Route path="routing/flow" element={<DecisionFlowPage />} />
           <Route path="routing/sr" element={<SRRoutingPage />} />
           <Route path="routing/rules" element={<EuclidRulesPage />} />
           <Route path="routing/rules/new" element={<EuclidRuleBuilderPage />} />
