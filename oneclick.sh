@@ -83,6 +83,8 @@ OTEL_COLLECTOR_ENDPOINT="http://${OTEL_COLLECTOR_HOST}:${OTEL_COLLECTOR_GRPC_POR
 OTEL_COLLECTOR_METRICS_URL="http://${OTEL_COLLECTOR_HOST}:${OTEL_COLLECTOR_PROM_PORT}/metrics"
 
 PORTS=(8080 5173 "$DOCS_PORT")
+# Ports of Compose-managed infra oneclick starts itself; our own containers on them are reused, anything else is a conflict.
+INFRA_PORTS=("$OTEL_COLLECTOR_GRPC_PORT" "$OTEL_COLLECTOR_PROM_PORT" 9090)
 EXPECTED_CLICKHOUSE_TABLES=(
     analytics_api_events_queue
     analytics_domain_events_queue
@@ -94,14 +96,22 @@ EXPECTED_CLICKHOUSE_TABLES=(
     cost_bin_product
 )
 
+# True when the container publishing $1 belongs to this Compose project (so it is ours to reuse).
+is_own_compose_container() {
+    local port="$1"
+    local container_id
+    container_id=$(docker ps --filter "publish=$port" -q 2>/dev/null | head -1 || true)
+    [ -n "$container_id" ] && docker compose ps -q 2>/dev/null | grep -q "^${container_id}"
+}
+
 check_and_kill_ports() {
     local pids_to_kill=()
     local ports_in_use=()
 
-    echo "Checking for processes on ports ${PORTS[*]}..."
+    echo "Checking for processes on ports ${PORTS[*]} ${INFRA_PORTS[*]}..."
     echo ""
 
-    for port in "${PORTS[@]}"; do
+    for port in "${PORTS[@]}" "${INFRA_PORTS[@]}"; do
         local pids
         pids=$(lsof -t -iTCP:$port -sTCP:LISTEN 2>/dev/null || true)
         if [ -n "$pids" ]; then
@@ -114,6 +124,10 @@ check_and_kill_ports() {
                 # processes. Killing them would take down the entire container runtime.
                 # Stop the container instead.
                 if echo "$cmd" | grep -qiE "OrbStack|com\.docker\.backend|dockerd"; then
+                    if is_own_compose_container "$port"; then
+                        echo "  [ok] Port $port is forwarded by this project's own container — reusing it."
+                        continue
+                    fi
                     local container_id
                     container_id=$(docker ps --filter "publish=$port" -q 2>/dev/null | head -1 || true)
                     if [ -n "$container_id" ]; then
@@ -160,10 +174,14 @@ check_and_kill_ports() {
 
         sleep 1
 
-        for port in "${PORTS[@]}"; do
+        for port in "${PORTS[@]}" "${INFRA_PORTS[@]}"; do
             local pid
             pid=$(lsof -t -iTCP:$port -sTCP:LISTEN 2>/dev/null || true)
             if [ -n "$pid" ]; then
+                # Never force-kill the container runtime's port forwarder: that takes down every container.
+                if ps -p "$pid" -o command= 2>/dev/null | grep -qiE "OrbStack|com\.docker\.backend|dockerd"; then
+                    continue
+                fi
                 kill -9 "$pid" 2>/dev/null || true
                 echo "  Force killed PID $pid on port $port"
             fi
@@ -172,7 +190,7 @@ check_and_kill_ports() {
         echo "Done. All ports cleared."
         echo ""
     else
-        echo "No processes found on ports ${PORTS[*]}."
+        echo "No conflicting processes found on ports ${PORTS[*]} ${INFRA_PORTS[*]}."
         echo ""
     fi
 }

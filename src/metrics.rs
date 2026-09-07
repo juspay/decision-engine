@@ -15,7 +15,8 @@ use crate::logger::config::LogTelemetry;
 
 /// Service name reported as the OpenTelemetry `service.name` resource attribute.
 const SERVICE_NAME: &str = "decision-engine";
-const DEFAULT_EXPORT_INTERVAL_SECS: u64 = 5;
+// Same push cadence and timeout as Hyperswitch's exporter.
+const EXPORT_INTERVAL_SECS: u64 = 3;
 const EXPORT_TIMEOUT_SECS: u64 = 10;
 
 /// Meter every instrument is created from; resolved per instrument so anything created after [`init`] binds to the real provider.
@@ -136,10 +137,11 @@ fn exponential_buckets(start: f64, factor: f64, count: i32) -> Vec<f64> {
 
 /// Pairs label names with the values a call site passed, in order.
 fn attributes(label_names: &[&'static str], values: &[&str]) -> Vec<KeyValue> {
-    debug_assert_eq!(
+    // Enforced in every build: a silent mismatch would corrupt series. Call sites pass literal label sets.
+    assert_eq!(
         label_names.len(),
         values.len(),
-        "metric label value count does not match its label names"
+        "metric label value count does not match its label names {label_names:?}"
     );
     label_names
         .iter()
@@ -406,13 +408,9 @@ fn build_otlp_reader(config: &LogTelemetry) -> error_stack::Result<PeriodicReade
         .build()
         .change_context(MetricsError::ExporterSetup)?;
 
-    let interval = config
-        .metrics_export_interval_secs
-        .unwrap_or(DEFAULT_EXPORT_INTERVAL_SECS);
-
     Ok(
         PeriodicReader::builder(exporter, opentelemetry_sdk::runtime::Tokio)
-            .with_interval(Duration::from_secs(interval))
+            .with_interval(Duration::from_secs(EXPORT_INTERVAL_SECS))
             .with_timeout(Duration::from_secs(EXPORT_TIMEOUT_SECS))
             .build(),
     )
@@ -511,6 +509,12 @@ mod tests {
         );
     }
 
+    #[test]
+    #[should_panic(expected = "metric label value count does not match")]
+    fn label_arity_mismatch_panics_in_every_build() {
+        attributes(&["endpoint", "status"], &["decide"]);
+    }
+
     /// The push reader must build and run without a reachable collector; failed exports never take the process down.
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn otlp_reader_survives_an_unreachable_collector() {
@@ -521,7 +525,6 @@ mod tests {
             ignore_errors: false,
             otel_exporter_otlp_endpoint: Some("http://127.0.0.1:1".to_owned()),
             otel_exporter_otlp_timeout: Some(200),
-            metrics_export_interval_secs: Some(1),
         };
         let reader = build_otlp_reader(&config).expect("otlp reader");
         let provider = SdkMeterProvider::builder()

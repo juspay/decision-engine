@@ -26,8 +26,6 @@ pub struct LogTelemetry {
     pub otel_exporter_otlp_endpoint: Option<String>,
     /// Timeout (in milliseconds) for one export.
     pub otel_exporter_otlp_timeout: Option<u64>,
-    /// Seconds between two exports. Defaults to 5.
-    pub metrics_export_interval_secs: Option<u64>,
 }
 
 /// Logging to a console.

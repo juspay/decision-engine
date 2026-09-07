@@ -46,10 +46,9 @@ metrics_enabled = true
 ignore_errors = true
 otel_exporter_otlp_endpoint = "http://localhost:4317"
 otel_exporter_otlp_timeout = 10000 # milliseconds per export request
-metrics_export_interval_secs = 5   # how often the collected metrics are pushed
 ```
 
-There is no metrics port to scrape. When `metrics_enabled` is on, metrics are pushed over OTLP/gRPC to an OpenTelemetry collector every `metrics_export_interval_secs`. In the Hyperswitch clusters the collector re-exposes them to vmagent, so they land in VictoriaMetrics and the Grafana `VictoriaMetrics` datasource. The collector adds `source_namespace`, `source_pod` and `source_app` labels; filter by `source_namespace="decision-engine"` in Grafana. With `metrics_enabled = false` the instruments are no-ops.
+There is no metrics port to scrape. When `metrics_enabled` is on, metrics are pushed over OTLP/gRPC to an OpenTelemetry collector every 3 seconds, the same cadence as Hyperswitch. In the Hyperswitch clusters the collector re-exposes them to vmagent, so they land in VictoriaMetrics and the Grafana `VictoriaMetrics` datasource. The collector adds `source_namespace`, `source_pod` and `source_app` labels; filter by `source_namespace="decision-engine"` in Grafana. With `metrics_enabled = false` the instruments are no-ops.
 
 `metrics_enabled` defaults to `false` and the endpoint defaults to the local collector (`http://localhost:4317` for a native binary, `http://otel-collector:4317` inside Compose), so enabling is a single flag. `oneclick.sh` starts the collector and Prometheus and runs the API with metrics enabled; the `monitoring` Compose profile adds Grafana. Metrics are then at `http://localhost:9898/metrics` on the collector and in Prometheus at `http://localhost:9090`.
 
