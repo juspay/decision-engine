@@ -70,6 +70,14 @@ interface StageView {
   dim: boolean
   /** A short config fact shown next to the badge when the stage is live, e.g. "3 rules". */
   detail?: string
+  /** Tiny top-right tag naming the operation kind: "hard filter", "re-rank", "branch"… */
+  kind?: string
+  kindTone?: 'filter' | 'rank' | 'override' | 'neutral'
+}
+
+/** Both halves of the hybrid integration are live: static routing picks, then SR ranks. */
+function isHybrid(stack: StackState) {
+  return (stack.slot === 'rule' || stack.slot === 'volume') && stack.srConfigured
 }
 
 interface StageDef {
@@ -108,6 +116,7 @@ const STAGES: StageDef[] = [
       badge: 'Always runs',
       variant: 'blue',
       dim: false,
+      kind: 'input',
       detail:
         connectorCount > 0 ? `${connectorCount} connector${connectorCount === 1 ? '' : 's'} in play` : undefined,
     }),
@@ -129,12 +138,13 @@ const STAGES: StageDef[] = [
     view: (stack) => {
       if (stack.slot !== 'ab') return { badge: 'No experiment', variant: 'gray', dim: true }
       if (!stack.abRealPaymentsOn)
-        return { badge: 'Live · interceptor flag off', variant: 'orange', dim: false }
+        return { badge: 'Live · interceptor flag off', variant: 'orange', dim: false, kind: 'traffic split' }
       const split = abTestData(stack)?.variant_split_pct
       return {
         badge: 'Experiment live',
         variant: 'purple',
         dim: false,
+        kind: 'traffic split',
         detail: split != null ? `${split}% variant` : undefined,
       }
     },
@@ -152,7 +162,7 @@ const STAGES: StageDef[] = [
     api: 'GET /merchant-account/{merchant_id}/debit-routing',
     view: (stack) =>
       stack.debitOn
-        ? { badge: 'Enabled · per request', variant: 'blue', dim: false }
+        ? { badge: 'Enabled · per request', variant: 'blue', dim: false, kind: 'branch' }
         : { badge: 'Not enabled', variant: 'gray', dim: true },
   },
   {
@@ -177,14 +187,24 @@ const STAGES: StageDef[] = [
     view: (stack) => {
       const summary = slotAlgorithmSummary(stack)
       if (!summary) return { badge: 'Not set', variant: 'gray', dim: true }
-      if (stack.slot === 'ab') return { badge: 'Occupied by experiment', variant: 'purple', dim: false }
+      if (stack.slot === 'ab')
+        return { badge: 'Occupied by experiment', variant: 'purple', dim: false, kind: 'traffic split' }
       const euclid = euclidData(stack)
       const detail = euclid
         ? `${euclid.rules?.length ?? 0} rule${(euclid.rules?.length ?? 0) === 1 ? '' : 's'} · first match wins`
         : stack.slot === 'volume'
           ? volumeSplits(stack).map((s) => `${s.output.gateway_name} ${s.split}%`).join(' / ')
           : undefined
-      return { badge: `“${summary.name}” active`, variant: 'green', dim: false, detail }
+      return {
+        badge: `“${summary.name}” active`,
+        variant: 'green',
+        dim: false,
+        detail,
+        kind:
+          (isHybrid(stack) ? 'step 1 · ' : '') +
+          (stack.slot === 'volume' ? 'weighted pick' : 'hard filter'),
+        kindTone: 'filter',
+      }
     },
   },
   {
@@ -199,7 +219,7 @@ const STAGES: StageDef[] = [
     runsWhen: 'Whenever the payment’s method type is known.',
     configuredBy: 'Platform payment-method filters (not merchant-editable today).',
     api: 'pm_filters graph inside POST /routing/evaluate',
-    view: () => ({ badge: 'Always runs', variant: 'blue', dim: false }),
+    view: () => ({ badge: 'Always runs', variant: 'blue', dim: false, kind: 'hard filter', kindTone: 'filter' }),
   },
   {
     id: 'preferred',
@@ -231,6 +251,8 @@ const STAGES: StageDef[] = [
       badge: 'Always runs',
       variant: 'blue',
       dim: false,
+      kind: 'ordering',
+      kindTone: 'rank',
       detail: stack.srConfigured ? undefined : 'positions become scores',
     }),
   },
@@ -255,6 +277,8 @@ const STAGES: StageDef[] = [
         badge: stack.autopilotOn && !stack.srData ? 'Auto-pilot' : 'Configured',
         variant: 'green',
         dim: false,
+        kind: (isHybrid(stack) ? 'step 2 · ' : '') + 're-rank',
+        kindTone: 'rank',
         detail: parts.join(' · ') || (stack.autopilotOn ? 'tuned automatically' : undefined),
       }
     },
@@ -278,6 +302,8 @@ const STAGES: StageDef[] = [
             badge: 'Elimination on',
             variant: 'green',
             dim: false,
+            kind: 'demote',
+            kindTone: 'filter',
             detail:
               stack.eliminationData?.threshold != null
                 ? // The threshold is stored as a 0..1 fraction; tolerate percent-scale values too.
@@ -310,6 +336,8 @@ const STAGES: StageDef[] = [
             badge: 'Enabled',
             variant: 'green',
             dim: false,
+            kind: 're-rank',
+            kindTone: 'rank',
             detail: stack.srData?.margin != null ? `margin ${stack.srData.margin * 100}%` : undefined,
           }
         : { badge: 'Not set', variant: 'gray', dim: true },
@@ -327,7 +355,7 @@ const STAGES: StageDef[] = [
     api: 'GET /merchant-account/{merchant_id}/volume-commitment',
     view: (stack) =>
       stack.volumeCommitmentOn
-        ? { badge: 'Enabled', variant: 'green', dim: false }
+        ? { badge: 'Enabled', variant: 'green', dim: false, kind: 'override', kindTone: 'override' }
         : { badge: 'Not set', variant: 'gray', dim: true },
   },
   {
@@ -353,6 +381,7 @@ const STAGES: StageDef[] = [
       badge: 'Always runs',
       variant: 'blue',
       dim: false,
+      kind: 'pick winner',
       detail:
         stack.srConfigured && stack.costOn
           ? 'best score + cost wins'
@@ -380,7 +409,7 @@ const STAGES: StageDef[] = [
     runsWhen: 'Whenever the score-update endpoint is called after the payment settles or fails.',
     configuredBy: 'An integration responsibility.',
     api: 'POST /update-gateway-score',
-    view: () => ({ badge: 'Integration-controlled', variant: 'blue', dim: false }),
+    view: () => ({ badge: 'Integration-controlled', variant: 'blue', dim: false, kind: 'feedback' }),
   },
 ]
 
@@ -678,7 +707,26 @@ function exampleRequest(
   }
   switch (stageId) {
     case 'arrive':
-    case 'decide':
+    case 'decide': {
+      // A plain /decide-gateway call never consults the static strategy — its candidate list is
+      // caller-supplied. With a rule set or volume split active, the right integration is
+      // /routing/hybrid: the strategy's output becomes the eligible list for scoring.
+      if (stack.slot === 'rule' || stack.slot === 'volume') {
+        const strategyName = slotAlgorithmSummary(stack)?.name ?? 'your strategy'
+        const { eligibleGatewayList: _omitted, ...dynamicBody } = decideBody
+        return {
+          code: curlFor('/routing/hybrid', {
+            static_routing_request: {
+              created_by: mid,
+              payment_id: 'PAY_001',
+              parameters: exampleEvaluateParameters(stack),
+              fallback_output: laneNames.map((name) => ({ gateway_name: name, gateway_id: null })),
+            },
+            dynamic_routing_request: dynamicBody,
+          }),
+          note: `With “${strategyName}” active, call /routing/hybrid — the strategy picks the candidates and its output feeds scoring as the eligible list automatically. Sending your own eligibleGatewayList in the dynamic half would override it.`,
+        }
+      }
       return {
         code: curlFor('/decide-gateway', decideBody),
         note:
@@ -686,6 +734,7 @@ function exampleRequest(
             ? 'With nothing configured, the answer comes straight from this eligibleGatewayList.'
             : undefined,
       }
+    }
     case 'slot':
       if (stack.slot === 'ab') return null
       return {
@@ -853,8 +902,25 @@ function StageRow({
 }) {
   const view = stage.view(stack, connectorCount)
   const Icon = stage.icon
+  const kindTone =
+    view.kindTone === 'filter'
+      ? 'text-amber-600 dark:text-amber-400/90'
+      : view.kindTone === 'rank'
+        ? 'text-sky-600 dark:text-sky-300/90'
+        : view.kindTone === 'override'
+          ? 'text-violet-600 dark:text-violet-300/90'
+          : 'text-slate-400 dark:text-[#78849a]'
   return (
     <div className="relative z-[2]">
+      {view.kind ? (
+        // Sits across the card's top-right border like a ribbon; the Card-background fill masks
+        // the border segment beneath it.
+        <span
+          className={`absolute -top-[7px] right-4 z-[1] rounded bg-white px-1.5 text-[9px] font-semibold uppercase tracking-wider dark:bg-[#11151d] ${kindTone}`}
+        >
+          {view.kind}
+        </span>
+      ) : null}
       <div
         className={`overflow-hidden rounded-2xl border transition-colors ${
           open
