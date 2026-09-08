@@ -25,7 +25,6 @@ use std::{
 #[derive(Clone, serde::Deserialize, Debug)]
 pub struct GlobalConfig {
     pub server: Server,
-    pub metrics: Server,
     #[cfg(feature = "mysql")]
     pub database: Database,
     #[cfg(feature = "postgres")]

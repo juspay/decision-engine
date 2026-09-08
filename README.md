@@ -142,7 +142,7 @@ For the full local dev environment (API + dashboard on port 5173 + docs), run:
 ./oneclick.sh
 ```
 
-This brings up Postgres, Redis, ClickHouse, and Kafka via Docker Compose, runs migrations, and starts the API server and dashboard locally. See [Local Setup Guide](docs/local-setup.md) for full details and options like `ONECLICK_KEEP_INFRA=1`.
+This brings up Postgres, Redis, ClickHouse, Kafka, an OpenTelemetry collector and Prometheus via Docker Compose, runs migrations, and starts the API server and dashboard locally. The API pushes its metrics to the collector on `localhost:4317`; browse them at `http://localhost:9898/metrics` or in Prometheus at `http://localhost:9090`. See [Local Setup Guide](docs/local-setup.md) for full details and options like `ONECLICK_KEEP_INFRA=1`.
 
 ### Verify
 
