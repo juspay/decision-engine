@@ -15,8 +15,8 @@ use crate::{
             RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
         },
         utils::{
-            generate_random_id, is_valid_enum_value, normalize_rule_value_types,
-            validate_routing_rule,
+            apply_default_fallback, generate_random_id, is_valid_enum_value,
+            normalize_rule_value_types, validate_routing_rule,
         },
     },
     types::service_configuration::{find_config_by_name, insert_config, update_config},
@@ -762,10 +762,6 @@ async fn evaluate_algorithm_data(
     algorithm_data: &StaticRoutingAlgorithm,
     payload: &RoutingRequest,
 ) -> Result<EvaluationOutcome, (ContainerError<EuclidErrors>, &'static str)> {
-    let default_output_present = payload
-        .fallback_output
-        .as_ref()
-        .is_some_and(|output| !output.is_empty());
     let parameters = &payload.parameters;
 
     let mut preview_flow_type = crate::analytics::refine_routing_evaluate_flow_type(algorithm_data);
@@ -836,19 +832,8 @@ async fn evaluate_algorithm_data(
                     )
                 })?;
 
-                // Check if fallback is enabled
-                if default_output_present && ir.output == program.default_selection {
-                    logger::debug!(
-                        "Default fallback triggered: Overriding with fallback connector"
-                    );
+                apply_default_fallback(&mut ir, payload.fallback_output.as_deref());
 
-                    // Replace output with fallback connector from request
-                    if let Some(fallback_connector) = payload.fallback_output.clone() {
-                        ir.rule_name = Some("default_fallback".to_string());
-                        ir.output = Output::Priority(fallback_connector.clone());
-                        ir.evaluated_output = fallback_connector;
-                    }
-                }
                 (ir.output, ir.evaluated_output, ir.rule_name)
             }
 
@@ -889,7 +874,6 @@ async fn evaluate_algorithm_data(
                     arm,
                     arm_algorithm_id,
                     payload,
-                    default_output_present,
                     &state.db,
                 )
                 .await;
@@ -1145,8 +1129,11 @@ pub async fn routing_evaluate_batch(
         .map(str::to_string);
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
+    // Shared across entries; carried through every log line and analytics event below.
+    let batch_payment_id = uniform_payment_id(&payload.requests);
     logger::debug!(
         created_by = %payload.created_by,
+        payment_id = ?batch_payment_id,
         entry_count = payload.requests.len(),
         "Received batch routing evaluation request"
     );
@@ -1157,7 +1144,7 @@ pub async fn routing_evaluate_batch(
         ),
         crate::analytics::AnalyticsRoute::RoutingEvaluate,
         Some(payload.created_by.clone()),
-        None,
+        batch_payment_id.clone(),
         request_id.clone(),
         global_request_id.clone(),
         trace_id.clone(),
@@ -1167,7 +1154,7 @@ pub async fn routing_evaluate_batch(
     // One representative request for the batch: a whole-batch failure has no single entry to
     // attribute, but without it the audit records a request hit and never an outcome.
     let batch_error_payload = RoutingRequest {
-        payment_id: None,
+        payment_id: batch_payment_id.clone(),
         created_by: payload.created_by.clone(),
         fallback_output: payload.fallback_output.clone(),
         parameters: payload
@@ -1254,7 +1241,7 @@ pub async fn routing_evaluate_batch(
                 .as_ref()
                 .is_some_and(|fallback| !fallback.is_empty()) =>
         {
-            let call_payment_id = uniform_payment_id(&payload.requests);
+            let call_payment_id = batch_payment_id.clone();
             let mut entry_outcomes = Vec::with_capacity(payload.requests.len());
             let mut results = Vec::with_capacity(payload.requests.len());
             for entry in payload.requests {
@@ -1322,7 +1309,7 @@ pub async fn routing_evaluate_batch(
             Err(e) => return fail_batch(e.into(), "batch_routing_algorithm_parse_failed"),
         };
 
-    let call_payment_id = uniform_payment_id(&payload.requests);
+    let call_payment_id = batch_payment_id.clone();
     let mut entry_outcomes: Vec<Value> = Vec::with_capacity(payload.requests.len());
     let mut first_success: Option<(
         crate::analytics::FlowType,

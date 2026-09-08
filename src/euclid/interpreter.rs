@@ -1,7 +1,6 @@
 use crate::euclid::ast::{Output, VolumeSplit};
+use crate::euclid::utils::sample_split_winner_first;
 use crate::euclid::{ast, types};
-use rand::distributions::WeightedIndex;
-use rand::prelude::*;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -219,22 +218,6 @@ impl fmt::Display for RoutingError {
 }
 impl Error for RoutingError {}
 type RoutingResult<T> = Result<T, RoutingError>;
-
-fn sample_split_winner_first<T>(mut splits: Vec<VolumeSplit<T>>) -> RoutingResult<Vec<T>> {
-    let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
-    let weighted_index =
-        WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
-    let mut rng = rand::thread_rng();
-    let idx = weighted_index.sample(&mut rng);
-
-    if idx >= splits.len() {
-        return Err(RoutingError::VolumeSplitFailed);
-    }
-    let winner = splits.remove(idx);
-    splits.insert(0, winner);
-
-    Ok(splits.into_iter().map(|split| split.output).collect())
-}
 
 pub fn perform_volume_split(
     splits: Vec<VolumeSplit<ConnectorInfo>>,

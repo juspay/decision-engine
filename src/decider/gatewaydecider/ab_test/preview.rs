@@ -13,6 +13,7 @@ use crate::{
         errors::EuclidErrors,
         interpreter::{evaluate_output, InterpreterBackend},
         types::{Context, RoutingAlgorithm, RoutingRequest, StaticRoutingAlgorithm},
+        utils::apply_default_fallback,
     },
 };
 use diesel::{associations::HasTable, ExpressionMethods};
@@ -32,7 +33,6 @@ pub async fn evaluate_arm(
     arm: &str,
     arm_algorithm_id: &str,
     payload: &RoutingRequest,
-    default_output_present: bool,
     db: &crate::storage::Storage,
 ) -> Result<AbTestArmOutput, ContainerError<EuclidErrors>> {
     // SR arm: in simulation, pick the first fallback connector as a proxy for what
@@ -121,13 +121,8 @@ pub async fn evaluate_arm(
                     e.error_type
                 )))
             })?;
-            if default_output_present && ir.output == program.default_selection {
-                if let Some(fallback) = payload.fallback_output.clone() {
-                    ir.rule_name = Some("default_fallback".to_string());
-                    ir.output = Output::Priority(fallback.clone());
-                    ir.evaluated_output = fallback;
-                }
-            }
+            apply_default_fallback(&mut ir, payload.fallback_output.as_deref());
+
             (ir.output, ir.evaluated_output, ir.rule_name)
         }
         StaticRoutingAlgorithm::AbTest(_) => {
