@@ -140,7 +140,10 @@ test.describe('Routing rule mutations (API)', () => {
     expect(evaluated.status).toBe(400)
   })
 
-  test('deleting an inactive rule removes it from the list', async ({ api, merchant }) => {
+  test('rule deletion is disabled -- the delete route is removed', async ({ api, merchant }) => {
+    // Deletion is disabled for parity with the Hyperswitch dashboard, which cannot delete
+    // routing rules yet (juspay/hyperswitch-control-center#5495, item 4). The /routing/delete
+    // route is commented out in src/app.rs, so any call to it 404s and the rule survives.
     const m = merchant.id
     const created = await api.createRoutingAlgorithm(
       factory.singleRoutingPayload(m, { name: factory.ruleName('mutate_delete'), gateway: 'stripe' }),
@@ -151,38 +154,10 @@ test.describe('Routing rule mutations (API)', () => {
       failOnStatusCode: false,
       body: { created_by: m, routing_algorithm_id: ruleId },
     })
-
-    expect(deleted.status).toBe(200)
-    expect(deleted.body.status).toBe('deleted')
-    expect(deleted.body.routing_algorithm_id).toBe(ruleId)
+    expect(deleted.status).toBe(404)
 
     const all = await api.listRoutingAlgorithms(m)
-    expect(all.body.some((r: any) => r.id === ruleId)).toBe(false)
-  })
-
-  test('an active rule cannot be deleted until it is deactivated', async ({ api, merchant }) => {
-    const m = merchant.id
-    const created = await api.createRoutingAlgorithm(
-      factory.singleRoutingPayload(m, { name: factory.ruleName('mutate_del_active'), gateway: 'stripe' }),
-    )
-    const ruleId = created.body.rule_id
-    await api.activateRoutingAlgorithm(m, ruleId)
-
-    const blocked = await api.raw('POST', '/routing/delete', {
-      failOnStatusCode: false,
-      body: { created_by: m, routing_algorithm_id: ruleId },
-    })
-    expect(blocked.status).toBe(400)
-
-    // Deactivate first, then the delete goes through — this is the operator's actual path.
-    await api.raw('POST', '/routing/deactivate', {
-      body: { created_by: m, routing_algorithm_id: ruleId },
-    })
-    const deleted = await api.raw('POST', '/routing/delete', {
-      failOnStatusCode: false,
-      body: { created_by: m, routing_algorithm_id: ruleId },
-    })
-    expect(deleted.status).toBe(200)
+    expect(all.body.some((r: any) => r.id === ruleId)).toBe(true)
   })
 
   test('mutating an unknown rule id is rejected', async ({ api, merchant }) => {
@@ -206,14 +181,8 @@ test.describe('Routing rule mutations (API)', () => {
       body: { created_by: m, routing_algorithm_id: unknown },
     })
     expect(deactivated.status).toBe(400)
-
-    // NOTE: delete of an unknown id currently surfaces as a 500 (the storage layer's "no rows to
-    // delete" is not mapped to a 404). Asserting >=400 documents "it is rejected" without pinning the
-    // suite to a status that is arguably a bug.
-    const deleted = await api.raw('POST', '/routing/delete', {
-      failOnStatusCode: false,
-      body: { created_by: m, routing_algorithm_id: unknown },
-    })
-    expect(deleted.status).toBeGreaterThanOrEqual(400)
+    // Delete is intentionally not exercised here: the /routing/delete route is removed
+    // (deletion disabled for dashboard parity), so it 404s regardless of the id. The
+    // dedicated "rule deletion is disabled" test covers that.
   })
 })
