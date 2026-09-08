@@ -138,8 +138,6 @@ export default function App() {
         <Route element={<AppShell />}>
           <Route index element={<OverviewPage />} />
           <Route path="routing" element={<RoutingHubPage />} />
-          {/* Decision Flow lives as a Routing Hub tab; keep the old path for bookmarks/links. */}
-          <Route path="routing/flow" element={<Navigate to="/routing?tab=flow" replace />} />
           <Route path="routing/sr" element={<SRRoutingPage />} />
           <Route path="routing/rules" element={<EuclidRulesPage />} />
           <Route path="routing/rules/new" element={<EuclidRuleBuilderPage />} />
