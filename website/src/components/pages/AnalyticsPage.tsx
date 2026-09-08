@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
-import { useVolumeContractsBeta } from '../../store/authStore'
+import { useFeatureReleased } from '../../lib/featureReleases'
 import useSWR from 'swr'
 import {
   Bar,
@@ -830,10 +830,10 @@ export function AnalyticsPage() {
   // reopens it directly; the default (transactions) is left out of the URL.
   const [searchParams, setSearchParams] = useSearchParams()
   const viewParam = searchParams.get('view')
-  // Volume commitments is in beta: only super-admins get the view. For
-  // anyone else a ?view=volume_commitments link behaves like an unknown view and is canonicalised
+  // Volume commitments is gated by the release roster (featureReleases.ts). Outside the audience
+  // a ?view=volume_commitments link behaves like an unknown view and is canonicalised
   // back to the default by the effect below.
-  const volumeContractsBeta = useVolumeContractsBeta()
+  const volumeContractsBeta = useFeatureReleased('volume-contracts')
   const requestedView: AnalyticsView = ANALYTICS_VIEWS.includes(viewParam as AnalyticsView)
     ? (viewParam as AnalyticsView)
     : 'transactions'

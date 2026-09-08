@@ -13,7 +13,8 @@ import { Spinner } from '../ui/Spinner'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
-import { useAuthStore, useVolumeContractsBeta } from '../../store/authStore'
+import { useAuthStore } from '../../store/authStore'
+import { useFeatureReleased } from '../../lib/featureReleases'
 import { apiErrorStatus, apiPost, fetcher } from '../../lib/api'
 import { ContractSimulationPanel } from './ContractSimulationPanel'
 import { VolumeCommitmentRunChart } from './VolumeCommitmentRunChart'
@@ -1179,9 +1180,9 @@ export function DecisionSimulatorPage() {
   const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
   const authUser = useAuthStore((state) => state.user)
-  // Volume Contracts is in beta: the contract loader and commitment run chart on the Batch tab
-  // are shown only to super-admins.
-  const volumeContractsBeta = useVolumeContractsBeta()
+  // Volume Contracts is gated by the release roster (featureReleases.ts): the contract loader
+  // and commitment run chart on the Batch tab are shown only to its audience.
+  const volumeContractsBeta = useFeatureReleased('volume-contracts')
   const authMerchantId = authUser?.merchantId || ''
   const effectiveMerchantId = merchantId || authMerchantId
   const currentScopeKey = explorerScopeKey(
