@@ -669,7 +669,7 @@ function exampleRequest(
   stack: StackState,
   merchantId: string,
   laneNames: string[],
-): { code: string; note?: string } | null {
+): { code: string; note?: string; label?: string } | null {
   const mid = merchantId || 'your_merchant_id'
   const decideBody = {
     merchantId: mid,
@@ -710,6 +710,22 @@ function exampleRequest(
         code: curlFor('/decide-gateway', { ...decideBody, rankingAlgorithm: 'NTW_BASED_ROUTING' }),
         note: 'The co-badged card details must ride along in paymentInfo.metadata.',
       }
+    case 'eligibility':
+      // The filter graph is built from the server's TOML, which no API exposes — this excerpt
+      // shows its real shape (values from config/development.toml) so the mechanism is concrete.
+      return {
+        label: 'How it’s configured — pm_filters in the server’s config/<env>.toml',
+        code: [
+          '[pm_filters.razorpay]',
+          'upi_collect = { country = "IN", currency = "INR" }',
+          '',
+          '[pm_filters.default]',
+          'affirm  = { country = "US", currency = "USD" }',
+          'giropay = { country = "DE", currency = "EUR" }',
+          'klarna  = { country = "AT,BE,DK,…,US,CA", currency = "USD,GBP,EUR,…" }',
+        ].join('\n'),
+        note: 'Per connector and payment method, on country and currency: a payment outside a connector’s lists drops that connector here. Server-owned config — not editable from the dashboard yet.',
+      }
     case 'learn':
       return {
         code: curlFor('/update-gateway-score', {
@@ -726,10 +742,10 @@ function exampleRequest(
   }
 }
 
-function CodeSnippet({ code, note }: { code: string; note?: string }) {
+function CodeSnippet({ code, note, label }: { code: string; note?: string; label?: string }) {
   return (
     <div className="mt-3">
-      <p className={`${type.labelSmall} mb-1.5`}>Example request — required fields only</p>
+      <p className={`${type.labelSmall} mb-1.5`}>{label ?? 'Example request — required fields only'}</p>
       <pre className="overflow-x-auto rounded-lg border border-slate-200 bg-white px-3 py-2.5 font-mono text-[10.5px] leading-[16px] text-slate-700 dark:border-[#1e2535] dark:bg-[#0d1118] dark:text-[#a8b4c8]">
         {code}
       </pre>
@@ -883,7 +899,7 @@ function StageRow({
             <StageLiveDetail stage={stage} stack={stack} overflow={overflow} loadFailed={loadFailed} />
             {(() => {
               const example = exampleRequest(stage.id, stack, merchantId, laneNames)
-              return example ? <CodeSnippet code={example.code} note={example.note} /> : null
+              return example ? <CodeSnippet code={example.code} note={example.note} label={example.label} /> : null
             })()}
             <dl className="mt-3 space-y-1.5">
               <ExpansionFact label="Runs when" value={stage.runsWhen} />
