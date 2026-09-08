@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
   GitBranch,
-  Workflow,
   TrendingUp,
   BookOpen,
   PieChart,
@@ -143,7 +142,6 @@ export function Sidebar() {
         </div>
 
         <SideLink to="/routing" icon={GitBranch} end selectedPath={selectedPath} onNavigate={setPendingPath}>Routing Hub</SideLink>
-        <SideLink to="/routing/flow" icon={Workflow} indent isNew selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Flow</SideLink>
         <SideLink to="/routing/sr" icon={TrendingUp} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Multi Objective</SideLink>
         <SideLink to="/routing/rules" icon={BookOpen} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Rule-Based</SideLink>
         <SideLink to="/routing/volume" icon={PieChart} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Volume Split</SideLink>

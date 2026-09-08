@@ -1,6 +1,6 @@
 import type { ElementType } from 'react'
 import { useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import useSWR, { useSWRConfig } from 'swr'
 import {
   BookOpen,
@@ -21,6 +21,7 @@ import { apiPost, fetcher } from '../../lib/api'
 import { AnalyticsOverviewResponse, RoutingAlgorithm, RuleConfig, SRConfigData } from '../../types/api'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
+import { DecisionFlowView } from './DecisionFlowPage'
 
 import { PageHeading } from '../ui/PageHeading'
 type StrategyId = 'auth-rate' | 'rules' | 'volume' | 'debit' | 'ab-test'
@@ -64,6 +65,28 @@ function strategyStateLabel(state: StrategyState) {
 }
 
 export function RoutingHubPage() {
+  // The hub has two faces: the strategy list, and the Decision Flow diagram of how those
+  // strategies compose. The active one is kept in the URL (?tab=flow) so links and reloads
+  // land on the right view; the default (strategies) stays out of the URL.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const activeTab: 'strategies' | 'flow' = searchParams.get('tab') === 'flow' ? 'flow' : 'strategies'
+  const setActiveTab = (tab: 'strategies' | 'flow') => {
+    setSearchParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (tab === 'strategies') next.delete('tab')
+        else next.set('tab', tab)
+        return next
+      },
+      { replace: true },
+    )
+  }
+  const tabClass = (tab: 'strategies' | 'flow') =>
+    `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+      activeTab === tab
+        ? 'border-brand-500 text-brand-600 dark:text-brand-400'
+        : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+    }`
   const { mutate: mutateCache } = useSWRConfig()
   const selectedMerchantId = useMerchantStore((state) => state.merchantId)
   const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
@@ -232,6 +255,29 @@ export function RoutingHubPage() {
         <PageHeading title="Routing Hub" />
       </header>
 
+      {/* Tab navigation — the same underline idiom the Multi Objective page uses. */}
+      <div className="border-b border-slate-200 dark:border-[#1c1c23]">
+        <nav className="-mb-px flex gap-1">
+          <button type="button" className={tabClass('strategies')} onClick={() => setActiveTab('strategies')}>
+            Strategies
+          </button>
+          <button
+            type="button"
+            className={`${tabClass('flow')} inline-flex items-center gap-1.5`}
+            onClick={() => setActiveTab('flow')}
+          >
+            Decision Flow
+            <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-wide text-sky-600 dark:bg-sky-500/15 dark:text-sky-300">
+              New
+            </span>
+          </button>
+        </nav>
+      </div>
+
+      {activeTab === 'flow' ? (
+        <DecisionFlowView />
+      ) : (
+      <>
       {actionError && (
         <div className="rounded-lg border border-red-500/20 bg-red-500/8 px-3 py-2 text-sm text-red-600 dark:text-red-400">
           {actionError}
@@ -421,6 +467,8 @@ export function RoutingHubPage() {
           </CardBody>
         </Card>
       </div>
+      </>
+      )}
     </div>
   )
 }

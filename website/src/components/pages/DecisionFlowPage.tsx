@@ -20,7 +20,6 @@ import {
 } from 'lucide-react'
 import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Badge } from '../ui/Badge'
-import { PageHeading } from '../ui/PageHeading'
 import * as type from '../ui/typography'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
@@ -422,7 +421,11 @@ const GROUP_ORDER = [
   'Decision & learning',
 ]
 
-export function DecisionFlowPage() {
+/**
+ * The Decision Flow view, embedded as a tab of the Routing Hub (?tab=flow). It owns its own data
+ * reads (the SWR keys are shared with the hub's, so nothing is fetched twice).
+ */
+export function DecisionFlowView() {
   const selectedMerchantId = useMerchantStore((state) => state.merchantId)
   const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
   const merchantId = selectedMerchantId || authMerchantId
@@ -474,13 +477,10 @@ export function DecisionFlowPage() {
     isRealError(debitRoutingFlag.error)
 
   return (
-    <div className="mx-auto max-w-[1060px] space-y-6 px-5 sm:px-6 lg:px-8 xl:px-10">
-      <header>
-        <PageHeading
-          title="Decision Flow"
-          description="Follow your connectors through every stage — read live from your configuration."
-        />
-      </header>
+    <div className="max-w-[1100px] space-y-6">
+      <p className={type.subheading}>
+        Follow your connectors through every stage — read live from your configuration.
+      </p>
 
       <StackBoard stack={stack} loading={loading} loadFailed={loadFailed} hasMerchant={Boolean(merchantId)} />
 
