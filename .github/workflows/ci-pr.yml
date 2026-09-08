@@ -292,3 +292,29 @@ jobs:
             test-results/
           retention-days: 7
           if-no-files-found: ignore
+
+  # The single check the branch ruleset requires. Jobs above are gated by path filters, and a job
+  # GitHub skips reports no status at all — required directly, each one would leave unrelated PRs
+  # waiting forever on a check that is never going to arrive. This job always runs, so it always
+  # reports, and it fails unless every job it depends on succeeded or was deliberately skipped.
+  # Adding a job to `needs` here is what makes it blocking; the ruleset does not need touching.
+  ci-gate:
+    name: CI Gate
+    needs:
+      - changes
+      - fmt
+      - clippy
+      - typos
+      - ci-hack
+      - unit-tests
+      - frontend-typecheck
+      - helm
+      - e2e-playwright
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every upstream job to have succeeded or been skipped
+        run: |
+          echo '${{ toJSON(needs) }}' | jq .
+          echo '${{ toJSON(needs) }}' \
+            | jq -e 'all(.[]; .result == "success" or .result == "skipped")'

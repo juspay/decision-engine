@@ -1,7 +1,6 @@
 use crate::euclid::ast::{Output, VolumeSplit};
+use crate::euclid::utils::sample_split_winner_first;
 use crate::euclid::{ast, types};
-use rand::distributions::WeightedIndex;
-use rand::prelude::*;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -222,59 +221,6 @@ impl fmt::Display for RoutingError {
 impl Error for RoutingError {}
 type RoutingResult<T> = Result<T, RoutingError>;
 
-/// djb2 hash of the volume-split seed. Byte-identical with the A/B arm assignment
-/// (`ab_test::common::assign_arm` / `ab_test::evaluator`) and with Hyperswitch's
-/// seeded volume split (hyperswitch `crates/router/src/core/payments/routing.rs`,
-/// `seeded_volume_split_index`): both sides must land on the same winner for the
-/// same payment, so this hash is a cross-repo contract — do not change it alone.
-fn djb2_seed_hash(seed: &str) -> u64 {
-    seed.bytes().fold(5381u64, |acc, b| {
-        acc.wrapping_mul(33).wrapping_add(u64::from(b))
-    })
-}
-
-fn sample_split_winner_first<T>(
-    mut splits: Vec<VolumeSplit<T>>,
-    seed: Option<&str>,
-) -> RoutingResult<Vec<T>> {
-    let idx = match seed {
-        // Deterministic per seed: djb2 slot over the cumulative weights, walked in
-        // declaration order. Every evaluation of the same payment picks the same
-        // winner, so the SDK's concurrent PML/session/config calls — and retries —
-        // cannot disagree with each other or with Hyperswitch's local evaluation.
-        Some(seed) => {
-            let total_weight: u64 = splits.iter().map(|sp| u64::from(sp.split)).sum();
-            if total_weight == 0 {
-                return Err(RoutingError::VolumeSplitFailed);
-            }
-            let slot = djb2_seed_hash(seed) % total_weight;
-            let mut cumulative = 0u64;
-            splits
-                .iter()
-                .position(|split| {
-                    cumulative += u64::from(split.split);
-                    slot < cumulative
-                })
-                .ok_or(RoutingError::VolumeSplitFailed)?
-        }
-        None => {
-            let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
-            let weighted_index =
-                WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
-            let mut rng = rand::thread_rng();
-            weighted_index.sample(&mut rng)
-        }
-    };
-
-    if idx >= splits.len() {
-        return Err(RoutingError::VolumeSplitFailed);
-    }
-    let winner = splits.remove(idx);
-    splits.insert(0, winner);
-
-    Ok(splits.into_iter().map(|split| split.output).collect())
-}
-
 pub fn perform_volume_split(
     splits: Vec<VolumeSplit<ConnectorInfo>>,
     seed: Option<&str>,
@@ -309,6 +255,7 @@ pub fn evaluate_output(output: &Output, seed: Option<&str>) -> RoutingResult<Vec
 #[cfg(test)]
 mod seeded_volume_split_tests {
     use super::*;
+    use crate::euclid::utils::djb2_seed_hash;
 
     fn splits(weights: &[u8]) -> Vec<VolumeSplit<ConnectorInfo>> {
         weights

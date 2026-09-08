@@ -1,8 +1,13 @@
-use super::ast::{Comparison, ComparisonType, IfStatement, Rule, ValueType};
+use super::ast::{
+    Comparison, ComparisonType, ConnectorInfo, IfStatement, Output, Rule, ValueType, VolumeSplit,
+};
 use super::errors::{EuclidErrors, ValidationErrorDetails};
-use super::types::{AlgorithmType, KeyDataType, StaticRoutingAlgorithm};
+use super::interpreter::RoutingError;
+use super::types::{AlgorithmType, BackendOutput, KeyDataType, StaticRoutingAlgorithm};
 use crate::error::ContainerError;
 use crate::euclid::types::{FieldValidationRules, KeyConfig, RoutingRule, TomlConfig};
+use rand::distributions::WeightedIndex;
+use rand::prelude::*;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -590,6 +595,71 @@ pub fn validate_string_value(
         Ok(())
     } else {
         Err(errors.join("; "))
+    }
+}
+
+/// djb2 hash of the volume-split seed. Byte-identical with the A/B arm assignment
+/// (`ab_test::common::assign_arm` / `ab_test::evaluator`) and with Hyperswitch's
+/// seeded volume split (hyperswitch `crates/router/src/core/payments/routing.rs`,
+/// `seeded_volume_split_index`): both sides must land on the same winner for the
+/// same payment, so this hash is a cross-repo contract — do not change it alone.
+pub(crate) fn djb2_seed_hash(seed: &str) -> u64 {
+    seed.bytes().fold(5381u64, |acc, b| {
+        acc.wrapping_mul(33).wrapping_add(u64::from(b))
+    })
+}
+
+pub fn sample_split_winner_first<T>(
+    mut splits: Vec<VolumeSplit<T>>,
+    seed: Option<&str>,
+) -> Result<Vec<T>, RoutingError> {
+    let idx = match seed {
+        // Deterministic per seed: djb2 slot over the cumulative weights, walked in
+        // declaration order. Every evaluation of the same payment picks the same
+        // winner, so the SDK's concurrent PML/session/config calls — and retries —
+        // cannot disagree with each other or with Hyperswitch's local evaluation.
+        Some(seed) => {
+            let total_weight: u64 = splits.iter().map(|sp| u64::from(sp.split)).sum();
+            if total_weight == 0 {
+                return Err(RoutingError::VolumeSplitFailed);
+            }
+            let slot = djb2_seed_hash(seed) % total_weight;
+            let mut cumulative = 0u64;
+            splits
+                .iter()
+                .position(|split| {
+                    cumulative += u64::from(split.split);
+                    slot < cumulative
+                })
+                .ok_or(RoutingError::VolumeSplitFailed)?
+        }
+        None => {
+            let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
+            let weighted_index =
+                WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
+            let mut rng = rand::thread_rng();
+            weighted_index.sample(&mut rng)
+        }
+    };
+
+    if idx >= splits.len() {
+        return Err(RoutingError::VolumeSplitFailed);
+    }
+    let winner = splits.remove(idx);
+    splits.insert(0, winner);
+
+    Ok(splits.into_iter().map(|split| split.output).collect())
+}
+
+pub fn apply_default_fallback(ir: &mut BackendOutput, fallback_output: Option<&[ConnectorInfo]>) {
+    if ir.rule_name.is_none() {
+        if let Some(fallback) = fallback_output.filter(|connectors| !connectors.is_empty()) {
+            crate::logger::debug!("Default fallback triggered: Overriding with fallback connector");
+
+            ir.rule_name = Some("default_fallback".to_string());
+            ir.output = Output::Priority(fallback.to_vec());
+            ir.evaluated_output = fallback.to_vec();
+        }
     }
 }
 
