@@ -598,14 +598,49 @@ pub fn validate_string_value(
     }
 }
 
+/// djb2 hash of the volume-split seed. Byte-identical with the A/B arm assignment
+/// (`ab_test::common::assign_arm` / `ab_test::evaluator`) and with Hyperswitch's
+/// seeded volume split (hyperswitch `crates/router/src/core/payments/routing.rs`,
+/// `seeded_volume_split_index`): both sides must land on the same winner for the
+/// same payment, so this hash is a cross-repo contract — do not change it alone.
+pub(crate) fn djb2_seed_hash(seed: &str) -> u64 {
+    seed.bytes().fold(5381u64, |acc, b| {
+        acc.wrapping_mul(33).wrapping_add(u64::from(b))
+    })
+}
+
 pub fn sample_split_winner_first<T>(
     mut splits: Vec<VolumeSplit<T>>,
+    seed: Option<&str>,
 ) -> Result<Vec<T>, RoutingError> {
-    let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
-    let weighted_index =
-        WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
-    let mut rng = rand::thread_rng();
-    let idx = weighted_index.sample(&mut rng);
+    let idx = match seed {
+        // Deterministic per seed: djb2 slot over the cumulative weights, walked in
+        // declaration order. Every evaluation of the same payment picks the same
+        // winner, so the SDK's concurrent PML/session/config calls — and retries —
+        // cannot disagree with each other or with Hyperswitch's local evaluation.
+        Some(seed) => {
+            let total_weight: u64 = splits.iter().map(|sp| u64::from(sp.split)).sum();
+            if total_weight == 0 {
+                return Err(RoutingError::VolumeSplitFailed);
+            }
+            let slot = djb2_seed_hash(seed) % total_weight;
+            let mut cumulative = 0u64;
+            splits
+                .iter()
+                .position(|split| {
+                    cumulative += u64::from(split.split);
+                    slot < cumulative
+                })
+                .ok_or(RoutingError::VolumeSplitFailed)?
+        }
+        None => {
+            let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
+            let weighted_index =
+                WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
+            let mut rng = rand::thread_rng();
+            weighted_index.sample(&mut rng)
+        }
+    };
 
     if idx >= splits.len() {
         return Err(RoutingError::VolumeSplitFailed);

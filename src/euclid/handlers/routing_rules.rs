@@ -774,7 +774,7 @@ async fn evaluate_algorithm_data(
         match algorithm_data {
             StaticRoutingAlgorithm::Single(conn) => {
                 let out_enum = Output::Single((**conn).clone());
-                let eval = evaluate_output(&out_enum).map_err(|_| {
+                let eval = evaluate_output(&out_enum, payload.payment_id.as_deref()).map_err(|_| {
                     (
                         EuclidErrors::FailedToEvaluateOutput(format!(
                             "{}",
@@ -789,7 +789,7 @@ async fn evaluate_algorithm_data(
 
             StaticRoutingAlgorithm::Priority(connectors) => {
                 let out_enum = Output::Priority(connectors.clone());
-                let eval = evaluate_output(&out_enum).map_err(|_| {
+                let eval = evaluate_output(&out_enum, payload.payment_id.as_deref()).map_err(|_| {
                     (
                         EuclidErrors::FailedToEvaluateOutput(format!(
                             "{}",
@@ -804,7 +804,7 @@ async fn evaluate_algorithm_data(
 
             StaticRoutingAlgorithm::VolumeSplit(splits) => {
                 let out_enum = Output::VolumeSplit(splits.clone());
-                let eval = evaluate_output(&out_enum).map_err(|_| {
+                let eval = evaluate_output(&out_enum, payload.payment_id.as_deref()).map_err(|_| {
                     (
                         EuclidErrors::FailedToEvaluateOutput(format!(
                             "{}",
@@ -821,7 +821,8 @@ async fn evaluate_algorithm_data(
                 let ctx = Context::new(payload.parameters.clone());
                 logger::debug!("routing_evaluation: context keys = {:?}", parameters.keys());
 
-                let mut ir = InterpreterBackend::eval_program(program, &ctx).map_err(|e| {
+                let mut ir = InterpreterBackend::eval_program(program, &ctx, payload.payment_id.as_deref())
+                    .map_err(|e| {
                     (
                         EuclidErrors::InvalidRequest(format!(
                             "Interpreter error: {:?}",
