@@ -76,7 +76,8 @@ interface StageDef {
   group: string
   icon: ElementType
   name: string
-  what: string
+  /** Computed from the live configuration, so the prose matches what actually happens here. */
+  what: (stack: StackState) => string
   runsWhen: string
   configuredBy: string
   configureTo?: string
@@ -94,7 +95,11 @@ const STAGES: StageDef[] = [
     group: 'Entry',
     icon: Zap,
     name: 'Payment arrives',
-    what: 'Your integration asks for a gateway, offering the connectors it considers eligible. Missing card attributes (network, type, issuer country) are filled in from the BIN before anything else runs.',
+    what: (stack) =>
+      'Your integration asks for a gateway, offering the connectors it considers eligible. Missing card attributes (network, type, issuer country) are filled in from the BIN before anything else runs.' +
+      (stack.slot === 'none'
+        ? ' With no strategy active, that list continues through the pipeline as-is — activate one to shape it.'
+        : ''),
     runsWhen: 'Every decision starts here.',
     configuredBy: 'Nothing to configure — but the fields your integration sends decide which later stages can run.',
     api: 'POST /decide-gateway',
@@ -111,7 +116,11 @@ const STAGES: StageDef[] = [
     group: 'Experiment layer',
     icon: FlaskConical,
     name: 'A/B experiment gate',
-    what: 'Payments are hashed into control or variant by payment ID. An arm pointing at a fixed strategy answers immediately — nothing below runs for that payment. An arm pointing at live routing continues with its own overrides (hedging, elimination threshold).',
+    what: (stack) => {
+      const experiment = abTestData(stack)
+      const split = experiment ? `${experiment.variant_split_pct}% of payments land in the variant, the rest in control — ` : ''
+      return `${split}payments are hashed into their arm by payment ID. An arm pointing at a fixed strategy answers immediately — nothing below runs for that payment. An arm pointing at live routing continues with its own overrides (hedging, elimination threshold).`
+    },
     runsWhen: 'While an experiment occupies the strategy slot. /routing/evaluate always follows its arms; /decide-gateway interception additionally needs the real-payments flag.',
     configuredBy: 'The A/B Testing page. An active experiment occupies the same slot as rules and volume splits.',
     configureTo: '/routing/ab-testing',
@@ -134,7 +143,8 @@ const STAGES: StageDef[] = [
     group: 'Network branch',
     icon: Network,
     name: 'Debit network routing',
-    what: 'For co-badged debit cards, eligible networks are ranked by processing cost — answering by itself in network-only mode, or riding along with the gateway decision in hybrid mode.',
+    what: () =>
+      'For co-badged debit cards, eligible networks are ranked by processing cost — answering by itself in network-only mode, or riding along with the gateway decision in hybrid mode.',
     runsWhen: 'Only when your integration asks for it on the request (rankingAlgorithm = NTW_BASED_ROUTING or NTW_SR_HYBRID_ROUTING) — and the account flag is on.',
     configuredBy: 'The Debit Routing page (merchant category code, acquirer country, enable flag).',
     configureTo: '/routing/debit',
@@ -149,7 +159,16 @@ const STAGES: StageDef[] = [
     group: 'Candidates — who can process it',
     icon: BookOpen,
     name: 'Your routing strategy',
-    what: 'One strategy holds this slot at a time: a rule set (rules evaluate top-to-bottom, first match wins), a volume split (weighted draw), or a running experiment. Its output is the ordered candidate list. When the slot is empty, your integration’s connector list passes through untouched.',
+    what: (stack) => {
+      const name = slotAlgorithmSummary(stack)?.name
+      if (stack.slot === 'rule')
+        return `Rules in “${name}” evaluate top-to-bottom — the first match wins and emits its connectors; when nothing matches, the default selection answers. Only one strategy can hold this slot at a time.`
+      if (stack.slot === 'volume')
+        return `“${name}” splits traffic by weighted draw — lane thickness above mirrors each connector’s share. Only one strategy can hold this slot at a time.`
+      if (stack.slot === 'ab')
+        return `The experiment “${name}” holds the slot, so rules and volume splits are paused while it runs — they all share this one activation slot.`
+      return 'One strategy holds this slot at a time: a rule set (first match wins), a volume split (weighted draw), or a running experiment. Its output is the ordered candidate list.'
+    },
     runsWhen: 'Whenever a strategy is activated. Activating one replaces whatever held the slot.',
     configuredBy: 'The Rule-Based or Volume Split pages.',
     configureTo: '/routing/rules',
@@ -172,7 +191,10 @@ const STAGES: StageDef[] = [
     group: 'Candidates — who can process it',
     icon: Filter,
     name: 'Eligibility check',
-    what: 'Connectors that can’t process this payment type are removed from the candidate list. Fails open: if the filter graph can’t be built, nothing is removed.',
+    what: (stack) =>
+      `Connectors that can’t process the payment’s method are removed from ${
+        stack.slot === 'none' ? 'your integration’s list' : 'the strategy’s output'
+      }. Fails open: if the filter graph can’t be built, nothing is removed.`,
     runsWhen: 'Whenever the payment’s method type is known.',
     configuredBy: 'Platform payment-method filters (not merchant-editable today).',
     api: 'pm_filters graph inside POST /routing/evaluate',
@@ -183,7 +205,8 @@ const STAGES: StageDef[] = [
     group: 'Ordering — who should get it',
     icon: Star,
     name: 'Preferred gateway',
-    what: 'A payment that pins a gateway (with dynamic switching off) is answered on the spot — or fails if the pinned gateway isn’t eligible. With dynamic switching on, the preference only boosts it to the front.',
+    what: () =>
+      'A payment that pins a gateway (with dynamic switching off) is answered on the spot — or fails if the pinned gateway isn’t eligible. With dynamic switching on, the preference only boosts it to the front.',
     runsWhen: 'Only when a preferred gateway is present on the payment itself.',
     configuredBy: 'Set per order by your integration — the dashboard cannot know it in advance.',
     api: 'payment_info.preferred_gateway on POST /decide-gateway',
@@ -196,7 +219,10 @@ const STAGES: StageDef[] = [
     group: 'Ordering — who should get it',
     icon: SlidersHorizontal,
     name: 'Baseline priority',
-    what: 'The static gateway priority (or priority script) sets the starting order and can enforce a hard allow-list. When success-rate scoring is off, positions become the scores: 1.0, 0.9, 0.8…',
+    what: (stack) =>
+      stack.srConfigured
+        ? 'The static gateway priority (or priority script) sets the starting order and can enforce a hard allow-list; success-rate scores take over from here.'
+        : 'With success-rate scoring off, these positions become the scores themselves (1.0, 0.9, 0.8…) — in effect, the priority order decides the ranking.',
     runsWhen: 'Every gateway decision, unless the request forces pure success-rate ranking.',
     configuredBy: 'Gateway priority on the merchant account.',
     api: 'merchant_account.gateway_priority',
@@ -212,7 +238,9 @@ const STAGES: StageDef[] = [
     group: 'Ordering — who should get it',
     icon: TrendingUp,
     name: 'Success-rate scoring',
-    what: 'Live rolling success rates for this payment’s dimensions re-rank the candidates. A hedging slice of traffic explores uniformly so the scores never go stale.',
+    what: (stack) =>
+      'Live rolling success rates for this payment’s dimensions re-rank the candidates. A hedging slice of traffic explores uniformly so the scores never go stale.' +
+      (stack.autopilotOn ? ' Autopilot is retuning the score window and hedging automatically.' : ''),
     runsWhen: 'When success-rate routing is configured for your account (or forced by the request).',
     configuredBy: 'The Multi Objective page — score window, hedging %, per-method overrides, Autopilot.',
     configureTo: '/routing/sr',
@@ -235,7 +263,10 @@ const STAGES: StageDef[] = [
     group: 'Ordering — who should get it',
     icon: Activity,
     name: 'Health penalties',
-    what: 'Scheduled outages divide a gateway’s score by 10; elimination divides below-threshold gateways by 5 and relabels the decision as downtime routing. Penalised gateways are demoted, never removed — there is always an answer.',
+    what: (stack) =>
+      `Scheduled outages divide a gateway’s score by 10; elimination divides below-threshold gateways by 5 — on top of ${
+        stack.srConfigured ? 'their live success-rate scores' : 'the priority-based scores'
+      } — and relabels the decision as downtime routing. Penalised gateways are demoted, never removed.`,
     runsWhen: 'Outage checks always run; elimination needs its configuration (or the request flag).',
     configuredBy: 'Elimination thresholds on the Multi Objective page.',
     configureTo: '/routing/sr',
@@ -263,7 +294,11 @@ const STAGES: StageDef[] = [
     group: 'Ordering — who should get it',
     icon: Coins,
     name: 'Cost optimization',
-    what: 'Expected value = auth score × (margin − cost). A gateway that trails slightly on auth but processes cheaper takes the lead. Steps aside without cost data, and for exploration traffic.',
+    what: (stack) =>
+      'Expected value = auth score × (margin − cost). A gateway that trails slightly on auth but processes cheaper takes the lead. Steps aside without cost data, and for exploration traffic.' +
+      (stack.srConfigured
+        ? ''
+        : ' Note: with success-rate scoring off, the auth side of the trade-off comes from priority positions, not live data.'),
     runsWhen: 'When multi-objective routing is enabled.',
     configuredBy: 'The Multi Objective page — the margin dial sets how much success rate you’ll trade for cost.',
     configureTo: '/routing/sr',
@@ -283,7 +318,8 @@ const STAGES: StageDef[] = [
     group: 'Ordering — who should get it',
     icon: Scale,
     name: 'Volume commitment',
-    what: 'A contracted gateway that is behind on its committed volume and within quality tolerance of the leader can win a dice-roll and take the payment. The last stage that can change the answer; fails open on a stale plan.',
+    what: () =>
+      'A contracted gateway that is behind on its committed volume and within quality tolerance of the leader can win a dice-roll and take the payment. The last stage that can change the answer; fails open on a stale plan.',
     runsWhen: 'When volume-commitment routing is enabled and a current steering plan exists.',
     configuredBy: 'Volume contracts on the Multi Objective page.',
     configureTo: '/routing/sr?tab=volume',
@@ -298,18 +334,48 @@ const STAGES: StageDef[] = [
     group: 'Decision & learning',
     icon: Flag,
     name: 'Decision',
-    what: 'The top-scored gateway wins; the rest queue as ordered fallbacks. The response’s routing_approach names the stage that made the call. If no candidate survived, the decision fails with GATEWAY_NOT_FOUND — there is no hidden default.',
+    what: (stack) => {
+      const suffix =
+        ' The response’s routing_approach names the deciding stage; if no candidate survived, the decision fails with GATEWAY_NOT_FOUND — there is no hidden default.'
+      if (stack.srConfigured && stack.costOn)
+        return `The best live success-rate score leads, and cost optimization may hand the payment to a near-tied cheaper gateway; the rest queue as ordered fallbacks.${suffix}`
+      if (stack.srConfigured)
+        return `The best live success-rate score wins; the rest queue as ordered fallbacks.${suffix}`
+      if (stack.slot === 'rule' || stack.slot === 'volume')
+        return `With success-rate scoring off, your strategy’s order decides — the first eligible connector it emits wins, and the rest queue in its order.${suffix}`
+      return `With no strategy and no scoring, every eligible candidate ties — the winner falls to internal map order, effectively arbitrary. Activate a strategy or configure success-rate scoring to make this deterministic.${suffix}`
+    },
     runsWhen: 'Every decision ends here, unless answered early above.',
     configuredBy: '—',
     api: 'DecidedGateway response of POST /decide-gateway',
-    view: () => ({ badge: 'Always runs', variant: 'blue', dim: false }),
+    view: (stack) => ({
+      badge: 'Always runs',
+      variant: 'blue',
+      dim: false,
+      detail:
+        stack.srConfigured && stack.costOn
+          ? 'best score + cost wins'
+          : stack.srConfigured
+            ? 'best score wins'
+            : stack.slot === 'rule' || stack.slot === 'volume'
+              ? 'strategy order wins'
+              : 'arbitrary tie',
+    }),
   },
   {
     id: 'learn',
     group: 'Decision & learning',
     icon: RefreshCcw,
     name: 'Learning loop',
-    what: 'Your integration reports each payment’s outcome; success-rate and elimination scores update, and tomorrow’s ranking shifts. No outcome reported means no learning.',
+    what: (stack) => {
+      if (stack.srConfigured && stack.eliminationConfigured)
+        return 'Your integration reports each payment’s outcome; success-rate and elimination scores update, and tomorrow’s ranking shifts. No outcome reported means no learning.'
+      if (stack.srConfigured)
+        return 'Your integration reports each payment’s outcome; success-rate scores update, and tomorrow’s ranking shifts. No outcome reported means no learning.'
+      if (stack.eliminationConfigured)
+        return 'Your integration reports each payment’s outcome; elimination health scores update. Success-rate scoring is off, so the ranking itself doesn’t learn yet — only health penalties do.'
+      return 'Your integration can report outcomes here, but nothing reads them yet — success-rate scoring and elimination are both off, so reported results don’t change routing today.'
+    },
     runsWhen: 'Whenever the score-update endpoint is called after the payment settles or fails.',
     configuredBy: 'An integration responsibility.',
     api: 'POST /update-gateway-score',
@@ -715,7 +781,7 @@ function StageRow({
         </button>
         {open ? (
           <div className="border-t border-slate-100 bg-slate-50/60 px-4 py-3 dark:border-[#1e2535] dark:bg-black/15">
-            <p className={type.body}>{stage.what}</p>
+            <p className={type.body}>{stage.what(stack)}</p>
             <StageLiveDetail stage={stage} stack={stack} overflow={overflow} loadFailed={loadFailed} />
             <dl className="mt-3 space-y-1.5">
               <ExpansionFact label="Runs when" value={stage.runsWhen} />
@@ -828,11 +894,12 @@ function StageLiveDetail({
       </div>
     )
   }
-  if (stage.id === 'decide' && stack.slot === 'none' && !stack.srConfigured && !loadFailed) {
+  // The decide stage's arbitrary-tie warning lives in its dynamic `what` copy; only flag when
+  // that copy may be wrong because the configuration never fully loaded.
+  if (stage.id === 'decide' && loadFailed) {
     return (
       <p className="mt-3 text-[12px] leading-4 text-amber-600 dark:text-amber-400">
-        With no strategy and no scoring configured, tied candidates are broken by internal map order —
-        effectively arbitrary, and not the order your integration sent.
+        Part of your configuration didn’t load, so this description may not reflect your real setup.
       </p>
     )
   }
