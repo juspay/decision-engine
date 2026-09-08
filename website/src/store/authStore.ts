@@ -94,6 +94,16 @@ export function useCanEditRouting(): boolean {
   return useAuthStore((s) => sessionAllows(s.user, 'routing:write'))
 }
 
+/**
+ * Whether this session sees the beta Volume Contracts surfaces (SR routing tab, its feature flag,
+ * the analytics view, and the simulator panel). Super-admins only — the platform roster on
+ * `user_auth.super_admin_emails`, as reported by `/auth/me`. Presentation only: nothing on the API
+ * is gated by it.
+ */
+export function useVolumeContractsBeta(): boolean {
+  return useAuthStore((s) => Boolean(s.user?.isSuperAdmin))
+}
+
 export const useAuthStore = create<AuthStore>()(
   persist(
     (set) => ({

@@ -13,7 +13,7 @@ import { Spinner } from '../ui/Spinner'
 import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
-import { useAuthStore } from '../../store/authStore'
+import { useAuthStore, useVolumeContractsBeta } from '../../store/authStore'
 import { apiErrorStatus, apiPost, fetcher } from '../../lib/api'
 import { ContractSimulationPanel } from './ContractSimulationPanel'
 import { VolumeCommitmentRunChart } from './VolumeCommitmentRunChart'
@@ -1179,6 +1179,9 @@ export function DecisionSimulatorPage() {
   const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
   const authUser = useAuthStore((state) => state.user)
+  // Volume Contracts is in beta: the contract loader and commitment run chart on the Batch tab
+  // are shown only to super-admins.
+  const volumeContractsBeta = useVolumeContractsBeta()
   const authMerchantId = authUser?.merchantId || ''
   const effectiveMerchantId = merchantId || authMerchantId
   const currentScopeKey = explorerScopeKey(
@@ -3956,7 +3959,7 @@ export function DecisionSimulatorPage() {
         style={activeTab === 'rule' ? { display: 'none' } : undefined}
       >
         <div className={`flex flex-col gap-6 min-w-0 ${activeTab === 'batch' ? 'lg:min-h-0' : 'self-start'}`}>
-        {activeTab === 'batch' && (
+        {activeTab === 'batch' && volumeContractsBeta && (
           <ContractSimulationPanel
             merchantId={effectiveMerchantId}
             isSimulating={isSimulating}
@@ -3982,7 +3985,7 @@ export function DecisionSimulatorPage() {
             }}
           />
         )}
-        {activeTab === 'batch' && (
+        {activeTab === 'batch' && volumeContractsBeta && (
           <VolumeCommitmentRunChart
             merchantId={effectiveMerchantId}
             results={simulationResults}

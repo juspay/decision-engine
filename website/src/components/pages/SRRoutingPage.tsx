@@ -11,7 +11,7 @@ import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
-import { useCanEditRouting } from '../../store/authStore'
+import { useCanEditRouting, useVolumeContractsBeta } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
 import { PAYMENT_METHOD_TYPES, PAYMENT_METHODS } from '../../lib/constants'
 import {
@@ -212,11 +212,15 @@ export function SRRoutingPage() {
   // editable. (See sr_auto_calibration.rs — it skips non-autopilot rows and never sets defaults.)
   const features = useMerchantFeatures(merchantId ?? undefined)
   const autopilotOn = features.isEnabled('autopilot')
+  // Volume Contracts is in beta: only super-admins see its tab. A shared
+  // ?tab=volume link opened by anyone else falls back to Autopilot like any unknown tab.
+  const volumeContractsBeta = useVolumeContractsBeta()
   // Active tab is kept in the URL (?tab=…) so a reload or shared link reopens it directly.
   // Unknown/absent values fall back to Autopilot, and the default is left out of the URL.
   const [searchParams, setSearchParams] = useSearchParams()
   const tabParam = searchParams.get('tab')
-  const activeTab: SRTab = SR_TABS.includes(tabParam as SRTab) ? (tabParam as SRTab) : 'autopilot'
+  const requestedTab: SRTab = SR_TABS.includes(tabParam as SRTab) ? (tabParam as SRTab) : 'autopilot'
+  const activeTab: SRTab = requestedTab === 'volume' && !volumeContractsBeta ? 'autopilot' : requestedTab
   const setActiveTab = (tab: SRTab) => {
     setSearchParams(
       (prev) => {
@@ -406,12 +410,14 @@ export function SRRoutingPage() {
           <button type="button" className={tabClass('manual')} onClick={() => setActiveTab('manual')}>Manual</button>
           <button type="button" className={tabClass('flags')} onClick={() => setActiveTab('flags')}>Feature Flags</button>
           <button type="button" className={tabClass('cost')} onClick={() => setActiveTab('cost')}>Cost Estimation</button>
-          <button type="button" className={`${tabClass('volume')} inline-flex items-center gap-1.5`} onClick={() => setActiveTab('volume')}>
-            Volume Contracts
-            <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-wide text-violet-600 dark:bg-violet-500/15 dark:text-violet-400">
-              Beta
-            </span>
-          </button>
+          {volumeContractsBeta && (
+            <button type="button" className={`${tabClass('volume')} inline-flex items-center gap-1.5`} onClick={() => setActiveTab('volume')}>
+              Volume Contracts
+              <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-wide text-violet-600 dark:bg-violet-500/15 dark:text-violet-400">
+                Beta
+              </span>
+            </button>
+          )}
         </nav>
       </div>
 
@@ -614,7 +620,7 @@ export function SRRoutingPage() {
 
           {/* ── Volume Contracts tab: the contract editor, hosted here beside the other routing
               objectives. It keeps its own data hooks; only the page chrome is dropped. ── */}
-          {activeTab === 'volume' && <VolumeContractsPage embedded />}
+          {activeTab === 'volume' && volumeContractsBeta && <VolumeContractsPage embedded />}
         </>
       )}
     </div>
@@ -800,6 +806,9 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
   )
 }
 
+/** Feature rows shown only to super-admins while Volume Contracts is in beta. */
+const VOLUME_CONTRACTS_BETA_FEATURES: readonly KnownFeature[] = ['volume-contracts']
+
 const SR_FEATURES: { feature: KnownFeature; title: string; description: string; docsUrl?: string }[] = [
   {
     feature: 'gsm-scoring-filter',
@@ -925,6 +934,10 @@ function SrDimensionsConfig({ merchantId }: { merchantId: string | null }) {
 
 function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
   const features = useMerchantFeatures(merchantId ?? undefined)
+  const volumeContractsBeta = useVolumeContractsBeta()
+  const visibleFeatures = SR_FEATURES.filter(
+    ({ feature }) => volumeContractsBeta || !VOLUME_CONTRACTS_BETA_FEATURES.includes(feature),
+  )
   const [toggling, setToggling] = useState<KnownFeature | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -961,7 +974,7 @@ function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
       )}
 
       <Card>
-        {SR_FEATURES.map(({ feature, title, description, docsUrl }, idx) => {
+        {visibleFeatures.map(({ feature, title, description, docsUrl }, idx) => {
           const enabled = features.isEnabled(feature)
           return (
             <div
