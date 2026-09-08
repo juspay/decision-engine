@@ -211,6 +211,34 @@ export function volumeSplits(stack: StackState): VolumeSplitItem[] {
   return (algorithmData(stack.slotAlgorithm) as VolumeSplitItem[]) ?? []
 }
 
+/**
+ * Parameters for an example /routing/evaluate call that would actually match the merchant's
+ * first rule (first match wins, so the response demonstrates it). Falls back to a generic card
+ * payment when no rule conditions are usable.
+ */
+export function exampleEvaluateParameters(
+  stack: StackState,
+): Record<string, { type: string; value: string | number }> {
+  const params: Record<string, { type: string; value: string | number }> = {}
+  const firstRule = euclidData(stack)?.rules?.[0]
+  for (const condition of firstRule?.statements?.[0]?.condition ?? []) {
+    if (Object.keys(params).length >= 3) break
+    const { type, value } = condition.value ?? {}
+    if (type === 'number' && typeof value === 'number') {
+      // Satisfy strict inequalities by stepping past the boundary.
+      const bump = condition.comparison === 'greater_than' ? 1 : condition.comparison === 'less_than' ? -1 : 0
+      params[condition.lhs] = { type, value: value + bump }
+    } else if ((type === 'enum_variant' || type === 'str_value') && typeof value === 'string') {
+      params[condition.lhs] = { type, value }
+    }
+  }
+  if (Object.keys(params).length === 0) {
+    params.payment_method = { type: 'enum_variant', value: 'card' }
+    params.amount = { type: 'number', value: 1500 }
+  }
+  return params
+}
+
 export function priorityList(stack: StackState): GatewayConnector[] {
   const type = algorithmType(stack.slotAlgorithm)
   const data = algorithmData(stack.slotAlgorithm)

@@ -36,6 +36,7 @@ import {
   deriveLanes,
   deriveStack,
   euclidData,
+  exampleEvaluateParameters,
   slotAlgorithmSummary,
   volumeSplits,
 } from '../../features/routing/decisionFlow/model'
@@ -343,7 +344,7 @@ const STAGES: StageDef[] = [
         return `The best live success-rate score wins; the rest queue as ordered fallbacks.${suffix}`
       if (stack.slot === 'rule' || stack.slot === 'volume')
         return `With success-rate scoring off, your strategy’s order decides — the first eligible connector it emits wins, and the rest queue in its order.${suffix}`
-      return `With no strategy and no scoring, every eligible candidate ties — the winner falls to internal map order, effectively arbitrary. Activate a strategy or configure success-rate scoring to make this deterministic.${suffix}`
+      return `With no strategy and no scoring, nothing filters or reorders — the payment simply goes to your integration’s fallback: the eligibleGatewayList sent on /decide-gateway. Every candidate in it ties, so the pick within the list is effectively arbitrary; activate a strategy or configure scoring to make it deterministic.${suffix}`
     },
     runsWhen: 'Every decision ends here, unless answered early above.',
     configuredBy: '—',
@@ -359,7 +360,7 @@ const STAGES: StageDef[] = [
             ? 'best score wins'
             : stack.slot === 'rule' || stack.slot === 'volume'
               ? 'strategy order wins'
-              : 'arbitrary tie',
+              : 'integration fallback wins',
     }),
   },
   {
@@ -477,6 +478,8 @@ export function DecisionFlowPage() {
               connectorCount={laneModel.ghost ? 0 : laneModel.lanes.length + laneModel.overflow}
               overflow={laneModel.overflow}
               loadFailed={loadFailed}
+              merchantId={merchantId}
+              laneNames={laneModel.lanes.map((lane) => lane.name)}
               openStage={openStage}
               onToggle={(id) => setOpenStage((current) => (current === id ? null : id))}
             />
@@ -650,6 +653,91 @@ function ConfigureLink({ to }: { to: string }) {
   )
 }
 
+/* ── example requests: the smallest call that exercises each stage ────────── */
+
+function curlFor(path: string, body: unknown) {
+  return `curl -X POST '$DE_HOST${path}' \\\n  -H 'content-type: application/json' \\\n  -d '${JSON.stringify(body, null, 2)}'`
+}
+
+/**
+ * A minimal, copy-pasteable request per stage — required fields only, rebuilt from the live
+ * configuration (real connector names and rule parameters when a strategy provides them, a
+ * sensible default set otherwise).
+ */
+function exampleRequest(
+  stageId: StageId,
+  stack: StackState,
+  merchantId: string,
+  laneNames: string[],
+): { code: string; note?: string } | null {
+  const mid = merchantId || 'your_merchant_id'
+  const decideBody = {
+    merchantId: mid,
+    eligibleGatewayList: laneNames,
+    paymentInfo: { paymentId: 'PAY_001', amount: 1500, currency: 'INR', paymentMethodType: 'card' },
+  }
+  switch (stageId) {
+    case 'arrive':
+    case 'decide':
+      return {
+        code: curlFor('/decide-gateway', decideBody),
+        note:
+          stack.slot === 'none' && !stack.srConfigured
+            ? 'With nothing configured, the answer comes straight from this eligibleGatewayList.'
+            : undefined,
+      }
+    case 'slot':
+      if (stack.slot === 'ab') return null
+      return {
+        code: curlFor('/routing/evaluate', {
+          created_by: mid,
+          payment_id: 'PAY_001',
+          fallback_output: laneNames.map((name) => ({ gateway_name: name, gateway_id: null })),
+          parameters: exampleEvaluateParameters(stack),
+        }),
+        note:
+          stack.slot === 'rule'
+            ? 'These parameters satisfy your first rule, so the response shows it matching.'
+            : undefined,
+      }
+    case 'sr':
+      return {
+        code: curlFor('/decide-gateway', { ...decideBody, rankingAlgorithm: 'SR_BASED_ROUTING' }),
+        note: 'rankingAlgorithm forces pure success-rate ranking for this request.',
+      }
+    case 'debit':
+      return {
+        code: curlFor('/decide-gateway', { ...decideBody, rankingAlgorithm: 'NTW_BASED_ROUTING' }),
+        note: 'The co-badged card details must ride along in paymentInfo.metadata.',
+      }
+    case 'learn':
+      return {
+        code: curlFor('/update-gateway-score', {
+          merchantId: mid,
+          gateway: laneNames[0] ?? 'razorpay',
+          gatewayReferenceId: null,
+          status: 'CHARGED',
+          paymentId: 'PAY_001',
+        }),
+        note: 'Report the same paymentId you routed — the decision context is kept for 30 minutes.',
+      }
+    default:
+      return null
+  }
+}
+
+function CodeSnippet({ code, note }: { code: string; note?: string }) {
+  return (
+    <div className="mt-3">
+      <p className={`${type.labelSmall} mb-1.5`}>Example request — required fields only</p>
+      <pre className="overflow-x-auto rounded-lg border border-slate-200 bg-white px-3 py-2.5 font-mono text-[10.5px] leading-[16px] text-slate-700 dark:border-[#1e2535] dark:bg-[#0d1118] dark:text-[#a8b4c8]">
+        {code}
+      </pre>
+      {note ? <p className={`${type.bodySmall} mt-1.5`}>{note}</p> : null}
+    </div>
+  )
+}
+
 /* ── the stage rail ───────────────────────────────────────────────────────── */
 
 function FlowRail({
@@ -657,6 +745,8 @@ function FlowRail({
   connectorCount,
   overflow,
   loadFailed,
+  merchantId,
+  laneNames,
   openStage,
   onToggle,
 }: {
@@ -664,6 +754,8 @@ function FlowRail({
   connectorCount: number
   overflow: number
   loadFailed: boolean
+  merchantId: string
+  laneNames: string[]
   openStage: StageId | null
   onToggle: (id: StageId) => void
 }) {
@@ -695,6 +787,8 @@ function FlowRail({
                     connectorCount={connectorCount}
                     overflow={overflow}
                     loadFailed={loadFailed}
+                    merchantId={merchantId}
+                    laneNames={laneNames}
                     open={openStage === stage.id}
                     onToggle={() => onToggle(stage.id)}
                   />
@@ -726,6 +820,8 @@ function StageRow({
   connectorCount,
   overflow,
   loadFailed,
+  merchantId,
+  laneNames,
   open,
   onToggle,
 }: {
@@ -734,6 +830,8 @@ function StageRow({
   connectorCount: number
   overflow: number
   loadFailed: boolean
+  merchantId: string
+  laneNames: string[]
   open: boolean
   onToggle: () => void
 }) {
@@ -783,6 +881,10 @@ function StageRow({
           <div className="border-t border-slate-100 bg-slate-50/60 px-4 py-3 dark:border-[#1e2535] dark:bg-black/15">
             <p className={type.body}>{stage.what(stack)}</p>
             <StageLiveDetail stage={stage} stack={stack} overflow={overflow} loadFailed={loadFailed} />
+            {(() => {
+              const example = exampleRequest(stage.id, stack, merchantId, laneNames)
+              return example ? <CodeSnippet code={example.code} note={example.note} /> : null
+            })()}
             <dl className="mt-3 space-y-1.5">
               <ExpansionFact label="Runs when" value={stage.runsWhen} />
               <ExpansionFact label="Configured by" value={stage.configuredBy} />
