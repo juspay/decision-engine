@@ -11,7 +11,7 @@ interface LanePath {
 interface LaneLabel {
   x: number
   y: number
-  kind: 'dot' | 'chip' | 'rank'
+  kind: 'dot' | 'chip' | 'rank' | 'note'
   text?: string
   color?: string
 }
@@ -98,6 +98,14 @@ export function LaneCanvas({
             if (i === lanes.length - 1 && overflow > 0) {
               labels.push({ x: laneX(lanes.length), y: y1 - 22, kind: 'chip', text: `+${overflow} more` })
             }
+            if (i === lanes.length - 1 && ghost) {
+              labels.push({
+                x: laneX(lanes.length) - LANE_STEP / 2 + 10,
+                y: y1 - 20,
+                kind: 'note',
+                text: 'example set — activate a strategy to see yours',
+              })
+            }
           } else if (gap.kind === 'converge' && deterministicHead && !ghost) {
             d += ` L ${x} ${y0}`
             if (lane.name === deterministicHead) {
@@ -146,19 +154,19 @@ export function LaneCanvas({
       >
         {drawn.paths.map((path, i) => (
           <g key={i}>
-            <path d={path.d} fill="none" stroke={path.color} strokeWidth={path.width + 7} strokeLinecap="round" opacity={ghost ? 0.06 : 0.14} />
+            <path d={path.d} fill="none" stroke={path.color} strokeWidth={path.width + 7} strokeLinecap="round" opacity={ghost ? 0.09 : 0.14} />
             <path
               d={path.d}
               fill="none"
               stroke={path.color}
               strokeWidth={path.width}
               strokeLinecap="round"
-              opacity={ghost ? 0.55 : 0.95}
+              opacity={ghost ? 0.72 : 0.95}
               pathLength={100}
-              // The draw-in class sets stroke-dasharray:100, which would override the ghost dash
-              // pattern (stylesheet beats presentation attribute) — ghost lanes skip the animation.
+              // The draw-in class sets stroke-dasharray:100, which would override the example dash
+              // pattern (stylesheet beats presentation attribute) — example lanes skip the animation.
               className={ghost ? undefined : 'de-lane-draw'}
-              style={ghost ? { strokeDasharray: '4 7' } : { animationDelay: `${i * 90}ms` }}
+              style={ghost ? { strokeDasharray: '6 5' } : { animationDelay: `${i * 90}ms` }}
             />
           </g>
         ))}
@@ -179,13 +187,24 @@ export function LaneCanvas({
               <span
                 key={i}
                 title={label.text}
-                className="absolute flex max-w-[74px] -translate-x-1/2 items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2 py-0.5 font-mono text-[10px] text-slate-600 dark:border-[#1e2535] dark:bg-[#0d1118] dark:text-[#9ca7ba]"
+                className="absolute flex max-w-[80px] -translate-x-1/2 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:border-[#1e2535] dark:bg-[#0d1118] dark:text-[#9ca7ba]"
                 style={{ left: label.x, top: label.y }}
               >
                 {label.color ? (
                   <span className="h-[7px] w-[7px] flex-shrink-0 rounded-[3px]" style={{ background: label.color }} />
                 ) : null}
                 <span className="min-w-0 truncate">{label.text}</span>
+              </span>
+            )
+          }
+          if (label.kind === 'note') {
+            return (
+              <span
+                key={i}
+                className="absolute whitespace-nowrap text-[10.5px] italic text-slate-400 dark:text-[#6d778a]"
+                style={{ left: label.x, top: label.y }}
+              >
+                {label.text}
               </span>
             )
           }

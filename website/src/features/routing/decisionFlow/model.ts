@@ -105,10 +105,15 @@ export interface LaneModel {
   deterministicHead: string | null
 }
 
-const GHOST_LANES: LaneDef[] = [
-  { name: 'connector A', color: '#64748b' },
-  { name: 'connector B', color: '#64748b' },
-  { name: 'connector C', color: '#64748b' },
+/**
+ * When no strategy names connectors we can't know the merchant's real set — but a blank grey
+ * diagram teaches nothing. Show a plausible example set instead, in full color, dashed and
+ * explicitly labeled as an example by the canvas.
+ */
+const EXAMPLE_LANES: LaneDef[] = [
+  { name: 'razorpay', color: LANE_PALETTE[0] },
+  { name: 'payu', color: LANE_PALETTE[1] },
+  { name: 'stripe', color: LANE_PALETTE[2] },
 ]
 
 /**
@@ -167,7 +172,7 @@ export function deriveLanes(stack: StackState): LaneModel {
   }
 
   if (seen.length === 0) {
-    return { lanes: GHOST_LANES, overflow: 0, ghost: true, deterministicHead: null }
+    return { lanes: EXAMPLE_LANES, overflow: 0, ghost: true, deterministicHead: null }
   }
 
   const lanes = seen.slice(0, MAX_LANES).map((name, i) => ({

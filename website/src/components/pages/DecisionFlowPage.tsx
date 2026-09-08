@@ -393,7 +393,7 @@ export function DecisionFlowPage() {
           <h2 className={type.heading}>The journey of one payment</h2>
           <p className={type.bodySmall}>
             {laneModel.ghost
-              ? 'Lanes are illustrative until a strategy names connectors.'
+              ? 'Showing an example connector set — activate a strategy to see yours.'
               : 'Lanes are your connectors. Click any stage to see what it does.'}
           </p>
         </CardHeader>
