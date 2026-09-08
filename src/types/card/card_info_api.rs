@@ -46,9 +46,7 @@ fn client() -> &'static reqwest::Client {
     })
 }
 
-
 const RESPONSE_BODY_SNIPPET_MAX_BYTES: usize = 2048;
-
 
 async fn read_body_snippet(mut response: reqwest::Response) -> Option<String> {
     let mut buf: Vec<u8> = Vec::new();
@@ -79,9 +77,7 @@ fn upstream_request_id(headers: &reqwest::header::HeaderMap) -> String {
         .to_string()
 }
 
-
 const ERROR_MESSAGE_LABEL_MAX_CHARS: usize = 120;
-
 
 fn upstream_error(body: Option<&str>) -> (String, String) {
     let parsed = body.and_then(|body| serde_json::from_str::<serde_json::Value>(body).ok());
@@ -96,13 +92,15 @@ fn upstream_error(body: Option<&str>) -> (String, String) {
     (field("/error/code"), field("/error/message"))
 }
 
-
 fn sanitize_error_message(message: &str) -> String {
     let message = message
         .split_once(" at line ")
         .map(|(head, _)| head)
         .unwrap_or(message);
-    message.chars().take(ERROR_MESSAGE_LABEL_MAX_CHARS).collect()
+    message
+        .chars()
+        .take(ERROR_MESSAGE_LABEL_MAX_CHARS)
+        .collect()
 }
 
 fn record_lookup_failure(error_code: &str, upstream_code: &str, error_message: &str) {
