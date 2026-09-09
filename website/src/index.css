@@ -305,3 +305,23 @@
     animation-duration: 0s;
   }
 }
+
+/* Ambient flow along the Decision Flow ribbons: a short dash cycle drifting downstream. The
+   cycle length (18px) matches the dasharray below; duration is set inline per lane so volume
+   shares read as flow speed. */
+.de-lane-flow {
+  stroke-dasharray: 3 15;
+  animation: de-lane-flow 2.2s linear infinite;
+}
+
+@keyframes de-lane-flow {
+  to {
+    stroke-dashoffset: -18;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .de-lane-flow {
+    display: none;
+  }
+}

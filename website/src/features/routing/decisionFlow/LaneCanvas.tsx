@@ -6,12 +6,14 @@ interface LanePath {
   color: string
   width: number
   winner: boolean
+  /** Seconds per flow-dash cycle — volume shares read as flow speed (bigger share, faster). */
+  flowDuration: number
 }
 
 interface LaneLabel {
   x: number
   y: number
-  kind: 'dot' | 'chip' | 'rank' | 'note'
+  kind: 'dot' | 'chip' | 'rank' | 'note' | 'pct'
   text?: string
   color?: string
 }
@@ -20,8 +22,12 @@ interface Drawn {
   width: number
   height: number
   paths: LanePath[]
+  /** Clearly-illustrative side branches (dashed) — e.g. the eligibility "if unsupported" fork. */
+  extras: Array<{ d: string }>
   labels: LaneLabel[]
 }
+
+type GapKind = 'fan' | 'straight' | 'converge' | 'filter' | 'split'
 
 const LANE_X0 = 46
 const LANE_STEP = 76
@@ -66,7 +72,7 @@ export function LaneCanvas({
       const gaps = Array.from(container.querySelectorAll<HTMLElement>('[data-lane-gap]')).map((el) => {
         const rect = el.getBoundingClientRect()
         return {
-          kind: el.dataset.laneGap as 'fan' | 'straight' | 'converge',
+          kind: el.dataset.laneGap as GapKind,
           top: rect.top - containerRect.top,
           height: rect.height,
         }
@@ -77,10 +83,12 @@ export function LaneCanvas({
       }
 
       const paths: LanePath[] = []
+      const extras: Array<{ d: string }> = []
       const labels: LaneLabel[] = []
 
       lanes.forEach((lane, i) => {
         const x = laneX(i)
+        const last = i === lanes.length - 1
         let d = ''
         let alive = true
         let winner = false
@@ -95,16 +103,38 @@ export function LaneCanvas({
             d = `M ${originX} ${originY} C ${originX} ${y0 + gap.height * 0.55}, ${x} ${y0 + gap.height * 0.35}, ${x} ${y1}`
             if (i === 0) labels.push({ x: originX, y: originY, kind: 'dot' })
             labels.push({ x, y: y1 - 22, kind: 'chip', text: lane.name, color: lane.color })
-            if (i === lanes.length - 1 && overflow > 0) {
+            if (last && overflow > 0) {
               labels.push({ x: laneX(lanes.length), y: y1 - 22, kind: 'chip', text: `+${overflow} more` })
             }
-            if (i === lanes.length - 1 && ghost) {
+            if (last && ghost) {
               labels.push({
                 x: laneX(lanes.length) - LANE_STEP / 2 + 10,
                 y: y1 - 20,
                 kind: 'note',
                 text: 'example set — activate a strategy to see yours',
               })
+            }
+          } else if (gap.kind === 'split') {
+            d += ` L ${x} ${y0} L ${x} ${y1}`
+            if (lane.share != null) {
+              labels.push({ x, y: mid - 8, kind: 'pct', text: `${Math.round(lane.share * 100)}%`, color: lane.color })
+            }
+          } else if (gap.kind === 'filter') {
+            // Eligibility can drop connectors, but which ones depends on the payment. The example
+            // set demonstrates it for real (its last lane peels off); real lanes continue and a
+            // dashed illustrative fork shows the mechanism instead.
+            if (ghost && last && lanes.length > 2) {
+              d += ` L ${x} ${y0} C ${x} ${y0 + gap.height * 0.3}, ${x + 64} ${y0 + gap.height * 0.25}, ${x + 64} ${y0 + gap.height * 0.6}`
+              labels.push({ x: x + 64, y: y0 + gap.height * 0.66, kind: 'rank', text: `✕ ${lane.name}`, color: lane.color })
+              alive = false
+            } else {
+              d += ` L ${x} ${y0} L ${x} ${y1}`
+              if (last && !ghost) {
+                extras.push({
+                  d: `M ${x} ${y0 + 2} C ${x} ${y0 + gap.height * 0.3}, ${x + 58} ${y0 + gap.height * 0.25}, ${x + 58} ${y0 + gap.height * 0.62}`,
+                })
+                labels.push({ x: x + 58, y: y0 + gap.height * 0.68, kind: 'rank', text: '✕ if not eligible', color: '#8d96aa' })
+              }
             }
           } else if (gap.kind === 'converge' && deterministicHead && !ghost) {
             d += ` L ${x} ${y0}`
@@ -122,7 +152,11 @@ export function LaneCanvas({
             d += ` L ${x} ${y0} L ${x} ${y1}`
           }
         }
-        if (d) paths.push({ d, color: lane.color, width: laneWidth(lane) * (winner ? 1.5 : 1), winner })
+        if (d) {
+          // Bigger volume shares flow faster; everything else drifts at a calm default.
+          const flowDuration = lane.share != null ? Math.min(6, 0.85 / Math.max(lane.share, 0.12)) : 2.6
+          paths.push({ d, color: lane.color, width: laneWidth(lane) * (winner ? 1.5 : 1), winner, flowDuration })
+        }
       })
 
       setDrawn({
@@ -131,6 +165,7 @@ export function LaneCanvas({
         // collapse after an expansion would ratchet the canvas to the tallest height seen.
         height: containerRect.height,
         paths,
+        extras,
         labels,
       })
     }
@@ -152,6 +187,18 @@ export function LaneCanvas({
         height={drawn.height}
         viewBox={`0 0 ${drawn.width} ${drawn.height}`}
       >
+        {drawn.extras.map((extra, i) => (
+          <path
+            key={`extra-${i}`}
+            d={extra.d}
+            fill="none"
+            stroke="#8d96aa"
+            strokeWidth={1.5}
+            strokeLinecap="round"
+            strokeDasharray="3 4"
+            opacity={0.55}
+          />
+        ))}
         {drawn.paths.map((path, i) => (
           <g key={i}>
             <path d={path.d} fill="none" stroke={path.color} strokeWidth={path.width + 7} strokeLinecap="round" opacity={ghost ? 0.09 : 0.14} />
@@ -167,6 +214,17 @@ export function LaneCanvas({
               // pattern (stylesheet beats presentation attribute) — example lanes skip the animation.
               className={ghost ? undefined : 'de-lane-draw'}
               style={ghost ? { strokeDasharray: '6 5' } : { animationDelay: `${i * 90}ms` }}
+            />
+            {/* Ambient downstream flow; on volume splits its speed encodes the share. */}
+            <path
+              d={path.d}
+              fill="none"
+              stroke={path.color}
+              strokeWidth={Math.max(1.2, path.width * 0.55)}
+              strokeLinecap="round"
+              opacity={ghost ? 0.5 : 0.9}
+              className="de-lane-flow"
+              style={{ animationDuration: `${path.flowDuration}s`, animationDelay: `${0.9 + i * 0.15}s` }}
             />
           </g>
         ))}
@@ -194,6 +252,17 @@ export function LaneCanvas({
                   <span className="h-[7px] w-[7px] flex-shrink-0 rounded-[3px]" style={{ background: label.color }} />
                 ) : null}
                 <span className="min-w-0 truncate">{label.text}</span>
+              </span>
+            )
+          }
+          if (label.kind === 'pct') {
+            return (
+              <span
+                key={i}
+                className="absolute -translate-x-1/2 rounded-md border border-slate-200 bg-white px-1.5 font-mono text-[10px] font-semibold tabular-nums dark:border-[#1e2535] dark:bg-[#0d1118]"
+                style={{ left: label.x, top: label.y, color: label.color }}
+              >
+                {label.text}
               </span>
             )
           }

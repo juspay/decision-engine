@@ -841,7 +841,11 @@ function FlowRail({
                 ? 'fan'
                 : stage.id === 'decide'
                   ? 'converge'
-                  : 'straight'
+                  : stage.id === 'slot' && stack.slot === 'volume'
+                    ? 'split'
+                    : stage.id === 'eligibility'
+                      ? 'filter'
+                      : 'straight'
               const renderGap = stage.id !== 'learn'
               if (renderGap) firstGapRendered = true
               return (
@@ -860,7 +864,17 @@ function FlowRail({
                   {renderGap ? (
                     <div
                       data-lane-gap={gapKind}
-                      className={gapKind === 'fan' ? 'h-[58px]' : gapKind === 'converge' ? 'h-[56px]' : 'h-[34px]'}
+                      className={
+                        gapKind === 'fan'
+                          ? 'h-[58px]'
+                          : gapKind === 'converge'
+                            ? 'h-[56px]'
+                            : gapKind === 'filter'
+                              ? 'h-[62px]'
+                              : gapKind === 'split'
+                                ? 'h-[46px]'
+                                : 'h-[34px]'
+                      }
                     />
                   ) : null}
                   {stage.id === 'decide' ? (
