@@ -15,9 +15,11 @@ interface LanePath {
 interface LaneLabel {
   x: number
   y: number
-  kind: 'dot' | 'chip' | 'rank' | 'note' | 'pct' | 'windot'
+  kind: 'dot' | 'chip' | 'rank' | 'note' | 'pct' | 'windot' | 'endchip'
   text?: string
   color?: string
+  /** endchip only: which lane this names, so the wave engine can slide/hide it. */
+  laneIndex?: number
 }
 
 interface GapRect {
@@ -170,7 +172,10 @@ export function LaneCanvas({
         if (lane.name === deterministicHead) {
           d += ` C ${x} ${mid}, ${laneX(0)} ${mid}, ${laneX(0)} ${y1 - 8}`
           winner = true
-          if (collect) collect.labels.push({ x: laneX(0), y: y1 - 8, kind: 'windot', color: lane.color })
+          if (collect) {
+            collect.labels.push({ x: laneX(0), y: y1 - 8, kind: 'windot', color: lane.color })
+            collect.labels.push({ x: laneX(0), y: y1 + 4, kind: 'endchip', text: lane.name, color: lane.color, laneIndex: i })
+          }
         } else {
           d += ` L ${x} ${y0 + gap.height * 0.42}`
           // Rank labels would drift once the animation moves lanes around — skip them then.
@@ -179,9 +184,14 @@ export function LaneCanvas({
           }
           alive = false
         }
+      } else if (gap.kind === 'converge') {
+        // Without a deterministic winner the lanes run through — the winner depends on the
+        // payment — but the arriving candidates get named, leftmost slot = current leader.
+        d += ` L ${x} ${y0} L ${x} ${y1}`
+        if (collect) {
+          collect.labels.push({ x, y: y1 - 20, kind: 'endchip', text: lane.name, color: lane.color, laneIndex: i })
+        }
       } else {
-        // A converge gap without a deterministic winner draws straight through: the winner
-        // depends on the payment, and pretending otherwise would be a lie.
         d += ` L ${x} ${y0} L ${x} ${y1}`
       }
     }
@@ -401,6 +411,15 @@ export function LaneCanvas({
       const finish = () => {
         orders = next
         refreshParticles()
+        // Slide the arriving-connector chips to their final slots; hide the ones that are out.
+        const lastSet = slotSetsRef.current[slotSetsRef.current.length - 1]
+        overlayRef.current?.querySelectorAll<HTMLElement>('.de-end-chip').forEach((chip) => {
+          const laneIndex = Number(chip.dataset.lane)
+          if (Number.isNaN(laneIndex)) return
+          const cut = cutsRef.current.filter === laneIndex || cutsRef.current.health === laneIndex
+          chip.style.opacity = cut ? '0' : '1'
+          chip.style.left = `${lastSet?.[laneIndex] ?? laneX(laneIndex)}px`
+        })
         timeouts.push(window.setTimeout(() => svg?.classList.remove('de-wave'), 200))
       }
       // The wave travels top-down: filter → sort(sr) → health → sort(cost).
@@ -556,6 +575,26 @@ export function LaneCanvas({
                 title={label.text}
                 className="absolute flex max-w-[80px] -translate-x-1/2 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:border-[#1e2535] dark:bg-[#0d1118] dark:text-[#9ca7ba]"
                 style={{ left: label.x, top: label.y }}
+              >
+                {label.color ? (
+                  <span className="h-[7px] w-[7px] flex-shrink-0 rounded-[3px]" style={{ background: label.color }} />
+                ) : null}
+                <span className="min-w-0 truncate">{label.text}</span>
+              </span>
+            )
+          }
+          if (label.kind === 'endchip') {
+            return (
+              <span
+                key={i}
+                data-lane={label.laneIndex}
+                title={label.text}
+                className="de-end-chip absolute flex max-w-[80px] -translate-x-1/2 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:border-[#1e2535] dark:bg-[#0d1118] dark:text-[#9ca7ba]"
+                style={{
+                  left: label.x,
+                  top: label.y,
+                  transition: 'left 0.55s cubic-bezier(0.65, 0, 0.35, 1), opacity 0.3s',
+                }}
               >
                 {label.color ? (
                   <span className="h-[7px] w-[7px] flex-shrink-0 rounded-[3px]" style={{ background: label.color }} />
