@@ -13,7 +13,7 @@ import {
 } from 'recharts'
 import { CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import { CommitmentConnectorSeries } from '../../types/api'
-import { NEUTRAL_INK, SECS_PER_DAY, bucketsPerDay, dayUnit, formatAchieved, formatMoney, formatMoneyExact, isTestCycle, pctOfGoal } from './volumeCommitmentChartBits'
+import { NEUTRAL_INK, SECS_PER_DAY, bucketsPerDay, formatAchieved, formatMoney, formatMoneyExact, isTestCycle, pctOfGoal } from './volumeCommitmentChartBits'
 
 /** Where a PSP stands against its promise, as the chart marks it. */
 export type PacingStatus = 'met' | 'steering' | 'on_pace' | 'eliminated' | 'missed' | 'pending'
@@ -397,12 +397,14 @@ function labelLines(
 ): [string, string] {
   const prefix = m.status === 'met' ? '' : m.status === 'steering' ? '↗ ' : ''
   const wholeCycle = xHi >= m.offset + m.cycleDays - 1e-9
-  // Inside a window the label sits at a fraction of the goal, so it reads "$11k of $70k" rather
-  // than naming the goal beside a gridline that is not it. It does not say which day that edge is:
-  // the x-axis is directly beneath and already labelled.
+  // These label the *promise* line, so inside a window the figure is what the promise expects by
+  // that edge — not what the PSP has delivered. It has to say so. Read as "$91k of $400k" it is
+  // the same grammar the legend under the chart uses for delivered-of-goal, so a PSP sitting well
+  // above the promise looked like one far behind it; "due" is a word delivered volume cannot take.
+  // Which day the edge is goes unsaid: the x-axis is directly beneath and already labelled.
   const position = wholeCycle
     ? formatMoney(m.goal, currency)
-    : `${formatMoney(promiseAt(m, xHi), currency)} of ${formatMoney(m.goal, currency)}`
+    : `${formatMoney(promiseAt(m, xHi), currency)} due of ${formatMoney(m.goal, currency)}`
   const needs = needsPace(m)
     ? `needs ${formatMoney(m.neededDaily, currency)}/${dayLabel.toLowerCase()} `
     : ''
@@ -601,7 +603,8 @@ export function CommitmentPacingChart({
   const maxPendingDays = bucketDays * 2
   // The clock the live view redraws on; started below, once there is something for it to move.
   const [, setTick] = useState(0)
-  const dayLabel = dayUnit(daySecs).short
+  // Contract days are labelled "Day" whatever they last, so a demo axis reads like production's.
+  const dayLabel = 'Day'
   const { cycleStartMs, offsets, daysTotal } = useMemo(
     () => pacingAxis(connectors, daySecs),
     [connectors, daySecs],

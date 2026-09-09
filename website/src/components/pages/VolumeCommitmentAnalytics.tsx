@@ -30,7 +30,6 @@ import {
   SECS_PER_DAY,
   SolidSwatch,
   bucketsPerDay,
-  dayUnit,
   firstEliminationByConnector,
   formatMoney,
   hatchId, pctOfGoal} from './volumeCommitmentChartBits'
@@ -114,7 +113,7 @@ type BandScale = ((value: string) => number | undefined) & { bandwidth?: () => n
 
 /** A dashed segment per PSP across each day's band at that day's required pace; mounted through
  *  `<Customized>` so it can read the chart's band and value scales. */
-export function PaceMarkers(props: {
+function PaceMarkers(props: {
   rows: DayRow[]
   psps: ImpactRow[]
   xAxisMap?: Record<string, { scale: BandScale }>
@@ -357,7 +356,7 @@ export function VolumeCommitmentAnalytics() {
       }),
     [impactConnectors, colorIndex, isPastRun, eliminatedInRun],
   )
-  const dayWord = dayUnit(impact.data?.daySecs).word
+  const dayWord = 'day'
   // Day-by-day rows for both cycles, one row per contract day with a pair of keys per PSP.
   const { beforeRows, withRows, beforeYMax, withYMax } = useMemo(() => {
     const daysTotal = Math.max(1, impact.data?.daysTotal ?? 1)
@@ -507,7 +506,7 @@ export function VolumeCommitmentAnalytics() {
                     {cycle && (
                       <>
                         {' '}· this cycle {formatWhen(cycle.startMs)} → {formatWhen(cycle.endMs)} (
-                        {impact.data.daysTotal} {dayUnit(impact.data.daySecs).short.toLowerCase()} cycle)
+                        {impact.data.daysTotal} day cycle)
                       </>
                     )}
                     {baseline && (

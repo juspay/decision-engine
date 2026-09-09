@@ -6,6 +6,7 @@ import {
   ArrowLeft,
   ChevronDown,
   ChevronRight,
+  LayoutTemplate,
   Pencil,
   Plus,
   PowerOff,
@@ -27,7 +28,6 @@ import type {
   VolumeContractTier,
 } from '../../types/api'
 import { Card, CardBody, InsetPanel } from '../ui/Card'
-import { Badge } from '../ui/Badge'
 import { useVolumeContractSamples } from '../../hooks/useVolumeCommitment'
 import { Button } from '../ui/Button'
 import { PageHeading } from '../ui/PageHeading'
@@ -73,7 +73,7 @@ const ANCHOR_HELP: Record<string, string> = {
   calendar_month: 'Day of month the cycle starts (1–30)',
   calendar_quarter: 'Month within the quarter the cycle starts (1–3)',
   calendar_year: 'Month the cycle starts (1–12)',
-  test_minutes: 'Cycle length in minutes (2–240) — one minute per contract day',
+  test_minutes: 'Contract days in the cycle (2–240) — each lasts seconds, not a day',
 }
 
 interface TierForm {
@@ -145,7 +145,6 @@ type MerchantSettings = {
   amountUnits: 'major' | 'minor'
   expectedDailyTraffic: string
   forecastInterval: string
-  steeringInterval: string
 }
 
 /**
@@ -166,8 +165,6 @@ function settingsFromConfig(config: VolumeContractConfig): MerchantSettings {
       config.expected_daily_traffic != null ? String(config.expected_daily_traffic) : '',
     forecastInterval:
       config.forecast_interval_secs != null ? String(config.forecast_interval_secs) : '',
-    steeringInterval:
-      config.steering_interval_secs != null ? String(config.steering_interval_secs) : '',
   }
 }
 
@@ -268,7 +265,7 @@ function cycleSummary(contract: ContractForm): string {
   const label = CYCLE_LABELS[contract.cycleType]
   const anchor = contract.anchor.trim()
   if (!anchor) return label
-  return contract.cycleType === 'test_minutes' ? `${label} ${anchor}m` : `${label} ${anchor}`
+  return contract.cycleType === 'test_minutes' ? `${label} ${anchor}d` : `${label} ${anchor}`
 }
 
 /** What the PSP pays back on the goal. A tiered contract quotes the tier it is steered at. */
@@ -384,7 +381,6 @@ function documentSettings(config: VolumeContractConfig) {
     { label: 'Currency', value: config.currency?.denomination ?? '—' },
     { label: 'Expected daily traffic', value: formatMoney(Number(config.expected_daily_traffic ?? 0), currency) },
     { label: 'Forecast interval', value: config.forecast_interval_secs ? `${config.forecast_interval_secs}s` : 'default' },
-    { label: 'Steering interval', value: config.steering_interval_secs ? `${config.steering_interval_secs}s` : 'default' },
     { label: 'Billing cycle', value: summarizeCycle(config) },
   ]
 }
@@ -392,7 +388,7 @@ function documentSettings(config: VolumeContractConfig) {
 function cycleWords(cycle: VolumeContract['billing_cycle']) {
   switch (cycle.type) {
     case 'test_minutes':
-      return `${cycle.anchor}-minute test cycle`
+      return `${cycle.anchor}-day test cycle`
     case 'calendar_month':
       return `Monthly from day ${cycle.anchor}`
     case 'calendar_quarter':
@@ -494,7 +490,7 @@ function summarizeCycle(config: VolumeContractConfig | undefined) {
   if (!cycle) return '—'
   switch (cycle.type) {
     case 'test_minutes':
-      return `${cycle.anchor}-minute test cycle`
+      return `${cycle.anchor}-day test cycle`
     case 'calendar_month':
       return `Monthly from day ${cycle.anchor} (${cycle.timezone})`
     case 'calendar_quarter':
@@ -553,6 +549,8 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
   /** Which template seeded this draft, so the picker can show it as chosen. */
   const [loadedSample, setLoadedSample] = useState<string | null>(null)
   const { samples } = useVolumeContractSamples(merchantId ?? undefined)
+  /** The chosen template, whose description is shown under the picker. */
+  const loadedSampleDetail = samples.find((s) => s.id === loadedSample) ?? null
   const [docDesc, setDocDesc] = useState('')
   const [routingMode, setRoutingMode] = useState<'pace_guarded' | 'volume_commitment'>('pace_guarded')
   const [tolerancePp, setTolerancePp] = useState('5')
@@ -561,7 +559,6 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
   const [amountUnits, setAmountUnits] = useState<'major' | 'minor'>('major')
   const [expectedDailyTraffic, setExpectedDailyTraffic] = useState('')
   const [forecastInterval, setForecastInterval] = useState('')
-  const [steeringInterval, setSteeringInterval] = useState('')
   const [contracts, setContracts] = useState<ContractForm[]>([emptyContract()])
   // Which contract the detail panel is editing. The panel writes straight into `contracts`, so
   // this is a view concern only — nothing is staged behind it.
@@ -590,6 +587,8 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
   // /routing/update runs ensure_routing_algorithm_inactive, so say so up front rather than
   // letting Save fail.
   const editingActiveDoc = editingId != null && editingId === activeDocumentId
+  // Templates seed a new document only, and production deployments configure none.
+  const showTemplates = !editingId && samples.length > 0
   // A document holding an archetype the builder has no controls for would be silently rewritten
   // as something else on save, so it stays read-only instead.
   const editingUnsupported = Boolean(
@@ -613,14 +612,24 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
     if (next.amountUnits) setAmountUnits(next.amountUnits)
     if (next.expectedDailyTraffic != null) setExpectedDailyTraffic(next.expectedDailyTraffic)
     if (next.forecastInterval != null) setForecastInterval(next.forecastInterval)
-    if (next.steeringInterval != null) setSteeringInterval(next.steeringInterval)
   }
+  // Which merchant's defaults the open builder was seeded with. Seeding is a once-per-visit act,
+  // not a subscription: `activeConfig` is rebuilt from `documents` on every SWR revalidation, so
+  // an effect that re-ran on it overwrote whatever the form held seconds later — a template's
+  // settings included, which is how a document could be created with the merchant's forecast
+  // interval and expected traffic in place of the ones the template asked for.
+  const settingsSeededFor = useRef<string | null>(null)
   useEffect(() => {
-    if (!settingsKey) return
+    // Outside the builder there is nothing to seed, and the next visit seeds afresh.
+    if (!settingsKey || !view) {
+      settingsSeededFor.current = null
+      return
+    }
     // An edited document carries the settings it was stored with; the merchant defaults must not
     // overwrite them, or a document written in minor units would be re-saved as major ones and
     // every amount in it would move by two decimal places. Leaving the editor restores them.
     if (editingId) return
+    if (settingsSeededFor.current === settingsKey) return
     let stored: Partial<MerchantSettings> | null = null
     try {
       const raw = window.localStorage.getItem(settingsKey)
@@ -629,12 +638,18 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
       stored = null
     }
     if (stored) {
+      settingsSeededFor.current = settingsKey
       applySettings(stored)
       return
     }
-    if (activeConfig) applySettings(settingsFromConfig(activeConfig))
+    // Nothing stored: fall back to the live document, which may still be loading — leave the
+    // visit unseeded so the next render, once it has arrived, can seed from it.
+    if (activeConfig) {
+      settingsSeededFor.current = settingsKey
+      applySettings(settingsFromConfig(activeConfig))
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [settingsKey, activeConfig, editingId])
+  }, [settingsKey, activeConfig, editingId, view])
 
   // Load the document under edit into the form. Seeded once per document — SWR revalidation
   // would otherwise throw away whatever the user has typed.
@@ -657,7 +672,7 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
   }, [editingId, editingDoc, editingConfig])
   function saveMerchantSettings() {
     if (!settingsKey) return
-    const next: MerchantSettings = { routingMode, tolerancePp, metric, currency, amountUnits, expectedDailyTraffic, forecastInterval, steeringInterval }
+    const next: MerchantSettings = { routingMode, tolerancePp, metric, currency, amountUnits, expectedDailyTraffic, forecastInterval }
     try {
       window.localStorage.setItem(settingsKey, JSON.stringify(next))
     } catch {
@@ -807,7 +822,6 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
       }),
     }
     if (forecastInterval.trim()) config.forecast_interval_secs = parseInt(forecastInterval, 10)
-    if (steeringInterval.trim()) config.steering_interval_secs = parseInt(steeringInterval, 10)
     return config
   }
 
@@ -1070,17 +1084,6 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
                     placeholder="engine default"
                     value={forecastInterval}
                     onChange={(e) => setForecastInterval(e.target.value)}
-                  />
-                </div>
-                <div>
-                  {fieldLabel('Steering interval', 'seconds, optional')}
-                  <input
-                    className={inputClass}
-                    type="number"
-                    min={60}
-                    placeholder="engine default"
-                    value={steeringInterval}
-                    onChange={(e) => setSteeringInterval(e.target.value)}
                   />
                 </div>
               </div>
@@ -1445,92 +1448,87 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
         )}
 
         <div className="space-y-6">
-          {/* Merchant-level settings: set once for the merchant; the values live on their own
-              screen. They are shown here because every amount typed below is read in these units
-              — a target means nothing without the metric and unit it is counted in. */}
-          <InsetPanel>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <SlidersHorizontal size={14} className="text-slate-400 dark:text-[#8a8a93]" />
-                <span className={type.label}>Merchant-level settings</span>
-                <span className="text-sm text-slate-500 dark:text-[#8d96aa]">
-                  {editingId
-                    ? '— read back from this document and saved with it.'
-                    : expectedDailyTraffic.trim()
-                    ? '— applied to this document when it is created.'
-                    : '— expected daily traffic is not set yet; the document cannot be created without it.'}
-                </span>
-              </div>
-              {/* Hidden while editing: the settings screen is its own view, so opening it would
-                  drop the document being edited along with any unsaved changes to it. */}
-              {!editingId && (
-                <Button variant="secondary" size="sm" onClick={openSettings}>
-                  Edit settings
-                </Button>
-              )}
-            </div>
-            <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 border-t border-slate-200 pt-3 text-sm dark:border-[#222226]">
-              {inheritedSettings.map((setting) => (
-                <div key={setting.label} className="flex items-baseline gap-1.5">
-                  <dt className="text-slate-500 dark:text-[#78849a]">{setting.label}</dt>
-                  <dd
-                    className={
-                      'invalid' in setting && setting.invalid
-                        ? 'font-medium text-red-600 dark:text-red-400'
-                        : 'font-medium text-slate-800 dark:text-[#e6e6ea]'
-                    }
-                  >
-                    {setting.value}
-                  </dd>
-                </div>
-              ))}
-            </dl>
-            {showIssues && fieldError(documentIssues.expectedDailyTraffic)}
-          </InsetPanel>
-
-          {/* Templates. Absent in production, where the deployment configures none. */}
-          {!editingId && samples.length > 0 && (
+          {/* The two panels that frame the document — what the amounts below are counted in, and
+              what can seed them. Side by side at equal width, collapsing to one column when the
+              templates panel is absent, so the settings never sit in a half-width box alone. */}
+          <div className={`grid gap-4 ${showTemplates ? 'lg:grid-cols-2' : 'grid-cols-1'}`}>
+            {/* Merchant-level settings: set once for the merchant; the values live on their own
+                screen. They are shown here because every amount typed below is read in these units
+                — a target means nothing without the metric and unit it is counted in. */}
             <InsetPanel>
-              <div className="flex flex-wrap items-baseline justify-between gap-2">
-                <span className="text-sm font-medium text-slate-800 dark:text-white">
-                  Start from a template
-                </span>
-                <span className="text-xs text-slate-500 dark:text-[#78849a]">
-                  Each one puts the engine in a different situation. Nothing is written until you
-                  press Create.
-                </span>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-2">
+                  <SlidersHorizontal size={14} className="text-slate-400 dark:text-[#8a8a93]" />
+                  <span className={type.label}>Merchant-level settings</span>
+                </div>
+                {/* Hidden while editing: the settings screen is its own view, so opening it would
+                    drop the document being edited along with any unsaved changes to it. */}
+                {!editingId && (
+                  <Button variant="secondary" size="sm" onClick={openSettings}>
+                    Edit settings
+                  </Button>
+                )}
               </div>
-              <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                {samples.map((sample) => {
-                  const chosen = loadedSample === sample.id
-                  return (
-                    <button
-                      key={sample.id}
-                      type="button"
-                      onClick={() => loadSample(sample)}
-                      className={`rounded-xl border px-3.5 py-3 text-left transition-colors ${
-                        chosen
-                          ? 'border-brand-500 bg-brand-500/5'
-                          : 'border-slate-200 hover:border-slate-300 dark:border-[#222226] dark:hover:border-[#33333d]'
-                      }`}
+              {/* Said only when it blocks Create; the settings otherwise speak for themselves. */}
+              {!editingId && !expectedDailyTraffic.trim() && (
+                <p className="mt-1 text-sm text-slate-500 dark:text-[#8d96aa]">
+                  Expected daily traffic is not set yet; the document cannot be created without it.
+                </p>
+              )}
+              <dl className="mt-3 flex flex-wrap gap-x-6 gap-y-2 border-t border-slate-200 pt-3 text-sm dark:border-[#222226]">
+                {inheritedSettings.map((setting) => (
+                  <div key={setting.label} className="flex items-baseline gap-1.5">
+                    <dt className="text-slate-500 dark:text-[#78849a]">{setting.label}</dt>
+                    <dd
+                      className={
+                        'invalid' in setting && setting.invalid
+                          ? 'font-medium text-red-600 dark:text-red-400'
+                          : 'font-medium text-slate-800 dark:text-[#e6e6ea]'
+                      }
                     >
-                      <span className="flex items-center gap-2 text-sm font-medium text-slate-800 dark:text-white">
-                        {sample.title}
-                        {chosen && <Badge variant="blue">Loaded</Badge>}
-                      </span>
-                      <span className="mt-1 block text-xs text-slate-600 dark:text-[#8d96a8]">
-                        {sample.summary}
-                      </span>
-                      <span className="mt-2 block text-xs text-slate-500 dark:text-[#78849a]">
-                        <strong className="font-medium">What to watch:</strong>{' '}
-                        {sample.expectedOutcome}
-                      </span>
-                    </button>
-                  )
-                })}
-              </div>
+                      {setting.value}
+                    </dd>
+                  </div>
+                ))}
+              </dl>
+              {showIssues && fieldError(documentIssues.expectedDailyTraffic)}
             </InsetPanel>
-          )}
+
+            {/* Templates. Absent in production, where the deployment configures none. A picker
+                rather than a card per template: only the one being loaded is worth reading about,
+                so its description follows the choice and the rest stay behind the dropdown. */}
+            {showTemplates && (
+              <InsetPanel>
+                <div className="flex min-w-0 items-center gap-2">
+                  <LayoutTemplate size={14} className="text-slate-400 dark:text-[#8a8a93]" />
+                  <span className={type.label}>Start from a template</span>
+                </div>
+                <div className="mt-3 border-t border-slate-200 pt-3 dark:border-[#222226]">
+                  <SearchableSelect
+                    value={loadedSample ?? ''}
+                    onChange={(id) => {
+                      const sample = samples.find((s) => s.id === id)
+                      if (sample) loadSample(sample)
+                    }}
+                    options={samples.map((s) => ({ value: s.id, label: s.title }))}
+                    className="w-full sm:max-w-sm"
+                    triggerClassName={inputClass}
+                  />
+                  {loadedSampleDetail && (
+                    <div className="mt-2.5 space-y-1.5">
+                      <p className="text-xs text-slate-600 dark:text-[#8d96a8]">
+                        {loadedSampleDetail.summary}
+                      </p>
+                      <p className="text-xs text-slate-500 dark:text-[#78849a]">
+                        <strong className="font-medium">What to watch:</strong>{' '}
+                        {loadedSampleDetail.expectedOutcome}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </InsetPanel>
+            )}
+          </div>
 
           {/* Document */}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
@@ -1671,7 +1669,11 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
                           </tr>
                           {isExpanded && (
                             <tr className="border-b border-slate-100 dark:border-[#1e2330]">
-                              <td colSpan={8} className="bg-slate-50/70 px-5 py-4 dark:bg-[#131317]">
+                              {/* A recessed surface, a step down from both the card and the
+                                  brand-tinted row that opened it, so the fields read as the row's
+                                  contents rather than as more table. Matches the documents table
+                                  lower on this page. */}
+                              <td colSpan={8} className="bg-slate-100/70 px-5 py-4 dark:bg-[#0d1017]">
                                 {contractFields(contract, flagged ? issues : {})}
 
                                 <div className="mt-5 border-t border-slate-200 pt-4 dark:border-[#222226]">

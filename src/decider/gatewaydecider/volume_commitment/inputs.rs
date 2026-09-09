@@ -113,6 +113,53 @@ impl MeasuredVolume {
     }
 }
 
+/// The merchant's flow, as the two questions a forecast actually asks of it.
+///
+/// Both are volume per contract day and both are `f64`, which is why they were mixed up: passed
+/// as bare numbers, "how much does this merchant do" and "how much will arrive before the cycle
+/// closes" are indistinguishable at a call site, and picking the wrong one silently writes off
+/// reachable commitments or rations steering that should be at full rate. Named on a type, the
+/// choice has to be made deliberately.
+#[derive(Debug, Clone, Copy)]
+pub struct TrafficRates {
+    /// How much this merchant does in a day, read over a window wide enough to be stable. The
+    /// size of the merchant — what a day-0 pace guess is split from.
+    pub typical_daily: f64,
+    /// How much will arrive between now and the cycle close, following the *current* rate. What
+    /// feasibility and every steer rate are judged against: answering those from the wide window
+    /// writes off commitments on a merchant whose volume is climbing.
+    pub forward_daily: f64,
+}
+
+impl TrafficRates {
+    /// Prefer what was measured; fall back to the contract's declaration only where there is no
+    /// measurement yet. A wrong declaration otherwise decides both questions on its own.
+    pub fn read(measured: &MeasuredVolume, declared_daily: f64) -> Self {
+        Self {
+            typical_daily: measured.total_daily.unwrap_or(declared_daily),
+            forward_daily: measured
+                .recent_daily
+                .or(measured.total_daily)
+                .unwrap_or(declared_daily),
+        }
+    }
+
+    /// The flow a steer can draw on for one PSP: everything except what routing already gives it.
+    pub fn divertible_daily(&self, routing_gives_daily: f64) -> f64 {
+        super::math::divertible_daily(self.forward_daily, routing_gives_daily)
+    }
+
+    /// Traffic still to come over `days` — the budget every commitment competes for.
+    pub fn left_over(&self, days: f64) -> f64 {
+        super::math::traffic_left(self.forward_daily, days)
+    }
+
+    /// The day-0 guess at what one PSP receives, before any of them has a measured pace.
+    pub fn starting_pace(&self, psp_count: usize) -> f64 {
+        super::math::starting_pace(self.typical_daily, psp_count)
+    }
+}
+
 /// Where commitments come from — the contract DSL in production, a stub in tests.
 #[async_trait]
 pub trait InputSource: Send + Sync {
@@ -131,4 +178,50 @@ pub trait InputSource: Send + Sync {
     }
     /// Every merchant with commitments, checked on each pass of the background loop.
     async fn list_active(&self) -> Vec<String>;
+}
+
+#[cfg(test)]
+mod traffic_rates {
+    use super::*;
+
+    fn measured(total_daily: Option<f64>, recent_daily: Option<f64>) -> MeasuredVolume {
+        MeasuredVolume {
+            total_daily,
+            recent_daily,
+            ..MeasuredVolume::default()
+        }
+    }
+
+    /// The two questions get different answers on a merchant whose volume is climbing, which is
+    /// the whole reason they are separate fields.
+    #[test]
+    fn the_size_of_the_merchant_and_what_is_coming_are_read_differently() {
+        let rates = TrafficRates::read(&measured(Some(60_000.0), Some(120_000.0)), 1.0);
+        assert_eq!(rates.typical_daily, 60_000.0);
+        assert_eq!(rates.forward_daily, 120_000.0);
+    }
+
+    /// Measured first, then the wider measurement, then the declaration — which is only ever
+    /// reached before there is any traffic to read.
+    #[test]
+    fn the_declaration_is_the_last_resort() {
+        assert_eq!(
+            TrafficRates::read(&measured(Some(60_000.0), None), 9_000.0).forward_daily,
+            60_000.0
+        );
+        let unmeasured = TrafficRates::read(&measured(None, None), 9_000.0);
+        assert_eq!(unmeasured.typical_daily, 9_000.0);
+        assert_eq!(unmeasured.forward_daily, 9_000.0);
+    }
+
+    /// A steer draws on what routing sends elsewhere, so the flow it may take is the forward rate
+    /// less this PSP's own unaided share — never the merchant's whole flow.
+    #[test]
+    fn only_what_routing_sends_elsewhere_is_divertible() {
+        let rates = TrafficRates::read(&measured(Some(9_400.0), Some(9_400.0)), 0.0);
+        assert_eq!(rates.divertible_daily(3_500.0), 5_900.0);
+        assert_eq!(rates.divertible_daily(9_400.0), 0.0);
+        assert_eq!(rates.left_over(8.0), 75_200.0);
+        assert_eq!(rates.starting_pace(2), 4_700.0);
+    }
 }

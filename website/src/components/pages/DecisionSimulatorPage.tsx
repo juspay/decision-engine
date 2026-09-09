@@ -15,7 +15,14 @@ import { useMerchantStore } from '../../store/merchantStore'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { useAuthStore } from '../../store/authStore'
 import { apiErrorStatus, apiPost, fetcher } from '../../lib/api'
-import { VolumeCommitmentRunChart } from './VolumeCommitmentRunChart'
+import {
+  VolumeCommitmentRunChart,
+  countPayment,
+  emptyRunTally,
+  tallyOf,
+  type ContractRunPreset,
+  type ContractRunTally,
+} from './VolumeCommitmentRunChart'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import { BlockedCommitment, DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RankedPsp, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
@@ -456,10 +463,19 @@ const runProgressRef = { current: 0 }
 const liveRun: {
   running: boolean
   results: SimulationResult[]
+  /**
+   * The volume-contract card's counters, folded in as each row lands.
+   *
+   * Kept beside the rows rather than derived from them: the card needs counts, and recounting
+   * every row on every flush costs more the further into a run you are — which showed up as a
+   * simulation that slowed 8x across one billing cycle while the backend stayed within 2x.
+   */
+  contractTally: ContractRunTally
   subscribers: Set<() => void>
 } = {
   running: false,
   results: [],
+  contractTally: emptyRunTally(),
   subscribers: new Set(),
 }
 
@@ -522,6 +538,18 @@ function unionConnectors(...lists: string[][]): string[] {
 // Auth-rate simulation runs a fixed batch — no user input; it starts on Run
 // and stops at this many transactions.
 const SIMULATION_TOTAL_PAYMENTS = '5000'
+
+/**
+ * Transactions kept in the DOM at once.
+ *
+ * The table is a live view of a run, and a run is thousands of payments long. Rendering every one
+ * puts a row per payment in the document — reconciled on every commit, laid out by the browser on
+ * every paint — so the page grows heavier the longer the run goes, on the same thread the run
+ * dispatches its requests from. That is most of why a simulation's rate decayed several times
+ * over inside one billing cycle. The newest couple of hundred is what anyone actually reads; the
+ * count beside the table still reports the true total, and the filters still run over every row.
+ */
+const TX_TABLE_MAX_ROWS = 200
 
 // Default / ceiling for the parallel-requests (TPS) lever. 1 preserves the original
 // sequential cadence; the ceiling caps how many decide+feedback round-trips we fan out
@@ -1242,7 +1270,13 @@ export function DecisionSimulatorPage() {
    * out of `SimulationConfig` (which is persisted) and cleared whenever the contract goes away or
    * the tab is reset: loading a contract once must never leave later simulations throttled.
    */
-  const [contractPaceMs, setContractPaceMs] = useState(0)
+  // What the volume-contract card needs done before a run's first payment — opening the billing
+  // cycle the run is to race. Held as a ref because the card registers it once and `runSimulation`
+  // has to reach the current one.
+  const contractPrepareRef = useRef<null | (() => Promise<ContractRunPreset | null>)>(null)
+  // The volume-contract card's counters for the run on screen, adopted from `liveRun` like the
+  // rows are — so a page mounted mid-run shows what has been counted rather than starting at zero.
+  const [contractTally, setContractTally] = useState<ContractRunTally>(emptyRunTally)
   const [gatewaySimConfigs, setGatewaySimConfigs] = useState<Record<string, GatewaySimConfig>>(initialState.gatewaySimConfigs)
   const gatewaySimConfigsRef = useRef(gatewaySimConfigs)
   useEffect(() => { gatewaySimConfigsRef.current = gatewaySimConfigs }, [gatewaySimConfigs])
@@ -1729,7 +1763,9 @@ export function DecisionSimulatorPage() {
     setVolumeEvaluationLog(defaults.volumeEvaluationLog)
     setVolumeProgress(defaults.volumeProgress)
     liveRun.results = defaults.simulationResults
+    liveRun.contractTally = tallyOf(defaults.simulationResults)
     setSimulationResults(defaults.simulationResults)
+    setContractTally(liveRun.contractTally)
     setSimulationStartedAtMs(null)
     setResponseOpen(defaults.responseOpen)
     setDebitResponseOpen(defaults.debitResponseOpen)
@@ -1779,9 +1815,10 @@ export function DecisionSimulatorPage() {
     setVolumeEvaluationLog(nextState.volumeEvaluationLog)
     setVolumeProgress(nextState.volumeProgress)
     liveRun.results = nextState.simulationResults
+    liveRun.contractTally = tallyOf(nextState.simulationResults)
     liveRun.running = false
-    setContractPaceMs(0)
     setSimulationResults(nextState.simulationResults)
+    setContractTally(liveRun.contractTally)
     setSimulationStartedAtMs(null)
     setResponseOpen(nextState.responseOpen)
     setDebitResponseOpen(nextState.debitResponseOpen)
@@ -1815,6 +1852,7 @@ export function DecisionSimulatorPage() {
   useEffect(() => {
     const sync = () => {
       setSimulationResults(liveRun.results)
+      setContractTally(liveRun.contractTally)
       setIsSimulating(liveRun.running)
       setIsPaused(liveRun.running && simulationPausedRef.current)
     }
@@ -2320,7 +2358,9 @@ export function DecisionSimulatorPage() {
       })
       // Clear local state so the UI reflects the fresh-scores starting point.
       liveRun.results = []
+      liveRun.contractTally = emptyRunTally()
       setSimulationResults([])
+      setContractTally(liveRun.contractTally)
       setTxFilters({})
       routingEvents.refresh()
       setError(null)
@@ -2334,6 +2374,14 @@ export function DecisionSimulatorPage() {
   async function runSimulation(opts: { resumeFrom?: number } = {}) {
     if (!effectiveMerchantId) return setError('Sign in with a merchant-linked account to continue')
     if (routingConfigUnavailable) return setError('Routing key config unavailable. Fix /config/routing-keys and retry.')
+
+    // A contract-driven run races a whole billing cycle, so the cycle is opened here — before a
+    // single payment goes out, and before `isSimulating` is set. Doing it once the run is under
+    // way put payments into the cycle being replaced and read, for an instant, as the cycle
+    // ending, which aborted the run through `onCycleEnded`.
+    if (!opts.resumeFrom && contractPrepareRef.current) {
+      await contractPrepareRef.current()
+    }
 
     const total = parseInt(simulationConfig.totalPayments) || 0
 
@@ -2356,7 +2404,9 @@ export function DecisionSimulatorPage() {
     setSetupPrompt(null)
     if (!isResume) {
       liveRun.results = []
+      liveRun.contractTally = emptyRunTally()
       setSimulationResults([])
+      setContractTally(liveRun.contractTally)
     }
     simulationAbortRef.current = false
     // Claim ownership of the shared run state. Any earlier run still unwinding is now superseded and
@@ -2400,7 +2450,6 @@ export function DecisionSimulatorPage() {
     // pool size below). Read once here so a mid-run slider change can't reshape an in-flight run.
     // 1 reproduces the original strictly-sequential loop.
     const concurrency = Math.max(1, Math.min(MAX_SIMULATION_TPS, Math.round(simulationConfig.tps) || 1))
-    const paceMs = Math.max(0, Math.round(contractPaceMs))
 
     // One full transaction (decide → score → optional smart retry). Returns the row to
     // append; throws on a backend error so the batch can tally it. `drawSuccess` mutates
@@ -2542,6 +2591,21 @@ export function DecisionSimulatorPage() {
       let dispatched = resumeFrom
       let lastError: unknown = null
 
+      // How long to leave between UI commits, as a function of how much there is to redraw.
+      //
+      // A commit costs work proportional to the rows already on screen: a dozen memos on this
+      // page each fold the whole result array, and the table maps every row. The run loop shares
+      // that thread, so at a fixed cadence every payment costs more than the last — measured
+      // across one cycle as 22ms of client time per payment at the start and 310ms by the end,
+      // against a backend answering in under 50ms throughout. The traffic rate then decays 8x
+      // inside a single billing cycle, which is no basis for a demo whose promises are sized
+      // against that rate.
+      //
+      // Widening the gap as rows accumulate holds the *rate* of that work roughly constant: the
+      // page still commits several times a second early on and a few times a second deep into a
+      // long run, which is far more often than anyone reads it, and the run keeps its pace.
+      const uiThrottleMs = () => Math.min(1_000, 150 + results.length / 4)
+
       // Commit the accumulated rows + refresh the events feed, throttled so a fast loop can't
       // spam re-renders (force=true bypasses the throttle for pause/end-of-run flushes).
       const flushResults = (force: boolean) => {
@@ -2549,13 +2613,15 @@ export function DecisionSimulatorPage() {
         // run's rows are not wanted.
         if (!isCurrentRun()) return
         const now = Date.now()
-        if (force || now - lastUIUpdate > 150) {
+        if (force || now - lastUIUpdate > uiThrottleMs()) {
           liveRun.results = [...results]
+          liveRun.contractTally = { ...liveRun.contractTally }
           publishLiveRun()
           markExplorerRunDataUpdated()
           lastUIUpdate = now
         }
-        if (force || now - lastEventsRefresh > 250) {
+        // The events feed is a refetch and a render of its own, so it widens with the rest.
+        if (force || now - lastEventsRefresh > uiThrottleMs() + 100) {
           routingEvents.refresh()
           lastEventsRefresh = now
         }
@@ -2586,6 +2652,7 @@ export function DecisionSimulatorPage() {
           try {
             const row = await runTxn(i)
             results.push(row)
+            countPayment(liveRun.contractTally, row)
             consecutiveErrors = 0
           } catch (e) {
             lastError = e
@@ -2606,11 +2673,6 @@ export function DecisionSimulatorPage() {
           runProgressRef.current = results.length
           flushResults(false)
 
-          // Hold the configured rate. Each of the `concurrency` workers waits its own share, so
-          // the run as a whole dispatches one payment every `paceMs`.
-          if (paceMs > 0) {
-            await new Promise(resolve => setTimeout(resolve, paceMs * concurrency))
-          }
         }
       }
 
@@ -2631,6 +2693,7 @@ export function DecisionSimulatorPage() {
       if (isCurrentRun()) {
         liveRun.running = false
         liveRun.results = [...results]
+        liveRun.contractTally = { ...liveRun.contractTally }
         simulationPausedRef.current = false
         publishLiveRun()
       }
@@ -3111,6 +3174,12 @@ export function DecisionSimulatorPage() {
     })
   }, [deferredSimulationResults, txFilters])
 
+  // Newest first, so the tail of a long run is the part that stays on screen.
+  const txVisibleRows = useMemo(
+    () => txFilteredRows.slice(-TX_TABLE_MAX_ROWS).reverse(),
+    [txFilteredRows],
+  )
+
   // Column totals over the currently filtered rows, for the Transaction Log footer.
   // Only the numeric columns are summable: Amount (all rows) and Cost Savings (realized —
   // same condition as the per-row cell: a charged cost-override with positive savings).
@@ -3446,7 +3515,9 @@ export function DecisionSimulatorPage() {
   function clearBatchResults() {
     const defaults = getDefaultExplorerState()
     liveRun.results = defaults.simulationResults
+    liveRun.contractTally = tallyOf(defaults.simulationResults)
     setSimulationResults(defaults.simulationResults)
+    setContractTally(liveRun.contractTally)
     setResumableRun(defaults.resumableRun)
     // Abort any in-flight run and drop the run-start timestamp so the
     // Autopilot Actions feed (scoped to simulationStartedAtMs) clears back
@@ -3480,7 +3551,6 @@ export function DecisionSimulatorPage() {
       resetBatchInputs()
       clearBatchResults()
       // A pace only belongs to a loaded contract; resetting the tab drops it with everything else.
-      setContractPaceMs(0)
     } else if (activeTab === 'rule') {
       setRuleResetSignal(n => n + 1)
     } else if (activeTab === 'volume') {
@@ -3961,28 +4031,22 @@ export function DecisionSimulatorPage() {
         {activeTab === 'batch' && (
           <VolumeCommitmentRunChart
             merchantId={effectiveMerchantId}
-            results={simulationResults}
+            tally={contractTally}
             colorFor={colorForGateway}
             isSimulating={isSimulating}
-            tps={simulationConfig.tps}
-            onContractGone={() => setContractPaceMs(0)}
+            onPrepareRun={prepare => {
+              contractPrepareRef.current = prepare
+            }}
+            onContractGone={() => {}}
             onCycleEnded={() => {
               // Volume sent past the cycle end lands in the next period, against goals that have
               // just reset — stop rather than quietly mis-attribute it.
               simulationAbortRef.current = true
-              setContractPaceMs(0)
             }}
-            onLoad={({ gateways, amount, totalPayments, paceMs }) => {
-              setContractPaceMs(paceMs)
-              // `form.amount` drives the fixed-amount path and the min/max pair drives the
-              // multi-objective one; setting both keeps the ticket exact either way.
-              setForm(f => ({ ...f, eligible_gateways: gateways.join(', '), amount: String(amount) }))
-              setSimulationConfig(c => ({
-                ...c,
-                minAmount: amount,
-                maxAmount: amount,
-                totalPayments: String(totalPayments),
-              }))
+            onLoad={({ gateways }) => {
+              // Only who the payments may go to. Ticket size and rate are this page's own, the
+              // same for a contract run as for any other.
+              setForm(f => ({ ...f, eligible_gateways: gateways.join(', ') }))
             }}
           />
         )}
@@ -5625,6 +5689,9 @@ export function DecisionSimulatorPage() {
                     ? `${txFilteredRows.length} / ${deferredSimulationResults.length}`
                     : deferredSimulationResults.length}{' '}
                   transactions
+                  {/* Say so rather than let a reader take the newest rows for all of them. */}
+                  {txFilteredRows.length > txVisibleRows.length &&
+                    ` · showing the latest ${txVisibleRows.length}`}
                 </span>
               </span>
             )}
@@ -5688,7 +5755,7 @@ export function DecisionSimulatorPage() {
                     })()}
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-[#1a1a22]">
-                    {txFilteredRows.map(({ res, idx }) => (
+                    {txVisibleRows.map(({ res, idx }) => (
                       <tr
                         key={res.paymentId}
                         className="group cursor-pointer hover:bg-slate-50 dark:hover:bg-[#0d0d14] transition-colors"

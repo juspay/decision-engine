@@ -78,12 +78,10 @@ pub struct VolumeContractConfig {
     /// Expected total volume per day across all PSPs, in the document's metric/currency unit.
     /// Seeds the consumer's day-0 pace forecast.
     pub expected_daily_traffic: Amount,
-    /// Per-merchant override of the forecast cadence; omit to use the engine's global default.
+    /// Per-merchant override of the forecast cadence; omit to derive one from the contract's own
+    /// day (see `controller::interval_secs`), which is what every contract should normally do.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub forecast_interval_secs: Option<u32>,
-    /// Per-merchant override of the steering cadence; omit to use the engine's global default.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub steering_interval_secs: Option<u32>,
     pub volume_contracts: Vec<VolumeContract>,
 }
 
@@ -242,7 +240,7 @@ pub struct BillingCycle {
     #[serde(rename = "type")]
     pub cycle_type: BillingCycleType,
     /// `calendar_month`: day-of-month 1–30; `calendar_quarter`: month-in-quarter 1–3;
-    /// `calendar_year`: start month 1–12; `test_minutes`: cycle length in minutes 2–240.
+    /// `calendar_year`: start month 1–12; `test_minutes`: contract days in the cycle 2–240.
     /// Range-validated per cycle type on write.
     pub anchor: u8,
     /// IANA zone name, e.g. `"America/New_York"`. Validated against the tz database on write.
@@ -258,10 +256,11 @@ pub enum BillingCycleType {
     CalendarMonth,
     CalendarQuarter,
     CalendarYear,
-    /// TESTING: the cycle lasts `anchor` minutes and repeats from the contract's activation
-    /// instant (its stamped anchor), so a fresh contract always plays out a whole period while
-    /// you watch. Each minute counts as one contract "day", so pacing, elimination and steering
-    /// behave exactly as on a calendar cycle — only faster.
+    /// TESTING: the cycle runs `anchor` contract "days" of `volume_commitment.test_day_secs`
+    /// each (thirty seconds unless a deployment says otherwise) and repeats from
+    /// the contract's activation instant (its stamped anchor), so a fresh contract always plays
+    /// out a whole period while you watch. Pacing, elimination and steering behave exactly as on
+    /// a calendar cycle — only faster.
     TestMinutes,
 }
 
@@ -735,10 +734,7 @@ pub fn validate_volume_contract_config(
         &mut errors,
     );
 
-    for (field, interval) in [
-        ("forecast_interval_secs", config.forecast_interval_secs),
-        ("steering_interval_secs", config.steering_interval_secs),
-    ] {
+    for (field, interval) in [("forecast_interval_secs", config.forecast_interval_secs)] {
         if let Some(secs) = interval {
             if !(MIN_INTERVAL_SECS..=MAX_INTERVAL_SECS).contains(&secs) {
                 errors.push(ValidationErrorDetails::new(
@@ -1050,7 +1046,6 @@ mod tests {
         assert_eq!(config.metric, CommitmentMetric::Gmv);
         assert_eq!(config.currency.amount_units, AmountUnits::Minor);
         assert_eq!(config.forecast_interval_secs, None);
-        assert_eq!(config.steering_interval_secs, None);
         let contract = &config.volume_contracts[0];
         assert_eq!(contract.status, ContractStatus::Active);
         assert_eq!(contract.billing_cycle.proration, Proration::FullPeriod);
@@ -1328,8 +1323,8 @@ mod tests {
         config.forecast_interval_secs = Some(1);
         assert_single_error(&config, "out_of_range", "forecast_interval_secs");
         let mut config = parse_ok(lumpsum_doc());
-        config.steering_interval_secs = Some(10_000_000);
-        assert_single_error(&config, "out_of_range", "steering_interval_secs");
+        config.forecast_interval_secs = Some(10_000_000);
+        assert_single_error(&config, "out_of_range", "forecast_interval_secs");
 
         // Bad id / connector.
         let mut config = parse_ok(lumpsum_doc());
@@ -1574,6 +1569,13 @@ mod shipped_samples {
         let s = shape("reward_ranked");
         assert!(s.targets.iter().sum::<u64>() > s.cycle_volume);
         assert!(s.targets.iter().all(|&t| t > s.unaided_share));
+        // Each has to be winnable on its own, or the engine drops both and "keeps the one worth
+        // more" never happens. This is what ties the targets to the cycle's length: shorten the
+        // cycle without moving them and every commitment is out of reach from the first forecast.
+        assert!(
+            s.targets.iter().all(|&t| t < s.cycle_volume),
+            "a target over the cycle's traffic cannot be met even with steering"
+        );
         assert!(
             s.rebates
                 .iter()

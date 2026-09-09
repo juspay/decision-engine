@@ -122,16 +122,25 @@ v1 = "0000000000000000000000000000000000000000000000000000000000000000"
 [volume_commitment]
 # Expose the scheduler on its own port in this process. Prod: only the deployment that owns it.
 enabled = true
-# How often a merchant's plan is rebuilt — the only scheduled job. prod default: 3600 (1 h)
+# How long the scheduler sleeps when no merchant has a contract at all. A merchant's own cadence
+# is not this: it is derived from the contract's day, so every contract is forecast the same
+# number of times per contract day (24) whether that day lasts a minute or twenty-four hours.
 default_forecast_interval_secs = 60
 # Where the scheduler calls when a forecast comes due. Normally this same process's [server].
 main_server_url = "http://127.0.0.1:8080"
-# How often the scheduler wakes. Keep well under the shortest cadence above — a due job cannot
-# fire sooner than the next tick, so a tick coarser than the interval throws the interval away.
-tick_secs = 10
-# May a contract declare a `test_minutes` billing cycle, whose "day" lasts sixty seconds? A demo
+# How often the scheduler wakes. Must be finer than the shortest cadence it has to fire — a due
+# job cannot fire sooner than the next tick, so a coarser tick silently becomes the cadence. A
+# 30-second contract day derives a 2-second cadence, so this has to be under that.
+tick_secs = 1
+# May a contract declare a `test_minutes` billing cycle, whose "day" lasts seconds? A demo
 # device, meaningless against real billing. Defaults off, so production needs no key at all.
 allow_test_cycles = true
+# How long one of those contract "days" lasts. This is the demo's speed dial: a cycle is `anchor`
+# of these, so 30 runs the ten-day templates below in five minutes and paces them at a contract
+# day every half minute. The forecast cadence follows it — 24 forecasts a contract day, as on a
+# calendar contract — down to a floor of one every 2s, which a day of 48s reaches. Below that the
+# demo still runs, with fewer forecasts per day than production would have. Held to 1..=3600.
+test_day_secs = 10
 
 # ── Demo contract templates ───────────────────────────────────────────────────────────────────
 [[volume_commitment.samples]]
@@ -139,35 +148,50 @@ id = "saved_by_steering"
 title = "Would have missed — now makes it"
 summary = "A commitment just out of reach of unaided routing, which steering closes."
 expected_outcome = """
-Watch adyen. Routing splits traffic roughly evenly, so adyen arrives at about $50k on its own \
-against a $65k promise — it starts behind and flips to "Steering", taking the difference from \
-stripe, whose own $5k promise was met in the first minute. The shaded wedge under adyen's line is \
+Watch adyen. Approval-rate routing sends most payments to whichever PSP is scoring better — on \
+the default sliders that is stripe — so adyen arrives well short of a $1.3M promise on its own. \
+It flips to "Steering" and takes the difference from stripe, whose own $100k promise is met in \
+the first contract day and which has no claim on the rest. The shaded wedge under adyen's line is \
 the volume the engine added; the commitment lands by the cycle close."""
 
 [volume_commitment.samples.contract]
 routing_mode = "pace_guarded"
 tolerance_bps = 500
-expected_daily_traffic = 1000000
-forecast_interval_secs = 5
+# $200,000 a contract day: what the simulator sustains at its ordinary rate — around 20 payments a
+# second of the $1,000 ticket the amount range defaults to, over a ten-second contract day. Held a
+# little under the ~24/s measured, so a slower machine still leaves the targets below reachable;
+# a faster one simply meets them earlier.
+#
+# The rate holds now. It used to decay eightfold inside a single cycle, because the simulator page
+# recomputed every tile from the whole result array and kept a table row per payment in the DOM,
+# on the thread the run dispatches from — which made every target here a guess about how far into
+# a run it would be judged. Client time per payment is flat at ~15-30ms against a backend
+# answering in ~20ms, so these figures mean the same thing on day 9 as on day 0.
+expected_daily_traffic = 20000000
 currency = { denomination = "USD" }
 
-# $65,000 — more than the ~$50,000 an even split gives adyen, so it cannot get there unaided, and
-# well under the $100,000 the cycle carries, so steering can close the gap.
+# $1.3M — 65% of the $2.0M the cycle carries, and far more than routing gives adyen
+# unaided (a fifth of the flow on the default sliders), so only steering gets it there. Under the
+# cycle total, so steering can.
+#
+# The 1.5% rebate is what pays for the steering: reward over volume still owed is the approval
+# rate a commitment can afford to give up, and 1.5% comfortably covers the ~1pp gap between the
+# two PSPs' scores. A thinner rebate would be gated by tolerance and the scenario would stall.
 [[volume_commitment.samples.contract.volume_contracts]]
 id = "saved-by-steering"
 connector = "adyen"
 billing_cycle = { type = "test_minutes", anchor = 10, timezone = "UTC" }
 archetype = "lumpsum"
-terms = { target = 6500000, reward = { kind = "percentage", value = { rebate_bps = 150 } } }
+terms = { target = 130000000, reward = { kind = "percentage", value = { rebate_bps = 150 } } }
 
-# The traffic adyen is steered from. $5,000 is met within the first contract minute, so this
+# The traffic adyen is steered from. $100k is met within the first contract day, so this
 # commitment is never itself behind and never competes for the steering budget.
 [[volume_commitment.samples.contract.volume_contracts]]
 id = "saved-by-steering-source"
 connector = "stripe"
 billing_cycle = { type = "test_minutes", anchor = 10, timezone = "UTC" }
 archetype = "lumpsum"
-terms = { target = 500000, reward = { kind = "percentage", value = { rebate_bps = 150 } } }
+terms = { target = 10000000, reward = { kind = "percentage", value = { rebate_bps = 150 } } }
 
 [[volume_commitment.samples]]
 id = "reward_ranked"
@@ -180,24 +204,33 @@ Together these ask for more traffic than the cycle has. The engine keeps the one
 [volume_commitment.samples.contract]
 routing_mode = "pace_guarded"
 tolerance_bps = 500
-expected_daily_traffic = 1000000
-forecast_interval_secs = 5
+# $200,000 a contract day: what the simulator sustains at its ordinary rate — around 20 payments a
+# second of the $1,000 ticket the amount range defaults to, over a ten-second contract day. Held a
+# little under the ~24/s measured, so a slower machine still leaves the targets below reachable;
+# a faster one simply meets them earlier.
+#
+# The rate holds now. It used to decay eightfold inside a single cycle, because the simulator page
+# recomputed every tile from the whole result array and kept a table row per payment in the DOM,
+# on the thread the run dispatches from — which made every target here a guess about how far into
+# a run it would be judged. Client time per payment is flat at ~15-30ms against a backend
+# answering in ~20ms, so these figures mean the same thing on day 9 as on day 0.
+expected_daily_traffic = 20000000
 currency = { denomination = "USD" }
 
-# $70,000 each against $100,000 of traffic: together 1.4x what exists, so one has to give.
+# $1.4M each against $2.0M of traffic: together 1.4x what exists, so one has to give.
 [[volume_commitment.samples.contract.volume_contracts]]
 id = "contested-rich"
 connector = "adyen"
 billing_cycle = { type = "test_minutes", anchor = 10, timezone = "UTC" }
 archetype = "lumpsum"
-terms = { target = 7000000, reward = { kind = "percentage", value = { rebate_bps = 200 } } }
+terms = { target = 140000000, reward = { kind = "percentage", value = { rebate_bps = 200 } } }
 
 [[volume_commitment.samples.contract.volume_contracts]]
 id = "contested-cheap"
 connector = "stripe"
 billing_cycle = { type = "test_minutes", anchor = 10, timezone = "UTC" }
 archetype = "lumpsum"
-terms = { target = 7000000, reward = { kind = "percentage", value = { rebate_bps = 25 } } }
+terms = { target = 140000000, reward = { kind = "percentage", value = { rebate_bps = 25 } } }
 
 # The scheduler's own listener. GET /schedule shows the timing; GET /health is a liveness probe.
 [volume_commitment.server]

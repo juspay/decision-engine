@@ -22,38 +22,133 @@ import {
   formatMoney,
   pctOfGoal,
   isTestCycle as isTestCycleOf,
-  toMajorUnits,
 } from './volumeCommitmentChartBits'
 
-/** The slice of a simulator row this card reads. */
-export type SteerableResult = {
-  decidedGateway: string
-  /** Whether the volume-commitment engine moved this payment, from `volume_steer_info.outcome`. */
-  steerOutcome?: 'STEERED' | 'SR_PREVAILED' | null
-  /** The PSP approval-rate routing had picked, when the payment was steered elsewhere. */
-  steerSrHead?: string | null
-  /** Commitments that wanted this payment and the gate that stopped each. */
-  steerBlocked?: BlockedCommitment[] | null
+/**
+ * What a run has to be given to drive traffic at the contract: the PSPs the document names, so
+ * every payment is one the commitments can compete for.
+ *
+ * Nothing else. This used to carry a ticket size and a pace derived from the contract's declared
+ * daily volume, which made a contract run at a rate no other simulation on this page runs at —
+ * one payment a second where the rest go as fast as the backend answers. The contract's own
+ * figures are calibrated to the ordinary rate instead, so a contract demo and a routing demo push
+ * traffic the same way and only the promises differ.
+ */
+export type ContractRunPreset = {
+  gateways: string[]
+}
+
+/** What this card counted for one PSP over the run. */
+type ConnectorTally = {
+  /** Payments approval-rate routing sent here of its own accord. */
+  auth: number
+  /** Payments the commitment engine moved here. */
+  steered: number
+  /** How often each gate stopped a steer to this PSP — the reason shown beside a zero. */
+  blocked: Partial<Record<SteerBlock, number>>
 }
 
 /**
- * Why a commitment took no payments, in the reader's terms.
+ * The run's payments as this card needs them: counted, not listed.
+ *
+ * It used to take the rows themselves and count them on every render — O(rows) per connector, on
+ * a flush cadence that does not slow as rows accumulate, so the cost of a payment climbed with
+ * the number already on screen. Measured across one cycle: 24ms of client time per payment early
+ * in a run against 309ms by the end of it, while the backend answered in 48ms throughout. Folding
+ * each row in once as it lands is O(1), which is what keeps a run's rate flat enough for a demo's
+ * numbers to repeat.
+ */
+export type ContractRunTally = {
+  /** Payments the run has completed. */
+  total: number
+  /** Of those, the ones the commitment engine moved. */
+  steered: number
+  byConnector: Record<string, ConnectorTally>
+}
+
+/** A tally with nothing counted yet — a run not started, or one just cleared. */
+export function emptyRunTally(): ContractRunTally {
+  return { total: 0, steered: 0, byConnector: {} }
+}
+
+/**
+ * Count a whole set of rows at once — for rows that arrive already complete, restored from a
+ * snapshot rather than counted as they landed. One pass, not one per render.
+ */
+export function tallyOf(
+  rows: {
+    decidedGateway: string
+    steerOutcome?: 'STEERED' | 'SR_PREVAILED' | null
+    steerBlocked?: BlockedCommitment[] | null
+  }[],
+): ContractRunTally {
+  const tally = emptyRunTally()
+  for (const row of rows) countPayment(tally, row)
+  return tally
+}
+
+/** Fold one completed payment into a tally, in place. */
+export function countPayment(
+  tally: ContractRunTally,
+  row: {
+    decidedGateway: string
+    steerOutcome?: 'STEERED' | 'SR_PREVAILED' | null
+    steerBlocked?: BlockedCommitment[] | null
+  },
+) {
+  const of = (connector: string) =>
+    (tally.byConnector[connector] ??= { auth: 0, steered: 0, blocked: {} })
+
+  tally.total += 1
+  const wasSteered = row.steerOutcome === 'STEERED'
+  if (wasSteered) tally.steered += 1
+  if (row.decidedGateway) {
+    const entry = of(row.decidedGateway)
+    if (wasSteered) entry.steered += 1
+    else entry.auth += 1
+  }
+  for (const block of row.steerBlocked ?? []) {
+    const entry = of(block.connector)
+    entry.blocked[block.gate] = (entry.blocked[block.gate] ?? 0) + 1
+  }
+}
+
+/**
+ * Why a commitment steered nothing, in the reader's terms. Each reads as a clause completing
+ * "0 steered in — ...", so they all take the same shape.
  *
  * A steer rate is a share of the payments a commitment is *allowed* to take, and most payments
  * reach none of them. Without this, "Steering · 62% of eligible" beside zero steered payments
  * reads as a broken engine rather than an empty eligible set.
+ *
+ * `ALREADY_CHOSEN` has no entry, and is not counted towards the dominant gate: it is the one
+ * block that is not a refusal — routing had picked that PSP already, so the commitment was being
+ * served, not denied. It is reported by the payment it kept, in the row's "by approval" count.
+ * Counted here it would win the tally on any PSP routing favours and hide the gate that does
+ * explain the zero.
  */
-const GATE_REASONS: Record<SteerBlock, (n: number) => string> = {
-  ALREADY_CHOSEN: (n) => `routing already chose it ${n === 1 ? 'once' : `${n} times`}`,
-  NOT_OFFERED: (n) => `routing did not offer it on ${n} payment${n === 1 ? '' : 's'}`,
-  OUTSIDE_TOLERANCE: (n) => `${n} payment${n === 1 ? '' : 's'} outside its approval-rate budget`,
+type DenialGate = Exclude<SteerBlock, 'ALREADY_CHOSEN'>
+
+const GATE_REASONS: Record<DenialGate, (n: number) => string> = {
+  NOT_OFFERED: (n) => `not offered on ${n} payment${n === 1 ? '' : 's'}`,
+  OUTSIDE_TOLERANCE: (n) =>
+    `outside its approval-rate budget on ${n} payment${n === 1 ? '' : 's'}`,
   CYCLE_CLOSED: (n) => `its cycle had closed on ${n} payment${n === 1 ? '' : 's'}`,
-  LOST_ROLL: (n) => `${n} eligible, none drawn`,
-  UNKNOWN: (n) => `${n} payment${n === 1 ? '' : 's'} held back`,
+  LOST_ROLL: (n) => `eligible on ${n}, none drawn`,
+  UNKNOWN: (n) => `held back on ${n} payment${n === 1 ? '' : 's'}`,
 }
 
-/** Tighter than the default polls while someone is watching a run; a test cycle is only minutes. */
-const RUN_POLL_MS = 5_000
+/** A block that actually denied the payment; see `GATE_REASONS` for the one that does not. */
+function isDenial(gate: SteerBlock): gate is DenialGate {
+  return gate !== 'ALREADY_CHOSEN'
+}
+
+/**
+ * Tighter than the default polls while someone is watching a run; a test cycle is only minutes,
+ * and its series is bucketed by the second, so the poll is what decides how often those points
+ * actually reach the chart.
+ */
+const RUN_POLL_MS = 2_000
 
 /**
  * A steer rate at or above this takes every payment its PSP is allowed to take, so nothing is left
@@ -62,22 +157,18 @@ const RUN_POLL_MS = 5_000
  */
 const SATURATED_STEER_RATE = 0.995
 
-/** Extra payments over the seconds left, so latency cannot end the run before the cycle does. */
-const RUN_HEADROOM = 3
-
 type Row = {
   name: string
   color: string
   auth: number
   steered: number
-  ceded: number
   status: PacingStatus
   steerRate: number
   achieved: number
   goal: number
   reason?: string
   /** Why this commitment took nothing, when it was set to steer and took nothing. */
-  noneEligible?: string
+  noSteerReason?: string
   /** A richer commitment that is already taking every payment it may, leaving this one nothing.
    *  The engine rolls its plan in reward order, so a saturated PSP above this one in that order
    *  wins every contested payment — this one's own steer rate is never actually spent. */
@@ -125,54 +216,87 @@ function StatusBadge({ row }: { row: Row }) {
  */
 export function VolumeCommitmentRunChart({
   merchantId,
-  results,
+  tally,
   colorFor,
-  tps,
   isSimulating,
   onLoad,
   onContractGone,
   onCycleEnded,
+  onPrepareRun,
 }: {
   merchantId: string | null
-  results: SteerableResult[]
+  /** The run's payments, counted as they landed — see `ContractRunTally`. */
+  tally: ContractRunTally
   colorFor: (gateway: string) => string
-  /** Payments the run fires per second — the divisor that turns a daily total into a ticket size. */
-  tps: number
   isSimulating: boolean
-  onLoad: (preset: {
-    gateways: string[]
-    amount: number
-    totalPayments: number
-    paceMs: number
-  }) => void
+  onLoad: (preset: ContractRunPreset) => void
   /** Called when no contract is available, so the page can drop a pace set by an earlier Load. */
   onContractGone: () => void
   /** Called when the cycle closes mid-run: volume sent past it lands in the next period. */
   onCycleEnded: () => void
+  /**
+   * Hands the page the work to do before a run's first payment: opening the cycle that run will
+   * race, and reporting the terms it should race on. Registered once; the page awaits it from its
+   * own start path, which is the only place that can order it before the run rather than during
+   * it, and takes the terms from the return rather than from state a render behind.
+   */
+  onPrepareRun: (prepare: () => Promise<ContractRunPreset | null>) => void
 }) {
   // One request for pacing, series and audit. The bucket size depends on the contract-day length,
   // which arrives in the same response, so the first fetch comes back at whole-day resolution and
   // the next poll refines it — `keepPreviousData` keeps the chart from blanking in between.
   const [daySecs, setDaySecs] = useState<number | null | undefined>(undefined)
+  // The card follows the clock only while a run is in flight — running or paused, which is what
+  // `isSimulating` covers. Off a run there is nothing arriving to plot, and a `test_minutes` cycle
+  // repeats the instant it closes, so a card that kept following would answer with a cycle that
+  // has delivered nothing: the standings, the eliminations and the wedge the run was watched for,
+  // replaced by an empty chart seconds after the verdict landed. The last payload from the run is
+  // kept and shown instead, until the next run opens a cycle of its own.
+  //
+  // The hold is of the whole payload. `run_id` cannot do it: the dashboard's pacing block is the
+  // live plan whatever run is asked for.
   const dashboard = useVolumeCommitmentDashboard(merchantId ?? undefined, {
     perDay: bucketsPerDay(daySecs),
-    refreshInterval: RUN_POLL_MS,
+    // Between runs the view is frozen; polling it only invites the next cycle in.
+    refreshInterval: isSimulating ? RUN_POLL_MS : 0,
   })
+  const live = {
+    pacing: dashboard.pacing,
+    series: dashboard.series,
+    runs: dashboard.runs,
+    events: dashboard.events,
+  }
+  // The cycle this run is watching. A payload for a different one means the cycle rolled under the
+  // run — its close was never rendered — and the race on screen is already over, so the last
+  // payload for it stands rather than being replaced by the successor's empty one.
+  const runCycleStart = useRef<string | null>(null)
+  const kept = useRef<typeof live | null>(null)
+  const liveCycleStart = live.pacing?.cycleStart ?? null
+  const rolled = Boolean(
+    runCycleStart.current && liveCycleStart && liveCycleStart !== runCycleStart.current,
+  )
+  // Before the first run there is nothing kept, so the contract's current standing is what shows.
+  if ((isSimulating || !kept.current) && !rolled) {
+    runCycleStart.current = liveCycleStart
+    kept.current = live
+  }
+  const view = isSimulating && !rolled ? live : kept.current ?? live
+
   useEffect(() => {
-    if (dashboard.pacing?.daySecs !== undefined) setDaySecs(dashboard.pacing.daySecs)
-  }, [dashboard.pacing?.daySecs])
-  const pacing = { data: dashboard.pacing }
-  const audit = { runs: dashboard.runs, events: dashboard.events }
-  const active = Boolean(dashboard.pacing?.active)
-  const connectors = useMemo(() => dashboard.series?.connectors ?? [], [dashboard.series])
-  const currency = dashboard.series?.currency
+    if (view.pacing?.daySecs !== undefined) setDaySecs(view.pacing.daySecs)
+  }, [view.pacing?.daySecs])
+  const pacing = { data: view.pacing }
+  const audit = { runs: view.runs, events: view.events }
+  const active = Boolean(view.pacing?.active)
+  const connectors = useMemo(() => view.series?.connectors ?? [], [view.series])
+  const currency = view.series?.currency
 
   // How much of the cycle is left. It lived beside the simulator's controls, which is where you
   // press things, not where you read where the commitments stand — and every verdict on this card
   // is a statement about the time remaining, so the countdown belongs next to them.
   const [, setClockTick] = useState(0)
-  const cycleEndMs = dashboard.pacing?.cycleEnd ? Date.parse(dashboard.pacing.cycleEnd) : 0
-  const isTest = isTestCycleOf(dashboard.pacing?.daySecs ?? SECS_PER_DAY)
+  const cycleEndMs = view.pacing?.cycleEnd ? Date.parse(view.pacing.cycleEnd) : 0
+  const isTest = isTestCycleOf(view.pacing?.daySecs ?? SECS_PER_DAY)
   useEffect(() => {
     // Seconds matter on a test cycle, where a contract day is a minute. On a calendar cycle the
     // countdown reads in days and a minute's resolution is already more than it can show.
@@ -182,17 +306,18 @@ export function VolumeCommitmentRunChart({
   }, [cycleEndMs, isTest])
   const secondsLeft = cycleEndMs ? Math.max(0, Math.round((cycleEndMs - Date.now()) / 1000)) : 0
   // Null where the document mixes billing cycles: there is then no single end to count down to.
-  const cycleDays = dashboard.pacing?.daysTotal ?? null
+  const cycleDays = view.pacing?.daysTotal ?? null
 
   // The window control belongs with the title, not stranded above the plot, so this card owns the
   // value and hands it to the chart.
-  const seriesDaySecs = dashboard.series?.daySecs ?? daySecs
+  const seriesDaySecs = view.series?.daySecs ?? daySecs
   const axisDays = useMemo(
     () => pacingAxis(connectors, seriesDaySecs).daysTotal,
     [connectors, seriesDaySecs],
   )
   const [chartWindow, setChartWindow] = useState<number | 'all' | null>(null)
   const [restarting, setRestarting] = useState(false)
+  const [restartError, setRestartError] = useState<string | null>(null)
 
   /**
    * Start the cycle again from day 0.
@@ -210,14 +335,29 @@ export function VolumeCommitmentRunChart({
    * amount of re-stamping moves, so the control would claim to do something it cannot.
    */
   async function restartCycle() {
-    const ruleId = dashboard.pacing?.ruleId
+    const ruleId = view.pacing?.ruleId
     if (!ruleId || !merchantId || restarting) return
     setRestarting(true)
+    setRestartError(null)
     try {
       const body = { created_by: merchantId, routing_algorithm_id: ruleId }
       await apiPost('/routing/deactivate', body)
       await apiPost('/routing/activate', body)
-      await dashboard.mutate()
+      // Adopt the new cycle from the refetch itself. Clearing what is kept before it arrives
+      // would let the payload still in hand — the closed cycle's — be taken for the new one, and
+      // every later payload would then read as a roll and freeze the card on a dead race.
+      const fresh = await dashboard.mutate()
+      runCycleStart.current = fresh?.pacing.cycleStart ?? null
+      kept.current = fresh
+        ? {
+            pacing: fresh.pacing,
+            series: fresh.series,
+            runs: fresh.audit.runs,
+            events: fresh.audit.events,
+          }
+        : null
+    } catch (e) {
+      setRestartError(e instanceof Error ? e.message : 'Could not start the next cycle')
     } finally {
       setRestarting(false)
     }
@@ -226,10 +366,7 @@ export function VolumeCommitmentRunChart({
   // known at mount.
   const windowValue = chartWindow ?? pacingWindows(axisDays).initial
 
-  const steeredCount = useMemo(
-    () => results.filter((r) => r.steerOutcome === 'STEERED').length,
-    [results],
-  )
+  const steeredCount = tally.steered
 
   // Drop times for *this* cycle only; an old cycle's elimination would pin the marker at minute 0.
   const currentRunId = audit.runs.find((r) => r.isCurrent)?.runId
@@ -247,17 +384,9 @@ export function VolumeCommitmentRunChart({
     const eliminated = pacing.data?.eliminated ?? []
     const names = [...new Set<string>([...connectors.map((c) => c.connector), ...psps.map((p) => p.connector), ...eliminated.map((e) => e.connector)])]
     return names.map((name) => {
-      let auth = 0
-      let steered = 0
-      let ceded = 0
-      for (const r of results) {
-        const wasSteered = r.steerOutcome === 'STEERED'
-        if (r.decidedGateway === name) {
-          if (wasSteered) steered += 1
-          else auth += 1
-        }
-        if (wasSteered && r.steerSrHead === name) ceded += 1
-      }
+      const counted = tally.byConnector[name]
+      const auth = counted?.auth ?? 0
+      const steered = counted?.steered ?? 0
       const live = psps.find((p) => p.connector === name)
       const dropped = eliminated.find((e) => e.connector === name)
       const seriesFor = connectors.find((c) => c.connector === name)
@@ -278,19 +407,14 @@ export function VolumeCommitmentRunChart({
                 ? 'steering'
                 : 'on_pace'
               : 'pending'
-      // The gate that stopped this commitment most often. One reason, not a tally: the row is a
+      // The gate that denied this commitment most often. One reason, not a tally: the row is a
       // line of text, and the dominant gate is the one that explains the zero.
-      let noneEligible: string | undefined
+      let noSteerReason: string | undefined
       if (steered === 0) {
-        const byGate = new Map<SteerBlock, number>()
-        for (const r of results) {
-          for (const b of r.steerBlocked ?? []) {
-            if (b.connector !== name) continue
-            byGate.set(b.gate, (byGate.get(b.gate) ?? 0) + 1)
-          }
-        }
-        const top = [...byGate.entries()].sort((a, b) => b[1] - a[1])[0]
-        if (top) noneEligible = GATE_REASONS[top[0]]?.(top[1]) ?? GATE_REASONS.UNKNOWN(top[1])
+        const top = Object.entries(counted?.blocked ?? {})
+          .filter((entry): entry is [DenialGate, number] => isDenial(entry[0] as SteerBlock))
+          .sort((a, b) => b[1] - a[1])[0]
+        if (top) noSteerReason = GATE_REASONS[top[0]]?.(top[1]) ?? GATE_REASONS.UNKNOWN(top[1])
       }
 
       // Who, if anyone, is soaking up every payment this one is waiting for.
@@ -311,17 +435,16 @@ export function VolumeCommitmentRunChart({
         color: colorFor(name),
         auth,
         steered,
-        ceded,
         status,
         steerRate: live?.steerRate ?? 0,
         achieved,
         goal,
         reason: dropped?.reason,
-        noneEligible,
+        noSteerReason,
         blockedBy,
       }
     })
-  }, [pacing.data, connectors, results, colorFor, cycleOver])
+  }, [pacing.data, connectors, tally, colorFor, cycleOver])
 
   const statusFor = useCallback(
     (name: string): PacingStatus => rows.find((r) => r.name === name)?.status ?? 'pending',
@@ -332,21 +455,6 @@ export function VolumeCommitmentRunChart({
     [pacing.data],
   )
 
-  // ── Driving traffic at the contract ─────────────────────────────────────────────────────
-  const contractDaySecs = dashboard.pacing?.daySecs ?? SECS_PER_DAY
-  const expectedDaily = dashboard.pacing?.expectedDailyTraffic ?? 0
-  // Volume rate is a contract term: `expectedDaily` per contract day, however many payments carry
-  // it. TPS only decides how finely that is chopped — more payments of proportionally less each.
-  const paymentsPerDay = Math.max(1, Math.round(tps * contractDaySecs))
-  // The rate is a contract figure in canonical minor units; the ticket is what a payment carries,
-  // so it goes on the wire in the major units `/decide-gateway` reads amounts in.
-  const perPayment =
-    expectedDaily > 0
-      ? Math.max(0.01, Math.round((toMajorUnits(expectedDaily, currency) / paymentsPerDay) * 100) / 100)
-      : 1000
-  const paceMs = Math.max(1, Math.round((contractDaySecs * 1000) / paymentsPerDay))
-  // Over-provisioned so the cycle, never the count, ends the run; `onCycleEnded` discards the rest.
-  const totalPayments = Math.max(1, Math.round(tps * secondsLeft * RUN_HEADROOM))
 
   // The page's callbacks change identity every render; the effects below key on facts, not on them.
   const callbacks = useRef({ onContractGone, onCycleEnded })
@@ -362,12 +470,31 @@ export function VolumeCommitmentRunChart({
     if (cycleOver && isSimulating) callbacks.current.onCycleEnded()
   }, [cycleOver, isSimulating])
 
-  // Refetch on cycle close so the countdown does not sit at "Cycle over" until the next poll.
-  const { mutate } = dashboard
+
+  // A run starts its own cycle, and it has to exist before the run's first payment does.
+  //
+  // Watching `isSimulating` instead put the restart *inside* the run, where it raced everything
+  // it touched: for the moment between deactivating and activating, the card still held the
+  // closed cycle, so it reported that cycle over and the page aborted the run it had just
+  // started. The page asks for the cycle now, and waits for it.
+  //
+  // Re-registered on every render rather than on mount alone. Mounting is not a reliable moment
+  // to hand something up: a card already on screen does not mount again, so a registration made
+  // only then is missing for the whole life of that card if anything about the arrangement
+  // changed after it appeared — and a page whose reference is null simply skips the step and
+  // runs against whatever cycle happened to be open, which is what this exists to prevent.
+  const prepareRun = useRef<() => Promise<ContractRunPreset | null>>(async () => null)
+  prepareRun.current = async () => {
+    // A calendar cycle is anchored to a day of the month, which no re-activation moves; the run
+    // joins the period the merchant is really in.
+    if (isTest) await restartCycle()
+    // `preset` is rebuilt every render from the contract, so it is right even on a first run the
+    // page has never been handed one for — which is a run with no pacing and the wrong ticket.
+    return preset.current.gateways.length > 0 ? { ...preset.current } : null
+  }
   useEffect(() => {
-    if (!cycleOver) return
-    void mutate()
-  }, [cycleOver, mutate])
+    onPrepareRun(() => prepareRun.current())
+  })
 
   // The simulator takes its settings from the contract rather than waiting to be pointed at it.
   // Ticket size, pace and the eligible gateways are all contract terms — a run driven by anything
@@ -378,14 +505,14 @@ export function VolumeCommitmentRunChart({
   // (`totalPayments` shrinks as the cycle runs down), so they are read from a ref and the effect
   // keys on the contract and cycle alone. A new cycle re-applies, which is what makes a closed
   // one's run stop and the next one start at its own full length.
-  const preset = useRef({ gateways: [] as string[], amount: 0, totalPayments: 0, paceMs: 0 })
-  preset.current = { gateways: rows.map((r) => r.name), amount: perPayment, totalPayments, paceMs }
+  const preset = useRef<ContractRunPreset>({ gateways: [] })
+  preset.current = { gateways: rows.map((r) => r.name) }
   const onLoadRef = useRef(onLoad)
   onLoadRef.current = onLoad
   const appliedCycle = useRef<string | null>(null)
   const liveCycle =
     active && !cycleOver
-      ? `${dashboard.pacing?.ruleId ?? ''}|${dashboard.pacing?.cycleStart ?? ''}`
+      ? `${view.pacing?.ruleId ?? ''}|${view.pacing?.cycleStart ?? ''}`
       : ''
   useEffect(() => {
     // Never mid-run: rewriting the ticket size under a run in flight would split its results
@@ -399,7 +526,7 @@ export function VolumeCommitmentRunChart({
   // The contract is activated but the feature flag is off, so nothing is paced and the endpoints
   // report no plan. Explain that rather than rendering nothing — this card vanishing is otherwise
   // indistinguishable from the merchant having no contract at all.
-  if (dashboard.pacing?.contractConfigured && !dashboard.pacing.featureEnabled) {
+  if (view.pacing?.contractConfigured && !view.pacing.featureEnabled) {
     return (
       <Card>
         <CardBody className="space-y-3">
@@ -410,7 +537,10 @@ export function VolumeCommitmentRunChart({
             </span>
             <Badge variant="orange">Not routing</Badge>
           </div>
-          <VolumeContractFeatureNotice merchantId={merchantId} onEnabled={() => void mutate()} />
+          <VolumeContractFeatureNotice
+              merchantId={merchantId}
+              onEnabled={() => void dashboard.mutate()}
+            />
         </CardBody>
       </Card>
     )
@@ -420,7 +550,7 @@ export function VolumeCommitmentRunChart({
   if (!active && steeredCount === 0) return null
   if (rows.length === 0) return null
 
-  const total = results.length
+  const total = tally.total
 
   return (
     <Card>
@@ -435,7 +565,7 @@ export function VolumeCommitmentRunChart({
               <Badge variant="gray">Mixed cycles</Badge>
             ) : isTest ? (
               <Badge variant="orange">
-                Test cycle · {secondsLeft}s left of {cycleDays} min
+                Test cycle · {secondsLeft}s left of {cycleDays} days
               </Badge>
             ) : (
               <Badge variant="blue">
@@ -445,7 +575,7 @@ export function VolumeCommitmentRunChart({
             )}
           </div>
           <div className="ml-auto flex shrink-0 items-center gap-2">
-            {isTest && dashboard.pacing?.ruleId && (
+            {isTest && view.pacing?.ruleId && (
               <button
                 type="button"
                 onClick={() => void restartCycle()}
@@ -471,7 +601,6 @@ export function VolumeCommitmentRunChart({
         <span className="block text-xs tabular-nums text-slate-500 dark:text-slate-400">
           {steeredCount.toLocaleString()} of {total.toLocaleString()} payments steered
           {total > 0 ? ` · ${((steeredCount / total) * 100).toFixed(1)}%` : ''}
-          {currentRunId && <span className="ml-2 font-mono text-[10px] opacity-60">{currentRunId}</span>}
         </span>
 
         {connectors.length > 0 ? (
@@ -497,9 +626,9 @@ export function VolumeCommitmentRunChart({
               <SolidSwatch color={r.color} />
               <span className="min-w-0 truncate font-medium text-slate-800 dark:text-white">{r.name}</span>
               <StatusBadge row={r} />
-              {/* The counts are held together, but the line as a whole wraps: the eligibility
-                  reason is a sentence, and holding that unbroken pushes it over the column beside
-                  it rather than onto a second line of its own. */}
+              {/* The counts are held together, but the line as a whole wraps: the reason for a
+                  zero is a clause, and holding that unbroken pushes it over the column beside it
+                  rather than onto a second line of its own. */}
               <span className="ml-auto min-w-0 tabular-nums text-slate-500 dark:text-slate-400">
                 {r.goal > 0 && (
                   <>
@@ -512,26 +641,20 @@ export function VolumeCommitmentRunChart({
                 )}
                 <span className="whitespace-nowrap">
                   {r.auth} by approval · {r.steered} steered in
-                  {r.ceded > 0 ? ` · ${r.ceded} ceded` : ''}
                 </span>
-                {r.noneEligible && (
+                {/* Reads on from the "0 steered in" it follows, so it needs no label of its
+                    own — the clause is the reason for that zero. */}
+                {r.noSteerReason && (
                   <span className="text-amber-600 dark:text-amber-500">
-                    {' · '}0 eligible: {r.noneEligible}
+                    {' · '}
+                    {r.noSteerReason}
                   </span>
                 )}
               </span>
             </div>
           ))}
         </div>
-
-        {cycleOver && (
-          <p className="text-xs text-slate-500 dark:text-slate-400">
-            This cycle has closed — its goals are settled and a new one has begun, with delivery
-            back at zero. Any run still going was stopped, because volume sent now counts toward the
-            next period. The simulator picks up the fresh cycle on its own; deactivate the contract
-            from the Volume Contracts page to stop.
-          </p>
-        )}
+        {restartError && <p className="text-xs text-red-500">{restartError}</p>}
       </CardBody>
     </Card>
   )

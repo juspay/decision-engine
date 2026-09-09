@@ -8,9 +8,9 @@ import {
 } from '../types/api'
 
 /** Default poll for the pacing card and series; the forecast recomputes in the background. */
-export const PACING_POLL_MS = 15_000
+const PACING_POLL_MS = 15_000
 /** Default poll for the audit trail and the impact view. */
-export const ACTIVITY_POLL_MS = 10_000
+const ACTIVITY_POLL_MS = 10_000
 
 /** A volume-commitment endpoint for one merchant, or `null` (no request) without one. */
 function vcPath(

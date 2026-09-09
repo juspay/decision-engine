@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::inputs::TrafficRates;
 use super::math;
 
 /// One PSP's position against its commitment.
@@ -68,6 +69,11 @@ pub struct SteeringPlan {
     /// checks against — see `compute_plan`.
     #[serde(default)]
     pub flagged_unreachable: Vec<String>,
+    /// Commitments already dropped that this forecast read as clearly reachable again. Reversing
+    /// a drop takes two agreeing forecasts, exactly as ordering one does, so this is what the
+    /// next forecast checks a recovery against.
+    #[serde(default)]
+    pub flagged_reachable: Vec<String>,
 }
 
 impl SteeringPlan {
@@ -86,11 +92,17 @@ impl SteeringPlan {
 /// dropped PSPs still get normal traffic.
 pub fn choose_commitments_to_keep(
     psps: Vec<PspPlan>,
-    traffic_left: f64,
-    daily_traffic: f64,
+    traffic: TrafficRates,
+    days_left: f64,
 ) -> (Vec<PspPlan>, Vec<DroppedPsp>) {
+    // The period budget is the daily rate over the horizon, derived here rather than passed in:
+    // handed the two separately, a caller can pass a total that no longer matches the rate it was
+    // computed from, and the pass then sheds commitments against a budget that never existed.
+    let traffic_left = traffic.left_over(days_left);
+    let daily_traffic = traffic.forward_daily;
+
     // Pass 1: the certifiably lost.
-    let (mut kept, mut dropped) = drop_unreachable(psps, daily_traffic);
+    let (mut kept, mut dropped) = drop_unreachable(psps, traffic);
 
     // Pass 2: reward-ranked, giving up the tail until the period and daily budgets both fit.
     kept.sort_by(by_reward_desc);
@@ -124,7 +136,12 @@ pub fn choose_commitments_to_keep(
 /// Drop only commitments whose daily need exceeds total daily traffic — measured traffic where
 /// there is any, else the contract's declared figure. Used alone through the first contract day,
 /// when the budget pass would be noise.
-pub fn drop_unreachable(psps: Vec<PspPlan>, daily_traffic: f64) -> (Vec<PspPlan>, Vec<DroppedPsp>) {
+pub fn drop_unreachable(
+    psps: Vec<PspPlan>,
+    traffic: TrafficRates,
+) -> (Vec<PspPlan>, Vec<DroppedPsp>) {
+    // Feasibility asks what will arrive before the cycle closes, never how big the merchant is.
+    let daily_traffic = traffic.forward_daily;
     let (unreachable, kept): (Vec<PspPlan>, Vec<PspPlan>) = psps
         .into_iter()
         .partition(|psp| psp.needed_daily > daily_traffic);
@@ -153,6 +170,48 @@ fn by_reward_desc(a: &PspPlan, b: &PspPlan) -> std::cmp::Ordering {
 }
 
 impl PspPlan {
+    /// Volume each remaining day must bring for this commitment to land inside the cycle's
+    /// finishing margin — the one answer to "what does this need right now".
+    ///
+    /// Read by both halves of the decision: whether the commitment is behind, and what share of
+    /// the flow steering then takes. They were separate sums over the same quantities, and a
+    /// margin added to one and not the other is a commitment steered at a rate that does not
+    /// match the urgency it was marked with.
+    ///
+    /// Higher than `needed_daily`, which paces to the cycle's closing instant and is what the
+    /// plan reports and feasibility is judged on. Nothing is written off for needing more than
+    /// this asks — see `math::pacing_days_left` for why the margin exists.
+    pub fn paced_daily_need(&self, now_ms: i64) -> f64 {
+        math::needed_daily(
+            self.remaining,
+            math::pacing_days_left(
+                math::days_left(self.period_end_ms, now_ms, self.day_secs),
+                math::cycle_days(self.period_start_ms, self.period_end_ms, self.day_secs),
+            ),
+        )
+    }
+
+    /// Of that need, what steering has to add: the rest routing delivers unaided.
+    pub fn steering_shortfall_daily(&self, now_ms: i64) -> f64 {
+        math::daily_shortfall(self.paced_daily_need(now_ms), self.routing_gives_daily)
+    }
+
+    /// Share of the divertible flow to take, 0..=1 — what the payment path rolls against.
+    ///
+    /// The denominator is the flow left in *this contract day*, so a rate set early in a day and
+    /// read late in it still asks for the whole of what the day still owes; `already_today` is
+    /// what steering has delivered since the day opened, which is how the loop closes without a
+    /// shared counter.
+    pub fn steer_rate_for(&self, now_ms: i64, already_today: f64, divertible_daily: f64) -> f64 {
+        let day_ms = math::day_ms(self.day_secs) as f64;
+        let elapsed_in_day = ((now_ms - self.period_start_ms).max(0) as f64) % day_ms;
+        let day_remaining = ((day_ms - elapsed_in_day) / day_ms).clamp(0.0, 1.0);
+        math::steer_rate(
+            (self.steering_shortfall_daily(now_ms) - already_today).max(0.0),
+            divertible_daily * day_remaining,
+        )
+    }
+
     /// Volume the promise expects to have landed by `now_ms`, pacing evenly across the cycle.
     fn promised_by(&self, now_ms: i64) -> f64 {
         let span = (self.period_end_ms - self.period_start_ms).max(1);
@@ -169,7 +228,9 @@ impl PspPlan {
     /// Whether normal routing is leaving this commitment short.
     ///
     /// The settled answer is the forward-looking rate test: at what routing sends here unaided,
-    /// does the remainder arrive before the cycle closes?
+    /// does the remainder arrive in time? "In time" is `paced_daily_need` — the same target the
+    /// steer rate is a share of, so being marked behind and being steered hard enough to fix it
+    /// are one decision.
     ///
     /// Inside the first contract day it cannot be asked. `routing_gives_daily` is measured over
     /// the window since the cycle opened and divided by a *whole* contract day — the divisor has
@@ -185,7 +246,7 @@ impl PspPlan {
     /// shortfall for one that is merely young.
     fn is_behind(&self, now_ms: i64) -> bool {
         if self.rate_is_measurable(now_ms) {
-            self.routing_gives_daily < self.needed_daily
+            self.steering_shortfall_daily(now_ms) > 0.0
         } else {
             self.achieved < self.promised_by(now_ms)
         }
@@ -285,6 +346,59 @@ mod steering_marks {
         );
     }
 
+    /// The last day of the cycle, with the goal within reach: the rate takes everything it may.
+    /// Paced to the cycle's closing instant instead, this commitment asked for a third of the
+    /// flow, lost the rolls and finished at 99% of its goal — which pays nothing.
+    #[test]
+    fn the_final_margin_takes_every_payment_it_can() {
+        let now = DAY_MS * 9;
+        // $67k of $70k delivered, $3k owed, routing sending $2.4k a day of its own.
+        let psp = paced(70_000.0, 67_000.0, 2_400.0, 3_000.0);
+        assert!(psp.paced_daily_need(now) > 3_000.0);
+        assert_eq!(psp.steer_rate_for(now, 0.0, 7_000.0), 1.0);
+    }
+
+    /// Mid-cycle it stays a share, not a sweep: the margin tightens the pace, it does not turn
+    /// every commitment urgent.
+    #[test]
+    fn mid_cycle_the_rate_is_still_a_share() {
+        let now = DAY_MS * 5;
+        let psp = paced(70_000.0, 35_000.0, 2_400.0, 7_000.0);
+        let rate = psp.steer_rate_for(now, 0.0, 7_000.0);
+        assert!(rate > 0.0 && rate < 1.0, "rate was {rate}");
+    }
+
+    /// Volume already steered this contract day is what the rate is net of — the loop closes on
+    /// the measurement rather than on a counter the payment path would have to keep.
+    #[test]
+    fn the_rate_is_net_of_what_today_already_delivered() {
+        let now = DAY_MS * 5;
+        let psp = paced(70_000.0, 35_000.0, 2_400.0, 7_000.0);
+        let fresh = psp.steer_rate_for(now, 0.0, 7_000.0);
+        let after = psp.steer_rate_for(now, 3_000.0, 7_000.0);
+        assert!(after < fresh);
+        // Today's share already delivered: nothing more is owed until tomorrow.
+        assert_eq!(psp.steer_rate_for(now, 1_000_000.0, 7_000.0), 0.0);
+    }
+
+    /// Being marked behind and being steered hard enough to fix it read the same target: a PSP
+    /// routing already covers is left alone *and* asks for nothing.
+    #[test]
+    fn the_mark_and_the_rate_agree() {
+        let now = DAY_MS * 3;
+        let covered = paced(65_000.0, 25_000.0, 9_000.0, 6_500.0);
+        let mut psps = vec![covered.clone()];
+        mark_who_needs_steering(&mut psps, now);
+        assert!(!psps[0].needs_steering);
+        assert_eq!(covered.steer_rate_for(now, 0.0, 7_000.0), 0.0);
+
+        let starved = paced(65_000.0, 25_000.0, 650.0, 6_500.0);
+        let mut psps = vec![starved.clone()];
+        mark_who_needs_steering(&mut psps, now);
+        assert!(psps[0].needs_steering);
+        assert!(starved.steer_rate_for(now, 0.0, 7_000.0) > 0.0);
+    }
+
     /// The richest commitment sorts first, so it wins a payment two of them could take.
     #[test]
     fn the_marker_orders_by_reward() {
@@ -323,6 +437,14 @@ mod tests {
         }
     }
 
+    /// A merchant flowing `forward_daily` a day, which is the only rate feasibility reads.
+    fn flowing(forward_daily: f64) -> TrafficRates {
+        TrafficRates {
+            typical_daily: forward_daily,
+            forward_daily,
+        }
+    }
+
     fn names(psps: &[PspPlan]) -> Vec<&str> {
         psps.iter().map(|p| p.connector.as_str()).collect()
     }
@@ -336,7 +458,7 @@ mod tests {
             psp("stripe", 5_000.0, 1_150_000.0, 380_000.0),
             psp("checkout", 1_000.0, 3_000_000.0, 750_000.0),
         ];
-        let (kept, dropped) = drop_unreachable(psps, 500_000.0);
+        let (kept, dropped) = drop_unreachable(psps, flowing(500_000.0));
         assert_eq!(names(&kept), vec!["adyen", "stripe"]);
         assert_eq!(names_dropped(&dropped), vec!["checkout"]);
     }
@@ -351,7 +473,7 @@ mod tests {
             psp("psp_a", 20_000.0, 4_400_000.0, 244_444.0),
             psp("psp_b", 12_000.0, 3_450_000.0, 191_667.0),
         ];
-        let (kept, dropped) = choose_commitments_to_keep(psps, 50_000_000.0, 1_000_000.0);
+        let (kept, dropped) = choose_commitments_to_keep(psps, flowing(1_000_000.0), 50.0);
         assert_eq!(names(&kept), ["psp_a", "psp_b"]);
         assert!(dropped.is_empty());
     }
@@ -366,7 +488,7 @@ mod tests {
             psp("psp_c", 6_000.0, 3_050_000.0, 169_444.0),
             psp("psp_d", 15_000.0, 2_500_000.0, 138_889.0),
         ];
-        let (kept, dropped) = choose_commitments_to_keep(psps, 11_160_000.0, 620_000.0);
+        let (kept, dropped) = choose_commitments_to_keep(psps, flowing(620_000.0), 18.0);
 
         assert_eq!(names(&kept), ["psp_a", "psp_d", "psp_b"]);
         assert_eq!(dropped.len(), 1);
@@ -381,7 +503,7 @@ mod tests {
             psp("psp_a", 20_000.0, 100.0, 400_000.0),
             psp("psp_b", 5_000.0, 100.0, 400_000.0),
         ];
-        let (kept, dropped) = choose_commitments_to_keep(psps, 10_000_000.0, 620_000.0);
+        let (kept, dropped) = choose_commitments_to_keep(psps, flowing(620_000.0), 16.13);
         assert_eq!(names(&kept), ["psp_a"]);
         assert_eq!(dropped.len(), 1);
         assert_eq!(dropped[0].connector, "psp_b");
@@ -394,7 +516,7 @@ mod tests {
             psp("zeta", 10_000.0, 6_000_000.0, 100.0),
             psp("alpha", 10_000.0, 6_000_000.0, 100.0),
         ];
-        let (kept, dropped) = choose_commitments_to_keep(psps, 6_000_000.0, 1_000_000.0);
+        let (kept, dropped) = choose_commitments_to_keep(psps, flowing(1_000_000.0), 6.0);
         assert_eq!(names(&kept), ["alpha"]);
         assert_eq!(dropped[0].connector, "zeta");
     }
@@ -403,7 +525,7 @@ mod tests {
     #[test]
     fn drops_everything_when_nothing_fits() {
         let psps = vec![psp("psp_a", 20_000.0, 9_000_000.0, 500_000.0)];
-        let (kept, dropped) = choose_commitments_to_keep(psps, 1_000.0, 1_000.0);
+        let (kept, dropped) = choose_commitments_to_keep(psps, flowing(1_000.0), 1.0);
         assert!(kept.is_empty());
         assert_eq!(dropped.len(), 1);
     }
@@ -418,7 +540,7 @@ mod tests {
             psp("psp_b", 12_000.0, 3_450_000.0, 191_667.0),
             psp("psp_c", 6_000.0, 3_050_000.0, 169_444.0),
         ];
-        let (kept, dropped) = choose_commitments_to_keep(psps, 11_160_000.0, 620_000.0);
+        let (kept, dropped) = choose_commitments_to_keep(psps, flowing(620_000.0), 18.0);
 
         // Without the pre-pass, psp_doomed's reward rank would keep it and evict both others.
         assert_eq!(names(&kept), ["psp_b", "psp_c"]);
@@ -429,7 +551,7 @@ mod tests {
 
     #[test]
     fn empty_input_is_no_op() {
-        let (kept, dropped) = choose_commitments_to_keep(Vec::new(), 0.0, 0.0);
+        let (kept, dropped) = choose_commitments_to_keep(Vec::new(), flowing(0.0), 0.0);
         assert!(kept.is_empty() && dropped.is_empty());
     }
 }

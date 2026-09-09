@@ -416,16 +416,31 @@ pub struct VolumeCommitmentConfig {
     pub tick_secs: u64,
     /// How often a merchant's plan is rebuilt — the only scheduled job. Per-merchant overridable.
     pub default_forecast_interval_secs: u64,
-    /// Whether `test_minutes` billing cycles may be written. A contract whose "day" lasts sixty
+    /// Whether `test_minutes` billing cycles may be written. A contract whose "day" lasts
     /// seconds is a demo device, meaningless against real billing, so it is off unless a
     /// deployment's own config turns it on.
     #[serde(default)]
     pub allow_test_cycles: bool,
+    /// How long one contract "day" lasts on a `test_minutes` cycle. It sets the speed of a demo:
+    /// the whole cycle is `anchor` of these, so halving it halves the wait and doubles the rate
+    /// the promise line paces at. Read through `test_day_secs()`, which holds it to a range a
+    /// demo can be watched at.
+    #[serde(default)]
+    pub test_day_secs: u64,
     /// The demo contract library — whole documents, not a recipe for building them, so a
     /// deployment tunes a scenario without a build. A config that lists none (the default, and
     /// what production ships) serves none: that empty list *is* the production gate.
     #[serde(default)]
     pub samples: Vec<SampleScenario>,
+}
+
+impl VolumeCommitmentConfig {
+    /// The configured test contract-day length, held to something a demo can be watched at: at
+    /// least a second, and under an hour, so a "day" stays shorter than the calendar day every
+    /// reader of `day_secs` distinguishes it from.
+    pub fn test_day_secs(&self) -> u64 {
+        self.test_day_secs.clamp(1, 3_600)
+    }
 }
 
 /// One demo contract a merchant can activate to watch a single engine behaviour happen on
@@ -463,6 +478,8 @@ impl Default for VolumeCommitmentConfig {
             // `config/` ships only `development.toml`, so a deployment whose config omits this
             // key must land on production behaviour, not on demo behaviour.
             allow_test_cycles: false,
+            test_day_secs:
+                crate::decider::gatewaydecider::volume_commitment::math::DEFAULT_TEST_DAY_SECS,
             samples: Vec::new(),
         }
     }

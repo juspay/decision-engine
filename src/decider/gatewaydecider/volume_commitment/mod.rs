@@ -69,7 +69,9 @@ pub async fn build_deps(
 
     Deps {
         config: config.clone(),
-        inputs: Arc::new(DslInputSource),
+        inputs: Arc::new(DslInputSource {
+            test_day_secs: config.test_day_secs(),
+        }),
         // Redis, always: a process-local plan would be invisible to other replicas and lost on restart.
         state: Arc::new(RedisStateStore),
         volume,

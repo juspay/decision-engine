@@ -326,6 +326,7 @@ mod tests {
             psps,
             dropped: Vec::new(),
             flagged_unreachable: Vec::new(),
+            flagged_reachable: Vec::new(),
         }
     }
 

@@ -8,7 +8,7 @@ use diesel::associations::HasTable;
 use diesel::{BoolExpressionMethods, ExpressionMethods};
 
 use super::inputs::{Commitment, CommitmentInputs, InputSource};
-use super::math::{MIN_TEST_CYCLE_MINUTES, SECS_PER_DAY, TEST_DAY_SECS};
+use super::math::{MIN_TEST_CYCLE_DAYS, SECS_PER_DAY};
 use super::FEATURE_FLAG;
 use crate::app::get_tenant_app_state;
 use crate::euclid::types::StaticRoutingAlgorithm;
@@ -32,8 +32,18 @@ use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
 /// One basis point is one ten-thousandth. Rewards and tolerance both arrive in bps.
 const BPS: f64 = 10_000.0;
 
+/// The test contract-day length these tests are written against — the shipped default, so they
+/// state a length rather than tracking whatever a deployment configures.
+#[cfg(test)]
+const TEST_DAY_SECS: u64 = super::math::DEFAULT_TEST_DAY_SECS;
+
 /// Reads commitments from the merchant's active volume-contract document.
-pub struct DslInputSource;
+pub struct DslInputSource {
+    /// How long one contract day lasts on a `test_minutes` cycle, from
+    /// `volume_commitment.test_day_secs`. Held here rather than read from the global deps: this
+    /// source is built as part of them, so it cannot read them back.
+    pub test_day_secs: u64,
+}
 
 #[async_trait]
 impl InputSource for DslInputSource {
@@ -43,7 +53,7 @@ impl InputSource for DslInputSource {
 
     async fn load_configured(&self, merchant_id: &str) -> Option<CommitmentInputs> {
         let (config, anchor_ms, rule_id) = active_config(merchant_id).await?;
-        to_commitment_inputs(merchant_id, &config, anchor_ms, rule_id)
+        to_commitment_inputs(merchant_id, &config, anchor_ms, rule_id, self.test_day_secs)
     }
 
     /// Every merchant with a contract activated; `load` is where the feature flag is applied.
@@ -140,6 +150,7 @@ fn to_commitment_inputs(
     config: &VolumeContractConfig,
     anchor_ms: i64,
     rule_id: String,
+    test_day_secs: u64,
 ) -> Option<CommitmentInputs> {
     // Mode 2 puts commitments ahead of approval rate; this engine only implements Mode 1, where
     // routing stays in charge and steering is a nudge within tolerance.
@@ -159,7 +170,7 @@ fn to_commitment_inputs(
         .volume_contracts
         .iter()
         .filter(|contract| contract.status == ContractStatus::Active)
-        .filter_map(|contract| to_commitment(merchant_id, contract, anchor_ms))
+        .filter_map(|contract| to_commitment(merchant_id, contract, anchor_ms, test_day_secs))
         .collect();
 
     if commitments.is_empty() {
@@ -191,6 +202,7 @@ fn to_commitment(
     merchant_id: &str,
     contract: &VolumeContract,
     anchor_ms: i64,
+    test_day_secs: u64,
 ) -> Option<Commitment> {
     let skip = |why: &str| {
         logger::warn!(
@@ -231,7 +243,12 @@ fn to_commitment(
         ContractTerms::MinCommitment(_) => return skip("min_commitment terms are not supported"),
     };
 
-    let window = match cycle_window(&contract.billing_cycle, Utc::now(), anchor_ms) {
+    let window = match cycle_window(
+        &contract.billing_cycle,
+        Utc::now(),
+        anchor_ms,
+        test_day_secs,
+    ) {
         Some(window) => window,
         None => return skip("its billing cycle could not be resolved"),
     };
@@ -287,18 +304,24 @@ pub struct CycleWindow {
 }
 
 /// Current billing window in the contract's timezone; a `test_minutes` cycle repeats from
-/// `anchor_ms` with one contract day per minute.
-fn cycle_window(cycle: &BillingCycle, now: DateTime<Utc>, anchor_ms: i64) -> Option<CycleWindow> {
+/// `anchor_ms`, its `anchor` counting contract days of `test_day_secs` each.
+fn cycle_window(
+    cycle: &BillingCycle,
+    now: DateTime<Utc>,
+    anchor_ms: i64,
+    test_day_secs: u64,
+) -> Option<CycleWindow> {
     if cycle.cycle_type == BillingCycleType::TestMinutes {
-        let minutes = u32::from(cycle.anchor).max(MIN_TEST_CYCLE_MINUTES);
-        let span_ms = i64::from(minutes) * i64::try_from(TEST_DAY_SECS).unwrap_or(60) * 1000;
+        let days = u32::from(cycle.anchor).max(MIN_TEST_CYCLE_DAYS);
+        let day_secs = test_day_secs.max(1);
+        let span_ms = i64::from(days) * i64::try_from(day_secs).unwrap_or(60) * 1000;
         // Anchored to activation, not the epoch, so a fresh contract always gets a whole first cycle.
         let elapsed = now.timestamp_millis().saturating_sub(anchor_ms).max(0);
         let start_ms = anchor_ms + (elapsed / span_ms) * span_ms;
         return Some(CycleWindow {
             start_ms,
             end_ms: start_ms + span_ms,
-            day_secs: TEST_DAY_SECS,
+            day_secs,
         });
     }
 
@@ -402,7 +425,7 @@ mod tests {
     /// The window's boundaries read back as dates in the contract's zone, for readable assertions.
     fn window_dates(c: &BillingCycle, now: DateTime<Utc>) -> Option<(NaiveDate, NaiveDate)> {
         let tz: Tz = c.timezone.parse().ok()?;
-        let w = cycle_window(c, now, 0)?;
+        let w = cycle_window(c, now, 0, TEST_DAY_SECS)?;
         let as_date = |ms: i64| {
             DateTime::from_timestamp_millis(ms).map(|dt| dt.with_timezone(&tz).date_naive())
         };
@@ -443,9 +466,15 @@ mod tests {
     #[test]
     fn the_amount_scale_follows_the_contract_currency() {
         let scale_of = |currency: &str, metric: &str| {
-            to_commitment_inputs("m1", &config_for(currency, metric), 0, "r1".to_string())
-                .expect("a paceable document")
-                .amount_scale
+            to_commitment_inputs(
+                "m1",
+                &config_for(currency, metric),
+                0,
+                "r1".to_string(),
+                TEST_DAY_SECS,
+            )
+            .expect("a paceable document")
+            .amount_scale
         };
         assert_eq!(scale_of("USD", "gmv"), 100.0);
         assert_eq!(scale_of("JPY", "gmv"), 1.0);
@@ -539,7 +568,7 @@ mod tests {
     #[test]
     fn an_unknown_timezone_resolves_to_nothing_rather_than_guessing() {
         let c = cycle(BillingCycleType::CalendarMonth, 1, "Mars/Olympus_Mons");
-        assert!(cycle_window(&c, at("2026-08-20T12:00:00Z"), 0).is_none());
+        assert!(cycle_window(&c, at("2026-08-20T12:00:00Z"), 0, TEST_DAY_SECS).is_none());
     }
 }
 
@@ -552,9 +581,10 @@ mod test_cycle_tests {
         text.parse().expect("valid instant")
     }
 
-    /// A 30-minute test cycle: thirty one-minute contract days, anchored to activation.
+    /// A thirty-day test cycle: thirty contract days of `TEST_DAY_SECS`, anchored to activation,
+    /// so it plays out in fifteen wall-clock minutes.
     #[test]
-    fn a_test_cycle_lasts_its_minutes_with_one_day_per_minute() {
+    fn a_test_cycle_lasts_its_contract_days() {
         let cycle = BillingCycle {
             cycle_type: BillingCycleType::TestMinutes,
             anchor: 30,
@@ -564,16 +594,19 @@ mod test_cycle_tests {
         // Contract written at 10:05; cycles run from there, not from a wall-clock grid.
         let anchor = at("2026-08-24T10:05:00Z").timestamp_millis();
         let now = at("2026-08-24T10:12:00Z");
-        let w = cycle_window(&cycle, now, anchor).expect("resolves");
+        let w = cycle_window(&cycle, now, anchor, TEST_DAY_SECS).expect("resolves");
 
-        assert_eq!(w.day_secs, 60);
-        assert_eq!(w.end_ms - w.start_ms, 30 * 60_000);
+        assert_eq!(w.day_secs, TEST_DAY_SECS);
+        assert_eq!(
+            w.end_ms - w.start_ms,
+            30 * i64::try_from(TEST_DAY_SECS).expect("fits") * 1000
+        );
         // Seven minutes after it was written, still inside the first cycle.
         assert_eq!(w.start_ms, anchor);
-        // Twenty-three contract days remain.
+        // Fourteen contract days have run at half a minute each; sixteen remain.
         assert_eq!(
             super::super::math::days_left(w.end_ms, now.timestamp_millis(), w.day_secs),
-            23.0
+            16.0
         );
     }
 }
@@ -587,7 +620,7 @@ mod anchor_tests {
         text.parse().expect("valid instant")
     }
 
-    fn two_minute_cycle() -> BillingCycle {
+    fn two_day_cycle() -> BillingCycle {
         BillingCycle {
             cycle_type: BillingCycleType::TestMinutes,
             anchor: 2,
@@ -600,8 +633,13 @@ mod anchor_tests {
     #[test]
     fn a_fresh_contract_gets_a_whole_first_cycle() {
         let written = at("2026-08-24T10:01:58Z");
-        let w = cycle_window(&two_minute_cycle(), written, written.timestamp_millis())
-            .expect("resolves");
+        let w = cycle_window(
+            &two_day_cycle(),
+            written,
+            written.timestamp_millis(),
+            TEST_DAY_SECS,
+        )
+        .expect("resolves");
 
         assert_eq!(w.start_ms, written.timestamp_millis());
         assert_eq!(
@@ -610,14 +648,15 @@ mod anchor_tests {
         );
     }
 
-    /// It still repeats: five minutes into a two-minute contract is the third cycle.
+    /// It still repeats: two and a half minutes into a two-day contract — five of its
+    /// half-minute days — is the third cycle.
     #[test]
     fn cycles_repeat_from_the_anchor() {
         let anchor = at("2026-08-24T10:00:00Z").timestamp_millis();
-        let now = at("2026-08-24T10:05:00Z");
-        let w = cycle_window(&two_minute_cycle(), now, anchor).expect("resolves");
+        let now = at("2026-08-24T10:02:30Z");
+        let w = cycle_window(&two_day_cycle(), now, anchor, TEST_DAY_SECS).expect("resolves");
 
-        assert_eq!(w.start_ms, at("2026-08-24T10:04:00Z").timestamp_millis());
-        assert_eq!(w.end_ms, at("2026-08-24T10:06:00Z").timestamp_millis());
+        assert_eq!(w.start_ms, at("2026-08-24T10:02:00Z").timestamp_millis());
+        assert_eq!(w.end_ms, at("2026-08-24T10:03:00Z").timestamp_millis());
     }
 }
