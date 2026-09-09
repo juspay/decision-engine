@@ -91,13 +91,13 @@ export function LaneCanvas({
   const slotSetsRef = useRef<number[][]>([])
   const cutsRef = useRef<Cuts>({ filter: null, health: null })
 
-  /** One shared path builder, used for the initial render and for every animation frame. */
+  /** One shared path builder, used for the initial render and for every animation frame. Cuts
+      never truncate geometry — they are smooth dash-mask overlays applied by the wave engine. */
   const buildLanePath = (
     lane: LaneDef,
     i: number,
     gaps: GapRect[],
     slotSets: number[][],
-    cuts: Cuts,
     collect?: { labels: LaneLabel[]; sortEnabled: boolean },
   ): { d: string; winner: boolean; aliveAnim: boolean } => {
     const last = i === lanes.length - 1
@@ -148,12 +148,7 @@ export function LaneCanvas({
         }
       } else if (gap.kind === 'filter') {
         aliveAnim = true
-        if (cuts.filter === i) {
-          d += ` L ${x} ${y0} L ${x} ${y0 + gap.height * 0.36}`
-          alive = false
-        } else {
-          d += ` L ${x} ${y0} L ${x} ${y1}`
-        }
+        d += ` L ${x} ${y0} L ${x} ${y1}`
       } else if (gap.kind === 'sort') {
         aliveAnim = true
         const target: number = slotSets[orderStep]?.[i] ?? x
@@ -161,12 +156,7 @@ export function LaneCanvas({
         currentSlotX = target
         orderStep++
       } else if (gap.kind === 'demote') {
-        if (cuts.health === i) {
-          d += ` L ${x} ${y0} L ${x} ${y0 + gap.height * 0.36}`
-          alive = false
-        } else {
-          d += ` L ${x} ${y0} L ${x} ${y1}`
-        }
+        d += ` L ${x} ${y0} L ${x} ${y1}`
       } else if (gap.kind === 'converge' && deterministicHead && !ghost) {
         d += ` L ${x} ${y0}`
         if (lane.name === deterministicHead) {
@@ -227,7 +217,7 @@ export function LaneCanvas({
       const paths: LanePath[] = []
       const aliveAnim: boolean[] = []
       lanes.forEach((lane, i) => {
-        const built = buildLanePath(lane, i, gaps, identitySets, cutsRef.current, collect)
+        const built = buildLanePath(lane, i, gaps, identitySets, collect)
         aliveAnim.push(built.aliveAnim)
         if (built.d) {
           const flowDuration = lane.share != null ? Math.min(6, 0.85 / Math.max(lane.share, 0.12)) : 2.6
@@ -294,7 +284,7 @@ export function LaneCanvas({
       lanes.forEach((lane, i) => {
         const group = laneGroupRefs.current[i]
         if (!group) return
-        const { d } = buildLanePath(lane, i, geom.gaps, slotSetsRef.current, cutsRef.current)
+        const { d } = buildLanePath(lane, i, geom.gaps, slotSetsRef.current)
         group.querySelectorAll<SVGPathElement>('path[data-lane-ribbon]').forEach((el) => el.setAttribute('d', d))
       })
     }
@@ -302,7 +292,7 @@ export function LaneCanvas({
       lanes.forEach((lane, i) => {
         const group = laneGroupRefs.current[i]
         if (!group) return
-        const { d } = buildLanePath(lane, i, geom.gaps, slotSetsRef.current, cutsRef.current)
+        const { d } = buildLanePath(lane, i, geom.gaps, slotSetsRef.current)
         group.querySelectorAll('animateMotion').forEach((el) => el.setAttribute('path', d))
       })
     }
@@ -342,32 +332,69 @@ export function LaneCanvas({
       overlay.appendChild(marker)
       cutMarkers[kind] = marker
     }
+    /** Fraction (0..100, matching pathLength=100) of a lane's path above the given y — found by
+        binary search over real arc length, so the dash mask breaks exactly at the gap. */
+    const fractionAtY = (laneIndex: number, targetY: number): number => {
+      const group = laneGroupRefs.current[laneIndex]
+      const core = group?.querySelector<SVGPathElement>('path[data-lane-core]')
+      if (!core) return 50
+      const total = core.getTotalLength()
+      let lo = 0
+      let hi = total
+      for (let step = 0; step < 14; step++) {
+        const mid = (lo + hi) / 2
+        if (core.getPointAtLength(mid).y < targetY) lo = mid
+        else hi = mid
+      }
+      return (lo / total) * 100
+    }
+    const setLaneCut = (laneIndex: number, cutY: number | null) => {
+      const group = laneGroupRefs.current[laneIndex]
+      if (!group) return
+      const masked = group.querySelectorAll<SVGPathElement>('path[data-lane-mask]')
+      const flow = group.querySelector<SVGPathElement>('path.de-lane-flow')
+      if (cutY == null) {
+        // Regrow to full length; example lanes get their dash pattern back once regrown.
+        masked.forEach((el) => (el.style.strokeDasharray = '100 100'))
+        if (ghost) {
+          timeouts.push(window.setTimeout(() => masked.forEach((el) => (el.style.strokeDasharray = '6 5')), 800))
+        }
+        if (flow) flow.style.opacity = String(ghost ? 0.5 : 0.9)
+        group.classList.remove('de-lane-cut')
+      } else {
+        const fraction = fractionAtY(laneIndex, cutY)
+        masked.forEach((el) => (el.style.strokeDasharray = `${fraction.toFixed(2)} 100`))
+        if (flow) flow.style.opacity = '0'
+        group.classList.add('de-lane-cut')
+      }
+    }
     const toggleCut = (kind: 'filter' | 'health', probability: number) => {
       const cuts = cutsRef.current
       const current = cuts[kind]
       const other = kind === 'filter' ? cuts.health : cuts.filter
+      const rect = kind === 'filter' ? filterRect : demoteRect
+      if (!rect) return
       if (current == null) {
         if (Math.random() > probability) return
         const candidates = movable.filter((i) => i !== other)
         if (!candidates.length) return
         const victim = candidates[Math.floor(Math.random() * candidates.length)]
         cuts[kind] = victim
-        setCutMarker(kind, victim)
+        setLaneCut(victim, rect.top + rect.height * 0.38)
+        // The name lands the moment the retracting tip reaches the break point.
+        timeouts.push(window.setTimeout(() => setCutMarker(kind, victim), 550))
       } else {
         cuts[kind] = null
         setCutMarker(kind, null)
-        const rect = kind === 'filter' ? filterRect : demoteRect
+        setLaneCut(current, null)
         const lane = lanes[current]
-        if (rect) {
-          spawnFlash(
-            kind === 'filter' ? laneX(current) : (slotSetsRef.current[0]?.[current] ?? laneX(current)),
-            rect.top + rect.height * 0.4,
-            `↩ ${lane.name} back`,
-            '#34d399',
-          )
-        }
+        spawnFlash(
+          kind === 'filter' ? laneX(current) : (slotSetsRef.current[0]?.[current] ?? laneX(current)),
+          rect.top + rect.height * 0.4,
+          `↩ ${lane.name} back`,
+          '#34d399',
+        )
       }
-      rebuild()
     }
 
     const runSortPhase = (sortIndex: number, fromOrders: number[][], toOrders: number[][], onDone: () => void) => {
@@ -481,15 +508,19 @@ export function LaneCanvas({
           <g key={i} ref={(el) => (laneGroupRefs.current[i] = el)}>
             <path
               data-lane-ribbon
+              data-lane-mask
               d={path.d}
               fill="none"
               stroke={path.color}
               strokeWidth={path.width + 7}
               strokeLinecap="round"
               opacity={ghost ? 0.09 : 0.14}
+              pathLength={100}
             />
             <path
               data-lane-ribbon
+              data-lane-mask
+              data-lane-core
               d={path.d}
               fill="none"
               stroke={path.color}
