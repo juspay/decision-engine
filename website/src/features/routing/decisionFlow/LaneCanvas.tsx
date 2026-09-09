@@ -18,8 +18,10 @@ interface LaneLabel {
   kind: 'dot' | 'chip' | 'rank' | 'note' | 'pct' | 'windot' | 'endchip'
   text?: string
   color?: string
-  /** endchip only: which lane this names, so the wave engine can slide/hide it. */
+  /** endchip/windot only: which lane this belongs to, so the wave engine can slide/hide it. */
   laneIndex?: number
+  /** endchip only: the deterministic winner's chip stays at the converge point. */
+  pinned?: boolean
 }
 
 interface GapRect {
@@ -40,6 +42,8 @@ interface Drawn {
  * markers stay while their connector is out; transient ones fade themselves away.
  */
 interface Marker {
+  /** Unique per appearance: React remounts the node, so its entrance animation replays. */
+  id: number
   key: 'filter' | 'health' | 'restored'
   laneIndex: number
   gap: 'filter' | 'demote'
@@ -51,6 +55,8 @@ interface Marker {
 type GapKind = 'fan' | 'straight' | 'converge' | 'filter' | 'split' | 'sort' | 'demote'
 
 interface Tween {
+  /** Only one tween per channel is ever live: pushing supersedes, so two can't fight one value. */
+  channel: string
   t0: number
   dur: number
   apply: (eased: number) => void
@@ -128,6 +134,14 @@ export function LaneCanvas({
   const cutsRef = useRef<{ filter: number | null; health: number | null }>({ filter: null, health: null })
   const tweensRef = useRef<Tween[]>([])
   const dirtyRef = useRef(true)
+  const markerIdRef = useRef(0)
+  const nextMarkerId = () => ++markerIdRef.current
+  /** Set by the wave effect so renderLanes can place demote markers under the right sort gap. */
+  const markerXRef = useRef<{ demoteX: (i: number) => number; laneX: (i: number) => number } | null>(null)
+  /** Identity of the diagram itself, so a pure resize never resets a running animation. */
+  const signatureRef = useRef<string | null>(null)
+  /** Geometry moved under a live cut: the wave effect re-anchors its break point next frame. */
+  const pendingRemeasureRef = useRef(false)
 
   useEffect(() => {
     if (typeof document === 'undefined') return
@@ -213,8 +227,8 @@ export function LaneCanvas({
           d += ` C ${x} ${mid}, ${laneX(0)} ${mid}, ${laneX(0)} ${y1 - 8}`
           winner = true
           if (collect) {
-            collect.labels.push({ x: laneX(0), y: y1 - 8, kind: 'windot', color: lane.color })
-            collect.labels.push({ x: laneX(0), y: y1 + 4, kind: 'endchip', text: lane.name, color: lane.color, laneIndex: i })
+            collect.labels.push({ x: laneX(0), y: y1 - 8, kind: 'windot', color: lane.color, laneIndex: i })
+            collect.labels.push({ x: laneX(0), y: y1 + 4, kind: 'endchip', text: lane.name, color: lane.color, laneIndex: i, pinned: true })
           }
         } else {
           d += ` L ${x} ${y0 + gap.height * 0.42}`
@@ -268,15 +282,29 @@ export function LaneCanvas({
     overlayRef.current?.querySelectorAll<HTMLElement>('[data-marker-lane]').forEach((el) => {
       const laneIndex = Number(el.dataset.markerLane)
       if (Number.isNaN(laneIndex)) return
-      el.style.left = `${el.dataset.markerGap === 'demote' ? slotSetsRef.current[0]?.[laneIndex] ?? laneX(laneIndex) : laneX(laneIndex)}px`
+      const x =
+        el.dataset.markerGap === 'demote'
+          ? markerXRef.current?.demoteX(laneIndex) ?? laneX(laneIndex)
+          : laneX(laneIndex)
+      el.style.left = `${x}px`
     })
     const lastSet = slotSetsRef.current[slotSetsRef.current.length - 1]
+    const isCut = (laneIndex: number) =>
+      cutsRef.current.filter === laneIndex || cutsRef.current.health === laneIndex
     overlayRef.current?.querySelectorAll<HTMLElement>('.de-end-chip').forEach((chip) => {
       const laneIndex = Number(chip.dataset.lane)
       if (Number.isNaN(laneIndex)) return
-      const cut = cutsRef.current.filter === laneIndex || cutsRef.current.health === laneIndex
-      chip.style.opacity = cut ? '0' : '1'
-      chip.style.left = `${lastSet?.[laneIndex] ?? laneX(laneIndex)}px`
+      chip.style.opacity = isCut(laneIndex) ? '0' : '1'
+      // A deterministic winner's ribbon always converges to the first slot, so its chip stays
+      // there too rather than chasing the lane's sorted position.
+      chip.style.left = `${
+        chip.dataset.pinned === 'true' ? laneX(0) : lastSet?.[laneIndex] ?? laneX(laneIndex)
+      }px`
+    })
+    // The win dot marks a decision that this lane no longer reaches while it is cut.
+    overlayRef.current?.querySelectorAll<HTMLElement>('[data-windot-lane]').forEach((el) => {
+      const laneIndex = Number(el.dataset.windotLane)
+      el.style.opacity = Number.isNaN(laneIndex) || !isCut(laneIndex) ? '1' : '0'
     })
   }
 
@@ -302,9 +330,18 @@ export function LaneCanvas({
 
       const sortGapCount = gaps.filter((gap) => gap.kind === 'sort').length
       const identity = lanes.map((_, i) => laneX(i))
-      slotSetsRef.current = Array.from({ length: sortGapCount }, () => [...identity])
-      cutsRef.current = { filter: null, health: null }
-      setMarkers([])
+      // A resize or an expanded stage re-measures the same diagram; only a genuinely different
+      // lane set or stage structure may reset cuts, markers and tweens mid-flight.
+      const signature = JSON.stringify([lanes.map((l) => [l.name, l.color, l.share]), gaps.map((g) => g.kind), ghost, deterministicHead])
+      const reseed = signature !== signatureRef.current
+      signatureRef.current = signature
+      if (reseed) {
+        slotSetsRef.current = Array.from({ length: sortGapCount }, () => [...identity])
+        cutsRef.current = { filter: null, health: null }
+        setMarkers([])
+      } else if (slotSetsRef.current.length !== sortGapCount) {
+        slotSetsRef.current = Array.from({ length: sortGapCount }, () => [...identity])
+      }
       const collect = { labels: [] as LaneLabel[], sortEnabled: sortGapCount > 0 }
       const paths: LanePath[] = []
       const animatable: boolean[] = []
@@ -329,19 +366,25 @@ export function LaneCanvas({
         typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
       // A hidden tab gets no animation frames, so skip the reveal rather than stage lanes at zero.
       const canReveal = !reduced && typeof document !== 'undefined' && document.visibilityState === 'visible'
-      visRef.current = lanes.map(() => (canReveal ? 0 : 100))
-      tweensRef.current = []
-      if (canReveal) {
-        const now = performance.now()
-        lanes.forEach((_, i) => {
-          tweensRef.current.push({
-            t0: now + i * 90,
-            dur: REVEAL_MS,
-            apply: (eased) => {
-              visRef.current[i] = eased * 100
-            },
+      if (reseed) {
+        visRef.current = lanes.map(() => (canReveal ? 0 : 100))
+        tweensRef.current = []
+        if (canReveal) {
+          const now = performance.now()
+          lanes.forEach((_, i) => {
+            tweensRef.current.push({
+              channel: `vis:${i}`,
+              t0: now + i * 90,
+              dur: REVEAL_MS,
+              apply: (eased) => {
+                visRef.current[i] = eased * 100
+              },
+            })
           })
-        })
+        }
+      } else {
+        // Same diagram, new box: keep every cut and tween, just re-anchor the break points.
+        pendingRemeasureRef.current = true
       }
       dirtyRef.current = true
 
@@ -365,19 +408,24 @@ export function LaneCanvas({
   /* One frame loop drives every tween and then rewrites the lanes from current state. */
   useEffect(() => {
     if (!drawn) return
+    // Theme changes recompute flowOpacity/laneColor, which only reach the DOM via renderLanes.
+    dirtyRef.current = true
     let raf = 0
     const loop = (now: number) => {
       const tweens = tweensRef.current
       if (tweens.length) {
-        for (let i = tweens.length - 1; i >= 0; i--) {
+        // Oldest first, so when several resolve in one frame the newest intent lands last.
+        const finished: Tween[] = []
+        for (let i = 0; i < tweens.length; i++) {
           const tween = tweens[i]
           if (now < tween.t0) continue
           const progress = tween.dur <= 0 ? 1 : Math.min(1, (now - tween.t0) / tween.dur)
           tween.apply(easeInOut(progress))
-          if (progress >= 1) {
-            tweens.splice(i, 1)
-            tween.done?.()
-          }
+          if (progress >= 1) finished.push(tween)
+        }
+        if (finished.length) {
+          tweensRef.current = tweens.filter((tween) => !finished.includes(tween))
+          finished.forEach((tween) => tween.done?.())
         }
         dirtyRef.current = true
       }
@@ -401,11 +449,30 @@ export function LaneCanvas({
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
     const movable = lanes.map((_, i) => i).filter((i) => geom.animatable[i])
     if (movable.length < 2) return
-    const filterGap = geom.gaps.find((gap) => gap.kind === 'filter')
-    const demoteGap = geom.gaps.find((gap) => gap.kind === 'demote')
 
     const timeouts: number[] = []
     const later = (fn: () => void, ms: number) => timeouts.push(window.setTimeout(fn, ms))
+    const pushTween = (tween: Tween) => {
+      tweensRef.current = tweensRef.current.filter((t) => t.channel !== tween.channel)
+      tweensRef.current.push(tween)
+    }
+    /** Gaps are read lazily: a re-measure moves them, and a stale snapshot cuts at the wrong y. */
+    const gapOf = (kind: GapKind) => geomRef.current?.gaps.find((gap) => gap.kind === kind)
+    /** Slot set of the last sort ABOVE the demote gap — not blindly index 0. */
+    const demoteSlotIndex = () => {
+      const gaps = geomRef.current?.gaps ?? []
+      let sorts = 0
+      for (const gap of gaps) {
+        if (gap.kind === 'demote') break
+        if (gap.kind === 'sort') sorts++
+      }
+      return sorts - 1
+    }
+    const demoteX = (laneIndex: number) => {
+      const idx = demoteSlotIndex()
+      return (idx >= 0 ? slotSetsRef.current[idx]?.[laneIndex] : undefined) ?? laneX(laneIndex)
+    }
+    markerXRef.current = { demoteX, laneX }
     const slotPositions = movable.map((i) => laneX(i))
     let orders: number[][] = Array.from({ length: geom.sortGapCount }, () => [...movable])
     const toSlotSets = (orderList: number[][]) =>
@@ -432,11 +499,15 @@ export function LaneCanvas({
       return (lo / total) * 100
     }
     const tweenVisible = (laneIndex: number, to: number, onDone?: () => void) => {
-      const from = visRef.current[laneIndex] ?? 100
-      tweensRef.current.push({
+      // `from` is captured on the first applied frame, not at push time, so a superseding tween
+      // starts from where the lane actually is.
+      let from: number | null = null
+      pushTween({
+        channel: `vis:${laneIndex}`,
         t0: performance.now(),
         dur: CUT_MS,
         apply: (eased) => {
+          if (from == null) from = visRef.current[laneIndex] ?? 100
           visRef.current[laneIndex] = from + (to - from) * eased
         },
         done: onDone,
@@ -444,7 +515,7 @@ export function LaneCanvas({
     }
 
     const toggleCut = (kind: 'filter' | 'health', probability: number) => {
-      const gap = kind === 'filter' ? filterGap : demoteGap
+      const gap = kind === 'filter' ? gapOf('filter') : gapOf('demote')
       if (!gap) return
       const cuts = cutsRef.current
       const current = cuts[kind]
@@ -467,6 +538,7 @@ export function LaneCanvas({
               text: kind === 'filter' ? `✕ ${lanes[victim].name} not eligible` : `▼ ${lanes[victim].name} penalized`,
               tone: kind === 'filter' ? 'cut' : 'warn',
               transient: false,
+              id: nextMarkerId(),
             },
           ])
         }, CUT_MS * 0.72)
@@ -481,6 +553,7 @@ export function LaneCanvas({
             text: `↩ ${lanes[current].name} back`,
             tone: 'ok',
             transient: true,
+            id: nextMarkerId(),
           },
         ])
         later(() => setMarkers((prev) => prev.filter((m) => m.key !== 'restored')), 2600)
@@ -491,7 +564,8 @@ export function LaneCanvas({
     const runSort = (sortIndex: number, from: number[][], to: number[][], onDone: () => void) => {
       const fromSets = toSlotSets(from)
       const toSets = toSlotSets(to)
-      tweensRef.current.push({
+      pushTween({
+        channel: 'slots',
         t0: performance.now(),
         dur: SORT_MS,
         apply: (eased) => {
@@ -504,17 +578,30 @@ export function LaneCanvas({
         done: () => {
           slotSetsRef.current = toSets.map((set, k) => (k <= sortIndex ? set : fromSets[k]))
           // Geometry moved, so a lane that is currently out needs its break point refreshed.
-          const cuts = cutsRef.current
-          if (cuts.filter != null && filterGap) {
-            visRef.current[cuts.filter] = cutFraction(cuts.filter, filterGap.top + filterGap.height * 0.34)
-          }
-          if (cuts.health != null && demoteGap) {
-            visRef.current[cuts.health] = cutFraction(cuts.health, demoteGap.top + demoteGap.height * 0.34)
-          }
+          reanchorCuts()
           onDone()
         },
       })
     }
+
+    /** Re-derive break points after geometry moved (a sort, a resize) so cuts stay on their stage. */
+    const reanchorCuts = () => {
+      const cuts = cutsRef.current
+      const filterGap = gapOf('filter')
+      const demoteGap = gapOf('demote')
+      if (cuts.filter != null && filterGap) {
+        visRef.current[cuts.filter] = cutFraction(cuts.filter, filterGap.top + filterGap.height * 0.34)
+      }
+      if (cuts.health != null && demoteGap) {
+        visRef.current[cuts.health] = cutFraction(cuts.health, demoteGap.top + demoteGap.height * 0.34)
+      }
+      dirtyRef.current = true
+    }
+    const remeasurePoll = window.setInterval(() => {
+      if (!pendingRemeasureRef.current) return
+      pendingRemeasureRef.current = false
+      reanchorCuts()
+    }, 250)
 
     const refreshParticles = () => {
       lanes.forEach((lane, i) => {
@@ -526,6 +613,9 @@ export function LaneCanvas({
     }
 
     const interval = window.setInterval(() => {
+      // A hidden tab gets no frames, so a wave would only queue tweens that all resolve at once
+      // on return. Skip the beat entirely and pick up on the next one.
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return
       const svg = svgRef.current
       svg?.classList.add('de-wave')
       const prev = orders
@@ -567,6 +657,7 @@ export function LaneCanvas({
 
     return () => {
       window.clearInterval(interval)
+      window.clearInterval(remeasurePoll)
       timeouts.forEach((id) => window.clearTimeout(id))
       svgRef.current?.classList.remove('de-wave')
     }
@@ -668,7 +759,7 @@ export function LaneCanvas({
           const color = markerTone(marker.tone, marker.laneIndex)
           return (
             <span
-              key={marker.key}
+              key={marker.id}
               data-marker-lane={marker.laneIndex}
               data-marker-gap={marker.gap}
               className={`${marker.transient ? 'de-demote-flash' : 'de-cut-marker'} absolute -translate-x-1/2 whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-[10px] font-semibold shadow-[0_8px_20px_-10px_rgba(15,23,42,0.55)]`}
@@ -701,8 +792,15 @@ export function LaneCanvas({
             return (
               <span
                 key={i}
+                data-windot-lane={label.laneIndex}
                 className="de-dot-breathe absolute h-[13px] w-[13px] -translate-x-1/2 -translate-y-1/2 rounded-full"
-                style={{ left: label.x, top: label.y, background: color, boxShadow: `0 0 14px 3px ${color}66` }}
+                style={{
+                  left: label.x,
+                  top: label.y,
+                  background: color,
+                  boxShadow: `0 0 14px 3px ${color}66`,
+                  transition: 'opacity 0.5s',
+                }}
               />
             )
           }
@@ -712,6 +810,7 @@ export function LaneCanvas({
               <span
                 key={i}
                 data-lane={isEnd ? label.laneIndex : undefined}
+                data-pinned={isEnd && label.pinned ? 'true' : undefined}
                 title={label.text}
                 className={`${isEnd ? 'de-end-chip ' : ''}absolute flex max-w-[80px] -translate-x-1/2 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-600 shadow-sm dark:border-[#1e2535] dark:bg-[#0d1118] dark:text-[#9ca7ba] dark:shadow-none`}
                 style={{

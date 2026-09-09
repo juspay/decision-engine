@@ -1,5 +1,5 @@
 import type { ElementType, ReactNode } from 'react'
-import { useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import useSWR from 'swr'
 import {
@@ -462,7 +462,12 @@ export function DecisionFlowView() {
     isFeatureEnabled: (feature) => merchantFeatures.isEnabled(feature),
     debitEnabled: debitRoutingFlag.isEnabled,
   })
-  const laneModel = deriveLanes(stack)
+  // The canvas measures and animates off `lanes`, so it must stay referentially stable across
+  // renders it doesn't care about (expanding a stage, an SWR revalidation). Keyed on what a lane
+  // actually is: which connectors, in what order, with what share.
+  const laneKey = JSON.stringify(deriveLanes(stack).lanes)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const laneModel = useMemo(() => deriveLanes(stack), [laneKey])
   const loading =
     activeLoading || srLoading || elimLoading || debitRoutingFlag.isLoading || merchantFeatures.isLoading
   // A 404 on any of these reads means "nothing configured for this merchant" — the legitimate
