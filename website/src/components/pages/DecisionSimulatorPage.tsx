@@ -4033,7 +4033,7 @@ export function DecisionSimulatorPage() {
       >
         <div className={`flex flex-col gap-6 min-w-0 ${activeTab === 'batch' ? 'lg:min-h-0' : 'self-start'}`}>
         {activeTab === 'batch' && volumeContractsBeta && (
-          <ContractSimulationPanel
+          <VolumeCommitmentRunChart
             merchantId={effectiveMerchantId}
             tally={contractTally}
             colorFor={colorForGateway}
@@ -4052,13 +4052,6 @@ export function DecisionSimulatorPage() {
               // same for a contract run as for any other.
               setForm(f => ({ ...f, eligible_gateways: gateways.join(', ') }))
             }}
-          />
-        )}
-        {activeTab === 'batch' && volumeContractsBeta && (
-          <VolumeCommitmentRunChart
-            merchantId={effectiveMerchantId}
-            results={simulationResults}
-            colorFor={colorForGateway}
           />
         )}
         {activeTab === 'batch' && (
