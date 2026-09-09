@@ -336,7 +336,13 @@ export function VolumeCommitmentRunChart({
    */
   async function restartCycle() {
     const ruleId = view.pacing?.ruleId
-    if (!ruleId || !merchantId || restarting) return
+    if (!ruleId || restarting) return
+    await restartCycleFor(ruleId)
+  }
+
+  /** The restart itself, for a rule the caller has already established. */
+  async function restartCycleFor(ruleId: string) {
+    if (!merchantId) return
     setRestarting(true)
     setRestartError(null)
     try {
@@ -485,15 +491,27 @@ export function VolumeCommitmentRunChart({
   // runs against whatever cycle happened to be open, which is what this exists to prevent.
   const prepareRun = useRef<() => Promise<ContractRunPreset | null>>(async () => null)
   prepareRun.current = async () => {
+    // Decided on a fresh reading rather than on what is displayed. Between runs this card holds
+    // a frozen payload and stops polling, so what it shows can predate the contract the run is
+    // about to race — a document created since — or, moments after a page load, not exist at all.
+    // Both used to skip the restart in silence, and a skipped restart is invisible: the run just
+    // joins whichever cycle happens to be open, part-spent, and the promises are sized for a
+    // whole one.
+    const pacing = (await dashboard.mutate())?.pacing
     // A calendar cycle is anchored to a day of the month, which no re-activation moves; the run
     // joins the period the merchant is really in.
-    if (isTest) await restartCycle()
+    if (pacing?.ruleId && isTestCycleOf(pacing.daySecs ?? SECS_PER_DAY)) {
+      await restartCycleFor(pacing.ruleId)
+    }
     // `preset` is rebuilt every render from the contract, so it is right even on a first run the
     // page has never been handed one for — which is a run with no pacing and the wrong ticket.
     return preset.current.gateways.length > 0 ? { ...preset.current } : null
   }
   useEffect(() => {
     onPrepareRun(() => prepareRun.current())
+    // Unregistered on the way out, so the page is never holding a gone card's promise to open a
+    // cycle — the simulator tab can be left, and this card goes with it.
+    return () => onPrepareRun(async () => null)
   })
 
   // The simulator takes its settings from the contract rather than waiting to be pointed at it.
