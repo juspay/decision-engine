@@ -41,6 +41,8 @@ pub const PAYMENT_AUDIT_DYNAMIC_FLOW_TYPES: &[FlowType] = &[
     FlowType::DecideGatewayError,
     FlowType::UpdateGatewayScoreError,
     FlowType::UpdateScoreLegacyError,
+    FlowType::RoutingHybridDecision,
+    FlowType::RoutingHybridError,
 ];
 
 /// Payment amount on a decide event, inside the `details` JSON. Shared by every metric that

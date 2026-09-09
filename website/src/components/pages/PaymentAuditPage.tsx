@@ -119,7 +119,10 @@ function isUpdateFlow(flowType: string) {
 }
 
 function isDecisionFlow(flowType: string) {
-  return flowType.startsWith('decide_gateway_') && !isRuleHitFlow(flowType)
+  return (
+    (flowType.startsWith('decide_gateway_') || flowType.startsWith('routing_hybrid_')) &&
+    !isRuleHitFlow(flowType)
+  )
 }
 
 function queryString(params: Record<string, string | number | undefined>) {

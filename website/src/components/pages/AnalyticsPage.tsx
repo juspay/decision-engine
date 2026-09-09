@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
+import { useFeatureReleased } from '../../lib/featureReleases'
 import useSWR from 'swr'
 import {
   Bar,
@@ -829,9 +830,15 @@ export function AnalyticsPage() {
   // reopens it directly; the default (transactions) is left out of the URL.
   const [searchParams, setSearchParams] = useSearchParams()
   const viewParam = searchParams.get('view')
-  const view: AnalyticsView = ANALYTICS_VIEWS.includes(viewParam as AnalyticsView)
+  // Volume commitments is gated by the release roster (featureReleases.ts). Outside the audience
+  // a ?view=volume_commitments link behaves like an unknown view and is canonicalised
+  // back to the default by the effect below.
+  const volumeContractsBeta = useFeatureReleased('volume-contracts')
+  const requestedView: AnalyticsView = ANALYTICS_VIEWS.includes(viewParam as AnalyticsView)
     ? (viewParam as AnalyticsView)
     : 'transactions'
+  const view: AnalyticsView =
+    requestedView === 'volume_commitments' && !volumeContractsBeta ? 'transactions' : requestedView
   const setView = (nextView: AnalyticsView) => {
     setSearchParams(
       (prev) => {
@@ -1643,14 +1650,16 @@ export function AnalyticsPage() {
           >
             {ANALYTICS_VIEW_LABELS.rule_based}
           </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            className={sectionButtonClass(view === 'volume_commitments')}
-            onClick={() => setView('volume_commitments')}
-          >
-            {ANALYTICS_VIEW_LABELS.volume_commitments}
-          </Button>
+          {volumeContractsBeta && (
+            <Button
+              size="sm"
+              variant="secondary"
+              className={sectionButtonClass(view === 'volume_commitments')}
+              onClick={() => setView('volume_commitments')}
+            >
+              {ANALYTICS_VIEW_LABELS.volume_commitments}
+            </Button>
+          )}
         </div>
 
         <div className="flex items-center gap-2 justify-self-start xl:justify-self-end">
