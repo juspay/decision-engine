@@ -13,7 +13,7 @@ interface LanePath {
 interface LaneLabel {
   x: number
   y: number
-  kind: 'dot' | 'chip' | 'rank' | 'note' | 'pct'
+  kind: 'dot' | 'chip' | 'rank' | 'note' | 'pct' | 'windot'
   text?: string
   color?: string
 }
@@ -141,6 +141,7 @@ export function LaneCanvas({
             if (lane.name === deterministicHead) {
               d += ` C ${x} ${mid}, ${laneX(0)} ${mid}, ${laneX(0)} ${y1 - 8}`
               winner = true
+              labels.push({ x: laneX(0), y: y1 - 8, kind: 'windot', color: lane.color })
             } else {
               d += ` L ${x} ${y0 + gap.height * 0.42}`
               labels.push({ x, y: y0 + gap.height * 0.5, kind: 'rank', text: `#${i + 1}`, color: lane.color })
@@ -226,6 +227,37 @@ export function LaneCanvas({
               className="de-lane-flow"
               style={{ animationDuration: `${path.flowDuration}s`, animationDelay: `${0.9 + i * 0.15}s` }}
             />
+            {/* "Payments" riding the lane — one educational moving object per ribbon (two on
+                busy lanes), traveling the full path on a loop. Share-weighted lanes carry
+                faster particles, so a 60/30/10 split is visible as traffic, not just labels. */}
+            {Array.from({ length: path.width > 3.5 ? 2 : 1 }, (_, p) => {
+              const travel = Math.min(11, Math.max(4, path.flowDuration * 2.4))
+              return (
+                <circle
+                  key={p}
+                  className="de-lane-particle"
+                  r={Math.max(2.4, path.width * 0.75)}
+                  fill={path.color}
+                  opacity={0}
+                  style={{ filter: `drop-shadow(0 0 4px ${path.color})` }}
+                >
+                  <animateMotion
+                    dur={`${travel}s`}
+                    begin={`${1.2 + i * 0.7 + p * (travel / 2)}s`}
+                    repeatCount="indefinite"
+                    path={path.d}
+                  />
+                  <animate
+                    attributeName="opacity"
+                    values="0;0.95;0.95;0"
+                    keyTimes="0;0.06;0.94;1"
+                    dur={`${travel}s`}
+                    begin={`${1.2 + i * 0.7 + p * (travel / 2)}s`}
+                    repeatCount="indefinite"
+                  />
+                </circle>
+              )
+            })}
           </g>
         ))}
       </svg>
@@ -235,8 +267,17 @@ export function LaneCanvas({
             return (
               <span
                 key={i}
-                className="absolute h-[11px] w-[11px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-500 shadow-[0_0_12px_2px_rgba(59,130,246,0.55)]"
+                className="de-dot-breathe absolute h-[11px] w-[11px] -translate-x-1/2 -translate-y-1/2 rounded-full bg-brand-500 shadow-[0_0_12px_2px_rgba(59,130,246,0.55)]"
                 style={{ left: label.x, top: label.y }}
+              />
+            )
+          }
+          if (label.kind === 'windot') {
+            return (
+              <span
+                key={i}
+                className="de-dot-breathe absolute h-[13px] w-[13px] -translate-x-1/2 -translate-y-1/2 rounded-full"
+                style={{ left: label.x, top: label.y, background: label.color, boxShadow: `0 0 14px 3px ${label.color}66` }}
               />
             )
           }
