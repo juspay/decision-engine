@@ -839,6 +839,15 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string; 
     docsUrl: 'https://docs.hyperswitch.io/integration-guide/workflows/intelligent-routing/routing-strategies/multi-objective-routing',
   },
   {
+    // Sticky is independent of the euclid rule store: this flag is THE config. The decide
+    // path pins a returning customer's proven connector over the SR pick (health-vetoed),
+    // and the feedback path accumulates the per-customer success counts.
+    feature: 'sticky-routing',
+    title: 'Sticky routing (pin returning customers)',
+    description:
+      'Routes each returning customer to the connector of their last successful payment for that payment method. Payment feedback maintains a per-customer habit score (successes add, gateway failures subtract); the pin only applies when that connector is eligible and healthy, and explicit priority rules always take precedence.',
+  },
+  {
     feature: 'volume-contracts',
     title: 'Volume contracts (meet PSP commitments)',
     description:
