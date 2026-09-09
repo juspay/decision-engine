@@ -341,3 +341,15 @@
   .de-dot-breathe { animation: none; }
   .de-lane-particle { display: none; }
 }
+
+/* Transient "demoted" marker at the health-penalties gap: pops in, drifts down, fades. */
+@keyframes de-demote-flash {
+  0% { opacity: 0; transform: translate(-50%, -6px) scale(0.85); }
+  18% { opacity: 1; transform: translate(-50%, 0) scale(1.05); }
+  70% { opacity: 1; transform: translate(-50%, 6px) scale(1); }
+  100% { opacity: 0; transform: translate(-50%, 14px) scale(0.95); }
+}
+
+.de-demote-flash {
+  animation: de-demote-flash 1.6s ease-out forwards;
+}

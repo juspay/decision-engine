@@ -845,9 +845,11 @@ function FlowRail({
                     ? 'split'
                     : stage.id === 'eligibility'
                       ? 'filter'
-                      : stage.id === 'sr'
+                      : stage.id === 'sr' || stage.id === 'cost'
                         ? 'sort'
-                        : 'straight'
+                        : stage.id === 'health'
+                          ? 'demote'
+                          : 'straight'
               const renderGap = stage.id !== 'learn'
               if (renderGap) firstGapRendered = true
               return (
@@ -875,7 +877,7 @@ function FlowRail({
                               ? 'h-[62px]'
                               : gapKind === 'split'
                                 ? 'h-[46px]'
-                                : gapKind === 'sort'
+                                : gapKind === 'sort' || gapKind === 'demote'
                                   ? 'h-[64px]'
                                   : 'h-[34px]'
                       }

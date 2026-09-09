@@ -35,7 +35,7 @@ interface Drawn {
   labels: LaneLabel[]
 }
 
-type GapKind = 'fan' | 'straight' | 'converge' | 'filter' | 'split' | 'sort'
+type GapKind = 'fan' | 'straight' | 'converge' | 'filter' | 'split' | 'sort' | 'demote'
 
 const LANE_X0 = 46
 const LANE_STEP = 76
@@ -72,27 +72,30 @@ export function LaneCanvas({
   overflow?: number
 }) {
   const [drawn, setDrawn] = useState<Drawn | null>(null)
-  const geomRef = useRef<{ gaps: GapRect[]; aliveAtSort: boolean[] } | null>(null)
+  const geomRef = useRef<{ gaps: GapRect[]; aliveAtOrder: boolean[]; orderGapCount: number } | null>(null)
   const laneGroupRefs = useRef<Array<SVGGElement | null>>([])
-  const belowXRef = useRef<number[]>([])
+  const overlayRef = useRef<HTMLDivElement | null>(null)
+  /** Per order-gap (sr sort, health demote, cost sort…), each lane's x below that gap. */
+  const slotSetsRef = useRef<number[][]>([])
 
-  /** One shared path builder, used for the initial render and for every re-sort frame. */
+  /** One shared path builder, used for the initial render and for every animation frame. */
   const buildLanePath = (
     lane: LaneDef,
     i: number,
     gaps: GapRect[],
-    belowX: number[],
+    slotSets: number[][],
     collect?: { labels: LaneLabel[]; extras: Array<{ d: string }>; sortEnabled: boolean },
-  ): { d: string; winner: boolean; aliveAtSort: boolean } => {
+  ): { d: string; winner: boolean; aliveAtOrder: boolean } => {
     const last = i === lanes.length - 1
     let d = ''
     let alive = true
     let winner = false
-    let afterSort = false
-    let aliveAtSort = false
+    let orderStep = 0
+    let currentSlotX: number | null = null
+    let aliveAtOrder = false
     for (const gap of gaps) {
       if (!alive) break
-      const x = afterSort ? belowX[i] : laneX(i)
+      const x: number = currentSlotX ?? laneX(i)
       const y0 = gap.top
       const y1 = gap.top + gap.height
       const mid = y0 + gap.height / 2
@@ -147,10 +150,12 @@ export function LaneCanvas({
             collect.labels.push({ x: x + 58, y: y0 + gap.height * 0.68, kind: 'rank', text: '✕ if not eligible', color: '#8d96aa' })
           }
         }
-      } else if (gap.kind === 'sort') {
-        aliveAtSort = true
-        d += ` L ${x} ${y0} C ${x} ${mid}, ${belowX[i]} ${mid}, ${belowX[i]} ${y1}`
-        afterSort = true
+      } else if (gap.kind === 'sort' || gap.kind === 'demote') {
+        if (orderStep === 0) aliveAtOrder = true
+        const target: number = slotSets[orderStep]?.[i] ?? x
+        d += ` L ${x} ${y0} C ${x} ${mid}, ${target} ${mid}, ${target} ${y1}`
+        currentSlotX = target
+        orderStep++
       } else if (gap.kind === 'converge' && deterministicHead && !ghost) {
         d += ` L ${x} ${y0}`
         if (lane.name === deterministicHead) {
@@ -171,7 +176,7 @@ export function LaneCanvas({
         d += ` L ${x} ${y0} L ${x} ${y1}`
       }
     }
-    return { d, winner, aliveAtSort }
+    return { d, winner, aliveAtOrder }
   }
 
   useLayoutEffect(() => {
@@ -194,15 +199,16 @@ export function LaneCanvas({
         return
       }
 
-      const sortEnabled = gaps.some((gap) => gap.kind === 'sort')
+      const orderGapCount = gaps.filter((gap) => gap.kind === 'sort' || gap.kind === 'demote').length
       const identity = lanes.map((_, i) => laneX(i))
-      belowXRef.current = identity
-      const collect = { labels: [] as LaneLabel[], extras: [] as Array<{ d: string }>, sortEnabled }
+      const identitySets = Array.from({ length: orderGapCount }, () => [...identity])
+      slotSetsRef.current = identitySets
+      const collect = { labels: [] as LaneLabel[], extras: [] as Array<{ d: string }>, sortEnabled: orderGapCount > 0 }
       const paths: LanePath[] = []
-      const aliveAtSort: boolean[] = []
+      const aliveAtOrder: boolean[] = []
       lanes.forEach((lane, i) => {
-        const built = buildLanePath(lane, i, gaps, identity, collect)
-        aliveAtSort.push(built.aliveAtSort)
+        const built = buildLanePath(lane, i, gaps, identitySets, collect)
+        aliveAtOrder.push(built.aliveAtOrder)
         if (built.d) {
           const flowDuration = lane.share != null ? Math.min(6, 0.85 / Math.max(lane.share, 0.12)) : 2.6
           paths.push({
@@ -215,7 +221,7 @@ export function LaneCanvas({
           })
         }
       })
-      geomRef.current = { gaps, aliveAtSort }
+      geomRef.current = { gaps, aliveAtOrder, orderGapCount }
 
       setDrawn({
         width: container.clientWidth,
@@ -235,25 +241,41 @@ export function LaneCanvas({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [containerRef, lanes, ghost, deterministicHead, overflow])
 
-  /* The re-sort loop: every few seconds, tween the below-sort lane positions into a new
-     permutation. Path data is mutated directly on the DOM so the draw-in animation doesn't
-     replay; particles get their motion paths refreshed after each swap (they restart from the
-     top, reading as fresh payments entering the reordered pipeline). */
+  /* The re-order cascade: every cycle, each ordering gap gets a new target in sequence —
+     success-rate rotates the field, health penalties sometimes demote one lane to the back
+     (with an amber flash — demoted, never removed), cost swaps the leading pair when the
+     cheaper one overtakes. Phases are staggered so the wave visibly travels down the page.
+     Path data is mutated directly on the DOM so the draw-in never replays; particles get their
+     motion paths refreshed after each wave, restarting from the top like fresh payments. */
   useEffect(() => {
     const geom = geomRef.current
-    if (!drawn || !geom) return
+    if (!drawn || !geom || geom.orderGapCount === 0) return
     if (typeof window === 'undefined') return
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
-    if (!geom.gaps.some((gap) => gap.kind === 'sort')) return
-    const movable = lanes.map((_, i) => i).filter((i) => geom.aliveAtSort[i])
+    const movable = lanes.map((_, i) => i).filter((i) => geom.aliveAtOrder[i])
     if (movable.length < 2) return
 
+    const orderGapKinds = geom.gaps.filter((gap) => gap.kind === 'sort' || gap.kind === 'demote').map((g) => g.kind)
+    const orderGapRects = geom.gaps.filter((gap) => gap.kind === 'sort' || gap.kind === 'demote')
+    const slotPositions = movable.map((i) => laneX(i))
+    // Each ordering gap's state as a position list of lane indices (position 0 = leftmost slot).
+    let orders: number[][] = Array.from({ length: geom.orderGapCount }, () => [...movable])
+    const toSlotSets = (orderList: number[][]) =>
+      orderList.map((order) => {
+        const xs = lanes.map((_, i) => laneX(i))
+        order.forEach((laneIndex, position) => {
+          xs[laneIndex] = slotPositions[position]
+        })
+        return xs
+      })
+
     let raf = 0
-    const applyBelowX = (belowX: number[]) => {
+    const timeouts: number[] = []
+    const applySlots = (slotSets: number[][]) => {
       lanes.forEach((lane, i) => {
         const group = laneGroupRefs.current[i]
         if (!group) return
-        const { d } = buildLanePath(lane, i, geom.gaps, belowX)
+        const { d } = buildLanePath(lane, i, geom.gaps, slotSets)
         group.querySelectorAll<SVGPathElement>('path[data-lane-ribbon]').forEach((el) => el.setAttribute('d', d))
       })
     }
@@ -261,39 +283,108 @@ export function LaneCanvas({
       lanes.forEach((lane, i) => {
         const group = laneGroupRefs.current[i]
         if (!group) return
-        const { d } = buildLanePath(lane, i, geom.gaps, belowXRef.current)
+        const { d } = buildLanePath(lane, i, geom.gaps, slotSetsRef.current)
         group.querySelectorAll('animateMotion').forEach((el) => el.setAttribute('path', d))
       })
     }
-    const interval = window.setInterval(() => {
-      const from = [...belowXRef.current]
-      // A rotation among the movable lanes guarantees every re-sort visibly changes the order.
-      const slots = movable.map((i) => from[i])
-      const rotated = [...slots.slice(1), slots[0]]
-      const to = [...from]
-      movable.forEach((laneIndex, j) => {
-        to[laneIndex] = rotated[j]
-      })
+    const flashDemotion = (laneIndex: number, gapIndex: number) => {
+      const overlay = overlayRef.current
+      const rect = orderGapRects[gapIndex]
+      if (!overlay || !rect) return
+      const lane = lanes[laneIndex]
+      const marker = document.createElement('span')
+      marker.className =
+        'de-demote-flash absolute rounded-md border px-1.5 font-mono text-[10px] font-semibold'
+      marker.style.left = `${slotSetsRef.current[gapIndex]?.[laneIndex] ?? laneX(laneIndex)}px`
+      marker.style.top = `${rect.top + rect.height * 0.28}px`
+      marker.style.color = '#fbbf24'
+      marker.style.borderColor = 'rgba(251,191,36,0.45)'
+      marker.style.background = 'rgba(251,191,36,0.10)'
+      marker.textContent = `▼ ${lane.name} penalized`
+      overlay.appendChild(marker)
+      timeouts.push(window.setTimeout(() => marker.remove(), 1700))
+    }
+
+    const runPhase = (gapIndex: number, fromOrders: number[][], toOrders: number[][], onDone: () => void) => {
+      const fromSets = toSlotSets(fromOrders)
+      const toSets = toSlotSets(toOrders)
       const started = performance.now()
-      const duration = 950
+      const duration = 850
       const step = (now: number) => {
         const t = Math.min(1, (now - started) / duration)
         const eased = easeInOut(t)
-        const current = from.map((value, i) => value + (to[i] - value) * eased)
-        applyBelowX(current)
-        if (t < 1) {
-          raf = requestAnimationFrame(step)
-        } else {
-          belowXRef.current = to
-          refreshParticles()
+        // Only the phase's own gap tweens; earlier gaps already sit at their targets.
+        const blended = toSets.map((set, k) => {
+          if (k < gapIndex) return set
+          if (k > gapIndex) return fromSets[k]
+          return set.map((value, i) => fromSets[k][i] + (value - fromSets[k][i]) * eased)
+        })
+        applySlots(blended)
+        if (t < 1) raf = requestAnimationFrame(step)
+        else {
+          slotSetsRef.current = toSets.map((set, k) => (k <= gapIndex ? set : fromSets[k]))
+          onDone()
         }
       }
       raf = requestAnimationFrame(step)
-    }, 4600)
+    }
+
+    const interval = window.setInterval(() => {
+      const prev = orders
+      const next: number[][] = []
+      let sortSeen = 0
+      orderGapKinds.forEach((kind, k) => {
+        const upstream = k === 0 ? prev[0] : next[k - 1]
+        if (kind === 'demote') {
+          // Sometimes a lane trips the threshold and sinks to the back.
+          if (Math.random() < 0.6 && upstream.length > 1) {
+            const victimPos = Math.floor(Math.random() * (upstream.length - 1))
+            const reordered = [...upstream]
+            const [victim] = reordered.splice(victimPos, 1)
+            reordered.push(victim)
+            next.push(reordered)
+          } else {
+            next.push([...upstream])
+          }
+        } else {
+          sortSeen++
+          if (sortSeen === 1) {
+            // Success-rate: rotate the whole field so the order visibly changes.
+            next.push([...upstream.slice(1), upstream[0]])
+          } else {
+            // Cost: the cheaper runner-up overtakes the leader, sometimes.
+            const reordered = [...upstream]
+            if (Math.random() < 0.65 && reordered.length > 1) {
+              ;[reordered[0], reordered[1]] = [reordered[1], reordered[0]]
+            }
+            next.push(reordered)
+          }
+        }
+      })
+
+      // Cascade the phases down the page, flashing demotions as they land.
+      const phase = (k: number, current: number[][]) => {
+        if (k >= geom.orderGapCount) {
+          orders = next
+          refreshParticles()
+          return
+        }
+        const staged = current.map((order, idx) => (idx < k ? next[idx] : order))
+        const target = staged.map((order, idx) => (idx === k ? next[idx] : order))
+        if (orderGapKinds[k] === 'demote' && next[k][next[k].length - 1] !== current[k][current[k].length - 1]) {
+          flashDemotion(next[k][next[k].length - 1], k)
+        }
+        runPhase(k, staged, target, () => {
+          timeouts.push(window.setTimeout(() => phase(k + 1, target), 350))
+        })
+      }
+      phase(0, prev)
+    }, 5600)
 
     return () => {
       window.clearInterval(interval)
       cancelAnimationFrame(raf)
+      timeouts.forEach((id) => window.clearTimeout(id))
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [drawn, lanes])
@@ -392,7 +483,7 @@ export function LaneCanvas({
           </g>
         ))}
       </svg>
-      <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[1]">
+      <div ref={overlayRef} aria-hidden="true" className="pointer-events-none absolute inset-0 z-[1]">
         {drawn.labels.map((label, i) => {
           if (label.kind === 'dot') {
             return (
