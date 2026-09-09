@@ -291,7 +291,7 @@
 .de-lane-draw {
   stroke-dasharray: 100;
   stroke-dashoffset: 100;
-  animation: de-lane-draw 0.7s ease-out forwards;
+  animation: de-lane-draw 1.15s ease-out forwards;
 }
 
 @keyframes de-lane-draw {
@@ -310,8 +310,8 @@
    cycle length (18px) matches the dasharray below; duration is set inline per lane so volume
    shares read as flow speed. */
 .de-lane-flow {
-  stroke-dasharray: 3 15;
-  animation: de-lane-flow 2.2s linear infinite;
+  stroke-dasharray: 2.2 15.8;
+  animation: de-lane-flow 3s linear infinite;
 }
 
 @keyframes de-lane-flow {
@@ -334,7 +334,7 @@
 }
 
 .de-dot-breathe {
-  animation: de-dot-breathe 2.4s ease-in-out infinite;
+  animation: de-dot-breathe 3.4s ease-in-out infinite;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -351,7 +351,7 @@
 }
 
 .de-demote-flash {
-  animation: de-demote-flash 1.6s ease-out forwards;
+  animation: de-demote-flash 2.4s ease-out forwards;
 }
 
 /* Persistent cut markers (a filtered/penalized connector while it is out) and the wave guard
@@ -373,11 +373,11 @@ svg.de-wave .de-lane-particle {
 /* Smooth lane cut/restore: the ribbon retracts to the break point and regrows via an animated
    dash mask (pathLength=100 normalizes the budget). Flow and particles fade with their lane. */
 path[data-lane-ribbon] {
-  transition: stroke-dasharray 0.75s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: stroke-dasharray 1.3s cubic-bezier(0.33, 0, 0.15, 1);
 }
 
 .de-lane-flow {
-  transition: opacity 0.45s ease;
+  transition: opacity 0.7s ease;
 }
 
 g.de-lane-cut .de-lane-particle {

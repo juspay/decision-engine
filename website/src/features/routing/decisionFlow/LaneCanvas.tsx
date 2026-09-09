@@ -152,7 +152,7 @@ export function LaneCanvas({
       } else if (gap.kind === 'sort') {
         aliveAnim = true
         const target: number = slotSets[orderStep]?.[i] ?? x
-        d += ` L ${x} ${y0} C ${x} ${mid}, ${target} ${mid}, ${target} ${y1}`
+        d += ` L ${x} ${y0} C ${x} ${y0 + gap.height * 0.62}, ${target} ${y0 + gap.height * 0.38}, ${target} ${y1}`
         currentSlotX = target
         orderStep++
       } else if (gap.kind === 'demote') {
@@ -220,7 +220,7 @@ export function LaneCanvas({
         const built = buildLanePath(lane, i, gaps, identitySets, collect)
         aliveAnim.push(built.aliveAnim)
         if (built.d) {
-          const flowDuration = lane.share != null ? Math.min(6, 0.85 / Math.max(lane.share, 0.12)) : 2.6
+          const flowDuration = lane.share != null ? Math.min(7, 1.1 / Math.max(lane.share, 0.12)) : 3.4
           paths.push({
             d: built.d,
             color: lane.color,
@@ -308,8 +308,9 @@ export function LaneCanvas({
       marker.style.borderColor = `${color}55`
       marker.style.background = `${color}14`
       marker.textContent = text
+      marker.style.boxShadow = '0 8px 20px -10px rgba(0,0,0,0.7)'
       overlay.appendChild(marker)
-      timeouts.push(window.setTimeout(() => marker.remove(), 1700))
+      timeouts.push(window.setTimeout(() => marker.remove(), 2600))
     }
     const setCutMarker = (kind: 'filter' | 'health', laneIndex: number | null) => {
       cutMarkers[kind]?.remove()
@@ -329,6 +330,7 @@ export function LaneCanvas({
       marker.style.borderColor = `${color}55`
       marker.style.background = `${color}14`
       marker.textContent = kind === 'filter' ? `✕ ${lane.name} not eligible` : `▼ ${lane.name} penalized`
+      marker.style.boxShadow = '0 8px 20px -10px rgba(0,0,0,0.7)'
       overlay.appendChild(marker)
       cutMarkers[kind] = marker
     }
@@ -357,7 +359,7 @@ export function LaneCanvas({
         // Regrow to full length; example lanes get their dash pattern back once regrown.
         masked.forEach((el) => (el.style.strokeDasharray = '100 100'))
         if (ghost) {
-          timeouts.push(window.setTimeout(() => masked.forEach((el) => (el.style.strokeDasharray = '6 5')), 800))
+          timeouts.push(window.setTimeout(() => masked.forEach((el) => (el.style.strokeDasharray = '6 5')), 1400))
         }
         if (flow) flow.style.opacity = String(ghost ? 0.5 : 0.9)
         group.classList.remove('de-lane-cut')
@@ -382,7 +384,7 @@ export function LaneCanvas({
         cuts[kind] = victim
         setLaneCut(victim, rect.top + rect.height * 0.38)
         // The name lands the moment the retracting tip reaches the break point.
-        timeouts.push(window.setTimeout(() => setCutMarker(kind, victim), 550))
+        timeouts.push(window.setTimeout(() => setCutMarker(kind, victim), 1050))
       } else {
         cuts[kind] = null
         setCutMarker(kind, null)
@@ -401,7 +403,7 @@ export function LaneCanvas({
       const fromSets = toSlotSets(fromOrders)
       const toSets = toSlotSets(toOrders)
       const started = performance.now()
-      const duration = 850
+      const duration = 1400
       const step = (now: number) => {
         const t = Math.min(1, (now - started) / duration)
         const eased = easeInOut(t)
@@ -447,7 +449,7 @@ export function LaneCanvas({
           chip.style.opacity = cut ? '0' : '1'
           chip.style.left = `${lastSet?.[laneIndex] ?? laneX(laneIndex)}px`
         })
-        timeouts.push(window.setTimeout(() => svg?.classList.remove('de-wave'), 200))
+        timeouts.push(window.setTimeout(() => svg?.classList.remove('de-wave'), 350))
       }
       // The wave travels top-down: filter → sort(sr) → health → sort(cost).
       toggleCut('filter', 0.45)
@@ -456,7 +458,7 @@ export function LaneCanvas({
           window.setTimeout(() => {
             toggleCut('health', 0.55)
             finish()
-          }, 900),
+          }, 1300),
         )
         return
       }
@@ -470,17 +472,17 @@ export function LaneCanvas({
                   timeouts.push(
                     window.setTimeout(() => {
                       runSortPhase(1, [next[0], ...prev.slice(1)], next, finish)
-                    }, 550),
+                    }, 950),
                   )
                 } else {
                   finish()
                 }
-              }, 450),
+              }, 850),
             )
           })
-        }, 650),
+        }, 1100),
       )
-    }, 6200)
+    }, 9500)
 
     return () => {
       window.clearInterval(interval)
@@ -549,7 +551,7 @@ export function LaneCanvas({
             )}
             {/* "Payments" riding the lane — educational moving objects, share-weighted. */}
             {Array.from({ length: path.noFlow ? 0 : path.width > 3.5 ? 2 : 1 }, (_, p) => {
-              const travel = Math.min(11, Math.max(4, path.flowDuration * 2.4))
+              const travel = Math.min(13, Math.max(5.5, path.flowDuration * 2.8))
               return (
                 <circle
                   key={p}
@@ -557,7 +559,7 @@ export function LaneCanvas({
                   r={Math.max(2.4, path.width * 0.75)}
                   fill={path.color}
                   opacity={0}
-                  style={{ filter: `drop-shadow(0 0 4px ${path.color})` }}
+                  style={{ filter: `drop-shadow(0 0 6px ${path.color})` }}
                 >
                   <animateMotion
                     dur={`${travel}s`}
@@ -624,7 +626,7 @@ export function LaneCanvas({
                 style={{
                   left: label.x,
                   top: label.y,
-                  transition: 'left 0.55s cubic-bezier(0.65, 0, 0.35, 1), opacity 0.3s',
+                  transition: 'left 1s cubic-bezier(0.33, 0, 0.15, 1), opacity 0.5s',
                 }}
               >
                 {label.color ? (
