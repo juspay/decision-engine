@@ -8,6 +8,8 @@ interface LanePath {
   winner: boolean
   /** Seconds per flow-dash cycle — volume shares read as flow speed (bigger share, faster). */
   flowDuration: number
+  /** No traffic ever rides this lane (a 0% split leg): draw the ribbon, skip flow and particles. */
+  noFlow: boolean
 }
 
 interface LaneLabel {
@@ -92,6 +94,7 @@ export function LaneCanvas({
         let d = ''
         let alive = true
         let winner = false
+        let noFlow = false
         for (const gap of gaps) {
           if (!alive) break
           const y0 = gap.top
@@ -115,9 +118,18 @@ export function LaneCanvas({
               })
             }
           } else if (gap.kind === 'split') {
-            d += ` L ${x} ${y0} L ${x} ${y1}`
-            if (lane.share != null) {
-              labels.push({ x, y: mid - 8, kind: 'pct', text: `${Math.round(lane.share * 100)}%`, color: lane.color })
+            if (lane.share === 0) {
+              // A 0% leg is configured but receives nothing: the lane ends right here, and no
+              // flow or particles ever ride it past the strategy.
+              d += ` L ${x} ${y0} L ${x} ${y0 + gap.height * 0.4}`
+              labels.push({ x, y: y0 + gap.height * 0.5, kind: 'rank', text: '✕ 0% — no traffic', color: lane.color })
+              alive = false
+              noFlow = true
+            } else {
+              d += ` L ${x} ${y0} L ${x} ${y1}`
+              if (lane.share != null) {
+                labels.push({ x, y: mid - 8, kind: 'pct', text: `${Math.round(lane.share * 100)}%`, color: lane.color })
+              }
             }
           } else if (gap.kind === 'filter') {
             // Eligibility can drop connectors, but which ones depends on the payment. The example
@@ -156,7 +168,7 @@ export function LaneCanvas({
         if (d) {
           // Bigger volume shares flow faster; everything else drifts at a calm default.
           const flowDuration = lane.share != null ? Math.min(6, 0.85 / Math.max(lane.share, 0.12)) : 2.6
-          paths.push({ d, color: lane.color, width: laneWidth(lane) * (winner ? 1.5 : 1), winner, flowDuration })
+          paths.push({ d, color: lane.color, width: laneWidth(lane) * (winner ? 1.5 : 1), winner, flowDuration, noFlow })
         }
       })
 
@@ -217,6 +229,7 @@ export function LaneCanvas({
               style={ghost ? { strokeDasharray: '6 5' } : { animationDelay: `${i * 90}ms` }}
             />
             {/* Ambient downstream flow; on volume splits its speed encodes the share. */}
+            {path.noFlow ? null : (
             <path
               d={path.d}
               fill="none"
@@ -227,10 +240,11 @@ export function LaneCanvas({
               className="de-lane-flow"
               style={{ animationDuration: `${path.flowDuration}s`, animationDelay: `${0.9 + i * 0.15}s` }}
             />
+            )}
             {/* "Payments" riding the lane — one educational moving object per ribbon (two on
                 busy lanes), traveling the full path on a loop. Share-weighted lanes carry
                 faster particles, so a 60/30/10 split is visible as traffic, not just labels. */}
-            {Array.from({ length: path.width > 3.5 ? 2 : 1 }, (_, p) => {
+            {Array.from({ length: path.noFlow ? 0 : path.width > 3.5 ? 2 : 1 }, (_, p) => {
               const travel = Math.min(11, Math.max(4, path.flowDuration * 2.4))
               return (
                 <circle
