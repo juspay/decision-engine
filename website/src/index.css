@@ -353,3 +353,19 @@
 .de-demote-flash {
   animation: de-demote-flash 1.6s ease-out forwards;
 }
+
+/* Persistent cut markers (a filtered/penalized connector while it is out) and the wave guard
+   that hides payment particles while lanes are re-shaping, so dots never float off-ribbon. */
+@keyframes de-pop-in {
+  from { opacity: 0; transform: translate(-50%, -4px) scale(0.85); }
+  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+
+.de-cut-marker {
+  animation: de-pop-in 0.35s ease-out both;
+}
+
+svg.de-wave .de-lane-particle {
+  opacity: 0 !important;
+  transition: opacity 0.25s;
+}
