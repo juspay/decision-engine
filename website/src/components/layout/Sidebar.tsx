@@ -256,6 +256,7 @@ function SideLink({
   end,
   indent,
   beta,
+  isNew,
   selectedPath,
   onNavigate,
 }: {
@@ -265,6 +266,7 @@ function SideLink({
   end?: boolean
   indent?: boolean
   beta?: boolean
+  isNew?: boolean
   selectedPath: string
   onNavigate?: (path: string) => void
 }) {
@@ -309,6 +311,11 @@ function SideLink({
       {beta && (
         <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-violet-600 dark:bg-violet-500/15 dark:text-violet-400 leading-4">
           Beta
+        </span>
+      )}
+      {isNew && (
+        <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-sky-600 dark:bg-sky-500/15 dark:text-sky-300 leading-4">
+          New
         </span>
       )}
     </button>
