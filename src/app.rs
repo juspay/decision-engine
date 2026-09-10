@@ -548,20 +548,20 @@ where
             get(routes::cost_coverage::get_cost_coverage),
         )
         .route(
-            "/merchant-account/:merchant-id/volume-commitment",
-            get(routes::volume_commitment::get_volume_commitment),
+            "/merchant-account/:merchant-id/volume-commitment/dashboard",
+            get(routes::volume_commitment::get_dashboard),
         )
         .route(
-            "/merchant-account/:merchant-id/volume-commitment/series",
-            get(routes::volume_commitment::get_series),
-        )
-        .route(
-            "/merchant-account/:merchant-id/volume-commitment/audit",
-            get(routes::volume_commitment::get_audit),
+            "/merchant-account/:merchant-id/volume-commitment/projection",
+            get(routes::volume_commitment::get_projection),
         )
         .route(
             "/merchant-account/:merchant-id/volume-commitment/impact",
             get(routes::volume_commitment::get_impact),
+        )
+        .route(
+            "/merchant-account/:merchant-id/volume-commitment/samples",
+            get(routes::volume_commitment::get_samples),
         )
         // Called by the volume-commitment scheduler when a merchant's forecast comes due. Behind
         // the same auth as any other write, and the handler narrows further: the admin secret

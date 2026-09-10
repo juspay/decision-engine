@@ -1,10 +1,11 @@
-use crate::decider::gatewaydecider::flow_new::decider_full_payload_hs_function;
+use crate::analytics::{global_request_id_from_headers, trace_id_from_headers};
 use crate::decider::gatewaydecider::types::DecidedGateway;
 use crate::error::ContainerError;
 use crate::euclid::ast::ConnectorInfo;
 use crate::euclid::errors::EuclidErrors;
 use crate::euclid::handlers::routing_rules::routing_evaluate;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
+use crate::routes::decide_gateway::{run_decider_with_analytics, DeciderAnalyticsFlows};
 use crate::types::hybrid_routing::HybridRoutingRequest;
 use axum::{response::IntoResponse, Json};
 use serde::Serialize;
@@ -68,10 +69,13 @@ fn extract_static_eligible_gateways(
     response.evaluated_output.clone()
 }
 
-fn extract_gateway_names(connectors: &[ConnectorInfo]) -> Vec<String> {
+fn extract_gateway_identifiers(connectors: &[ConnectorInfo]) -> Vec<String> {
     connectors
         .iter()
-        .map(|connector| connector.gateway_name.clone())
+        .map(|connector| match &connector.gateway_id {
+            Some(gateway_id) => format!("{}:{}", connector.gateway_name, gateway_id),
+            None => connector.gateway_name.clone(),
+        })
         .collect::<Vec<String>>()
 }
 
@@ -128,6 +132,14 @@ pub async fn hybrid_routing_evaluate(
         dynamic_routing_request,
     } = payload;
 
+    let x_request_id = headers
+        .get(crate::storage::consts::X_REQUEST_ID)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("unknown")
+        .to_string();
+    let global_request_id = global_request_id_from_headers(&headers);
+    let trace_id = trace_id_from_headers(&headers);
+
     let is_empty_request = static_routing_request.is_none() && dynamic_routing_request.is_none();
 
     let (static_routing_response, static_routing_error, static_fallback_gateways) =
@@ -157,18 +169,32 @@ pub async fn hybrid_routing_evaluate(
 
     let dynamic_eval_result = match dynamic_routing_request {
         Some(mut req) => {
-            // Request-provided dynamic list has precedence.
-            // Static-derived list is only used when request list is absent/empty.
             let request_eligible_gateways = match req.eligible_gateway_list.take() {
                 Some(gateways) if gateways.is_empty() => None,
                 Some(gateways) => Some(gateways),
                 None => None,
             };
+            let static_eligible_gateway_ids = static_eligible_gateways
+                .as_ref()
+                .filter(|connectors| !connectors.is_empty())
+                .map(|connectors| extract_gateway_identifiers(connectors));
             let fallback_eligible_gateways = dynamic_fallback_gateways
                 .clone()
-                .map(|connectors| extract_gateway_names(&connectors));
-            req.eligible_gateway_list = request_eligible_gateways.or(fallback_eligible_gateways);
-            Some(decider_full_payload_hs_function(req, Instant::now()).await)
+                .map(|connectors| extract_gateway_identifiers(&connectors));
+            req.eligible_gateway_list = static_eligible_gateway_ids
+                .or(request_eligible_gateways)
+                .or(fallback_eligible_gateways);
+            Some(
+                run_decider_with_analytics(
+                    req,
+                    &x_request_id,
+                    global_request_id,
+                    trace_id,
+                    Instant::now(),
+                    DeciderAnalyticsFlows::routing_hybrid(),
+                )
+                .await,
+            )
         }
         None => None,
     };
