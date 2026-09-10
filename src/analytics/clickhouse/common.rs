@@ -2,14 +2,12 @@ use clickhouse::{query::Query, Row};
 use serde::Deserialize;
 
 use crate::analytics::flow::{AnalyticsRoute, FlowType};
-use crate::analytics::models::AnalyticsRouteHit;
+use crate::analytics::models::{AnalyticsRouteHit, PaymentAuditScope};
 use crate::error::ApiError;
 
 pub const DOMAIN_TABLE: &str = "analytics_domain_events";
 pub const PAYMENT_AUDIT_SUMMARY_BUCKET_TABLE: &str = "analytics_payment_audit_summary_buckets";
 pub const PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE: &str = "analytics_payment_audit_lookup_summaries";
-pub const PAYMENT_AUDIT_SUMMARY_KIND_DYNAMIC: &str = "dynamic";
-pub const PAYMENT_AUDIT_SUMMARY_KIND_PREVIEW: &str = "preview";
 pub const OVERVIEW_SCORE_FLOW_TYPES: &[FlowType] = &[
     FlowType::UpdateGatewayScoreScoreSnapshot,
     FlowType::UpdateScoreLegacyScoreSnapshot,
@@ -44,6 +42,44 @@ pub const PAYMENT_AUDIT_DYNAMIC_FLOW_TYPES: &[FlowType] = &[
     FlowType::RoutingHybridDecision,
     FlowType::RoutingHybridError,
 ];
+pub const PAYMENT_AUDIT_HYBRID_FLOW_TYPES: &[FlowType] = &[
+    FlowType::RoutingHybridDecision,
+    FlowType::RoutingHybridError,
+];
+pub const PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES: &[FlowType] = &[
+    FlowType::DecideGatewayDecision,
+    FlowType::UpdateGatewayScoreUpdate,
+    FlowType::UpdateScoreLegacyScoreSnapshot,
+    FlowType::DecideGatewayRuleHit,
+    FlowType::DecideGatewayError,
+    FlowType::UpdateGatewayScoreError,
+    FlowType::UpdateScoreLegacyError,
+];
+pub const PAYMENT_AUDIT_ALL_FLOW_TYPES: &[FlowType] = &[
+    FlowType::RoutingEvaluateSingle,
+    FlowType::RoutingEvaluatePriority,
+    FlowType::RoutingEvaluateVolumeSplit,
+    FlowType::RoutingEvaluateAdvanced,
+    FlowType::RoutingEvaluatePreview,
+    FlowType::RoutingEvaluateError,
+    FlowType::DecideGatewayDecision,
+    FlowType::UpdateGatewayScoreUpdate,
+    FlowType::UpdateScoreLegacyScoreSnapshot,
+    FlowType::DecideGatewayRuleHit,
+    FlowType::DecideGatewayError,
+    FlowType::UpdateGatewayScoreError,
+    FlowType::UpdateScoreLegacyError,
+    FlowType::RoutingHybridDecision,
+    FlowType::RoutingHybridError,
+];
+
+pub const fn payment_audit_flow_types(scope: PaymentAuditScope) -> &'static [FlowType] {
+    match scope {
+        PaymentAuditScope::All => PAYMENT_AUDIT_ALL_FLOW_TYPES,
+        PaymentAuditScope::Dynamic => PAYMENT_AUDIT_DYNAMIC_FLOW_TYPES,
+        PaymentAuditScope::Preview => PAYMENT_AUDIT_PREVIEW_FLOW_TYPES,
+    }
+}
 
 /// Payment amount on a decide event, inside the `details` JSON. Shared by every metric that
 /// sums volume so the request shape has one place to move.
@@ -71,14 +107,19 @@ where
 }
 
 pub fn static_flow_type_in_sql(flow_types: &[FlowType]) -> String {
-    format!(
-        "({})",
-        flow_types
-            .iter()
-            .map(|flow_type| format!("'{}'", flow_type.as_str()))
-            .collect::<Vec<_>>()
-            .join(", ")
-    )
+    format!("({})", static_flow_type_list_sql(flow_types))
+}
+
+pub fn static_flow_type_array_sql(flow_types: &[FlowType]) -> String {
+    format!("[{}]", static_flow_type_list_sql(flow_types))
+}
+
+fn static_flow_type_list_sql(flow_types: &[FlowType]) -> String {
+    flow_types
+        .iter()
+        .map(|flow_type| format!("'{}'", flow_type.as_str()))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 pub fn ordered_route_hits_from_counts(
@@ -105,6 +146,7 @@ pub fn ordered_route_hits_from_counts(
 pub fn payment_audit_stage_label(stage: String) -> String {
     match stage.as_str() {
         "gateway_decided" => "Decide Gateway".to_string(),
+        "hybrid_routed" => "Hybrid Routing".to_string(),
         "score_updated" => "Update Gateway".to_string(),
         "rule_applied" => "Rule Evaluate".to_string(),
         "preview_evaluated" => "Preview Result".to_string(),
@@ -116,12 +158,4 @@ pub fn payment_audit_route_label(route: String) -> String {
     AnalyticsRoute::from_stored_value(&route)
         .map(|route| route.payment_audit_label().to_string())
         .unwrap_or(route)
-}
-
-pub const fn payment_audit_summary_kind(preview_only: bool) -> &'static str {
-    if preview_only {
-        PAYMENT_AUDIT_SUMMARY_KIND_PREVIEW
-    } else {
-        PAYMENT_AUDIT_SUMMARY_KIND_DYNAMIC
-    }
 }

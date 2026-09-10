@@ -38,6 +38,8 @@ pub struct AnalyticsQueryParams {
     pub routing_approach: Option<String>,
     pub exclude_routing_approach: Option<String>,
     pub error_code: Option<String>,
+    pub scope: Option<String>,
+    pub routing_kind: Option<String>,
 }
 
 fn analytics_query_from_params(
@@ -82,6 +84,8 @@ fn payment_audit_query_from_params(
         params.routing_approach.clone(),
         params.exclude_routing_approach.clone(),
         params.error_code.clone(),
+        params.scope.clone(),
+        params.routing_kind.clone(),
     )
 }
 

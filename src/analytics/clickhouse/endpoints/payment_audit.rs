@@ -1,5 +1,5 @@
 use crate::analytics::flow::AnalyticsRoute;
-use crate::analytics::models::{PaymentAuditQuery, PaymentAuditResponse};
+use crate::analytics::models::{PaymentAuditQuery, PaymentAuditResponse, PaymentAuditScope};
 use crate::error::ApiError;
 
 use super::super::metrics;
@@ -8,7 +8,7 @@ use super::super::time::payment_audit_range;
 pub async fn load(
     client: &clickhouse::Client,
     query: &PaymentAuditQuery,
-    preview_only: bool,
+    scope: PaymentAuditScope,
 ) -> Result<PaymentAuditResponse, ApiError> {
     let requested_lookup_key = crate::analytics::derive_lookup_key(
         query.payment_id.as_deref(),
@@ -27,21 +27,20 @@ pub async fn load(
 
     let (total_results, total_success, total_failure, results) =
         if let Some(lookup_key) = requested_lookup_key.clone() {
-            let results =
-                metrics::audit_summaries::load_exact(client, query, preview_only, &lookup_key)
-                    .await
-                    .map_err(|error| {
-                        crate::logger::error!(
-                            ?error,
-                            ?preview_only,
-                            lookup_key,
-                            merchant_id = %query.merchant_id,
-                            payment_id = ?query.payment_id,
-                            request_id = ?query.request_id,
-                            "payment audit exact summary load failed"
-                        );
-                        error
-                    })?;
+            let results = metrics::audit_summaries::load_exact(client, query, scope, &lookup_key)
+                .await
+                .map_err(|error| {
+                    crate::logger::error!(
+                        ?error,
+                        ?scope,
+                        lookup_key,
+                        merchant_id = %query.merchant_id,
+                        payment_id = ?query.payment_id,
+                        request_id = ?query.request_id,
+                        "payment audit exact summary load failed"
+                    );
+                    error
+                })?;
             let success = results
                 .iter()
                 .filter(|r| is_success(r.latest_status.as_deref()))
@@ -53,12 +52,12 @@ pub async fn load(
             (results.len(), success, failure, results)
         } else {
             let (total_results, total_success, total_failure) =
-                metrics::audit_summaries::count(client, query, preview_only)
+                metrics::audit_summaries::count(client, query, scope)
                     .await
                     .map_err(|error| {
                         crate::logger::error!(
                             ?error,
-                            ?preview_only,
+                            ?scope,
                             merchant_id = %query.merchant_id,
                             payment_id = ?query.payment_id,
                             request_id = ?query.request_id,
@@ -66,12 +65,12 @@ pub async fn load(
                         );
                         error
                     })?;
-            let results = metrics::audit_summaries::load_page(client, query, preview_only)
+            let results = metrics::audit_summaries::load_page(client, query, scope)
                 .await
                 .map_err(|error| {
                     crate::logger::error!(
                         ?error,
-                        ?preview_only,
+                        ?scope,
                         merchant_id = %query.merchant_id,
                         payment_id = ?query.payment_id,
                         request_id = ?query.request_id,
@@ -89,12 +88,12 @@ pub async fn load(
         .or(requested_lookup_key);
 
     let timeline = if let Some(lookup_key) = selected_lookup_key.clone() {
-        metrics::audit_timeline::load(client, query, preview_only, &lookup_key)
+        metrics::audit_timeline::load(client, query, scope, &lookup_key)
             .await
             .map_err(|error| {
                 crate::logger::error!(
                     ?error,
-                    ?preview_only,
+                    ?scope,
                     lookup_key,
                     merchant_id = %query.merchant_id,
                     payment_id = ?query.payment_id,
@@ -123,7 +122,7 @@ pub async fn load(
             .clone()
             .or_else(|| results.first().and_then(|row| row.request_id.clone())),
         gateway: query.gateway.clone(),
-        route: if preview_only {
+        route: if scope == PaymentAuditScope::Preview {
             Some(AnalyticsRoute::RoutingEvaluate.as_str().to_string())
         } else {
             query.route.clone()
@@ -132,6 +131,8 @@ pub async fn load(
         flow_type: query.flow_type.clone(),
         routing_approach: query.routing_approach.clone(),
         error_code: query.error_code.clone(),
+        scope: scope.as_str().to_string(),
+        routing_kind: query.routing_kind.map(|kind| kind.as_str().to_string()),
         page,
         page_size,
         total_results,

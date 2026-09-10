@@ -667,6 +667,8 @@ export interface PaymentAuditResponse {
   flow_type?: string | null
   routing_approach?: string | null
   error_code?: string | null
+  scope?: string
+  routing_kind?: string | null
   page: number
   page_size: number
   total_results: number

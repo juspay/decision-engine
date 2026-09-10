@@ -774,11 +774,13 @@ function routeLabel(route?: string | null) {
   if (route === 'decision_gateway' || route === 'decide_gateway') return 'Decide Gateway'
   if (route === 'update_gateway_score') return 'Update Gateway'
   if (route === 'routing_evaluate') return 'Rule Evaluate'
+  if (route === 'routing_hybrid') return 'Hybrid Routing'
   return humanizeAuditValue(route)
 }
 
 function eventTypeLabel(eventType?: string | null) {
   if (!eventType) return 'Unknown event'
+  if (eventType.startsWith('routing_hybrid_')) return 'Hybrid Routing'
   if (eventType === 'decide_gateway_decision') return 'Decide Gateway'
   if (
     eventType === 'update_gateway_score_update' ||
@@ -797,6 +799,7 @@ function flowTypeValue(event: PaymentAuditEvent) {
 
 function stageLabel(event: PaymentAuditEvent) {
   const flowType = flowTypeValue(event)
+  if (event.event_stage === 'hybrid_routed' || flowType.startsWith('routing_hybrid_')) return 'Hybrid Routing'
   if (event.event_stage === 'gateway_decided') return 'Decide Gateway'
   if (event.event_stage === 'score_updated') return 'Update Gateway'
   if (event.event_stage === 'rule_applied') return 'Rule Evaluate'
@@ -807,6 +810,7 @@ function stageLabel(event: PaymentAuditEvent) {
 
 function eventPhase(event: PaymentAuditEvent) {
   const flowType = flowTypeValue(event)
+  if (flowType.startsWith('routing_hybrid_') || event.event_stage === 'hybrid_routed') return 'Hybrid Routing'
   if ((flowType.startsWith('decide_gateway_') && flowType !== 'decide_gateway_rule_hit') || event.event_stage === 'gateway_decided') return 'Decide Gateway'
   if (flowType === 'decide_gateway_rule_hit' || event.event_stage === 'rule_applied') return 'Rule Evaluate'
   if (flowType.startsWith('update_gateway_score_') || flowType.startsWith('update_score_legacy_') || event.event_stage === 'score_updated') return 'Update Gateway'
@@ -886,6 +890,8 @@ function buildAuditUrl(paymentId: string) {
     page: 1,
     page_size: 25,
     payment_id: paymentId,
+    // The live-decision panel; rule previews have their own panel from /analytics/preview-trace.
+    scope: 'dynamic',
   })
   return `/analytics/payment-audit?${qs}`
 }

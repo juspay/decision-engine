@@ -74,3 +74,23 @@ curl --location "$BASE_URL/routing/hybrid" \
   ]
 }
 ```
+
+## Audit events
+
+One `/routing/hybrid` call records one analytics event for the whole call, on the
+`routing_hybrid` route, under the request id it was given (the `x-request-id` header when
+supplied, otherwise an id minted for the call):
+
+- `routing_hybrid_request_hit` — the call was received
+- `routing_hybrid_decision` — the call answered (`event_stage: hybrid_routed`). Its details hold
+  the full hybrid `request` and `response`, the SR connector scores as `score_context`, and a
+  `selection_reason` (`decided_gateway`, `routing_approach` — the SR approach, or
+  `STATIC_ROUTING` when the rule/fallback connectors answered — `dynamic_status`
+  `success | fallback | skipped`, `static_connectors`, `priority_logic_tag`)
+- `routing_hybrid_error` — the call answered with an error (`event_stage: hybrid_failed`)
+
+Neither half is recorded on its own: no `routing_evaluate_*` preview event and no
+`decide_gateway_*` event. The later `/update-gateway-score` call joins the same trail through
+`payment_id`, so the Decision Audit page shows the payment as one entry: Hybrid Routing →
+Update Gateway (`/analytics/payment-audit?routing_kind=hybrid`); the payment is not listed
+under the `multi_objective` or `rule_based` kinds.

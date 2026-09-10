@@ -37,6 +37,24 @@ export interface SeededTraffic {
   previewEvaluation?: any
 }
 
+export interface SeedHybridOptions {
+  /** Feedback status posted to /update-gateway-score. Default 'AUTHORIZED'. */
+  scoreStatus?: 'AUTHORIZED' | 'FAILURE'
+  /** Prefix for generated ids, to keep failures traceable to a spec. */
+  prefix?: string
+}
+
+export interface SeededHybridTraffic {
+  paymentId: string
+  decidedGateway: string
+  ruleId: string
+  /** Body of the /routing/hybrid call. */
+  hybridResponse: any
+}
+
+/** The audit events one hybrid-routed payment leaves, in trail order: the hybrid call, then feedback. */
+export const HYBRID_AUDIT_TRAIL = ['routing_hybrid_decision', 'update_gateway_score_update'] as const
+
 /** Generate a decision + score-update (and optionally a rule + preview evaluation) for a merchant. */
 export async function seedRoutedTraffic(
   api: ApiClient,
@@ -148,5 +166,113 @@ export function waitForPreviewFlowType(
     ({ body }) =>
       Array.isArray(body?.timeline) && body.timeline.some((e: any) => e.flow_type === flowType),
     { message: `Expected preview trace for ${paymentId} to contain ${flowType}` },
+  )
+}
+
+/**
+ * One payment routed the way Hyperswitch routes under DE cutover: a single POST /routing/hybrid
+ * carrying both the static rule request and the SR request, followed by the score feedback. Its
+ * audit trail is `HYBRID_AUDIT_TRAIL`: one event for the whole hybrid call, then the score update.
+ */
+export async function seedHybridTraffic(
+  api: ApiClient,
+  merchantId: string,
+  options: SeedHybridOptions = {},
+): Promise<SeededHybridTraffic> {
+  const { scoreStatus = 'AUTHORIZED', prefix = 'hybrid' } = options
+
+  await api.createSuccessRateConfig(merchantId)
+  const created = await api.createRoutingAlgorithm(
+    factory.singleRoutingPayload(merchantId, {
+      name: factory.ruleName(`${prefix}_single`),
+      gateway: 'stripe',
+    }),
+  )
+  const ruleId: string = created.body.rule_id
+  await api.activateRoutingAlgorithm(merchantId, ruleId)
+
+  const paymentId = factory.paymentId(`${prefix}_payment`)
+  const hybrid = await api.raw('POST', '/routing/hybrid', {
+    body: {
+      static_routing_request: {
+        created_by: merchantId,
+        payment_id: paymentId,
+        parameters: {
+          payment_method: { type: 'enum_variant', value: 'card' },
+          amount: { type: 'number', value: 100 },
+        },
+        fallback_output: [factory.gatewayConnector('stripe')],
+      },
+      dynamic_routing_request: factory.srDecideGatewayRequest({
+        merchantId,
+        paymentInfo: { paymentId },
+      }),
+    },
+  })
+  const decidedGateway: string | undefined = hybrid.body?.dynamic_routing?.decision?.decided_gateway
+  if (!decidedGateway) {
+    throw new Error(
+      `hybrid routing returned no dynamic decision: ${JSON.stringify(hybrid.body).slice(0, 800)}`,
+    )
+  }
+
+  await api.updateGatewayScore(
+    factory.updateGatewayScoreRequest({
+      merchantId,
+      gateway: decidedGateway,
+      paymentId,
+      status: scoreStatus,
+    }),
+  )
+
+  return { paymentId, decidedGateway, ruleId, hybridResponse: hybrid.body }
+}
+
+/**
+ * Poll /analytics/payment-audit until the payment's timeline contains every named flow type AND its
+ * summary entry counts them. The handler runs the summary query before the timeline query, so a poll
+ * that lands between a Kafka flush and those two reads can see the timeline populated while the entry
+ * is still empty; requiring both makes the settled response safe to assert on.
+ */
+export function waitForAuditFlowTypes(
+  api: ApiClient,
+  paymentId: string,
+  flowTypes: readonly string[],
+  qs: Record<string, unknown> = {},
+): Promise<ApiResponse> {
+  return poll(
+    () =>
+      api.raw('GET', '/analytics/payment-audit', {
+        failOnStatusCode: false,
+        qs: { range: '1h', payment_id: paymentId, ...qs },
+      }),
+    ({ body }) =>
+      Array.isArray(body?.timeline) &&
+      flowTypes.every((flowType) => body.timeline.some((e: any) => e.flow_type === flowType)) &&
+      Array.isArray(body?.results) &&
+      body.results.some((row: any) => row.payment_id === paymentId && row.event_count >= flowTypes.length),
+    { message: `Expected payment audit for ${paymentId} to list it with ${flowTypes.join(', ')}` },
+  )
+}
+
+/**
+ * Poll the payment-audit LIST (no payment id) until a payment appears under a routing-type filter.
+ * The list reads the pre-aggregated summaries, which are fed by their own Kafka consumer and can
+ * lag the raw timeline by a moment.
+ */
+export function waitForAuditListing(
+  api: ApiClient,
+  paymentId: string,
+  qs: Record<string, unknown> = {},
+): Promise<ApiResponse> {
+  return poll(
+    () =>
+      api.raw('GET', '/analytics/payment-audit', {
+        failOnStatusCode: false,
+        qs: { range: '1h', page: 1, page_size: 50, ...qs },
+      }),
+    ({ body }) =>
+      Array.isArray(body?.results) && body.results.some((row: any) => row.payment_id === paymentId),
+    { message: `Expected payment audit list ${JSON.stringify(qs)} to include ${paymentId}` },
   )
 }

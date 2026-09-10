@@ -1,14 +1,17 @@
 use clickhouse::Row;
 use serde::Deserialize;
 
-use crate::analytics::models::{PaymentAuditQuery, PaymentAuditSummary};
+use crate::analytics::models::{PaymentAuditQuery, PaymentAuditScope, PaymentAuditSummary};
 use crate::error::ApiError;
 
 use super::super::common::{
-    fetch_all, fetch_one, payment_audit_route_label, payment_audit_stage_label,
-    payment_audit_summary_kind, DOMAIN_TABLE, PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE,
+    fetch_all, fetch_one, payment_audit_route_label, payment_audit_stage_label, DOMAIN_TABLE,
+    PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE,
 };
-use super::super::filters::{payment_audit_summary_scope_filters, payment_audit_timeline_filters};
+use super::super::filters::{
+    payment_audit_needs_raw_rows, payment_audit_routing_kind_filters,
+    payment_audit_summary_scope_filters, payment_audit_timeline_filters,
+};
 use super::super::query::{BindArg, BoundQueryBuilder, FilterClause, OrderClause, SqlFragment};
 use super::super::time::effective_payment_audit_window_bounds;
 
@@ -37,38 +40,74 @@ struct CountRow {
     total_failure: u64,
 }
 
-fn finalized_summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFragment {
-    let mut builder = BoundQueryBuilder::new(format!("{PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE} FINAL"));
+/// The pre-aggregated path: one row per payment, merged across every `summary_kind` the
+/// payment produced (rule preview, hybrid, dynamic), so a hybrid payment's rule-evaluate,
+/// decide-gateway and score-update events read as one trail. The `-Merge` combinators finalise
+/// the AggregatingMergeTree states across parts and kinds, so no `FINAL` is needed; a narrow
+/// scope pins one `summary_kind`. Same two-level shape as `raw_summary_fragment`, so the
+/// merchant filter stays on the source rows and never collides with an aggregate alias.
+fn merged_summary_fragment(query: &PaymentAuditQuery, scope: PaymentAuditScope) -> SqlFragment {
+    let mut source = BoundQueryBuilder::new(PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE);
+    source.extend_selects([
+        "lookup_key".to_string(),
+        "merchant_id".to_string(),
+        "payment_id_state".to_string(),
+        "request_id_state".to_string(),
+        "first_seen_ms_state".to_string(),
+        "last_seen_ms_state".to_string(),
+        "event_count_state".to_string(),
+        "latest_status_state".to_string(),
+        "latest_gateway_state".to_string(),
+        "latest_stage_state".to_string(),
+        "gateways_state".to_string(),
+        "routes_state".to_string(),
+        "statuses_state".to_string(),
+        "flow_types_state".to_string(),
+        "error_codes_state".to_string(),
+    ]);
+    source.add_filter(FilterClause::eq("merchant_id", query.merchant_id.clone()));
+    if let Some(kinds) = scope.summary_kinds() {
+        let kinds = kinds
+            .iter()
+            .map(|kind| kind.to_string())
+            .collect::<Vec<_>>();
+        if let Some(filter) = FilterClause::in_list("summary_kind", &kinds) {
+            source.add_filter(filter);
+        }
+    }
+
+    let source = source.into_fragment();
+    let mut builder = BoundQueryBuilder::from_fragment(SqlFragment::with_binds(
+        format!("({})", source.sql()),
+        source.binds().to_vec(),
+    ));
     builder.extend_selects([
         "lookup_key".to_string(),
-        "finalizeAggregation(payment_id_state) AS payment_id".to_string(),
-        "finalizeAggregation(request_id_state) AS request_id".to_string(),
-        "finalizeAggregation(merchant_id_state) AS merchant_id".to_string(),
-        "finalizeAggregation(first_seen_ms_state) AS first_seen_ms".to_string(),
-        "finalizeAggregation(last_seen_ms_state) AS last_seen_ms".to_string(),
-        "finalizeAggregation(event_count_state) AS event_count".to_string(),
-        "finalizeAggregation(latest_status_state) AS latest_status".to_string(),
-        "finalizeAggregation(latest_gateway_state) AS latest_gateway".to_string(),
-        "finalizeAggregation(latest_stage_state) AS latest_stage".to_string(),
-        "arrayFilter(value -> value != '', finalizeAggregation(gateways_state)) AS gateways"
+        "argMaxMerge(payment_id_state) AS payment_id".to_string(),
+        "argMaxMerge(request_id_state) AS request_id".to_string(),
+        "toNullable(any(merchant_id)) AS merchant_id".to_string(),
+        "minMerge(first_seen_ms_state) AS first_seen_ms".to_string(),
+        "maxMerge(last_seen_ms_state) AS last_seen_ms".to_string(),
+        "sumMerge(event_count_state) AS event_count".to_string(),
+        "argMaxMerge(latest_status_state) AS latest_status".to_string(),
+        "argMaxMerge(latest_gateway_state) AS latest_gateway".to_string(),
+        "argMaxMerge(latest_stage_state) AS latest_stage".to_string(),
+        "arrayFilter(value -> value != '', groupUniqArrayMerge(gateways_state)) AS gateways"
             .to_string(),
-        "arrayFilter(value -> value != '', finalizeAggregation(routes_state)) AS routes"
+        "arrayFilter(value -> value != '', groupUniqArrayMerge(routes_state)) AS routes"
             .to_string(),
-        "arrayFilter(value -> value != '', finalizeAggregation(statuses_state)) AS statuses"
+        "arrayFilter(value -> value != '', groupUniqArrayMerge(statuses_state)) AS statuses"
             .to_string(),
-        "arrayFilter(value -> value != '', finalizeAggregation(flow_types_state)) AS flow_types"
+        "arrayFilter(value -> value != '', groupUniqArrayMerge(flow_types_state)) AS flow_types"
             .to_string(),
-        "arrayFilter(value -> value != '', finalizeAggregation(error_codes_state)) AS error_codes"
+        "arrayFilter(value -> value != '', groupUniqArrayMerge(error_codes_state)) AS error_codes"
             .to_string(),
     ]);
-    builder.extend_filters([
-        FilterClause::eq("merchant_id", query.merchant_id.clone()),
-        FilterClause::eq("summary_kind", payment_audit_summary_kind(preview_only)),
-    ]);
+    builder.add_group_by("lookup_key");
     builder.into_fragment()
 }
 
-fn raw_summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFragment {
+fn raw_summary_fragment(query: &PaymentAuditQuery, scope: PaymentAuditScope) -> SqlFragment {
     let mut source = BoundQueryBuilder::new(DOMAIN_TABLE);
     source.extend_selects([
         "lookup_key".to_string(),
@@ -83,7 +122,7 @@ fn raw_summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFra
         "flow_type".to_string(),
         "error_code".to_string(),
     ]);
-    source.extend_filters(payment_audit_summary_scope_filters(query, preview_only));
+    source.extend_filters(payment_audit_summary_scope_filters(query, scope));
     source.add_filter(FilterClause::raw("lookup_key IS NOT NULL"));
     source.add_filter(FilterClause::raw("lookup_key != ''"));
 
@@ -117,12 +156,12 @@ fn raw_summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFra
     builder.into_fragment()
 }
 
-fn summary_fragment(query: &PaymentAuditQuery, preview_only: bool) -> SqlFragment {
-    if query.routing_approach.is_some() || query.exclude_routing_approach.is_some() {
-        return raw_summary_fragment(query, preview_only);
+fn summary_fragment(query: &PaymentAuditQuery, scope: PaymentAuditScope) -> SqlFragment {
+    if payment_audit_needs_raw_rows(query) {
+        return raw_summary_fragment(query, scope);
     }
 
-    finalized_summary_fragment(query, preview_only)
+    merged_summary_fragment(query, scope)
 }
 
 fn exact_lookup_filter(lookup_key: &str) -> FilterClause {
@@ -168,6 +207,9 @@ fn outer_summary_filters(query: &PaymentAuditQuery) -> Vec<FilterClause> {
             "has(flow_types, ?)",
             vec![flow_type.clone().into()],
         ));
+    }
+    if let Some(kind) = query.routing_kind {
+        filters.extend(payment_audit_routing_kind_filters(kind));
     }
     // The lookup summary table intentionally does not carry routing_approach state.
     // When routing_approach is included or excluded, callers use raw_summary_fragment instead.
@@ -236,9 +278,9 @@ fn map_rows(rows: Vec<AuditSummaryRow>) -> Vec<PaymentAuditSummary> {
 pub async fn count(
     client: &clickhouse::Client,
     query: &PaymentAuditQuery,
-    preview_only: bool,
+    scope: PaymentAuditScope,
 ) -> Result<(usize, usize, usize), ApiError> {
-    let finalized = summary_fragment(query, preview_only);
+    let finalized = summary_fragment(query, scope);
     let mut builder = BoundQueryBuilder::from_fragment(SqlFragment::with_binds(
         format!("({})", finalized.sql()),
         finalized.binds().to_vec(),
@@ -262,9 +304,9 @@ pub async fn count(
 pub async fn load_page(
     client: &clickhouse::Client,
     query: &PaymentAuditQuery,
-    preview_only: bool,
+    scope: PaymentAuditScope,
 ) -> Result<Vec<PaymentAuditSummary>, ApiError> {
-    let finalized = summary_fragment(query, preview_only);
+    let finalized = summary_fragment(query, scope);
     let mut builder = results_builder(finalized, query);
     builder.add_order_by(OrderClause::desc("last_seen_ms"));
     builder.add_order_by(OrderClause::desc("event_count"));
@@ -277,7 +319,7 @@ pub async fn load_page(
 pub async fn load_exact(
     client: &clickhouse::Client,
     query: &PaymentAuditQuery,
-    preview_only: bool,
+    scope: PaymentAuditScope,
     lookup_key: &str,
 ) -> Result<Vec<PaymentAuditSummary>, ApiError> {
     let mut exact_query = query.clone();
@@ -298,7 +340,7 @@ pub async fn load_exact(
     ]);
     // A specific transaction's summary should report its full curated trace (like the timeline),
     // not just events matching the list's dimension filters.
-    source.extend_filters(payment_audit_timeline_filters(&exact_query, preview_only));
+    source.extend_filters(payment_audit_timeline_filters(&exact_query, scope));
     source.add_filter(exact_lookup_filter(lookup_key));
 
     let source = source.into_fragment();
@@ -328,12 +370,14 @@ pub async fn load_exact(
 
 #[cfg(test)]
 mod tests {
-    use crate::analytics::clickhouse::common::PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE;
-    use crate::analytics::models::{AnalyticsRange, PaymentAuditQuery};
+    use crate::analytics::clickhouse::common::{DOMAIN_TABLE, PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE};
+    use crate::analytics::models::{
+        AnalyticsRange, PaymentAuditQuery, PaymentAuditRoutingKind, PaymentAuditScope,
+    };
 
     use super::{
-        exact_lookup_filter, finalized_summary_fragment, outer_summary_filters,
-        raw_summary_fragment,
+        exact_lookup_filter, merged_summary_fragment, outer_summary_filters, raw_summary_fragment,
+        summary_fragment,
     };
 
     fn payment_audit_query() -> PaymentAuditQuery {
@@ -353,20 +397,88 @@ mod tests {
             routing_approach: None,
             exclude_routing_approach: None,
             error_code: None,
+            scope: PaymentAuditScope::All,
+            routing_kind: None,
         }
     }
 
     #[test]
-    fn finalized_summary_fragment_uses_lookup_summary_table() {
-        let fragment = finalized_summary_fragment(&payment_audit_query(), false);
-        assert!(fragment.sql().contains(PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE));
-        assert!(fragment.sql().contains("FINAL"));
-        assert!(!fragment.sql().contains("GROUP BY lookup_key"));
+    fn merged_summary_fragment_merges_every_summary_kind_per_payment() {
+        let fragment = merged_summary_fragment(&payment_audit_query(), PaymentAuditScope::All);
+        let sql = fragment.sql();
+        assert!(sql.contains(PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE));
+        assert!(!sql.contains("FINAL"));
+        assert!(sql.contains("sumMerge(event_count_state) AS event_count"));
+        assert!(sql.contains("groupUniqArrayMerge(flow_types_state)) AS flow_types"));
+        assert!(sql.contains("GROUP BY lookup_key"));
+        assert!(!sql.contains("summary_kind"));
+        assert_eq!(fragment.binds().len(), 1, "only the merchant bind");
+    }
+
+    #[test]
+    fn narrow_scopes_pin_their_summary_kinds() {
+        // dynamic = live decision path: SR rows and hybrid rows, matching its timeline list
+        let fragment = merged_summary_fragment(&payment_audit_query(), PaymentAuditScope::Dynamic);
+        assert!(fragment.sql().contains("summary_kind IN (?, ?)"));
+        assert_eq!(fragment.binds().len(), 3, "merchant + two kinds");
+        let preview = merged_summary_fragment(&payment_audit_query(), PaymentAuditScope::Preview);
+        assert!(preview.sql().contains("summary_kind IN (?)"));
+        assert_eq!(preview.binds().len(), 2);
+    }
+
+    #[test]
+    fn summary_fragment_reads_raw_rows_only_for_routing_approach_kinds() {
+        let mut query = payment_audit_query();
+        assert!(summary_fragment(&query, PaymentAuditScope::All)
+            .sql()
+            .contains(PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE));
+
+        query.routing_kind = Some(PaymentAuditRoutingKind::Hybrid);
+        assert!(summary_fragment(&query, PaymentAuditScope::All)
+            .sql()
+            .contains(PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE));
+
+        query.routing_kind = Some(PaymentAuditRoutingKind::DebitRouting);
+        let debit = summary_fragment(&query, PaymentAuditScope::All);
+        assert!(debit.sql().contains(DOMAIN_TABLE));
+        assert!(!debit.sql().contains(PAYMENT_AUDIT_LOOKUP_SUMMARY_TABLE));
+
+        query.routing_kind = Some(PaymentAuditRoutingKind::MultiObjective);
+        assert!(summary_fragment(&query, PaymentAuditScope::All)
+            .sql()
+            .contains(DOMAIN_TABLE));
+    }
+
+    #[test]
+    fn outer_filters_add_has_any_for_flow_type_backed_kinds() {
+        let mut query = payment_audit_query();
+        query.routing_kind = Some(PaymentAuditRoutingKind::RuleBased);
+        let predicates = outer_summary_filters(&query)
+            .into_iter()
+            .map(|filter| filter.predicate().to_string())
+            .collect::<Vec<_>>();
+        assert!(predicates.iter().any(|predicate| {
+            predicate.starts_with("hasAny(flow_types, [")
+                && predicate.contains("routing_evaluate_advanced")
+        }));
+        assert!(predicates.iter().any(|predicate| {
+            predicate.starts_with("NOT hasAny(flow_types, [")
+                && predicate.contains("routing_hybrid_decision")
+        }));
+
+        query.routing_kind = Some(PaymentAuditRoutingKind::DebitRouting);
+        let predicates = outer_summary_filters(&query)
+            .into_iter()
+            .map(|filter| filter.predicate().to_string())
+            .collect::<Vec<_>>();
+        assert!(!predicates
+            .iter()
+            .any(|predicate| predicate.contains("hasAny")));
     }
 
     #[test]
     fn raw_summary_fragment_exposes_outer_summary_column_names() {
-        let fragment = raw_summary_fragment(&payment_audit_query(), false);
+        let fragment = raw_summary_fragment(&payment_audit_query(), PaymentAuditScope::All);
         assert!(fragment.sql().contains("AS lookup_key"));
         assert!(fragment.sql().contains("AS merchant_id"));
         assert!(!fragment.sql().contains("resolved_lookup_key"));

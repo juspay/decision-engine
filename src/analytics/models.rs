@@ -327,6 +327,77 @@ pub struct AnalyticsRuleHit {
     pub count: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentAuditScope {
+    #[default]
+    All,
+    Dynamic,
+    Preview,
+}
+
+impl PaymentAuditScope {
+    pub fn from_query(value: Option<&str>) -> Self {
+        match value
+            .map(|value| value.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("dynamic") => Self::Dynamic,
+            Some("preview") => Self::Preview,
+            _ => Self::All,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Dynamic => "dynamic",
+            Self::Preview => "preview",
+        }
+    }
+
+    pub const fn summary_kinds(self) -> Option<&'static [&'static str]> {
+        match self {
+            Self::All => None,
+            Self::Dynamic => Some(&["dynamic", "hybrid"]),
+            Self::Preview => Some(&["preview"]),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentAuditRoutingKind {
+    MultiObjective,
+    RuleBased,
+    DebitRouting,
+    Hybrid,
+}
+
+impl PaymentAuditRoutingKind {
+    pub fn from_query(value: Option<&str>) -> Option<Self> {
+        match value
+            .map(|value| value.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("multi_objective") => Some(Self::MultiObjective),
+            Some("rule_based") => Some(Self::RuleBased),
+            Some("debit_routing") => Some(Self::DebitRouting),
+            Some("hybrid") => Some(Self::Hybrid),
+            _ => None,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MultiObjective => "multi_objective",
+            Self::RuleBased => "rule_based",
+            Self::DebitRouting => "debit_routing",
+            Self::Hybrid => "hybrid",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentAuditQuery {
     pub merchant_id: String,
@@ -344,6 +415,8 @@ pub struct PaymentAuditQuery {
     pub routing_approach: Option<String>,
     pub exclude_routing_approach: Option<String>,
     pub error_code: Option<String>,
+    pub scope: PaymentAuditScope,
+    pub routing_kind: Option<PaymentAuditRoutingKind>,
 }
 
 impl PaymentAuditQuery {
@@ -390,6 +463,8 @@ impl PaymentAuditQuery {
         routing_approach: Option<String>,
         exclude_routing_approach: Option<String>,
         error_code: Option<String>,
+        scope: Option<String>,
+        routing_kind: Option<String>,
     ) -> Self {
         let range = AnalyticsRange::from_query(range.as_deref());
         let (start_ms, end_ms) = match (start_ms, end_ms) {
@@ -415,6 +490,8 @@ impl PaymentAuditQuery {
             routing_approach,
             exclude_routing_approach,
             error_code,
+            scope: PaymentAuditScope::from_query(scope.as_deref()),
+            routing_kind: PaymentAuditRoutingKind::from_query(routing_kind.as_deref()),
         }
     }
 }
@@ -476,6 +553,8 @@ pub struct PaymentAuditResponse {
     pub flow_type: Option<String>,
     pub routing_approach: Option<String>,
     pub error_code: Option<String>,
+    pub scope: String,
+    pub routing_kind: Option<String>,
     pub page: usize,
     pub page_size: usize,
     pub total_results: usize,
@@ -828,5 +907,60 @@ mod tests {
             normalise_page_size(Some(500), DEFAULT_ANALYTICS_PAGE_SIZE),
             MAX_ANALYTICS_PAGE_SIZE
         );
+    }
+}
+
+#[cfg(test)]
+mod payment_audit_filter_tests {
+    use super::{PaymentAuditRoutingKind, PaymentAuditScope};
+
+    #[test]
+    fn scope_defaults_to_all_and_only_narrow_scopes_pin_a_summary_kind() {
+        assert_eq!(PaymentAuditScope::from_query(None), PaymentAuditScope::All);
+        assert_eq!(
+            PaymentAuditScope::from_query(Some("nonsense")),
+            PaymentAuditScope::All
+        );
+        assert_eq!(
+            PaymentAuditScope::from_query(Some(" Dynamic ")),
+            PaymentAuditScope::Dynamic
+        );
+        assert_eq!(
+            PaymentAuditScope::from_query(Some("preview")),
+            PaymentAuditScope::Preview
+        );
+        assert_eq!(PaymentAuditScope::All.summary_kinds(), None);
+        assert_eq!(
+            PaymentAuditScope::Dynamic.summary_kinds(),
+            Some(&["dynamic", "hybrid"][..])
+        );
+        assert_eq!(
+            PaymentAuditScope::Preview.summary_kinds(),
+            Some(&["preview"][..])
+        );
+    }
+
+    #[test]
+    fn routing_kind_parses_the_dashboard_filter_values_and_ignores_the_rest() {
+        assert_eq!(
+            PaymentAuditRoutingKind::from_query(Some("multi_objective")),
+            Some(PaymentAuditRoutingKind::MultiObjective)
+        );
+        assert_eq!(
+            PaymentAuditRoutingKind::from_query(Some("RULE_BASED")),
+            Some(PaymentAuditRoutingKind::RuleBased)
+        );
+        assert_eq!(
+            PaymentAuditRoutingKind::from_query(Some("debit_routing")),
+            Some(PaymentAuditRoutingKind::DebitRouting)
+        );
+        assert_eq!(
+            PaymentAuditRoutingKind::from_query(Some("hybrid")),
+            Some(PaymentAuditRoutingKind::Hybrid)
+        );
+        assert_eq!(PaymentAuditRoutingKind::from_query(Some("")), None);
+        assert_eq!(PaymentAuditRoutingKind::from_query(Some("tabs")), None);
+        assert_eq!(PaymentAuditRoutingKind::from_query(None), None);
+        assert_eq!(PaymentAuditRoutingKind::Hybrid.as_str(), "hybrid");
     }
 }
