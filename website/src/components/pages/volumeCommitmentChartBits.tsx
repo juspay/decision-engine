@@ -163,7 +163,7 @@ const ZERO_DECIMAL = new Set(['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'HUF', 'UGX', '
  * simulator, which has to turn a contract's daily rate back into a ticket size it can send.
  * A `metric: volume` contract counts transactions and has no currency, so nothing is converted.
  */
-function toMajorUnits(minor: number, currency?: string | null) {
+export function toMajorUnits(minor: number, currency?: string | null) {
   if (!currency) return minor
   return ZERO_DECIMAL.has(currency) ? minor : minor / 100
 }

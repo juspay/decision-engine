@@ -128,10 +128,14 @@ enabled = true
 default_forecast_interval_secs = 60
 # Where the scheduler calls when a forecast comes due. Normally this same process's [server].
 main_server_url = "http://127.0.0.1:8080"
-# How often the scheduler wakes. Must be finer than the shortest cadence it has to fire — a due
-# job cannot fire sooner than the next tick, so a coarser tick silently becomes the cadence. A
-# 30-second contract day derives a 2-second cadence, so this has to be under that.
-tick_secs = 1
+# How often the scheduler wakes. Must be no coarser than the shortest cadence it has to fire — a
+# due job cannot fire sooner than the next tick, so a coarser tick silently becomes the cadence.
+# A contract day of 48s or less derives the 2-second floor, so 2 is as slow as this can be.
+#
+# Not lower, either: every tick reads each active contract back from Postgres to work out what is
+# due, so at DEBUG a one-second tick fills the console with the same five queries a second whether
+# or not anything is happening.
+tick_secs = 2
 # May a contract declare a `test_minutes` billing cycle, whose "day" lasts seconds? A demo
 # device, meaningless against real billing. Defaults off, so production needs no key at all.
 allow_test_cycles = true
@@ -158,9 +162,12 @@ the volume the engine added; the commitment lands by the cycle close."""
 routing_mode = "pace_guarded"
 tolerance_bps = 500
 # $200,000 a contract day: what the simulator sustains at its ordinary rate — around 20 payments a
-# second of the $1,000 ticket the amount range defaults to, over a ten-second contract day. Held a
-# little under the ~24/s measured, so a slower machine still leaves the targets below reachable;
-# a faster one simply meets them earlier.
+# second over a ten-second contract day. Held a little under the ~24/s measured, so a slower
+# machine still leaves the targets below reachable; a faster one simply meets them earlier.
+#
+# This figure also sets the simulator's ticket, which it derives back out of it: $200,000 over the
+# 200 payments a contract day carries is $1,000 a payment. Change the rate and the tickets follow,
+# so the targets below keep meaning what they say.
 #
 # The rate holds now. It used to decay eightfold inside a single cycle, because the simulator page
 # recomputed every tile from the whole result array and kept a table row per payment in the DOM,
@@ -205,9 +212,12 @@ Together these ask for more traffic than the cycle has. The engine keeps the one
 routing_mode = "pace_guarded"
 tolerance_bps = 500
 # $200,000 a contract day: what the simulator sustains at its ordinary rate — around 20 payments a
-# second of the $1,000 ticket the amount range defaults to, over a ten-second contract day. Held a
-# little under the ~24/s measured, so a slower machine still leaves the targets below reachable;
-# a faster one simply meets them earlier.
+# second over a ten-second contract day. Held a little under the ~24/s measured, so a slower
+# machine still leaves the targets below reachable; a faster one simply meets them earlier.
+#
+# This figure also sets the simulator's ticket, which it derives back out of it: $200,000 over the
+# 200 payments a contract day carries is $1,000 a payment. Change the rate and the tickets follow,
+# so the targets below keep meaning what they say.
 #
 # The rate holds now. It used to decay eightfold inside a single cycle, because the simulator page
 # recomputed every tile from the whole result array and kept a table row per payment in the DOM,
@@ -1090,7 +1100,7 @@ jwt_expiry_seconds = 86400
 hs_redirect_jwt_expiry_seconds = 28800
 email_verification_enabled = false
 signup_requires_admin_secret = false
-super_admin_emails = []
+super_admin_emails = ["test@gmail.com"]
 
 [admin_secret]
 secret = "test_admin"

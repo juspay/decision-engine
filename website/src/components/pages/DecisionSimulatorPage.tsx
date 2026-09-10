@@ -4047,10 +4047,31 @@ export function DecisionSimulatorPage() {
               // just reset — stop rather than quietly mis-attribute it.
               simulationAbortRef.current = true
             }}
-            onLoad={({ gateways }) => {
-              // Only who the payments may go to. Ticket size and rate are this page's own, the
-              // same for a contract run as for any other.
-              setForm(f => ({ ...f, eligible_gateways: gateways.join(', ') }))
+            onLoad={({ gateways, ticket }) => {
+              // Who the payments may go to, and what each one is worth. The rate stays this page's
+              // own — a contract run goes as fast as any other — but the ticket is a contract term:
+              // every goal on the card is denominated in it, and the card derives it from the
+              // volume the document declares per contract day.
+              //
+              // Both amount inputs are set, because which one a payment reads depends on the
+              // ranking algorithm: SR routing sends `form.amount`, multi-objective draws from the
+              // range. Setting one alone leaves the other path racing the contract's promises with
+              // this page's default $10-$100 ticket, which no target here is sized for.
+              setForm(f => ({
+                ...f,
+                eligible_gateways: gateways.join(', '),
+                ...(ticket == null ? {} : { amount: String(ticket) }),
+              }))
+              if (ticket == null) return
+              const pinned = Math.min(
+                SIMULATION_AMOUNT_BOUND_MAX,
+                Math.max(SIMULATION_AMOUNT_BOUND_MIN, Math.round(ticket)),
+              )
+              setSimulationConfig(c =>
+                c.minAmount === pinned && c.maxAmount === pinned
+                  ? c
+                  : { ...c, minAmount: pinned, maxAmount: pinned },
+              )
             }}
           />
         )}

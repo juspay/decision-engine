@@ -21,21 +21,29 @@ import {
   formatAchieved,
   formatMoney,
   pctOfGoal,
+  toMajorUnits,
   isTestCycle as isTestCycleOf,
 } from './volumeCommitmentChartBits'
 
 /**
  * What a run has to be given to drive traffic at the contract: the PSPs the document names, so
- * every payment is one the commitments can compete for.
+ * every payment is one the commitments can compete for, and the ticket each payment carries.
  *
- * Nothing else. This used to carry a ticket size and a pace derived from the contract's declared
- * daily volume, which made a contract run at a rate no other simulation on this page runs at —
- * one payment a second where the rest go as fast as the backend answers. The contract's own
- * figures are calibrated to the ordinary rate instead, so a contract demo and a routing demo push
- * traffic the same way and only the promises differ.
+ * No pace. This used to carry one too, derived from the contract's declared daily volume, which
+ * made a contract run at a rate no other simulation on this page runs at — one payment a second
+ * where the rest go as fast as the backend answers. The contract's own figures are calibrated to
+ * the ordinary rate instead, so a contract demo and a routing demo push traffic the same way and
+ * only the promises differ.
+ *
+ * The ticket stays, because rate and ticket are not interchangeable here: how fast payments go is
+ * this page's business, but how much each one is worth is what every target on this card is
+ * measured in.
  */
 export type ContractRunPreset = {
   gateways: string[]
+  /** Major units per payment, or null when the contract declares no daily volume to derive it
+   *  from — the page then keeps whatever amount it was already set to. */
+  ticket: number | null
 }
 
 /** What this card counted for one PSP over the run. */
@@ -149,6 +157,17 @@ function isDenial(gate: SteerBlock): gate is DenialGate {
  * actually reach the chart.
  */
 const RUN_POLL_MS = 2_000
+
+/**
+ * Payments a second the simulator sustains once a run is going, which is what turns the contract's
+ * declared daily volume into a per-payment ticket.
+ *
+ * A constant rather than the TPS control, because the run is not throttled to it: payments go as
+ * fast as the backend answers, and TPS only sizes the batch. Held a little under the ~24/s
+ * measured so a slower machine sends slightly larger tickets and still delivers the declared rate,
+ * which is the same margin the shipped sample targets are chosen with.
+ */
+const SIMULATOR_PAYMENTS_PER_SEC = 20
 
 /**
  * A steer rate at or above this takes every payment its PSP is allowed to take, so nothing is left
@@ -515,16 +534,32 @@ export function VolumeCommitmentRunChart({
   })
 
   // The simulator takes its settings from the contract rather than waiting to be pointed at it.
-  // Ticket size, pace and the eligible gateways are all contract terms — a run driven by anything
-  // else measures nothing about the commitments on this card, and the numbers under each promise
-  // only mean what they say because the traffic matches the rate the document declares.
+  // Ticket size and the eligible gateways are both contract terms — a run driven by anything else
+  // measures nothing about the commitments on this card, and the numbers under each promise only
+  // mean what they say because the traffic matches the rate the document declares.
   //
-  // Applied once per cycle, not once per render: the values it carries move with the clock
-  // (`totalPayments` shrinks as the cycle runs down), so they are read from a ref and the effect
-  // keys on the contract and cycle alone. A new cycle re-applies, which is what makes a closed
-  // one's run stop and the next one start at its own full length.
-  const preset = useRef<ContractRunPreset>({ gateways: [] })
-  preset.current = { gateways: rows.map((r) => r.name) }
+  // Applied once per cycle rather than on every render, and never mid-run: the ticket is read
+  // from a ref and the effect keys on the contract and cycle alone, so a run cannot have its
+  // amount rewritten underneath it.
+  //
+  // `expectedDailyTraffic` is a rate — so much value per contract day — and it is the figure every
+  // goal on this card is sized against. Divided by the payments a contract day actually carries,
+  // it gives the ticket that makes the declaration true. A run sending anything else races
+  // promises priced for a different amount of money: at the shipped sample's $200k a contract day
+  // the ticket is $1,000, so the page's own $10-$100 range would deliver a small fraction of the
+  // cycle the targets assume and every commitment would read as unreachable from day 0.
+  const contractDaySecs = view.pacing?.daySecs ?? SECS_PER_DAY
+  const declaredDaily = view.pacing?.expectedDailyTraffic ?? 0
+  const paymentsPerContractDay = Math.max(1, SIMULATOR_PAYMENTS_PER_SEC * contractDaySecs)
+  const ticket =
+    declaredDaily > 0
+      ? Math.max(
+          0.01,
+          Math.round((toMajorUnits(declaredDaily, currency) / paymentsPerContractDay) * 100) / 100,
+        )
+      : null
+  const preset = useRef<ContractRunPreset>({ gateways: [], ticket: null })
+  preset.current = { gateways: rows.map((r) => r.name), ticket }
   const onLoadRef = useRef(onLoad)
   onLoadRef.current = onLoad
   const appliedCycle = useRef<string | null>(null)

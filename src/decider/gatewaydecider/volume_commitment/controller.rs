@@ -130,7 +130,26 @@ pub async fn build_plan(
     inputs: &CommitmentInputs,
 ) -> Result<SteeringPlan, VolumeError> {
     let (plan, measured) = compute_plan(deps, inputs).await?;
-    log_plan(&plan, &measured);
+    // Which of the drops this forecast ordered, as against the ones it merely carried forward.
+    let carried_over = deps
+        .state
+        .load_plan(&inputs.merchant_id)
+        .await
+        .filter(|prev| prev.run_id == plan.run_id)
+        .map(|prev| {
+            prev.dropped
+                .into_iter()
+                .map(|d| d.connector)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let newly_dropped: Vec<String> = plan
+        .dropped
+        .iter()
+        .map(|d| d.connector.clone())
+        .filter(|c| !carried_over.contains(c))
+        .collect();
+    log_plan(&plan, &measured, &newly_dropped);
     deps.state.store_plan(&inputs.merchant_id, &plan).await;
     audit_plan(&plan);
     Ok(plan)
@@ -421,10 +440,24 @@ fn position(
     )
 }
 
-/// One log line per PSP, so the merchant can be shown why volume went where it did.
-fn log_plan(plan: &SteeringPlan, measured: &super::inputs::MeasuredVolume) {
+/// What a forecast is worth saying out loud.
+///
+/// A forecast runs on the contract's own cadence, which on a demo's compressed day is every few
+/// seconds, for as long as the contract is active — a cycle rolls whether or not anyone is sending
+/// payments, so the loop never goes quiet on its own. At INFO, one line per PSP per forecast is a
+/// console nobody can read anything else in, and it says the same thing each time: the standing of
+/// each commitment, which the dashboard already shows and the analytics event already records.
+///
+/// So the standing is DEBUG, and only what *changed* is INFO. A commitment being given up on is a
+/// decision about the rest of the cycle and worth a line; the same commitment still being dropped
+/// on the next forecast, and the next, is not.
+fn log_plan(
+    plan: &SteeringPlan,
+    measured: &super::inputs::MeasuredVolume,
+    newly_dropped: &[String],
+) {
     for psp in &plan.psps {
-        logger::info!(
+        logger::debug!(
             tag = "volume_commitment",
             merchant_id = plan.merchant_id.as_str(),
             connector = psp.connector.as_str(),
@@ -439,7 +472,11 @@ fn log_plan(plan: &SteeringPlan, measured: &super::inputs::MeasuredVolume) {
         );
     }
 
-    for psp in &plan.dropped {
+    for psp in plan
+        .dropped
+        .iter()
+        .filter(|d| newly_dropped.contains(&d.connector))
+    {
         logger::info!(
             tag = "volume_commitment_dropped",
             merchant_id = plan.merchant_id.as_str(),
