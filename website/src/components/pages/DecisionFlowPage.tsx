@@ -468,6 +468,12 @@ export function DecisionFlowView() {
   const laneKey = JSON.stringify(deriveLanes(stack).lanes)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const laneModel = useMemo(() => deriveLanes(stack), [laneKey])
+  const connectorCount = laneModel.ghost ? 0 : laneModel.lanes.length + laneModel.overflow
+  // Which stages the rail will draw. The canvas measures the spacers between them, so it has to
+  // re-measure whenever this changes — stages appear as each config read lands.
+  const stageKey = STAGES.filter((stage) => !stage.view(stack, connectorCount).dim)
+    .map((stage) => stage.id)
+    .join(',')
   const loading =
     activeLoading || srLoading || elimLoading || debitRoutingFlag.isLoading || merchantFeatures.isLoading
   // A 404 on any of these reads means "nothing configured for this merchant" — the legitimate
@@ -506,10 +512,11 @@ export function DecisionFlowView() {
               ghost={laneModel.ghost}
               deterministicHead={laneModel.deterministicHead}
               overflow={laneModel.overflow}
+              stageKey={stageKey}
             />
             <FlowRail
               stack={stack}
-              connectorCount={laneModel.ghost ? 0 : laneModel.lanes.length + laneModel.overflow}
+              connectorCount={connectorCount}
               overflow={laneModel.overflow}
               loadFailed={loadFailed}
               merchantId={merchantId}

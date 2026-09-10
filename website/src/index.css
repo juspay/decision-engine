@@ -360,3 +360,25 @@ g.de-lane-cut .de-lane-particle {
   opacity: 0 !important;
   transition: opacity 0.3s;
 }
+
+/* Per-stage connector columns: each chip names a gateway still in the running after that stage.
+   The one a stage knocks out turns red and strikes through before its lane retracts. The colours
+   are also written inline by the canvas; these carry `!important` so the base-layer text rules
+   this file sets on every span can't tint an eliminated chip back to normal. */
+.de-state-chip.de-state-out {
+  color: #b91c1c !important;
+  border-color: rgba(239, 68, 68, 0.55) !important;
+  background: rgba(254, 226, 226, 0.95) !important;
+  text-decoration: line-through;
+}
+
+.dark .de-state-chip.de-state-out {
+  color: #fca5a5 !important;
+  border-color: rgba(248, 113, 113, 0.5) !important;
+  background: rgba(127, 29, 29, 0.35) !important;
+}
+
+.de-state-chip {
+  transition: left 0.9s cubic-bezier(0.33, 0, 0.15, 1), opacity 0.5s ease, background-color 0.4s ease,
+    border-color 0.4s ease, color 0.4s ease;
+}

@@ -15,13 +15,17 @@ interface LanePath {
 interface LaneLabel {
   x: number
   y: number
-  kind: 'dot' | 'chip' | 'rank' | 'note' | 'pct' | 'windot' | 'endchip'
+  kind: 'dot' | 'chip' | 'rank' | 'note' | 'pct' | 'windot' | 'endchip' | 'statechip'
   text?: string
   color?: string
   /** endchip/windot only: which lane this belongs to, so the wave engine can slide/hide it. */
   laneIndex?: number
   /** endchip only: the deterministic winner's chip stays at the converge point. */
   pinned?: boolean
+  /** statechip only: which gap it reports, and which sort-slot set positions it. */
+  gapIndex?: number
+  slotIndex?: number
+  gapKind?: GapKind
 }
 
 interface GapRect {
@@ -109,6 +113,7 @@ export function LaneCanvas({
   ghost,
   deterministicHead,
   overflow = 0,
+  stageKey,
 }: {
   containerRef: RefObject<HTMLDivElement>
   lanes: LaneDef[]
@@ -116,6 +121,9 @@ export function LaneCanvas({
   deterministicHead: string | null
   /** Connectors the strategy references beyond the drawn lanes — rendered as a "+N more" chip. */
   overflow?: number
+  /** Which stages the rail is currently rendering. Stages appear as configuration loads, which
+      changes the gaps this canvas measures without changing the lanes — so it must re-measure. */
+  stageKey: string
 }) {
   const [drawn, setDrawn] = useState<Drawn | null>(null)
   const [markers, setMarkers] = useState<Marker[]>([])
@@ -171,9 +179,26 @@ export function LaneCanvas({
     let orderStep = 0
     let currentSlotX: number | null = null
     let animatable = false
+    let gapIndex = -1
     for (const gap of gaps) {
+      gapIndex++
       if (!alive) break
       const x: number = currentSlotX ?? laneX(i)
+      // Every stage that can change the candidate list names who is still standing after it,
+      // the way the reference flow shows a column of gateways between steps.
+      if (collect && (gap.kind === 'filter' || gap.kind === 'sort' || gap.kind === 'demote')) {
+        collect.labels.push({
+          x,
+          y: gap.top + gap.height * 0.5 - 8,
+          kind: 'statechip',
+          text: lane.name,
+          color: lane.color,
+          laneIndex: i,
+          gapIndex,
+          slotIndex: orderStep - 1,
+          gapKind: gap.kind,
+        })
+      }
       const y0 = gap.top
       const y1 = gap.top + gap.height
       const mid = y0 + gap.height / 2
@@ -301,6 +326,40 @@ export function LaneCanvas({
         chip.dataset.pinned === 'true' ? laneX(0) : lastSet?.[laneIndex] ?? laneX(laneIndex)
       }px`
     })
+    // The per-stage connector columns: who is still standing after each stage, who just got
+    // knocked out (red, struck through), and who never reaches the stages below.
+    const filterIdx = gaps.findIndex((g) => g.kind === 'filter')
+    const demoteIdx = gaps.findIndex((g) => g.kind === 'demote')
+    overlayRef.current?.querySelectorAll<HTMLElement>('[data-statechip]').forEach((chip) => {
+      const laneIndex = Number(chip.dataset.lane)
+      const gapIndex = Number(chip.dataset.gapIndex)
+      const slotIndex = Number(chip.dataset.slotIndex)
+      if (Number.isNaN(laneIndex)) return
+      chip.style.left = `${
+        slotIndex >= 0 ? slotSetsRef.current[slotIndex]?.[laneIndex] ?? laneX(laneIndex) : laneX(laneIndex)
+      }px`
+      const cutHere =
+        (cutsRef.current.filter === laneIndex && gapIndex === filterIdx) ||
+        (cutsRef.current.health === laneIndex && gapIndex === demoteIdx)
+      const cutAbove =
+        (cutsRef.current.filter === laneIndex && filterIdx >= 0 && gapIndex > filterIdx) ||
+        (cutsRef.current.health === laneIndex && demoteIdx >= 0 && gapIndex > demoteIdx)
+      chip.style.opacity = cutAbove ? '0' : '1'
+      // Knocked out at this stage: the chip goes red and strikes through, the way the reference
+      // flow marks the gateway a step removes.
+      chip.classList.toggle('de-state-out', cutHere)
+      if (cutHere) {
+        chip.style.color = isDark ? '#fca5a5' : '#b91c1c'
+        chip.style.borderColor = isDark ? 'rgba(248,113,113,0.5)' : 'rgba(239,68,68,0.55)'
+        chip.style.background = isDark ? 'rgba(127,29,29,0.35)' : 'rgba(254,226,226,0.95)'
+        chip.style.textDecoration = 'line-through'
+      } else {
+        chip.style.color = isDark ? '#9ca7ba' : '#475569'
+        chip.style.borderColor = isDark ? '#1e2535' : '#e2e8f0'
+        chip.style.background = isDark ? '#0d1118' : '#ffffff'
+        chip.style.textDecoration = 'none'
+      }
+    })
     // The win dot marks a decision that this lane no longer reaches while it is cut.
     overlayRef.current?.querySelectorAll<HTMLElement>('[data-windot-lane]').forEach((el) => {
       const laneIndex = Number(el.dataset.windotLane)
@@ -403,7 +462,7 @@ export function LaneCanvas({
     observer.observe(container)
     return () => observer.disconnect()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [containerRef, lanes, ghost, deterministicHead, overflow])
+  }, [containerRef, lanes, ghost, deterministicHead, overflow, stageKey])
 
   /* One frame loop drives every tween and then rewrites the lanes from current state. */
   useEffect(() => {
@@ -825,6 +884,33 @@ export function LaneCanvas({
                     style={{ background: laneColor(label.color) }}
                   />
                 ) : null}
+                <span className="min-w-0 truncate">{label.text}</span>
+              </span>
+            )
+          }
+          if (label.kind === 'statechip') {
+            return (
+              <span
+                key={i}
+                data-statechip
+                data-lane={label.laneIndex}
+                data-gap-index={label.gapIndex}
+                data-slot-index={label.slotIndex}
+                className="de-state-chip absolute flex max-w-[74px] -translate-x-1/2 items-center gap-1 rounded-md border px-1.5 py-px font-mono text-[9.5px] shadow-sm dark:shadow-none"
+                // Correct on first paint: renderLanes only runs once frames start, and a tab that
+                // never gets one would otherwise show an unstyled chip.
+                style={{
+                  left: label.x,
+                  top: label.y,
+                  color: isDark ? '#9ca7ba' : '#475569',
+                  borderColor: isDark ? '#1e2535' : '#e2e8f0',
+                  background: isDark ? '#0d1118' : '#ffffff',
+                }}
+              >
+                <span
+                  className="h-[5px] w-[5px] flex-shrink-0 rounded-[2px]"
+                  style={{ background: laneColor(label.color ?? '#3b82f6') }}
+                />
                 <span className="min-w-0 truncate">{label.text}</span>
               </span>
             )
