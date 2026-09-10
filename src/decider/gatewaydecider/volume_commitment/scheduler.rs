@@ -6,13 +6,16 @@
 
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::Mutex;
 
 use chrono::Utc;
 use futures::FutureExt;
 use serde::Serialize;
 
 use super::controller::{self, RunReport};
+use super::inputs::CommitmentInputs;
 use super::Deps;
+use crate::config::VolumeCommitmentConfig;
 use crate::logger;
 
 /// Watches the clock for every merchant with commitments.
@@ -21,7 +24,45 @@ pub struct Scheduler {
     http: reqwest::Client,
     /// Presented to the main server's run endpoint, which sits behind the same auth as any write.
     admin_secret: String,
+    /// What each merchant's contract says about *when* to forecast, from the last time the
+    /// contracts were read. See `cadences`.
+    cadences: Mutex<Option<Cadences>>,
 }
+
+/// One merchant's timing, as the contract last stated it.
+#[derive(Debug, Clone)]
+struct Cadence {
+    every_secs: u64,
+    period_end_epoch_secs: i64,
+}
+
+/// Every merchant's timing, and when it was read.
+#[derive(Debug, Clone)]
+struct Cadences {
+    read_at_epoch_secs: i64,
+    by_merchant: Vec<(String, Cadence)>,
+}
+
+/// How long the contracts' timing is taken as still true.
+///
+/// Deciding what is due needs two things: how often a merchant wants forecasting, which is a
+/// contract term, and when it was last forecast, which is a Redis key. The second has to be read
+/// every tick; the first almost never changes, and reading it every tick meant loading every
+/// active contract back from Postgres several times a second to be told the same numbers — the
+/// bulk of what a quiet local console prints.
+///
+/// A stale reading costs at most one late forecast, and only for a contract whose terms changed
+/// without going through activation, which forecasts the merchant immediately anyway. A cycle
+/// rolling over is noticed by `period_end_epoch_secs` rather than waited out.
+///
+/// The reading is not dropped after a forecast, though a forecast is the one moment the contracts
+/// are certain to have been looked at. It changes neither thing cached here: the cadence is a
+/// contract term a run cannot rewrite, and a run that rolls the cycle moves `period_end` into the
+/// past, which the check above already catches. Dropping it there instead made the cache useless
+/// exactly where it was needed — on a compressed contract day the cadence floor and the tick are
+/// both two seconds, so nearly every tick notifies, and every notify threw away the reading the
+/// next tick was about to use. The console still printed a contract load per tick.
+const CADENCE_TTL_SECS: i64 = 30;
 
 /// One row of the schedule, served by `GET /schedule` for inspection.
 #[derive(Debug, Clone, Serialize)]
@@ -64,11 +105,28 @@ fn until_rollover_secs(period_end_epoch_secs: i64, now_epoch_secs: i64) -> u64 {
     u64::try_from(period_end_epoch_secs.saturating_sub(now_epoch_secs)).unwrap_or(0)
 }
 
+/// One merchant's timing, read off its contracts. The cache and `GET /schedule` both come through
+/// here, so an inspected schedule cannot describe different timing from the one being run.
+fn cadence_of(inputs: &CommitmentInputs, config: &VolumeCommitmentConfig) -> Cadence {
+    Cadence {
+        every_secs: controller::interval_secs(inputs, config),
+        // `load` recomputes cycle windows from "now", so right after a rollover this is already
+        // the new cycle's end — the boundary itself is enforced by the lease TTL.
+        period_end_epoch_secs: inputs
+            .commitments
+            .iter()
+            .map(|c| c.period_end_ms / 1000)
+            .min()
+            .unwrap_or(i64::MAX),
+    }
+}
+
 impl Scheduler {
     pub fn new(deps: Arc<Deps>, admin_secret: String) -> Self {
         Self {
             deps,
             admin_secret,
+            cadences: Mutex::new(None),
             // Short timeout so a wedged run cannot pin the loop; the next tick retries.
             http: reqwest::Client::builder()
                 .timeout(Duration::from_secs(30))
@@ -139,15 +197,72 @@ impl Scheduler {
 
     /// Everything currently due. A never-run merchant is due immediately, so one added mid-cycle
     /// gets a plan on the next tick.
+    ///
+    /// Only the last-run stamp is read fresh each tick; the timing comes from the cache.
     async fn due_now(&self) -> Vec<ScheduleEntry> {
-        self.schedule()
-            .await
-            .into_iter()
-            .filter(|entry| entry.due_in_secs == 0)
-            .collect()
+        let now = Utc::now().timestamp();
+        let mut entries = Vec::new();
+
+        for (merchant_id, cadence) in self.cadences(now).await {
+            let last_started_at = self.deps.state.last_run_started_at(&merchant_id).await;
+            let due_in_secs = due_in_secs(
+                cadence.every_secs,
+                last_started_at,
+                now,
+                until_rollover_secs(cadence.period_end_epoch_secs, now),
+            );
+            if due_in_secs > 0 {
+                continue;
+            }
+            entries.push(ScheduleEntry {
+                merchant_id,
+                every_secs: cadence.every_secs,
+                period_end_epoch_secs: cadence.period_end_epoch_secs,
+                last_notified_at_epoch_secs: last_started_at,
+                due_in_secs,
+            });
+        }
+        entries
     }
 
-    /// Every merchant's cadence and how long until its next forecast fires.
+    /// Every merchant's timing, re-read from the contracts only when the cached reading has aged
+    /// out or a cycle it describes has closed — a rolled cycle has a new end, and pacing against
+    /// the old one would leave the fresh cycle unsteered until the TTL came round.
+    async fn cadences(&self, now: i64) -> Vec<(String, Cadence)> {
+        let mut held = self.cadences.lock().await;
+        if let Some(cached) = held.as_ref() {
+            let fresh = now.saturating_sub(cached.read_at_epoch_secs) < CADENCE_TTL_SECS;
+            let rolled = cached
+                .by_merchant
+                .iter()
+                .any(|(_, cadence)| cadence.period_end_epoch_secs <= now);
+            if fresh && !rolled {
+                return cached.by_merchant.clone();
+            }
+        }
+        let by_merchant = self.read_cadences().await;
+        *held = Some(Cadences {
+            read_at_epoch_secs: now,
+            by_merchant: by_merchant.clone(),
+        });
+        by_merchant
+    }
+
+    /// Load every active merchant's contracts and take their timing off them.
+    async fn read_cadences(&self) -> Vec<(String, Cadence)> {
+        let mut cadences = Vec::new();
+        for merchant_id in self.deps.inputs.list_active().await {
+            let Some(inputs) = self.deps.inputs.load(&merchant_id).await else {
+                continue;
+            };
+            cadences.push((merchant_id, cadence_of(&inputs, &self.deps.config)));
+        }
+        cadences
+    }
+
+    /// Every merchant's cadence and how long until its next forecast fires. Read live rather than
+    /// from the cache: this is the inspection view, and it should answer for the contracts as they
+    /// stand right now.
     pub async fn schedule(&self) -> Vec<ScheduleEntry> {
         let now = Utc::now().timestamp();
         let mut entries = Vec::new();
@@ -156,15 +271,10 @@ impl Scheduler {
             let Some(inputs) = self.deps.inputs.load(&merchant_id).await else {
                 continue;
             };
-            let every_secs = controller::interval_secs(&inputs, &self.deps.config);
-            // `load` recomputes cycle windows from "now", so right after a rollover this is
-            // already the new cycle's end — the boundary itself is enforced by the lease TTL.
-            let period_end_epoch_secs = inputs
-                .commitments
-                .iter()
-                .map(|c| c.period_end_ms / 1000)
-                .min()
-                .unwrap_or(i64::MAX);
+            let Cadence {
+                every_secs,
+                period_end_epoch_secs,
+            } = cadence_of(&inputs, &self.deps.config);
             let last_started_at = self.deps.state.last_run_started_at(&merchant_id).await;
             entries.push(ScheduleEntry {
                 every_secs,
@@ -200,7 +310,10 @@ impl Scheduler {
             Ok(response) if response.status().is_success() => {
                 match response.json::<RunReport>().await {
                     Ok(report) => {
-                        logger::info!(
+                        // Once per forecast, which on a compressed contract day is every few
+                        // seconds for as long as a contract is active. The run's outcome is on
+                        // the audit trail; this is for following the loop, not for reading.
+                        logger::debug!(
                             tag = "volume_commitment",
                             merchant_id = merchant_id,
                             "forecast run done: processed={} skipped={} failed={}",
