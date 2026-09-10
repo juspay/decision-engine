@@ -52,8 +52,16 @@ struct Cadences {
 /// bulk of what a quiet local console prints.
 ///
 /// A stale reading costs at most one late forecast, and only for a contract whose terms changed
-/// without going through activation: activation forecasts the merchant immediately and clears
-/// this, and a cycle rolling over is noticed by `period_end_epoch_secs` rather than waited out.
+/// without going through activation, which forecasts the merchant immediately anyway. A cycle
+/// rolling over is noticed by `period_end_epoch_secs` rather than waited out.
+///
+/// The reading is not dropped after a forecast, though a forecast is the one moment the contracts
+/// are certain to have been looked at. It changes neither thing cached here: the cadence is a
+/// contract term a run cannot rewrite, and a run that rolls the cycle moves `period_end` into the
+/// past, which the check above already catches. Dropping it there instead made the cache useless
+/// exactly where it was needed — on a compressed contract day the cadence floor and the tick are
+/// both two seconds, so nearly every tick notifies, and every notify threw away the reading the
+/// next tick was about to use. The console still printed a contract load per tick.
 const CADENCE_TTL_SECS: i64 = 30;
 
 /// One row of the schedule, served by `GET /schedule` for inspection.
@@ -184,8 +192,6 @@ impl Scheduler {
                 // Give the interval back so the next tick retries rather than waiting it out.
                 self.deps.state.release_run_lease(&entry.merchant_id).await;
             }
-            // That run may have opened a new cycle, and the contracts may have moved under it.
-            self.forget_cadences().await;
         }
     }
 
@@ -252,11 +258,6 @@ impl Scheduler {
             cadences.push((merchant_id, cadence_of(&inputs, &self.deps.config)));
         }
         cadences
-    }
-
-    /// Drop the cached timing, so the next pass reads the contracts again.
-    async fn forget_cadences(&self) {
-        *self.cadences.lock().await = None;
     }
 
     /// Every merchant's cadence and how long until its next forecast fires. Read live rather than
