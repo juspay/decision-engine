@@ -169,7 +169,6 @@ export function LaneCanvas({
     lane: LaneDef,
     i: number,
     gaps: GapRect[],
-    slotSets: number[][],
     collect?: { labels: LaneLabel[]; sortEnabled: boolean },
   ): { d: string; winner: boolean; animatable: boolean } => {
     const last = i === lanes.length - 1
@@ -177,13 +176,12 @@ export function LaneCanvas({
     let alive = true
     let winner = false
     let orderStep = 0
-    let currentSlotX: number | null = null
     let animatable = false
     let gapIndex = -1
     for (const gap of gaps) {
       gapIndex++
       if (!alive) break
-      const x: number = currentSlotX ?? laneX(i)
+      const x: number = laneX(i)
       // Every stage that can change the candidate list names who is still standing after it,
       // the way the reference flow shows a column of gateways between steps.
       if (collect && (gap.kind === 'filter' || gap.kind === 'sort' || gap.kind === 'demote')) {
@@ -195,7 +193,9 @@ export function LaneCanvas({
           color: lane.color,
           laneIndex: i,
           gapIndex,
-          slotIndex: orderStep - 1,
+          // A re-rank column reports the order it just produced; every other column reports the
+          // order still standing from the last re-rank above it.
+          slotIndex: gap.kind === 'sort' ? orderStep : orderStep - 1,
           gapKind: gap.kind,
         })
       }
@@ -239,10 +239,11 @@ export function LaneCanvas({
         animatable = true
         d += ` L ${x} ${y0} L ${x} ${y1}`
       } else if (gap.kind === 'sort') {
+        // A re-rank changes the ORDER, not the lane. Crossing the ribbons here made the colour
+        // at a given column flip, which reads as two connectors swapping identity — so the
+        // ribbon runs straight and the new rank is stated on the chips instead.
         animatable = true
-        const target: number = slotSets[orderStep]?.[i] ?? x
-        d += ` L ${x} ${y0} C ${x} ${y0 + gap.height * 0.62}, ${target} ${y0 + gap.height * 0.38}, ${target} ${y1}`
-        currentSlotX = target
+        d += ` L ${x} ${y0} L ${x} ${y1}`
         orderStep++
       } else if (gap.kind === 'demote') {
         d += ` L ${x} ${y0} L ${x} ${y1}`
@@ -285,7 +286,7 @@ export function LaneCanvas({
     lanes.forEach((lane, i) => {
       const group = laneGroupRefs.current[i]
       if (!group) return
-      const { d } = buildLanePath(lane, i, gaps, slotSetsRef.current)
+      const { d } = buildLanePath(lane, i, gaps)
       const visible = visRef.current[i] ?? 100
       const full = visible >= 99.5
       group.querySelectorAll<SVGPathElement>('path[data-lane-mask]').forEach((el) => {
@@ -307,11 +308,7 @@ export function LaneCanvas({
     overlayRef.current?.querySelectorAll<HTMLElement>('[data-marker-lane]').forEach((el) => {
       const laneIndex = Number(el.dataset.markerLane)
       if (Number.isNaN(laneIndex)) return
-      const x =
-        el.dataset.markerGap === 'demote'
-          ? markerXRef.current?.demoteX(laneIndex) ?? laneX(laneIndex)
-          : laneX(laneIndex)
-      el.style.left = `${x}px`
+      el.style.left = `${laneX(laneIndex)}px`
     })
     const lastSet = slotSetsRef.current[slotSetsRef.current.length - 1]
     const isCut = (laneIndex: number) =>
@@ -324,9 +321,9 @@ export function LaneCanvas({
         .filter((i) => !isCut(i) && (visRef.current[i] ?? 100) > 1)
       if (!live.length) return -1
       return live.reduce((best, i) => {
-        const x = lastSet?.[i] ?? laneX(i)
+        const rankX = lastSet?.[i] ?? laneX(i)
         const bestX = lastSet?.[best] ?? laneX(best)
-        return x < bestX ? i : best
+        return rankX < bestX ? i : best
       }, live[0])
     })()
     overlayRef.current?.querySelectorAll<HTMLElement>('.de-end-chip').forEach((chip) => {
@@ -344,9 +341,7 @@ export function LaneCanvas({
       if (swatch) swatch.hidden = won
       // A deterministic winner's ribbon always converges to the first slot, so its chip stays
       // there too rather than chasing the lane's sorted position.
-      chip.style.left = `${
-        chip.dataset.pinned === 'true' ? laneX(0) : lastSet?.[laneIndex] ?? laneX(laneIndex)
-      }px`
+      chip.style.left = `${chip.dataset.pinned === 'true' ? laneX(0) : laneX(laneIndex)}px`
     })
     // The per-stage connector columns: who is still standing after each stage, who just got
     // knocked out (red, struck through), and who never reaches the stages below.
@@ -357,9 +352,17 @@ export function LaneCanvas({
       const gapIndex = Number(chip.dataset.gapIndex)
       const slotIndex = Number(chip.dataset.slotIndex)
       if (Number.isNaN(laneIndex)) return
-      chip.style.left = `${
-        slotIndex >= 0 ? slotSetsRef.current[slotIndex]?.[laneIndex] ?? laneX(laneIndex) : laneX(laneIndex)
-      }px`
+      chip.style.left = `${laneX(laneIndex)}px`
+      // Rank after the most recent re-rank above this column, derived from the slot this lane
+      // currently holds. The lane itself never moves, so the colour at a column is stable.
+      const rankEl = chip.querySelector<HTMLElement>('[data-rank]')
+      if (rankEl) {
+        const slotX = slotIndex >= 0 ? slotSetsRef.current[slotIndex]?.[laneIndex] : undefined
+        const rank = slotX == null ? null : Math.round((slotX - LANE_X0) / LANE_STEP) + 1
+        const text = rank == null ? '' : `#${rank}`
+        if (rankEl.textContent !== text) rankEl.textContent = text
+        rankEl.hidden = rank == null
+      }
       const cutHere =
         (cutsRef.current.filter === laneIndex && gapIndex === filterIdx) ||
         (cutsRef.current.health === laneIndex && gapIndex === demoteIdx)
@@ -427,7 +430,7 @@ export function LaneCanvas({
       const paths: LanePath[] = []
       const animatable: boolean[] = []
       lanes.forEach((lane, i) => {
-        const built = buildLanePath(lane, i, gaps, slotSetsRef.current, collect)
+        const built = buildLanePath(lane, i, gaps, collect)
         animatable.push(built.animatable)
         if (built.d) {
           const flowDuration = lane.share != null ? Math.min(7, 1.1 / Math.max(lane.share, 0.12)) : 3.4
@@ -688,7 +691,7 @@ export function LaneCanvas({
       lanes.forEach((lane, i) => {
         const group = laneGroupRefs.current[i]
         if (!group) return
-        const { d } = buildLanePath(lane, i, geom.gaps, slotSetsRef.current)
+        const { d } = buildLanePath(lane, i, geom.gaps)
         group.querySelectorAll('animateMotion').forEach((el) => el.setAttribute('path', d))
       })
     }
@@ -929,7 +932,7 @@ export function LaneCanvas({
                 data-lane={label.laneIndex}
                 data-gap-index={label.gapIndex}
                 data-slot-index={label.slotIndex}
-                className="de-state-chip absolute flex max-w-[74px] -translate-x-1/2 items-center gap-1 rounded-md border px-1.5 py-px font-mono text-[9.5px] shadow-sm dark:shadow-none"
+                className="de-state-chip absolute flex max-w-[104px] -translate-x-1/2 items-center gap-1 rounded-md border px-1.5 py-px font-mono text-[9.5px] shadow-sm dark:shadow-none"
                 // Correct on first paint: renderLanes only runs once frames start, and a tab that
                 // never gets one would otherwise show an unstyled chip.
                 style={{
@@ -945,6 +948,7 @@ export function LaneCanvas({
                   style={{ background: laneColor(label.color ?? '#3b82f6') }}
                 />
                 <span className="min-w-0 truncate">{label.text}</span>
+                <span data-rank className="flex-shrink-0 tabular-nums opacity-70" hidden />
               </span>
             )
           }
