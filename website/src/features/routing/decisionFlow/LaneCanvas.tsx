@@ -305,10 +305,9 @@ export function LaneCanvas({
       group.classList.toggle('de-lane-cut', !full)
     })
     // Markers ride their lane's x at the stage that produced them.
+    // Markers caption the column from the right of the last lane, so they never land on a chip.
     overlayRef.current?.querySelectorAll<HTMLElement>('[data-marker-lane]').forEach((el) => {
-      const laneIndex = Number(el.dataset.markerLane)
-      if (Number.isNaN(laneIndex)) return
-      el.style.left = `${laneX(laneIndex)}px`
+      el.style.left = `${laneX(lanes.length) + 6}px`
     })
     const lastSet = slotSetsRef.current[slotSetsRef.current.length - 1]
     const isCut = (laneIndex: number) =>
@@ -846,12 +845,10 @@ export function LaneCanvas({
               key={marker.id}
               data-marker-lane={marker.laneIndex}
               data-marker-gap={marker.gap}
-              className={`${marker.transient ? 'de-demote-flash' : 'de-cut-marker'} absolute -translate-x-1/2 whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-[10px] font-semibold shadow-[0_8px_20px_-10px_rgba(15,23,42,0.55)]`}
+              className={`${marker.transient ? 'de-demote-flash' : 'de-cut-marker'} absolute whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-[10px] font-semibold shadow-[0_8px_20px_-10px_rgba(15,23,42,0.55)]`}
               style={{
-                left: marker.gap === 'demote'
-                  ? slotSetsRef.current[0]?.[marker.laneIndex] ?? laneX(marker.laneIndex)
-                  : laneX(marker.laneIndex),
-                top: gap.top + gap.height * (marker.transient ? 0.46 : 0.52),
+                left: laneX(lanes.length) + 6,
+                top: gap.top + gap.height * 0.5 - 9,
                 color,
                 borderColor: `${color}66`,
                 background: isDark ? `${color}1f` : `${color}14`,

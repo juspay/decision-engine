@@ -324,10 +324,10 @@
 
 /* Transient "demoted" marker at the health-penalties gap: pops in, drifts down, fades. */
 @keyframes de-demote-flash {
-  0% { opacity: 0; transform: translate(-50%, -6px) scale(0.85); }
-  18% { opacity: 1; transform: translate(-50%, 0) scale(1.05); }
-  70% { opacity: 1; transform: translate(-50%, 6px) scale(1); }
-  100% { opacity: 0; transform: translate(-50%, 14px) scale(0.95); }
+  0% { opacity: 0; transform: translateY(-6px) scale(0.85); }
+  18% { opacity: 1; transform: translateY(0) scale(1.05); }
+  70% { opacity: 1; transform: translateY(6px) scale(1); }
+  100% { opacity: 0; transform: translateY(14px) scale(0.95); }
 }
 
 .de-demote-flash {
@@ -337,8 +337,8 @@
 /* Persistent cut markers (a filtered/penalized connector while it is out) and the wave guard
    that hides payment particles while lanes are re-shaping, so dots never float off-ribbon. */
 @keyframes de-pop-in {
-  from { opacity: 0; transform: translate(-50%, -4px) scale(0.85); }
-  to { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  from { opacity: 0; transform: translateY(-4px) scale(0.85); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 .de-cut-marker {
