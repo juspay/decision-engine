@@ -69,11 +69,7 @@ async fn load_score_feedback(
     Ok(row.count as i64)
 }
 
-fn score_feedback_builder(
-    query: &AnalyticsQuery,
-    start_ms: i64,
-    end_ms: i64,
-) -> BoundQueryBuilder {
+fn score_feedback_builder(query: &AnalyticsQuery, start_ms: i64, end_ms: i64) -> BoundQueryBuilder {
     let decision_flow_type = decision_shape(query.routing_kind).decision_flow_type;
 
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);

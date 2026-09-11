@@ -2,7 +2,9 @@ use clickhouse::Row;
 use serde::Deserialize;
 
 use crate::analytics::flow::FlowType;
-use crate::analytics::models::{AnalyticsHybridConnectorPick, AnalyticsHybridSplit, AnalyticsQuery};
+use crate::analytics::models::{
+    AnalyticsHybridConnectorPick, AnalyticsHybridSplit, AnalyticsQuery,
+};
 use crate::error::ApiError;
 
 use super::super::common::{fetch_all, fetch_one, static_flow_type_in_sql, DOMAIN_TABLE};
@@ -16,8 +18,10 @@ const DYNAMIC_STATUS_EXPR: &str =
     "JSONExtractString(assumeNotNull(details), 'selection_reason', 'dynamic_status')";
 const STATIC_CONNECTORS_EXPR: &str =
     "JSONExtractString(assumeNotNull(details), 'selection_reason', 'static_connectors')";
-const HYBRID_EVENT_FLOW_TYPES: &[FlowType] =
-    &[FlowType::RoutingHybridDecision, FlowType::RoutingHybridError];
+const HYBRID_EVENT_FLOW_TYPES: &[FlowType] = &[
+    FlowType::RoutingHybridDecision,
+    FlowType::RoutingHybridError,
+];
 const STATIC_ROUTING_APPROACH: &str = "STATIC_ROUTING";
 
 #[derive(Debug, Clone, Deserialize, Row)]

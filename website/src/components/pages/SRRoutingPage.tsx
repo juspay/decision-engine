@@ -11,7 +11,8 @@ import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
-import { useCanEditRouting, useVolumeContractsBeta } from '../../store/authStore'
+import { useCanEditRouting } from '../../store/authStore'
+import { releaseAdmits, useFeatureReleased, type ReleasedFeature } from '../../lib/featureReleases'
 import { apiPost, fetcher } from '../../lib/api'
 import { PAYMENT_METHOD_TYPES, PAYMENT_METHODS } from '../../lib/constants'
 import {
@@ -30,6 +31,7 @@ import { useMerchantFeatures, type KnownFeature } from '../../hooks/useMerchantF
 import { BucketHedgingTuner } from './BucketHedgingTuner'
 import { CostEstimationPanel } from './CostEstimationPanel'
 import { VolumeContractsPage } from './VolumeContractsPage'
+import { VolumeContractFeatureNotice } from './VolumeContractFeatureNotice'
 
 import { PageHeading } from '../ui/PageHeading'
 import { Notice } from '../ui/Notice'
@@ -212,9 +214,9 @@ export function SRRoutingPage() {
   // editable. (See sr_auto_calibration.rs — it skips non-autopilot rows and never sets defaults.)
   const features = useMerchantFeatures(merchantId ?? undefined)
   const autopilotOn = features.isEnabled('autopilot')
-  // Volume Contracts is in beta: only super-admins see its tab. A shared
-  // ?tab=volume link opened by anyone else falls back to Autopilot like any unknown tab.
-  const volumeContractsBeta = useVolumeContractsBeta()
+  // Volume Contracts is gated by the release roster (featureReleases.ts). A shared
+  // ?tab=volume link opened outside the audience falls back to Autopilot like any unknown tab.
+  const volumeContractsBeta = useFeatureReleased('volume-contracts')
   // Active tab is kept in the URL (?tab=…) so a reload or shared link reopens it directly.
   // Unknown/absent values fall back to Autopilot, and the default is left out of the URL.
   const [searchParams, setSearchParams] = useSearchParams()
@@ -806,10 +808,8 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
   )
 }
 
-/** Feature rows shown only to super-admins while Volume Contracts is in beta. */
-const VOLUME_CONTRACTS_BETA_FEATURES: readonly KnownFeature[] = ['volume-contracts']
-
-const SR_FEATURES: { feature: KnownFeature; title: string; description: string; docsUrl?: string }[] = [
+// A row with a `gate` is shown only to that feature's release audience (featureReleases.ts).
+const SR_FEATURES: { feature: KnownFeature; title: string; description: string; docsUrl?: string; gate?: ReleasedFeature }[] = [
   {
     feature: 'gsm-scoring-filter',
     title: 'GSM scoring filter',
@@ -840,6 +840,7 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string; 
   },
   {
     feature: 'volume-contracts',
+    gate: 'volume-contracts',
     title: 'Volume contracts (meet PSP commitments)',
     description:
       'Multi-objective routing: keeps approval-rate routing in charge, but when a contracted volume commitment is drifting behind pace, steers a little extra volume to that PSP — only onto payments where it approves about as well, so approvals barely move. Runs alongside Cost savings; when both are on, a behind-pace commitment takes priority for eligible payments.',
@@ -934,10 +935,8 @@ function SrDimensionsConfig({ merchantId }: { merchantId: string | null }) {
 
 function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
   const features = useMerchantFeatures(merchantId ?? undefined)
-  const volumeContractsBeta = useVolumeContractsBeta()
-  const visibleFeatures = SR_FEATURES.filter(
-    ({ feature }) => volumeContractsBeta || !VOLUME_CONTRACTS_BETA_FEATURES.includes(feature),
-  )
+  const user = useAuthStore((s) => s.user)
+  const visibleFeatures = SR_FEATURES.filter((f) => !f.gate || releaseAdmits(user, f.gate))
   const [toggling, setToggling] = useState<KnownFeature | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -1006,6 +1005,11 @@ function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
                   ) : null}
                 </div>
                 <p className={`mt-1 ${type.hint} max-w-[68ch]`}>{description}</p>
+                {feature === 'volume-contracts' && (
+                  // Renders only when a contract is live and this flag is off — the one feature
+                  // here whose effect depends on configuration made on another page.
+                  <VolumeContractFeatureNotice merchantId={merchantId} className="mt-3" />
+                )}
               </div>
               <div>
                 {enabled ? (
