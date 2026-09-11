@@ -20,6 +20,7 @@ import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import {
   AnalyticsCostSavingsResponse,
+  AnalyticsHybridSplit,
   AnalyticsOverviewResponse,
   AnalyticsRange,
   AnalyticsRangeValue,
@@ -74,10 +75,13 @@ type RoutingFilters = {
   gateways: string[]
 }
 
-type AnalyticsView = 'transactions' | 'rule_based' | 'volume_commitments'
-const ANALYTICS_VIEWS: readonly AnalyticsView[] = ['transactions', 'rule_based', 'volume_commitments']
+type AnalyticsView = 'transactions' | 'hybrid' | 'rule_based' | 'volume_commitments'
+const ANALYTICS_VIEWS: readonly AnalyticsView[] = ['transactions', 'hybrid', 'rule_based', 'volume_commitments']
+/** Server-side decision family: which flow types the decision metrics read. */
+type AnalyticsRoutingKindValue = 'multi_objective' | 'hybrid'
 const ANALYTICS_VIEW_LABELS: Record<AnalyticsView, string> = {
   transactions: 'Multi-objective',
+  hybrid: 'Hybrid Routing',
   rule_based: 'Rule based / Volume based',
   volume_commitments: 'Volume commitments',
 }
@@ -201,12 +205,15 @@ function buildAnalyticsUrl(
   range: AnalyticsRangeValue,
   customWindow?: TimeWindow,
   routingFilters?: RoutingFilters,
+  routingKind?: AnalyticsRoutingKindValue,
 ) {
   const params: Record<string, string | number | undefined> = {
     range: range === 'custom' ? '1h' : range,
     start_ms: customWindow?.start_ms,
     end_ms: customWindow?.end_ms,
     gateway: routingFilters?.gateways.length ? routingFilters.gateways.join(',') : undefined,
+    // Omitted for multi-objective so the default (and every existing link) stays untouched.
+    routing_kind: routingKind === 'hybrid' ? 'hybrid' : undefined,
   }
 
   Object.entries(routingFilters?.dimensions || {}).forEach(([key, value]) => {
@@ -687,8 +694,143 @@ function RoutingAlignmentCard({
   )
 }
 
+function HybridRoutingSplitCard({ split }: { split: AnalyticsHybridSplit | null }) {
+  const outcomes = useMemo(() => {
+    if (!split) return []
+    return [
+      {
+        key: 'dynamic',
+        label: 'Multi-objective decided',
+        count: split.dynamic_success,
+        color: '#22c55e',
+        hint: 'The dynamic decider scored the shortlist and picked the winner.',
+      },
+      {
+        key: 'fallback',
+        label: 'Fell back to rule output',
+        count: split.dynamic_fallback,
+        color: '#f97316',
+        hint: 'The dynamic half failed, so the rule-selected connectors answered.',
+      },
+      {
+        key: 'static',
+        label: 'Rule decided alone',
+        count: split.dynamic_skipped,
+        color: '#3b82f6',
+        hint: 'No dynamic request was made — the static rule was the whole decision.',
+      },
+      {
+        key: 'failed',
+        label: 'Failed',
+        count: split.failed,
+        color: '#ef4444',
+        hint: 'The call returned an error and selected no connector.',
+      },
+    ].filter((row) => row.count > 0)
+  }, [split])
+
+  const total = outcomes.reduce((sum, row) => sum + row.count, 0)
+  const maxConnectorCount = Math.max(1, ...(split?.static_connectors ?? []).map((row) => row.count))
+
+  return (
+    <div className="grid gap-5 lg:grid-cols-2">
+      <Card className="!rounded-2xl h-full overflow-visible">
+        <CardHeader>
+          <div>
+            <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">
+              Static vs dynamic outcome
+            </h2>
+            <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
+              Which half of the hybrid call produced the answer, per decision in this window.
+            </p>
+          </div>
+        </CardHeader>
+        <CardBody>
+          {total ? (
+            <div className="space-y-5">
+              {outcomes.map((row) => {
+                const pct = (row.count / total) * 100
+                return (
+                  <div key={row.key} className="space-y-2">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-[13px] font-medium text-slate-900 dark:text-white leading-[18px]">
+                        {row.label}
+                      </p>
+                      <p className="text-[13px] font-semibold tabular-nums text-slate-500 dark:text-[#8a8a93] leading-[18px]">
+                        {formatNumber(row.count, 0)} · {formatPercent(pct / 100)}
+                      </p>
+                    </div>
+                    <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-[#141822]">
+                      <div
+                        className="h-full rounded-full"
+                        style={{ width: `${pct}%`, backgroundColor: row.color }}
+                      />
+                    </div>
+                    <p className="text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">{row.hint}</p>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <EmptyState
+              title="No hybrid decisions yet"
+              body="Calls to /routing/hybrid will appear here once they are recorded in this window."
+            />
+          )}
+        </CardBody>
+      </Card>
+
+      <Card className="!rounded-2xl h-full overflow-visible">
+        <CardHeader>
+          <div>
+            <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">
+              Rule-shortlisted connectors
+            </h2>
+            <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
+              What the static rule step put forward, before the dynamic half chose between them.
+            </p>
+          </div>
+        </CardHeader>
+        <CardBody>
+          {split?.static_connectors.length ? (
+            <div className="space-y-3">
+              {split.static_connectors.map((item, index) => (
+                <div key={item.connector} className="space-y-2">
+                  <div className="flex items-center justify-between gap-3">
+                    <p className="text-[13px] font-medium text-slate-900 dark:text-white leading-[18px]">
+                      {item.connector}
+                    </p>
+                    <p className="text-[13px] font-semibold tabular-nums text-slate-500 dark:text-[#8a8a93] leading-[18px]">
+                      {formatNumber(item.count, 0)}
+                    </p>
+                  </div>
+                  <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-[#141822]">
+                    <div
+                      className="h-full rounded-full"
+                      style={{
+                        width: `${(item.count / maxConnectorCount) * 100}%`,
+                        backgroundColor: CHART_COLORS[index % CHART_COLORS.length],
+                      }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              title="No rule shortlist recorded"
+              body="Hybrid calls that send a static_routing_request will list the connectors their rule selected here."
+            />
+          )}
+        </CardBody>
+      </Card>
+    </div>
+  )
+}
+
 function analyticsRouteLabel(route: string) {
   if (route === '/decide_gateway') return 'Decide Gateway'
+  if (route === '/routing_hybrid') return 'Hybrid Routing'
   if (route === '/update_gateway') return 'Update Gateway'
   if (route === '/rule_evaluate') return 'Rule Evaluate'
   return route
@@ -880,24 +1022,29 @@ export function AnalyticsPage() {
 
   const costCurrency = 'USD'
 
+  // The hybrid tab reads the same metrics as the multi-objective tab, only over
+  // `routing_hybrid_*` events. Everything below is shared; only this key changes.
+  const routingKind: AnalyticsRoutingKindValue = view === 'hybrid' ? 'hybrid' : 'multi_objective'
+  const isDecisionView = view === 'transactions' || view === 'hybrid'
+
   const overviewUrl =
     activeQueryWindow
-      ? buildAnalyticsUrl('/analytics/overview', range, activeQueryWindow)
+      ? buildAnalyticsUrl('/analytics/overview', range, activeQueryWindow, undefined, routingKind)
       : null
   const routingUrl =
     activeQueryWindow
-      ? buildAnalyticsUrl('/analytics/routing-stats', range, activeQueryWindow)
+      ? buildAnalyticsUrl('/analytics/routing-stats', range, activeQueryWindow, undefined, routingKind)
       : null
   const costSavingsUrl = (() => {
     if (!activeQueryWindow) return null
-    const base = buildAnalyticsUrl('/analytics/cost-savings', range, activeQueryWindow)
+    const base = buildAnalyticsUrl('/analytics/cost-savings', range, activeQueryWindow, undefined, routingKind)
     if (!costCurrency) return base
     const sep = base.includes('?') ? '&' : '?'
     return `${base}${sep}currency=${encodeURIComponent(costCurrency)}`
   })()
   const filteredRoutingUrl =
     activeQueryWindow
-      ? buildAnalyticsUrl('/analytics/routing-stats', range, activeQueryWindow, routingFilters)
+      ? buildAnalyticsUrl('/analytics/routing-stats', range, activeQueryWindow, routingFilters, routingKind)
       : null
   const previewTraceKey =
     activeQueryWindow
@@ -973,7 +1120,7 @@ export function AnalyticsPage() {
   useEffect(() => {
     const revalidateCurrentView = () => {
       void overview.mutate()
-      if (view === 'transactions') {
+      if (view === 'transactions' || view === 'hybrid') {
         void routing.mutate()
         void filteredRouting.mutate()
         return
@@ -1009,8 +1156,8 @@ export function AnalyticsPage() {
     previewTrace.error?.message ||
     previewList.error?.message ||
     null
-  const loading = view === 'transactions' ? transactionLoading : ruleBasedLoading
-  const error = view === 'transactions' ? transactionError : ruleBasedError
+  const loading = isDecisionView ? transactionLoading : ruleBasedLoading
+  const error = isDecisionView ? transactionError : ruleBasedError
 
   const availableFilters: RoutingFilterOptions = {
     dimensions:
@@ -1083,6 +1230,7 @@ export function AnalyticsPage() {
   const routeHits = useMemo(() => {
     const fallback = [
       { route: '/decide_gateway', count: 0 },
+      { route: '/routing_hybrid', count: 0 },
       { route: '/update_gateway', count: 0 },
       { route: '/rule_evaluate', count: 0 },
     ]
@@ -1092,9 +1240,15 @@ export function AnalyticsPage() {
       count: overview.data?.route_hits.find((row) => row.route === item.route)?.count || 0,
     }))
   }, [overview.data])
+  // Each decision tab counts only its own entry point: `/decide_gateway` hits on the
+  // multi-objective tab, `/routing/hybrid` hits on the hybrid tab. Score feedback is shared.
+  const decisionRouteKey = view === 'hybrid' ? '/routing_hybrid' : '/decide_gateway'
   const transactionRouteHits = useMemo(
-    () => routeHits.filter((item) => item.route !== '/rule_evaluate'),
-    [routeHits],
+    () =>
+      routeHits.filter(
+        (item) => item.route === decisionRouteKey || item.route === '/update_gateway',
+      ),
+    [routeHits, decisionRouteKey],
   )
   const overallAuthRate = useMemo(() => {
     const scores = overview.data?.top_scores ?? []
@@ -1645,6 +1799,14 @@ export function AnalyticsPage() {
           <Button
             size="sm"
             variant="secondary"
+            className={sectionButtonClass(view === 'hybrid')}
+            onClick={() => setView('hybrid')}
+          >
+            {ANALYTICS_VIEW_LABELS.hybrid}
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
             className={sectionButtonClass(view === 'rule_based')}
             onClick={() => setView('rule_based')}
           >
@@ -1696,7 +1858,7 @@ export function AnalyticsPage() {
       ) : null}
 
       <div className="relative">
-      {view === 'transactions' ? (
+      {isDecisionView ? (
         <div className="space-y-5">
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             <Card className="!rounded-2xl">
@@ -1732,7 +1894,7 @@ export function AnalyticsPage() {
                     {formatNumber(item.count, 0)}
                   </p>
                   <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
-                    {item.route === '/decide_gateway' ? 'routing decisions' : 'score feedback calls'}
+                    {item.route === '/update_gateway' ? 'score feedback calls' : 'routing decisions'}
                   </p>
                 </CardBody>
               </Card>
@@ -1770,6 +1932,10 @@ export function AnalyticsPage() {
             expanded={routingAlignmentOpen}
             onToggle={() => setRoutingAlignmentOpen((value) => !value)}
           />
+
+          {view === 'hybrid' ? (
+            <HybridRoutingSplitCard split={overview.data?.hybrid_split ?? null} />
+          ) : null}
 
           {FEATURE_FLAGS.SMART_RETRY_IN_ANALYTICS && <SmartRetrySection stats={overview.data?.smart_retry_stats ?? null} />}
 

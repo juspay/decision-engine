@@ -1,12 +1,18 @@
 import { test, expect } from '../../fixtures/test'
-import { seedRoutedTraffic, waitForOverviewRouteHits } from '../../helpers/seed'
+import {
+  seedHybridTraffic,
+  seedRoutedTraffic,
+  waitForHybridDecisions,
+  waitForOverviewRouteHits,
+} from '../../helpers/seed'
 
 /**
  * Port of cypress/e2e/ui/analytics-page.cy.js.
  *
- * The Analytics page has two independent views — multi-objective (success-rate routing) and
+ * The Analytics page has independent views — multi-objective (success-rate routing), hybrid, and
  * rule/volume based — and the toggle between them is the thing worth guarding: each reads a different
- * set of endpoints, so a regression in one is invisible while looking at the other.
+ * set of endpoints (or the same ones over a different flow type), so a regression in one is
+ * invisible while looking at the other.
  */
 
 test.use({ viewport: { width: 1600, height: 1200 } })
@@ -45,5 +51,38 @@ test.describe('Analytics UI', () => {
       .getByRole('button', { name: 'Rule based / Volume based', exact: true })
       .click({ force: true })
     await expect(authedPage.getByText('Latest decisions from')).toBeVisible({ timeout: 30_000 })
+  })
+
+  /**
+   * The hybrid tab reads the same metrics as multi-objective, only over `routing_hybrid_*`
+   * events — so the regression it guards is the query never switching flow type, which looks
+   * like an empty tab rather than an error.
+   */
+  test('hybrid tab reports hybrid decisions the multi-objective tab does not count', async ({
+    api,
+    authedPage,
+    merchant,
+  }) => {
+    test.setTimeout(120_000)
+
+    await seedHybridTraffic(api, merchant.id, { prefix: 'analytics_hybrid_ui' })
+    await waitForHybridDecisions(api)
+
+    await authedPage.goto('/analytics')
+
+    const hybridOverview = authedPage.waitForResponse(
+      (r) => r.url().includes('/analytics/overview') && r.url().includes('routing_kind=hybrid'),
+    )
+    await authedPage.getByRole('button', { name: 'Hybrid Routing', exact: true }).click({ force: true })
+    await hybridOverview
+
+    // The rule-based half of the call, which the multi-objective tab has no card for.
+    await expect(authedPage.getByText('Static vs dynamic outcome')).toBeVisible({ timeout: 30_000 })
+    await expect(authedPage.getByText('Rule-shortlisted connectors')).toBeVisible()
+
+    // The view is shareable, and the decision card counts hybrid calls rather than
+    // /decide_gateway ones.
+    await expect(authedPage).toHaveURL(/view=hybrid/)
+    await expect(authedPage.getByText('Decide Gateway')).toHaveCount(0)
   })
 })

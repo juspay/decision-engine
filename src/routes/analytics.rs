@@ -61,6 +61,7 @@ fn analytics_query_from_params(
         params.country.clone(),
         params.auth_type.clone(),
         params.gateway.clone(),
+        params.routing_kind.clone(),
     )
 }
 

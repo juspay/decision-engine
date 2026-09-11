@@ -87,7 +87,7 @@ pub fn payment_audit_summary_bucket_bounds(query: &PaymentAuditQuery) -> (i64, i
 
 #[cfg(test)]
 mod tests {
-    use crate::analytics::models::{AnalyticsQuery, AnalyticsRange};
+    use crate::analytics::models::{AnalyticsQuery, AnalyticsRange, AnalyticsRoutingKind};
 
     use super::{effective_window_bounds, query_bucket_select_expr, DAY_MS, HOUR_MS, MINUTE_MS};
 
@@ -107,6 +107,7 @@ mod tests {
             country: None,
             auth_type: None,
             gateways: Vec::new(),
+            routing_kind: AnalyticsRoutingKind::default(),
         }
     }
 

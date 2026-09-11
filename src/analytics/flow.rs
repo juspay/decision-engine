@@ -272,6 +272,7 @@ impl AnalyticsRoute {
             Self::DecideGateway => Some("/decide_gateway"),
             Self::UpdateGatewayScore => Some("/update_gateway"),
             Self::RoutingEvaluate => Some("/rule_evaluate"),
+            Self::RoutingHybrid => Some("/routing_hybrid"),
             _ => None,
         }
     }

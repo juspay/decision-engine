@@ -431,6 +431,22 @@ export interface AnalyticsOverviewResponse {
   top_errors: AnalyticsErrorSummary[]
   top_rules: AnalyticsRuleHit[]
   smart_retry_stats: SmartRetryStats
+  hybrid_split?: AnalyticsHybridSplit
+}
+
+export interface AnalyticsHybridSplit {
+  decisions: number
+  dynamic_success: number
+  dynamic_fallback: number
+  dynamic_skipped: number
+  static_decided: number
+  failed: number
+  static_connectors: AnalyticsHybridConnectorPick[]
+}
+
+export interface AnalyticsHybridConnectorPick {
+  connector: string
+  count: number
 }
 
 export interface AnalyticsRouteHit {

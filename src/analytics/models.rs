@@ -29,6 +29,38 @@ fn normalise_gateways(raw: Option<String>) -> Vec<String> {
         .collect()
 }
 
+/// Which decision family the analytics charts read. `/decide_gateway` and `/routing/hybrid`
+/// both run the same decider and record the same columns, but under different flow types and
+/// with the decider payload nested one level deeper in `details`. Every decision-based metric
+/// resolves its flow type and JSON paths through this so the two never have to be special-cased
+/// at the call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalyticsRoutingKind {
+    #[default]
+    MultiObjective,
+    Hybrid,
+}
+
+impl AnalyticsRoutingKind {
+    pub fn from_query(value: Option<&str>) -> Self {
+        match value
+            .map(|value| value.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("hybrid") => Self::Hybrid,
+            _ => Self::MultiObjective,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MultiObjective => "multi_objective",
+            Self::Hybrid => "hybrid",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsQuery {
     pub merchant_id: String,
@@ -45,6 +77,7 @@ pub struct AnalyticsQuery {
     pub country: Option<String>,
     pub auth_type: Option<String>,
     pub gateways: Vec<String>,
+    pub routing_kind: AnalyticsRoutingKind,
 }
 
 impl AnalyticsQuery {
@@ -64,6 +97,7 @@ impl AnalyticsQuery {
         country: Option<String>,
         auth_type: Option<String>,
         gateways: Option<String>,
+        routing_kind: Option<String>,
     ) -> Self {
         let range = AnalyticsRange::from_query(range.as_deref());
         let (start_ms, end_ms) = match (start_ms, end_ms) {
@@ -88,6 +122,7 @@ impl AnalyticsQuery {
             country: country.filter(|value| !value.is_empty()),
             auth_type: auth_type.filter(|value| !value.is_empty()),
             gateways: normalise_gateways(gateways),
+            routing_kind: AnalyticsRoutingKind::from_query(routing_kind.as_deref()),
         }
     }
 }
@@ -162,6 +197,25 @@ pub struct AnalyticsOverviewResponse {
     pub top_errors: Vec<AnalyticsErrorSummary>,
     pub top_rules: Vec<AnalyticsRuleHit>,
     pub smart_retry_stats: SmartRetryStats,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hybrid_split: Option<AnalyticsHybridSplit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsHybridSplit {
+    pub decisions: i64,
+    pub dynamic_success: i64,
+    pub dynamic_fallback: i64,
+    pub dynamic_skipped: i64,
+    pub static_decided: i64,
+    pub failed: i64,
+    pub static_connectors: Vec<AnalyticsHybridConnectorPick>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsHybridConnectorPick {
+    pub connector: String,
+    pub count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -962,5 +1016,28 @@ mod payment_audit_filter_tests {
         assert_eq!(PaymentAuditRoutingKind::from_query(Some("tabs")), None);
         assert_eq!(PaymentAuditRoutingKind::from_query(None), None);
         assert_eq!(PaymentAuditRoutingKind::Hybrid.as_str(), "hybrid");
+    }
+
+    #[test]
+    fn analytics_routing_kind_defaults_to_multi_objective_for_anything_but_hybrid() {
+        use super::AnalyticsRoutingKind;
+
+        assert_eq!(
+            AnalyticsRoutingKind::from_query(Some("hybrid")),
+            AnalyticsRoutingKind::Hybrid
+        );
+        assert_eq!(
+            AnalyticsRoutingKind::from_query(Some(" HYBRID ")),
+            AnalyticsRoutingKind::Hybrid
+        );
+        assert_eq!(
+            AnalyticsRoutingKind::from_query(Some("rule_based")),
+            AnalyticsRoutingKind::MultiObjective
+        );
+        assert_eq!(
+            AnalyticsRoutingKind::from_query(None),
+            AnalyticsRoutingKind::MultiObjective
+        );
+        assert_eq!(AnalyticsRoutingKind::default(), AnalyticsRoutingKind::MultiObjective);
     }
 }

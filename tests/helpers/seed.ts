@@ -133,6 +133,18 @@ export function waitForOverviewRouteHits(api: ApiClient, routes: string[]): Prom
   )
 }
 
+export function waitForHybridDecisions(api: ApiClient, minimum = 1): Promise<ApiResponse> {
+  return poll(
+    () =>
+      api.raw('GET', '/analytics/overview', {
+        failOnStatusCode: false,
+        qs: { range: '1h', routing_kind: 'hybrid' },
+      }),
+    ({ body }) => (body?.hybrid_split?.decisions ?? 0) >= minimum,
+    { message: `Expected analytics overview to count at least ${minimum} hybrid decision(s)` },
+  )
+}
+
 /** Poll /analytics/payment-audit until the payment's timeline contains a given flow type. */
 export function waitForAuditFlowType(
   api: ApiClient,

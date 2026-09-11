@@ -291,8 +291,8 @@ fn routing_approach_exclusion_filter(routing_approach: &str) -> FilterClause {
 #[cfg(test)]
 mod tests {
     use crate::analytics::models::{
-        AnalyticsQuery, AnalyticsRange, PaymentAuditQuery, PaymentAuditRoutingKind,
-        PaymentAuditScope,
+        AnalyticsQuery, AnalyticsRange, AnalyticsRoutingKind, PaymentAuditQuery,
+        PaymentAuditRoutingKind, PaymentAuditScope,
     };
 
     use super::{
@@ -318,6 +318,7 @@ mod tests {
             country: None,
             auth_type: None,
             gateways: vec!["adyen".to_string()],
+            routing_kind: AnalyticsRoutingKind::default(),
         }
     }
 
