@@ -6,7 +6,7 @@ use crate::analytics::models::AnalyticsQuery;
 use crate::error::ApiError;
 
 use super::super::common::{
-    fetch_one, static_flow_type_in_sql, DOMAIN_TABLE, OVERVIEW_ERROR_FLOW_TYPES,
+    decision_shape, fetch_one, static_flow_type_in_sql, DOMAIN_TABLE, OVERVIEW_ERROR_FLOW_TYPES,
     OVERVIEW_SCORE_FLOW_TYPES,
 };
 use super::super::filters::{base_window_filters, merchant_filter};
@@ -38,19 +38,20 @@ pub async fn load(
     query: &AnalyticsQuery,
 ) -> Result<OverviewCounts, ApiError> {
     let (start_ms, end_ms) = effective_window_bounds(query);
+    let shape = decision_shape(query.routing_kind);
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
     builder.extend_selects([
         format!(
             "countIf(flow_type = '{}') AS total",
-            FlowType::DecideGatewayDecision.as_str()
+            shape.decision_flow_type.as_str()
         ),
         format!(
             "countIf(flow_type IN {}) AS score_count",
             static_flow_type_in_sql(OVERVIEW_SCORE_FLOW_TYPES)
         ),
         format!(
-            "countIf(flow_type = '{}') AS rule_hit_count",
-            FlowType::DecideGatewayRuleHit.as_str()
+            "countIf({}) AS rule_hit_count",
+            shape.rule_hit_predicate
         ),
         format!(
             "countIf(flow_type IN {}) AS error_count",

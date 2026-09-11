@@ -105,9 +105,9 @@ impl IntoResponse for DecidedGateway {
     }
 }
 
-/// The analytics identity a decider run is recorded under. `/decide-gateway` and the dynamic half
-/// of `/routing/hybrid` run the same decider and emit the same event shapes; only these labels
-/// differ, so hybrid traffic stays separable from direct calls in the audit and in metrics.
+/// The analytics identity a decider run is recorded under. (`/routing/hybrid` runs the same
+/// decider directly and records one event for its whole call instead — see
+/// `routes::hybrid_routing`.)
 pub(crate) struct DeciderAnalyticsFlows {
     pub request_hit: FlowType,
     pub decision: FlowType,
@@ -122,15 +122,6 @@ impl DeciderAnalyticsFlows {
             decision: FlowType::DecideGatewayDecision,
             error: FlowType::DecideGatewayError,
             metric_label: "decide_gateway",
-        }
-    }
-
-    pub(crate) fn routing_hybrid() -> Self {
-        Self {
-            request_hit: FlowType::RoutingHybridRequestHit,
-            decision: FlowType::RoutingHybridDecision,
-            error: FlowType::RoutingHybridError,
-            metric_label: "hybrid_routing_evaluate_dynamic",
         }
     }
 }

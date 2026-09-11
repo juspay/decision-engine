@@ -37,6 +37,7 @@ const ROUTE_OPTIONS = [
   { value: 'decide_gateway', label: 'Decide Gateway' },
   { value: 'update_gateway_score', label: 'Update Gateway' },
   { value: 'routing_evaluate', label: 'Rule Evaluate' },
+  { value: 'routing_hybrid', label: 'Hybrid Routing' },
 ]
 const INSPECTOR_TABS = ['summary', 'input', 'response', 'raw'] as const
 const INSPECTOR_TAB_LABELS: Record<(typeof INSPECTOR_TABS)[number], string> = {
@@ -46,7 +47,19 @@ const INSPECTOR_TAB_LABELS: Record<(typeof INSPECTOR_TABS)[number], string> = {
   raw: 'Raw JSON',
 }
 const DEBIT_ROUTING_APPROACH = 'NTW_BASED_ROUTING'
-
+const AUDIT_PATH = '/analytics/payment-audit'
+/**
+ * The routing-type filter. These were the page's tabs; each value lists the payments whose
+ * trail holds that kind of event, while every payment's trail itself always shows all of its
+ * events (rule evaluation, gateway decision, score update).
+ */
+const ROUTING_KIND_OPTIONS = [
+  { value: '', label: 'Any routing type' },
+  { value: 'multi_objective', label: 'Multi-objective' },
+  { value: 'rule_based', label: 'Rule based / Volume based' },
+  { value: 'debit_routing', label: 'Debit routing' },
+  { value: 'hybrid', label: 'Hybrid' },
+]
 
 type AuditFilters = {
   paymentId: string
@@ -56,15 +69,10 @@ type AuditFilters = {
   status: string
   flowType: string
   errorCode: string
+  routingKind: string
 }
 
 type InspectorTab = (typeof INSPECTOR_TABS)[number]
-type AuditMode = 'transactions' | 'rule_based' | 'debit_routing'
-const AUDIT_MODE_LABELS: Record<AuditMode, string> = {
-  transactions: 'Multi-objective',
-  rule_based: 'Rule based / Volume based',
-  debit_routing: 'Debit routing',
-}
 
 const EMPTY_FILTERS: AuditFilters = {
   paymentId: '',
@@ -74,6 +82,7 @@ const EMPTY_FILTERS: AuditFilters = {
   status: '',
   flowType: '',
   errorCode: '',
+  routingKind: '',
 }
 
 function normalizeAuditFilters(filters: AuditFilters): AuditFilters {
@@ -88,6 +97,7 @@ function normalizeAuditFilters(filters: AuditFilters): AuditFilters {
     status: filters.status,
     flowType: filters.flowType.trim(),
     errorCode: filters.errorCode.trim(),
+    routingKind: filters.routingKind,
   }
 }
 
@@ -118,9 +128,13 @@ function isUpdateFlow(flowType: string) {
   return flowType.startsWith('update_gateway_score_') || flowType.startsWith('update_score_legacy_')
 }
 
+function isHybridFlow(flowType: string) {
+  return flowType.startsWith('routing_hybrid_')
+}
+
 function isDecisionFlow(flowType: string) {
   return (
-    (flowType.startsWith('decide_gateway_') || flowType.startsWith('routing_hybrid_')) &&
+    (flowType.startsWith('decide_gateway_') || isHybridFlow(flowType)) &&
     !isRuleHitFlow(flowType)
   )
 }
@@ -136,14 +150,11 @@ function queryString(params: Record<string, string | number | undefined>) {
 }
 
 function buildAuditUrl(
-  path: '/analytics/payment-audit' | '/analytics/preview-trace',
   range: AnalyticsRangeValue,
   page: number,
   pageSize: number,
   filters: AuditFilters,
   customWindow?: TimeWindow,
-  routingApproach?: string,
-  excludedRoutingApproach?: string,
 ) {
   const normalizedFilters = normalizeAuditFilters(filters)
   const params: Record<string, string | number | undefined> = {
@@ -158,25 +169,21 @@ function buildAuditUrl(
     route: normalizedFilters.route || undefined,
     status: normalizedFilters.status || undefined,
     flow_type: normalizedFilters.flowType || undefined,
-    routing_approach: routingApproach,
-    exclude_routing_approach: excludedRoutingApproach,
+    routing_kind: normalizedFilters.routingKind || undefined,
     error_code: normalizedFilters.errorCode || undefined,
   }
   const qs = queryString(params)
-  return qs ? `${path}?${qs}` : path
+  return qs ? `${AUDIT_PATH}?${qs}` : AUDIT_PATH
 }
 
-function parseAuditMode(value: string | null): AuditMode {
-  if (value === 'debit_routing') return 'debit_routing'
-  return value === 'rule_based' ? 'rule_based' : 'transactions'
-}
-
-function routingApproachForMode(mode: AuditMode): string | undefined {
-  return mode === 'debit_routing' ? DEBIT_ROUTING_APPROACH : undefined
-}
-
-function excludedRoutingApproachForMode(mode: AuditMode): string | undefined {
-  return mode === 'transactions' ? DEBIT_ROUTING_APPROACH : undefined
+function parseRoutingKind(searchParams: URLSearchParams): string {
+  const explicit = searchParams.get('routing_kind') || ''
+  if (ROUTING_KIND_OPTIONS.some((option) => option.value && option.value === explicit)) return explicit
+  const legacyMode = searchParams.get('mode')
+  if (legacyMode === 'rule_based' || legacyMode === 'debit_routing') return legacyMode
+  if (searchParams.get('routing_approach') === DEBIT_ROUTING_APPROACH) return 'debit_routing'
+  if (searchParams.get('exclude_routing_approach') === DEBIT_ROUTING_APPROACH) return 'multi_objective'
+  return ''
 }
 
 function parseFilters(searchParams: URLSearchParams): AuditFilters {
@@ -188,6 +195,7 @@ function parseFilters(searchParams: URLSearchParams): AuditFilters {
     status: searchParams.get('status') || '',
     flowType: searchParams.get('flow_type') || searchParams.get('event_type') || '',
     errorCode: searchParams.get('error_code') || '',
+    routingKind: parseRoutingKind(searchParams),
   })
 }
 
@@ -228,11 +236,13 @@ function routeLabel(route?: string | null) {
   if (route === 'decision_gateway' || route === 'decide_gateway') return 'Decide Gateway'
   if (route === 'update_gateway_score') return 'Update Gateway'
   if (route === 'routing_evaluate') return 'Rule Evaluate'
+  if (route === 'routing_hybrid') return 'Hybrid Routing'
   return humanizeAuditValue(route)
 }
 
 function stageLabel(event: PaymentAuditEvent) {
   const flowType = flowTypeValue(event)
+  if (event.event_stage === 'hybrid_routed' || isHybridFlow(flowType)) return 'Hybrid Routing'
   if (event.event_stage === 'gateway_decided') return 'Decide Gateway'
   if (event.event_stage === 'score_updated') return 'Update Gateway'
   if (event.event_stage === 'rule_applied') return 'Rule Evaluate'
@@ -245,6 +255,7 @@ function stageLabel(event: PaymentAuditEvent) {
 
 function eventPhase(event: PaymentAuditEvent) {
   const flowType = flowTypeValue(event)
+  if (isHybridFlow(flowType) || event.event_stage === 'hybrid_routed') return 'Hybrid Routing'
   if (isDecisionFlow(flowType) || event.event_stage === 'gateway_decided') return 'Decide Gateway'
   if (isRuleHitFlow(flowType) || event.event_stage === 'rule_applied') return 'Rule Evaluate'
   if (isPreviewFlow(flowType) || event.event_stage === 'preview_evaluated') {
@@ -288,7 +299,13 @@ function statusDotClass(status?: string | null) {
  * A single-connector payment returns null — the row already names that connector on its own.
  */
 function connectorPath(row: PaymentAuditSummary) {
-  const gateways = (row.gateways || []).filter(Boolean)
+  const raw = (row.gateways || []).filter(Boolean)
+  // A trail names the same connector both ways: the rule step records `paypal_test`, the decision
+  // and score update record `paypal_test:mca_…`. Keep the id-bearing name and drop its bare twin,
+  // so only a genuine change of connector shows as a path.
+  const gateways = raw.filter(
+    (gateway) => !raw.some((other) => other !== gateway && other.split(':')[0] === gateway),
+  )
   if (gateways.length < 2) return null
   const ordered = row.latest_gateway && gateways.includes(row.latest_gateway)
     ? [...gateways.filter((gateway) => gateway !== row.latest_gateway), row.latest_gateway]
@@ -329,12 +346,6 @@ function cleanRecord(record: Record<string, unknown>) {
 function stringifyValue(value: unknown) {
   if (typeof value === 'string') return value
   return JSON.stringify(value, null, 2)
-}
-
-function sectionButtonClass(active: boolean) {
-  return active
-    ? '!border-brand-500/70 !bg-white !text-slate-950 shadow-[0_14px_30px_-24px_rgba(59,130,246,0.55)] ring-2 ring-brand-500/55 dark:!border-brand-500/70 dark:!bg-[#161b24] dark:!text-white dark:ring-brand-500/55'
-    : '!border-transparent !bg-slate-100 !text-slate-600 hover:!bg-slate-200 hover:!text-slate-900 dark:!bg-[#161b24] dark:!text-[#a7b2c6] dark:hover:!bg-[#1c2330] dark:hover:!text-white'
 }
 
 function fieldClassName() {
@@ -607,9 +618,6 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
 export function PaymentAuditPage() {
   const [searchParams, setSearchParams] = useSearchParams()
 
-  const initialMode = searchParams.get('routing_approach') === DEBIT_ROUTING_APPROACH
-    ? 'debit_routing'
-    : parseAuditMode(searchParams.get('mode'))
   const initialRange = searchParams.get('start_ms') && searchParams.get('end_ms')
     ? 'custom'
     : parseRange(searchParams.get('range'))
@@ -623,7 +631,6 @@ export function PaymentAuditPage() {
       ? { start_ms: initialStartMs, end_ms: initialEndMs }
       : presetWindow('1d')
 
-  const [mode, setMode] = useState<AuditMode>(initialMode)
   const [range, setRange] = useState<AnalyticsRangeValue>(initialRange)
   const [filters, setFilters] = useState<AuditFilters>(initialFilters)
   const [appliedFilters, setAppliedFilters] = useState<AuditFilters>(initialFilters)
@@ -646,22 +653,9 @@ export function PaymentAuditPage() {
     [customEnd, customStart, range],
   )
 
-  const auditPath = mode === 'rule_based' ? '/analytics/preview-trace' : '/analytics/payment-audit'
-  const modeRoutingApproach = routingApproachForMode(mode)
-  const modeExcludedRoutingApproach = excludedRoutingApproachForMode(mode)
-
   const searchUrl =
     range !== 'custom' || customWindow
-      ? buildAuditUrl(
-          auditPath,
-          range,
-          page,
-          pageSize,
-          appliedFilters,
-          customWindow,
-          modeRoutingApproach,
-          modeExcludedRoutingApproach,
-        )
+      ? buildAuditUrl(range, page, pageSize, appliedFilters, customWindow)
       : null
 
   const auditSearch = useSWR<PaymentAuditResponse>(searchUrl, fetcher, {
@@ -715,20 +709,13 @@ export function PaymentAuditPage() {
       status: '',
       flowType: '',
       errorCode: '',
+      // The trail of a selected payment always shows all of its events, whatever the list filter.
+      routingKind: '',
     }
   }, [selectedSummary])
 
   const detailUrl = detailFilters
-    ? buildAuditUrl(
-        auditPath,
-        range,
-        1,
-        50,
-        detailFilters,
-        customWindow,
-        modeRoutingApproach,
-        modeExcludedRoutingApproach,
-      )
+    ? buildAuditUrl(range, 1, 50, detailFilters, customWindow)
     : null
 
   const auditDetail = useSWR<PaymentAuditResponse>(detailUrl, fetcher, {
@@ -784,50 +771,22 @@ export function PaymentAuditPage() {
       ].filter(Boolean),
     ),
   ).sort((left, right) => left.localeCompare(right))
-  const content = mode === 'rule_based'
-    ? {
-        title: 'Decision Audit',
-        description: 'Inspect rule decisions from /routing/evaluate without mixing them into multi-objective transaction outcomes.',
-        merchantPrompt: 'Audit data follows your signed-in merchant account.',
-        searchTitle: 'Search Rule Decision Trail',
-        searchDescription: 'Use decision payment IDs or request IDs when you have them. Gateway, status, and error code help narrow rule decision activity quickly.',
-        matchingLabel: 'Matches',
-        matchingDescription: 'Scan the current result set and pick a decision to open its full trace.',
-        summaryLabel: 'Selected Decision Timeline',
-        summaryEmpty: 'Pick a decision from the left column to see the full rule evaluation trace.',
-        noMatchesTitle: 'No matching decisions found',
-        noMatchesBody: 'Try widening the time range or searching by a decision payment ID, request ID, or gateway.',
-      }
-    : mode === 'debit_routing'
-      ? {
-          title: 'Decision Audit',
-          description: 'Search debit-routing decisions produced by /decide-gateway with NTW_BASED_ROUTING.',
-          merchantPrompt: 'Audit data follows your signed-in merchant account.',
-          searchTitle: 'Search Debit Routing Trail',
-          searchDescription: 'Use payment or request IDs when you have them. Gateway, status, and error code help narrow debit-routing outcomes quickly.',
-          matchingLabel: 'Matches',
-          matchingDescription: 'Scan the current result set and pick a debit-routing payment to open its full event trail.',
-          summaryLabel: 'Selected Debit Routing Timeline',
-          summaryEmpty: 'Pick a debit-routing payment from the left column to see the full decision trail.',
-          noMatchesTitle: 'No debit-routing decisions found',
-          noMatchesBody: 'Run the Debit Routing tab in Decision Explorer, or widen the time range.',
-        }
-      : {
-          title: 'Decision Audit',
-          description: 'Search by payment or request, then inspect gateway decisions, gateway updates, rule evaluations, and errors with the exact payload captured at each step.',
-          merchantPrompt: 'Audit data follows your signed-in merchant account.',
-          searchTitle: 'Search Decision Trail',
-          searchDescription: 'Use payment or request IDs when you have them. Error code, gateway, route, and status narrow results quickly.',
-          matchingLabel: 'Matches',
-          matchingDescription: 'Scan the current result set and pick a payment to open its full event trail.',
-          summaryLabel: 'Selected Payment Timeline',
-          summaryEmpty: 'Pick a payment from the left column to see the full transaction trail.',
-          noMatchesTitle: 'No matching payments found',
-          noMatchesBody: 'Try widening the time range or searching by a single payment ID, request ID, or error code.',
-        }
+  const content = {
+    title: 'Decision Audit',
+    description:
+      'Search by payment or request, then inspect every step the payment went through — rule evaluations, gateway decisions, score updates, debit routing, and errors — with the exact payload captured at each step.',
+    merchantPrompt: 'Audit data follows your signed-in merchant account.',
+    searchTitle: 'Search Decision Trail',
+    searchDescription: 'Use payment or request IDs when you have them. Routing type, gateway, status, route, and error code narrow results quickly.',
+    matchingLabel: 'Matches',
+    matchingDescription: 'Scan the current result set and pick a payment to open its full event trail.',
+    summaryLabel: 'Selected Payment Timeline',
+    summaryEmpty: 'Pick a payment from the left column to see the full transaction trail.',
+    noMatchesTitle: 'No matching payments found',
+    noMatchesBody: 'Try widening the time range, clearing the routing type filter, or searching by a single payment ID, request ID, or error code.',
+  }
 
   function syncSearch(
-    nextMode: AuditMode,
     nextRange: AnalyticsRangeValue,
     nextPage: number,
     nextFilters: AuditFilters,
@@ -836,7 +795,6 @@ export function PaymentAuditPage() {
   ) {
     const normalizedFilters = normalizeAuditFilters(nextFilters)
     const nextQuery = queryString({
-      mode: nextMode === 'transactions' ? undefined : nextMode,
       range: nextRange,
       page: nextPage > 1 ? nextPage : undefined,
       start_ms: nextRange === 'custom' ? nextCustomWindow?.start_ms : undefined,
@@ -847,8 +805,7 @@ export function PaymentAuditPage() {
       route: normalizedFilters.route || undefined,
       status: normalizedFilters.status || undefined,
       flow_type: normalizedFilters.flowType || undefined,
-      routing_approach: routingApproachForMode(nextMode),
-      exclude_routing_approach: excludedRoutingApproachForMode(nextMode),
+      routing_kind: normalizedFilters.routingKind || undefined,
       error_code: normalizedFilters.errorCode || undefined,
       selected: nextSelectedKey || undefined,
     })
@@ -861,20 +818,17 @@ export function PaymentAuditPage() {
 
   function applyFilters() {
     const nextPage = 1
-    const normalizedFilters = normalizeAuditFilters({
-      ...filters,
-      route: mode === 'transactions' ? filters.route : '',
-    })
+    const normalizedFilters = normalizeAuditFilters(filters)
     setPage(nextPage)
     setTrailFocused(false)
     setSelectedEventId(null)
     setFilters(normalizedFilters)
     setAppliedFilters(normalizedFilters)
-    syncSearch(mode, range, nextPage, normalizedFilters, undefined, customWindow)
+    syncSearch(range, nextPage, normalizedFilters, undefined, customWindow)
   }
 
   /** Dropdown filters apply on change — the redesigned bar has no Search button to press. */
-  function applyDropdownFilter(field: 'gateway' | 'status' | 'route', value: string) {
+  function applyDropdownFilter(field: 'gateway' | 'status' | 'route' | 'routingKind', value: string) {
     const nextPage = 1
     const normalizedFilters = normalizeAuditFilters({ ...filters, [field]: value })
     setPage(nextPage)
@@ -882,21 +836,18 @@ export function PaymentAuditPage() {
     setSelectedEventId(null)
     setFilters(normalizedFilters)
     setAppliedFilters(normalizedFilters)
-    syncSearch(mode, range, nextPage, normalizedFilters, undefined, customWindow)
+    syncSearch(range, nextPage, normalizedFilters, undefined, customWindow)
   }
 
   function clearFilters() {
     const nextPage = 1
-    const clearedFilters = {
-      ...EMPTY_FILTERS,
-      route: mode === 'transactions' ? EMPTY_FILTERS.route : '',
-    }
+    const clearedFilters = { ...EMPTY_FILTERS }
     setPage(nextPage)
     setTrailFocused(false)
     setSelectedEventId(null)
     setFilters(clearedFilters)
     setAppliedFilters(clearedFilters)
-    syncSearch(mode, range, nextPage, clearedFilters, undefined, customWindow)
+    syncSearch(range, nextPage, clearedFilters, undefined, customWindow)
   }
 
   function refreshAll() {
@@ -927,7 +878,6 @@ export function PaymentAuditPage() {
       setCustomEnd(toDateTimeInputValue(preset.end_ms))
     }
     syncSearch(
-      mode,
       nextRange,
       nextPage,
       appliedFilters,
@@ -945,7 +895,6 @@ export function PaymentAuditPage() {
     setTrailFocused(false)
     setSelectedEventId(null)
     syncSearch(
-      mode,
       'custom',
       nextPage,
       appliedFilters,
@@ -960,55 +909,23 @@ export function PaymentAuditPage() {
     // Single-event payments have nothing to choose in the trail — keep the results
     // list visible and let the right panel populate directly from the auto-selected event.
     if (eventCount !== 1) setTrailFocused(true)
-    syncSearch(mode, range, page, appliedFilters, lookupKey, customWindow)
+    syncSearch(range, page, appliedFilters, lookupKey, customWindow)
   }
 
   function returnToResults() {
     setTrailFocused(false)
     setSelectedEventId(null)
-    syncSearch(mode, range, page, appliedFilters, undefined, customWindow)
+    syncSearch(range, page, appliedFilters, undefined, customWindow)
   }
-
-  function updateMode(nextMode: AuditMode) {
-    const nextPage = 1
-    const nextFilters = normalizeAuditFilters({
-      ...filters,
-      route: nextMode === 'transactions' ? filters.route : '',
-    })
-
-    setMode(nextMode)
-    setPage(nextPage)
-    setSelectedKey('')
-    setSelectedEventId(null)
-    setTrailFocused(false)
-    setFilters(nextFilters)
-    setAppliedFilters(nextFilters)
-    syncSearch(nextMode, range, nextPage, nextFilters, undefined, customWindow)
-  }
-
 
   // Full-height column so the two panels fill the shell (78px top bar + main's vertical padding)
   // and scroll internally, as they did before the header moved into the page.
   return (
     <div className="flex min-h-[620px] flex-col gap-5 xl:h-[calc(100vh-140px)]">
       {/* The mock draws these controls in an app-wide bar; the shell already owns that strip, so the
-          mode tabs and time range live at the top of the page's own content instead. */}
-      <div className="grid grid-cols-1 items-center gap-3 xl:grid-cols-[1fr_auto_1fr]">
+          time range lives at the top of the page's own content instead. */}
+      <div className="grid grid-cols-1 items-center gap-3 xl:grid-cols-[1fr_auto]">
         <PageHeading title={content.title} />
-
-        <div className="inline-flex max-w-full flex-wrap items-center gap-1 justify-self-start rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d] xl:justify-self-center">
-          {(Object.keys(AUDIT_MODE_LABELS) as AuditMode[]).map((value) => (
-            <Button
-              key={value}
-              size="sm"
-              variant="secondary"
-              className={sectionButtonClass(mode === value)}
-              onClick={() => updateMode(value)}
-            >
-              {AUDIT_MODE_LABELS[value]}
-            </Button>
-          ))}
-        </div>
 
         <div className="flex items-center gap-2 justify-self-start xl:justify-self-end">
           <TimeRangeFilter
@@ -1041,12 +958,8 @@ export function PaymentAuditPage() {
             className={`${fieldClassName()} pl-11 ${hasActiveFilters ? 'pr-20' : ''}`}
             value={filters.paymentId || filters.requestId}
             onChange={(event) => updateFilter('paymentId', event.target.value)}
-            placeholder={
-              mode === 'rule_based'
-                ? 'Search by decision payment ID or request ID…'
-                : 'Search by payment ID or request ID…'
-            }
-            aria-label={mode === 'rule_based' ? 'Decision payment ID' : 'Payment ID'}
+            placeholder="Search by payment ID or request ID…"
+            aria-label="Payment ID"
           />
           {hasActiveFilters ? (
             <button
@@ -1059,8 +972,8 @@ export function PaymentAuditPage() {
           ) : null}
         </div>
 
-        <div className="flex min-w-[300px] flex-1 items-center gap-3">
-        {showAdvancedFilters && mode === 'transactions' ? (
+        <div className="flex min-w-[480px] flex-1 items-center gap-3">
+        {showAdvancedFilters ? (
           <div className="flex-1">
             <select
               className={fieldSelectClassName()}
@@ -1087,6 +1000,21 @@ export function PaymentAuditPage() {
             />
           </div>
         ) : null}
+        <div className="flex-1">
+          <select
+            className={`${fieldSelectClassName()} min-w-[168px]`}
+            value={filters.routingKind}
+            onChange={(event) => applyDropdownFilter('routingKind', event.target.value)}
+            aria-label="Routing type"
+          >
+            {ROUTING_KIND_OPTIONS.map((option) => (
+              <option key={option.value || 'all'} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
         <div className="flex-1">
           <select
             className={fieldSelectClassName()}
@@ -1221,22 +1149,28 @@ export function PaymentAuditPage() {
                     </span>
                   </div>
                   <div className="mt-2 flex items-center justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-2">
+                    <div className="flex min-w-0 flex-1 items-center gap-2">
                       <span
                         className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(row.latest_status)}`}
                         title={humanizeAuditValue(row.latest_status) || 'Unknown'}
                       />
                       {row.latest_gateway ? (
-                        <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#a7b2c6] leading-[18px]">
+                        <span
+                          className="min-w-0 truncate text-[13px] text-slate-500 dark:text-[#a7b2c6] leading-[18px]"
+                          title={row.latest_gateway}
+                        >
                           {row.latest_gateway}
                         </span>
                       ) : null}
-                      <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
+                      <span className="shrink-0 whitespace-nowrap text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
                         · {row.event_count} event{row.event_count === 1 ? '' : 's'}
                       </span>
                     </div>
                     {gatewayPath ? (
-                      <span className="shrink-0 truncate rounded-md bg-orange-500/10 px-2 py-0.5 text-[13px] font-medium text-orange-600 ring-1 ring-inset ring-orange-500/20 dark:text-orange-300 leading-[18px]">
+                      <span
+                        className="min-w-0 max-w-[45%] truncate rounded-md bg-orange-500/10 px-2 py-0.5 text-[13px] font-medium text-orange-600 ring-1 ring-inset ring-orange-500/20 dark:text-orange-300 leading-[18px]"
+                        title={gatewayPath}
+                      >
                         {gatewayPath}
                       </span>
                     ) : null}
@@ -1260,7 +1194,7 @@ export function PaymentAuditPage() {
                   const nextPage = Math.max(1, page - 1)
                   setPage(nextPage)
                   setTrailFocused(false)
-                  syncSearch(mode, range, nextPage, appliedFilters, selectedKey)
+                  syncSearch(range, nextPage, appliedFilters, selectedKey)
                 }}
               >
                 Prev
@@ -1273,7 +1207,7 @@ export function PaymentAuditPage() {
                   const nextPage = page + 1
                   setPage(nextPage)
                   setTrailFocused(false)
-                  syncSearch(mode, range, nextPage, appliedFilters, selectedKey)
+                  syncSearch(range, nextPage, appliedFilters, selectedKey)
                 }}
               >
                 Next

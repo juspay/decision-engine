@@ -165,6 +165,28 @@ struct RoutingEvaluateAnalyticsDetails<'a> {
     preview_kind: &'static str,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct RoutingEvaluateAnalyticsFlows {
+    pub emit_events: bool,
+    pub metric_label: &'static str,
+}
+
+impl RoutingEvaluateAnalyticsFlows {
+    pub(crate) const fn routing_evaluate() -> Self {
+        Self {
+            emit_events: true,
+            metric_label: "routing_evaluate",
+        }
+    }
+
+    pub(crate) const fn routing_hybrid() -> Self {
+        Self {
+            emit_events: false,
+            metric_label: "hybrid_routing_evaluate_static",
+        }
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct RoutingEvaluateErrorResponseDetails<'a> {
     status: &'a str,
@@ -640,6 +662,7 @@ async fn build_no_active_algorithm_response(
 /// and recording its preview event stay together. The batch path uses the build half
 /// and records one event for the call instead.
 async fn no_active_algorithm_response(
+    flows: &RoutingEvaluateAnalyticsFlows,
     state: &crate::app::TenantAppState,
     payload: &RoutingRequest,
     request_id: Option<String>,
@@ -647,21 +670,23 @@ async fn no_active_algorithm_response(
     trace_id: Option<String>,
 ) -> RoutingEvaluateResponse {
     let response = build_no_active_algorithm_response(state, payload).await;
-    crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
-        crate::analytics::AnalyticsFlowContext::new(
-            crate::analytics::ApiFlow::RuleBasedRouting,
-            crate::analytics::FlowType::RoutingEvaluatePreview,
-        ),
-        Some(payload.created_by.clone()),
-        payload.payment_id.clone(),
-        preview_gateway(&response),
-        None,
-        Some(response.status.clone()),
-        serialize_routing_evaluate_analytics_details(payload, &response, None),
-        request_id,
-        global_request_id,
-        trace_id,
-    );
+    if flows.emit_events {
+        crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
+            crate::analytics::AnalyticsFlowContext::new(
+                crate::analytics::ApiFlow::RuleBasedRouting,
+                crate::analytics::FlowType::RoutingEvaluatePreview,
+            ),
+            Some(payload.created_by.clone()),
+            payload.payment_id.clone(),
+            preview_gateway(&response),
+            None,
+            Some(response.status.clone()),
+            serialize_routing_evaluate_analytics_details(payload, &response, None),
+            request_id,
+            global_request_id,
+            trace_id,
+        );
+    }
 
     response
 }
@@ -924,49 +949,68 @@ pub async fn routing_evaluate(
     headers: axum::http::HeaderMap,
     Json(payload): Json<RoutingRequest>,
 ) -> Result<Json<RoutingEvaluateResponse>, ContainerError<EuclidErrors>> {
-    let mut timer = Some(
-        metrics::API_LATENCY_HISTOGRAM
-            .with_label_values(&["routing_evaluate"])
-            .start_timer(),
-    );
-
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["routing_evaluate"])
-        .inc();
-
-    let state = get_tenant_app_state().await;
     let request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
+    routing_evaluate_with_analytics(
+        headers,
+        Json(payload),
+        RoutingEvaluateAnalyticsFlows::routing_evaluate(),
+        request_id,
+    )
+    .await
+}
+
+pub(crate) async fn routing_evaluate_with_analytics(
+    headers: axum::http::HeaderMap,
+    Json(payload): Json<RoutingRequest>,
+    flows: RoutingEvaluateAnalyticsFlows,
+    request_id: Option<String>,
+) -> Result<Json<RoutingEvaluateResponse>, ContainerError<EuclidErrors>> {
+    let mut timer = Some(
+        metrics::API_LATENCY_HISTOGRAM
+            .with_label_values(&[flows.metric_label])
+            .start_timer(),
+    );
+
+    API_REQUEST_TOTAL_COUNTER
+        .with_label_values(&[flows.metric_label])
+        .inc();
+
+    let state = get_tenant_app_state().await;
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
     logger::debug!(
         payment_id = ?payload.payment_id,
         created_by = %payload.created_by,
+        analytics_flow = flows.metric_label,
         "Received routing evaluation request"
     );
-    crate::analytics::DomainAnalyticsEvent::record_request_hit(
-        crate::analytics::AnalyticsFlowContext::new(
-            crate::analytics::ApiFlow::RuleBasedRouting,
-            crate::analytics::FlowType::RoutingEvaluateRequestHit,
-        ),
-        crate::analytics::AnalyticsRoute::RoutingEvaluate,
-        Some(payload.created_by.clone()),
-        payload.payment_id.clone(),
-        request_id.clone(),
-        global_request_id.clone(),
-        trace_id.clone(),
-        None,
-    );
+    if flows.emit_events {
+        crate::analytics::DomainAnalyticsEvent::record_request_hit(
+            crate::analytics::AnalyticsFlowContext::new(
+                crate::analytics::ApiFlow::RuleBasedRouting,
+                crate::analytics::FlowType::RoutingEvaluateRequestHit,
+            ),
+            crate::analytics::AnalyticsRoute::RoutingEvaluate,
+            Some(payload.created_by.clone()),
+            payload.payment_id.clone(),
+            request_id.clone(),
+            global_request_id.clone(),
+            trace_id.clone(),
+            None,
+        );
+    }
 
     let update_failure_metrics = || {
         API_REQUEST_COUNTER
-            .with_label_values(&["routing_evaluate", "failure"])
+            .with_label_values(&[flows.metric_label, "failure"])
             .inc();
     };
     let mut fail_preview = |err: ContainerError<EuclidErrors>, stage: &'static str| {
         record_routing_evaluate_preview_error(
+            &flows,
             &payload,
             &err,
             stage,
@@ -1012,13 +1056,14 @@ pub async fn routing_evaluate(
                 .is_some_and(|fallback| !fallback.is_empty()) =>
         {
             API_REQUEST_COUNTER
-                .with_label_values(&["routing_evaluate", "success"])
+                .with_label_values(&[flows.metric_label, "success"])
                 .inc();
             if let Some(timer) = timer.take() {
                 timer.observe_duration();
             }
             return Ok(Json(
                 no_active_algorithm_response(
+                    &flows,
                     &state,
                     &payload,
                     request_id,
@@ -1057,38 +1102,42 @@ pub async fn routing_evaluate(
     };
 
     logger::debug!("Response: {response:?}");
-    let analytics_details = match (&ab_experiment_id, &ab_variant_arm) {
-        (Some(exp_id), Some(arm)) => {
-            crate::decider::gatewaydecider::ab_test::preview::serialize_analytics_details(
+    if flows.emit_events {
+        let analytics_details = match (&ab_experiment_id, &ab_variant_arm) {
+            (Some(exp_id), Some(arm)) => {
+                crate::decider::gatewaydecider::ab_test::preview::serialize_analytics_details(
+                    &payload,
+                    &response,
+                    rule_name.as_deref(),
+                    exp_id,
+                    arm,
+                )
+            }
+            _ => serialize_routing_evaluate_analytics_details(
                 &payload,
                 &response,
                 rule_name.as_deref(),
-                exp_id,
-                arm,
-            )
-        }
-        _ => {
-            serialize_routing_evaluate_analytics_details(&payload, &response, rule_name.as_deref())
-        }
-    };
-    crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
-        crate::analytics::AnalyticsFlowContext::new(
-            crate::analytics::ApiFlow::RuleBasedRouting,
-            preview_flow_type,
-        ),
-        Some(payload.created_by.clone()),
-        payload.payment_id.clone(),
-        preview_gateway(&response),
-        rule_name.clone(),
-        Some(response.status.clone()),
-        analytics_details,
-        request_id,
-        global_request_id,
-        trace_id,
-    );
+            ),
+        };
+        crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
+            crate::analytics::AnalyticsFlowContext::new(
+                crate::analytics::ApiFlow::RuleBasedRouting,
+                preview_flow_type,
+            ),
+            Some(payload.created_by.clone()),
+            payload.payment_id.clone(),
+            preview_gateway(&response),
+            rule_name.clone(),
+            Some(response.status.clone()),
+            analytics_details,
+            request_id,
+            global_request_id,
+            trace_id,
+        );
+    }
 
     API_REQUEST_COUNTER
-        .with_label_values(&["routing_evaluate", "success"])
+        .with_label_values(&[flows.metric_label, "success"])
         .inc();
     if let Some(timer) = timer.take() {
         timer.observe_duration();
@@ -1166,6 +1215,7 @@ pub async fn routing_evaluate_batch(
     };
     let mut fail_batch = |err: ContainerError<EuclidErrors>, stage: &'static str| {
         record_routing_evaluate_preview_error(
+            &RoutingEvaluateAnalyticsFlows::routing_evaluate(),
             &batch_error_payload,
             &err,
             stage,
@@ -1422,6 +1472,7 @@ pub async fn routing_evaluate_batch(
     // failure's error and stage; the details above name every failed entry.
     if let Some((error, stage)) = first_entry_error {
         record_routing_evaluate_preview_error(
+            &RoutingEvaluateAnalyticsFlows::routing_evaluate(),
             &batch_error_payload,
             &error,
             stage,
@@ -1472,6 +1523,7 @@ fn serialize_batch_analytics_details(
 }
 
 fn record_routing_evaluate_preview_error(
+    flows: &RoutingEvaluateAnalyticsFlows,
     payload: &RoutingRequest,
     error: &ContainerError<EuclidErrors>,
     event_stage: &str,
@@ -1479,6 +1531,9 @@ fn record_routing_evaluate_preview_error(
     global_request_id: Option<String>,
     trace_id: Option<String>,
 ) {
+    if !flows.emit_events {
+        return;
+    }
     let response_payload = error
         .downcast_ref::<ApiErrorResponse>()
         .and_then(|payload| serde_json::to_value(payload).ok());
@@ -2348,4 +2403,23 @@ pub async fn get_routing_config(
     logger::info!("Successfully served routing config");
 
     Ok(Json(config))
+}
+
+#[cfg(test)]
+mod routing_evaluate_analytics_flows_tests {
+    use super::RoutingEvaluateAnalyticsFlows;
+
+    #[test]
+    fn direct_evaluate_records_preview_events() {
+        let flows = RoutingEvaluateAnalyticsFlows::routing_evaluate();
+        assert!(flows.emit_events);
+        assert_eq!(flows.metric_label, "routing_evaluate");
+    }
+
+    #[test]
+    fn hybrid_static_half_runs_silently_under_its_own_metric_label() {
+        let flows = RoutingEvaluateAnalyticsFlows::routing_hybrid();
+        assert!(!flows.emit_events);
+        assert_eq!(flows.metric_label, "hybrid_routing_evaluate_static");
+    }
 }
