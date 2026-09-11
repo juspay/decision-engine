@@ -316,10 +316,32 @@ export function LaneCanvas({
     const lastSet = slotSetsRef.current[slotSetsRef.current.length - 1]
     const isCut = (laneIndex: number) =>
       cutsRef.current.filter === laneIndex || cutsRef.current.health === laneIndex
+    // Whoever holds the first slot at the end of the rail is the gateway this payment goes to.
+    const winnerLane = (() => {
+      if (deterministicHead) return lanes.findIndex((lane) => lane.name === deterministicHead)
+      const live = lanes
+        .map((_, i) => i)
+        .filter((i) => !isCut(i) && (visRef.current[i] ?? 100) > 1)
+      if (!live.length) return -1
+      return live.reduce((best, i) => {
+        const x = lastSet?.[i] ?? laneX(i)
+        const bestX = lastSet?.[best] ?? laneX(best)
+        return x < bestX ? i : best
+      }, live[0])
+    })()
     overlayRef.current?.querySelectorAll<HTMLElement>('.de-end-chip').forEach((chip) => {
       const laneIndex = Number(chip.dataset.lane)
       if (Number.isNaN(laneIndex)) return
       chip.style.opacity = isCut(laneIndex) ? '0' : '1'
+      const won = laneIndex === winnerLane
+      chip.classList.toggle('de-end-win', won)
+      const tick = chip.querySelector<HTMLElement>('[data-win-tick]')
+      const note = chip.querySelector<HTMLElement>('[data-win-note]')
+      const swatch = chip.querySelector<HTMLElement>('[data-lane-swatch]')
+      if (tick) tick.hidden = !won
+      if (note) note.hidden = !won
+      // The tick replaces the colour swatch, so the winner reads as a verdict, not another lane.
+      if (swatch) swatch.hidden = won
       // A deterministic winner's ribbon always converges to the first slot, so its chip stays
       // there too rather than chasing the lane's sorted position.
       chip.style.left = `${
@@ -880,11 +902,22 @@ export function LaneCanvas({
               >
                 {label.color ? (
                   <span
+                    data-lane-swatch
                     className="h-[7px] w-[7px] flex-shrink-0 rounded-[3px]"
                     style={{ background: laneColor(label.color) }}
                   />
                 ) : null}
+                {isEnd ? (
+                  <span data-win-tick className="flex-shrink-0 font-sans font-semibold" hidden>
+                    ✓
+                  </span>
+                ) : null}
                 <span className="min-w-0 truncate">{label.text}</span>
+                {isEnd ? (
+                  <span data-win-note className="flex-shrink-0 whitespace-nowrap font-sans" hidden>
+                    wins
+                  </span>
+                ) : null}
               </span>
             )
           }
