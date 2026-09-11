@@ -13,32 +13,57 @@ export const NEUTRAL_INK = '#94a3b8'
 /** Seconds in a calendar contract day; anything shorter is a `test_minutes` cycle. */
 export const SECS_PER_DAY = 86_400
 
-/** True on a `test_minutes` cycle, where one contract day lasts a minute. */
+/** True on a `test_minutes` cycle, where a contract day lasts seconds rather than a day. */
 export function isTestCycle(daySecs?: number | null) {
   return (daySecs ?? SECS_PER_DAY) < SECS_PER_DAY
 }
 
-/** Sub-day buckets for the series: five-second ones on a test cycle, hourly on a calendar one. */
+/**
+ * Sub-day buckets for the series: one-second ones on a test cycle, hourly on a calendar one.
+ *
+ * A test contract day is seconds long, so a bucket is asked for per second of it — the line then
+ * moves as the payments land rather than in steps. Bounded by the day's own length, and the
+ * server clamps `per_day` besides.
+ */
 export function bucketsPerDay(daySecs?: number | null) {
-  return isTestCycle(daySecs) ? 12 : 24
-}
-
-/** The word for one contract day on axes and captions. A test cycle's minutes *are* its contract
- *  days, and are shown as days so a demo reads exactly like production. */
-export function dayUnit(_daySecs?: number | null): { word: 'day'; short: 'Day' } {
-  return { word: 'day', short: 'Day' }
+  return isTestCycle(daySecs) ? Math.max(1, Math.round(daySecs ?? 0)) : 24
 }
 
 /** When each PSP was first eliminated, within `runId` only (an old cycle's drop must not pin day 0). */
 export function firstEliminationByConnector(events: CommitmentAuditEvent[], runId?: string) {
-  const out = new Map<string, number>()
-  for (const e of events) {
-    if (e.kind !== 'eliminated' || !e.connector) continue
-    if (runId && e.runId !== runId) continue
-    const prev = out.get(e.connector)
-    if (prev == null || e.atEpochMs < prev) out.set(e.connector, e.atEpochMs)
+  // Where each connector's *standing* elimination began — the first of the unbroken run of
+  // forecasts that has been dropping it ever since.
+  //
+  // A drop can be reversed: traffic comes back in the days that remain, two forecasts agree, and
+  // the commitment is chased again. Marking the earliest elimination in the run then draws a
+  // verdict the engine has since revised, with the steering it went on to do plotted after it —
+  // which is a chart contradicting itself. A forecast that did not drop the connector ends its
+  // streak, and any later drop starts a new one.
+  const started = new Map<string, number>()
+  const inRun = events
+    .filter((e) => !runId || e.runId === runId)
+    .slice()
+    .sort((a, b) => a.atEpochMs - b.atEpochMs)
+
+  for (const e of inRun) {
+    if (e.kind === 'eliminated' && e.connector) {
+      if (!started.has(e.connector)) started.set(e.connector, e.atEpochMs)
+      continue
+    }
+    // A forecast carries its eliminations at the same instant, so anyone not named among them
+    // was being chased at that moment.
+    if (e.kind !== 'forecast') continue
+    for (const connector of [...started.keys()]) {
+      const droppedHere = inRun.some(
+        (other) =>
+          other.kind === 'eliminated' &&
+          other.connector === connector &&
+          other.atEpochMs === e.atEpochMs,
+      )
+      if (!droppedHere) started.delete(connector)
+    }
   }
-  return out
+  return started
 }
 
 /** Percent of goal for display. Rounding must never contradict the verdict: a shortfall never
@@ -58,7 +83,7 @@ export function formatAchieved(achieved: number, goal: number, currency?: string
   const compact = formatMoney(achieved, currency)
   if (achieved >= goal || compact !== formatMoney(goal, currency)) return compact
   if (!currency) return achieved.toLocaleString()
-  const major = toMajor(achieved, currency)
+  const major = toMajorUnits(achieved, currency)
   try {
     return new Intl.NumberFormat('en', {
       style: 'currency',
@@ -71,7 +96,7 @@ export function formatAchieved(achieved: number, goal: number, currency?: string
   }
 }
 
-export function compactAmount(value: number) {
+function compactAmount(value: number) {
   if (!Number.isFinite(value)) return '0'
   if (Math.abs(value) >= 1_000_000) return `${(value / 1_000_000).toFixed(1)}M`
   if (Math.abs(value) >= 1_000) return `${(value / 1_000).toFixed(0)}k`
@@ -130,10 +155,19 @@ export function DashSwatch() {
 /** Currencies whose minor unit is the major unit — no cents to divide away. */
 const ZERO_DECIMAL = new Set(['JPY', 'KRW', 'VND', 'CLP', 'ISK', 'HUF', 'UGX', 'XAF', 'XOF'])
 
-/** Stored minor units → major units for display. */
-function toMajor(minor: number, currency: string) {
+/**
+ * Contract amounts → the units payments are actually denominated in.
+ *
+ * Every figure the volume-commitment API returns is in the document's canonical minor units,
+ * while a payment reaches `/decide-gateway` in major ones. Display uses this; so does the
+ * simulator, which has to turn a contract's daily rate back into a ticket size it can send.
+ * A `metric: volume` contract counts transactions and has no currency, so nothing is converted.
+ */
+export function toMajorUnits(minor: number, currency?: string | null) {
+  if (!currency) return minor
   return ZERO_DECIMAL.has(currency) ? minor : minor / 100
 }
+
 
 /** The narrow symbol for a currency code, or the code itself when Intl does not know it. */
 function currencySymbol(currency: string) {
@@ -150,7 +184,7 @@ function currencySymbol(currency: string) {
 export function formatMoney(minor: number, currency?: string | null) {
   if (!Number.isFinite(minor)) minor = 0
   if (!currency) return compactAmount(minor)
-  const major = toMajor(minor, currency)
+  const major = toMajorUnits(minor, currency)
   const abs = Math.abs(major)
   const symbol = currencySymbol(currency)
   const sign = major < 0 ? '-' : ''
@@ -164,7 +198,7 @@ export function formatMoney(minor: number, currency?: string | null) {
 export function formatMoneyExact(minor: number, currency?: string | null) {
   if (!Number.isFinite(minor)) minor = 0
   if (!currency) return Math.round(minor).toLocaleString()
-  const major = toMajor(minor, currency)
+  const major = toMajorUnits(minor, currency)
   try {
     return new Intl.NumberFormat('en', {
       style: 'currency',

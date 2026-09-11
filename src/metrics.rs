@@ -88,6 +88,13 @@ lazy_static! {
         exponential_buckets(0.001, 2.0, 12).unwrap()
     ).unwrap();
 
+
+    pub static ref CARD_INFO_LOOKUP_FAILURE_COUNTER: IntCounterVec = register_int_counter_vec!(
+        "card_info_lookup_failures_total",
+        "Count of failed outbound card-info (BIN) lookups grouped by error code, upstream error code and error message",
+        &["error_code", "upstream_code", "error_message"]
+    ).unwrap();
+
 }
 
 pub async fn metrics_handler() -> error_stack::Result<String, MetricsError> {
