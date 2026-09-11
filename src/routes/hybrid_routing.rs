@@ -4,7 +4,9 @@ use crate::error::ContainerError;
 use crate::euclid::ast::ConnectorInfo;
 use crate::euclid::errors::EuclidErrors;
 use crate::euclid::handlers::routing_rules::routing_evaluate;
+use crate::feedback::constants::kvRedis;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
+use crate::redis::feature::is_feature_enabled;
 use crate::routes::decide_gateway::{run_decider_with_analytics, DeciderAnalyticsFlows};
 use crate::types::hybrid_routing::HybridRoutingRequest;
 use axum::{response::IntoResponse, Json};
@@ -92,6 +94,8 @@ fn parse_dynamic_connector(connector_with_id: &str) -> ConnectorInfo {
     }
 }
 
+pub const SR_ROUTING_FEATURE_FLAG: &str = "sr_routing_enabled";
+
 #[derive(Serialize)]
 struct DynamicRoutingEnvelope {
     status: &'static str,
@@ -167,34 +171,52 @@ pub async fn hybrid_routing_evaluate(
         .clone()
         .or(static_fallback_gateways);
 
+    let mut sr_routing_skipped = false;
+
     let dynamic_eval_result = match dynamic_routing_request {
         Some(mut req) => {
-            let request_eligible_gateways = match req.eligible_gateway_list.take() {
-                Some(gateways) if gateways.is_empty() => None,
-                Some(gateways) => Some(gateways),
-                None => None,
-            };
-            let static_eligible_gateway_ids = static_eligible_gateways
-                .as_ref()
-                .filter(|connectors| !connectors.is_empty())
-                .map(|connectors| extract_gateway_identifiers(connectors));
-            let fallback_eligible_gateways = dynamic_fallback_gateways
-                .clone()
-                .map(|connectors| extract_gateway_identifiers(&connectors));
-            req.eligible_gateway_list = static_eligible_gateway_ids
-                .or(request_eligible_gateways)
-                .or(fallback_eligible_gateways);
-            Some(
-                run_decider_with_analytics(
-                    req,
-                    &x_request_id,
-                    global_request_id,
-                    trace_id,
-                    Instant::now(),
-                    DeciderAnalyticsFlows::routing_hybrid(),
-                )
-                .await,
+            let dynamic_routing_enabled = is_feature_enabled(
+                SR_ROUTING_FEATURE_FLAG.to_string(),
+                req.merchant_id.clone(),
+                kvRedis(),
             )
+            .await;
+
+            if dynamic_routing_enabled {
+                let request_eligible_gateways = match req.eligible_gateway_list.take() {
+                    Some(gateways) if gateways.is_empty() => None,
+                    Some(gateways) => Some(gateways),
+                    None => None,
+                };
+                let static_eligible_gateway_ids = static_eligible_gateways
+                    .as_ref()
+                    .filter(|connectors| !connectors.is_empty())
+                    .map(|connectors| extract_gateway_identifiers(connectors));
+                let fallback_eligible_gateways = dynamic_fallback_gateways
+                    .clone()
+                    .map(|connectors| extract_gateway_identifiers(&connectors));
+                req.eligible_gateway_list = static_eligible_gateway_ids
+                    .or(request_eligible_gateways)
+                    .or(fallback_eligible_gateways);
+                Some(
+                    run_decider_with_analytics(
+                        req,
+                        &x_request_id,
+                        global_request_id,
+                        trace_id,
+                        Instant::now(),
+                        DeciderAnalyticsFlows::routing_hybrid(),
+                    )
+                    .await,
+                )
+            } else {
+                crate::logger::debug!(
+                    "sr_routing_enabled is off for merchant {}; skipping dynamic routing",
+                    req.merchant_id
+                );
+                sr_routing_skipped = true;
+                None
+            }
         }
         None => None,
     };
@@ -209,6 +231,22 @@ pub async fn hybrid_routing_evaluate(
             "static_routing",
         ),
         None => Ok(()),
+    };
+
+    let skipped_insert_result = if sr_routing_skipped {
+        let skipped_payload = DynamicRoutingEnvelope {
+            status: "skipped",
+            decision: None,
+            fallback_connectors: dynamic_fallback_gateways.clone(),
+        };
+        insert_serialized(
+            &mut res,
+            "dynamic_routing",
+            &skipped_payload,
+            "dynamic_routing",
+        )
+    } else {
+        Ok(())
     };
 
     let response_result = match (
@@ -276,7 +314,9 @@ pub async fn hybrid_routing_evaluate(
         (false, None, _, None, None) => Ok((to_logged_success_response(res), "success")),
     };
 
-    let final_result = static_insert_result.and(response_result);
+    let final_result = static_insert_result
+        .and(skipped_insert_result)
+        .and(response_result);
     let api_result = match final_result {
         Ok((response, metric_status)) => {
             API_REQUEST_COUNTER

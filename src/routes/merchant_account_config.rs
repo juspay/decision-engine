@@ -55,6 +55,7 @@ pub enum KnownFeature {
     Autopilot,
     /// Volume-commitment steering — a secondary objective that runs alongside cost savings.
     VolumeContracts,
+    SrRouting,
 }
 
 impl KnownFeature {
@@ -68,6 +69,7 @@ impl KnownFeature {
             Self::SrAutoCalibration,
             Self::Autopilot,
             Self::VolumeContracts,
+            Self::SrRouting,
         ]
     }
 
@@ -81,6 +83,7 @@ impl KnownFeature {
             "auto-calibration" => Some(Self::SrAutoCalibration),
             "autopilot" => Some(Self::Autopilot),
             "volume-contracts" => Some(Self::VolumeContracts),
+            "sr-routing" => Some(Self::SrRouting),
             _ => None,
         }
     }
@@ -100,6 +103,7 @@ impl KnownFeature {
             Self::VolumeContracts => {
                 crate::decider::gatewaydecider::volume_commitment::FEATURE_FLAG
             }
+            Self::SrRouting => crate::routes::hybrid_routing::SR_ROUTING_FEATURE_FLAG,
         }
     }
 

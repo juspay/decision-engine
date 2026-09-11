@@ -382,11 +382,21 @@ export function SRRoutingPage() {
     }
   }
 
+  // Every tab on this page configures the decider, which never runs while SR-based dynamic
+  // routing is off — so the tabs are locked until it is back on. `isEnabled` answers false
+  // while the features request is in flight, so wait for the response before restricting:
+  // otherwise the page flashes the locked state on every load.
+  const srRoutingResolved = Boolean(merchantId) && !features.isLoading && features.data != null
+  const srRoutingOff = srRoutingResolved && !features.isEnabled('sr-routing')
+  const lockedTabTitle = 'Turn SR-based dynamic routing on to configure this'
+
   const tabClass = (tab: SRTab) =>
     `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-      activeTab === tab
-        ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-        : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+      srRoutingOff
+        ? 'border-transparent text-slate-400 dark:text-slate-600 cursor-not-allowed'
+        : activeTab === tab
+          ? 'border-brand-500 text-brand-600 dark:text-brand-400'
+          : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
     }`
 
   return (
@@ -394,9 +404,12 @@ export function SRRoutingPage() {
     // constraining them would spend a quarter of an already-narrow column on the rail. The
     // single-column tabs (Autopilot, Flags) still read better constrained.
     <div className={`space-y-6 ${WIDE_TABS.includes(activeTab) ? 'w-full' : 'max-w-4xl'}`}>
-      {/* Page header */}
-      <div>
+      {/* Page header. SR-based dynamic routing is the parent of everything on this page —
+          Autopilot, the Manual scoring config and every Feature Flags row only take effect
+          while it is on — so the switch lives here rather than as a sibling row in that list. */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <PageHeading title="Multi Objective Routing" description="Dynamic gateway scoring based on real-time success rates." />
+        <SrRoutingMasterToggle features={features} />
       </div>
 
       {!merchantId && (
@@ -408,12 +421,12 @@ export function SRRoutingPage() {
       {/* Tab navigation */}
       <div className="border-b border-slate-200 dark:border-[#1c1c23]">
         <nav className="-mb-px flex gap-1">
-          <button type="button" className={tabClass('autopilot')} onClick={() => setActiveTab('autopilot')}>Autopilot</button>
-          <button type="button" className={tabClass('manual')} onClick={() => setActiveTab('manual')}>Manual</button>
-          <button type="button" className={tabClass('flags')} onClick={() => setActiveTab('flags')}>Feature Flags</button>
-          <button type="button" className={tabClass('cost')} onClick={() => setActiveTab('cost')}>Cost Estimation</button>
+          <button type="button" disabled={srRoutingOff} title={srRoutingOff ? lockedTabTitle : undefined} className={tabClass('autopilot')} onClick={() => setActiveTab('autopilot')}>Autopilot</button>
+          <button type="button" disabled={srRoutingOff} title={srRoutingOff ? lockedTabTitle : undefined} className={tabClass('manual')} onClick={() => setActiveTab('manual')}>Manual</button>
+          <button type="button" disabled={srRoutingOff} title={srRoutingOff ? lockedTabTitle : undefined} className={tabClass('flags')} onClick={() => setActiveTab('flags')}>Feature Flags</button>
+          <button type="button" disabled={srRoutingOff} title={srRoutingOff ? lockedTabTitle : undefined} className={tabClass('cost')} onClick={() => setActiveTab('cost')}>Cost Estimation</button>
           {volumeContractsBeta && (
-            <button type="button" className={`${tabClass('volume')} inline-flex items-center gap-1.5`} onClick={() => setActiveTab('volume')}>
+            <button type="button" disabled={srRoutingOff} title={srRoutingOff ? lockedTabTitle : undefined} className={`${tabClass('volume')} inline-flex items-center gap-1.5`} onClick={() => setActiveTab('volume')}>
               Volume Contracts
               <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-wide text-violet-600 dark:bg-violet-500/15 dark:text-violet-400">
                 Beta
@@ -425,6 +438,11 @@ export function SRRoutingPage() {
 
       {isLoading ? (
         <div className="flex justify-center py-12"><Spinner /></div>
+      ) : srRoutingOff ? (
+        <Notice tone="warning">
+          SR-based dynamic routing is off for this merchant, so none of these settings are in
+          effect. Turn it on with the switch above to configure scoring.
+        </Notice>
       ) : (
         <>
           {/* ── Autopilot tab ── */}
@@ -688,6 +706,49 @@ function Switch({ on, onClick, disabled }: { on: boolean; onClick: () => void; d
         }`}
       />
     </button>
+  )
+}
+
+/** Parent switch for the whole Multi Objective page. Off means hybrid routing never enters the
+ *  decider (see `SR_ROUTING_FEATURE_FLAG` in hybrid_routing.rs) and answers from the static
+ *  routing result, so Autopilot, the Manual config and every scoring flag are inert until it
+ *  is back on. */
+function SrRoutingMasterToggle({ features }: { features: ReturnType<typeof useMerchantFeatures> }) {
+  const canEditRouting = useCanEditRouting()
+  const [toggling, setToggling] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const on = features.isEnabled('sr-routing')
+
+  async function toggle(next: boolean) {
+    setToggling(true)
+    setError(null)
+    try {
+      await features.setFeatureEnabled('sr-routing', next)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setToggling(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-2">
+      <div className="flex items-center gap-2.5">
+        <div className="text-right">
+          <div className="text-sm font-medium text-slate-800 dark:text-white">SR-based dynamic routing</div>
+          <p className="text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
+            {on ? 'Scoring eligible gateways on every payment.' : 'Gateway scoring is paused for this merchant.'}
+          </p>
+        </div>
+        {on ? <Badge variant="green">On</Badge> : <Badge variant="gray">Off</Badge>}
+        <Switch
+          on={on}
+          disabled={!canEditRouting || features.isLoading || toggling}
+          onClick={() => toggle(!on)}
+        />
+      </div>
+      <ErrorMessage error={error} />
+    </div>
   )
 }
 
