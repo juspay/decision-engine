@@ -54,7 +54,8 @@ const ALL_SEARCH_GROUPS: SearchGroup[] = [
     items: [
       { to: '/', label: 'Overview', icon: LayoutDashboard, keywords: ['home', 'dashboard'] },
       { to: '/analytics', label: 'Analytics', icon: BarChart3, keywords: ['metrics', 'charts', 'stats'] },
-      { to: '/analytics', label: 'Multi-objective', hint: 'Analytics', icon: BarChart3, keywords: ['sr', 'success rate', 'multi objective', 'transactions'] },
+      { to: '/analytics', label: 'Hybrid Routing', hint: 'Analytics', icon: BarChart3, keywords: ['hybrid', 'static', 'dynamic', 'routing'] },
+      { to: '/analytics?view=multi_objective', label: 'Multi-objective', hint: 'Analytics', icon: BarChart3, keywords: ['sr', 'success rate', 'multi objective', 'transactions'] },
       { to: '/analytics?view=rule_based', label: 'Rule & Volume', hint: 'Analytics', icon: BarChart3, keywords: ['rule based', 'volume', 'rules', 'analytics'] },
       { to: '/audit', label: 'Decision Audit', icon: Activity, keywords: ['payment', 'inspect', 'logs', 'transactions'] },
       { to: '/audit?routing_kind=multi_objective', label: 'Multi-objective', hint: 'Decision Audit', icon: Activity, keywords: ['sr', 'success rate', 'multi objective', 'transactions'] },

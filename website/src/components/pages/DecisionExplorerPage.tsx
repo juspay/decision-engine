@@ -572,7 +572,6 @@ function buildAuditUrl(paymentId: string) {
     page: 1,
     page_size: 25,
     payment_id: paymentId,
-    // The live-decision panel; rule previews have their own panel from /analytics/preview-trace.
     scope: 'dynamic',
   })
   return `/analytics/payment-audit?${qs}`

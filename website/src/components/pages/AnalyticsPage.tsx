@@ -75,13 +75,14 @@ type RoutingFilters = {
   gateways: string[]
 }
 
-type AnalyticsView = 'transactions' | 'hybrid' | 'rule_based' | 'volume_commitments'
-const ANALYTICS_VIEWS: readonly AnalyticsView[] = ['transactions', 'hybrid', 'rule_based', 'volume_commitments']
-/** Server-side decision family: which flow types the decision metrics read. */
+type AnalyticsView = 'hybrid' | 'multi_objective' | 'rule_based' | 'volume_commitments'
+const ANALYTICS_VIEWS: readonly AnalyticsView[] = ['hybrid', 'multi_objective', 'rule_based', 'volume_commitments']
+const DEFAULT_ANALYTICS_VIEW: AnalyticsView = 'hybrid'
+
 type AnalyticsRoutingKindValue = 'multi_objective' | 'hybrid'
 const ANALYTICS_VIEW_LABELS: Record<AnalyticsView, string> = {
-  transactions: 'Multi-objective',
   hybrid: 'Hybrid Routing',
+  multi_objective: 'Multi-objective',
   rule_based: 'Rule based / Volume based',
   volume_commitments: 'Volume commitments',
 }
@@ -212,7 +213,6 @@ function buildAnalyticsUrl(
     start_ms: customWindow?.start_ms,
     end_ms: customWindow?.end_ms,
     gateway: routingFilters?.gateways.length ? routingFilters.gateways.join(',') : undefined,
-    // Omitted for multi-objective so the default (and every existing link) stays untouched.
     routing_kind: routingKind === 'hybrid' ? 'hybrid' : undefined,
   }
 
@@ -969,7 +969,7 @@ export function AnalyticsPage() {
   const location = useLocation()
   const [range, setRange] = useState<AnalyticsRangeValue>('1d')
   // View is kept in the URL (?view=…) so a reload or shared/searched link
-  // reopens it directly; the default (transactions) is left out of the URL.
+  // reopens it directly; the default view is left out of the URL.
   const [searchParams, setSearchParams] = useSearchParams()
   const viewParam = searchParams.get('view')
   // Volume commitments is in beta: only super-admins get the view. For
@@ -978,14 +978,16 @@ export function AnalyticsPage() {
   const volumeContractsBeta = useVolumeContractsBeta()
   const requestedView: AnalyticsView = ANALYTICS_VIEWS.includes(viewParam as AnalyticsView)
     ? (viewParam as AnalyticsView)
-    : 'transactions'
+    : DEFAULT_ANALYTICS_VIEW
   const view: AnalyticsView =
-    requestedView === 'volume_commitments' && !volumeContractsBeta ? 'transactions' : requestedView
+    requestedView === 'volume_commitments' && !volumeContractsBeta
+      ? DEFAULT_ANALYTICS_VIEW
+      : requestedView
   const setView = (nextView: AnalyticsView) => {
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev)
-        if (nextView === 'transactions') next.delete('view')
+        if (nextView === DEFAULT_ANALYTICS_VIEW) next.delete('view')
         else next.set('view', nextView)
         return next
       },
@@ -996,7 +998,7 @@ export function AnalyticsPage() {
   // to the canonical form (default omitted) so the URL never disagrees with the
   // rendered view and default links stay shareable/canonical.
   useEffect(() => {
-    const canonical = view === 'transactions' ? null : view
+    const canonical = view === DEFAULT_ANALYTICS_VIEW ? null : view
     if (viewParam !== canonical) setView(view)
     // setView is stable enough for this purpose; re-run only on the derived state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1025,7 +1027,7 @@ export function AnalyticsPage() {
   // The hybrid tab reads the same metrics as the multi-objective tab, only over
   // `routing_hybrid_*` events. Everything below is shared; only this key changes.
   const routingKind: AnalyticsRoutingKindValue = view === 'hybrid' ? 'hybrid' : 'multi_objective'
-  const isDecisionView = view === 'transactions' || view === 'hybrid'
+  const isDecisionView = view === 'multi_objective' || view === 'hybrid'
 
   const overviewUrl =
     activeQueryWindow
@@ -1120,7 +1122,7 @@ export function AnalyticsPage() {
   useEffect(() => {
     const revalidateCurrentView = () => {
       void overview.mutate()
-      if (view === 'transactions' || view === 'hybrid') {
+      if (view === 'multi_objective' || view === 'hybrid') {
         void routing.mutate()
         void filteredRouting.mutate()
         return
@@ -1139,14 +1141,14 @@ export function AnalyticsPage() {
     }
   }, [location.key, view])
 
-  const transactionLoading =
+  const decisionLoading =
     (!overview.data && overview.isLoading) ||
     (!routing.data && routing.isLoading) ||
     (!filteredRouting.data && filteredRouting.isLoading)
   const ruleBasedLoading =
     (!overview.data && overview.isLoading) ||
     (!previewTrace.data && previewTrace.isLoading)
-  const transactionError =
+  const decisionError =
     overview.error?.message ||
     routing.error?.message ||
     filteredRouting.error?.message ||
@@ -1156,8 +1158,8 @@ export function AnalyticsPage() {
     previewTrace.error?.message ||
     previewList.error?.message ||
     null
-  const loading = isDecisionView ? transactionLoading : ruleBasedLoading
-  const error = isDecisionView ? transactionError : ruleBasedError
+  const loading = isDecisionView ? decisionLoading : ruleBasedLoading
+  const error = isDecisionView ? decisionError : ruleBasedError
 
   const availableFilters: RoutingFilterOptions = {
     dimensions:
@@ -1243,7 +1245,7 @@ export function AnalyticsPage() {
   // Each decision tab counts only its own entry point: `/decide_gateway` hits on the
   // multi-objective tab, `/routing/hybrid` hits on the hybrid tab. Score feedback is shared.
   const decisionRouteKey = view === 'hybrid' ? '/routing_hybrid' : '/decide_gateway'
-  const transactionRouteHits = useMemo(
+  const decisionRouteHits = useMemo(
     () =>
       routeHits.filter(
         (item) => item.route === decisionRouteKey || item.route === '/update_gateway',
@@ -1791,18 +1793,18 @@ export function AnalyticsPage() {
           <Button
             size="sm"
             variant="secondary"
-            className={sectionButtonClass(view === 'transactions')}
-            onClick={() => setView('transactions')}
-          >
-            {ANALYTICS_VIEW_LABELS.transactions}
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
             className={sectionButtonClass(view === 'hybrid')}
             onClick={() => setView('hybrid')}
           >
             {ANALYTICS_VIEW_LABELS.hybrid}
+          </Button>
+          <Button
+            size="sm"
+            variant="secondary"
+            className={sectionButtonClass(view === 'multi_objective')}
+            onClick={() => setView('multi_objective')}
+          >
+            {ANALYTICS_VIEW_LABELS.multi_objective}
           </Button>
           <Button
             size="sm"
@@ -1884,7 +1886,7 @@ export function AnalyticsPage() {
               </CardBody>
             </Card>
 
-            {transactionRouteHits.map((item) => (
+            {decisionRouteHits.map((item) => (
               <Card key={item.route} className="!rounded-2xl">
                 <CardBody>
                   <p className="text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">
