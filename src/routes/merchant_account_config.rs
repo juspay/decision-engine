@@ -48,10 +48,6 @@ pub enum KnownFeature {
     AbTestRealPayments,
     MultiObjectiveRouting,
     Elimination,
-    // Serialize as "auto-calibration" (not the kebab default "sr-auto-calibration") so it matches
-    // the dashboard slug used in GET responses and POST paths.
-    #[serde(rename = "auto-calibration")]
-    SrAutoCalibration,
     Autopilot,
     /// Volume-commitment steering — a secondary objective that runs alongside cost savings.
     VolumeContracts,
@@ -66,7 +62,6 @@ impl KnownFeature {
             Self::AbTestRealPayments,
             Self::MultiObjectiveRouting,
             Self::Elimination,
-            Self::SrAutoCalibration,
             Self::Autopilot,
             Self::VolumeContracts,
             Self::SrRouting,
@@ -80,7 +75,6 @@ impl KnownFeature {
             "ab-test-real-payments" => Some(Self::AbTestRealPayments),
             "multi-objective-routing" => Some(Self::MultiObjectiveRouting),
             "elimination" => Some(Self::Elimination),
-            "auto-calibration" => Some(Self::SrAutoCalibration),
             "autopilot" => Some(Self::Autopilot),
             "volume-contracts" => Some(Self::VolumeContracts),
             "sr-routing" => Some(Self::SrRouting),
@@ -97,7 +91,6 @@ impl KnownFeature {
             Self::AbTestRealPayments => "ab_test_real_payments_enabled",
             Self::MultiObjectiveRouting => "multi_objective_routing_enabled",
             Self::Elimination => "enable_gateway_level_sr_elimination",
-            Self::SrAutoCalibration => "sr_auto_calibration_enabled",
             Self::Autopilot => "autopilot_enabled",
             // The same key `flow_new` checks, so this toggle drives the routing gate directly.
             Self::VolumeContracts => {

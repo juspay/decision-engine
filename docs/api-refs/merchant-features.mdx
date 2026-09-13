@@ -23,8 +23,9 @@ curl "$BASE_URL/merchant-account/merchant_demo/features" \
     { "feature": "ab-test-real-payments", "enabled": true },
     { "feature": "multi-objective-routing", "enabled": true },
     { "feature": "elimination", "enabled": true },
-    { "feature": "auto-calibration", "enabled": true },
-    { "feature": "autopilot", "enabled": true }
+    { "feature": "autopilot", "enabled": true },
+    { "feature": "volume-contracts", "enabled": false },
+    { "feature": "sr-routing", "enabled": true }
   ]
 }
 ```
@@ -49,12 +50,13 @@ Response is the same shape as the list call, re-read after the change so you alw
 | `ab-test-real-payments` | Whether active A/B test experiments intercept real `/decide-gateway` traffic — see [A/B Testing: Results](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-results.mdx). |
 | `multi-objective-routing` | Merchant-wide default for the cost-aware post-step — see [Multi-Objective Routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-multi-objective.mdx). Per-request `enableMultiObjective` overrides this. |
 | `elimination` | Gateway-level SR-based elimination (excluding gateways in downtime). |
-| `auto-calibration` | Enables the self-tuning background job (see below). Must be on **together with** `autopilot` for the job to actually write changes. |
-| `autopilot` | Master write-permission switch for the self-tuning job. With `auto-calibration` off, this alone does nothing. |
+| `autopilot` | Enables the self-tuning background job (see below). |
+| `volume-contracts` | Volume-commitment steering, a secondary objective alongside cost savings. |
+| `sr-routing` | Master switch for SR-based dynamic routing. With this off, hybrid routing never enters the decider and every other flag here is inert. |
 
-## What Autopilot & Auto-Calibration Do
+## What Autopilot Does
 
-These two flags jointly control a background job — there is no separate "run autopilot" endpoint. `auto-calibration` gates whether the job considers a merchant at all; `autopilot` gates whether it's allowed to write. Both must be enabled for self-tuning to take effect.
+`autopilot` controls a background job — there is no separate "run autopilot" endpoint. A merchant listed in this flag's `merchants` array is picked up by the job on its next cycle.
 
 Every polling interval (default 900s, configurable via `[sr_auto_calibration]` in `config/*.toml` or `SR_AUTO_CALIBRATION_INTERVAL_SECS`), the job:
 

@@ -9103,8 +9103,9 @@
               "ab-test-real-payments",
               "multi-objective-routing",
               "elimination",
-              "auto-calibration",
-              "autopilot"
+              "autopilot",
+              "volume-contracts",
+              "sr-routing"
             ]
           },
           "enabled": {

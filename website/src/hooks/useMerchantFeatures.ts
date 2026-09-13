@@ -8,7 +8,6 @@ export type KnownFeature =
   | 'ab-test-real-payments'
   | 'multi-objective-routing'
   | 'elimination'
-  | 'auto-calibration'
   | 'autopilot'
   | 'volume-contracts'
   | 'sr-routing'

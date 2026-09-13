@@ -13,7 +13,7 @@ test.describe('Merchant features & debit routing (API)', () => {
     expect(Array.isArray(r.body.features)).toBe(true)
 
     const slugs = r.body.features.map((f: any) => f.feature)
-    for (const expected of ['autopilot', 'auto-calibration', 'elimination', 'multi-objective-routing', 'sr-routing']) {
+    for (const expected of ['autopilot', 'elimination', 'multi-objective-routing', 'sr-routing']) {
       expect(slugs).toContain(expected)
     }
   })

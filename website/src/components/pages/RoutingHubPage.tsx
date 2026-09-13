@@ -127,7 +127,6 @@ export function RoutingHubPage() {
           await merchantFeatures.setFeatureEnabled('autopilot', false)
           await merchantFeatures.setFeatureEnabled('elimination', false)
           await merchantFeatures.setFeatureEnabled('multi-objective-routing', false)
-          await merchantFeatures.setFeatureEnabled('auto-calibration', false)
         }
       } else if (strategyId === 'rules' && activeRuleAlgorithm) {
         await apiPost('/routing/deactivate', { created_by: merchantId, routing_algorithm_id: activeRuleAlgorithm.id })

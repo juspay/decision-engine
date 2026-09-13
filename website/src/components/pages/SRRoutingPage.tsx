@@ -41,7 +41,7 @@ const configInputClass =
   'focus:outline-none focus:border-brand-500 dark:border-[#222226]'
 
 // Ensures a stored value is always selectable in a dropdown, even when it isn't in the known
-// option list (e.g. auto-calibration writes the casing live txns use, "CARD"/"CREDIT", while the
+// option list (e.g. the calibration job writes the casing live txns use, "CARD"/"CREDIT", while the
 // option lists are lowercase). Prepends the value so the <select> renders it instead of going blank.
 function optionsWithValue(options: readonly string[], value: string): string[] {
   return value && !options.includes(value) ? [value, ...options] : [...options]
@@ -753,7 +753,7 @@ function SrRoutingMasterToggle({ features }: { features: ReturnType<typeof useMe
 }
 
 // Autopilot reframes routing as a set of outcomes rather than raw flags. The single master
-// toggle is the real switch: it enables self-tuning (auto-calibration) plus cost savings, and
+// toggle is the real switch: it enables self-tuning plus cost savings, and
 // turning it OFF hard-disables those backend flags so the engine falls back to the Manual
 // configuration. SR base routing ("switch PSP on low auth") is always on and shown as a status
 // pill. Cost savings (`multi-objective-routing`) is surfaced independently in the Feature Flags
@@ -769,9 +769,9 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
 
   // Master is its own persisted backend flag (`autopilot`) so the toggle survives reloads.
   // Autopilot subsumes self-tuning: the only thing that distinguishes it from Manual is that the
-  // engine adapts settings to your traffic, so a single toggle drives both `autopilot` and
-  // `auto-calibration` (the calibration job requires both — see sr_auto_calibration.rs). Cost
-  // savings (`multi-objective-routing`) is orthogonal and now lives in the Feature Flags tab.
+  // engine adapts settings to your traffic, so `autopilot` alone gates the calibration job (see
+  // sr_auto_calibration.rs). Cost savings (`multi-objective-routing`) is orthogonal and now
+  // lives in the Feature Flags tab.
   const autopilotOn = features.isEnabled('autopilot')
 
   async function toggleMaster(next: boolean) {
@@ -780,14 +780,13 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
       await features.setFeatureEnabled('autopilot', next)
       if (next) {
         // Turning Autopilot on enables its decisions by default — cost savings (multi-objective
-        // economic routing) and auto-calibration — and activates all low-cardinality SR
+        // economic routing) — and activates all low-cardinality SR
         // dimensions so scoring clusters split on them (card scheme / currency / country /
         // auth type) and the calibrator can tune each cluster.
         // Enable unconditionally: the toggle is idempotent, and the captured `costOn` /
         // `autoCalibrationOn` booleans can be stale (the features list is SWR-cached for 5 min),
         // so guarding on them would silently skip the POST and leave the decision off.
         await features.setFeatureEnabled('multi-objective-routing', true)
-        await features.setFeatureEnabled('auto-calibration', true)
         if (merchantId) await enableAutopilotSrDimensions(merchantId)
       } else {
         // Hard-disable: turn every autopilot decision off so routing uses manual config.
@@ -795,7 +794,6 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
         // gate the POST, or a flag that is actually on server-side would be left enabled.
         await features.setFeatureEnabled('elimination', false)
         await features.setFeatureEnabled('multi-objective-routing', false)
-        await features.setFeatureEnabled('auto-calibration', false)
       }
       setMessage(next
         ? 'Autopilot on — the engine self-tunes to your traffic (cost savings also enabled).'
@@ -818,7 +816,7 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
         <p className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-xs text-emerald-500">{message}</p>
       )}
 
-      {/* Master toggle — the single Autopilot input. It bundles self-tuning (auto-calibration) and,
+      {/* Master toggle — the single Autopilot input. It bundles self-tuning and,
           for convenience, enables cost savings; cost can be turned back off independently from the
           Feature Flags tab. Turning Autopilot off falls back to the Manual configuration. */}
       <Card>
@@ -871,6 +869,14 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
 
 // A row with a `gate` is shown only to that feature's release audience (featureReleases.ts).
 const SR_FEATURES: { feature: KnownFeature; title: string; description: string; docsUrl?: string; gate?: ReleasedFeature }[] = [
+  {
+    // The threshold this drops a PSP at lives in Manual → Elimination; this row is only the
+    // on/off switch. Both the decider and the score writer read the same flag.
+    feature: 'elimination',
+    title: 'Elimination (pause PSPs with low auth rate)',
+    description:
+      'Stop routing to a gateway once its recent authorization rate falls below the elimination threshold, and let it back in when it recovers. Set the threshold itself under Manual → Elimination.',
+  },
   {
     feature: 'gsm-scoring-filter',
     title: 'GSM scoring filter',
