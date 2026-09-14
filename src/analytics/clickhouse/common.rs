@@ -17,6 +17,7 @@ pub const OVERVIEW_ERROR_FLOW_TYPES: &[FlowType] = &[
     FlowType::UpdateGatewayScoreError,
     FlowType::UpdateScoreLegacyError,
     FlowType::RoutingEvaluateError,
+    FlowType::RoutingHybridError,
 ];
 pub const ROUTE_HIT_FLOW_TYPES: &[FlowType] = &[
     FlowType::DecideGatewayRequestHit,
@@ -29,63 +30,31 @@ pub const ROUTE_HIT_ENTRY_POINT_FLOW_TYPES: &[FlowType] = &[
     FlowType::RoutingEvaluateRequestHit,
     FlowType::RoutingHybridRequestHit,
 ];
-pub const PAYMENT_AUDIT_PREVIEW_FLOW_TYPES: &[FlowType] = &[
-    FlowType::RoutingEvaluateSingle,
-    FlowType::RoutingEvaluatePriority,
-    FlowType::RoutingEvaluateVolumeSplit,
-    FlowType::RoutingEvaluateAdvanced,
-    FlowType::RoutingEvaluatePreview,
-    FlowType::RoutingEvaluateError,
-];
-pub const PAYMENT_AUDIT_DYNAMIC_FLOW_TYPES: &[FlowType] = &[
-    FlowType::DecideGatewayDecision,
-    FlowType::UpdateGatewayScoreUpdate,
-    FlowType::UpdateScoreLegacyScoreSnapshot,
-    FlowType::DecideGatewayRuleHit,
-    FlowType::DecideGatewayError,
-    FlowType::UpdateGatewayScoreError,
-    FlowType::UpdateScoreLegacyError,
-    FlowType::RoutingHybridDecision,
-    FlowType::RoutingHybridError,
-];
-pub const PAYMENT_AUDIT_HYBRID_FLOW_TYPES: &[FlowType] = &[
-    FlowType::RoutingHybridDecision,
-    FlowType::RoutingHybridError,
-];
-pub const PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES: &[FlowType] = &[
-    FlowType::DecideGatewayDecision,
-    FlowType::UpdateGatewayScoreUpdate,
-    FlowType::UpdateScoreLegacyScoreSnapshot,
-    FlowType::DecideGatewayRuleHit,
-    FlowType::DecideGatewayError,
-    FlowType::UpdateGatewayScoreError,
-    FlowType::UpdateScoreLegacyError,
-];
-pub const PAYMENT_AUDIT_ALL_FLOW_TYPES: &[FlowType] = &[
-    FlowType::RoutingEvaluateSingle,
-    FlowType::RoutingEvaluatePriority,
-    FlowType::RoutingEvaluateVolumeSplit,
-    FlowType::RoutingEvaluateAdvanced,
-    FlowType::RoutingEvaluatePreview,
-    FlowType::RoutingEvaluateError,
-    FlowType::DecideGatewayDecision,
-    FlowType::UpdateGatewayScoreUpdate,
-    FlowType::UpdateScoreLegacyScoreSnapshot,
-    FlowType::DecideGatewayRuleHit,
-    FlowType::DecideGatewayError,
-    FlowType::UpdateGatewayScoreError,
-    FlowType::UpdateScoreLegacyError,
-    FlowType::RoutingHybridDecision,
-    FlowType::RoutingHybridError,
-];
+pub use crate::analytics::flow::{
+    PAYMENT_AUDIT_HYBRID_FLOW_TYPES, PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES,
+    PAYMENT_AUDIT_PREVIEW_FLOW_TYPES,
+};
 
-pub const fn payment_audit_flow_types(scope: PaymentAuditScope) -> &'static [FlowType] {
+pub const fn payment_audit_flow_type_groups(
+    scope: PaymentAuditScope,
+) -> &'static [&'static [FlowType]] {
     match scope {
-        PaymentAuditScope::All => PAYMENT_AUDIT_ALL_FLOW_TYPES,
-        PaymentAuditScope::Dynamic => PAYMENT_AUDIT_DYNAMIC_FLOW_TYPES,
-        PaymentAuditScope::Preview => PAYMENT_AUDIT_PREVIEW_FLOW_TYPES,
+        PaymentAuditScope::All => &[
+            PAYMENT_AUDIT_PREVIEW_FLOW_TYPES,
+            PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES,
+            PAYMENT_AUDIT_HYBRID_FLOW_TYPES,
+        ],
+        PaymentAuditScope::Dynamic => &[
+            PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES,
+            PAYMENT_AUDIT_HYBRID_FLOW_TYPES,
+        ],
+        PaymentAuditScope::Preview => &[PAYMENT_AUDIT_PREVIEW_FLOW_TYPES],
     }
 }
+
+/// The routing approach a hybrid call records when its static half made the decision. Written by
+/// `routes::hybrid_routing`, read back by the hybrid metrics.
+pub const STATIC_ROUTING_APPROACH: &str = "STATIC_ROUTING";
 
 /// Payment amount on a decide event, inside the `details` JSON. Shared by every metric that
 /// sums volume so the request shape has one place to move.
@@ -129,16 +98,30 @@ where
 }
 
 pub fn static_flow_type_in_sql(flow_types: &[FlowType]) -> String {
-    format!("({})", static_flow_type_list_sql(flow_types))
+    format!("({})", flow_type_list_sql(flow_types))
 }
 
 pub fn static_flow_type_array_sql(flow_types: &[FlowType]) -> String {
-    format!("[{}]", static_flow_type_list_sql(flow_types))
+    format!("[{}]", flow_type_list_sql(flow_types))
 }
 
-fn static_flow_type_list_sql(flow_types: &[FlowType]) -> String {
+/// The `IN (…)` list for a scope, over its groups in the order `payment_audit_flow_type_groups`
+/// holds them.
+pub fn payment_audit_flow_types_in_sql(scope: PaymentAuditScope) -> String {
+    format!(
+        "({})",
+        flow_type_list_sql(
+            payment_audit_flow_type_groups(scope)
+                .iter()
+                .copied()
+                .flatten()
+        )
+    )
+}
+
+fn flow_type_list_sql<'a>(flow_types: impl IntoIterator<Item = &'a FlowType>) -> String {
     flow_types
-        .iter()
+        .into_iter()
         .map(|flow_type| format!("'{}'", flow_type.as_str()))
         .collect::<Vec<_>>()
         .join(", ")
@@ -186,23 +169,30 @@ const fn route_for_request_hit(flow_type: FlowType) -> AnalyticsRoute {
 #[derive(Debug, Clone, Copy)]
 pub struct DecisionShape {
     pub decision_flow_type: FlowType,
-    pub request_hit_flow_type: FlowType,
-    pub error_flow_type: FlowType,
-    /// Predicate for "the rule step decided this". `/decide_gateway` records a dedicated
-    /// rule-hit event; hybrid records no separate event, so its static half is identified by the
-    /// routing approach on the decision row itself.
     pub rule_hit_predicate: &'static str,
+    pub error_flow_types: &'static [FlowType],
     pub amount_expr: &'static str,
     pub currency_expr: &'static str,
     pub cost_saved_bps_expr: &'static str,
     pub multi_objective_outcome_expr: &'static str,
 }
 
+const MULTI_OBJECTIVE_ERROR_FLOW_TYPES: &[FlowType] = &[
+    FlowType::DecideGatewayError,
+    FlowType::UpdateGatewayScoreError,
+    FlowType::UpdateScoreLegacyError,
+];
+
+const HYBRID_ERROR_FLOW_TYPES: &[FlowType] = &[
+    FlowType::RoutingHybridError,
+    FlowType::UpdateGatewayScoreError,
+    FlowType::UpdateScoreLegacyError,
+];
+
 const MULTI_OBJECTIVE_SHAPE: DecisionShape = DecisionShape {
     decision_flow_type: FlowType::DecideGatewayDecision,
-    request_hit_flow_type: FlowType::DecideGatewayRequestHit,
-    error_flow_type: FlowType::DecideGatewayError,
     rule_hit_predicate: "flow_type = 'decide_gateway_rule_hit'",
+    error_flow_types: MULTI_OBJECTIVE_ERROR_FLOW_TYPES,
     amount_expr: PAYMENT_AMOUNT_EXPR,
     currency_expr: "JSONExtractString(assumeNotNull(details), 'request', 'paymentInfo', 'currency')",
     cost_saved_bps_expr:
@@ -213,10 +203,9 @@ const MULTI_OBJECTIVE_SHAPE: DecisionShape = DecisionShape {
 
 const HYBRID_SHAPE: DecisionShape = DecisionShape {
     decision_flow_type: FlowType::RoutingHybridDecision,
-    request_hit_flow_type: FlowType::RoutingHybridRequestHit,
-    error_flow_type: FlowType::RoutingHybridError,
     rule_hit_predicate:
         "flow_type = 'routing_hybrid_decision' AND routing_approach = 'STATIC_ROUTING'",
+    error_flow_types: HYBRID_ERROR_FLOW_TYPES,
     amount_expr: HYBRID_PAYMENT_AMOUNT_EXPR,
     currency_expr: "JSONExtractString(assumeNotNull(details), 'request', 'dynamic_routing_request', 'paymentInfo', 'currency')",
     cost_saved_bps_expr:

@@ -4,6 +4,39 @@ use serde::{Deserialize, Serialize};
 use crate::euclid::types::StaticRoutingAlgorithm;
 use crate::types::routing_configuration::{AlgorithmType, ConfigVariant};
 
+// One event belongs to exactly one of these three families. The write path stamps the family
+// onto the row as its `summary_kind` (`derive_payment_audit_summary_kind`); the read path filters
+// and composes scopes out of the same sets (`clickhouse::common`). Both sides read them here so a
+// new flow type joins its family once.
+
+pub const SUMMARY_KIND_PREVIEW: &str = "preview";
+pub const SUMMARY_KIND_HYBRID: &str = "hybrid";
+pub const SUMMARY_KIND_DYNAMIC: &str = "dynamic";
+
+pub const PAYMENT_AUDIT_PREVIEW_FLOW_TYPES: &[FlowType] = &[
+    FlowType::RoutingEvaluateSingle,
+    FlowType::RoutingEvaluatePriority,
+    FlowType::RoutingEvaluateVolumeSplit,
+    FlowType::RoutingEvaluateAdvanced,
+    FlowType::RoutingEvaluatePreview,
+    FlowType::RoutingEvaluateError,
+];
+
+pub const PAYMENT_AUDIT_HYBRID_FLOW_TYPES: &[FlowType] = &[
+    FlowType::RoutingHybridDecision,
+    FlowType::RoutingHybridError,
+];
+
+pub const PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES: &[FlowType] = &[
+    FlowType::DecideGatewayDecision,
+    FlowType::UpdateGatewayScoreUpdate,
+    FlowType::UpdateScoreLegacyScoreSnapshot,
+    FlowType::DecideGatewayRuleHit,
+    FlowType::DecideGatewayError,
+    FlowType::UpdateGatewayScoreError,
+    FlowType::UpdateScoreLegacyError,
+];
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ApiFlow {

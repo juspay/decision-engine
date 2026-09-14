@@ -15,9 +15,9 @@ Use it when you want to answer questions like:
 - what structured event payload was captured at each step
 
 Every payment is one entry. Its trail holds every audit event recorded for that payment,
-whatever produced it: the rule evaluation, the gateway decision, the later score update, and
+whatever produced it - the rule evaluation, the gateway decision, the later score update, and
 any errors. A payment routed through `/routing/hybrid` reads as `routing_hybrid_decision`
-(Hybrid Routing — one event carrying the whole hybrid request and response, the connector
+(Hybrid Routing - one event carrying the whole hybrid request and response, the connector
 scores and the selection reason) → `update_gateway_score_update` (Update Gateway).
 
 The page is designed for exact lookups first and broad operator filtering second.
@@ -28,24 +28,12 @@ The page supports these filters:
 
 - `payment_id`
 - `request_id`
-- `routing_kind` — the "Routing type" select, which replaced the page's tabs:
-  `multi_objective` (direct `/decide-gateway` decisions and their score updates, excluding
-  debit routing), `rule_based` (direct `/routing/evaluate` decisions), `debit_routing`
-  (`NTW_BASED_ROUTING` decisions), `hybrid` (payments routed through `/routing/hybrid`). A
-  payment is listed under exactly one kind, by precedence: hybrid, then multi-objective (an SR
-  decision exists), then rule based (only rule evaluations exist) — so a payment id that carries
-  both a rule evaluation and an SR decision is listed under Multi-objective only. A listed
-  payment's trail always shows all of its events.
+- `routing_kind`
 - `gateway`
 - `route`
 - `status`
 - `flow_type`
 - time window: `15m`, `1h`, `12h`, `1d`, `1w`
-
-The API also accepts `scope=all|dynamic|preview` (default `all`). `dynamic` is the live
-decision path (SR decisions, score updates and hybrid calls) and `preview` the direct
-`/routing/evaluate` decisions, the narrower views the old tabs read; `/analytics/preview-trace`
-is `scope=preview`.
 
 Use an exact `payment_id` when you have it. If you only have a request trace, use `request_id`.
 Payment Audit is always merchant-scoped by the authenticated JWT or API key. The route does not
@@ -79,9 +67,7 @@ The read path is split intentionally:
 
 - exact `payment_id` / `request_id` lookups read the raw `analytics_domain_events` timeline
 - broad search results read the pre-aggregated `analytics_payment_audit_lookup_summaries`,
-  merging its per-kind rows (`preview`, `hybrid`, `dynamic`) into one row per payment; the
-  `multi_objective` and `debit_routing` kinds fall back to the raw rows because
-  `routing_approach` is not carried in the rollup
+  merging its per-kind rows (`preview`, `hybrid`, `dynamic`) into one row per payment.
 
 Both views correlate events through the write-time `lookup_key`, which prefers `payment_id` and
 falls back to `request_id`.

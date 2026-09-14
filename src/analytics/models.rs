@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::analytics::flow::AnalyticsRoute;
+use crate::analytics::flow::{
+    AnalyticsRoute, SUMMARY_KIND_DYNAMIC, SUMMARY_KIND_HYBRID, SUMMARY_KIND_PREVIEW,
+};
 
 pub const MAX_ANALYTICS_LOOKBACK_MS: i64 = 18 * 30 * 24 * 60 * 60 * 1000;
 pub const MIN_ANALYTICS_PAGE: usize = 1;
@@ -413,8 +415,8 @@ impl PaymentAuditScope {
     pub const fn summary_kinds(self) -> Option<&'static [&'static str]> {
         match self {
             Self::All => None,
-            Self::Dynamic => Some(&["dynamic", "hybrid"]),
-            Self::Preview => Some(&["preview"]),
+            Self::Dynamic => Some(&[SUMMARY_KIND_DYNAMIC, SUMMARY_KIND_HYBRID]),
+            Self::Preview => Some(&[SUMMARY_KIND_PREVIEW]),
         }
     }
 }

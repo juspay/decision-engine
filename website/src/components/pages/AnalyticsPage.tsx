@@ -694,6 +694,38 @@ function RoutingAlignmentCard({
   )
 }
 
+/** One labelled bar in the hybrid split cards: name, figure, bar, and an optional note under it. */
+function HybridBarRow({
+  label,
+  value,
+  pct,
+  color,
+  hint,
+}: {
+  label: string
+  value: string
+  pct: number
+  color: string
+  hint?: string
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[13px] font-medium text-slate-900 dark:text-white leading-[18px]">{label}</p>
+        <p className="text-[13px] font-semibold tabular-nums text-slate-500 dark:text-[#8a8a93] leading-[18px]">
+          {value}
+        </p>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-[#141822]">
+        <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+      </div>
+      {hint ? (
+        <p className="text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">{hint}</p>
+      ) : null}
+    </div>
+  )
+}
+
 function HybridRoutingSplitCard({ split }: { split: AnalyticsHybridSplit | null }) {
   const outcomes = useMemo(() => {
     if (!split) return []
@@ -751,23 +783,14 @@ function HybridRoutingSplitCard({ split }: { split: AnalyticsHybridSplit | null 
               {outcomes.map((row) => {
                 const pct = (row.count / total) * 100
                 return (
-                  <div key={row.key} className="space-y-2">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-[13px] font-medium text-slate-900 dark:text-white leading-[18px]">
-                        {row.label}
-                      </p>
-                      <p className="text-[13px] font-semibold tabular-nums text-slate-500 dark:text-[#8a8a93] leading-[18px]">
-                        {formatNumber(row.count, 0)} · {formatPercent(pct / 100)}
-                      </p>
-                    </div>
-                    <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-[#141822]">
-                      <div
-                        className="h-full rounded-full"
-                        style={{ width: `${pct}%`, backgroundColor: row.color }}
-                      />
-                    </div>
-                    <p className="text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">{row.hint}</p>
-                  </div>
+                  <HybridBarRow
+                    key={row.key}
+                    label={row.label}
+                    value={`${formatNumber(row.count, 0)} · ${formatPercent(pct / 100)}`}
+                    pct={pct}
+                    color={row.color}
+                    hint={row.hint}
+                  />
                 )
               })}
             </div>
@@ -795,25 +818,13 @@ function HybridRoutingSplitCard({ split }: { split: AnalyticsHybridSplit | null 
           {split?.static_connectors.length ? (
             <div className="space-y-3">
               {split.static_connectors.map((item, index) => (
-                <div key={item.connector} className="space-y-2">
-                  <div className="flex items-center justify-between gap-3">
-                    <p className="text-[13px] font-medium text-slate-900 dark:text-white leading-[18px]">
-                      {item.connector}
-                    </p>
-                    <p className="text-[13px] font-semibold tabular-nums text-slate-500 dark:text-[#8a8a93] leading-[18px]">
-                      {formatNumber(item.count, 0)}
-                    </p>
-                  </div>
-                  <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-[#141822]">
-                    <div
-                      className="h-full rounded-full"
-                      style={{
-                        width: `${(item.count / maxConnectorCount) * 100}%`,
-                        backgroundColor: CHART_COLORS[index % CHART_COLORS.length],
-                      }}
-                    />
-                  </div>
-                </div>
+                <HybridBarRow
+                  key={item.connector}
+                  label={item.connector}
+                  value={formatNumber(item.count, 0)}
+                  pct={(item.count / maxConnectorCount) * 100}
+                  color={CHART_COLORS[index % CHART_COLORS.length]}
+                />
               ))}
             </div>
           ) : (

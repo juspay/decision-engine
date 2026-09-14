@@ -7,7 +7,10 @@ use crate::analytics::models::{
 };
 use crate::error::ApiError;
 
-use super::super::common::{fetch_all, fetch_one, static_flow_type_in_sql, DOMAIN_TABLE};
+use super::super::common::{
+    fetch_all, fetch_one, static_flow_type_in_sql, DOMAIN_TABLE, PAYMENT_AUDIT_HYBRID_FLOW_TYPES,
+    STATIC_ROUTING_APPROACH,
+};
 use super::super::filters::{base_window_filters, merchant_filter};
 use super::super::query::{BoundQueryBuilder, FilterClause, OrderClause};
 use super::super::time::effective_window_bounds;
@@ -18,11 +21,6 @@ const DYNAMIC_STATUS_EXPR: &str =
     "JSONExtractString(assumeNotNull(details), 'selection_reason', 'dynamic_status')";
 const STATIC_CONNECTORS_EXPR: &str =
     "JSONExtractString(assumeNotNull(details), 'selection_reason', 'static_connectors')";
-const HYBRID_EVENT_FLOW_TYPES: &[FlowType] = &[
-    FlowType::RoutingHybridDecision,
-    FlowType::RoutingHybridError,
-];
-const STATIC_ROUTING_APPROACH: &str = "STATIC_ROUTING";
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct SplitRow {
@@ -72,7 +70,7 @@ pub async fn load(
     builder.extend_filters(merchant_filter(&query.merchant_id));
     builder.add_filter(FilterClause::raw(format!(
         "flow_type IN {}",
-        static_flow_type_in_sql(HYBRID_EVENT_FLOW_TYPES)
+        static_flow_type_in_sql(PAYMENT_AUDIT_HYBRID_FLOW_TYPES)
     )));
 
     let row = fetch_one::<SplitRow>(builder.build(client)).await?;

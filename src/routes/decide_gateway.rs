@@ -105,27 +105,6 @@ impl IntoResponse for DecidedGateway {
     }
 }
 
-/// The analytics identity a decider run is recorded under. (`/routing/hybrid` runs the same
-/// decider directly and records one event for its whole call instead — see
-/// `routes::hybrid_routing`.)
-pub(crate) struct DeciderAnalyticsFlows {
-    pub request_hit: FlowType,
-    pub decision: FlowType,
-    pub error: FlowType,
-    pub metric_label: &'static str,
-}
-
-impl DeciderAnalyticsFlows {
-    pub(crate) fn decide_gateway() -> Self {
-        Self {
-            request_hit: FlowType::DecideGatewayRequestHit,
-            decision: FlowType::DecideGatewayDecision,
-            error: FlowType::DecideGatewayError,
-            metric_label: "decide_gateway",
-        }
-    }
-}
-
 /// Runs the decider and records the request hit, the decision and any failure. Callers that
 /// already hold a parsed request use this directly; `decide_gateway` wraps it with the raw-body
 /// read and parse-failure reporting that only an HTTP entry point can do.
@@ -135,11 +114,10 @@ pub(crate) async fn run_decider_with_analytics(
     global_request_id: Option<String>,
     trace_id: Option<String>,
     cpu_start: Instant,
-    flows: DeciderAnalyticsFlows,
 ) -> Result<DecidedGateway, ErrorResponse> {
     let auth_type = payload.auth_type();
     DomainAnalyticsEvent::record_request_hit(
-        AnalyticsFlowContext::new(ApiFlow::DynamicRouting, flows.request_hit),
+        AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayRequestHit),
         AnalyticsRoute::DecideGateway,
         Some(payload.merchant_id.clone()),
         Some(payload.payment_id().to_string()),
@@ -154,7 +132,7 @@ pub(crate) async fn run_decider_with_analytics(
             let routing_approach = decided_gateway.routing_approach.to_string();
 
             DomainAnalyticsEvent::record_decision(
-                AnalyticsFlowContext::new(ApiFlow::DynamicRouting, flows.decision),
+                AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayDecision),
                 Some(payload.merchant_id.clone()),
                 Some(routing_approach),
                 Some(decided_gateway.decided_gateway.clone()),
@@ -188,7 +166,7 @@ pub(crate) async fn run_decider_with_analytics(
                 payload.country(),
             );
             metrics::API_REQUEST_COUNTER
-                .with_label_values(&[flows.metric_label, "success"])
+                .with_label_values(&["decide_gateway", "success"])
                 .inc();
             Ok(decided_gateway)
         }
@@ -199,7 +177,7 @@ pub(crate) async fn run_decider_with_analytics(
                 e.routing_approach.as_ref(),
             );
             DomainAnalyticsEvent::record_error(
-                AnalyticsFlowContext::new(ApiFlow::DynamicRouting, flows.error),
+                AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayError),
                 AnalyticsRoute::DecideGateway,
                 Some(payload.merchant_id.clone()),
                 Some(payload.payment_id().to_string()),
@@ -220,7 +198,7 @@ pub(crate) async fn run_decider_with_analytics(
                 auth_type,
             );
             metrics::API_REQUEST_COUNTER
-                .with_label_values(&[flows.metric_label, "failure"])
+                .with_label_values(&["decide_gateway", "failure"])
                 .inc();
             Err(e)
         }
@@ -296,7 +274,6 @@ pub async fn decide_gateway(
                 global_request_id,
                 trace_id,
                 cpu_start,
-                DeciderAnalyticsFlows::decide_gateway(),
             )
             .await
         }

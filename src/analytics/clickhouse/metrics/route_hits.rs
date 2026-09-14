@@ -64,12 +64,6 @@ async fn load_score_feedback(
     start_ms: i64,
     end_ms: i64,
 ) -> Result<i64, ApiError> {
-    let builder = score_feedback_builder(query, start_ms, end_ms);
-    let row = fetch_one::<ScoreFeedbackRow>(builder.build(client)).await?;
-    Ok(row.count as i64)
-}
-
-fn score_feedback_builder(query: &AnalyticsQuery, start_ms: i64, end_ms: i64) -> BoundQueryBuilder {
     let decision_flow_type = decision_shape(query.routing_kind).decision_flow_type;
 
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
@@ -96,5 +90,6 @@ fn score_feedback_builder(query: &AnalyticsQuery, start_ms: i64, end_ms: i64) ->
         ],
     ));
 
-    builder
+    let row = fetch_one::<ScoreFeedbackRow>(builder.build(client)).await?;
+    Ok(row.count as i64)
 }

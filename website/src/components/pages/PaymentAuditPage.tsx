@@ -27,6 +27,19 @@ import {
 } from '../../lib/timeRange'
 
 import { PageHeading } from '../ui/PageHeading'
+import {
+  eventPhase as auditEventPhase,
+  flowTypeValue,
+  humanizeAuditValue,
+  isDecisionFlow,
+  routeLabel,
+  stageLabel,
+} from '../../lib/auditLabels'
+
+/** Decision Audit files rule evaluations under "Rule Decision" — see `eventPhase`. */
+function eventPhase(event: PaymentAuditEvent) {
+  return auditEventPhase(event, 'Rule Decision')
+}
 const STATUS_OPTIONS = [
   { value: '', label: 'Any status' },
   { value: 'success', label: 'Success' },
@@ -108,37 +121,6 @@ function looksLikeRequestIdentifier(value: string) {
   )
 }
 
-function flowTypeValue(event: PaymentAuditEvent) {
-  return event.flow_type || ''
-}
-
-function isErrorFlow(flowType: string) {
-  return flowType.endsWith('_error')
-}
-
-function isPreviewFlow(flowType: string) {
-  return flowType.startsWith('routing_evaluate_') && flowType !== 'routing_evaluate_request_hit'
-}
-
-function isRuleHitFlow(flowType: string) {
-  return flowType === 'decide_gateway_rule_hit'
-}
-
-function isUpdateFlow(flowType: string) {
-  return flowType.startsWith('update_gateway_score_') || flowType.startsWith('update_score_legacy_')
-}
-
-function isHybridFlow(flowType: string) {
-  return flowType.startsWith('routing_hybrid_')
-}
-
-function isDecisionFlow(flowType: string) {
-  return (
-    (flowType.startsWith('decide_gateway_') || isHybridFlow(flowType)) &&
-    !isRuleHitFlow(flowType)
-  )
-}
-
 function queryString(params: Record<string, string | number | undefined>) {
   const search = new URLSearchParams()
   Object.entries(params).forEach(([key, value]) => {
@@ -216,53 +198,8 @@ function formatRelative(ms: number) {
   return `${diffDays}d ago`
 }
 
-function humanizeAuditValue(value?: string | null) {
-  if (!value) return ''
-  const normalized = value
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase()
-
-  return normalized.replace(/\b\w/g, (char) => char.toUpperCase())
-}
-
 function compactMeta(parts: Array<string | null | undefined | false>) {
   return parts.filter(Boolean).join(' · ')
-}
-
-function routeLabel(route?: string | null) {
-  if (!route) return 'Unknown route'
-  if (route === 'decision_gateway' || route === 'decide_gateway') return 'Decide Gateway'
-  if (route === 'update_gateway_score') return 'Update Gateway'
-  if (route === 'routing_evaluate') return 'Rule Evaluate'
-  if (route === 'routing_hybrid') return 'Hybrid Routing'
-  return humanizeAuditValue(route)
-}
-
-function stageLabel(event: PaymentAuditEvent) {
-  const flowType = flowTypeValue(event)
-  if (event.event_stage === 'hybrid_routed' || isHybridFlow(flowType)) return 'Hybrid Routing'
-  if (event.event_stage === 'gateway_decided') return 'Decide Gateway'
-  if (event.event_stage === 'score_updated') return 'Update Gateway'
-  if (event.event_stage === 'rule_applied') return 'Rule Evaluate'
-  if (event.event_stage === 'preview_evaluated' || isPreviewFlow(flowType)) {
-    return 'Decision Result'
-  }
-  if (isErrorFlow(flowType)) return 'Errors'
-  return humanizeAuditValue(event.event_stage || flowType)
-}
-
-function eventPhase(event: PaymentAuditEvent) {
-  const flowType = flowTypeValue(event)
-  if (isHybridFlow(flowType) || event.event_stage === 'hybrid_routed') return 'Hybrid Routing'
-  if (isDecisionFlow(flowType) || event.event_stage === 'gateway_decided') return 'Decide Gateway'
-  if (isRuleHitFlow(flowType) || event.event_stage === 'rule_applied') return 'Rule Evaluate'
-  if (isPreviewFlow(flowType) || event.event_stage === 'preview_evaluated') {
-    return 'Rule Decision'
-  }
-  if (isUpdateFlow(flowType) || event.event_stage === 'score_updated') return 'Update Gateway'
-  return 'Errors'
 }
 
 function isDecideGatewayEvent(event: PaymentAuditEvent) {

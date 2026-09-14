@@ -4,9 +4,8 @@ use crate::analytics::models::{
 };
 
 use super::common::{
-    payment_audit_flow_types, static_flow_type_array_sql, static_flow_type_in_sql,
-    PAYMENT_AUDIT_HYBRID_FLOW_TYPES, PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES,
-    PAYMENT_AUDIT_PREVIEW_FLOW_TYPES,
+    payment_audit_flow_types_in_sql, static_flow_type_array_sql, PAYMENT_AUDIT_HYBRID_FLOW_TYPES,
+    PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES, PAYMENT_AUDIT_PREVIEW_FLOW_TYPES,
 };
 use super::query::FilterClause;
 use super::time::{effective_payment_audit_window_bounds, payment_audit_summary_bucket_bounds};
@@ -75,9 +74,19 @@ fn scope_flow_type_filters(scope: PaymentAuditScope) -> Vec<FilterClause> {
     }
     filters.push(FilterClause::raw(format!(
         "flow_type IN {}",
-        static_flow_type_in_sql(payment_audit_flow_types(scope))
+        payment_audit_flow_types_in_sql(scope)
     )));
     filters
+}
+
+/// The `summary_kind` predicate for a scope, or `None` when the scope reads every kind.
+pub fn summary_kind_filter(scope: PaymentAuditScope) -> Option<FilterClause> {
+    let kinds = scope
+        .summary_kinds()?
+        .iter()
+        .map(|kind| kind.to_string())
+        .collect::<Vec<_>>();
+    FilterClause::in_list("summary_kind", &kinds)
 }
 
 pub fn payment_audit_raw_filters(
@@ -249,15 +258,7 @@ pub fn payment_audit_summary_bucket_filters(
             vec![end_ms.into()],
         ),
     ];
-    if let Some(kinds) = scope.summary_kinds() {
-        let kinds = kinds
-            .iter()
-            .map(|kind| kind.to_string())
-            .collect::<Vec<_>>();
-        if let Some(filter) = FilterClause::in_list("summary_kind", &kinds) {
-            filters.push(filter);
-        }
-    }
+    filters.extend(summary_kind_filter(scope));
     filters
 }
 

@@ -10,7 +10,7 @@ use super::super::common::{
 };
 use super::super::filters::{
     payment_audit_needs_raw_rows, payment_audit_routing_kind_filters,
-    payment_audit_summary_scope_filters, payment_audit_timeline_filters,
+    payment_audit_summary_scope_filters, payment_audit_timeline_filters, summary_kind_filter,
 };
 use super::super::query::{BindArg, BoundQueryBuilder, FilterClause, OrderClause, SqlFragment};
 use super::super::time::effective_payment_audit_window_bounds;
@@ -66,15 +66,7 @@ fn merged_summary_fragment(query: &PaymentAuditQuery, scope: PaymentAuditScope) 
         "error_codes_state".to_string(),
     ]);
     source.add_filter(FilterClause::eq("merchant_id", query.merchant_id.clone()));
-    if let Some(kinds) = scope.summary_kinds() {
-        let kinds = kinds
-            .iter()
-            .map(|kind| kind.to_string())
-            .collect::<Vec<_>>();
-        if let Some(filter) = FilterClause::in_list("summary_kind", &kinds) {
-            source.add_filter(filter);
-        }
-    }
+    source.extend_filters(summary_kind_filter(scope));
 
     let source = source.into_fragment();
     let mut builder = BoundQueryBuilder::from_fragment(SqlFragment::with_binds(

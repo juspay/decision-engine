@@ -1,3 +1,4 @@
+use crate::analytics::clickhouse::common::STATIC_ROUTING_APPROACH;
 use crate::analytics::{
     global_request_id_from_headers, serialize_details, trace_id_from_headers, AnalyticsFlowContext,
     AnalyticsRoute, ApiFlow, DomainAnalyticsEvent, FlowType,
@@ -120,21 +121,7 @@ struct HybridRoutingSuccessDetail<'a> {
     response: &'a serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
     score_context: Option<&'a serde_json::Value>,
-    selection_reason: HybridRoutingSelectionReason<'a>,
-}
-
-#[derive(Serialize)]
-struct HybridRoutingSelectionReason<'a> {
-    decided_gateway: Option<&'a str>,
-    routing_approach: &'a str,
-    /// `success`: the SR decision answered; `fallback`: it failed and the static/fallback
-    /// connectors answered; `skipped`: no dynamic request was made.
-    dynamic_status: &'a str,
-    /// The connectors the static rule step chose, comma-separated (a scalar, so the audit page
-    /// renders the reason as label/value rows).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    static_connectors: Option<String>,
-    priority_logic_tag: Option<&'a str>,
+    selection_reason: &'a HybridDecisionSummary,
 }
 
 #[derive(Serialize)]
@@ -143,14 +130,42 @@ struct HybridRoutingFailureDetail<'a> {
     error: serde_json::Value,
 }
 
-/// What a successful hybrid call resolved to, for its audit event.
+/// What a successful hybrid call resolved to. This is the `selection_reason` of its audit event,
+/// so the field order here is the order the audit page reads. `score_context` rides along for the
+/// detail's own field and stays out of the reason.
+#[derive(Serialize)]
 struct HybridDecisionSummary {
     decided_gateway: Option<String>,
     routing_approach: String,
-    priority_logic_tag: Option<String>,
-    score_context: Option<serde_json::Value>,
     dynamic_status: &'static str,
+    #[serde(
+        serialize_with = "serialize_connector_list",
+        skip_serializing_if = "Vec::is_empty"
+    )]
     static_connectors: Vec<String>,
+    priority_logic_tag: Option<String>,
+    #[serde(skip_serializing)]
+    score_context: Option<serde_json::Value>,
+}
+
+impl HybridDecisionSummary {
+    fn static_only(dynamic_status: &'static str, connectors: Vec<String>) -> Self {
+        Self {
+            decided_gateway: connectors.first().cloned(),
+            routing_approach: STATIC_ROUTING_APPROACH.to_string(),
+            dynamic_status,
+            static_connectors: connectors,
+            priority_logic_tag: None,
+            score_context: None,
+        }
+    }
+}
+
+fn serialize_connector_list<S>(connectors: &[String], serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(&connectors.join(", "))
 }
 
 /// A hybrid call that answers with an error response.
@@ -160,8 +175,6 @@ struct HybridFailure {
     error_message: String,
     error: serde_json::Value,
 }
-
-const STATIC_ROUTING_APPROACH: &str = "STATIC_ROUTING";
 
 #[axum::debug_handler]
 pub async fn hybrid_routing_evaluate(
@@ -362,14 +375,7 @@ pub async fn hybrid_routing_evaluate(
                 let fallback_ids = extract_gateway_identifiers(&dynamic_fallback);
                 Ok(Ok((
                     res,
-                    HybridDecisionSummary {
-                        decided_gateway: fallback_ids.first().cloned(),
-                        routing_approach: STATIC_ROUTING_APPROACH.to_string(),
-                        priority_logic_tag: None,
-                        score_context: None,
-                        dynamic_status: "fallback",
-                        static_connectors: fallback_ids,
-                    },
+                    HybridDecisionSummary::static_only("fallback", fallback_ids),
                 )))
             }
             (false, Some(Err(dynamic_err)), None, _, _) => {
@@ -386,14 +392,7 @@ pub async fn hybrid_routing_evaluate(
                 insert_evaluated_connectors(&mut res, &static_gateways)?;
                 Ok(Ok((
                     res,
-                    HybridDecisionSummary {
-                        decided_gateway: static_connector_ids.first().cloned(),
-                        routing_approach: STATIC_ROUTING_APPROACH.to_string(),
-                        priority_logic_tag: None,
-                        score_context: None,
-                        dynamic_status: "skipped",
-                        static_connectors: static_connector_ids,
-                    },
+                    HybridDecisionSummary::static_only("skipped", static_connector_ids),
                 )))
             }
             (false, None, Some(dynamic_fallback), None, _) => {
@@ -401,14 +400,7 @@ pub async fn hybrid_routing_evaluate(
                 let fallback_ids = extract_gateway_identifiers(&dynamic_fallback);
                 Ok(Ok((
                     res,
-                    HybridDecisionSummary {
-                        decided_gateway: fallback_ids.first().cloned(),
-                        routing_approach: STATIC_ROUTING_APPROACH.to_string(),
-                        priority_logic_tag: None,
-                        score_context: None,
-                        dynamic_status: "skipped",
-                        static_connectors: fallback_ids,
-                    },
+                    HybridDecisionSummary::static_only("skipped", fallback_ids),
                 )))
             }
             (false, None, _, None, Some(static_err)) => {
@@ -427,14 +419,7 @@ pub async fn hybrid_routing_evaluate(
             }
             (false, None, _, None, None) => Ok(Ok((
                 res,
-                HybridDecisionSummary {
-                    decided_gateway: None,
-                    routing_approach: STATIC_ROUTING_APPROACH.to_string(),
-                    priority_logic_tag: None,
-                    score_context: None,
-                    dynamic_status: "skipped",
-                    static_connectors: static_connector_ids,
-                },
+                HybridDecisionSummary::static_only("skipped", static_connector_ids),
             ))),
         }
     };
@@ -481,14 +466,7 @@ pub async fn hybrid_routing_evaluate(
                     request: &recorded_request,
                     response: &response_value,
                     score_context: summary.score_context.as_ref(),
-                    selection_reason: HybridRoutingSelectionReason {
-                        decided_gateway: summary.decided_gateway.as_deref(),
-                        routing_approach: &summary.routing_approach,
-                        dynamic_status: summary.dynamic_status,
-                        static_connectors: (!summary.static_connectors.is_empty())
-                            .then(|| summary.static_connectors.join(", ")),
-                        priority_logic_tag: summary.priority_logic_tag.as_deref(),
-                    },
+                    selection_reason: &summary,
                 }),
                 payment_id.clone(),
                 Some(request_id.clone()),

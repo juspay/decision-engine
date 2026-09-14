@@ -6,8 +6,7 @@ use crate::analytics::models::AnalyticsQuery;
 use crate::error::ApiError;
 
 use super::super::common::{
-    decision_shape, fetch_one, static_flow_type_in_sql, DOMAIN_TABLE, OVERVIEW_ERROR_FLOW_TYPES,
-    OVERVIEW_SCORE_FLOW_TYPES,
+    decision_shape, fetch_one, static_flow_type_in_sql, DOMAIN_TABLE, OVERVIEW_SCORE_FLOW_TYPES,
 };
 use super::super::filters::{base_window_filters, merchant_filter};
 use super::super::query::BoundQueryBuilder;
@@ -55,7 +54,7 @@ pub async fn load(
         ),
         format!(
             "countIf(flow_type IN {}) AS error_count",
-            static_flow_type_in_sql(OVERVIEW_ERROR_FLOW_TYPES)
+            static_flow_type_in_sql(shape.error_flow_types)
         ),
         format!(
             "countIf(flow_type = '{}' AND JSONExtractBool(assumeNotNull(details), 'request', 'is_smart_retry') = true) AS smart_retry_count",
