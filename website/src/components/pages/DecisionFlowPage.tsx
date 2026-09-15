@@ -112,7 +112,7 @@ const STAGES: StageDef[] = [
     configuredBy: 'Nothing to configure — but the fields your integration sends decide which later stages can run.',
     api: 'POST /decide-gateway',
     view: (_stack, connectorCount) => ({
-      badge: 'Always runs',
+      badge: ALWAYS_RUNS,
       variant: 'blue',
       dim: false,
       kind: 'input',
@@ -166,7 +166,7 @@ const STAGES: StageDef[] = [
   },
   {
     id: 'slot',
-    group: 'Candidates — who can process it',
+    group: 'Who can process it',
     icon: BookOpen,
     name: 'Your routing strategy',
     what: (stack) => {
@@ -208,7 +208,7 @@ const STAGES: StageDef[] = [
   },
   {
     id: 'eligibility',
-    group: 'Candidates — who can process it',
+    group: 'Who can process it',
     icon: Filter,
     name: 'Eligibility check',
     what: (stack) =>
@@ -218,11 +218,11 @@ const STAGES: StageDef[] = [
     runsWhen: 'Whenever the payment’s method type is known.',
     configuredBy: 'Platform payment-method filters (not merchant-editable today).',
     api: 'pm_filters graph inside POST /routing/evaluate',
-    view: () => ({ badge: 'Always runs', variant: 'blue', dim: false, kind: 'hard filter', kindTone: 'filter' }),
+    view: () => ({ badge: ALWAYS_RUNS, variant: 'blue', dim: false, kind: 'hard filter', kindTone: 'filter' }),
   },
   {
     id: 'preferred',
-    group: 'Ordering — who should get it',
+    group: 'Who should get it',
     icon: Star,
     name: 'Preferred gateway',
     what: () =>
@@ -236,7 +236,7 @@ const STAGES: StageDef[] = [
   },
   {
     id: 'priority',
-    group: 'Ordering — who should get it',
+    group: 'Who should get it',
     icon: SlidersHorizontal,
     name: 'Baseline priority',
     what: (stack) =>
@@ -247,7 +247,7 @@ const STAGES: StageDef[] = [
     configuredBy: 'Gateway priority on the merchant account.',
     api: 'merchant_account.gateway_priority',
     view: (stack) => ({
-      badge: 'Always runs',
+      badge: ALWAYS_RUNS,
       variant: 'blue',
       dim: false,
       kind: 'ordering',
@@ -257,7 +257,7 @@ const STAGES: StageDef[] = [
   },
   {
     id: 'sr',
-    group: 'Ordering — who should get it',
+    group: 'Who should get it',
     icon: TrendingUp,
     name: 'Success-rate scoring',
     what: (stack) =>
@@ -284,7 +284,7 @@ const STAGES: StageDef[] = [
   },
   {
     id: 'health',
-    group: 'Ordering — who should get it',
+    group: 'Who should get it',
     icon: Activity,
     name: 'Health penalties',
     what: (stack) =>
@@ -317,7 +317,7 @@ const STAGES: StageDef[] = [
   },
   {
     id: 'cost',
-    group: 'Ordering — who should get it',
+    group: 'Who should get it',
     icon: Coins,
     name: 'Cost optimization',
     what: (stack) =>
@@ -343,7 +343,7 @@ const STAGES: StageDef[] = [
   },
   {
     id: 'commitment',
-    group: 'Ordering — who should get it',
+    group: 'Who should get it',
     icon: Scale,
     name: 'Volume commitment',
     what: () =>
@@ -377,7 +377,7 @@ const STAGES: StageDef[] = [
     configuredBy: '—',
     api: 'DecidedGateway response of POST /decide-gateway',
     view: (stack) => ({
-      badge: 'Always runs',
+      badge: ALWAYS_RUNS,
       variant: 'blue',
       dim: false,
       kind: 'pick winner',
@@ -412,12 +412,15 @@ const STAGES: StageDef[] = [
   },
 ]
 
+/** Stages carrying this badge render no pill — see StageRow. */
+const ALWAYS_RUNS = 'Always runs'
+
 const GROUP_ORDER = [
   'Entry',
   'Experiment layer',
   'Network branch',
-  'Candidates — who can process it',
-  'Ordering — who should get it',
+  'Who can process it',
+  'Who should get it',
   'Decision & learning',
 ]
 
@@ -993,7 +996,9 @@ function StageRow({
                 {view.detail}
               </span>
             ) : null}
-            <Badge variant={view.variant}>{view.badge}</Badge>
+            {/* A stage that always runs has nothing to report: it is drawn at all only because it
+                runs, so the pill just repeated itself down the rail. */}
+            {view.badge === ALWAYS_RUNS ? null : <Badge variant={view.variant}>{view.badge}</Badge>}
             <ChevronRight
               size={12}
               className={`text-slate-400 transition-transform dark:text-[#6d778a] ${open ? 'rotate-90' : ''}`}
