@@ -254,7 +254,7 @@ export function LaneCanvas({
           winner = true
           if (collect) {
             collect.labels.push({ x: laneX(0), y: y1 - 8, kind: 'windot', color: lane.color, laneIndex: i })
-            collect.labels.push({ x: laneX(0), y: y1 + 4, kind: 'endchip', text: lane.name, color: lane.color, laneIndex: i, pinned: true })
+            collect.labels.push({ x: laneX(0), y: y0 + gap.height * 0.3, kind: 'endchip', text: lane.name, color: lane.color, laneIndex: i, pinned: true })
           }
         } else {
           d += ` L ${x} ${y0 + gap.height * 0.42}`
@@ -269,7 +269,7 @@ export function LaneCanvas({
         // payment — but the arriving candidates get named, leftmost slot = current leader.
         d += ` L ${x} ${y0} L ${x} ${y1}`
         if (collect) {
-          collect.labels.push({ x, y: y1 - 20, kind: 'endchip', text: lane.name, color: lane.color, laneIndex: i })
+          collect.labels.push({ x, y: y0 + gap.height * 0.3, kind: 'endchip', text: lane.name, color: lane.color, laneIndex: i })
         }
       } else {
         d += ` L ${x} ${y0} L ${x} ${y1}`

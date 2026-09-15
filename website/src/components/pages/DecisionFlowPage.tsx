@@ -884,7 +884,7 @@ function FlowRail({
                         gapKind === 'fan'
                           ? 'h-[58px]'
                           : gapKind === 'converge'
-                            ? 'h-[56px]'
+                            ? 'h-[82px]'
                             : gapKind === 'filter'
                               ? 'h-[62px]'
                               : gapKind === 'split'
@@ -896,7 +896,7 @@ function FlowRail({
                     />
                   ) : null}
                   {stage.id === 'decide' ? (
-                    <div className="relative z-[2] flex items-center gap-2 pb-1 pl-1">
+                    <div className="relative z-[2] flex items-center gap-2 pb-1 pl-1 pt-1">
                       <RefreshCcw size={12} className="text-slate-400 dark:text-[#78849a]" />
                       <span className={type.bodySmall}>outcomes feed tomorrow’s scores</span>
                     </div>
