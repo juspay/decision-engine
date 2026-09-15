@@ -1,5 +1,5 @@
 import type { ElementType, ReactNode } from 'react'
-import { CSSProperties, useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import useSWR from 'swr'
 import {
@@ -39,7 +39,7 @@ import {
   slotAlgorithmSummary,
   volumeSplits,
 } from '../../features/routing/decisionFlow/model'
-import { LaneCanvas, laneBandRight } from '../../features/routing/decisionFlow/LaneCanvas'
+import { LaneCanvas } from '../../features/routing/decisionFlow/LaneCanvas'
 
 type StageId =
   | 'arrive'
@@ -850,16 +850,6 @@ function FlowRail({
         if (stages.length === 0) return null
         return (
           <div key={group}>
-            <p
-              className={`${type.labelSmall} de-flow-heading relative z-[2] pb-2 pt-3`}
-              // Stand clear of the lane band so the ribbons run through this row unbroken. The
-              // indent follows the full lane set, not the ones still live, so it holds still
-              // while the animation cuts and re-admits connectors.
-              style={{ '--de-lane-indent': `${laneBandRight(laneNames.length)}px` } as CSSProperties}
-            >
-              {/* Backstop for a wide lane set, where the indent clamps back over the ribbons. */}
-              <span className="bg-white pr-3 dark:bg-[#11151d]">{group}</span>
-            </p>
             {stages.map((stage) => {
               const gapKind = !firstGapRendered
                 ? 'fan'

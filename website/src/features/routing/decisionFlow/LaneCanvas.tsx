@@ -76,8 +76,6 @@ const SORT_MS = 1400
 const WAVE_MS = 9500
 
 const laneX = (index: number) => LANE_X0 + index * LANE_STEP
-/** x just clear of the rightmost lane column, so page content can sit beside the ribbons. */
-export const laneBandRight = (count: number) => laneX(Math.max(0, count - 1)) + 30
 
 function laneWidth(lane: LaneDef) {
   if (lane.share == null) return 2.5
