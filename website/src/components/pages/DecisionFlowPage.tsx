@@ -847,7 +847,10 @@ function FlowRail({
         if (stages.length === 0) return null
         return (
           <div key={group}>
-            <p className={`${type.labelSmall} relative z-[2] pb-2 pt-3`}>{group}</p>
+            <p className={`${type.labelSmall} relative z-[2] pb-2 pt-3`}>
+              {/* Lanes run down through this row — knock them out from behind the words. */}
+              <span className="bg-white pr-3 dark:bg-[#11151d]">{group}</span>
+            </p>
             {stages.map((stage) => {
               const gapKind = !firstGapRendered
                 ? 'fan'
