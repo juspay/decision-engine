@@ -593,7 +593,7 @@ export function LaneCanvas({
         if (!candidates.length) return
         const victim = candidates[Math.floor(Math.random() * candidates.length)]
         cuts[kind] = victim
-        tweenVisible(victim, cutFraction(victim, gap.top + gap.height * 0.34))
+        tweenVisible(victim, cutFraction(victim, gap.top + gap.height * 0.5 + 1))
         // The name lands as the retracting tip reaches the stage.
         later(() => {
           setMarkers((prev) => [
@@ -657,10 +657,10 @@ export function LaneCanvas({
       const filterGap = gapOf('filter')
       const demoteGap = gapOf('demote')
       if (cuts.filter != null && filterGap) {
-        visRef.current[cuts.filter] = cutFraction(cuts.filter, filterGap.top + filterGap.height * 0.34)
+        visRef.current[cuts.filter] = cutFraction(cuts.filter, filterGap.top + filterGap.height * 0.5 + 1)
       }
       if (cuts.health != null && demoteGap) {
-        visRef.current[cuts.health] = cutFraction(cuts.health, demoteGap.top + demoteGap.height * 0.34)
+        visRef.current[cuts.health] = cutFraction(cuts.health, demoteGap.top + demoteGap.height * 0.5 + 1)
       }
       dirtyRef.current = true
     }
