@@ -882,7 +882,7 @@ function FlowRail({
                       data-lane-gap={gapKind}
                       className={
                         gapKind === 'fan'
-                          ? 'h-[58px]'
+                          ? 'h-[86px]'
                           : gapKind === 'converge'
                             ? 'h-[82px]'
                             : gapKind === 'filter'

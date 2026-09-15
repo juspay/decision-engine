@@ -207,12 +207,12 @@ export function LaneCanvas({
       if (gap.kind === 'fan') {
         const originX = 24
         const originY = y0 + 6
-        d = `M ${originX} ${originY} C ${originX} ${y0 + gap.height * 0.55}, ${x} ${y0 + gap.height * 0.35}, ${x} ${y1}`
+        d = `M ${originX} ${originY} C ${originX} ${y0 + gap.height * 0.42}, ${x} ${y0 + gap.height * 0.18}, ${x} ${y0 + gap.height * 0.52} L ${x} ${y1}`
         if (collect) {
           if (i === 0) collect.labels.push({ x: originX, y: originY, kind: 'dot' })
-          collect.labels.push({ x, y: y1 - 22, kind: 'chip', text: lane.name, color: lane.color })
+          collect.labels.push({ x, y: y1 - 19, kind: 'chip', text: lane.name, color: lane.color })
           if (last && overflow > 0) {
-            collect.labels.push({ x: laneX(lanes.length), y: y1 - 22, kind: 'chip', text: `+${overflow} more` })
+            collect.labels.push({ x: laneX(lanes.length), y: y1 - 19, kind: 'chip', text: `+${overflow} more` })
           }
           if (last && ghost) {
             collect.labels.push({
