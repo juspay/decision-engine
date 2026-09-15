@@ -397,3 +397,15 @@ g.de-lane-cut .de-lane-particle {
   border-color: rgba(52, 211, 153, 0.45) !important;
   background: #06342a !important;
 }
+
+/* The flow's section headings step clear of the lane band so the ribbons run through their row
+   unbroken. Narrow viewports have no room to stand beside the lanes, so there the heading stays
+   left and the knockout behind the words carries it instead. */
+.de-flow-heading {
+  padding-left: 0;
+}
+@media (min-width: 1024px) {
+  .de-flow-heading {
+    padding-left: min(var(--de-lane-indent, 0px), 50%);
+  }
+}
