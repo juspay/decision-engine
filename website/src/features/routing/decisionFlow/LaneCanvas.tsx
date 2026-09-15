@@ -15,13 +15,11 @@ interface LanePath {
 interface LaneLabel {
   x: number
   y: number
-  kind: 'dot' | 'chip' | 'rank' | 'note' | 'pct' | 'windot' | 'endchip' | 'statechip'
+  kind: 'dot' | 'chip' | 'rank' | 'note' | 'pct' | 'windot' | 'statechip'
   text?: string
   color?: string
-  /** endchip/windot only: which lane this belongs to, so the wave engine can slide/hide it. */
+  /** statechip/windot only: which lane this belongs to, so the wave engine can slide/hide it. */
   laneIndex?: number
-  /** endchip only: the deterministic winner's chip stays at the converge point. */
-  pinned?: boolean
   /** statechip only: which gap it reports, and which sort-slot set positions it. */
   gapIndex?: number
   slotIndex?: number
@@ -268,7 +266,7 @@ export function LaneCanvas({
           winner = true
           if (collect) {
             collect.labels.push({ x: laneX(0), y: y1 - 8, kind: 'windot', color: lane.color, laneIndex: i })
-            collect.labels.push({ x: laneX(0), y: y0 + gap.height * 0.3, kind: 'endchip', text: lane.name, color: lane.color, laneIndex: i, pinned: true, gapIndex, slotIndex: orderStep - 1 })
+            collect.labels.push({ x: laneX(0), y: y0 + gap.height * 0.3, kind: 'statechip', text: lane.name, color: lane.color, laneIndex: i, gapIndex, slotIndex: orderStep - 1 })
           }
         } else {
           d += ` L ${x} ${y0 + gap.height * 0.42}`
@@ -283,7 +281,7 @@ export function LaneCanvas({
         // payment — but the arriving candidates get named, leftmost slot = current leader.
         d += ` L ${x} ${y0} L ${x} ${y1}`
         if (collect) {
-          collect.labels.push({ x, y: y0 + gap.height * 0.3, kind: 'endchip', text: lane.name, color: lane.color, laneIndex: i, gapIndex, slotIndex: orderStep - 1 })
+          collect.labels.push({ x, y: y0 + gap.height * 0.3, kind: 'statechip', text: lane.name, color: lane.color, laneIndex: i, gapIndex, slotIndex: orderStep - 1 })
         }
       } else {
         d += ` L ${x} ${y0} L ${x} ${y1}`
@@ -943,7 +941,7 @@ export function LaneCanvas({
               </span>
             )
           }
-          if (label.kind === 'endchip' || label.kind === 'statechip') return null
+          if (label.kind === 'statechip') return null
           if (label.kind === 'pct') {
             return (
               <span

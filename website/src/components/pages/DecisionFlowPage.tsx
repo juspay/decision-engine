@@ -473,6 +473,10 @@ export function DecisionFlowView() {
   const laneKey = JSON.stringify(deriveLanes(stack).lanes)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const laneModel = useMemo(() => deriveLanes(stack), [laneKey])
+  const laneColors = useMemo(
+    () => Object.fromEntries(laneModel.lanes.map((lane) => [lane.name, lane.color])),
+    [laneModel],
+  )
   const connectorCount = laneModel.ghost ? 0 : laneModel.lanes.length + laneModel.overflow
   // Which stages the rail will draw. The canvas measures the spacers between them, so it has to
   // re-measure whenever this changes — stages appear as each config read lands.
@@ -527,6 +531,7 @@ export function DecisionFlowView() {
               loadFailed={loadFailed}
               merchantId={merchantId}
               laneNames={laneModel.lanes.map((lane) => lane.name)}
+              laneColors={laneColors}
               outputOrder={outputOrder}
               openStage={openStage}
               onToggle={(id) => setOpenStage((current) => (current === id ? null : id))}
@@ -831,6 +836,7 @@ function FlowRail({
   loadFailed,
   merchantId,
   laneNames,
+  laneColors,
   outputOrder,
   openStage,
   onToggle,
@@ -841,6 +847,7 @@ function FlowRail({
   loadFailed: boolean
   merchantId: string
   laneNames: string[]
+  laneColors: Record<string, string>
   outputOrder: string[]
   openStage: StageId | null
   onToggle: (id: StageId) => void
@@ -882,6 +889,7 @@ function FlowRail({
                     loadFailed={loadFailed}
                     merchantId={merchantId}
                     laneNames={laneNames}
+                    laneColors={laneColors}
                     outputOrder={outputOrder}
                     open={openStage === stage.id}
                     onToggle={() => onToggle(stage.id)}
@@ -928,6 +936,7 @@ function StageRow({
   loadFailed,
   merchantId,
   laneNames,
+  laneColors,
   outputOrder,
   open,
   onToggle,
@@ -939,6 +948,7 @@ function StageRow({
   loadFailed: boolean
   merchantId: string
   laneNames: string[]
+  laneColors: Record<string, string>
   outputOrder: string[]
   open: boolean
   onToggle: () => void
@@ -975,7 +985,7 @@ function StageRow({
           type="button"
           onClick={onToggle}
           aria-expanded={open}
-          className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]/40"
+          className="relative flex w-full items-center gap-2.5 px-4 py-2.5 text-left focus:outline-none focus-visible:ring-2 focus-visible:ring-[#3b82f6]/40"
         >
           <span
             className={`flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-lg border ${
@@ -989,14 +999,27 @@ function StageRow({
             <Icon size={14} />
           </span>
           <span className="text-[13px] font-semibold text-slate-900 dark:text-white">{stage.name}</span>
+          {/* The decision's output, centred on its own row: the connectors still in play, in the
+              order they would be offered. It tracks the rail, so one dropping out takes its box
+              away as it happens. Inert to pointers so the row still toggles when clicked. */}
+          {stage.id === 'decide' && outputOrder.length ? (
+            <span className="pointer-events-none absolute left-1/2 top-1/2 hidden -translate-x-1/2 -translate-y-1/2 items-center gap-1.5 sm:flex">
+              {outputOrder.map((name) => (
+                <span
+                  key={name}
+                  className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-[3px] font-mono text-[10.5px] text-slate-700 dark:border-[#273141] dark:bg-[#0c1119] dark:text-[#c7cfdb]"
+                >
+                  <span
+                    className="h-[5px] w-[5px] flex-shrink-0 rounded-[2px]"
+                    style={{ background: laneColors[name] ?? '#3b82f6' }}
+                  />
+                  {name}
+                </span>
+              ))}
+            </span>
+          ) : null}
           <span className="ml-auto flex flex-shrink-0 items-center gap-2">
-            {stage.id === 'decide' && outputOrder.length ? (
-              // The decision's actual output: the connectors still in play, in offer order. It
-              // tracks the rail, so a connector dropping out leaves the bracket as it happens.
-              <span className="hidden font-mono text-[11px] text-brand-700 dark:text-[#93c5fd] sm:inline">
-                {outputOrder.map((name) => `[${name}]`).join(' ')}
-              </span>
-            ) : view.detail ? (
+            {view.detail ? (
               <span className="hidden font-mono text-[11px] text-brand-700 dark:text-[#93c5fd] sm:inline">
                 {view.detail}
               </span>
