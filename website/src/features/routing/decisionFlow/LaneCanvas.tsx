@@ -254,7 +254,7 @@ export function LaneCanvas({
           winner = true
           if (collect) {
             collect.labels.push({ x: laneX(0), y: y1 - 8, kind: 'windot', color: lane.color, laneIndex: i })
-            collect.labels.push({ x: laneX(0), y: y0 + gap.height * 0.3, kind: 'endchip', text: lane.name, color: lane.color, laneIndex: i, pinned: true })
+            collect.labels.push({ x: laneX(0), y: y0 + gap.height * 0.3, kind: 'endchip', text: lane.name, color: lane.color, laneIndex: i, pinned: true, gapIndex, slotIndex: orderStep - 1 })
           }
         } else {
           d += ` L ${x} ${y0 + gap.height * 0.42}`
@@ -269,7 +269,7 @@ export function LaneCanvas({
         // payment — but the arriving candidates get named, leftmost slot = current leader.
         d += ` L ${x} ${y0} L ${x} ${y1}`
         if (collect) {
-          collect.labels.push({ x, y: y0 + gap.height * 0.3, kind: 'endchip', text: lane.name, color: lane.color, laneIndex: i })
+          collect.labels.push({ x, y: y0 + gap.height * 0.3, kind: 'endchip', text: lane.name, color: lane.color, laneIndex: i, gapIndex, slotIndex: orderStep - 1 })
         }
       } else {
         d += ` L ${x} ${y0} L ${x} ${y1}`
@@ -305,59 +305,39 @@ export function LaneCanvas({
       group.classList.toggle('de-lane-cut', !full)
     })
     // Markers ride their lane's x at the stage that produced them.
-    // Markers caption the column from the right of the last lane, so they never land on a chip.
-    overlayRef.current?.querySelectorAll<HTMLElement>('[data-marker-lane]').forEach((el) => {
-      el.style.left = `${laneX(lanes.length) + 6}px`
-    })
-    const lastSet = slotSetsRef.current[slotSetsRef.current.length - 1]
-    const isCut = (laneIndex: number) =>
-      cutsRef.current.filter === laneIndex || cutsRef.current.health === laneIndex
-    // Whoever holds the first slot at the end of the rail is the gateway this payment goes to.
-    const winnerLane = (() => {
-      if (deterministicHead) return lanes.findIndex((lane) => lane.name === deterministicHead)
-      const live = lanes
-        .map((_, i) => i)
-        .filter((i) => !isCut(i) && (visRef.current[i] ?? 100) > 1)
-      if (!live.length) return -1
-      return live.reduce((best, i) => {
-        const rankX = lastSet?.[i] ?? laneX(i)
-        const bestX = lastSet?.[best] ?? laneX(best)
-        return rankX < bestX ? i : best
-      }, live[0])
-    })()
-    overlayRef.current?.querySelectorAll<HTMLElement>('.de-end-chip').forEach((chip) => {
-      const laneIndex = Number(chip.dataset.lane)
-      if (Number.isNaN(laneIndex)) return
-      chip.style.opacity = isCut(laneIndex) ? '0' : '1'
-      const won = laneIndex === winnerLane
-      chip.classList.toggle('de-end-win', won)
-      const tick = chip.querySelector<HTMLElement>('[data-win-tick]')
-      const note = chip.querySelector<HTMLElement>('[data-win-note]')
-      const swatch = chip.querySelector<HTMLElement>('[data-lane-swatch]')
-      if (tick) tick.hidden = !won
-      if (note) note.hidden = !won
-      // The tick replaces the colour swatch, so the winner reads as a verdict, not another lane.
-      if (swatch) swatch.hidden = won
-      // A deterministic winner's ribbon always converges to the first slot, so its chip stays
-      // there too rather than chasing the lane's sorted position.
-      chip.style.left = `${chip.dataset.pinned === 'true' ? laneX(0) : laneX(laneIndex)}px`
-    })
-    // The per-stage connector columns: who is still standing after each stage, who just got
-    // knocked out (red, struck through), and who never reaches the stages below.
+    // Chips live in flex rows, so state is all that needs writing: rank, elimination and the
+    // verdict. Nothing here positions anything — the row handles layout.
     const filterIdx = gaps.findIndex((g) => g.kind === 'filter')
     const demoteIdx = gaps.findIndex((g) => g.kind === 'demote')
-    overlayRef.current?.querySelectorAll<HTMLElement>('[data-statechip]').forEach((chip) => {
+    const isCut = (laneIndex: number) =>
+      cutsRef.current.filter === laneIndex || cutsRef.current.health === laneIndex
+    const lastSet = slotSetsRef.current[slotSetsRef.current.length - 1]
+    const rankOf = (laneIndex: number, slotIndex: number) => {
+      const slotX = slotIndex >= 0 ? slotSetsRef.current[slotIndex]?.[laneIndex] : undefined
+      return slotX == null ? null : Math.round((slotX - LANE_X0) / LANE_STEP) + 1
+    }
+    const winnerLane = (() => {
+      if (deterministicHead) return lanes.findIndex((lane) => lane.name === deterministicHead)
+      const live = lanes.map((_, i) => i).filter((i) => !isCut(i) && (visRef.current[i] ?? 100) > 1)
+      if (!live.length) return -1
+      return live.reduce((best, i) => {
+        const x = lastSet?.[i] ?? laneX(i)
+        const bestX = lastSet?.[best] ?? laneX(best)
+        return x < bestX ? i : best
+      }, live[0])
+    })()
+
+    overlayRef.current?.querySelectorAll<HTMLElement>('[data-statechip], [data-endchip]').forEach((chip) => {
       const laneIndex = Number(chip.dataset.lane)
       const gapIndex = Number(chip.dataset.gapIndex)
       const slotIndex = Number(chip.dataset.slotIndex)
       if (Number.isNaN(laneIndex)) return
-      chip.style.left = `${laneX(laneIndex)}px`
-      // Rank after the most recent re-rank above this column, derived from the slot this lane
-      // currently holds. The lane itself never moves, so the colour at a column is stable.
+      const isEnd = chip.dataset.endchip != null
+      const rank = rankOf(laneIndex, slotIndex)
+      // Rank drives the chip's place in the row, so a re-rank visibly reorders them.
+      chip.style.order = String(rank ?? laneIndex + 1)
       const rankEl = chip.querySelector<HTMLElement>('[data-rank]')
-      if (rankEl) {
-        const slotX = slotIndex >= 0 ? slotSetsRef.current[slotIndex]?.[laneIndex] : undefined
-        const rank = slotX == null ? null : Math.round((slotX - LANE_X0) / LANE_STEP) + 1
+      if (rankEl && !isEnd) {
         const text = rank == null ? '' : `#${rank}`
         if (rankEl.textContent !== text) rankEl.textContent = text
         rankEl.hidden = rank == null
@@ -368,20 +348,26 @@ export function LaneCanvas({
       const cutAbove =
         (cutsRef.current.filter === laneIndex && filterIdx >= 0 && gapIndex > filterIdx) ||
         (cutsRef.current.health === laneIndex && demoteIdx >= 0 && gapIndex > demoteIdx)
-      chip.style.opacity = cutAbove ? '0' : '1'
-      // Knocked out at this stage: the chip goes red and strikes through, the way the reference
-      // flow marks the gateway a step removes.
+      chip.style.display = cutAbove ? 'none' : ''
       chip.classList.toggle('de-state-out', cutHere)
       if (cutHere) {
         chip.style.color = isDark ? '#fca5a5' : '#b91c1c'
         chip.style.borderColor = isDark ? 'rgba(248,113,113,0.5)' : 'rgba(239,68,68,0.55)'
         chip.style.background = isDark ? 'rgba(127,29,29,0.35)' : 'rgba(254,226,226,0.95)'
-        chip.style.textDecoration = 'line-through'
-      } else {
+      } else if (!isEnd || laneIndex !== winnerLane) {
         chip.style.color = isDark ? '#9ca7ba' : '#475569'
         chip.style.borderColor = isDark ? '#1e2535' : '#e2e8f0'
         chip.style.background = isDark ? '#0d1118' : '#ffffff'
-        chip.style.textDecoration = 'none'
+      }
+      if (isEnd) {
+        const won = laneIndex === winnerLane && !isCut(laneIndex)
+        chip.classList.toggle('de-end-win', won)
+        const tick = chip.querySelector<HTMLElement>('[data-win-tick]')
+        const note = chip.querySelector<HTMLElement>('[data-win-note]')
+        const swatch = chip.querySelector<HTMLElement>('[data-lane-swatch]')
+        if (tick) tick.hidden = !won
+        if (note) note.hidden = !won
+        if (swatch) swatch.hidden = won
       }
     })
     // The win dot marks a decision that this lane no longer reaches while it is cut.
@@ -749,6 +735,21 @@ export function LaneCanvas({
 
   if (!drawn) return null
 
+  // One row per stage gap: the connector chips for that stage, then its event. Rows sit clear of
+  // every lane, so a ribbon can never run through a chip.
+  const ROW_X = laneX(lanes.length) + 18
+  const gapIndexOfKind = (kind: GapKind) => geomRef.current?.gaps.findIndex((gap) => gap.kind === kind) ?? -1
+  const chipRows = (() => {
+    const rows = new Map<number, { gapIndex: number; y: number; items: LaneLabel[] }>()
+    drawn.labels.forEach((label) => {
+      if (label.kind !== 'statechip' && label.kind !== 'endchip') return
+      const gapIndex = label.gapIndex ?? -1
+      if (!rows.has(gapIndex)) rows.set(gapIndex, { gapIndex, y: label.y, items: [] })
+      rows.get(gapIndex)!.items.push(label)
+    })
+    return [...rows.values()]
+  })()
+
   const markerTone = (tone: Marker['tone'], laneIndex: number) => {
     if (tone === 'ok') return isDark ? '#34d399' : '#047857'
     if (tone === 'warn') return isDark ? '#fbbf24' : '#b45309'
@@ -836,28 +837,74 @@ export function LaneCanvas({
         ))}
       </svg>
       <div ref={overlayRef} aria-hidden="true" className="pointer-events-none absolute inset-0 z-[1]">
-        {markers.map((marker) => {
-          const gap = geomRef.current?.gaps.find((g) => g.kind === marker.gap)
-          if (!gap) return null
-          const color = markerTone(marker.tone, marker.laneIndex)
-          return (
-            <span
-              key={marker.id}
-              data-marker-lane={marker.laneIndex}
-              data-marker-gap={marker.gap}
-              className={`${marker.transient ? 'de-demote-flash' : 'de-cut-marker'} absolute whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-[10px] font-semibold shadow-[0_8px_20px_-10px_rgba(15,23,42,0.55)]`}
-              style={{
-                left: laneX(lanes.length) + 6,
-                top: gap.top + gap.height * 0.5 - 9,
-                color,
-                borderColor: `${color}66`,
-                background: isDark ? `${color}1f` : `${color}14`,
-              }}
-            >
-              {marker.text}
-            </span>
-          )
-        })}
+        {chipRows.map((row) => (
+          <div
+            key={`row-${row.gapIndex}`}
+            data-chiprow
+            className="absolute flex items-center gap-1.5"
+            style={{ left: ROW_X, top: row.y }}
+          >
+            {row.items.map((label, n) => {
+              const isEnd = label.kind === 'endchip'
+              return (
+                <span
+                  key={`${label.laneIndex}-${n}`}
+                  data-statechip={isEnd ? undefined : true}
+                  data-endchip={isEnd ? true : undefined}
+                  data-lane={label.laneIndex}
+                  data-gap-index={label.gapIndex}
+                  data-slot-index={label.slotIndex}
+                  data-pinned={isEnd && label.pinned ? 'true' : undefined}
+                  className={`${isEnd ? 'de-end-chip ' : 'de-state-chip '}flex items-center gap-1 whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-[9.5px] shadow-sm dark:shadow-none`}
+                  style={{
+                    color: isDark ? '#9ca7ba' : '#475569',
+                    borderColor: isDark ? '#1e2535' : '#e2e8f0',
+                    background: isDark ? '#0d1118' : '#ffffff',
+                  }}
+                >
+                  <span
+                    data-lane-swatch
+                    className="h-[5px] w-[5px] flex-shrink-0 rounded-[2px]"
+                    style={{ background: laneColor(label.color ?? '#3b82f6') }}
+                  />
+                  {isEnd ? (
+                    <span data-win-tick className="flex-shrink-0 font-sans font-semibold" hidden>
+                      ✓
+                    </span>
+                  ) : null}
+                  <span>{label.text}</span>
+                  <span data-rank className="flex-shrink-0 tabular-nums opacity-70" hidden />
+                  {isEnd ? (
+                    <span data-win-note className="flex-shrink-0 font-sans" hidden>
+                      wins
+                    </span>
+                  ) : null}
+                </span>
+              )
+            })}
+            {markers
+              .filter((marker) => gapIndexOfKind(marker.gap === 'demote' ? 'demote' : 'filter') === row.gapIndex)
+              .map((marker) => {
+                const color = markerTone(marker.tone, marker.laneIndex)
+                return (
+                  <span
+                    key={marker.id}
+                    data-marker-lane={marker.laneIndex}
+                    className={`${marker.transient ? 'de-demote-flash' : 'de-cut-marker'} ml-2 whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-[10px] font-semibold shadow-[0_8px_20px_-10px_rgba(15,23,42,0.55)]`}
+                    style={{
+                      // Chips carry their rank as flex order, so the event always sorts last.
+                      order: 99,
+                      color,
+                      borderColor: `${color}66`,
+                      background: isDark ? `${color}1f` : `${color}14`,
+                    }}
+                  >
+                    {marker.text}
+                  </span>
+                )
+              })}
+          </div>
+        ))}
         {drawn.labels.map((label, i) => {
           if (label.kind === 'dot') {
             return (
@@ -885,70 +932,25 @@ export function LaneCanvas({
               />
             )
           }
-          if (label.kind === 'chip' || label.kind === 'endchip') {
-            const isEnd = label.kind === 'endchip'
+          if (label.kind === 'chip') {
             return (
               <span
                 key={i}
-                data-lane={isEnd ? label.laneIndex : undefined}
-                data-pinned={isEnd && label.pinned ? 'true' : undefined}
                 title={label.text}
-                className={`${isEnd ? 'de-end-chip ' : ''}absolute flex max-w-[80px] -translate-x-1/2 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-600 shadow-sm dark:border-[#1e2535] dark:bg-[#0d1118] dark:text-[#9ca7ba] dark:shadow-none`}
-                style={{
-                  left: label.x,
-                  top: label.y,
-                  transition: isEnd ? 'left 1s cubic-bezier(0.33, 0, 0.15, 1), opacity 0.5s' : undefined,
-                }}
+                className="absolute flex max-w-[80px] -translate-x-1/2 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-600 shadow-sm dark:border-[#1e2535] dark:bg-[#0d1118] dark:text-[#9ca7ba] dark:shadow-none"
+                style={{ left: label.x, top: label.y }}
               >
                 {label.color ? (
                   <span
-                    data-lane-swatch
                     className="h-[7px] w-[7px] flex-shrink-0 rounded-[3px]"
                     style={{ background: laneColor(label.color) }}
                   />
                 ) : null}
-                {isEnd ? (
-                  <span data-win-tick className="flex-shrink-0 font-sans font-semibold" hidden>
-                    ✓
-                  </span>
-                ) : null}
                 <span className="min-w-0 truncate">{label.text}</span>
-                {isEnd ? (
-                  <span data-win-note className="flex-shrink-0 whitespace-nowrap font-sans" hidden>
-                    wins
-                  </span>
-                ) : null}
               </span>
             )
           }
-          if (label.kind === 'statechip') {
-            return (
-              <span
-                key={i}
-                data-statechip
-                data-lane={label.laneIndex}
-                data-gap-index={label.gapIndex}
-                data-slot-index={label.slotIndex}
-                className="de-state-chip absolute flex max-w-[104px] -translate-x-1/2 items-center gap-1 rounded-md border px-1.5 py-px font-mono text-[9.5px] shadow-sm dark:shadow-none"
-                // Correct on first paint: renderLanes only runs once frames start, and a tab that
-                // never gets one would otherwise show an unstyled chip.
-                style={{
-                  left: label.x,
-                  top: label.y,
-                  color: isDark ? '#9ca7ba' : '#475569',
-                  borderColor: isDark ? '#1e2535' : '#e2e8f0',
-                  background: isDark ? '#0d1118' : '#ffffff',
-                }}
-              >
-                <span
-                  className="h-[5px] w-[5px] flex-shrink-0 rounded-[2px]"
-                  style={{ background: laneColor(label.color ?? '#3b82f6') }}
-                />
-                <span className="min-w-0 truncate">{label.text}</span>
-                <span data-rank className="flex-shrink-0 tabular-nums opacity-70" hidden />
-              </span>
-            )
-          }
+          if (label.kind === 'endchip' || label.kind === 'statechip') return null
           if (label.kind === 'pct') {
             return (
               <span
