@@ -328,22 +328,40 @@ export function LaneCanvas({
       }, live[0])
     })()
 
+    // Where each retracting ribbon currently ends, in the canvas's own coordinates.
+    const ribbonEndY = new Map<number, number>()
+    lanes.forEach((_, i) => {
+      const visible = visRef.current[i] ?? 100
+      if (visible >= 99.5) return
+      const core = laneGroupRefs.current[i]?.querySelector<SVGPathElement>('path[data-lane-core]')
+      if (!core) return
+      const total = core.getTotalLength()
+      if (total > 0) ribbonEndY.set(i, core.getPointAtLength((total * visible) / 100).y)
+    })
+
     overlayRef.current?.querySelectorAll<HTMLElement>('[data-statechip], [data-endchip]').forEach((chip) => {
       const laneIndex = Number(chip.dataset.lane)
       const gapIndex = Number(chip.dataset.gapIndex)
       const slotIndex = Number(chip.dataset.slotIndex)
       if (Number.isNaN(laneIndex)) return
       const isEnd = chip.dataset.endchip != null
-      // The chip sits wherever its lane is at this stage, so a re-rank visibly moves it.
+      // The chip rides its lane. A re-rank row sits at the curve's midpoint, where the ribbon is
+      // exactly half-way between the old and new column — so the chip goes there too and the two
+      // move as one instead of the name snapping ahead of the line.
       const slotX = slotIndex >= 0 ? slotSetsRef.current[slotIndex]?.[laneIndex] : undefined
-      chip.style.left = `${(isEnd ? lastSet?.[laneIndex] : slotX) ?? laneX(laneIndex)}px`
+      const prevX =
+        slotIndex >= 1 ? slotSetsRef.current[slotIndex - 1]?.[laneIndex] ?? laneX(laneIndex) : laneX(laneIndex)
+      const restingX = (isEnd ? lastSet?.[laneIndex] : slotX) ?? laneX(laneIndex)
+      const onCurve = chip.dataset.gapKind === 'sort' && slotX != null
+      chip.style.left = `${onCurve ? (prevX + slotX!) / 2 : restingX}px`
       const cutHere =
         (cutsRef.current.filter === laneIndex && gapIndex === filterIdx) ||
         (cutsRef.current.health === laneIndex && gapIndex === demoteIdx)
-      const cutAbove =
-        (cutsRef.current.filter === laneIndex && filterIdx >= 0 && gapIndex > filterIdx) ||
-        (cutsRef.current.health === laneIndex && demoteIdx >= 0 && gapIndex > demoteIdx)
-      chip.style.display = cutAbove ? 'none' : ''
+      // Rather than blink out, a chip below a cut hides at the moment the retracting ribbon
+      // passes its row — so the names fall away in step with the line, top to bottom.
+      const endY = ribbonEndY.get(laneIndex)
+      const chipY = parseFloat(chip.style.top) || 0
+      chip.style.opacity = endY != null && chipY > endY + 3 ? '0' : '1'
       chip.classList.toggle('de-state-out', cutHere)
       if (cutHere) {
         chip.style.color = isDark ? '#fca5a5' : '#b91c1c'
@@ -832,6 +850,7 @@ export function LaneCanvas({
                 data-lane={label.laneIndex}
                 data-gap-index={label.gapIndex}
                 data-slot-index={label.slotIndex}
+                data-gap-kind={label.gapKind}
                 className={`${isEnd ? 'de-end-chip ' : 'de-state-chip '}absolute flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-[9.5px] shadow-sm dark:shadow-none`}
                 // Opaque by design: the chip sits on its ribbon and has to hide it.
                 style={{
