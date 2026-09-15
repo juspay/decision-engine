@@ -73,7 +73,8 @@ const LANE_STEP = 116
 const REVEAL_MS = 1100
 const CUT_MS = 1200
 const SORT_MS = 1400
-const WAVE_MS = 9500
+/** Beat between one event and the next: a connector dropping out, a re-rank, a demote. */
+const EVENT_MS = 5000
 
 const laneX = (index: number) => LANE_X0 + index * LANE_STEP
 
@@ -691,6 +692,9 @@ export function LaneCanvas({
       })
     }
 
+    // Events land one EVENT_MS apart, the wrap to the next wave included, so the rail changes on
+    // a steady beat instead of firing a burst and then sitting still.
+    const eventsPerWave = geom.sortGapCount === 0 ? 2 : geom.sortGapCount === 1 ? 3 : 4
     const interval = window.setInterval(() => {
       // A hidden tab gets no frames, so a wave would only queue tweens that all resolve at once
       // on return. Skip the beat entirely and pick up on the next one.
@@ -701,8 +705,11 @@ export function LaneCanvas({
       const next = prev.map((order, k) => {
         if (k === 0) return [...order.slice(1), order[0]] // success-rate: rotate the field
         const reordered = [...order]
-        if (Math.random() < 0.65 && reordered.length > 1) {
-          ;[reordered[0], reordered[1]] = [reordered[1], reordered[0]] // cost: cheaper overtakes
+        if (reordered.length > 1) {
+          // Always move something. Skipping the swap left the beat animating to the positions it
+          // already held, which reads as the diagram having stalled rather than as a quiet moment.
+          const i = Math.floor(Math.random() * (reordered.length - 1))
+          ;[reordered[i], reordered[i + 1]] = [reordered[i + 1], reordered[i]] // cheaper overtakes
         }
         return reordered
       })
@@ -717,7 +724,7 @@ export function LaneCanvas({
         later(() => {
           toggleCut('health', 0.55)
           finish()
-        }, 1300)
+        }, EVENT_MS)
         return
       }
       later(() => {
@@ -725,14 +732,15 @@ export function LaneCanvas({
           later(() => {
             toggleCut('health', 0.55)
             if (geom.sortGapCount > 1) {
-              later(() => runSort(1, [next[0], ...prev.slice(1)], next, finish), 950)
+              later(() => runSort(1, [next[0], ...prev.slice(1)], next, finish), EVENT_MS)
             } else {
               finish()
             }
-          }, 850)
+            // The sort has already eaten part of the beat; wait out only the remainder.
+          }, Math.max(0, EVENT_MS - SORT_MS))
         })
-      }, 1100)
-    }, WAVE_MS)
+      }, EVENT_MS)
+    }, eventsPerWave * EVENT_MS)
 
     return () => {
       window.clearInterval(interval)
