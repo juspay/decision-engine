@@ -171,6 +171,7 @@ export function LaneCanvas({
     lane: LaneDef,
     i: number,
     gaps: GapRect[],
+    slotSets: number[][],
     collect?: { labels: LaneLabel[]; sortEnabled: boolean },
   ): { d: string; winner: boolean; animatable: boolean } => {
     const last = i === lanes.length - 1
@@ -178,12 +179,13 @@ export function LaneCanvas({
     let alive = true
     let winner = false
     let orderStep = 0
+    let currentSlotX: number | null = null
     let animatable = false
     let gapIndex = -1
     for (const gap of gaps) {
       gapIndex++
       if (!alive) break
-      const x: number = laneX(i)
+      const x: number = currentSlotX ?? laneX(i)
       // Every stage that can change the candidate list names who is still standing after it,
       // the way the reference flow shows a column of gateways between steps.
       if (collect && (gap.kind === 'filter' || gap.kind === 'sort' || gap.kind === 'demote')) {
@@ -241,11 +243,12 @@ export function LaneCanvas({
         animatable = true
         d += ` L ${x} ${y0} L ${x} ${y1}`
       } else if (gap.kind === 'sort') {
-        // A re-rank changes the ORDER, not the lane. Crossing the ribbons here made the colour
-        // at a given column flip, which reads as two connectors swapping identity — so the
-        // ribbon runs straight and the new rank is stated on the chips instead.
+        // A re-rank moves the connector to its new position: the ribbons cross, and the named
+        // chip rides along, so you can see which connector overtook which.
         animatable = true
-        d += ` L ${x} ${y0} L ${x} ${y1}`
+        const target: number = slotSets[orderStep]?.[i] ?? x
+        d += ` L ${x} ${y0} C ${x} ${y0 + gap.height * 0.62}, ${target} ${y0 + gap.height * 0.38}, ${target} ${y1}`
+        currentSlotX = target
         orderStep++
       } else if (gap.kind === 'demote') {
         d += ` L ${x} ${y0} L ${x} ${y1}`
@@ -288,7 +291,7 @@ export function LaneCanvas({
     lanes.forEach((lane, i) => {
       const group = laneGroupRefs.current[i]
       if (!group) return
-      const { d } = buildLanePath(lane, i, gaps)
+      const { d } = buildLanePath(lane, i, gaps, slotSetsRef.current)
       const visible = visRef.current[i] ?? 100
       const full = visible >= 99.5
       group.querySelectorAll<SVGPathElement>('path[data-lane-mask]').forEach((el) => {
@@ -314,10 +317,6 @@ export function LaneCanvas({
     const isCut = (laneIndex: number) =>
       cutsRef.current.filter === laneIndex || cutsRef.current.health === laneIndex
     const lastSet = slotSetsRef.current[slotSetsRef.current.length - 1]
-    const rankOf = (laneIndex: number, slotIndex: number) => {
-      const slotX = slotIndex >= 0 ? slotSetsRef.current[slotIndex]?.[laneIndex] : undefined
-      return slotX == null ? null : Math.round((slotX - LANE_X0) / LANE_STEP) + 1
-    }
     const winnerLane = (() => {
       if (deterministicHead) return lanes.findIndex((lane) => lane.name === deterministicHead)
       const live = lanes.map((_, i) => i).filter((i) => !isCut(i) && (visRef.current[i] ?? 100) > 1)
@@ -335,13 +334,9 @@ export function LaneCanvas({
       const slotIndex = Number(chip.dataset.slotIndex)
       if (Number.isNaN(laneIndex)) return
       const isEnd = chip.dataset.endchip != null
-      const rank = rankOf(laneIndex, slotIndex)
-      const rankEl = chip.querySelector<HTMLElement>('[data-rank]')
-      if (rankEl && !isEnd) {
-        const text = rank == null ? '' : `#${rank}`
-        if (rankEl.textContent !== text) rankEl.textContent = text
-        rankEl.hidden = rank == null
-      }
+      // The chip sits wherever its lane is at this stage, so a re-rank visibly moves it.
+      const slotX = slotIndex >= 0 ? slotSetsRef.current[slotIndex]?.[laneIndex] : undefined
+      chip.style.left = `${(isEnd ? lastSet?.[laneIndex] : slotX) ?? laneX(laneIndex)}px`
       const cutHere =
         (cutsRef.current.filter === laneIndex && gapIndex === filterIdx) ||
         (cutsRef.current.health === laneIndex && gapIndex === demoteIdx)
@@ -415,7 +410,7 @@ export function LaneCanvas({
       const paths: LanePath[] = []
       const animatable: boolean[] = []
       lanes.forEach((lane, i) => {
-        const built = buildLanePath(lane, i, gaps, collect)
+        const built = buildLanePath(lane, i, gaps, slotSetsRef.current, collect)
         animatable.push(built.animatable)
         if (built.d) {
           const flowDuration = lane.share != null ? Math.min(7, 1.1 / Math.max(lane.share, 0.12)) : 3.4
@@ -676,7 +671,7 @@ export function LaneCanvas({
       lanes.forEach((lane, i) => {
         const group = laneGroupRefs.current[i]
         if (!group) return
-        const { d } = buildLanePath(lane, i, geom.gaps)
+        const { d } = buildLanePath(lane, i, geom.gaps, slotSetsRef.current)
         group.querySelectorAll('animateMotion').forEach((el) => el.setAttribute('path', d))
       })
     }
@@ -859,7 +854,6 @@ export function LaneCanvas({
                   </span>
                 ) : null}
                 <span>{label.text}</span>
-                <span data-rank className="flex-shrink-0 tabular-nums opacity-70" hidden />
                 {isEnd ? (
                   <span data-win-note className="flex-shrink-0 font-sans" hidden>
                     wins
