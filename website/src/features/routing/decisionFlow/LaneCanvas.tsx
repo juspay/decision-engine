@@ -160,6 +160,8 @@ export function LaneCanvas({
   }, [])
 
   const laneColor = (color: string) => (isDark ? color : shade(color, 0.26))
+  /** Painted in the card's own background: the ribbon is knocked out around each chip. */
+  const knockout = `0 0 0 3px ${isDark ? '#11151d' : '#ffffff'}`
   const coreOpacity = ghost ? (isDark ? 0.7 : 0.6) : isDark ? 0.95 : 0.9
   const haloOpacity = ghost ? 0.08 : isDark ? 0.14 : 0.13
   const flowOpacity = ghost ? 0.5 : isDark ? 0.9 : 0.75
@@ -843,6 +845,7 @@ export function LaneCanvas({
                   color: isDark ? '#9ca7ba' : '#475569',
                   borderColor: isDark ? '#1e2535' : '#e2e8f0',
                   background: isDark ? '#0d1118' : '#ffffff',
+                  boxShadow: knockout,
                 }}
               >
                 <span
@@ -918,8 +921,8 @@ export function LaneCanvas({
               <span
                 key={i}
                 title={label.text}
-                className="absolute flex max-w-[80px] -translate-x-1/2 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-600 shadow-sm dark:border-[#1e2535] dark:bg-[#0d1118] dark:text-[#9ca7ba] dark:shadow-none"
-                style={{ left: label.x, top: label.y }}
+                className="absolute flex max-w-[80px] -translate-x-1/2 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:border-[#1e2535] dark:bg-[#0d1118] dark:text-[#9ca7ba]"
+                style={{ left: label.x, top: label.y, boxShadow: knockout }}
               >
                 {label.color ? (
                   <span
@@ -936,8 +939,8 @@ export function LaneCanvas({
             return (
               <span
                 key={i}
-                className="absolute -translate-x-1/2 rounded-md border border-slate-200 bg-white px-1.5 font-mono text-[10px] font-semibold tabular-nums shadow-sm dark:border-[#1e2535] dark:bg-[#0d1118] dark:shadow-none"
-                style={{ left: label.x, top: label.y, color: laneColor(label.color ?? '#3b82f6') }}
+                className="absolute -translate-x-1/2 rounded-md border border-slate-200 bg-white px-1.5 font-mono text-[10px] font-semibold tabular-nums dark:border-[#1e2535] dark:bg-[#0d1118]"
+                style={{ left: label.x, top: label.y, color: laneColor(label.color ?? '#3b82f6'), boxShadow: knockout }}
               >
                 {label.text}
               </span>
