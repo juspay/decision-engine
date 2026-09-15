@@ -387,12 +387,12 @@ g.de-lane-cut .de-lane-particle {
 .de-end-chip.de-end-win {
   color: #047857 !important;
   border-color: rgba(5, 150, 105, 0.5) !important;
-  background: rgba(209, 250, 229, 0.95) !important;
+  background: #d1fae5 !important;
   max-width: none;
 }
 
 .dark .de-end-chip.de-end-win {
   color: #6ee7b7 !important;
   border-color: rgba(52, 211, 153, 0.45) !important;
-  background: rgba(6, 78, 59, 0.45) !important;
+  background: #06342a !important;
 }

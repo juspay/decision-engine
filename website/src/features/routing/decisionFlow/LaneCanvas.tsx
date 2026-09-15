@@ -68,7 +68,7 @@ interface Tween {
 }
 
 const LANE_X0 = 46
-const LANE_STEP = 76
+const LANE_STEP = 116
 
 const REVEAL_MS = 1100
 const CUT_MS = 1200
@@ -334,8 +334,6 @@ export function LaneCanvas({
       if (Number.isNaN(laneIndex)) return
       const isEnd = chip.dataset.endchip != null
       const rank = rankOf(laneIndex, slotIndex)
-      // Rank drives the chip's place in the row, so a re-rank visibly reorders them.
-      chip.style.order = String(rank ?? laneIndex + 1)
       const rankEl = chip.querySelector<HTMLElement>('[data-rank]')
       if (rankEl && !isEnd) {
         const text = rank == null ? '' : `#${rank}`
@@ -735,20 +733,8 @@ export function LaneCanvas({
 
   if (!drawn) return null
 
-  // One row per stage gap: the connector chips for that stage, then its event. Rows sit clear of
-  // every lane, so a ribbon can never run through a chip.
-  const ROW_X = laneX(lanes.length) + 18
-  const gapIndexOfKind = (kind: GapKind) => geomRef.current?.gaps.findIndex((gap) => gap.kind === kind) ?? -1
-  const chipRows = (() => {
-    const rows = new Map<number, { gapIndex: number; y: number; items: LaneLabel[] }>()
-    drawn.labels.forEach((label) => {
-      if (label.kind !== 'statechip' && label.kind !== 'endchip') return
-      const gapIndex = label.gapIndex ?? -1
-      if (!rows.has(gapIndex)) rows.set(gapIndex, { gapIndex, y: label.y, items: [] })
-      rows.get(gapIndex)!.items.push(label)
-    })
-    return [...rows.values()]
-  })()
+  // Events sit in open space past the last lane; the connector chips ride their own lanes.
+  const EVENT_X = laneX(lanes.length) + 24
 
   const markerTone = (tone: Marker['tone'], laneIndex: number) => {
     if (tone === 'ok') return isDark ? '#34d399' : '#047857'
@@ -837,74 +823,69 @@ export function LaneCanvas({
         ))}
       </svg>
       <div ref={overlayRef} aria-hidden="true" className="pointer-events-none absolute inset-0 z-[1]">
-        {chipRows.map((row) => (
-          <div
-            key={`row-${row.gapIndex}`}
-            data-chiprow
-            className="absolute flex items-center gap-1.5"
-            style={{ left: ROW_X, top: row.y }}
-          >
-            {row.items.map((label, n) => {
-              const isEnd = label.kind === 'endchip'
-              return (
+        {drawn.labels
+          .filter((label) => label.kind === 'statechip' || label.kind === 'endchip')
+          .map((label, i) => {
+            const isEnd = label.kind === 'endchip'
+            return (
+              <span
+                key={`chip-${label.gapIndex}-${label.laneIndex}-${i}`}
+                data-statechip={isEnd ? undefined : true}
+                data-endchip={isEnd ? true : undefined}
+                data-lane={label.laneIndex}
+                data-gap-index={label.gapIndex}
+                data-slot-index={label.slotIndex}
+                className={`${isEnd ? 'de-end-chip ' : 'de-state-chip '}absolute flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-[9.5px] shadow-sm dark:shadow-none`}
+                // Opaque by design: the chip sits on its ribbon and has to hide it.
+                style={{
+                  left: label.x,
+                  top: label.y,
+                  color: isDark ? '#9ca7ba' : '#475569',
+                  borderColor: isDark ? '#1e2535' : '#e2e8f0',
+                  background: isDark ? '#0d1118' : '#ffffff',
+                }}
+              >
                 <span
-                  key={`${label.laneIndex}-${n}`}
-                  data-statechip={isEnd ? undefined : true}
-                  data-endchip={isEnd ? true : undefined}
-                  data-lane={label.laneIndex}
-                  data-gap-index={label.gapIndex}
-                  data-slot-index={label.slotIndex}
-                  data-pinned={isEnd && label.pinned ? 'true' : undefined}
-                  className={`${isEnd ? 'de-end-chip ' : 'de-state-chip '}flex items-center gap-1 whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-[9.5px] shadow-sm dark:shadow-none`}
-                  style={{
-                    color: isDark ? '#9ca7ba' : '#475569',
-                    borderColor: isDark ? '#1e2535' : '#e2e8f0',
-                    background: isDark ? '#0d1118' : '#ffffff',
-                  }}
-                >
-                  <span
-                    data-lane-swatch
-                    className="h-[5px] w-[5px] flex-shrink-0 rounded-[2px]"
-                    style={{ background: laneColor(label.color ?? '#3b82f6') }}
-                  />
-                  {isEnd ? (
-                    <span data-win-tick className="flex-shrink-0 font-sans font-semibold" hidden>
-                      ✓
-                    </span>
-                  ) : null}
-                  <span>{label.text}</span>
-                  <span data-rank className="flex-shrink-0 tabular-nums opacity-70" hidden />
-                  {isEnd ? (
-                    <span data-win-note className="flex-shrink-0 font-sans" hidden>
-                      wins
-                    </span>
-                  ) : null}
-                </span>
-              )
-            })}
-            {markers
-              .filter((marker) => gapIndexOfKind(marker.gap === 'demote' ? 'demote' : 'filter') === row.gapIndex)
-              .map((marker) => {
-                const color = markerTone(marker.tone, marker.laneIndex)
-                return (
-                  <span
-                    key={marker.id}
-                    data-marker-lane={marker.laneIndex}
-                    className={`${marker.transient ? 'de-demote-flash' : 'de-cut-marker'} ml-2 whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-[10px] font-semibold shadow-[0_8px_20px_-10px_rgba(15,23,42,0.55)]`}
-                    style={{
-                      // Chips carry their rank as flex order, so the event always sorts last.
-                      order: 99,
-                      color,
-                      borderColor: `${color}66`,
-                      background: isDark ? `${color}1f` : `${color}14`,
-                    }}
-                  >
-                    {marker.text}
+                  data-lane-swatch
+                  className="h-[5px] w-[5px] flex-shrink-0 rounded-[2px]"
+                  style={{ background: laneColor(label.color ?? '#3b82f6') }}
+                />
+                {isEnd ? (
+                  <span data-win-tick className="flex-shrink-0 font-sans font-semibold" hidden>
+                    ✓
                   </span>
-                )
-              })}
-          </div>
-        ))}
+                ) : null}
+                <span>{label.text}</span>
+                <span data-rank className="flex-shrink-0 tabular-nums opacity-70" hidden />
+                {isEnd ? (
+                  <span data-win-note className="flex-shrink-0 font-sans" hidden>
+                    wins
+                  </span>
+                ) : null}
+              </span>
+            )
+          })}
+        {markers.map((marker) => {
+          const gap = geomRef.current?.gaps.find((g) => g.kind === marker.gap)
+          if (!gap) return null
+          const color = markerTone(marker.tone, marker.laneIndex)
+          return (
+            <span
+              key={marker.id}
+              data-marker-lane={marker.laneIndex}
+              className={`${marker.transient ? 'de-demote-flash' : 'de-cut-marker'} absolute whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-[10px] font-semibold shadow-[0_8px_20px_-10px_rgba(15,23,42,0.55)]`}
+              style={{
+                left: EVENT_X,
+                top: gap.top + gap.height * 0.5 - 9,
+                color,
+                borderColor: `${color}66`,
+                background: isDark ? `${color}1f` : `${color}14`,
+              }}
+            >
+              {marker.text}
+            </span>
+          )
+        })}
         {drawn.labels.map((label, i) => {
           if (label.kind === 'dot') {
             return (
