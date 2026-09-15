@@ -113,6 +113,7 @@ export function LaneCanvas({
   lanes,
   ghost,
   deterministicHead,
+  onOutput,
   overflow = 0,
   stageKey,
 }: {
@@ -120,6 +121,8 @@ export function LaneCanvas({
   lanes: LaneDef[]
   ghost: boolean
   deterministicHead: string | null
+  /** Connectors reaching the decision, in offer order; fires only when the set or order changes. */
+  onOutput?: (names: string[]) => void
   /** Connectors the strategy references beyond the drawn lanes — rendered as a "+N more" chip. */
   overflow?: number
   /** Which stages the rail is currently rendering. Stages appear as configuration loads, which
@@ -136,6 +139,10 @@ export function LaneCanvas({
   const laneGroupRefs = useRef<Array<SVGGElement | null>>([])
   const svgRef = useRef<SVGSVGElement | null>(null)
   const overlayRef = useRef<HTMLDivElement | null>(null)
+  /** Held in a ref so a caller passing a fresh closure never re-runs the measure/frame effects. */
+  const onOutputRef = useRef(onOutput)
+  onOutputRef.current = onOutput
+  const outputSigRef = useRef<string | null>(null)
   /** Per sort-gap (success-rate, cost), each lane's x below that gap. */
   const slotSetsRef = useRef<number[][]>([])
   /** Visible fraction of each lane, 0-100 against pathLength=100. The single mask authority. */
@@ -319,16 +326,24 @@ export function LaneCanvas({
     const isCut = (laneIndex: number) =>
       cutsRef.current.filter === laneIndex || cutsRef.current.health === laneIndex
     const lastSet = slotSetsRef.current[slotSetsRef.current.length - 1]
-    const winnerLane = (() => {
-      if (deterministicHead) return lanes.findIndex((lane) => lane.name === deterministicHead)
-      const live = lanes.map((_, i) => i).filter((i) => !isCut(i) && (visRef.current[i] ?? 100) > 1)
-      if (!live.length) return -1
-      return live.reduce((best, i) => {
-        const x = lastSet?.[i] ?? laneX(i)
-        const bestX = lastSet?.[best] ?? laneX(best)
-        return x < bestX ? i : best
-      }, live[0])
-    })()
+    // The connectors that actually reach the decision, in the order they would be offered.
+    // A 0% leg is excluded outright: its ribbon ends at the split, so unlike a wave cut it never
+    // reaches this point at all — a re-rank could otherwise rotate it into the lead and it would
+    // read as the chosen connector while carrying no traffic.
+    const liveOrder = lanes
+      .map((_, i) => i)
+      .filter((i) => lanes[i].share !== 0 && !isCut(i) && (visRef.current[i] ?? 100) > 1)
+      .sort((a, b) => (lastSet?.[a] ?? laneX(a)) - (lastSet?.[b] ?? laneX(b)))
+    if (deterministicHead) {
+      const head = lanes.findIndex((lane) => lane.name === deterministicHead)
+      if (head >= 0) liveOrder.splice(0, 0, ...liveOrder.splice(liveOrder.indexOf(head), 1))
+    }
+    const outputNames = liveOrder.map((i) => lanes[i].name)
+    const outputSig = outputNames.join('\u0000')
+    if (outputSig !== outputSigRef.current) {
+      outputSigRef.current = outputSig
+      onOutputRef.current?.(outputNames)
+    }
 
     // Where each retracting ribbon currently ends, in the canvas's own coordinates.
     const ribbonEndY = new Map<number, number>()
@@ -341,17 +356,15 @@ export function LaneCanvas({
       if (total > 0) ribbonEndY.set(i, core.getPointAtLength((total * visible) / 100).y)
     })
 
-    overlayRef.current?.querySelectorAll<HTMLElement>('[data-statechip], [data-endchip]').forEach((chip) => {
+    overlayRef.current?.querySelectorAll<HTMLElement>('[data-statechip]').forEach((chip) => {
       const laneIndex = Number(chip.dataset.lane)
       const gapIndex = Number(chip.dataset.gapIndex)
       const slotIndex = Number(chip.dataset.slotIndex)
       if (Number.isNaN(laneIndex)) return
-      const isEnd = chip.dataset.endchip != null
-      // The chip rides its lane. A re-rank row sits at the curve's midpoint, where the ribbon is
-      // exactly half-way between the old and new column — so the chip goes there too and the two
-      // move as one instead of the name snapping ahead of the line.
+      // The chip rides its lane: it takes the column its lane holds below this gap, so during a
+      // re-rank the name travels with the ribbon instead of snapping ahead of it.
       const slotX = slotIndex >= 0 ? slotSetsRef.current[slotIndex]?.[laneIndex] : undefined
-      chip.style.left = `${(isEnd ? lastSet?.[laneIndex] : slotX) ?? laneX(laneIndex)}px`
+      chip.style.left = `${slotX ?? laneX(laneIndex)}px`
       const cutHere =
         (cutsRef.current.filter === laneIndex && gapIndex === filterIdx) ||
         (cutsRef.current.health === laneIndex && gapIndex === demoteIdx)
@@ -365,20 +378,10 @@ export function LaneCanvas({
         chip.style.color = isDark ? '#fca5a5' : '#b91c1c'
         chip.style.borderColor = isDark ? 'rgba(248,113,113,0.5)' : 'rgba(239,68,68,0.55)'
         chip.style.background = isDark ? 'rgba(127,29,29,0.35)' : 'rgba(254,226,226,0.95)'
-      } else if (!isEnd || laneIndex !== winnerLane) {
+      } else {
         chip.style.color = isDark ? '#9ca7ba' : '#475569'
         chip.style.borderColor = isDark ? '#1e2535' : '#e2e8f0'
         chip.style.background = isDark ? '#0d1118' : '#ffffff'
-      }
-      if (isEnd) {
-        const won = laneIndex === winnerLane && !isCut(laneIndex)
-        chip.classList.toggle('de-end-win', won)
-        const tick = chip.querySelector<HTMLElement>('[data-win-tick]')
-        const note = chip.querySelector<HTMLElement>('[data-win-note]')
-        const swatch = chip.querySelector<HTMLElement>('[data-lane-swatch]')
-        if (tick) tick.hidden = !won
-        if (note) note.hidden = !won
-        if (swatch) swatch.hidden = won
       }
     })
     // The win dot marks a decision that this lane no longer reaches while it is cut.
@@ -844,19 +847,17 @@ export function LaneCanvas({
       </svg>
       <div ref={overlayRef} aria-hidden="true" className="pointer-events-none absolute inset-0 z-[1]">
         {drawn.labels
-          .filter((label) => label.kind === 'statechip' || label.kind === 'endchip')
+          .filter((label) => label.kind === 'statechip')
           .map((label, i) => {
-            const isEnd = label.kind === 'endchip'
             return (
               <span
                 key={`chip-${label.gapIndex}-${label.laneIndex}-${i}`}
-                data-statechip={isEnd ? undefined : true}
-                data-endchip={isEnd ? true : undefined}
+                data-statechip
                 data-lane={label.laneIndex}
                 data-gap-index={label.gapIndex}
                 data-slot-index={label.slotIndex}
                 data-gap-kind={label.gapKind}
-                className={`${isEnd ? 'de-end-chip ' : 'de-state-chip '}absolute flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-[9.5px] shadow-sm dark:shadow-none`}
+                className="de-state-chip absolute flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-[9.5px] shadow-sm dark:shadow-none"
                 // Opaque by design: the chip sits on its ribbon and has to hide it.
                 style={{
                   left: label.x,
@@ -872,17 +873,7 @@ export function LaneCanvas({
                   className="h-[5px] w-[5px] flex-shrink-0 rounded-[2px]"
                   style={{ background: laneColor(label.color ?? '#3b82f6') }}
                 />
-                {isEnd ? (
-                  <span data-win-tick className="flex-shrink-0 font-sans font-semibold" hidden>
-                    ✓
-                  </span>
-                ) : null}
                 <span>{label.text}</span>
-                {isEnd ? (
-                  <span data-win-note className="flex-shrink-0 font-sans" hidden>
-                    wins
-                  </span>
-                ) : null}
               </span>
             )
           })}

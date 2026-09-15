@@ -383,17 +383,4 @@ g.de-lane-cut .de-lane-particle {
 }
 
 /* The gateway the payment is handed to: the arriving chip turns into a verdict. */
-.de-end-chip.de-end-win {
-  box-shadow: 0 0 0 3px #ffffff !important;
-  color: #047857 !important;
-  border-color: rgba(5, 150, 105, 0.5) !important;
-  background: #d1fae5 !important;
-  max-width: none;
-}
 
-.dark .de-end-chip.de-end-win {
-  box-shadow: 0 0 0 3px #11151d !important;
-  color: #6ee7b7 !important;
-  border-color: rgba(52, 211, 153, 0.45) !important;
-  background: #06342a !important;
-}

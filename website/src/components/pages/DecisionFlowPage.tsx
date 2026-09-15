@@ -435,6 +435,8 @@ export function DecisionFlowView() {
   const debitRoutingFlag = useDebitRoutingFlag(merchantId)
   const merchantFeatures = useMerchantFeatures(merchantId || undefined)
   const [openStage, setOpenStage] = useState<StageId | null>(null)
+  /** Connectors still reaching the decision, in offer order — the rail's live output. */
+  const [outputOrder, setOutputOrder] = useState<string[]>([])
   const flowRef = useRef<HTMLDivElement>(null)
 
   const { data: activeAlgorithms, isLoading: activeLoading, error: activeError } = useSWR<RoutingAlgorithm[]>(
@@ -516,6 +518,7 @@ export function DecisionFlowView() {
               deterministicHead={laneModel.deterministicHead}
               overflow={laneModel.overflow}
               stageKey={stageKey}
+              onOutput={setOutputOrder}
             />
             <FlowRail
               stack={stack}
@@ -524,6 +527,7 @@ export function DecisionFlowView() {
               loadFailed={loadFailed}
               merchantId={merchantId}
               laneNames={laneModel.lanes.map((lane) => lane.name)}
+              outputOrder={outputOrder}
               openStage={openStage}
               onToggle={(id) => setOpenStage((current) => (current === id ? null : id))}
             />
@@ -827,6 +831,7 @@ function FlowRail({
   loadFailed,
   merchantId,
   laneNames,
+  outputOrder,
   openStage,
   onToggle,
 }: {
@@ -836,6 +841,7 @@ function FlowRail({
   loadFailed: boolean
   merchantId: string
   laneNames: string[]
+  outputOrder: string[]
   openStage: StageId | null
   onToggle: (id: StageId) => void
 }) {
@@ -876,6 +882,7 @@ function FlowRail({
                     loadFailed={loadFailed}
                     merchantId={merchantId}
                     laneNames={laneNames}
+                    outputOrder={outputOrder}
                     open={openStage === stage.id}
                     onToggle={() => onToggle(stage.id)}
                   />
@@ -921,6 +928,7 @@ function StageRow({
   loadFailed,
   merchantId,
   laneNames,
+  outputOrder,
   open,
   onToggle,
 }: {
@@ -931,6 +939,7 @@ function StageRow({
   loadFailed: boolean
   merchantId: string
   laneNames: string[]
+  outputOrder: string[]
   open: boolean
   onToggle: () => void
 }) {
@@ -981,7 +990,13 @@ function StageRow({
           </span>
           <span className="text-[13px] font-semibold text-slate-900 dark:text-white">{stage.name}</span>
           <span className="ml-auto flex flex-shrink-0 items-center gap-2">
-            {view.detail ? (
+            {stage.id === 'decide' && outputOrder.length ? (
+              // The decision's actual output: the connectors still in play, in offer order. It
+              // tracks the rail, so a connector dropping out leaves the bracket as it happens.
+              <span className="hidden font-mono text-[11px] text-brand-700 dark:text-[#93c5fd] sm:inline">
+                {outputOrder.map((name) => `[${name}]`).join(' ')}
+              </span>
+            ) : view.detail ? (
               <span className="hidden font-mono text-[11px] text-brand-700 dark:text-[#93c5fd] sm:inline">
                 {view.detail}
               </span>
