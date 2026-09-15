@@ -191,7 +191,8 @@ export function LaneCanvas({
       if (collect && (gap.kind === 'filter' || gap.kind === 'sort' || gap.kind === 'demote')) {
         collect.labels.push({
           x,
-          y: gap.top + gap.height * 0.5 - 8,
+          // Below the crossing on a re-rank row, mid-gap everywhere else.
+          y: gap.top + (gap.kind === 'sort' ? gap.height - 19 : gap.height * 0.5 - 8),
           kind: 'statechip',
           text: lane.name,
           color: lane.color,
@@ -349,11 +350,7 @@ export function LaneCanvas({
       // exactly half-way between the old and new column — so the chip goes there too and the two
       // move as one instead of the name snapping ahead of the line.
       const slotX = slotIndex >= 0 ? slotSetsRef.current[slotIndex]?.[laneIndex] : undefined
-      const prevX =
-        slotIndex >= 1 ? slotSetsRef.current[slotIndex - 1]?.[laneIndex] ?? laneX(laneIndex) : laneX(laneIndex)
-      const restingX = (isEnd ? lastSet?.[laneIndex] : slotX) ?? laneX(laneIndex)
-      const onCurve = chip.dataset.gapKind === 'sort' && slotX != null
-      chip.style.left = `${onCurve ? (prevX + slotX!) / 2 : restingX}px`
+      chip.style.left = `${(isEnd ? lastSet?.[laneIndex] : slotX) ?? laneX(laneIndex)}px`
       const cutHere =
         (cutsRef.current.filter === laneIndex && gapIndex === filterIdx) ||
         (cutsRef.current.health === laneIndex && gapIndex === demoteIdx)
