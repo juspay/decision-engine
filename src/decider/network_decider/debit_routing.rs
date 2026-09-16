@@ -52,6 +52,7 @@ pub async fn perform_debit_routing(
                         latency: None,
                         multi_objective_info: None,
                         volume_steer_info: None,
+                        ab_test_info: None,
                     });
                 }
             }

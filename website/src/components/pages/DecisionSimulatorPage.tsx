@@ -335,6 +335,11 @@ interface SimulationResult {
   steerSrHead?: string | null
   /** Commitments that wanted this payment and the gate that stopped each. */
   steerBlocked?: BlockedCommitment[] | null
+  // Which A/B experiment arm routed this payment, straight from the decide response. Absent
+  // when no experiment applied — the control arm is also inferable from routingApproach, but
+  // the variant arm is not, so the backend has to tell us.
+  abArm?: 'control' | 'variant' | null
+  abArmAlgorithm?: string | null
 }
 
 // Soft, sentence-case stat label (vs the all-caps SurfaceLabel) for the cost/auth summary.
@@ -1205,6 +1210,20 @@ function AmountBoundInput({
 // concrete value. Non-Advanced algorithms (Priority/Single) have no conditions
 // so return an empty array.
 // ---------------------------------------------------------------------------
+
+// The backend labels an arm's algorithm by the legs it runs: the reserved 'sr_routing' for a pure
+// SR arm, a saved algorithm id for a rule-only arm, and '<id>+sr_routing' for a hybrid arm, which
+// evaluates the rule and then ranks its connectors by success rate.
+const SR_ARM = 'sr_routing'
+function armTooltip(arm: string, armAlgorithm?: string | null): string {
+  if (!armAlgorithm) return `${arm} arm`
+  if (armAlgorithm === SR_ARM) return `${arm} arm — success-rate routing`
+  const [ruleId, ...rest] = armAlgorithm.split('+')
+  return rest.includes(SR_ARM)
+    ? `${arm} arm — rule ${ruleId}, then ranked by success rate`
+    : `${arm} arm — rule ${armAlgorithm}`
+}
+
 export function DecisionSimulatorPage() {
   const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
@@ -2582,6 +2601,8 @@ export function DecisionSimulatorPage() {
         steerOutcome: decideRes.volume_steer_info?.outcome ?? null,
         steerSrHead: decideRes.volume_steer_info?.srHead ?? null,
         steerBlocked: decideRes.volume_steer_info?.blocked ?? null,
+        abArm: decideRes.ab_test_info?.arm ?? null,
+        abArmAlgorithm: decideRes.ab_test_info?.armAlgorithm ?? null,
       }
     }
 
@@ -3126,6 +3147,7 @@ export function DecisionSimulatorPage() {
     const outcomes = new Set<string>()
     const retryGateways = new Set<string>()
     const retryOutcomes = new Set<string>()
+    const arms = new Set<string>()
     for (const res of deferredSimulationResults) {
       gateways.add(res.decidedGateway)
       if (res.cardNetwork) networks.add(res.cardNetwork)
@@ -3134,6 +3156,7 @@ export function DecisionSimulatorPage() {
       if (res.status) outcomes.add(res.status)
       if (res.retryGateway) retryGateways.add(res.retryGateway)
       if (res.retryStatus) retryOutcomes.add(res.retryStatus)
+      if (res.abArm) arms.add(res.abArm)
     }
     const sorted = (s: Set<string>) => Array.from(s).sort()
     return {
@@ -3144,8 +3167,13 @@ export function DecisionSimulatorPage() {
       outcomes: sorted(outcomes),
       retryGateways: sorted(retryGateways),
       retryOutcomes: sorted(retryOutcomes),
+      arms: sorted(arms),
     }
   }, [deferredSimulationResults])
+
+  // The Arm column earns its width only once an experiment is actually routing this run's
+  // traffic — otherwise every row would read "—". Mirrors how the retry columns are gated.
+  const abTestActive = txFilterOptions.arms.length > 0
 
   // Transaction Log rows after applying the column filters, keeping each row's
   // original index so the "#" column stays stable regardless of filtering.
@@ -3166,6 +3194,7 @@ export function DecisionSimulatorPage() {
       if (f.outcome && res.status !== f.outcome) return false
       if (f.retryGateway && (res.retryGateway ?? '') !== f.retryGateway) return false
       if (f.retryOutcome && (res.retryStatus ?? '') !== f.retryOutcome) return false
+      if (f.arm && (res.abArm ?? '') !== f.arm) return false
       if (f.amount && !formatCurrencyValue(res.amount, res.currency).toLowerCase().includes(f.amount.toLowerCase())) return false
       if (f.sr && !srText(res).includes(f.sr)) return false
       if (f.evGap && !(res.evGapTop2 != null ? (res.evGapTop2 * 100).toFixed(2) : '').includes(f.evGap)) return false
@@ -5734,6 +5763,7 @@ export function DecisionSimulatorPage() {
                       <th className="text-left px-3 py-2 whitespace-nowrap">Gateway</th>
                       <th className="text-right px-3 py-2 whitespace-nowrap w-20">SR Score</th>
                       <th className="text-right px-3 py-2 whitespace-nowrap w-20" title="Expected-value gap between the top-two EV-ranked PSPs (% of ticket) — the decision's margin of victory. Small values mean it was a close call.">EV Δ (top 2)</th>
+                      {abTestActive && <th className="text-left px-3 py-2 whitespace-nowrap w-24" title="Which A/B experiment arm routed this payment. Control and variant are assigned deterministically from the payment_id, so the same payment always lands in the same arm.">Arm</th>}
                       <th className="text-left px-3 py-2">Routing</th>
                       <th className="text-left px-3 py-2">Outcome</th>
                       <th className="text-right px-3 py-2 whitespace-nowrap">Cost Savings</th>
@@ -5764,6 +5794,7 @@ export function DecisionSimulatorPage() {
                           <th className="px-2 py-1.5">
                             <input value={txFilters.evGap ?? ''} onChange={e => setF('evGap', e.target.value)} placeholder="e.g. 0.12" className={inputCls} />
                           </th>
+                          {abTestActive && <th className="px-2 py-1.5">{sel('arm', txFilterOptions.arms, 'All')}</th>}
                           <th className="px-2 py-1.5">{sel('routing', txFilterOptions.routings, 'All')}</th>
                           <th className="px-2 py-1.5">{sel('outcome', txFilterOptions.outcomes, 'All')}</th>
                           <th className="px-2 py-1.5">
@@ -5816,6 +5847,24 @@ export function DecisionSimulatorPage() {
                             <span className="text-[11px] text-slate-500 leading-4">—</span>
                           )}
                         </td>
+                        {abTestActive && (
+                          <td className="px-3 py-2">
+                            {res.abArm ? (
+                              <span
+                                title={armTooltip(res.abArm, res.abArmAlgorithm)}
+                                className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium ring-1 ring-inset leading-4 ${
+                                  res.abArm === 'variant'
+                                    ? 'bg-violet-50 text-violet-700 ring-violet-200 dark:bg-violet-900/20 dark:text-violet-300 dark:ring-violet-800'
+                                    : 'bg-slate-100 text-slate-700 ring-slate-200 dark:bg-slate-800/60 dark:text-slate-300 dark:ring-slate-700'
+                                }`}
+                              >
+                                {res.abArm === 'variant' ? 'Variant' : 'Control'}
+                              </span>
+                            ) : (
+                              <span className="text-[11px] text-slate-500 leading-4">—</span>
+                            )}
+                          </td>
+                        )}
                         <td className="px-3 py-2">
                           {res.routingApproach?.includes('HEDGING') ? (
                             <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:ring-amber-800 leading-4">Hedging</span>
@@ -5855,7 +5904,7 @@ export function DecisionSimulatorPage() {
                     ))}
                     {txFilteredRows.length === 0 && (
                       <tr>
-                        <td colSpan={smartRetryEnabled ? 12 : 10} className="px-3 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
+                        <td colSpan={(smartRetryEnabled ? 12 : 10) + (abTestActive ? 1 : 0)} className="px-3 py-8 text-center text-sm text-slate-500 dark:text-slate-400">
                           No transactions match the current filters.
                         </td>
                       </tr>
@@ -5873,6 +5922,7 @@ export function DecisionSimulatorPage() {
                         <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums font-normal text-slate-500" title="Average EV margin of victory across these rows">
                           {txColumnTotals.evGapPctAvg != null ? `${txColumnTotals.evGapPctAvg.toFixed(2)}% avg` : ''}
                         </td>
+                        {abTestActive && <td className="px-3 py-2" />}
                         <td className="px-3 py-2" />
                         <td className="px-3 py-2" />
                         <td className="px-3 py-2 text-right whitespace-nowrap tabular-nums text-emerald-700 dark:text-emerald-400">{formatCurrencyValue(txColumnTotals.savings, txColumnTotals.currency)}</td>

@@ -13,6 +13,7 @@ import {
   RoutingAlgorithm,
 } from '../../types/api'
 import { ChevronDown, ChevronUp, Code, Play, Plus, Trash2 } from 'lucide-react'
+import { parseStoredArm } from '../../features/routing/abTesting/state'
 
 import { Notice } from '../ui/Notice'
 // ---------------------------------------------------------------------------
@@ -218,13 +219,14 @@ export function RuleEvaluationPanel({
 
     if (!source && activeAbTest) {
       const abData = (activeAbTest.algorithm_data || activeAbTest.algorithm)?.data as ABTestAlgorithmData | undefined
-      // Try control arm first, then variant — sr_routing has no saved algorithm to extract from.
-      const controlAlgo = abData?.control_algorithm_id
-        ? allAlgorithms.find(a => a.id === abData.control_algorithm_id)
-        : undefined
-      const variantAlgo = abData?.variant_algorithm_id
-        ? allAlgorithms.find(a => a.id === abData.variant_algorithm_id)
-        : undefined
+      // Try control arm first, then variant — an arm that runs only success-rate routing has no
+      // saved rule to extract parameters from.
+      const armAlgo = (side: 'control' | 'variant') => {
+        const id = abData ? parseStoredArm(abData, side).algorithmId : ''
+        return id ? allAlgorithms.find(a => a.id === id) : undefined
+      }
+      const controlAlgo = armAlgo('control')
+      const variantAlgo = armAlgo('variant')
 
       if (controlAlgo && extractRuleParams(controlAlgo, routingKeysConfig).length > 0) {
         source = controlAlgo

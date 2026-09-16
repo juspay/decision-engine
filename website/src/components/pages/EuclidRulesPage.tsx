@@ -10,6 +10,8 @@ import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useCanEditRouting } from '../../store/authStore'
 import { apiPost } from '../../lib/api'
+import { ABTestAlgorithmData } from '../../types/api'
+import { parseStoredArm } from '../../features/routing/abTesting/state'
 import { formatLastModified, lastModifiedMs } from '../../lib/routingRuleTimestamps'
 import { RoutingAlgorithm } from '../../types/api'
 import { RuleBreakdown } from '../routing/euclid/RuleBreakdown'
@@ -57,12 +59,17 @@ export function EuclidRulesPage() {
   const activeAbTestAlgorithm = (activeAlgorithms || []).find(
     (a) => (a.algorithm_data || a.algorithm)?.type === 'ab_test'
   )
+  // Rules an active experiment is running, so they can be flagged as in use. An arm may hold a
+  // rule alongside success-rate routing, so this reads each arm's rule leg rather than an id.
   const abTestArmIds = activeAbTestAlgorithm
     ? (() => {
         const d = (activeAbTestAlgorithm.algorithm_data || activeAbTestAlgorithm.algorithm)?.data as
-          | { control_algorithm_id?: string; variant_algorithm_id?: string }
+          | ABTestAlgorithmData
           | undefined
-        return new Set([d?.control_algorithm_id, d?.variant_algorithm_id].filter(Boolean) as string[])
+        if (!d) return new Set<string>()
+        return new Set(
+          [parseStoredArm(d, 'control').algorithmId, parseStoredArm(d, 'variant').algorithmId].filter(Boolean),
+        )
       })()
     : new Set<string>()
 

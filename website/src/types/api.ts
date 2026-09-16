@@ -13,7 +13,19 @@ export interface DecideGatewayResponse {
   debit_routing_output?: DebitRoutingOutput | null
   multi_objective_info?: MultiObjectiveInfo | null
   volume_steer_info?: VolumeSteerInfo | null
+  ab_test_info?: AbTestInfo | null
   latency: number | null
+}
+
+// Which A/B experiment arm routed this payment. Absent when no experiment applied.
+// The control/static arm is also visible as routing_approach = AB_TEST_STATIC_ALGORITHM, but
+// the variant (SR) arm looks like any other SR decision, so this is the only way to tell them
+// apart.
+export interface AbTestInfo {
+  experimentId: string
+  arm: 'control' | 'variant'
+  // 'sr_routing' for the dynamic arm, otherwise the static algorithm's id.
+  armAlgorithm: string
 }
 
 export type MultiObjectiveOutcome = 'COST_WON' | 'AUTH_WON'
@@ -91,14 +103,30 @@ export interface SrConfigOverride {
   enable_multi_objective?: boolean
   margin?: number
   use_autopilot?: boolean
+  enable_volume_commitment?: boolean
 }
 
+// One arm's routing configuration. `hybrid` runs both legs: the rule narrows the candidate set,
+// then SR picks among the survivors.
+export type ArmStrategy =
+  | { kind: 'rule'; algorithm_id: string }
+  | { kind: 'sr'; sr_config?: SrConfigOverride }
+  | { kind: 'hybrid'; algorithm_id: string; sr_config?: SrConfigOverride }
+  // Carries no settings: resolved into one of the above from the merchant's live configuration
+  // when the experiment is created, so a stored arm is never 'current'.
+  | { kind: 'current' }
+
 export interface ABTestAlgorithmData {
-  control_algorithm_id: string
-  variant_algorithm_id: string
+  control?: ArmStrategy
+  variant?: ArmStrategy
   variant_split_pct: number
   min_sample_size: number
   guardrail_threshold_pp: number
+  // Experiments created before arms could hold both legs. Every arm was either a saved config or
+  // the reserved id 'sr_routing', never both; rows written then are still read this way.
+  // `parseStoredArm` in features/routing/abTesting/state.ts normalizes the two shapes.
+  control_algorithm_id?: string
+  variant_algorithm_id?: string
   variant_sr_config?: SrConfigOverride
   control_sr_config?: SrConfigOverride
 }

@@ -1,8 +1,7 @@
 use crate::app::get_tenant_app_state;
-use crate::euclid::types::{
-    ABTestData, RoutingAlgorithm, RoutingAlgorithmMapper, StaticRoutingAlgorithm,
-};
+use crate::euclid::types::{RoutingAlgorithm, RoutingAlgorithmMapper, StaticRoutingAlgorithm};
 use crate::generics::generic_find_one;
+use crate::types::ab_test::ABTestData;
 use crate::types::service_configuration;
 use diesel::associations::HasTable;
 use diesel::prelude::*;
@@ -80,4 +79,12 @@ pub async fn load_active_ab_test(merchant_id: &str) -> Option<AbTestConfig> {
         }),
         _ => None,
     }
+}
+
+/// Whether a payment for this merchant would be intercepted by an experiment right now — the
+/// same two gates `intercept` applies. Lets a caller that composes routing itself
+/// (`/routing/hybrid`) step aside and let the interceptor own both legs, instead of evaluating
+/// the arm's rule a second time and emitting a duplicate routing event for one payment.
+pub async fn is_intercepting(merchant_id: &str) -> bool {
+    is_enabled(merchant_id).await && load_active_ab_test(merchant_id).await.is_some()
 }

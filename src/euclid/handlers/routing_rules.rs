@@ -28,6 +28,8 @@ use crate::euclid::{
     types::{RoutingAlgorithmMapper, RoutingAlgorithmMapperUpdate},
 };
 use crate::generics::MeshError;
+use crate::routes::merchant_account_config::KnownFeature;
+use crate::types::ab_test::{ArmStrategy, SrConfigOverride};
 use crate::{euclid::types::RoutingAlgorithm, logger, metrics};
 use axum::{extract::Path, response::IntoResponse, Json};
 use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods};
@@ -367,6 +369,207 @@ pub async fn get_sr_dimensions(
     Ok(Json(config))
 }
 
+/// Whether this merchant has set success-rate routing up. `SR_V3_INPUT_CONFIG_<merchant_id>` is
+/// written by `/rule-config` when they configure it and removed when they delete it, so its
+/// presence is the merchant's own statement that SR is part of how they route — not an inference.
+async fn has_success_rate_config(merchant_id: &str) -> bool {
+    crate::types::service_configuration::find_config_by_name(format!(
+        "SR_V3_INPUT_CONFIG_{merchant_id}"
+    ))
+    .await
+    .ok()
+    .flatten()
+    .is_some()
+}
+
+/// Whether autopilot is actually tuning this merchant's SR config right now. Both flags are
+/// required because `sr_auto_calibration::enrolled_merchants` calibrates only merchants that have
+/// both — with either one off no `source = "autopilot"` entry is ever written, and an arm that
+/// honors autopilot scores identically to one that ignores it.
+async fn autopilot_active(merchant_id: &str) -> bool {
+    KnownFeature::Autopilot.read_effective(merchant_id).await
+        && KnownFeature::SrAutoCalibration
+            .read_effective(merchant_id)
+            .await
+}
+
+/// The SR dials a resolved control arm pins, read from the merchant's live feature flags at
+/// create time.
+///
+/// These are the two dials a variant arm can vary, and both are read from shared state the
+/// merchant can change mid-experiment: `enable_multi_objective` falls back to the
+/// `multi_objective_routing_enabled` flag (`flow_new.rs`), and `use_autopilot` defaults to true
+/// (`gw_scoring.rs`) against autopilot-sourced entries that appear as soon as the calibration job
+/// is switched on. Writing today's values down is what keeps the control arm on the pre-experiment
+/// baseline: enabling autopilot to *run* the experiment then moves the variant only, which is the
+/// whole point of running one.
+async fn live_sr_dials(merchant_id: &str) -> SrConfigOverride {
+    SrConfigOverride {
+        enable_multi_objective: Some(
+            KnownFeature::MultiObjectiveRouting
+                .read_effective(merchant_id)
+                .await,
+        ),
+        use_autopilot: Some(autopilot_active(merchant_id).await),
+        ..Default::default()
+    }
+}
+
+/// Resolve an [`ArmStrategy::Current`] arm by reading the merchant's live configuration: their
+/// active payment-slot rule, and whether they have success-rate routing configured. An arm that
+/// has both is a `Hybrid` — which is how a merchant on hybrid routing actually routes, and
+/// therefore what their control arm has to be for the comparison to mean anything.
+///
+/// Resolution happens once, at creation, and the arm is stored as the concrete `Rule`/`Sr`/
+/// `Hybrid` it produced, with every SR dial written down. Both halves are pinned for the same
+/// reason: the control arm is the experiment's baseline, so it has to keep describing what the
+/// merchant ran *at create time* even as they change things afterwards. Pinning the rule holds it
+/// against later edits and re-activations; pinning the dials (see [`live_sr_dials`]) holds it
+/// against the merchant enabling the very feature the variant is testing.
+async fn resolve_current_arm(
+    state: &crate::app::TenantAppState,
+    merchant_id: &str,
+    arm_name: &str,
+) -> Result<ArmStrategy, ContainerError<EuclidErrors>> {
+    let runs_sr = has_success_rate_config(merchant_id).await;
+
+    let mapper = crate::generics::generic_find_one::<
+        <RoutingAlgorithmMapper as HasTable>::Table,
+        _,
+        RoutingAlgorithmMapper,
+    >(
+        &state.db,
+        mapper_dsl::created_by.eq(merchant_id.to_string()).and(
+            mapper_dsl::algorithm_for.eq(crate::euclid::types::AlgorithmType::Payment.to_string()),
+        ),
+    )
+    .await
+    .ok();
+
+    let Some(mapper) = mapper else {
+        // No active rule at all. That is a real configuration — the merchant routes purely on the
+        // dynamic decider — but only if they have it set up.
+        return if runs_sr {
+            Ok(ArmStrategy::Sr {
+                sr_config: Some(live_sr_dials(merchant_id).await),
+            })
+        } else {
+            Err(EuclidErrors::InvalidRequest(format!(
+                "the '{arm_name}' arm follows the merchant's current configuration, but {merchant_id} has neither an active payment routing rule nor success-rate routing configured"
+            ))
+            .into())
+        };
+    };
+
+    let algorithm_id = mapper.routing_algorithm_id;
+    let algorithm = crate::generics::generic_find_one::<
+        <RoutingAlgorithm as HasTable>::Table,
+        _,
+        RoutingAlgorithm,
+    >(&state.db, dsl::id.eq(algorithm_id.clone()))
+    .await
+    .change_context(EuclidErrors::StorageError)?;
+
+    // What is active has to be something an arm can actually run. An experiment already in the
+    // slot would nest; a contract document is not an evaluable routing flow at all.
+    match serde_json::from_str::<StaticRoutingAlgorithm>(&algorithm.algorithm_data) {
+        Ok(StaticRoutingAlgorithm::AbTest(_)) => {
+            return Err(EuclidErrors::InvalidRequest(format!(
+                "{merchant_id} already has an active A/B experiment; end it before starting another"
+            ))
+            .into())
+        }
+        Ok(StaticRoutingAlgorithm::VolumeContract(_)) => {
+            return Err(EuclidErrors::InvalidRequest(format!(
+                "the merchant's active payment configuration is a volume-commitment document and cannot be used as the '{arm_name}' arm"
+            ))
+            .into())
+        }
+        Ok(_) => {}
+        Err(e) => {
+            return Err(EuclidErrors::InvalidRequest(format!(
+                "the merchant's active payment configuration could not be parsed for the '{arm_name}' arm: {e}"
+            ))
+            .into())
+        }
+    }
+
+    Ok(if runs_sr {
+        ArmStrategy::Hybrid {
+            algorithm_id,
+            sr_config: Some(live_sr_dials(merchant_id).await),
+        }
+    } else {
+        ArmStrategy::Rule { algorithm_id }
+    })
+}
+
+/// Replace any `Current` arm in a freshly submitted experiment with the concrete arm it stands
+/// for. Runs before validation and storage, so nothing downstream ever sees an unresolved arm.
+async fn resolve_ab_test_arms(
+    state: &crate::app::TenantAppState,
+    merchant_id: &str,
+    data: &mut crate::types::ab_test::ABTestData,
+) -> Result<(), ContainerError<EuclidErrors>> {
+    for (arm_name, arm) in [
+        ("control", &mut data.control),
+        ("variant", &mut data.variant),
+    ] {
+        if matches!(arm, ArmStrategy::Current) {
+            let resolved = resolve_current_arm(state, merchant_id, arm_name).await?;
+            logger::debug!(
+                "ab_test create: resolved the '{}' arm for {} to {:?}",
+                arm_name,
+                merchant_id,
+                resolved
+            );
+            *arm = resolved;
+        }
+    }
+
+    // A variant that resolves to exactly the control arm splits traffic between two identical
+    // configurations and measures nothing. Worth catching here rather than after a week of data,
+    // and only detectable once `Current` has been resolved.
+    //
+    // Compared on effective dials, not stored shape: an arm that leaves `use_autopilot` unset and
+    // one that pins it to the value the merchant is already running are the same setup to the
+    // decider, and differ only in whether the dial was written down.
+    let live = live_sr_dials(merchant_id).await;
+    if effective_arm(&data.control, &live) == effective_arm(&data.variant, &live) {
+        return Err(EuclidErrors::InvalidRequest(
+            "the variant arm is configured identically to the control arm, so the experiment would compare a setup against itself".to_string(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
+/// An arm with every dial the decider would fall back on written down, so two arms can be
+/// compared on what they actually do rather than on how much of it they spell out. Dials outside
+/// `live` (hedging, elimination, margin, volume commitment) are left as-is: unset means "live
+/// config" for both arms alike, so they already compare equal.
+fn effective_arm(arm: &ArmStrategy, live: &SrConfigOverride) -> ArmStrategy {
+    let fill = |cfg: &Option<SrConfigOverride>| {
+        let mut out = cfg.clone().unwrap_or_default();
+        out.enable_multi_objective = out.enable_multi_objective.or(live.enable_multi_objective);
+        out.use_autopilot = out.use_autopilot.or(live.use_autopilot);
+        Some(out)
+    };
+    match arm {
+        ArmStrategy::Sr { sr_config } => ArmStrategy::Sr {
+            sr_config: fill(sr_config),
+        },
+        ArmStrategy::Hybrid {
+            algorithm_id,
+            sr_config,
+        } => ArmStrategy::Hybrid {
+            algorithm_id: algorithm_id.clone(),
+            sr_config: fill(sr_config),
+        },
+        other => other.clone(),
+    }
+}
+
 pub async fn routing_create(
     headers: axum::http::HeaderMap,
     Json(payload): Json<Value>,
@@ -410,6 +613,19 @@ pub async fn routing_create(
             ));
         }
     }
+    // An A/B experiment may describe either arm as "whatever the merchant runs today"; pin that
+    // to a concrete algorithm now, so the stored experiment is self-contained and the control
+    // arm cannot move once traffic starts splitting.
+    if let StaticRoutingAlgorithm::AbTest(ab_data) = &mut config.algorithm {
+        if let Err(err) = resolve_ab_test_arms(&state, &config.created_by, ab_data).await {
+            metrics::API_REQUEST_COUNTER
+                .with_label_values(&["routing_create", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(err);
+        }
+    }
+
     let create_flow_type = crate::analytics::refine_routing_create_flow_type(&config.algorithm);
     let analytics_created_by = config.created_by.clone();
     let analytics_config_name = config.name.clone();
@@ -751,6 +967,9 @@ struct EvaluationOutcome {
     flow_type: crate::analytics::FlowType,
     ab_experiment_id: Option<String>,
     ab_variant_arm: Option<String>,
+    /// The arm previewed uses success-rate routing, which this flow cannot execute — its
+    /// connector order is the caller's fallback order, not a live ranking.
+    ab_sr_leg_simulated: bool,
 }
 
 /// Evaluates one parsed algorithm against one request's parameters and assembles the
@@ -769,6 +988,8 @@ async fn evaluate_algorithm_data(
     // Populated by the AbTest arm to tag analytics events with experiment context.
     let mut ab_experiment_id: Option<String> = None;
     let mut ab_variant_arm: Option<String> = None;
+    // Whether the arm's dynamic leg was stood in for rather than executed (see preview.rs).
+    let mut ab_sr_leg_simulated = false;
 
     let (output, evaluated_output, rule_name): (Output, Vec<ConnectorInfo>, Option<String>) =
         match algorithm_data {
@@ -850,35 +1071,31 @@ async fn evaluate_algorithm_data(
                 ))
             }
 
+            // Preview only. This resolves the same arm a real payment would get — assignment
+            // is a pure function of the payment id — but it is not the experiment's assignment:
+            // nothing is recorded in-flight here and no outcome is ever filed against it. A
+            // request without a payment id hashes the empty string, so every such preview lands
+            // in the same arm; that is fine for previewing a rule and is exactly why this path
+            // is not allowed to be the split of record.
             StaticRoutingAlgorithm::AbTest(ab_data) => {
                 let payment_id = payload.payment_id.as_deref().unwrap_or("");
-                let arm = crate::decider::gatewaydecider::ab_test::assign_arm(
-                    payment_id,
-                    ab_data.variant_split_pct,
-                );
-                let arm_algorithm_id = if arm == "variant" {
-                    ab_data.variant_algorithm_id.as_str()
-                } else {
-                    ab_data.control_algorithm_id.as_str()
-                };
+                let (arm, strategy) = ab_data.arm_for(payment_id);
                 logger::debug!(
                     "A/B test routing evaluate: payment_id={:?} arm={} algorithm={}",
                     payload.payment_id,
                     arm,
-                    arm_algorithm_id
+                    strategy.label()
                 );
                 ab_experiment_id = Some(algorithm.id.clone());
                 ab_variant_arm = Some(arm.to_string());
 
                 let result = crate::decider::gatewaydecider::ab_test::preview::evaluate_arm(
-                    arm,
-                    arm_algorithm_id,
-                    payload,
-                    &state.db,
+                    arm, strategy, payload, &state.db,
                 )
                 .await;
                 let r = result.map_err(|e| (e, "ab_test_evaluation_failed"))?;
                 preview_flow_type = r.flow_type;
+                ab_sr_leg_simulated = r.sr_leg_simulated;
                 (r.output, r.evaluated_output, r.rule_name)
             }
         };
@@ -917,6 +1134,7 @@ async fn evaluate_algorithm_data(
         flow_type: preview_flow_type,
         ab_experiment_id,
         ab_variant_arm,
+        ab_sr_leg_simulated,
     })
 }
 
@@ -1051,6 +1269,7 @@ pub async fn routing_evaluate(
         flow_type: preview_flow_type,
         ab_experiment_id,
         ab_variant_arm,
+        ab_sr_leg_simulated,
     } = match evaluate_algorithm_data(&state, &algorithm, &algorithm_data, &payload).await {
         Ok(outcome) => outcome,
         Err((e, stage)) => return fail_preview(e, stage),
@@ -1065,6 +1284,7 @@ pub async fn routing_evaluate(
                 rule_name.as_deref(),
                 exp_id,
                 arm,
+                ab_sr_leg_simulated,
             )
         }
         _ => {
@@ -1350,6 +1570,7 @@ pub async fn routing_evaluate_batch(
                     "rule_name": outcome.rule_name,
                     "ab_experiment_id": outcome.ab_experiment_id,
                     "ab_variant_arm": outcome.ab_variant_arm,
+                    "ab_sr_leg_simulated": outcome.ab_sr_leg_simulated,
                 }));
                 results.push(outcome.response);
             }

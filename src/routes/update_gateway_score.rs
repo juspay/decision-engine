@@ -161,8 +161,9 @@ pub async fn update_gateway_score(
                 None,
             );
             // Must happen before check_and_update_gateway_score_ consumes the inflight key.
-            let is_ab_test_payment =
-                crate::decider::gatewaydecider::ab_test::is_static_arm_inflight(&payment_id).await;
+            let suppress_score_event =
+                crate::decider::gatewaydecider::ab_test::is_rule_only_arm_inflight(&payment_id)
+                    .await;
 
             // GSM lookup is a fast in-memory lookup — compute it synchronously so the
             // caller gets the result immediately without waiting for the score update.
@@ -194,7 +195,7 @@ pub async fn update_gateway_score(
 
                 match check_and_update_gateway_score_(payload.clone()).await {
                     Ok(_) => {
-                        if !is_ab_test_payment {
+                        if !suppress_score_event {
                             crate::analytics::DomainAnalyticsEvent::record_gateway_update(
                                 crate::analytics::AnalyticsFlowContext::new(
                                     crate::analytics::ApiFlow::DynamicRouting,

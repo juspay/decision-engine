@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, useEffect, useRef, type ReactNode, type RefObject } from 'react'
 import { createPortal } from 'react-dom'
 import { useSearchParams } from 'react-router-dom'
 import useSWR, { useSWRConfig } from 'swr'
@@ -14,17 +14,16 @@ import { apiPost, fetcher } from '../../lib/api'
 import {
   RoutingAlgorithm,
   ABTestAlgorithmData,
-  SrConfigOverride,
   ExperimentResultsResponse,
   ExperimentTransactionsResponse,
 } from '../../types/api'
 import { ShieldAlert, PowerOff, Plus, FlaskConical, CheckCircle2, XCircle, Clock, AlertTriangle, Sliders, Pencil, Trash2, Info, GitCompare, Copy } from 'lucide-react'
 import * as type from '../ui/typography'
 import { RuleBreakdown } from '../routing/euclid/RuleBreakdown'
-import { validateABTestForm } from '../../features/routing/abTesting/schema'
+import { validateABTestForm, ABTestFormField, ABTestFormIssue } from '../../features/routing/abTesting/schema'
 import { toABTestCreatePayload } from '../../features/routing/abTesting/payload'
-import { toABTestFormValues } from '../../features/routing/abTesting/state'
-import { ABTestFormValues, ABTestExperimentType, SrConfigOverrideForm, DEFAULT_VARIANT_SR_CONFIG, SR_STRATEGY_LABELS, SrStrategy } from '../../features/routing/abTesting/types'
+import { toABTestFormValues, parseStoredArm, storedSrConfig } from '../../features/routing/abTesting/state'
+import { ABTestFormValues, ABTestExperimentType, ArmFormValue, ArmSrLeg, SrConfigOverrideForm, DEFAULT_VARIANT_SR_CONFIG, EMPTY_ARM, LIVE_SR, SR_STRATEGY_LABELS, SrStrategy, armRunsSr, armSrLegLabel, legHonorsAutopilot, srLegPrerequisite } from '../../features/routing/abTesting/types'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 
 import { PageHeading } from '../ui/PageHeading'
@@ -38,15 +37,20 @@ const EXPERIMENT_TYPE_HELP: Record<ABTestExperimentType, string> = {
 
 // Detect the experiment type from the persisted arm shape (the backend stores no "type").
 function abExperimentKind(abData?: ABTestAlgorithmData): ABTestExperimentType {
-  const v = abData?.variant_sr_config
-  if (v && (v.hedging_percent !== undefined || v.elimination_threshold !== undefined)) return 'sr_config_tuning'
-  return 'algorithm_comparison'
+  if (!abData) return 'algorithm_comparison'
+  const v = storedSrConfig(abData, 'variant')
+  const tweaksParams = v?.hedging_percent !== undefined || v?.elimination_threshold !== undefined
+  // A hybrid arm can also carry hedging overrides, but it is not a config-tuning experiment —
+  // that comparison only holds when neither arm has a rule leg.
+  const bothPureSr = !parseStoredArm(abData, 'control').algorithmId && !parseStoredArm(abData, 'variant').algorithmId
+  return tweaksParams && bothPureSr ? 'sr_config_tuning' : 'algorithm_comparison'
 }
 
 // Cost/net-value metrics are meaningful when either arm runs multi-objective (cost-aware) routing.
 function hasCostArm(abData?: ABTestAlgorithmData): boolean {
-  return abData?.control_sr_config?.enable_multi_objective === true
-    || abData?.variant_sr_config?.enable_multi_objective === true
+  if (!abData) return false
+  return storedSrConfig(abData, 'control')?.enable_multi_objective === true
+    || storedSrConfig(abData, 'variant')?.enable_multi_objective === true
 }
 
 function KindBadge({ kind }: { kind: ABTestExperimentType }) {
@@ -58,19 +62,15 @@ function KindBadge({ kind }: { kind: ABTestExperimentType }) {
   return null
 }
 
-// Display label for an arm (algorithm_id + sr_config) — resolves the four SR strategies
-// (cost-awareness × autopilot).
-function armLabel(id: string, config: SrConfigOverride | undefined, algorithmName: (id: string) => string): string {
-  if (id === 'sr_routing') {
-    // Resolve the two config dials (cost-awareness, autopilot) to a SrStrategy key and label it
-    // through the shared map, so the results/config views read identically to the create-form
-    // dropdown — same combo → same string, defined once in SR_STRATEGY_LABELS.
-    const key: SrStrategy = config?.enable_multi_objective === true
-      ? (config.use_autopilot === true ? 'sr_mo_autopilot' : 'sr_mo_manual')
-      : (config?.use_autopilot === true ? 'sr_auth_autopilot' : 'sr_auth')
-    return SR_STRATEGY_LABELS[key]
-  }
-  return algorithmName(id)
+// Display label for one arm. A hybrid arm names both legs in the order they run, so the rule and
+// the ranking that follows it are both visible — the SR half of a hybrid arm is otherwise
+// invisible next to a rule-only arm. Labels resolve through the shared armSrLegLabel, so the
+// results and config views read identically to the create-form dropdown.
+function armLabel(arm: ArmFormValue, algorithmName: (id: string) => string): string {
+  const rule = arm.algorithmId ? algorithmName(arm.algorithmId) : ''
+  const sr = arm.srStrategy ? armSrLegLabel(arm.srStrategy) : ''
+  if (rule && sr) return `${rule} → ${sr}`
+  return rule || sr || '—'
 }
 
 // Renders the actual routing logic behind a static arm (rule-based / priority / volume split /
@@ -192,70 +192,86 @@ const ALGO_TYPE_LABELS: Record<string, string> = {
   single: 'Single connector',
 }
 
-// The three SR strategies are top-level arm choices (each resolves to a distinct override).
-const SR_STRATEGIES = Object.keys(SR_STRATEGY_LABELS) as (keyof typeof SR_STRATEGY_LABELS)[]
-const isSrStrategy = (v: string): boolean => (SR_STRATEGIES as string[]).includes(v)
+const SR_STRATEGIES = Object.keys(SR_STRATEGY_LABELS) as SrStrategy[]
 
-// Cascading arm picker for Algorithm comparison. Level 1 picks the strategy: an SR strategy
-// (auth / auth+autopilot / multi-objective manual / multi-objective autopilot) resolves directly to
-// an arm; a saved config type (Rule-based / Volume split / …) shows a 2nd dropdown when it has more
-// than one config (a single-config type is auto-selected). `value` is the resolved arm form value:
-// '' | 'sr_auth' | 'sr_auth_autopilot' | 'sr_mo_manual' | 'sr_mo_autopilot' | <algorithmId>.
-function ArmSelector({ label, help, accent, algorithms, value, excludeId, allowedSrStrategies, liveSrConfig, onChange }: {
+// Arm picker for Algorithm comparison. An arm has two independent legs and the picker mirrors
+// that: a routing rule (optional), and success-rate routing on top of it (optional). Choosing
+// both is a hybrid arm — the rule narrows the candidate set, SR ranks what survives — which is
+// how most merchants already route, and therefore what a control arm usually has to be.
+// The rule side stays a cascade: pick a config type, then the config itself when the type has
+// more than one (a single-config type is auto-selected).
+function ArmSelector({ containerRef, label, help, accent, algorithms, value, allowedSrStrategies, autopilotReady, liveSrConfig, onChange }: {
+  // Lets the form put the cursor on this arm's first control when validation points here.
+  containerRef?: RefObject<HTMLDivElement>
   label: string
   help: string
   // Variant arm (accent) vs control arm — drives the colored pill + panel tint so the two are
   // visually distinct and can't be misread for each other across the form.
   accent?: boolean
   algorithms: RoutingAlgorithm[]
-  value: string
-  excludeId: string
+  value: ArmFormValue
   // SR strategies the merchant's features permit; the currently-selected value is always kept
   // visible so editing an experiment whose feature was later disabled still works.
   allowedSrStrategies: SrStrategy[]
+  // Whether autopilot is actually tuning this merchant right now. An autopilot leg is still
+  // offered when it is not — that experiment is exactly how a merchant decides to adopt it — but
+  // the arm scores identically to its manual twin until the job has written something, so the
+  // requirement is stated rather than left to be discovered from a flat result.
+  autopilotReady: boolean
   // The merchant's base SR config (hedging / elimination / bucket size) plus how many segments
-  // autopilot is actively tuning — shown when the resolved arm is SR-based. All three SR
-  // strategies share the same base config; they differ in whether they honor autopilot's
-  // per-segment overrides on top of it (see `honorsAutopilot` below). `autopilotFeatureOn` is
-  // the merchant's actual auto-calibration flag — segment count alone can't distinguish "tuning
-  // right now" from "tuned before the feature was switched off".
+  // autopilot is actively tuning — shown when this arm runs SR. All four SR strategies share the
+  // same base config; they differ in whether they honor autopilot's per-segment overrides on top
+  // of it. `autopilotFeatureOn` is the merchant's actual auto-calibration flag — segment count
+  // alone can't distinguish "tuning right now" from "tuned before the feature was switched off".
   liveSrConfig: { hedging: number | null; elimination: number | null; bucketSize: number | null; autopilotSegmentCount: number; autopilotFeatureOn: boolean }
-  onChange: (id: string) => void
+  onChange: (arm: ArmFormValue) => void
 }) {
-  const srOptions = SR_STRATEGIES.filter(s => allowedSrStrategies.includes(s) || value === s)
+  const srOptions = SR_STRATEGIES.filter(s => allowedSrStrategies.includes(s) || value.srStrategy === s)
+  // An arm stored without pinned dials runs the merchant's live settings. It is not offered as a
+  // new choice, but an experiment already holding one must render it rather than an empty select
+  // that silently rewrites the arm on save.
+  const srLegOptions: ArmSrLeg[] = value.srStrategy === LIVE_SR ? [LIVE_SR, ...srOptions] : srOptions
   const typeOf = (id: string): string => {
-    if (isSrStrategy(id)) return id // SR strategies are their own top-level "strategy"
     const a = algorithms.find(x => x.id === id)
     return a ? ((a.algorithm_data || a.algorithm)?.type ?? '') : ''
   }
-  const [strategy, setStrategy] = useState<string>(() => typeOf(value))
-  // Keep the strategy in sync when the value is set externally (edit prefill) or once algorithms load.
+  const [ruleType, setRuleType] = useState<string>(() => typeOf(value.algorithmId))
+  // Keep the rule type in sync when the value is set externally (edit prefill) or once algorithms load.
   useEffect(() => {
-    const t = typeOf(value)
-    if (t) setStrategy(t)
+    const t = typeOf(value.algorithmId)
+    if (t) setRuleType(t)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [value, algorithms])
+  }, [value.algorithmId, algorithms])
 
   const realTypes = Array.from(
     new Set(algorithms.map(a => (a.algorithm_data || a.algorithm)?.type).filter(Boolean) as string[]),
   )
-  const configs = strategy && !isSrStrategy(strategy)
-    ? algorithms.filter(a => (a.algorithm_data || a.algorithm)?.type === strategy)
-    : []
+  const configs = ruleType ? algorithms.filter(a => (a.algorithm_data || a.algorithm)?.type === ruleType) : []
 
-  function pickStrategy(t: string) {
-    setStrategy(t)
-    if (isSrStrategy(t)) { onChange(t); return } // SR strategy resolves directly to the arm value
-    if (!t) { onChange(''); return }
+  // An arm has to do something, so dropping the rule leg turns SR on rather than leaving the arm
+  // empty — and an arm with no rule cannot have SR switched off.
+  function pickRuleType(t: string) {
+    setRuleType(t)
+    if (!t) { onChange({ algorithmId: '', srStrategy: value.srStrategy ?? 'sr_auth' }); return }
     const c = algorithms.filter(a => (a.algorithm_data || a.algorithm)?.type === t)
     // One config → auto-select it; multiple → clear so the 2nd dropdown forces a choice.
-    onChange(c.length === 1 ? c[0].id : '')
+    onChange({ ...value, algorithmId: c.length === 1 ? c[0].id : '' })
   }
+
+  function toggleSr(on: boolean) {
+    onChange({ ...value, srStrategy: on ? (value.srStrategy ?? 'sr_auth') : null })
+  }
+
+  // SR is mandatory only once the merchant has actually chosen "no rule" — not while a rule type
+  // is selected but its config is still unpicked, which would otherwise show a required checkbox
+  // that cannot be ticked.
+  const srLocked = ruleType === ''
+
 
   const selectCls = `w-full ${fieldCls}`
 
   return (
-    <div className={`rounded-xl border p-3 ${accent
+    <div ref={containerRef} className={`rounded-xl border p-3 ${accent
       ? 'border-brand-200 bg-brand-50/40 dark:border-brand-800/50 dark:bg-brand-900/10'
       : 'border-slate-200 bg-slate-50/50 dark:border-[#222226] dark:bg-[#0c0c10]'}`}>
       <div className="mb-2 flex items-center gap-1.5">
@@ -266,46 +282,89 @@ function ArmSelector({ label, help, accent, algorithms, value, excludeId, allowe
         </span>
         <InfoHint text={help} />
       </div>
-      <select className={selectCls} value={strategy} onChange={e => pickStrategy(e.target.value)}>
-        <option value="">Select strategy</option>
-        {srOptions.map(s => (
-          <option key={s} value={s} disabled={excludeId === s}>{SR_STRATEGY_LABELS[s]}</option>
-        ))}
+      <label className="mb-1 block text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">Routing rule</label>
+      <select className={selectCls} value={ruleType} onChange={e => pickRuleType(e.target.value)}>
+        <option value="">No rule — success-rate routing decides</option>
         {realTypes.map(t => (
           <option key={t} value={t}>{ALGO_TYPE_LABELS[t] ?? t}</option>
         ))}
       </select>
       {configs.length > 1 && (
-        <select className={`${selectCls} mt-2`} value={value} onChange={e => onChange(e.target.value)}>
-          <option value="">Select {ALGO_TYPE_LABELS[strategy]?.toLowerCase() ?? 'config'}</option>
+        <select
+          className={`${selectCls} mt-2`}
+          value={value.algorithmId}
+          onChange={e => onChange({ ...value, algorithmId: e.target.value })}
+        >
+          <option value="">Select {ALGO_TYPE_LABELS[ruleType]?.toLowerCase() ?? 'config'}</option>
           {configs.map(a => (
-            <option key={a.id} value={a.id} disabled={a.id === excludeId}>{a.name}</option>
+            <option key={a.id} value={a.id}>{a.name}</option>
           ))}
         </select>
       )}
       {configs.length === 1 && (
         <p className="mt-1.5 text-[13px] text-slate-500 dark:text-[#8d96aa] leading-[18px]">Using <span className="font-medium text-slate-600 dark:text-slate-300">{configs[0].name}</span></p>
       )}
-      {value && !isSrStrategy(value) && (
+      {value.algorithmId && (
         <div className="mt-2 rounded-lg border border-slate-100 dark:border-[#1a1f2a] bg-slate-50/60 dark:bg-[#0a0a0f]/60 p-2">
-          <ArmRuleDetail algorithmId={value} algorithms={algorithms} />
+          <ArmRuleDetail algorithmId={value.algorithmId} algorithms={algorithms} />
         </div>
       )}
-      {value && isSrStrategy(value) && (
-        <div className="mt-2 rounded-lg border border-slate-100 dark:border-[#1a1f2a] bg-slate-50/60 dark:bg-[#0a0a0f]/60 p-2">
-          <p className="text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] mb-1.5 leading-4">Base SR config</p>
-          <LiveSrConfigPanel
-            hedging={liveSrConfig.hedging}
-            elimination={liveSrConfig.elimination}
-            bucketSize={liveSrConfig.bucketSize}
-            autopilotSegmentCount={liveSrConfig.autopilotSegmentCount}
-            autopilotFeatureOn={liveSrConfig.autopilotFeatureOn}
-            // The two autopilot strategies honor autopilot-tuned segments; "auth based" and
-            // "MO manual" run on the merchant's static/manual config (see resolveArm in payload.ts).
-            honorsAutopilot={value === 'sr_mo_autopilot' || value === 'sr_auth_autopilot'}
+
+      <div className="mt-3 border-t border-slate-100 dark:border-[#1a1f2a] pt-2.5">
+        <label className="flex items-start gap-2 cursor-pointer">
+          <input
+            type="checkbox"
+            className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 dark:border-[#2a2a30] text-brand-600 focus:ring-brand-500"
+            checked={armRunsSr(value)}
+            disabled={srLocked}
+            onChange={e => toggleSr(e.target.checked)}
           />
-        </div>
-      )}
+          <span className="text-[13px] leading-[18px] text-slate-600 dark:text-slate-300">
+            {ruleType
+              ? 'Then rank the rule’s connectors by success rate'
+              : 'Rank by success rate'}
+            {srLocked && (
+              <span className="block text-[12px] text-slate-400 dark:text-[#6b7280] leading-4">
+                Required — an arm with no rule has to rank somehow.
+              </span>
+            )}
+          </span>
+        </label>
+        {armRunsSr(value) && (
+          <>
+            <select
+              className={`${selectCls} mt-2`}
+              value={value.srStrategy ?? ''}
+              onChange={e => onChange({ ...value, srStrategy: e.target.value as ArmSrLeg })}
+            >
+              {srLegOptions.map(s => (
+                <option key={s} value={s}>{armSrLegLabel(s)}</option>
+              ))}
+            </select>
+            {value.srStrategy && srLegPrerequisite(value.srStrategy) === 'autopilot' && !autopilotReady && (
+              <p className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50/60 px-2 py-1.5 text-[12px] leading-4 text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/20 dark:text-amber-400">
+                Turn Autopilot on in SR Routing for this arm to differ from manual tuning — it
+                ranks by autopilot-tuned values, and there are none until the tuning job runs.
+                The other arm keeps the settings you have today.
+              </p>
+            )}
+            <div className="mt-2 rounded-lg border border-slate-100 dark:border-[#1a1f2a] bg-slate-50/60 dark:bg-[#0a0a0f]/60 p-2">
+              <p className="text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] mb-1.5 leading-4">Base SR config</p>
+              <LiveSrConfigPanel
+                hedging={liveSrConfig.hedging}
+                elimination={liveSrConfig.elimination}
+                bucketSize={liveSrConfig.bucketSize}
+                autopilotSegmentCount={liveSrConfig.autopilotSegmentCount}
+                autopilotFeatureOn={liveSrConfig.autopilotFeatureOn}
+                // The two autopilot strategies honor autopilot-tuned segments; the manual ones run
+                // on the merchant's static config (see SR_STRATEGY_CONFIG in payload.ts). An arm
+                // that pins nothing honors it too.
+                honorsAutopilot={legHonorsAutopilot(value.srStrategy)}
+              />
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }
@@ -387,13 +446,16 @@ function useLiveSrConfig(merchantId: string | undefined) {
     liveBucketSize: srConfig?.config?.data?.defaultBucketSize ?? null,
     autopilotSegmentCount: (srConfig?.config?.data?.subLevelInputConfig ?? [])
       .filter(c => c.source === AUTOPILOT_SOURCE).length,
+    // The merchant has success-rate routing set up — `/rule/get` only answers once they have
+    // configured it. This is the same signal the backend resolves a `current` arm against.
+    srConfigured: !!srConfig?.config?.data,
   }
 }
 
 // `honorsAutopilot` reflects the arm's `use_autopilot` resolution (see `get_sr_v3_hedging_percent`
-// / `get_sr_v3_bucket_size` in gw_scoring — absent override defaults to true). Only the "MO
-// manual" strategy forces it false; auth and "MO autopilot" both honor autopilot-tuned segments
-// by default, so both need the caveat when any exist.
+// / `get_sr_v3_bucket_size` in gw_scoring — absent override defaults to true). The two manual
+// strategies pin it false; the two `_autopilot` ones and an arm with no pinned dials all honor
+// autopilot-tuned segments, so they need the caveat when any exist. See legHonorsAutopilot.
 function LiveSrConfigPanel({ hedging, elimination, bucketSize, autopilotSegmentCount, honorsAutopilot, autopilotFeatureOn }: {
   hedging: number | null
   elimination: number | null
@@ -508,8 +570,10 @@ function ConfigComparisonTable({ abData, isTuning, controlPct, variantPct, live,
   algorithmName: (id: string) => string
   algorithms: RoutingAlgorithm[]
 }) {
-  const controlSr = abData.control_algorithm_id === 'sr_routing'
-  const variantSr = abData.variant_algorithm_id === 'sr_routing'
+  const controlArm = parseStoredArm(abData, 'control')
+  const variantArm = parseStoredArm(abData, 'variant')
+  const controlSr = armRunsSr(controlArm)
+  const variantSr = armRunsSr(variantArm)
   const muted = (t: string) => <span className="italic text-slate-500">{t}</span>
   const dash = <span className="text-slate-500 dark:text-slate-400">—</span>
   const emphasis = (v: ReactNode) => <span className="font-medium text-brand-600 dark:text-brand-400">{v}</span>
@@ -518,15 +582,15 @@ function ConfigComparisonTable({ abData, isTuning, controlPct, variantPct, live,
   const rows: { label: string; control: ReactNode; variant: ReactNode }[] = [
     {
       label: 'Strategy',
-      control: armLabel(abData.control_algorithm_id, abData.control_sr_config, algorithmName),
-      variant: armLabel(abData.variant_algorithm_id, abData.variant_sr_config, algorithmName),
+      control: armLabel(controlArm, algorithmName),
+      variant: armLabel(variantArm, algorithmName),
     },
   ]
 
   if (isTuning) {
     // Same SR algorithm, control on live config, variant on its overrides.
-    const vHedge = abData.variant_sr_config?.hedging_percent
-    const vElim = abData.variant_sr_config?.elimination_threshold
+    const vHedge = storedSrConfig(abData, 'variant')?.hedging_percent
+    const vElim = storedSrConfig(abData, 'variant')?.elimination_threshold
     rows.push({
       label: 'Hedging %',
       control: live.hedging != null ? `${live.hedging}%` : muted('Uses default'),
@@ -539,8 +603,8 @@ function ConfigComparisonTable({ abData, isTuning, controlPct, variantPct, live,
     })
   } else {
     if (controlSr || variantSr) {
-      const cAuto = controlSr && abData.control_sr_config?.use_autopilot !== false && autopilotOn
-      const vAuto = variantSr && abData.variant_sr_config?.use_autopilot !== false && autopilotOn
+      const cAuto = controlSr && storedSrConfig(abData, 'control')?.use_autopilot !== false && autopilotOn
+      const vAuto = variantSr && storedSrConfig(abData, 'variant')?.use_autopilot !== false && autopilotOn
       const hedge = (isSr: boolean, auto: boolean) => !isSr ? dash : auto ? muted('Auto-tuned per segment') : live.hedging != null ? `${live.hedging}%` : muted('Uses default')
       const bucket = (isSr: boolean, auto: boolean) => !isSr ? dash : auto ? muted('Auto-tuned per segment') : live.bucketSize != null ? `${live.bucketSize} requests` : muted('Uses default')
       const elim = (isSr: boolean) => !isSr ? dash : live.elimination != null ? elimText(live.elimination) : muted('Uses default')
@@ -548,12 +612,26 @@ function ConfigComparisonTable({ abData, isTuning, controlPct, variantPct, live,
       rows.push({ label: 'Elimination threshold', control: elim(controlSr), variant: elim(variantSr) })
       rows.push({ label: 'Bucket size', control: bucket(controlSr, cAuto), variant: bucket(variantSr, vAuto) })
     }
-    if (!controlSr || !variantSr) {
+    // A hybrid arm has a rule *and* SR, so this row keys off the rule leg alone rather than
+    // treating "runs SR" as "has no rule".
+    if (controlArm.algorithmId || variantArm.algorithmId) {
+      const ruleCell = (arm: ArmFormValue) =>
+        arm.algorithmId
+          ? <ArmRuleDetail algorithmId={arm.algorithmId} algorithms={algorithms} />
+          : muted('No rule — SR picks from all connectors')
       rows.push({
         label: 'Routing rule',
-        control: controlSr ? muted('SR scoring') : <ArmRuleDetail algorithmId={abData.control_algorithm_id} algorithms={algorithms} />,
-        variant: variantSr ? muted('SR scoring') : <ArmRuleDetail algorithmId={abData.variant_algorithm_id} algorithms={algorithms} />,
+        control: ruleCell(controlArm),
+        variant: ruleCell(variantArm),
       })
+      // Only worth spelling out when the two arms differ on it.
+      if (controlSr !== variantSr) {
+        rows.push({
+          label: 'Ranks by success rate',
+          control: controlSr ? 'Yes' : muted('No — the rule’s first choice is final'),
+          variant: variantSr ? 'Yes' : muted('No — the rule’s first choice is final'),
+        })
+      }
     }
   }
 
@@ -700,7 +778,7 @@ function ExperimentDetailPanel({
   const autopilotFeatureOn = merchantFeatures.isEnabled('auto-calibration') || merchantFeatures.isEnabled('autopilot')
 
   // If the variant carries a margin override, value net EV at it; otherwise the backend default.
-  const evalMargin = abData?.variant_sr_config?.margin
+  const evalMargin = abData ? storedSrConfig(abData, 'variant')?.margin : undefined
   const resultsUrl = abData
     ? `/analytics/experiment/${algorithm.id}/results?min_sample_size=${abData.min_sample_size}&guardrail_threshold_pp=${abData.guardrail_threshold_pp}${evalMargin !== undefined ? `&evaluation_margin=${evalMargin}` : ''}`
     : null
@@ -721,22 +799,23 @@ function ExperimentDetailPanel({
     { refreshInterval: 60_000 },
   )
 
-  function routingType(variantArm: string): string {
+  function routingType(side: string): string {
     if (!abData) return '—'
-    const algorithmId = variantArm === 'control' ? abData.control_algorithm_id : abData.variant_algorithm_id
-    const config = variantArm === 'control' ? abData.control_sr_config : abData.variant_sr_config
-    if (algorithmId === 'sr_routing' && isTuning) {
-      return variantArm === 'variant' ? 'SR Routing (custom params)' : 'SR Routing (live config)'
+    const arm = parseStoredArm(abData, side === 'control' ? 'control' : 'variant')
+    if (isTuning && !arm.algorithmId) {
+      return side === 'variant' ? 'SR Routing (custom params)' : 'SR Routing (live config)'
     }
-    // armLabel resolves the SR strategies (auth / MO manual / MO autopilot) and real algo names.
-    return armLabel(algorithmId, config, algorithmName)
+    return armLabel(arm, algorithmName)
   }
 
-  function openAuditForTxn(paymentId: string, variantArm: string) {
-    const isSr = variantArm === 'control'
-      ? abData?.control_algorithm_id === 'sr_routing'
-      : abData?.variant_algorithm_id === 'sr_routing'
-    if (!isSr) return
+  // A payment only has a Decision Audit trail if the decider actually ran for it — which is true
+  // of a hybrid arm as much as a pure SR one, and never of a rule-only arm.
+  function armWasScored(side: string): boolean {
+    return !!abData && armRunsSr(parseStoredArm(abData, side === 'control' ? 'control' : 'variant'))
+  }
+
+  function openAuditForTxn(paymentId: string, side: string) {
+    if (!armWasScored(side)) return
     const url = `/audit?range=1d&exclude_routing_approach=NTW_BASED_ROUTING&payment_id=${encodeURIComponent(paymentId)}`
     window.open(url, '_blank')
   }
@@ -970,14 +1049,12 @@ function ExperimentDetailPanel({
                     </td>
                   </tr>
                 ) : txnData.transactions.map((txn, idx) => {
-                  const txnIsSr = txn.variant_arm === 'control'
-                    ? abData?.control_algorithm_id === 'sr_routing'
-                    : abData?.variant_algorithm_id === 'sr_routing'
+                  const txnIsSr = armWasScored(txn.variant_arm)
                   return (
                     <tr
                       key={`${txn.payment_id}-${idx}`}
                       onClick={() => openAuditForTxn(txn.payment_id, txn.variant_arm)}
-                      title={txnIsSr ? 'Open in Decision Audit' : 'Audit trail not available for static arm payments'}
+                      title={txnIsSr ? 'Open in Decision Audit' : 'Audit trail not available for rule-only arm payments'}
                       className={`border-b border-slate-50 dark:border-[#131318] transition-colors ${txnIsSr ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-[#0f0f16]' : 'cursor-default opacity-60'}`}
                     >
                       <td className="px-4 py-2.5">
@@ -1071,15 +1148,17 @@ function ExperimentDetailPanel({
 // ─── SR Config Tuning arm editor ──────────────────────────────────────────────
 
 interface SrArmEditorProps {
+  // Lets the form put the cursor on the first override input when validation points here.
+  containerRef?: RefObject<HTMLDivElement>
   label: string
   splitPct: number
   config: SrConfigOverrideForm
   onChange: (fn: (c: SrConfigOverrideForm) => SrConfigOverrideForm) => void
 }
 
-function SrArmEditor({ label, splitPct, config, onChange }: SrArmEditorProps) {
+function SrArmEditor({ containerRef, label, splitPct, config, onChange }: SrArmEditorProps) {
   return (
-    <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 bg-brand-50/30 dark:bg-brand-900/10 px-4 py-4 space-y-3">
+    <div ref={containerRef} className="rounded-xl border border-brand-200 dark:border-brand-800/50 bg-brand-50/30 dark:bg-brand-900/10 px-4 py-4 space-y-3">
       <span className="inline-flex items-center rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 leading-4">
         {label} ({splitPct}%)
       </span>
@@ -1117,12 +1196,80 @@ function SrArmEditor({ label, splitPct, config, onChange }: SrArmEditorProps) {
   )
 }
 
+
+// The control arm, which is never configured: it is always the merchant's live setup, so this
+// shows what that is rather than asking. Reading it here mirrors what the backend does when it
+// resolves a `current` arm — the active payment rule, plus success-rate routing if configured —
+// so the merchant sees the arm they are about to get, not a promise about it.
+function CurrentSetupPanel({ activeAlgorithm, algorithms, srConfigured, liveSrConfig }: {
+  activeAlgorithm: RoutingAlgorithm | undefined
+  algorithms: RoutingAlgorithm[]
+  srConfigured: boolean
+  liveSrConfig: { hedging: number | null; elimination: number | null; bucketSize: number | null; autopilotSegmentCount: number; autopilotFeatureOn: boolean }
+}) {
+  const shape = activeAlgorithm && srConfigured ? 'hybrid' : activeAlgorithm ? 'rule' : srConfigured ? 'sr' : 'none'
+
+  return (
+    <div className="rounded-xl border border-slate-200 bg-slate-50/50 p-3 dark:border-[#222226] dark:bg-[#0c0c10]">
+      <div className="mb-2 flex items-center gap-1.5">
+        <span className="inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600 leading-4 dark:bg-slate-700 dark:text-slate-200">
+          Control
+        </span>
+        <InfoHint text="Your live setup as it stands right now, recorded when you start the experiment and held there for its whole run. Most of your traffic keeps routing exactly as it does today — and keeps routing that way even if you switch a routing feature on to test it, which is what makes the variant's numbers comparable." />
+      </div>
+
+      {shape === 'none' ? (
+        <p className="text-[13px] leading-[18px] text-amber-700 dark:text-amber-400">
+          You have no active routing rule and no success-rate routing configured, so there is
+          nothing to compare a variant against. Set one up first.
+        </p>
+      ) : (
+        <>
+          <p className="mb-2 text-[13px] leading-[18px] text-slate-500 dark:text-[#8d96aa]">
+            {shape === 'hybrid' && 'Your rule picks the eligible connectors, then success-rate routing ranks them.'}
+            {shape === 'rule' && 'Your rule decides. Success-rate routing is not configured.'}
+            {shape === 'sr' && 'Success-rate routing decides. You have no active rule.'}
+          </p>
+
+          <p className="mb-1 text-[12px] font-medium leading-4 text-slate-500 dark:text-[#8d96aa]">Routing rule</p>
+          {activeAlgorithm ? (
+            <div className="rounded-lg border border-slate-100 bg-white/60 p-2 dark:border-[#1a1f2a] dark:bg-[#0a0a0f]/60">
+              <p className="mb-1.5 text-[13px] font-medium leading-[18px] text-slate-700 dark:text-slate-300">{activeAlgorithm.name}</p>
+              <ArmRuleDetail algorithmId={activeAlgorithm.id} algorithms={algorithms} />
+            </div>
+          ) : (
+            <p className="text-[13px] italic leading-[18px] text-slate-500">None</p>
+          )}
+
+          {srConfigured && (
+            <div className="mt-2 rounded-lg border border-slate-100 bg-white/60 p-2 dark:border-[#1a1f2a] dark:bg-[#0a0a0f]/60">
+              <p className="mb-1.5 text-[12px] font-medium leading-4 text-slate-500 dark:text-[#8d96aa]">Success-rate routing</p>
+              <LiveSrConfigPanel
+                hedging={liveSrConfig.hedging}
+                elimination={liveSrConfig.elimination}
+                bucketSize={liveSrConfig.bucketSize}
+                autopilotSegmentCount={liveSrConfig.autopilotSegmentCount}
+                autopilotFeatureOn={liveSrConfig.autopilotFeatureOn}
+                // The control pins `use_autopilot` to whatever the merchant runs today, so it
+                // honors autopilot-tuned segments exactly when autopilot is on for them now.
+                honorsAutopilot={liveSrConfig.autopilotFeatureOn}
+              />
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  )
+}
+
 // ─── Create form ──────────────────────────────────────────────────────────────
 
 interface CreateFormProps {
   form: ABTestFormValues
   setForm: (fn: (f: ABTestFormValues) => ABTestFormValues) => void
   eligibleAlgorithms: RoutingAlgorithm[]
+  // The merchant's active payment rule, shown as the control arm — never picked.
+  activeAlgorithm: RoutingAlgorithm | undefined
   saving: boolean
   error: string | null
   success: string | null
@@ -1130,35 +1277,66 @@ interface CreateFormProps {
   merchantId: string | null
   isEditing: boolean
   onCreate: () => void
+  // Reported to the parent so a validation message shares the one error slot with API failures.
+  // Called with null when the only thing wrong was an empty field the cursor now sits in.
+  onValidationIssue: (message: string | null) => void
   onActivateCreated: (id: string) => void
   // Present only when there's a list to return to (i.e. experiments already exist).
   onCancel?: () => void
 }
 
 function CreateForm({
-  form, setForm, eligibleAlgorithms, saving, error, success, createdId,
-  merchantId, isEditing, onCreate, onActivateCreated, onCancel,
+  form, setForm, eligibleAlgorithms, activeAlgorithm, saving, error, success, createdId,
+  merchantId, isEditing, onCreate, onValidationIssue, onActivateCreated, onCancel,
 }: CreateFormProps) {
   // Read-only sessions still see everything; the controls that would change it are inert.
   const canEditRouting = useCanEditRouting()
-  // Only offer the Multi-Objective SR strategies when the merchant has the backing features on:
-  //  - MO manual needs cost-aware (multi-objective) routing enabled
-  //  - MO autopilot additionally needs autopilot self-tuning (auto-calibration) enabled, otherwise
-  //    there are no autopilot-tuned values and it would behave identically to manual.
+
+  // Validation puts the cursor in the offending control rather than describing it from a distance.
+  // The refs are wired to the inputs below; the arm ref lands on a panel, so focus goes to the
+  // first control inside it.
+  const fieldRefs: Record<ABTestFormField, RefObject<HTMLElement | null>> = {
+    name: useRef<HTMLInputElement>(null),
+    controlArm: useRef<HTMLDivElement>(null),
+    variantArm: useRef<HTMLDivElement>(null),
+    variantSrConfig: useRef<HTMLDivElement>(null),
+    variantSplitPct: useRef<HTMLInputElement>(null),
+    minSampleSize: useRef<HTMLInputElement>(null),
+    guardrailThresholdPp: useRef<HTMLInputElement>(null),
+  }
+
+  function submit() {
+    // Editing renames and nothing else, so the name is the only thing there is to check.
+    const issue: ABTestFormIssue | null = isEditing
+      ? (form.name.trim() ? null : { field: 'name' })
+      : validateABTestForm(form)
+    if (!issue) {
+      onValidationIssue(null)
+      onCreate()
+      return
+    }
+    onValidationIssue(issue.message ?? null)
+    const container = fieldRefs[issue.field].current
+    const target = container?.matches('input, select, textarea')
+      ? container
+      : container?.querySelector<HTMLElement>('input, select, textarea') ?? container
+    target?.scrollIntoView({ block: 'center' })
+    target?.focus({ preventScroll: true })
+  }
+  // Every SR strategy is offered, because an experiment exists to answer whether a setting is
+  // worth adopting — gating the choice on already having adopted it is the one thing that makes
+  // the question unaskable. Cost-awareness needs nothing switched on: `enable_multi_objective` on
+  // the arm beats the feature flag outright. Autopilot does need its job running to have tuned
+  // anything, so that prerequisite is surfaced next to the choice instead of hiding it.
   const features = useMerchantFeatures(merchantId || undefined)
-  const moOn = features.isEnabled('multi-objective-routing')
-  const autopilotOn = features.isEnabled('auto-calibration') || features.isEnabled('autopilot')
-  const allowedSrStrategies: SrStrategy[] = [
-    'sr_auth',
-    // Auth + autopilot needs only the autopilot feature (no cost-awareness required).
-    ...(autopilotOn ? (['sr_auth_autopilot'] as SrStrategy[]) : []),
-    ...(moOn ? (['sr_mo_manual'] as SrStrategy[]) : []),
-    ...(moOn && autopilotOn ? (['sr_mo_autopilot'] as SrStrategy[]) : []),
-  ]
+  // Both flags, matching sr_auto_calibration.rs `enrolled_merchants` — with either off the job
+  // never runs and no autopilot-sourced values exist for an arm to honor.
+  const autopilotOn = features.isEnabled('auto-calibration') && features.isEnabled('autopilot')
+  const allowedSrStrategies: SrStrategy[] = ['sr_auth', 'sr_auth_autopilot', 'sr_mo_manual', 'sr_mo_autopilot']
 
   // Shared across both experiment types: SR config tuning needs it for the control panel below,
   // and any SR-based arm in Algorithm comparison (auth / MO manual / MO autopilot) shows it too.
-  const { liveHedging, liveElimination, liveBucketSize, autopilotSegmentCount } = useLiveSrConfig(merchantId || undefined)
+  const { liveHedging, liveElimination, liveBucketSize, autopilotSegmentCount, srConfigured } = useLiveSrConfig(merchantId || undefined)
 
   // "Custom" is active when the sample target isn't one of the presets — either the user chose it,
   // or an edited experiment carries an off-preset value.
@@ -1185,6 +1363,7 @@ function CreateForm({
           <div>
             <FieldLabel required>Experiment name</FieldLabel>
             <input
+              ref={fieldRefs.name as RefObject<HTMLInputElement>}
               className={`w-full ${fieldCls}`}
               value={form.name}
               onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
@@ -1223,6 +1402,7 @@ function CreateForm({
                 <FieldLabel required>Experiment name</FieldLabel>
                 <input
                   className={`w-full ${fieldCls}`}
+                  ref={fieldRefs.name as RefObject<HTMLInputElement>}
                   placeholder={form.experimentType === 'sr_config_tuning' ? 'e.g. Hedging 10% vs 5%' : 'e.g. Stripe vs Checkout.com'}
                   value={form.name}
                   onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
@@ -1231,26 +1411,54 @@ function CreateForm({
 
               {form.experimentType === 'algorithm_comparison' && (
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    {form.control === null ? (
+                      <CurrentSetupPanel
+                        activeAlgorithm={activeAlgorithm}
+                        algorithms={eligibleAlgorithms}
+                        srConfigured={srConfigured}
+                        liveSrConfig={{ hedging: liveHedging, elimination: liveElimination, bucketSize: liveBucketSize, autopilotSegmentCount, autopilotFeatureOn: autopilotOn }}
+                      />
+                    ) : (
+                      <ArmSelector
+                        containerRef={fieldRefs.controlArm as RefObject<HTMLDivElement>}
+                        label="Control"
+                        help="The baseline the variant is measured against. Pick this yourself only when your live setup cannot express it."
+                        algorithms={eligibleAlgorithms}
+                        value={form.control}
+                        allowedSrStrategies={allowedSrStrategies}
+                        autopilotReady={autopilotOn}
+                        liveSrConfig={{ hedging: liveHedging, elimination: liveElimination, bucketSize: liveBucketSize, autopilotSegmentCount, autopilotFeatureOn: autopilotOn }}
+                        onChange={arm => setForm(f => ({ ...f, control: arm }))}
+                      />
+                    )}
+                    {/* Naming the control outright is the escape hatch for a baseline the live
+                        setup cannot describe — "my rule alone", once autopilot has created an SR
+                        config next to it and `current` therefore resolves to hybrid. */}
+                    <button
+                      type="button"
+                      className="text-[12px] font-medium leading-4 text-slate-500 underline-offset-2 hover:underline dark:text-[#8d96aa]"
+                      onClick={() => setForm(f => ({
+                        ...f,
+                        control: f.control === null
+                          ? { algorithmId: activeAlgorithm?.id ?? '', srStrategy: null }
+                          : null,
+                      }))}
+                    >
+                      {form.control === null ? 'Choose the control arm instead' : 'Use my live setup instead'}
+                    </button>
+                  </div>
                   <ArmSelector
-                    label="Control"
-                    help="Your current strategy — the baseline."
-                    algorithms={eligibleAlgorithms}
-                    value={form.controlAlgorithmId}
-                    excludeId={form.variantAlgorithmId}
-                    allowedSrStrategies={allowedSrStrategies}
-                    liveSrConfig={{ hedging: liveHedging, elimination: liveElimination, bucketSize: liveBucketSize, autopilotSegmentCount, autopilotFeatureOn: autopilotOn }}
-                    onChange={id => setForm(f => ({ ...f, controlAlgorithmId: id }))}
-                  />
-                  <ArmSelector
+                    containerRef={fieldRefs.variantArm as RefObject<HTMLDivElement>}
                     label="Variant"
-                    help="The new strategy you want to test."
+                    help="The new setup you want to test."
                     accent
                     algorithms={eligibleAlgorithms}
-                    value={form.variantAlgorithmId}
-                    excludeId={form.controlAlgorithmId}
+                    value={form.variant}
                     allowedSrStrategies={allowedSrStrategies}
+                    autopilotReady={autopilotOn}
                     liveSrConfig={{ hedging: liveHedging, elimination: liveElimination, bucketSize: liveBucketSize, autopilotSegmentCount, autopilotFeatureOn: autopilotOn }}
-                    onChange={id => setForm(f => ({ ...f, variantAlgorithmId: id }))}
+                    onChange={arm => setForm(f => ({ ...f, variant: arm }))}
                   />
                 </div>
               )}
@@ -1286,6 +1494,7 @@ function CreateForm({
 
                   {/* Variant — editable overrides */}
                   <SrArmEditor
+                    containerRef={fieldRefs.variantSrConfig as RefObject<HTMLDivElement>}
                     label="Variant"
                     splitPct={form.variantSplitPct}
                     config={form.variantSrConfig}
@@ -1321,6 +1530,7 @@ function CreateForm({
                   />
                   <input
                     type="range" min={0} max={100} step={1}
+                    ref={fieldRefs.variantSplitPct as RefObject<HTMLInputElement>}
                     value={100 - form.variantSplitPct}
                     onChange={e => {
                       const variant = Math.min(30, Math.max(5, 100 - Number(e.target.value)))
@@ -1358,6 +1568,7 @@ function CreateForm({
                       type="text" inputMode="numeric" autoFocus
                       placeholder="Custom"
                       className="w-24 rounded-md bg-transparent px-2.5 py-1.5 text-xs tabular-nums focus:outline-none focus:border-brand-500"
+                      ref={fieldRefs.minSampleSize as RefObject<HTMLInputElement>}
                       value={form.minSampleSize ? form.minSampleSize.toLocaleString() : ''}
                       onChange={e => setForm(f => ({ ...f, minSampleSize: Number(e.target.value.replace(/[^\d]/g, '')) }))}
                     />
@@ -1383,6 +1594,7 @@ function CreateForm({
                 <input
                   type="number" min={0.5} max={20} step={0.5}
                   className={`w-16 ${fieldCls}`}
+                  ref={fieldRefs.guardrailThresholdPp as RefObject<HTMLInputElement>}
                   value={form.guardrailThresholdPp}
                   onChange={e => setForm(f => ({ ...f, guardrailThresholdPp: Number(e.target.value) }))}
                 />
@@ -1413,7 +1625,7 @@ function CreateForm({
           {onCancel && (
             <Button variant="secondary" onClick={onCancel} disabled={saving}>Cancel</Button>
           )}
-          <Button variant="primary" onClick={onCreate} disabled={saving || !merchantId || !canEditRouting}>
+          <Button variant="primary" onClick={submit} disabled={saving || !merchantId || !canEditRouting}>
             {saving ? <><Spinner size={14} /> {isEditing ? 'Saving…' : 'Creating…'}</> : isEditing ? 'Save changes' : 'Create experiment'}
           </Button>
         </div>
@@ -1427,8 +1639,9 @@ function CreateForm({
 const DEFAULT_FORM: ABTestFormValues = {
   name: '',
   experimentType: 'algorithm_comparison',
-  controlAlgorithmId: '',
-  variantAlgorithmId: '',
+  // Live setup — the right baseline for nearly every experiment, and the one the backend pins.
+  control: null,
+  variant: { ...EMPTY_ARM },
   variantSplitPct: 10,
   minSampleSize: 5000,
   guardrailThresholdPp: 3,
@@ -1457,6 +1670,12 @@ export function ABTestingPage() {
   const realPaymentsOn = features.isEnabled('ab-test-real-payments')
 
   const activeAbTest = activeAlgorithms?.find(r => (r.algorithm_data || r.algorithm)?.type === 'ab_test')
+  // The rule the merchant routes on today. Once an experiment is active it holds the payment slot,
+  // so there is no plain rule to show — the control arm's rule is inside the experiment by then.
+  const activeRoutingAlgorithm = activeAlgorithms?.find(r => {
+    const type = (r.algorithm_data || r.algorithm)?.type
+    return type !== 'ab_test' && type !== 'volume_contract'
+  })
   const savedAbTests = allAlgorithms?.filter(r => (r.algorithm_data || r.algorithm)?.type === 'ab_test') ?? []
   const eligibleAlgorithms = allAlgorithms?.filter(r => (r.algorithm_data || r.algorithm)?.type !== 'ab_test') ?? []
 
@@ -1544,7 +1763,6 @@ export function ABTestingPage() {
     // silently change how a running/collected experiment routes. To change the setup, the
     // user creates a new experiment.
     if (editingId) {
-      if (!form.name.trim()) { setError('Enter an experiment name'); return }
       const original = savedAbTests.find(a => a.id === editingId)
       const originalAlgorithm = original && (original.algorithm_data || original.algorithm)
       if (!original || !originalAlgorithm) { setError('Could not load the experiment to edit'); return }
@@ -1571,8 +1789,6 @@ export function ABTestingPage() {
       return
     }
 
-    const validationError = validateABTestForm(form)
-    if (validationError) { setError(validationError); return }
     setSaving(true); setError(null); setSuccess(null)
     try {
       const payload = toABTestCreatePayload(form, merchantId)
@@ -1655,7 +1871,6 @@ export function ABTestingPage() {
   }
 
   function algorithmName(id: string) {
-    if (id === 'sr_routing') return 'SR Routing (Dynamic)'
     return allAlgorithms?.find(a => a.id === id)?.name ?? id
   }
 
@@ -1711,6 +1926,7 @@ export function ABTestingPage() {
             form={form}
             setForm={setForm}
             eligibleAlgorithms={eligibleAlgorithms}
+            activeAlgorithm={activeRoutingAlgorithm}
             saving={saving}
             error={error}
             success={success}
@@ -1718,6 +1934,7 @@ export function ABTestingPage() {
             merchantId={merchantId}
             isEditing={editingId !== null}
             onCreate={handleCreate}
+            onValidationIssue={setError}
             onActivateCreated={(id) => handleActivate(id)}
           />
         </div>
@@ -1767,7 +1984,7 @@ export function ABTestingPage() {
                         <p className="text-[13px] text-slate-500 dark:text-[#8d96aa] mt-0.5 truncate max-w-[57ch] leading-[18px]">
                           {kind === 'sr_config_tuning'
                             ? 'SR config tuning'
-                            : `${armLabel(abData.control_algorithm_id, abData.control_sr_config, algorithmName)} → ${armLabel(abData.variant_algorithm_id, abData.variant_sr_config, algorithmName)}`
+                            : `${armLabel(parseStoredArm(abData, 'control'), algorithmName)} vs ${armLabel(parseStoredArm(abData, 'variant'), algorithmName)}`
                           }
                         </p>
                       )}
@@ -1801,6 +2018,7 @@ export function ABTestingPage() {
                 form={form}
                 setForm={setForm}
                 eligibleAlgorithms={eligibleAlgorithms}
+                activeAlgorithm={activeRoutingAlgorithm}
                 saving={saving}
                 error={error}
                 success={success}
@@ -1808,6 +2026,7 @@ export function ABTestingPage() {
                 merchantId={merchantId}
                 isEditing={editingId !== null}
                 onCreate={handleCreate}
+                onValidationIssue={setError}
                 onActivateCreated={(id) => handleActivate(id)}
                 onCancel={closeCreate}
               />

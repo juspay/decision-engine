@@ -142,8 +142,29 @@ pub async fn hybrid_routing_evaluate(
 
     let is_empty_request = static_routing_request.is_none() && dynamic_routing_request.is_none();
 
+    // When an experiment is live, the decider's own interceptor composes both legs for the
+    // assigned arm: it evaluates that arm's rule and enforces the result as the dynamic leg's
+    // candidate set. Running the static leg here as well would evaluate the same rule twice and
+    // file two routing events against one payment, so stand down and let the interceptor own
+    // it. Only when there is no dynamic leg to carry the rule does the static leg still run.
+    let ab_test_owns_static_leg = match dynamic_routing_request.as_ref() {
+        Some(req) => {
+            crate::decider::gatewaydecider::ab_test::is_intercepting(&req.merchant_id).await
+        }
+        None => false,
+    };
     let (static_routing_response, static_routing_error, static_fallback_gateways) =
         match static_routing_request {
+            // Deferring the evaluation, not the request: the caller's fallback connectors are
+            // still carried through, so a dynamic leg that fails degrades gracefully exactly as
+            // it would have.
+            Some(req) if ab_test_owns_static_leg => {
+                crate::logger::debug!(
+                    "hybrid routing: an A/B experiment is active for {}, deferring the static leg to the decider",
+                    req.created_by
+                );
+                (None, None, req.fallback_output)
+            }
             Some(req) => {
                 // Preserve static fallback connectors even when static evaluation fails,
                 // so dynamic can still run with a bounded candidate set.

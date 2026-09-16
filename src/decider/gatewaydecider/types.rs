@@ -475,7 +475,7 @@ pub struct DeciderState {
     /// SR config overrides injected by an active SR Config Tuning A/B test for the variant arm.
     /// Applied at routing time: hedging_percent overrides explore-exploit, elimination_threshold
     /// overrides the merchant's elimination rule. Absent for control arm and non-tuning experiments.
-    pub ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride>,
+    pub ab_test_sr_override: Option<crate::types::ab_test::SrConfigOverride>,
     pub multi_objective_info: Option<super::multi_objective::MultiObjectiveInfo>,
     /// Why the volume-commitment nudge did or did not move this payment.
     pub volume_steer_info: Option<super::volume_commitment::VolumeSteerInfo>,
@@ -1385,6 +1385,9 @@ pub struct DecidedGateway {
     pub latency: Option<u64>,
     pub multi_objective_info: Option<super::multi_objective::MultiObjectiveInfo>,
     pub volume_steer_info: Option<super::volume_commitment::VolumeSteerInfo>,
+    /// Set only when an A/B experiment applied to this payment; see [`AbTestInfo`].
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ab_test_info: Option<crate::types::ab_test::AbTestInfo>,
 }
 
 #[derive(Debug, Serialize, Clone, Deserialize)]

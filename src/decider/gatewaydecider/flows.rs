@@ -405,6 +405,7 @@ pub async fn run_decider_flow(
                     latency: None,
                     multi_objective_info: None,
                     volume_steer_info: None,
+                    ab_test_info: None,
                 })
             } else {
                 decider_flow
@@ -736,6 +737,7 @@ pub async fn run_decider_flow(
                                 latency: None,
                                 multi_objective_info: None,
                                 volume_steer_info: None,
+                                ab_test_info: None,
                             })
                         }
                         None => Err((

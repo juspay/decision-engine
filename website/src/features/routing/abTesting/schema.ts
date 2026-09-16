@@ -1,29 +1,51 @@
-import { ABTestFormValues } from './types'
+import { ABTestFormValues, armHasRule, armRunsSr } from './types'
 
-export function validateABTestForm(values: ABTestFormValues): string | null {
-  if (!values.name.trim()) return 'Enter an experiment name'
+/** The form control a validation issue belongs to, so the form can put the cursor there. */
+export type ABTestFormField =
+  | 'name'
+  | 'controlArm'
+  | 'variantArm'
+  | 'variantSrConfig'
+  | 'variantSplitPct'
+  | 'minSampleSize'
+  | 'guardrailThresholdPp'
+
+export interface ABTestFormIssue {
+  field: ABTestFormField
+  /**
+   * Why the value is wrong. Omitted when the field being empty is the whole story — putting the
+   * cursor in a blank required input says "fill this in" better than a sentence does, and a
+   * message the reader has to connect back to a control is worse than no message.
+   */
+  message?: string
+}
+
+export function validateABTestForm(values: ABTestFormValues): ABTestFormIssue | null {
+  if (!values.name.trim()) return { field: 'name' }
 
   if (values.experimentType === 'sr_config_tuning') {
     const v = values.variantSrConfig
     if (v.hedgingPercent !== null && (v.hedgingPercent < 0 || v.hedgingPercent > 100))
-      return 'Hedging % must be between 0 and 100'
+      return { field: 'variantSrConfig', message: 'Hedging % must be between 0 and 100' }
     if (v.eliminationThreshold !== null && (v.eliminationThreshold < 0 || v.eliminationThreshold > 1))
-      return 'Elimination threshold must be between 0 and 1'
+      return { field: 'variantSrConfig', message: 'Elimination threshold must be between 0 and 1' }
     if (v.hedgingPercent === null && v.eliminationThreshold === null)
-      return 'Set at least one parameter override for the variant arm'
+      return { field: 'variantSrConfig', message: 'Set at least one parameter override for the variant arm' }
   } else {
-    // algorithm_comparison — each arm is a strategy (an SR variant or a saved config).
-    if (!values.controlAlgorithmId) return 'Select a control strategy'
-    if (!values.variantAlgorithmId) return 'Select a variant strategy'
-    if (values.controlAlgorithmId === values.variantAlgorithmId)
-      return 'Control and variant must be different strategies'
+    // algorithm_comparison — an arm needs at least one leg to route with. The control is checked
+    // only when it is named outright; left as the merchant's live setup the backend resolves it,
+    // and rejects the merchant having nothing to resolve.
+    if (values.control && !armHasRule(values.control) && !armRunsSr(values.control))
+      return { field: 'controlArm', message: 'Give the control a routing rule, success-rate routing, or both' }
+    if (!armHasRule(values.variant) && !armRunsSr(values.variant))
+      return { field: 'variantArm', message: 'Give the variant a routing rule, success-rate routing, or both' }
   }
 
   if (values.variantSplitPct < 5 || values.variantSplitPct > 30)
-    return 'Variant traffic must be between 5% and 30%'
+    return { field: 'variantSplitPct', message: 'Variant traffic must be between 5% and 30%' }
   if (values.minSampleSize < 100)
-    return 'Minimum sample size must be at least 100 transactions'
+    return { field: 'minSampleSize', message: 'Minimum sample size must be at least 100 transactions' }
   if (values.guardrailThresholdPp <= 0 || values.guardrailThresholdPp > 20)
-    return 'Guardrail threshold must be between 0.1 and 20 percentage points'
+    return { field: 'guardrailThresholdPp', message: 'Guardrail threshold must be between 0.1 and 20 percentage points' }
   return null
 }

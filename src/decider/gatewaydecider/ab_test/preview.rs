@@ -6,6 +6,7 @@ use crate::storage::schema::routing_algorithm::dsl;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg::routing_algorithm::dsl;
 
+use crate::types::ab_test::ArmStrategy;
 use crate::{
     error::ContainerError,
     euclid::{
@@ -24,6 +25,11 @@ pub struct AbTestArmOutput {
     pub evaluated_output: Vec<ConnectorInfo>,
     pub rule_name: Option<String>,
     pub flow_type: crate::analytics::flow::FlowType,
+    /// True when part of this arm's answer is a stand-in rather than a real evaluation: the
+    /// dynamic leg cannot run against rule parameters, so an arm that uses SR is only
+    /// approximated here. Surfaced to the caller so the preview never passes itself off as the
+    /// decision a real payment would get.
+    pub sr_leg_simulated: bool,
 }
 
 /// Evaluate the selected AB test arm for the Decision Explorer preview flow.
@@ -31,23 +37,26 @@ pub struct AbTestArmOutput {
 /// flow type (used so preview events get the correct summary_kind in the audit).
 pub async fn evaluate_arm(
     arm: &str,
-    arm_algorithm_id: &str,
+    strategy: &ArmStrategy,
     payload: &RoutingRequest,
     db: &crate::storage::Storage,
 ) -> Result<AbTestArmOutput, ContainerError<EuclidErrors>> {
-    // SR arm: in simulation, pick the first fallback connector as a proxy for what
-    // SR scoring would select in a real payment.
-    if arm_algorithm_id == "sr_routing" {
-        let chosen = payload
+    let Some(arm_algorithm_id) = strategy.algorithm_id() else {
+        // No rule leg to evaluate. The preview flow holds Euclid rule parameters, not a payment
+        // — there is no transaction to score, no merchant gateway accounts resolved and no live
+        // SR state — so the dynamic leg cannot be executed here. Stand in for it with the
+        // caller's own fallback order, and mark the result simulated so the Decision Explorer
+        // can say so rather than presenting a guess as a decision.
+        let connectors = payload
             .fallback_output
-            .as_deref()
-            .and_then(|cs| cs.first().cloned())
+            .clone()
+            .filter(|cs| !cs.is_empty())
             .ok_or_else(|| {
                 ContainerError::from(EuclidErrors::InvalidRequest(
-                    "SR routing arm requires at least one connector in fallback_output".into(),
+                    "an SR arm preview requires at least one connector in fallback_output".into(),
                 ))
             })?;
-        let out_enum = Output::Single(chosen.clone());
+        let out_enum = Output::Priority(connectors);
         let evaluated = evaluate_output(&out_enum).map_err(|_| {
             ContainerError::from(EuclidErrors::FailedToEvaluateOutput(
                 "ab_test sr routing arm evaluation".into(),
@@ -56,10 +65,11 @@ pub async fn evaluate_arm(
         return Ok(AbTestArmOutput {
             output: out_enum,
             evaluated_output: evaluated,
-            rule_name: Some(format!("ab_test_{arm}_sr_routing")),
+            rule_name: Some(format!("ab_test_{arm}_{}", strategy.label())),
             flow_type: crate::analytics::flow::FlowType::RoutingEvaluateSingle,
+            sr_leg_simulated: true,
         });
-    }
+    };
 
     // Static arm: fetch the arm's algorithm from DB and evaluate it.
     let arm_algorithm = crate::generics::generic_find_one::<
@@ -142,6 +152,9 @@ pub async fn evaluate_arm(
         evaluated_output,
         rule_name,
         flow_type,
+        // A hybrid arm's rule leg above is real; its SR leg, which would reorder these
+        // connectors on a live payment, is not run here.
+        sr_leg_simulated: strategy.runs_sr(),
     })
 }
 
@@ -153,6 +166,7 @@ pub fn serialize_analytics_details(
     rule_name: Option<&str>,
     experiment_id: &str,
     variant_arm: &str,
+    sr_leg_simulated: bool,
 ) -> Option<String> {
     crate::analytics::serialize_details(&serde_json::json!({
         "request": request,
@@ -161,5 +175,6 @@ pub fn serialize_analytics_details(
         "preview_kind": "routing_evaluate_ab_test",
         "experiment_id": experiment_id,
         "variant_arm": variant_arm,
+        "sr_leg_simulated": sr_leg_simulated,
     }))
 }

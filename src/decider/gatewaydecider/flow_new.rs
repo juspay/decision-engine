@@ -35,7 +35,7 @@ use crate::types::routing_configuration::SuccessRateData;
 use crate::types::service_configuration;
 
 pub async fn decider_full_payload_hs_function(
-    dreq_: T::DomainDeciderRequestForApiCallV2,
+    mut dreq_: T::DomainDeciderRequestForApiCallV2,
     cpu_start: Instant,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let merchant_account =
@@ -56,6 +56,39 @@ pub async fn decider_full_payload_hs_function(
                 priority_logic_output: None,
                 is_dynamic_mga_enabled: false,
             })?;
+    // AB test intercept — must run before the candidate set is fixed below, because a hybrid
+    // arm's rule leg narrows it. Feature-flagged per merchant: disabled by default, enable via
+    // service config AB_TEST_REAL_PAYMENTS_ENABLED_{merchant_id}.
+    let mut ab_test_sr_override: Option<crate::types::ab_test::SrConfigOverride> = None;
+    // For arms that reach the decider, keep (experiment_id, variant_arm, arm_algorithm) so the
+    // response can name the arm and the multi-objective cost outcome can be attributed to it
+    // once routing completes (see below).
+    let mut ab_test_experiment: Option<(String, String, String)> = None;
+    match super::ab_test::intercept(&dreq_).await {
+        super::ab_test::AbTestIntercept::StaticArm { result, .. } => {
+            return Ok(*result);
+        }
+        super::ab_test::AbTestIntercept::SrArm {
+            sr_config_override,
+            experiment_id,
+            variant_arm,
+            arm_algorithm,
+            eligible_gateways,
+        } => {
+            // Carry on into the decider. `sr_config_override` holds the arm's per-arm dials
+            // (hedging / elimination / margin / cost / autopilot / volume steering), applied at
+            // routing time. `eligible_gateways` is the hybrid arm's rule leg: enforcing it as
+            // the candidate set is what makes SR pick among the rule's outputs, the same
+            // composition `/routing/hybrid` performs a layer up.
+            ab_test_sr_override = sr_config_override;
+            if let Some(gateways) = eligible_gateways {
+                dreq_.eligible_gateway_list = Some(gateways);
+            }
+            ab_test_experiment = Some((experiment_id, variant_arm, arm_algorithm));
+        }
+        super::ab_test::AbTestIntercept::Disabled => {}
+    }
+
     let enforced_gateway_filter = handle_enforced_gateway(dreq_.clone().eligible_gateway_list);
 
     // check if type formation is correct
@@ -170,36 +203,11 @@ pub async fn decider_full_payload_hs_function(
         dpRedisCompressionConfig: None,
     };
 
-    // AB test intercept — must run before SR routing. Feature-flagged per merchant.
-    // Disabled by default; enable via service config AB_TEST_REAL_PAYMENTS_ENABLED_{merchant_id}.
-    let mut ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride> = None;
-    // For SR-arm A/B payments, keep (experiment_id, variant_arm) so we can attribute the
-    // multi-objective cost outcome to the arm after routing completes (see below).
-    let mut ab_test_experiment: Option<(String, String)> = None;
-    match super::ab_test::intercept(&dreq_).await {
-        super::ab_test::AbTestIntercept::StaticArm {
-            result,
-            experiment_id: _,
-            variant_arm: _,
-        } => {
-            return Ok(*result);
-        }
-        super::ab_test::AbTestIntercept::SrArm {
-            sr_config_override,
-            experiment_id,
-            variant_arm,
-        } => {
-            // Carry on with normal SR routing. sr_config_override carries the per-arm overrides
-            // (hedging / elimination / margin / multi-objective / autopilot) to apply at routing time.
-            ab_test_sr_override = sr_config_override;
-            ab_test_experiment = Some((experiment_id, variant_arm));
-        }
-        super::ab_test::AbTestIntercept::Disabled => {}
-    }
-
     let is_hybrid_routing = dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwSrHybridRouting);
 
-    if dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwBasedRouting) || is_hybrid_routing {
+    let mut routing_result = if dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwBasedRouting)
+        || is_hybrid_routing
+    {
         let config_name = format!("DEBIT_ROUTING_ENABLED_{}", dreq_.merchant_id);
         let debit_routing_enabled = service_configuration::find_config_by_name(config_name)
             .await
@@ -260,7 +268,8 @@ pub async fn decider_full_payload_hs_function(
         // Cost measurement: for an SR-arm A/B payment, enrich the inflight record with the
         // decided gateway + multi-objective cost outcome so the later outcome event can
         // attribute cost per arm. No-op (aside from gateway backfill) when the arm ran auth-only.
-        if let (Ok(decided), Some((experiment_id, variant_arm))) = (&result, &ab_test_experiment) {
+        if let (Ok(decided), Some((experiment_id, variant_arm, _))) = (&result, &ab_test_experiment)
+        {
             let mo = decided.multi_objective_info.as_ref();
             super::ab_test::record_cost_outcome(
                 dreq_.payment_id(),
@@ -281,7 +290,23 @@ pub async fn decider_full_payload_hs_function(
         }
 
         result
+    };
+
+    // Echo the arm on the response. A rule-only arm is stamped by the interceptor (which returns
+    // early); this covers the arms the decider ran, whose decision is otherwise indistinguishable
+    // from a payment outside the experiment. `ab_test_experiment` is None whenever no A/B test
+    // applied.
+    if let (Ok(decided), Some((experiment_id, variant_arm, arm_algorithm))) =
+        (&mut routing_result, &ab_test_experiment)
+    {
+        decided.ab_test_info = Some(crate::types::ab_test::AbTestInfo {
+            experiment_id: experiment_id.clone(),
+            arm: variant_arm.clone(),
+            arm_algorithm: arm_algorithm.clone(),
+        });
     }
+
+    routing_result
 }
 
 async fn perform_hybrid_routing(
@@ -375,7 +400,7 @@ pub async fn run_decider_flow(
     eliminationEnabled: Option<bool>,
     is_legacy_decider_flow: bool,
     cpu_start: Instant,
-    ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride>,
+    ab_test_sr_override: Option<crate::types::ab_test::SrConfigOverride>,
     enable_multi_objective_override: Option<bool>,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let txnCreationTime = deciderParams
@@ -459,6 +484,7 @@ pub async fn run_decider_flow(
                     latency: Some(cpu_time),
                     multi_objective_info: None,
                     volume_steer_info: None,
+                    ab_test_info: None,
                 })
             } else {
                 decider_flow
@@ -722,14 +748,26 @@ pub async fn run_decider_flow(
                     }
 
                     // Volume-commitment nudge runs last on its own flag; fails open when flag,
-                    // deps or plan is absent. Under hedging the flag is not even read.
+                    // deps or plan is absent. Under hedging the flag is not even read. An A/B
+                    // arm override wins over the merchant flag, so an experiment can run
+                    // steering off on control and on in variant against one commitment document.
                     let volume_commitment_on = !hedging_on
-                        && is_feature_enabled(
-                            volume_commitment::FEATURE_FLAG.to_string(),
-                            merchant_id_text.clone(),
-                            kvRedis(),
-                        )
-                        .await;
+                        && match decider_flow
+                            .writer
+                            .ab_test_sr_override
+                            .as_ref()
+                            .and_then(|o| o.enable_volume_commitment)
+                        {
+                            Some(b) => b,
+                            None => {
+                                is_feature_enabled(
+                                    volume_commitment::FEATURE_FLAG.to_string(),
+                                    merchant_id_text.clone(),
+                                    kvRedis(),
+                                )
+                                .await
+                            }
+                        };
                     if volume_commitment_on {
                         if let Some(vc_deps) = volume_commitment::deps() {
                             if let Some(plan) = vc_deps.state.load_plan(&merchant_id_text).await {
@@ -900,6 +938,7 @@ pub async fn run_decider_flow(
                                     .multi_objective_info
                                     .clone(),
                                 volume_steer_info: decider_flow.writer.volume_steer_info.clone(),
+                                ab_test_info: None,
                             })
                         }
                         None => Err((

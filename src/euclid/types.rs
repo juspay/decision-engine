@@ -4,6 +4,7 @@ use crate::euclid::ast::{Output, Program, ValueType};
 use crate::storage::schema;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg;
+use crate::types::ab_test::ABTestData;
 use diesel::prelude::AsChangeset;
 use diesel::Identifiable;
 use diesel::Insertable;
@@ -57,58 +58,6 @@ pub enum StaticRoutingAlgorithm {
     /// algorithm. Must ride the `algorithm_for = "volume_commitment"` slot (validated), so the
     /// payment/payout/3DS evaluate paths never see it.
     VolumeContract(Box<super::volume_contract::VolumeContractConfig>),
-}
-
-/// Per-arm routing overrides for A/B experiments. Applied inside scoring_flow / the
-/// multi-objective post-step before gateway selection, so no isolated score pools are
-/// needed. All fields are optional — an absent field falls through to the merchant
-/// config / feature flag / default, exactly as if no override were present.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct SrConfigOverride {
-    /// Share of traffic (0–100) sent to non-top gateways to keep scores fresh (explore-exploit).
-    /// Overrides `defaultHedgingPercent` from the merchant's SR config.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub hedging_percent: Option<f64>,
-    /// SR score threshold (0–1) below which a gateway is eliminated from routing.
-    /// Overrides the merchant's elimination rule threshold.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub elimination_threshold: Option<f64>,
-    /// Whether the multi-objective (cost-aware) post-step runs for this arm. Overrides the
-    /// merchant `multi_objective_routing_enabled` flag / per-request value. Used by the
-    /// "Turn cost on" experiment (control = false, variant = true).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub enable_multi_objective: Option<bool>,
-    /// Merchant margin (fraction of ticket) the multi-objective EV ranking applies for this
-    /// arm. Overrides `SuccessRateData.margin`. Lower margin lets cost win more often.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub margin: Option<f64>,
-    /// Whether this arm honors autopilot-calibrated (source = "autopilot") bucket/hedging
-    /// sub-level config. When `false`, autopilot-sourced entries are skipped and the arm
-    /// falls back to the merchant's manual/default config. Used by the "Autopilot value"
-    /// experiment (control = false → manual, variant = true → live autopilot).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub use_autopilot: Option<bool>,
-}
-
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
-pub struct ABTestData {
-    pub control_algorithm_id: String,
-    pub variant_algorithm_id: String,
-    /// Percentage of traffic routed to the variant arm (1–49).
-    pub variant_split_pct: u8,
-    /// Minimum transactions to collect before reporting a significance verdict.
-    pub min_sample_size: u32,
-    /// Auto-pause threshold: if variant auth rate drops more than this many pp below control, flag for pause.
-    pub guardrail_threshold_pp: f64,
-    /// Routing overrides for the variant arm. Absent means the variant uses the live SR config
-    /// (standard A/B test / algorithm comparison).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub variant_sr_config: Option<SrConfigOverride>,
-    /// Routing overrides for the control arm. Absent means the control uses the live SR config
-    /// (the common case). Set by experiments that need to pin the control arm — e.g. "Turn cost
-    /// on" (control = multi-objective off) or "Autopilot value" (control = manual config).
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub control_sr_config: Option<SrConfigOverride>,
 }
 
 #[derive(

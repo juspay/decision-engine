@@ -6,19 +6,27 @@ use crate::decider::gatewaydecider::types::{
     DecidedGateway, DomainDeciderRequestForApiCallV2, GatewayDeciderApproach, ResetApproach,
 };
 use crate::logger;
+use crate::types::ab_test::ArmStrategy;
 
 pub enum AbTestIntercept {
-    /// Feature flag off, no active AB test, or error — proceed normally.
+    /// Feature flag off, no active AB test, an arm shape this build does not understand, or an
+    /// arm that failed to evaluate — proceed normally, outside the experiment.
     Disabled,
-    /// This payment is assigned to the SR routing arm — proceed normally, carry experiment context.
+    /// This payment's arm runs the dynamic decider — proceed into it carrying experiment context.
+    /// Covers both a pure SR arm and a hybrid arm whose rule leg has already run.
     SrArm {
         experiment_id: String,
         variant_arm: String,
-        /// SR hyperparameter overrides to apply during routing. Only set for the variant arm
-        /// in SR Config Tuning experiments; None for control arm and standard A/B tests.
-        sr_config_override: Option<crate::euclid::types::SrConfigOverride>,
+        /// The arm's algorithm label, for the response and the audit trail.
+        arm_algorithm: String,
+        /// SR hyperparameter overrides to apply during routing. `None` means the arm uses the
+        /// merchant's live SR config, which is what keeps a control arm faithful to production.
+        sr_config_override: Option<crate::types::ab_test::SrConfigOverride>,
+        /// Gateways the arm's rule leg admitted, to be enforced as SR's candidate set.
+        /// `None` for a pure SR arm, which routes over everything the decider's filters allow.
+        eligible_gateways: Option<Vec<String>>,
     },
-    /// This payment is assigned to a static algorithm arm — return this result directly.
+    /// This payment is assigned to a rule-only arm — return this result directly, SR never runs.
     StaticArm {
         result: Box<DecidedGateway>,
         experiment_id: String,
@@ -73,64 +81,71 @@ pub async fn intercept(dreq: &DomainDeciderRequestForApiCallV2) -> AbTestInterce
     };
 
     let payment_id = dreq.payment_id();
-    let arm = super::common::assign_arm(payment_id, data.variant_split_pct);
-    let arm_algorithm_id = if arm == "variant" {
-        &data.variant_algorithm_id
-    } else {
-        &data.control_algorithm_id
-    };
+    let (arm, strategy) = data.arm_for(payment_id);
+    let arm_algorithm = strategy.label();
 
     logger::debug!(
-        "ab_test intercept: payment_id={} merchant={} experiment={} arm={}",
+        "ab_test intercept: payment_id={} merchant={} experiment={} arm={} algorithm={}",
         payment_id,
         dreq.merchant_id,
         experiment_id,
-        arm
+        arm,
+        arm_algorithm
     );
 
-    // SR arm: gateway unknown until the decider runs — emit routing event without gateway.
-    if arm_algorithm_id == "sr_routing" {
-        // Per-arm routing overrides: the variant carries variant_sr_config, the control carries
-        // control_sr_config. Either may be None (→ live SR config), which preserves the original
-        // "control always uses live config" behavior for standard A/B tests.
-        let sr_config_override = if arm == "variant" {
-            data.variant_sr_config.clone()
-        } else {
-            data.control_sr_config.clone()
-        };
-        emit_routing_event(
-            payment_id,
-            &dreq.merchant_id,
-            &experiment_id,
-            arm,
-            "sr_routing",
-            None,
-        );
-        outcome::store_inflight(
-            payment_id,
-            &experiment_id,
-            arm,
-            None,
-            false,
-            Some(dreq.payment_info.amount),
-        )
-        .await;
-        return AbTestIntercept::SrArm {
-            experiment_id,
-            variant_arm: arm.to_string(),
-            sr_config_override,
-        };
-    }
+    // The rule leg, for the arms that have one. `Rule` answers with it directly; `Hybrid`
+    // reduces it to a candidate set and hands that to SR.
+    let rule_result = match strategy.algorithm_id() {
+        Some(algorithm_id) => {
+            match evaluator::evaluate_static_arm(algorithm_id, payment_id, dreq).await {
+                Some(result) => Some(result),
+                None => {
+                    // Do NOT fall back to unrestricted routing under this arm's attribution — the
+                    // payment would route some other way but still get counted in this arm's
+                    // auth/cost stats, silently corrupting the experiment (a broken rule config
+                    // would make the "rule" arm's results actually be SR results). Opt this
+                    // payment out of the experiment entirely: no routing/outcome events, no
+                    // store_inflight, normal live-config routing.
+                    logger::warn!(
+                        "ab_test intercept: rule '{}' failed to evaluate for the '{}' arm, excluding payment {} from experiment {} and routing normally",
+                        algorithm_id,
+                        arm,
+                        payment_id,
+                        experiment_id
+                    );
+                    return AbTestIntercept::Disabled;
+                }
+            }
+        }
+        None => None,
+    };
 
-    // Static arm: evaluate, emit routing event with decided gateway.
-    match evaluator::evaluate_static_arm(arm_algorithm_id, payment_id, dreq).await {
-        Some(static_result) => {
+    match strategy {
+        // Exclude the payment rather than guess at it: an arm shape this build cannot execute
+        // would otherwise be routed as something else and still counted for the arm. `Current`
+        // is resolved to a concrete arm by `routing_create`, so one reaching here means a row
+        // was written by some other path and its real shape is unknown. Neither names an
+        // algorithm, so no rule was evaluated above.
+        ArmStrategy::Unknown | ArmStrategy::Current => {
+            logger::warn!(
+                "ab_test intercept: unresolved or unrecognized arm shape on the '{}' arm of experiment {}, excluding payment {}",
+                arm,
+                experiment_id,
+                payment_id
+            );
+            AbTestIntercept::Disabled
+        }
+
+        // Rule only: the rule's pick is the decision and SR never runs, so the gateway is
+        // known now and this payment gets no SR score feedback.
+        ArmStrategy::Rule { .. } => {
+            let static_result = rule_result.expect("Rule arm always evaluates a rule");
             emit_routing_event(
                 payment_id,
                 &dreq.merchant_id,
                 &experiment_id,
                 arm,
-                arm_algorithm_id,
+                &arm_algorithm,
                 Some(static_result.decided_gateway.as_str()),
             );
             outcome::store_inflight(
@@ -138,7 +153,7 @@ pub async fn intercept(dreq: &DomainDeciderRequestForApiCallV2) -> AbTestInterce
                 &experiment_id,
                 arm,
                 Some(static_result.decided_gateway.as_str()),
-                true,
+                false,
                 Some(dreq.payment_info.amount),
             )
             .await;
@@ -163,24 +178,57 @@ pub async fn intercept(dreq: &DomainDeciderRequestForApiCallV2) -> AbTestInterce
                     latency: None,
                     multi_objective_info: None,
                     volume_steer_info: None,
+                    ab_test_info: Some(crate::types::ab_test::AbTestInfo {
+                        experiment_id: experiment_id.clone(),
+                        arm: arm.to_string(),
+                        arm_algorithm,
+                    }),
                 }),
                 experiment_id,
                 variant_arm: arm.to_string(),
             }
         }
-        None => {
-            // Do NOT fall back to SR routing under this arm's attribution — the payment would
-            // route via SR but still get counted in the rule arm's auth/cost stats, silently
-            // corrupting the experiment (a broken rule config would make the "rule" arm's
-            // results actually be SR results). Opt this payment out of the experiment entirely:
-            // no routing/outcome events, no store_inflight, normal live-config SR routing.
-            logger::warn!(
-                "ab_test intercept: static arm evaluation failed for '{}', excluding payment {} from experiment {} and routing normally",
-                arm_algorithm_id,
+
+        // SR only, and hybrid (rule narrows, SR picks): both continue into the decider, so the
+        // gateway is unknown until it returns. `record_cost_outcome` backfills it afterwards.
+        ArmStrategy::Sr { .. } | ArmStrategy::Hybrid { .. } => {
+            let eligible_gateways = match rule_result {
+                Some(result) if result.candidates.is_empty() => {
+                    logger::warn!(
+                        "ab_test intercept: rule on the '{}' arm admitted no gateway, excluding payment {} from experiment {}",
+                        arm,
+                        payment_id,
+                        experiment_id
+                    );
+                    return AbTestIntercept::Disabled;
+                }
+                Some(result) => Some(result.candidates),
+                None => None,
+            };
+            emit_routing_event(
                 payment_id,
-                experiment_id
+                &dreq.merchant_id,
+                &experiment_id,
+                arm,
+                &arm_algorithm,
+                None,
             );
-            AbTestIntercept::Disabled
+            outcome::store_inflight(
+                payment_id,
+                &experiment_id,
+                arm,
+                None,
+                true,
+                Some(dreq.payment_info.amount),
+            )
+            .await;
+            AbTestIntercept::SrArm {
+                experiment_id,
+                variant_arm: arm.to_string(),
+                arm_algorithm,
+                sr_config_override: strategy.sr_config().cloned(),
+                eligible_gateways,
+            }
         }
     }
 }

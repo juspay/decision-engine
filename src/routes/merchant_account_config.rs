@@ -7,6 +7,7 @@ use crate::{error, logger};
 use axum::{extract::Path, http::HeaderMap, Json};
 use error_stack::ResultExt;
 use masking::PeekInterface;
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -33,6 +34,22 @@ pub struct DebitRoutingResponse {
     pub merchant_id: String,
     pub debit_routing_enabled: bool,
 }
+
+/// How many times a feature-flag write will re-read and re-apply after losing a race.
+///
+/// Losing a round means somebody else's write landed, so the loop makes progress system-wide and
+/// cannot spin forever — but N writers hitting the row at once serialize into N rounds, so the
+/// bound has to clear the realistic burst. A bulk enable script is the worst case, not two
+/// operators in a console.
+const FEATURE_CONF_MAX_ATTEMPTS: u8 = 20;
+
+/// Upper bound on the jittered pause between attempts, in milliseconds.
+///
+/// Without a pause every loser re-reads the instant the winner commits, so the same crowd collides
+/// again and again and the round count is exactly the writer count. Spreading the retries thins
+/// each round out. It is jitter rather than a fixed delay for the same reason: a fixed delay just
+/// moves the pile-up.
+const FEATURE_CONF_RETRY_MAX_BACKOFF_MS: u64 = 40;
 
 fn debit_routing_config_name(merchant_id: &str) -> String {
     format!("DEBIT_ROUTING_ENABLED_{}", merchant_id)
@@ -106,7 +123,7 @@ impl KnownFeature {
     /// Reads the FeatureConf directly from service_configuration (bypasses Redis/memory
     /// cache) so the dashboard always shows the current persisted state. Falls back to
     /// the Redis-cached path for features whose FeatureConf lives only in Redis.
-    async fn read_effective(&self, merchant_id: &str) -> bool {
+    pub(crate) async fn read_effective(&self, merchant_id: &str) -> bool {
         let key = self.feature_conf_key();
 
         let conf = service_configuration::find_config_by_name(key.to_string())
@@ -142,41 +159,96 @@ impl KnownFeature {
     ) -> error_stack::Result<(), crate::generics::MeshError> {
         let key = self.feature_conf_key().to_string();
 
-        let existing = service_configuration::find_config_by_name(key.clone())
-            .await
-            .unwrap_or(None);
+        // ONE row holds the enabled-merchant list for ALL merchants, so every toggle of this
+        // feature — for any merchant — contends on it. Read-modify-writing it with a plain
+        // `update_config` let the last writer win the whole list: two operators enabling the
+        // feature for two different merchants at the same time would each read the pre-change
+        // list, and whichever wrote second would silently drop the other's merchant. Nothing
+        // surfaced, the response showed the feature as enabled, and the merchant simply never got
+        // the behaviour.
+        //
+        // So: swap against the value we read, and re-apply our change to whatever is there now if
+        // somebody beat us. The retries are bounded because each one only loses to a write that
+        // actually landed.
+        for attempt in 1..=FEATURE_CONF_MAX_ATTEMPTS {
+            let existing = service_configuration::find_config_by_name(key.clone())
+                .await
+                .unwrap_or(None);
+            // A row whose value is NULL is not the same as no row: the first is swapped, the
+            // second inserted.
+            let row_exists = existing.is_some();
+            let previous = existing.and_then(|c| c.value);
 
-        let exists = existing.is_some();
+            let mut conf: FeatureConf = previous
+                .as_deref()
+                .and_then(|v| serde_json::from_str(v).ok())
+                .unwrap_or(FeatureConf {
+                    enableAll: false,
+                    enableAllRollout: None,
+                    disableAny: None,
+                    merchants: Some(vec![]),
+                });
 
-        let mut conf: FeatureConf = existing
-            .and_then(|c| c.value)
-            .and_then(|v| serde_json::from_str(&v).ok())
-            .unwrap_or(FeatureConf {
-                enableAll: false,
-                enableAllRollout: None,
-                disableAny: None,
-                merchants: Some(vec![]),
-            });
+            let mut merchants = conf.merchants.take().unwrap_or_default();
+            merchants.retain(|m| m.merchantId.to_lowercase() != merchant_id.to_lowercase());
+            if enabled {
+                merchants.push(FeatureMerchant {
+                    merchantId: merchant_id.to_string(),
+                    rollout: 100,
+                });
+            }
+            conf.merchants = Some(merchants);
 
-        let mut merchants = conf.merchants.take().unwrap_or_default();
-        merchants.retain(|m| m.merchantId.to_lowercase() != merchant_id.to_lowercase());
-        if enabled {
-            merchants.push(FeatureMerchant {
-                merchantId: merchant_id.to_string(),
-                rollout: 100,
-            });
+            let serialized = serde_json::to_string(&conf)
+                .map_err(|e| error_stack::report!(e))
+                .change_context(crate::generics::MeshError::Others)?;
+
+            if row_exists {
+                if service_configuration::compare_and_swap_config(
+                    key.clone(),
+                    previous.as_deref(),
+                    Some(serialized),
+                )
+                .await?
+                {
+                    return Ok(());
+                }
+            } else {
+                // The unique index on `service_configuration.name` is what makes this safe: the
+                // loser of two concurrent first-writes fails here instead of inserting a second
+                // row, and comes back round to the swap branch. `generic_insert` flattens every
+                // failure to `Others`, so a genuine error is indistinguishable from losing the
+                // race and also retries — bounded by the attempt count either way.
+                if service_configuration::insert_config(key.clone(), Some(serialized))
+                    .await
+                    .is_ok()
+                {
+                    return Ok(());
+                }
+            }
+
+            logger::debug!(
+                "feature conf {} was written concurrently, re-applying {} (attempt {}/{})",
+                key,
+                merchant_id,
+                attempt,
+                FEATURE_CONF_MAX_ATTEMPTS
+            );
+
+            // Exponential-ish, capped, and jittered across the whole window rather than around a
+            // growing centre — the point is to break the lockstep, not to wait accurately.
+            let ceiling = FEATURE_CONF_RETRY_MAX_BACKOFF_MS.min(1 << attempt.min(6));
+            let backoff = rand::thread_rng().gen_range(0..=ceiling);
+            tokio::time::sleep(std::time::Duration::from_millis(backoff)).await;
         }
-        conf.merchants = Some(merchants);
 
-        let serialized = serde_json::to_string(&conf)
-            .map_err(|e| error_stack::report!(e))
-            .change_context(crate::generics::MeshError::Others)?;
-
-        if exists {
-            service_configuration::update_config(key, Some(serialized)).await
-        } else {
-            service_configuration::insert_config(key, Some(serialized)).await
-        }
+        logger::error!(
+            "gave up updating feature conf {} for {} after {} contended attempts",
+            key,
+            merchant_id,
+            FEATURE_CONF_MAX_ATTEMPTS
+        );
+        Err(error_stack::report!(crate::generics::MeshError::Others))
     }
 }
 
