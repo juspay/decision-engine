@@ -16,6 +16,7 @@ use crate::decider::gatewaydecider::types::{
     toListOfGatewayScore, ConfigSource, DeciderFlow, DeciderScoringName, FilterLevel,
     GatewayDeciderApproach, GatewayScoreMap, SRMetricLogData, SrRoutingDimensions,
 };
+use crate::feedback::constants::kvRedis;
 use crate::feedback::gateway_scoring_service::MetricEntry;
 use crate::logger;
 use crate::merchant_config_util::{
@@ -2548,8 +2549,15 @@ pub async fn update_gateway_score_based_on_success_rate(
         .ok(),
     )
     .await;
-    let enable_success_rate_based_gateway_elimination =
-        payment_flow_enabled || elimination_enabled == Some(true);
+    let elimination_feature_flag_enabled = is_feature_enabled(
+        C::ENABLE_GW_LEVEL_SR_ELIMINATION.get_key(),
+        Utils::get_m_id(txn_detail.merchantId.clone()),
+        kvRedis(),
+    )
+    .await;
+    let enable_success_rate_based_gateway_elimination = payment_flow_enabled
+        || elimination_feature_flag_enabled
+        || elimination_enabled == Some(true);
 
     logger::debug!(
         tag = "updateGatewayScoreBasedOnSuccessRate",

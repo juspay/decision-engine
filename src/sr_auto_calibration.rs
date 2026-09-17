@@ -1,6 +1,6 @@
 //! Runtime auto-calibration of the SRv3 bucket size and hedging %.
 //!
-//! A periodic background job (gated per-merchant by the `sr_auto_calibration_enabled` feature
+//! A periodic background job (gated per-merchant by the `autopilot_enabled` feature
 //! flag) derives both knobs purely from observed traffic — no merchant input. Volume and the
 //! distinct-PSP count come from ClickHouse (off the decision hot path, zero new Redis keys);
 //! the result is written back into the merchant's `SR_V3_INPUT_CONFIG_<merchant>` and applied
@@ -23,11 +23,6 @@ use crate::logger;
 use crate::types::merchant_config::types::FeatureConf;
 use crate::types::service_configuration::{find_config_by_name, insert_config, update_config};
 
-/// Service-configuration key whose FeatureConf lists the merchants opted into auto-calibration
-/// ("Self-tune routing settings…").
-const FEATURE_CONF_KEY: &str = "sr_auto_calibration_enabled";
-/// FeatureConf key for the Autopilot master toggle. Auto-calibration runs only when a merchant
-/// has BOTH this and self-tuning enabled.
 const AUTOPILOT_CONF_KEY: &str = "autopilot_enabled";
 /// Default recalc cadence. 15 min tracks within-day traffic shifts while each tick still sees a
 /// statistically meaningful volume delta and stays clear of analytics ingestion lag. Override
@@ -243,20 +238,7 @@ async fn run_once(runtime: &AnalyticsRuntime, params: CalibrationParams, interva
 }
 
 async fn enrolled_merchants() -> Vec<String> {
-    // Calibrate only merchants who enabled BOTH self-tuning (this job's flag) AND Autopilot.
-    let self_tuning = merchants_for_flag(FEATURE_CONF_KEY).await;
-    if self_tuning.is_empty() {
-        return Vec::new();
-    }
-    let autopilot: std::collections::HashSet<String> = merchants_for_flag(AUTOPILOT_CONF_KEY)
-        .await
-        .into_iter()
-        .map(|m| m.to_lowercase())
-        .collect();
-    self_tuning
-        .into_iter()
-        .filter(|m| autopilot.contains(&m.to_lowercase()))
-        .collect()
+    merchants_for_flag(AUTOPILOT_CONF_KEY).await
 }
 
 /// Merchant IDs listed in a feature flag's FeatureConf `merchants` array.

@@ -253,7 +253,7 @@ pub async fn routing_events(
 ///
 /// ```ignore
 /// let multi_objective_on = crate::redis::feature::is_feature_enabled(
-///     "multi_objective_routing_enabled".to_string(),
+///     "cost_savings_enabled".to_string(),
 ///     merchant_id.to_string(),
 ///     crate::feedback::constants::kvRedis(),
 /// ).await;

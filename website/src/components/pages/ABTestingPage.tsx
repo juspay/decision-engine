@@ -218,7 +218,7 @@ function ArmSelector({ label, help, accent, algorithms, value, excludeId, allowe
   // autopilot is actively tuning — shown when the resolved arm is SR-based. All three SR
   // strategies share the same base config; they differ in whether they honor autopilot's
   // per-segment overrides on top of it (see `honorsAutopilot` below). `autopilotFeatureOn` is
-  // the merchant's actual auto-calibration flag — segment count alone can't distinguish "tuning
+  // the merchant's actual autopilot flag — segment count alone can't distinguish "tuning
   // right now" from "tuned before the feature was switched off".
   liveSrConfig: { hedging: number | null; elimination: number | null; bucketSize: number | null; autopilotSegmentCount: number; autopilotFeatureOn: boolean }
   onChange: (id: string) => void
@@ -355,7 +355,7 @@ function VerdictChip({ verdict }: { verdict: string }) {
 // SR-based routing actually applies right now. Shared by the create form and the results view so
 // any SR-backed arm (auth, MO manual, MO autopilot, or SR config tuning's control) can show its
 // real current config instead of just a strategy name.
-// The autopilot auto-calibration job writes cluster-specific hedging/bucket overrides tagged
+// The autopilot calibration job writes cluster-specific hedging/bucket overrides tagged
 // with this source string (see `sr_auto_calibration::AUTOPILOT_SOURCE` in the backend). A
 // sub-level entry carrying it means autopilot is actively tuning that segment away from the
 // merchant's flat default — the value below can't be read as "the" current hedging/bucket size.
@@ -436,7 +436,7 @@ function LiveSrConfigPanel({ hedging, elimination, bucketSize, autopilotSegmentC
       {honorsAutopilot && !autopilotFeatureOn && autopilotSegmentCount > 0 && (
         <p className="flex items-center gap-1 text-[12px] text-slate-500 pt-1.5 mt-0.5 border-t border-slate-100 dark:border-[#1e2330] leading-4">
           Autopilot is off — {autopilotSegmentCount} segment{autopilotSegmentCount === 1 ? '' : 's'} from earlier tuning
-          <InfoHint text={`Autopilot (auto-calibration) is currently disabled for this merchant. ${autopilotSegmentCount} segment${autopilotSegmentCount === 1 ? '' : 's'} still carry values it tuned before being turned off, but nothing is being actively adjusted right now — every transaction uses the base config shown above.`} />
+          <InfoHint text={`Autopilot is currently disabled for this merchant. ${autopilotSegmentCount} segment${autopilotSegmentCount === 1 ? '' : 's'} still carry values it tuned before being turned off, but nothing is being actively adjusted right now — every transaction uses the base config shown above.`} />
         </p>
       )}
     </div>
@@ -698,7 +698,7 @@ function ExperimentDetailPanel({
   const costKind = hasCostArm(abData)
   const { liveHedging, liveElimination, liveBucketSize } = useLiveSrConfig(merchantId || undefined)
   const merchantFeatures = useMerchantFeatures(merchantId || undefined)
-  const autopilotFeatureOn = merchantFeatures.isEnabled('auto-calibration') || merchantFeatures.isEnabled('autopilot')
+  const autopilotFeatureOn = merchantFeatures.isEnabled('autopilot')
 
   // If the variant carries a margin override, value net EV at it; otherwise the backend default.
   const evalMargin = abData?.variant_sr_config?.margin
@@ -1146,11 +1146,11 @@ function CreateForm({
   const canEditRouting = useCanEditRouting()
   // Only offer the Multi-Objective SR strategies when the merchant has the backing features on:
   //  - MO manual needs cost-aware (multi-objective) routing enabled
-  //  - MO autopilot additionally needs autopilot self-tuning (auto-calibration) enabled, otherwise
-  //    there are no autopilot-tuned values and it would behave identically to manual.
+  //  - MO autopilot additionally needs the autopilot flag enabled, otherwise there are no
+  //    autopilot-tuned values and it would behave identically to manual.
   const features = useMerchantFeatures(merchantId || undefined)
-  const moOn = features.isEnabled('multi-objective-routing')
-  const autopilotOn = features.isEnabled('auto-calibration') || features.isEnabled('autopilot')
+  const moOn = features.isEnabled('cost-savings')
+  const autopilotOn = features.isEnabled('autopilot')
   const allowedSrStrategies: SrStrategy[] = [
     'sr_auth',
     // Auth + autopilot needs only the autopilot feature (no cost-awareness required).

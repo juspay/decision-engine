@@ -41,7 +41,7 @@ const configInputClass =
   'focus:outline-none focus:border-brand-500 dark:border-[#222226]'
 
 // Ensures a stored value is always selectable in a dropdown, even when it isn't in the known
-// option list (e.g. auto-calibration writes the casing live txns use, "CARD"/"CREDIT", while the
+// option list (e.g. the calibration job writes the casing live txns use, "CARD"/"CREDIT", while the
 // option lists are lowercase). Prepends the value so the <select> renders it instead of going blank.
 function optionsWithValue(options: readonly string[], value: string): string[] {
   return value && !options.includes(value) ? [value, ...options] : [...options]
@@ -382,11 +382,21 @@ export function SRRoutingPage() {
     }
   }
 
+  // Every tab on this page configures the decider, which never runs while SR-based dynamic
+  // routing is off — so the tabs are locked until it is back on. `isEnabled` answers false
+  // while the features request is in flight, so wait for the response before restricting:
+  // otherwise the page flashes the locked state on every load.
+  const srRoutingResolved = Boolean(merchantId) && !features.isLoading && features.data != null
+  const srRoutingOff = srRoutingResolved && !features.isEnabled('sr-routing')
+  const lockedTabTitle = 'Turn SR-based dynamic routing on to configure this'
+
   const tabClass = (tab: SRTab) =>
     `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-      activeTab === tab
-        ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-        : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+      srRoutingOff
+        ? 'border-transparent text-slate-400 dark:text-slate-600 cursor-not-allowed'
+        : activeTab === tab
+          ? 'border-brand-500 text-brand-600 dark:text-brand-400'
+          : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
     }`
 
   return (
@@ -394,9 +404,12 @@ export function SRRoutingPage() {
     // constraining them would spend a quarter of an already-narrow column on the rail. The
     // single-column tabs (Autopilot, Flags) still read better constrained.
     <div className={`space-y-6 ${WIDE_TABS.includes(activeTab) ? 'w-full' : 'max-w-4xl'}`}>
-      {/* Page header */}
-      <div>
+      {/* Page header. SR-based dynamic routing is the parent of everything on this page —
+          Autopilot, the Manual scoring config and every Feature Flags row only take effect
+          while it is on — so the switch lives here rather than as a sibling row in that list. */}
+      <div className="flex flex-wrap items-start justify-between gap-4">
         <PageHeading title="Multi Objective Routing" description="Dynamic gateway scoring based on real-time success rates." />
+        <SrRoutingMasterToggle features={features} />
       </div>
 
       {!merchantId && (
@@ -408,12 +421,12 @@ export function SRRoutingPage() {
       {/* Tab navigation */}
       <div className="border-b border-slate-200 dark:border-[#1c1c23]">
         <nav className="-mb-px flex gap-1">
-          <button type="button" className={tabClass('autopilot')} onClick={() => setActiveTab('autopilot')}>Autopilot</button>
-          <button type="button" className={tabClass('manual')} onClick={() => setActiveTab('manual')}>Manual</button>
-          <button type="button" className={tabClass('flags')} onClick={() => setActiveTab('flags')}>Feature Flags</button>
-          <button type="button" className={tabClass('cost')} onClick={() => setActiveTab('cost')}>Cost Estimation</button>
+          <button type="button" disabled={srRoutingOff} title={srRoutingOff ? lockedTabTitle : undefined} className={tabClass('autopilot')} onClick={() => setActiveTab('autopilot')}>Autopilot</button>
+          <button type="button" disabled={srRoutingOff} title={srRoutingOff ? lockedTabTitle : undefined} className={tabClass('manual')} onClick={() => setActiveTab('manual')}>Manual</button>
+          <button type="button" disabled={srRoutingOff} title={srRoutingOff ? lockedTabTitle : undefined} className={tabClass('flags')} onClick={() => setActiveTab('flags')}>Feature Flags</button>
+          <button type="button" disabled={srRoutingOff} title={srRoutingOff ? lockedTabTitle : undefined} className={tabClass('cost')} onClick={() => setActiveTab('cost')}>Cost Estimation</button>
           {volumeContractsBeta && (
-            <button type="button" className={`${tabClass('volume')} inline-flex items-center gap-1.5`} onClick={() => setActiveTab('volume')}>
+            <button type="button" disabled={srRoutingOff} title={srRoutingOff ? lockedTabTitle : undefined} className={`${tabClass('volume')} inline-flex items-center gap-1.5`} onClick={() => setActiveTab('volume')}>
               Volume Contracts
               <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-wide text-violet-600 dark:bg-violet-500/15 dark:text-violet-400">
                 Beta
@@ -425,6 +438,11 @@ export function SRRoutingPage() {
 
       {isLoading ? (
         <div className="flex justify-center py-12"><Spinner /></div>
+      ) : srRoutingOff ? (
+        <Notice tone="warning">
+          SR-based dynamic routing is off for this merchant, so none of these settings are in
+          effect. Turn it on with the switch above to configure scoring.
+        </Notice>
       ) : (
         <>
           {/* ── Autopilot tab ── */}
@@ -691,11 +709,54 @@ function Switch({ on, onClick, disabled }: { on: boolean; onClick: () => void; d
   )
 }
 
+/** Parent switch for the whole Multi Objective page. Off means hybrid routing never enters the
+ *  decider (see `SR_ROUTING_FEATURE_FLAG` in hybrid_routing.rs) and answers from the static
+ *  routing result, so Autopilot, the Manual config and every scoring flag are inert until it
+ *  is back on. */
+function SrRoutingMasterToggle({ features }: { features: ReturnType<typeof useMerchantFeatures> }) {
+  const canEditRouting = useCanEditRouting()
+  const [toggling, setToggling] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const on = features.isEnabled('sr-routing')
+
+  async function toggle(next: boolean) {
+    setToggling(true)
+    setError(null)
+    try {
+      await features.setFeatureEnabled('sr-routing', next)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setToggling(false)
+    }
+  }
+
+  return (
+    <div className="flex flex-col items-end gap-2">
+      <div className="flex items-center gap-2.5">
+        <div className="text-right">
+          <div className="text-sm font-medium text-slate-800 dark:text-white">SR-based dynamic routing</div>
+          <p className="text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
+            {on ? 'Scoring eligible gateways on every payment.' : 'Gateway scoring is paused for this merchant.'}
+          </p>
+        </div>
+        {on ? <Badge variant="green">On</Badge> : <Badge variant="gray">Off</Badge>}
+        <Switch
+          on={on}
+          disabled={!canEditRouting || features.isLoading || toggling}
+          onClick={() => toggle(!on)}
+        />
+      </div>
+      <ErrorMessage error={error} />
+    </div>
+  )
+}
+
 // Autopilot reframes routing as a set of outcomes rather than raw flags. The single master
-// toggle is the real switch: it enables self-tuning (auto-calibration) plus cost savings, and
+// toggle is the real switch: it enables self-tuning plus cost savings, and
 // turning it OFF hard-disables those backend flags so the engine falls back to the Manual
 // configuration. SR base routing ("switch PSP on low auth") is always on and shown as a status
-// pill. Cost savings (`multi-objective-routing`) is surfaced independently in the Feature Flags
+// pill. Cost savings (`cost-savings`) is surfaced independently in the Feature Flags
 // tab so a Manual-config merchant can run cost-aware routing without Autopilot.
 function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
   const features = useMerchantFeatures(merchantId ?? undefined)
@@ -708,9 +769,9 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
 
   // Master is its own persisted backend flag (`autopilot`) so the toggle survives reloads.
   // Autopilot subsumes self-tuning: the only thing that distinguishes it from Manual is that the
-  // engine adapts settings to your traffic, so a single toggle drives both `autopilot` and
-  // `auto-calibration` (the calibration job requires both — see sr_auto_calibration.rs). Cost
-  // savings (`multi-objective-routing`) is orthogonal and now lives in the Feature Flags tab.
+  // engine adapts settings to your traffic, so `autopilot` alone gates the calibration job (see
+  // sr_auto_calibration.rs). Cost savings (`cost-savings`) is orthogonal and now
+  // lives in the Feature Flags tab.
   const autopilotOn = features.isEnabled('autopilot')
 
   async function toggleMaster(next: boolean) {
@@ -719,22 +780,20 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
       await features.setFeatureEnabled('autopilot', next)
       if (next) {
         // Turning Autopilot on enables its decisions by default — cost savings (multi-objective
-        // economic routing) and auto-calibration — and activates all low-cardinality SR
+        // economic routing) — and activates all low-cardinality SR
         // dimensions so scoring clusters split on them (card scheme / currency / country /
         // auth type) and the calibrator can tune each cluster.
         // Enable unconditionally: the toggle is idempotent, and the captured `costOn` /
         // `autoCalibrationOn` booleans can be stale (the features list is SWR-cached for 5 min),
         // so guarding on them would silently skip the POST and leave the decision off.
-        await features.setFeatureEnabled('multi-objective-routing', true)
-        await features.setFeatureEnabled('auto-calibration', true)
+        await features.setFeatureEnabled('cost-savings', true)
         if (merchantId) await enableAutopilotSrDimensions(merchantId)
       } else {
         // Hard-disable: turn every autopilot decision off so routing uses manual config.
         // Unconditional for the same reason as the enable path — stale cached booleans must not
         // gate the POST, or a flag that is actually on server-side would be left enabled.
         await features.setFeatureEnabled('elimination', false)
-        await features.setFeatureEnabled('multi-objective-routing', false)
-        await features.setFeatureEnabled('auto-calibration', false)
+        await features.setFeatureEnabled('cost-savings', false)
       }
       setMessage(next
         ? 'Autopilot on — the engine self-tunes to your traffic (cost savings also enabled).'
@@ -757,7 +816,7 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
         <p className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-xs text-emerald-500">{message}</p>
       )}
 
-      {/* Master toggle — the single Autopilot input. It bundles self-tuning (auto-calibration) and,
+      {/* Master toggle — the single Autopilot input. It bundles self-tuning and,
           for convenience, enables cost savings; cost can be turned back off independently from the
           Feature Flags tab. Turning Autopilot off falls back to the Manual configuration. */}
       <Card>
@@ -811,6 +870,14 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
 // A row with a `gate` is shown only to that feature's release audience (featureReleases.ts).
 const SR_FEATURES: { feature: KnownFeature; title: string; description: string; docsUrl?: string; gate?: ReleasedFeature }[] = [
   {
+    // The threshold this drops a PSP at lives in Manual → Elimination; this row is only the
+    // on/off switch. Both the decider and the score writer read the same flag.
+    feature: 'elimination',
+    title: 'Elimination (pause PSPs with low auth rate)',
+    description:
+      'Stop routing to a gateway once its recent authorization rate falls below the elimination threshold, and let it back in when it recovers. Set the threshold itself under Manual → Elimination.',
+  },
+  {
     feature: 'gsm-scoring-filter',
     title: 'GSM scoring filter',
     description:
@@ -832,7 +899,7 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string; 
     // Cost savings is orthogonal to Autopilot vs Manual — it applies to either scoring config.
     // Autopilot enables it as a convenience, but it lives here as the single, ungated source of
     // truth so a Manual-config merchant can run cost-aware routing without Autopilot.
-    feature: 'multi-objective-routing',
+    feature: 'cost-savings',
     title: 'Cost savings (optimize for economic value)',
     description:
       'Multi-objective routing: alongside approval rate, weighs each PSP\'s expected cost and picks the highest expected-value option. Works with either the Autopilot or Manual scoring config.',

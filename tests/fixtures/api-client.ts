@@ -123,6 +123,17 @@ export class ApiClient {
     return this.raw('DELETE', `/merchant-account/${merchantId}`, options)
   }
 
+  setMerchantFeature(merchantId: string, feature: string, enabled: boolean, options: RequestOptions = {}) {
+    return this.raw('POST', `/merchant-account/${merchantId}/features/${feature}`, {
+      ...options,
+      body: { enabled },
+    })
+  }
+
+  getMerchantFeatures(merchantId: string, options: RequestOptions = {}) {
+    return this.raw('GET', `/merchant-account/${merchantId}/features`, options)
+  }
+
   cleanupTestData(merchantId: string) {
     if (!merchantId) return Promise.resolve(undefined)
     return this.raw('DELETE', `/merchant-account/${merchantId}`, { failOnStatusCode: false })

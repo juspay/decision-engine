@@ -11,7 +11,9 @@ use crate::euclid::errors::EuclidErrors;
 use crate::euclid::handlers::routing_rules::{
     routing_evaluate_with_analytics, RoutingEvaluateAnalyticsFlows,
 };
+use crate::feedback::constants::kvRedis;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
+use crate::redis::feature::is_feature_enabled;
 use crate::types::hybrid_routing::HybridRoutingRequest;
 use axum::{response::IntoResponse, Json};
 use serde::Serialize;
@@ -89,6 +91,8 @@ fn parse_dynamic_connector(connector_with_id: &str) -> ConnectorInfo {
         },
     }
 }
+
+pub const SR_ROUTING_FEATURE_FLAG: &str = "sr_routing_enabled";
 
 #[derive(Serialize)]
 struct DynamicRoutingEnvelope {
@@ -270,29 +274,44 @@ pub async fn hybrid_routing_evaluate(
 
     let dynamic_eval_result = match dynamic_routing_request {
         Some(mut req) => {
-            let request_eligible_gateways = match req.eligible_gateway_list.take() {
-                Some(gateways) if gateways.is_empty() => None,
-                Some(gateways) => Some(gateways),
-                None => None,
-            };
-            let static_eligible_gateway_ids = static_eligible_gateways
-                .as_ref()
-                .filter(|connectors| !connectors.is_empty())
-                .map(|connectors| extract_gateway_identifiers(connectors));
-            let fallback_eligible_gateways = dynamic_fallback_gateways
-                .clone()
-                .map(|connectors| extract_gateway_identifiers(&connectors));
-            req.eligible_gateway_list = static_eligible_gateway_ids
-                .or(request_eligible_gateways)
-                .or(fallback_eligible_gateways);
-            let result = decider_full_payload_hs_function(req, Instant::now()).await;
-            API_REQUEST_COUNTER
-                .with_label_values(&[
-                    "hybrid_routing_evaluate_dynamic",
-                    if result.is_ok() { "success" } else { "failure" },
-                ])
-                .inc();
-            Some(result)
+            let dynamic_routing_enabled = is_feature_enabled(
+                SR_ROUTING_FEATURE_FLAG.to_string(),
+                req.merchant_id.clone(),
+                kvRedis(),
+            )
+            .await;
+
+            if dynamic_routing_enabled {
+                let request_eligible_gateways = match req.eligible_gateway_list.take() {
+                    Some(gateways) if gateways.is_empty() => None,
+                    Some(gateways) => Some(gateways),
+                    None => None,
+                };
+                let static_eligible_gateway_ids = static_eligible_gateways
+                    .as_ref()
+                    .filter(|connectors| !connectors.is_empty())
+                    .map(|connectors| extract_gateway_identifiers(connectors));
+                let fallback_eligible_gateways = dynamic_fallback_gateways
+                    .clone()
+                    .map(|connectors| extract_gateway_identifiers(&connectors));
+                req.eligible_gateway_list = static_eligible_gateway_ids
+                    .or(request_eligible_gateways)
+                    .or(fallback_eligible_gateways);
+                let result = decider_full_payload_hs_function(req, Instant::now()).await;
+                API_REQUEST_COUNTER
+                    .with_label_values(&[
+                        "hybrid_routing_evaluate_dynamic",
+                        if result.is_ok() { "success" } else { "failure" },
+                    ])
+                    .inc();
+                Some(result)
+            } else {
+                crate::logger::debug!(
+                    "SR routing feature is off for merchant {}; skipping dynamic routing",
+                    req.merchant_id
+                );
+                None
+            }
         }
         None => None,
     };

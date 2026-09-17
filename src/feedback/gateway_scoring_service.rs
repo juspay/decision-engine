@@ -586,7 +586,23 @@ pub async fn check_and_update_gateway_score_(
             Ok("Success".to_string())
         }
         Err(e) => {
-            // Return error response if gateway scoring data is not found
+            if matches!(
+                e.current_context(),
+                redis_interface::errors::RedisError::NotFound
+                    | redis_interface::errors::RedisError::GetFailed
+            ) {
+                logger::info!(
+                    action = "GATEWAY_SCORING_DATA_NOT_FOUND_SKIP",
+                    tag = "GATEWAY_SCORING_DATA_NOT_FOUND_SKIP",
+                    "No GatewayScoringData in redis for merchant={} gateway={} payment_id={}; \
+                     skipping score update: {}",
+                    api_payload.merchant_id,
+                    api_payload.gateway,
+                    api_payload.payment_id,
+                    e,
+                );
+                return Ok("Skipped".to_string());
+            }
             Err(T::ErrorResponse {
                 status: "400".to_string(),
                 error_code: "GATEWAY_SCORING_DATA_NOT_FOUND".to_string(),

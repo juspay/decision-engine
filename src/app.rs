@@ -319,7 +319,7 @@ where
     }
 
     // Background job: periodically auto-calibrate SRv3 bucket size + hedging from observed
-    // traffic for merchants enrolled via the `sr_auto_calibration_enabled` flag. Spawned after
+    // traffic for merchants enrolled via the `autopilot_enabled` flag. Spawned after
     // APP_STATE is set so config reads/writes resolve the tenant app state.
     crate::sr_auto_calibration::spawn(
         global_app_state.analytics_runtime.clone(),
