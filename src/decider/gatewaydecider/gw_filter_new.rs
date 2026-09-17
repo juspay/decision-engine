@@ -2665,7 +2665,8 @@ fn getPaymentMethodForNonCardTransaction(txn_card_info: &TxnCardInfo) -> String 
         ETP::PaymentMethodType::ConsumerFinance | 
         ETP::PaymentMethodType::UPI | 
         ETP::PaymentMethodType::Reward | 
-        ETP::PaymentMethodType::Cash
+        ETP::PaymentMethodType::Cash |
+        ETP::PaymentMethodType::CBDC
     ) {
         txn_card_info.paymentMethod.clone()
     } else {
