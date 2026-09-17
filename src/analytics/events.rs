@@ -3,6 +3,11 @@ use uuid::Uuid;
 
 use crate::analytics::flow::{AnalyticsFlowContext, AnalyticsRoute};
 use crate::analytics::flow::{ApiFlow, FlowType};
+use crate::analytics::flow::{
+    PAYMENT_AUDIT_HYBRID_FLOW_TYPES, PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES,
+    PAYMENT_AUDIT_PREVIEW_FLOW_TYPES, SUMMARY_KIND_DYNAMIC, SUMMARY_KIND_HYBRID,
+    SUMMARY_KIND_PREVIEW,
+};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DomainAnalyticsEvent {
@@ -448,37 +453,17 @@ pub fn derive_payment_audit_summary_kind(
     flow_type: FlowType,
 ) -> Option<String> {
     if route == AnalyticsRoute::RoutingEvaluate
-        && matches!(
-            flow_type,
-            FlowType::RoutingEvaluateSingle
-                | FlowType::RoutingEvaluatePriority
-                | FlowType::RoutingEvaluateVolumeSplit
-                | FlowType::RoutingEvaluateAdvanced
-                | FlowType::RoutingEvaluatePreview
-                | FlowType::RoutingEvaluateError
-        )
+        && PAYMENT_AUDIT_PREVIEW_FLOW_TYPES.contains(&flow_type)
     {
-        return Some("preview".to_string());
+        return Some(SUMMARY_KIND_PREVIEW.to_string());
     }
 
-    if matches!(
-        flow_type,
-        FlowType::RoutingHybridDecision | FlowType::RoutingHybridError
-    ) {
-        return Some("hybrid".to_string());
+    if PAYMENT_AUDIT_HYBRID_FLOW_TYPES.contains(&flow_type) {
+        return Some(SUMMARY_KIND_HYBRID.to_string());
     }
 
-    if matches!(
-        flow_type,
-        FlowType::DecideGatewayDecision
-            | FlowType::UpdateGatewayScoreUpdate
-            | FlowType::UpdateScoreLegacyScoreSnapshot
-            | FlowType::DecideGatewayRuleHit
-            | FlowType::DecideGatewayError
-            | FlowType::UpdateGatewayScoreError
-            | FlowType::UpdateScoreLegacyError
-    ) {
-        return Some("dynamic".to_string());
+    if PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES.contains(&flow_type) {
+        return Some(SUMMARY_KIND_DYNAMIC.to_string());
     }
 
     None

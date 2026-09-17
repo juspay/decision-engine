@@ -23,10 +23,6 @@ use crate::logger;
 use crate::types::merchant_config::types::FeatureConf;
 use crate::types::service_configuration::{find_config_by_name, insert_config, update_config};
 
-/// Service-configuration key whose FeatureConf lists the merchants opted into Autopilot, the
-/// single switch this job is gated on. Self-tuning is what Autopilot *is*, so it never had a
-/// meaningful state of its own — the separate `sr_auto_calibration_enabled` flag it used to be
-/// AND-ed with was always set in lockstep by the dashboard and has been removed.
 const AUTOPILOT_CONF_KEY: &str = "autopilot_enabled";
 /// Default recalc cadence. 15 min tracks within-day traffic shifts while each tick still sees a
 /// statistically meaningful volume delta and stays clear of analytics ingestion lag. Override

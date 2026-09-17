@@ -4,6 +4,39 @@ use serde::{Deserialize, Serialize};
 use crate::euclid::types::StaticRoutingAlgorithm;
 use crate::types::routing_configuration::{AlgorithmType, ConfigVariant};
 
+// One event belongs to exactly one of these three families. The write path stamps the family
+// onto the row as its `summary_kind` (`derive_payment_audit_summary_kind`); the read path filters
+// and composes scopes out of the same sets (`clickhouse::common`). Both sides read them here so a
+// new flow type joins its family once.
+
+pub const SUMMARY_KIND_PREVIEW: &str = "preview";
+pub const SUMMARY_KIND_HYBRID: &str = "hybrid";
+pub const SUMMARY_KIND_DYNAMIC: &str = "dynamic";
+
+pub const PAYMENT_AUDIT_PREVIEW_FLOW_TYPES: &[FlowType] = &[
+    FlowType::RoutingEvaluateSingle,
+    FlowType::RoutingEvaluatePriority,
+    FlowType::RoutingEvaluateVolumeSplit,
+    FlowType::RoutingEvaluateAdvanced,
+    FlowType::RoutingEvaluatePreview,
+    FlowType::RoutingEvaluateError,
+];
+
+pub const PAYMENT_AUDIT_HYBRID_FLOW_TYPES: &[FlowType] = &[
+    FlowType::RoutingHybridDecision,
+    FlowType::RoutingHybridError,
+];
+
+pub const PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES: &[FlowType] = &[
+    FlowType::DecideGatewayDecision,
+    FlowType::UpdateGatewayScoreUpdate,
+    FlowType::UpdateScoreLegacyScoreSnapshot,
+    FlowType::DecideGatewayRuleHit,
+    FlowType::DecideGatewayError,
+    FlowType::UpdateGatewayScoreError,
+    FlowType::UpdateScoreLegacyError,
+];
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ApiFlow {
@@ -195,6 +228,7 @@ pub enum AnalyticsRoute {
     UpdateGatewayScore,
     UpdateScore,
     RoutingEvaluate,
+    RoutingHybrid,
     RoutingCreate,
     RuleConfigCreate,
     RuleConfigGet,
@@ -209,6 +243,7 @@ impl AnalyticsRoute {
             Self::UpdateGatewayScore => "update_gateway_score",
             Self::UpdateScore => "update_score",
             Self::RoutingEvaluate => "routing_evaluate",
+            Self::RoutingHybrid => "routing_hybrid",
             Self::RoutingCreate => "routing_create",
             Self::RuleConfigCreate => "rule_config_create",
             Self::RuleConfigGet => "rule_config_get",
@@ -223,6 +258,7 @@ impl AnalyticsRoute {
             "update_gateway_score" => Some(Self::UpdateGatewayScore),
             "update_score" => Some(Self::UpdateScore),
             "routing_evaluate" => Some(Self::RoutingEvaluate),
+            "routing_hybrid" => Some(Self::RoutingHybrid),
             "routing_create" => Some(Self::RoutingCreate),
             "rule_config_create" => Some(Self::RuleConfigCreate),
             "rule_config_get" => Some(Self::RuleConfigGet),
@@ -239,6 +275,7 @@ impl AnalyticsRoute {
             "Update Gateway" => Some(Self::UpdateGatewayScore),
             "Update Score" => Some(Self::UpdateScore),
             "Rule Evaluate" => Some(Self::RoutingEvaluate),
+            "Hybrid Routing" => Some(Self::RoutingHybrid),
             "Routing Create" => Some(Self::RoutingCreate),
             "Rule Config Create" => Some(Self::RuleConfigCreate),
             "Rule Config Get" => Some(Self::RuleConfigGet),
@@ -254,6 +291,7 @@ impl AnalyticsRoute {
             Self::UpdateGatewayScore => "Update Gateway",
             Self::UpdateScore => "Update Score",
             Self::RoutingEvaluate => "Rule Evaluate",
+            Self::RoutingHybrid => "Hybrid Routing",
             Self::RoutingCreate => "Routing Create",
             Self::RuleConfigCreate => "Rule Config Create",
             Self::RuleConfigGet => "Rule Config Get",
@@ -267,6 +305,7 @@ impl AnalyticsRoute {
             Self::DecideGateway => Some("/decide_gateway"),
             Self::UpdateGatewayScore => Some("/update_gateway"),
             Self::RoutingEvaluate => Some("/rule_evaluate"),
+            Self::RoutingHybrid => Some("/routing_hybrid"),
             _ => None,
         }
     }
@@ -492,6 +531,15 @@ mod tests {
             Err(error) => panic!("flow type should serialize: {error}"),
         };
         assert_eq!(flow_type, "\"routing_evaluate_volume_split\"");
+        assert_eq!(
+            FlowType::RoutingHybridDecision.as_str(),
+            "routing_hybrid_decision"
+        );
+        assert_eq!(AnalyticsRoute::RoutingHybrid.as_str(), "routing_hybrid");
+        assert_eq!(
+            AnalyticsRoute::from_filter_value("Hybrid Routing"),
+            Some(AnalyticsRoute::RoutingHybrid)
+        );
     }
 
     #[test]

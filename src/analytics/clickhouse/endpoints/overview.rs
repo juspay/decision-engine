@@ -1,5 +1,5 @@
 use crate::analytics::models::{
-    AnalyticsKpi, AnalyticsOverviewResponse, AnalyticsQuery, SmartRetryStats,
+    AnalyticsKpi, AnalyticsOverviewResponse, AnalyticsQuery, AnalyticsRoutingKind, SmartRetryStats,
 };
 use crate::analytics::service::format_range;
 use crate::error::ApiError;
@@ -49,6 +49,11 @@ pub async fn load(
     );
     let counts = counts?;
 
+    let hybrid_split = match query.routing_kind {
+        AnalyticsRoutingKind::Hybrid => Some(metrics::hybrid_split::load(client, query).await?),
+        AnalyticsRoutingKind::MultiObjective => None,
+    };
+
     Ok(AnalyticsOverviewResponse {
         merchant_id: query.merchant_id.clone(),
         kpis: counts.into_kpis(query),
@@ -62,5 +67,6 @@ pub async fn load(
             by_trigger: by_trigger.unwrap_or_default(),
             by_fallback: by_fallback.unwrap_or_default(),
         },
+        hybrid_split,
     })
 }
