@@ -42,6 +42,14 @@ import { Play, Pause, RefreshCw, ChevronDown, ChevronUp, Code, Plus, Trash2, Pie
 
 import { PageHeading } from '../ui/PageHeading'
 import { Notice } from '../ui/Notice'
+import {
+  eventPhase,
+  eventTypeLabel,
+  flowTypeValue,
+  humanizeAuditValue,
+  routeLabel,
+  stageLabel,
+} from '../../lib/auditLabels'
 // UI-local algorithm tokens for the simulation dropdown. Both map to
 // { rankingAlgorithm: 'SR_BASED_ROUTING' } on the backend /decide-gateway request;
 // the dropdown no longer forces multi-objective. Whether cost-savings (multi-objective)
@@ -788,61 +796,6 @@ function formatDateTime(ms: number) {
   }).format(new Date(ms))
 }
 
-function humanizeAuditValue(value?: string | null) {
-  if (!value) return ''
-  const normalized = value
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase()
-
-  return normalized.replace(/\b\w/g, (char) => char.toUpperCase())
-}
-
-function routeLabel(route?: string | null) {
-  if (!route) return 'Unknown route'
-  if (route === 'decision_gateway' || route === 'decide_gateway') return 'Decide Gateway'
-  if (route === 'update_gateway_score') return 'Update Gateway'
-  if (route === 'routing_evaluate') return 'Rule Evaluate'
-  return humanizeAuditValue(route)
-}
-
-function eventTypeLabel(eventType?: string | null) {
-  if (!eventType) return 'Unknown event'
-  if (eventType === 'decide_gateway_decision') return 'Decide Gateway'
-  if (
-    eventType === 'update_gateway_score_update' ||
-    eventType === 'update_gateway_score_score_snapshot' ||
-    eventType === 'update_score_legacy_score_snapshot'
-  ) return 'Update Gateway'
-  if (eventType === 'decide_gateway_rule_hit') return 'Rule Evaluate'
-  if (eventType.startsWith('routing_evaluate_') && eventType !== 'routing_evaluate_request_hit') return 'Decision Result'
-  if (eventType.endsWith('_error')) return 'Errors'
-  return humanizeAuditValue(eventType)
-}
-
-function flowTypeValue(event: PaymentAuditEvent) {
-  return event.flow_type || ''
-}
-
-function stageLabel(event: PaymentAuditEvent) {
-  const flowType = flowTypeValue(event)
-  if (event.event_stage === 'gateway_decided') return 'Decide Gateway'
-  if (event.event_stage === 'score_updated') return 'Update Gateway'
-  if (event.event_stage === 'rule_applied') return 'Rule Evaluate'
-  if (event.event_stage === 'preview_evaluated' || (flowType.startsWith('routing_evaluate_') && flowType !== 'routing_evaluate_request_hit')) return 'Decision Result'
-  if (flowType.endsWith('_error')) return 'Errors'
-  return humanizeAuditValue(event.event_stage || flowType)
-}
-
-function eventPhase(event: PaymentAuditEvent) {
-  const flowType = flowTypeValue(event)
-  if ((flowType.startsWith('decide_gateway_') && flowType !== 'decide_gateway_rule_hit') || event.event_stage === 'gateway_decided') return 'Decide Gateway'
-  if (flowType === 'decide_gateway_rule_hit' || event.event_stage === 'rule_applied') return 'Rule Evaluate'
-  if (flowType.startsWith('update_gateway_score_') || flowType.startsWith('update_score_legacy_') || event.event_stage === 'score_updated') return 'Update Gateway'
-  if ((flowType.startsWith('routing_evaluate_') && flowType !== 'routing_evaluate_request_hit') || event.event_stage === 'preview_evaluated') return 'Decision'
-  return 'Errors'
-}
 
 function badgeVariantForEvent(event: PaymentAuditEvent): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
   const flowType = flowTypeValue(event)
@@ -916,6 +869,7 @@ function buildAuditUrl(paymentId: string) {
     page: 1,
     page_size: 25,
     payment_id: paymentId,
+    scope: 'dynamic',
   })
   return `/analytics/payment-audit?${qs}`
 }

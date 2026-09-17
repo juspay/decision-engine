@@ -738,7 +738,7 @@ function ExperimentDetailPanel({
       ? abData?.control_algorithm_id === 'sr_routing'
       : abData?.variant_algorithm_id === 'sr_routing'
     if (!isSr) return
-    const url = `/audit?range=1d&exclude_routing_approach=NTW_BASED_ROUTING&payment_id=${encodeURIComponent(paymentId)}`
+    const url = `/audit?range=1d&routing_kind=multi_objective&payment_id=${encodeURIComponent(paymentId)}`
     window.open(url, '_blank')
   }
 

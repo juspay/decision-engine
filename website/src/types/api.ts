@@ -430,6 +430,22 @@ export interface AnalyticsOverviewResponse {
   top_errors: AnalyticsErrorSummary[]
   top_rules: AnalyticsRuleHit[]
   smart_retry_stats: SmartRetryStats
+  hybrid_split?: AnalyticsHybridSplit
+}
+
+export interface AnalyticsHybridSplit {
+  decisions: number
+  dynamic_success: number
+  dynamic_fallback: number
+  dynamic_skipped: number
+  static_decided: number
+  failed: number
+  static_connectors: AnalyticsHybridConnectorPick[]
+}
+
+export interface AnalyticsHybridConnectorPick {
+  connector: string
+  count: number
 }
 
 export interface AnalyticsRouteHit {
@@ -666,6 +682,8 @@ export interface PaymentAuditResponse {
   flow_type?: string | null
   routing_approach?: string | null
   error_code?: string | null
+  scope?: string
+  routing_kind?: string | null
   page: number
   page_size: number
   total_results: number

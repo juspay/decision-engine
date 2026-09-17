@@ -1117,6 +1117,36 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "description": "Which audit kinds to read: all (default, merged per payment), dynamic, or preview.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "dynamic",
+                "preview"
+              ],
+              "default": "all"
+            }
+          },
+          {
+            "name": "routing_kind",
+            "in": "query",
+            "required": false,
+            "description": "List only payments whose trail holds this kind of event (the dashboard's Routing type filter).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "multi_objective",
+                "rule_based",
+                "debit_routing",
+                "hybrid"
+              ]
+            }
           }
         ],
         "responses": {
@@ -8007,6 +8037,14 @@
             "items": {
               "$ref": "#/components/schemas/PaymentAuditEvent"
             }
+          },
+          "scope": {
+            "type": "string",
+            "description": "all | dynamic | preview"
+          },
+          "routing_kind": {
+            "type": "string",
+            "nullable": true
           }
         }
       },
