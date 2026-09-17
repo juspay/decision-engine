@@ -1,0 +1,19 @@
+{{- if and (or .Values.hypersenseBackend.enabled .Values.hypersenseEtl.enabled) .Values.hypersenseShared.create -}}
+# Shared connection coordinates for the Hypersense backend + etl services.
+# Mirrors the external ConfigMap referenced by the hypersense-main chart; the
+# deployments consume these keys via configMapKeyRef. Set hypersenseShared.create
+# to false and point hypersenseShared.configMapName at your own ConfigMap to use
+# an externally-managed one instead (e.g. pointing DB_HOST at RDS).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "decision-engine.hypersenseConfigMapName" . }}
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+data:
+  DB_HOST: {{ include "decision-engine.postgresqlHost" . | quote }}
+  DB_PORT: "5432"
+  DB_USER: {{ .Values.postgresql.auth.username | quote }}
+  DB_NAME: {{ .Values.hypersenseShared.dbName | quote }}
+  REDIS_URL: {{ printf "redis://%s:6379" (include "decision-engine.redisHost" .) | quote }}
+{{- end }}
