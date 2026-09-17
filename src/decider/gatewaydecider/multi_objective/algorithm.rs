@@ -3,9 +3,26 @@ use std::collections::HashMap;
 use super::cluster_key::derive_cluster_key;
 use super::hypersense_client;
 use super::hypersense_client::PspCost;
-use super::{MultiObjectiveInfo, MultiObjectiveOutcome, PspSummary, RankedPsp};
+use super::{
+    MultiObjectiveInfo, MultiObjectiveOutcome, PspSummary, RankedPsp, FEATURE_FLAG,
+    LEGACY_FEATURE_FLAG,
+};
+use crate::feedback::constants::kvRedis;
+use crate::redis::feature::is_feature_enabled;
 use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::txn_details::types::TxnDetail;
+
+pub async fn is_cost_savings_enabled(merchant_id: &str) -> bool {
+    if is_feature_enabled(FEATURE_FLAG.to_string(), merchant_id.to_string(), kvRedis()).await {
+        return true;
+    }
+    is_feature_enabled(
+        LEGACY_FEATURE_FLAG.to_string(),
+        merchant_id.to_string(),
+        kvRedis(),
+    )
+    .await
+}
 
 pub struct CostDecision {
     pub chosen: String,

@@ -1149,7 +1149,7 @@ function CreateForm({
   //  - MO autopilot additionally needs the autopilot flag enabled, otherwise there are no
   //    autopilot-tuned values and it would behave identically to manual.
   const features = useMerchantFeatures(merchantId || undefined)
-  const moOn = features.isEnabled('multi-objective-routing')
+  const moOn = features.isEnabled('cost-savings')
   const autopilotOn = features.isEnabled('autopilot')
   const allowedSrStrategies: SrStrategy[] = [
     'sr_auth',
