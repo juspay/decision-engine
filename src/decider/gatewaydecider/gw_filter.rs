@@ -1324,13 +1324,82 @@ pub async fn isAuthTypeSupported(
     // let mauth: Option<AuthType> = mauthS.map(|auth| auth.peek().clone());
 
     // Filter gateway card info based on merchant account, bin, and auth type
-    let enabled_gcis = filterGatewaysCardInfo(this, ma, bin_list, gws, mauth, None).await?;
+    if mauth == Some(AuthType::MOTO) {
+        filterMotoMGCI(this, ma, bin_list, gws, mauth).await
+    }
+    else { 
+        let enabled_gcis = filterGatewaysCardInfo(this, ma, bin_list, gws, mauth, None).await?;
 
-    // Extract just the gateways from the gateway card info objects
-    Ok(enabled_gcis
-        .into_iter()
-        .filter_map(|gci| gci.gateway)
-        .collect())
+        // Extract just the gateways from the gateway card info objects
+        Ok(enabled_gcis
+            .into_iter()
+            .filter_map(|gci| gci.gateway)
+            .collect())
+    }
+}
+
+pub async fn filterMotoMGCI(
+    this: &mut DeciderFlow<'_>,
+    merchantAccount: ETM::merchant_account::MerchantAccount,
+    cardBins: Vec<Option<String>>,
+    gateways: Vec<String>,
+    mAuthType: Option<AuthType>
+) ->  Result<Vec<String>, ErrorResponse> {
+
+    let mut mgciCheckGateways = Vec::new();
+    let mut mgciCheckSkipGateways = Vec::new();
+    
+    for gateway in gateways {
+        if Utils::is_merchant_wise_auth_type_check_needed(&merchantAccount, mAuthType.as_ref(), None, &gateway).await {
+            mgciCheckGateways.push(gateway);
+        }
+        else {
+            mgciCheckSkipGateways.push(gateway)
+        }
+    }
+
+    let gcis = ETGCI::get_enabled_gateway_card_info_for_gateways(cardBins, mgciCheckGateways).await;
+    let motoGcis = 
+            match mAuthType {
+                Some(authType) => gcis
+                                    .iter()
+                                    .filter(
+                                        |gci| 
+                                            match &gci.authType {
+                                                Some(gciAuthType) => gciAuthType == &auth_type_to_text(&authType),
+                                                None => false
+                                            })
+                                    .collect(),
+                None => vec![]
+            };
+    
+    let gciIds = motoGcis
+                    .iter()
+                    .map(|gci| gci.id.clone())
+                    .collect::<Vec<_>>();
+    let mgcisEnabledGciIds = 
+            if gciIds.len() == 0 {
+                vec![]
+            }
+            else {
+                ETMGCI::find_all_mgcis_by_macc_and_gci_p_id(merchantAccount.id, gciIds)
+                    .await
+                    .iter()
+                    .filter(|mgci| !mgci.disabled)
+                    .map(|mgci| mgci.gatewayCardInfoId.clone())
+                    .collect()
+            };
+    let mgciFilteredGateways = gcis
+                                    .iter()
+                                    .filter(|gci| mgcisEnabledGciIds.contains(&gci.id))
+                                    .map(|gci| gci.gateway.clone())
+                                    .filter_map(|gateway| gateway.clone())
+                                    .collect::<Vec<String>>();
+
+
+    mgciCheckSkipGateways.extend(mgciFilteredGateways);
+
+    Ok(mgciCheckSkipGateways)
 }
 
 /// Filters gateways for One-Time Mandate payment flow
