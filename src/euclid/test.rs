@@ -969,7 +969,7 @@ mod tests {
         }
 
         fn matched_rule(program: &Program, ctx: &Context) -> Option<String> {
-            InterpreterBackend::eval_program(program, ctx)
+            InterpreterBackend::eval_program(program, ctx, None)
                 .expect("program evaluation failed")
                 .rule_name
         }

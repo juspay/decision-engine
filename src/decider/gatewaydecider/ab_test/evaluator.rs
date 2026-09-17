@@ -127,7 +127,7 @@ pub async fn evaluate_static_arm(
         // gateway.
         StaticRoutingAlgorithm::Advanced(program) => {
             let ctx = build_card_context(dreq);
-            let result = InterpreterBackend::eval_program(&program, &ctx)
+            let result = InterpreterBackend::eval_program(&program, &ctx, Some(payment_id))
                 .inspect_err(|e| {
                     logger::warn!(
                         "ab_test evaluator: Advanced arm '{}' interpreter error: {:?} — falling back to SR routing",
