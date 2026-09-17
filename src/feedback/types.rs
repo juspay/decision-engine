@@ -259,6 +259,15 @@ pub struct UpdateScorePayload {
     /// When present, the engine emits a SmartRetryDecision analytics event capturing
     /// which gateway was retried and whether it recovered the payment.
     pub is_smart_retry: Option<bool>,
+    /// Customer identifier, used to accumulate sticky-routing success counts.
+    /// Optional; when absent it is recovered from the decide-time GatewayScoringData
+    /// snapshot, which expires 30 minutes after the decide call.
+    pub customer_id: Option<String>,
+    /// Payment method for the sticky-routing write when feedback arrives after the
+    /// decide-time snapshot expired (e.g. a late CHARGED webhook). Snapshot fallback.
+    pub payment_method: Option<String>,
+    /// Payment method type; same role as `payment_method`.
+    pub payment_method_type: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
