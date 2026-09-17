@@ -154,7 +154,7 @@ test.describe('Volume contracts (API)', () => {
     expect(amount.status).toBe(400)
   })
 
-  test('runs the activate/update/deactivate/delete lifecycle in its own slot', async ({ api, merchant }) => {
+  test('runs the activate/update/deactivate lifecycle in its own slot', async ({ api, merchant }) => {
     const m = merchant.id
     const created = await createContract(api, volumeContractPayload(m))
     const ruleId = created.body.rule_id
@@ -199,13 +199,15 @@ test.describe('Volume contracts (API)', () => {
     })
     expect(rejectedEdit.status).toBe(400)
 
+    // Deletion is disabled for parity with the Hyperswitch dashboard: the /routing/delete
+    // route is removed, so the (deactivated) contract cannot be deleted and remains listed.
     const deleted = await api.raw('POST', '/routing/delete', {
       failOnStatusCode: false,
       body: { created_by: m, routing_algorithm_id: ruleId },
     })
-    expect(deleted.status).toBe(200)
+    expect(deleted.status).toBe(404)
     const all = await api.listRoutingAlgorithms(m)
-    expect(all.body.some((r: any) => r.id === ruleId)).toBe(false)
+    expect(all.body.some((r: any) => r.id === ruleId)).toBe(true)
   })
 
   test('an active volume contract does not disturb payment routing for the same merchant', async ({ api, merchant }) => {

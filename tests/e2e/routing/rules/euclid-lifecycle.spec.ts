@@ -199,14 +199,15 @@ test.describe('Rule Lifecycle — creation and management', () => {
       await expect(euclid.ruleRow(ruleName).getByText('Inactive')).toBeVisible()
     })
 
-    test('blocks Edit and Delete while the rule is active', async ({ authedPage }) => {
+    test('blocks Edit while active and hides Delete', async ({ authedPage }) => {
       await euclid.ruleAction(ruleName, 'Activate')
       await expect(authedPage.getByText('Rule activated successfully.')).toBeVisible()
 
-      // /routing/update and /routing/delete both reject an active algorithm.
+      // /routing/update rejects an active algorithm, so Edit is disabled. Delete is hidden
+      // entirely (RULE_DELETION feature flag off) for parity with the Hyperswitch dashboard.
       await euclid.openRuleMenu(ruleName)
       await expect(euclid.menuItem('Edit')).toBeDisabled()
-      await expect(euclid.menuItem('Delete')).toBeDisabled()
+      await expect(euclid.menuItem('Delete')).toHaveCount(0)
     })
 
     test('edits an inactive rule and sends the update to the backend', async ({ authedPage }) => {
@@ -227,13 +228,11 @@ test.describe('Rule Lifecycle — creation and management', () => {
       await expect(euclid.ruleRow(renamed)).toBeVisible()
     })
 
-    test('deletes an inactive rule', async ({ authedPage }) => {
-      await euclid.ruleAction(ruleName, 'Delete')
-
-      await expect(authedPage.getByText('Delete this rule?')).toBeVisible()
-      await authedPage.locator('.fixed.inset-0').getByRole('button', { name: 'Delete' }).click()
-
-      await expect(euclid.ruleRow(ruleName)).toHaveCount(0)
+    test('does not offer Delete for an inactive rule', async ({ authedPage }) => {
+      // Deletion is disabled for parity with the Hyperswitch dashboard: no Delete action is
+      // rendered even for an inactive rule (RULE_DELETION feature flag off).
+      await euclid.openRuleMenu(ruleName)
+      await expect(euclid.menuItem('Delete')).toHaveCount(0)
     })
 
     test('filters the list by name from the column header', async ({ authedPage }) => {

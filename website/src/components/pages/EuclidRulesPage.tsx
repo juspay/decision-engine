@@ -19,6 +19,7 @@ import {
 
 import { PageHeading } from '../ui/PageHeading'
 import { Notice } from '../ui/Notice'
+import { FEATURE_FLAGS } from '../../lib/featureFlags'
 type StatusFilter = 'all' | 'active' | 'inactive'
 
 export function EuclidRulesPage() {
@@ -370,14 +371,18 @@ export function EuclidRulesPage() {
                               onSelect: () => navigate(`/routing/rules/new?cloneFrom=${algo.id}`),
                               disabled: !canEditRouting,
                             },
-                            {
-                              label: 'Delete',
-                              icon: Trash2,
-                              tone: 'danger',
-                              onSelect: () => setPendingDeleteId(algo.id),
-                              disabled: Boolean(lockedReason),
-                              hint: lockedReason,
-                            },
+                            ...(FEATURE_FLAGS.RULE_DELETION
+                              ? [
+                                  {
+                                    label: 'Delete',
+                                    icon: Trash2,
+                                    tone: 'danger' as const,
+                                    onSelect: () => setPendingDeleteId(algo.id),
+                                    disabled: Boolean(lockedReason),
+                                    hint: lockedReason,
+                                  },
+                                ]
+                              : []),
                           ]}
                         />
                       </td>

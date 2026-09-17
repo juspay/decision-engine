@@ -29,6 +29,7 @@ import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 
 import { PageHeading } from '../ui/PageHeading'
 import { Notice } from '../ui/Notice'
+import { FEATURE_FLAGS } from '../../lib/featureFlags'
 const SAMPLE_SIZE_PRESETS = [1000, 5000, 10000, 50000]
 
 const EXPERIMENT_TYPE_HELP: Record<ABTestExperimentType, string> = {
@@ -838,7 +839,9 @@ function ExperimentDetailPanel({
                     Duplicate, being read-only on this experiment, is offered in every state. */}
                 <Button size="sm" variant="secondary" onClick={onClone} disabled={!canEditRouting}><Copy size={13} /> Duplicate</Button>
                 <Button size="sm" variant="secondary" onClick={onEdit} disabled={!canEditRouting}><Pencil size={13} /> Edit</Button>
-                <Button size="sm" variant="secondary" onClick={onDelete} disabled={!canEditRouting}><Trash2 size={13} /> Delete</Button>
+                {FEATURE_FLAGS.RULE_DELETION && (
+                  <Button size="sm" variant="secondary" onClick={onDelete} disabled={!canEditRouting}><Trash2 size={13} /> Delete</Button>
+                )}
                 <Button size="sm" variant="primary" onClick={onActivate} disabled={!canEditRouting}>Activate</Button>
               </>
             )}

@@ -37,7 +37,11 @@ export function GatewaySelect({
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   const query = value.trim().toLowerCase()
-  const filtered = query ? options.filter((o) => o.name.toLowerCase().includes(query)) : options
+  const filtered = query
+    ? options.filter(
+        (o) => o.name.toLowerCase().includes(query) || o.label?.toLowerCase().includes(query),
+      )
+    : options
 
   function openDropdown() {
     const rect = inputRef.current?.getBoundingClientRect()
@@ -166,9 +170,16 @@ export function GatewaySelect({
                     i === highlight ? 'bg-slate-50 dark:bg-[#1c1c24]' : ''
                   } ${o.name === value ? 'bg-brand-50/50 font-medium text-brand-600 dark:bg-brand-900/10 dark:text-brand-400' : ''}`}
                 >
-                  {o.name}
-                  {/* The merchant may run several accounts of one connector, so the id is what
-                      actually tells two options apart. */}
+                  {/* The merchant may run several accounts of one connector, so the label (their
+                      own name for the account) and the id are what tell two options apart. */}
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <span>{o.name}</span>
+                    {o.label && (
+                      <span className="min-w-0 truncate font-sans text-xs font-normal text-slate-600 dark:text-slate-400">
+                        {o.label}
+                      </span>
+                    )}
+                  </span>
                   {o.gatewayId && (
                     <span
                       data-gateway-id={o.gatewayId}

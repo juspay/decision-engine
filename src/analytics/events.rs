@@ -463,6 +463,13 @@ pub fn derive_payment_audit_summary_kind(
 
     if matches!(
         flow_type,
+        FlowType::RoutingHybridDecision | FlowType::RoutingHybridError
+    ) {
+        return Some("hybrid".to_string());
+    }
+
+    if matches!(
+        flow_type,
         FlowType::DecideGatewayDecision
             | FlowType::UpdateGatewayScoreUpdate
             | FlowType::UpdateScoreLegacyScoreSnapshot
@@ -529,6 +536,24 @@ mod tests {
                 FlowType::DecideGatewayDecision,
             ),
             Some("dynamic".to_string())
+        );
+    }
+
+    #[test]
+    fn summary_kind_uses_hybrid_for_hybrid_routing_flows() {
+        assert_eq!(
+            derive_payment_audit_summary_kind(
+                AnalyticsRoute::DecideGateway,
+                FlowType::RoutingHybridDecision,
+            ),
+            Some("hybrid".to_string())
+        );
+        assert_eq!(
+            derive_payment_audit_summary_kind(
+                AnalyticsRoute::DecideGateway,
+                FlowType::RoutingHybridError,
+            ),
+            Some("hybrid".to_string())
         );
     }
 

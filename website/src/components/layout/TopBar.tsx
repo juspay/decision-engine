@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, type Ref } from 'react'
 import { useAuthStore } from '../../store/authStore'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiFetch } from '../../lib/api'
@@ -28,7 +28,13 @@ interface LookupResult {
   hs_org_name?: string
 }
 
-export function TopBar() {
+interface TopBarProps {
+  /** Slides the bar out of view while the page scrolls down. See useHeaderAutoHide. */
+  hidden?: boolean
+  headerRef?: Ref<HTMLElement>
+}
+
+export function TopBar({ hidden = false, headerRef }: TopBarProps) {
   const { user, setAuth } = useAuthStore()
   const { setMerchantId } = useMerchantStore()
   const [superAdminOpen, setSuperAdminOpen] = useState(false)
@@ -111,7 +117,14 @@ export function TopBar() {
   }
 
   return (
-    <header className="flex h-[78px] shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-6 transition-colors duration-300 dark:border-[#22262f] dark:bg-[#06080d] relative z-10">
+    // Sticky rather than a flex sibling of the scroller: the bar can then translate out of view
+    // and let the page use its 78px, instead of reserving that height whether it is visible or not.
+    <header
+      ref={headerRef}
+      className={`sticky top-0 z-30 flex h-[78px] shrink-0 items-center gap-4 border-b border-slate-200 bg-white px-6 transition-[transform,background-color,border-color] duration-300 ease-out motion-reduce:transition-none dark:border-[#22262f] dark:bg-[#06080d] ${
+        hidden ? '-translate-y-full' : 'translate-y-0'
+      }`}
+    >
       <div className="flex-1" />
 
       {/* The header sits right of the 256px (w-64) sidebar, so centering within

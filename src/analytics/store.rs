@@ -4,7 +4,8 @@ use crate::analytics::events::{ApiEvent, DomainAnalyticsEvent};
 use crate::analytics::models::{
     AnalyticsCostSavingsResponse, AnalyticsDecisionResponse, AnalyticsGatewayScoresResponse,
     AnalyticsLogSummariesResponse, AnalyticsOverviewResponse, AnalyticsQuery,
-    AnalyticsRoutingStatsResponse, ExperimentResultsQuery, ExperimentResultsResponse,
+    AnalyticsRoutingStatsResponse, CommitmentAnalytics, CommitmentAnalyticsQuery,
+    CommitmentImpactData, ExperimentResultsQuery, ExperimentResultsResponse,
     ExperimentTransactionsQuery, ExperimentTransactionsResponse, PaymentAuditQuery,
     PaymentAuditResponse, RoutingEventsQuery, RoutingEventsResponse,
 };
@@ -49,6 +50,26 @@ pub trait AnalyticsReadStore: Send + Sync {
         _active_dims: &[&str],
     ) -> Result<Vec<SegmentTraffic>, ApiError> {
         Ok(Vec::new())
+    }
+
+    /// Series, audit trail and per-PSP impact for a merchant's volume commitments, read together.
+    /// Defaults to empty so a store without analytics degrades to "nothing measured" rather than
+    /// failing the dashboard.
+    async fn volume_commitment(
+        &self,
+        _query: &CommitmentAnalyticsQuery,
+    ) -> Result<CommitmentAnalytics, ApiError> {
+        Ok(CommitmentAnalytics::default())
+    }
+
+    /// Each PSP's cycle against the period before it, for the impact view. The windows on the
+    /// query say which cycle each one is; the period before is derived from them. Defaults to
+    /// empty for the same reason as `volume_commitment`.
+    async fn volume_commitment_impact(
+        &self,
+        _query: &CommitmentAnalyticsQuery,
+    ) -> Result<CommitmentImpactData, ApiError> {
+        Ok(CommitmentImpactData::default())
     }
 
     async fn gateway_scores(

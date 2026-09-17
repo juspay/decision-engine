@@ -830,3 +830,206 @@ mod tests {
         );
     }
 }
+
+// ── Volume commitments ───────────────────────────────────────────────────────────────────────
+//
+// A billing cycle is not a time range, so these do not use `AnalyticsQuery`: buckets are numbered
+// from the instant a cycle opened rather than from the wall clock, and each connector can be on a
+// cycle of its own. What analytics needs is only the windows to read; nothing here knows what a
+// contract is.
+
+/// One connector's cycle: the span to read, and how long a contract "day" lasts inside it.
+#[derive(Debug, Clone)]
+pub struct CommitmentWindow {
+    pub connector: String,
+    pub cycle_start_ms: i64,
+    pub cycle_end_ms: i64,
+    /// 86_400 on a calendar cycle, 60 on a test cycle, where a minute stands in for a day.
+    pub day_secs: u64,
+}
+
+/// Everything the commitment dashboard reads, in one query.
+#[derive(Debug, Clone)]
+pub struct CommitmentAnalyticsQuery {
+    pub merchant_id: String,
+    /// Empty means there is nothing to read; every metric returns empty rather than querying.
+    pub windows: Vec<CommitmentWindow>,
+    /// Buckets per contract day: 1 for a day-resolution series, more for an intraday one.
+    pub per_day: u32,
+    /// How many events each half of the audit trail may return.
+    pub audit_limit: u64,
+    /// The `routing_approach` value the nudge stamps on a diverted decision. Passed in so this
+    /// layer keeps no dependency on the decider's enums — the caller owns that vocabulary.
+    pub steered_approach: String,
+    /// Multiplier that puts a measured payment amount on the same scale as the contract's goals.
+    /// Traffic reaches `/decide-gateway` in major currency units while goals are stored in minor
+    /// ones; `1.0` where a contract counts transactions rather than money.
+    pub amount_scale: f64,
+}
+
+impl CommitmentAnalyticsQuery {
+    /// The cycle spanning every window — the widest audit range worth reading.
+    pub fn span_ms(&self) -> Option<(i64, i64)> {
+        let start = self.windows.iter().map(|w| w.cycle_start_ms).min()?;
+        let end = self.windows.iter().map(|w| w.cycle_end_ms).max()?;
+        Some((start, end))
+    }
+
+    pub fn connectors(&self) -> Vec<String> {
+        self.windows.iter().map(|w| w.connector.clone()).collect()
+    }
+
+    /// The same connectors over the period immediately before each one's *own* cycle — the
+    /// comparison the impact view makes. Every window is shifted back by its own length, because
+    /// cycles can differ in both start and duration: shifting them all by one shared figure reads
+    /// part of a later-starting connector's current cycle as its history.
+    pub fn previous_cycle(&self) -> Self {
+        Self {
+            windows: self
+                .windows
+                .iter()
+                .map(|w| CommitmentWindow {
+                    connector: w.connector.clone(),
+                    cycle_start_ms: w
+                        .cycle_start_ms
+                        .saturating_sub((w.cycle_end_ms - w.cycle_start_ms).max(1)),
+                    cycle_end_ms: w.cycle_start_ms,
+                    day_secs: w.day_secs,
+                })
+                .collect(),
+            ..self.clone()
+        }
+    }
+
+    /// The same windows read at a different bucket size.
+    pub fn at_resolution(&self, per_day: u32) -> Self {
+        Self {
+            per_day,
+            ..self.clone()
+        }
+    }
+}
+
+#[cfg(test)]
+mod commitment_query_tests {
+    use super::*;
+
+    fn window(connector: &str, start_ms: i64, end_ms: i64) -> CommitmentWindow {
+        CommitmentWindow {
+            connector: connector.to_string(),
+            cycle_start_ms: start_ms,
+            cycle_end_ms: end_ms,
+            day_secs: 86_400,
+        }
+    }
+
+    fn query(windows: Vec<CommitmentWindow>) -> CommitmentAnalyticsQuery {
+        CommitmentAnalyticsQuery {
+            merchant_id: "m1".to_string(),
+            windows,
+            per_day: 24,
+            audit_limit: 50,
+            steered_approach: "SR_SELECTION_VOLUME_COMMITMENT".to_string(),
+            amount_scale: 100.0,
+        }
+    }
+
+    const DAY: i64 = 86_400_000;
+
+    /// Each commitment's history is the period before *its* cycle. A document whose cycles open on
+    /// different days would otherwise read the later one's opening days as its own baseline.
+    #[test]
+    fn every_window_steps_back_by_its_own_length() {
+        let q = query(vec![
+            window("stripe", 30 * DAY, 61 * DAY),
+            window("adyen", 33 * DAY, 64 * DAY),
+        ]);
+        let previous = q.previous_cycle();
+        let bounds: Vec<(i64, i64)> = previous
+            .windows
+            .iter()
+            .map(|w| (w.cycle_start_ms / DAY, w.cycle_end_ms / DAY))
+            .collect();
+        assert_eq!(bounds, vec![(-1, 30), (2, 33)]);
+    }
+
+    #[test]
+    fn resolution_changes_the_bucket_size_and_nothing_else() {
+        let q = query(vec![window("stripe", 0, 31 * DAY)]);
+        let daily = q.at_resolution(1);
+        assert_eq!(daily.per_day, 1);
+        assert_eq!(daily.windows.len(), 1);
+        assert_eq!(daily.amount_scale, q.amount_scale);
+    }
+}
+
+/// One PSP's volume in one bucket of its cycle, for the pacing chart.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitmentDayVolume {
+    pub connector: String,
+    /// Whole contract days since this PSP's cycle opened (0 = the first day).
+    pub day_index: u32,
+    /// Where the bucket starts in fractional contract days, at the resolution asked for.
+    pub day: f64,
+    pub total: f64,
+    /// Of `total`, what the nudge moved here.
+    pub steered: f64,
+    pub payments: u64,
+    pub steered_payments: u64,
+}
+
+/// What kind of audit entry an event is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommitmentAuditKind {
+    Forecast,
+    Steered,
+    Eliminated,
+}
+
+/// One entry in the audit trail, reconstructed from stored events so it survives restarts.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitmentAuditEvent {
+    pub at_epoch_ms: i64,
+    pub kind: CommitmentAuditKind,
+    /// The contract execution this belongs to. `None` on events written before runs were named.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connector: Option<String>,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount: Option<f64>,
+}
+
+/// Per-PSP totals over one window: `steered_*` moved *to* it, `ceded_*` moved *away* from it.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitmentWindowTotals {
+    pub connector: String,
+    pub payments: u64,
+    pub volume: f64,
+    pub steered_payments: u64,
+    pub steered_volume: f64,
+    pub ceded_payments: u64,
+    pub ceded_volume: f64,
+}
+
+/// What the pacing dashboard reads from analytics, gathered in one pass.
+#[derive(Debug, Clone, Default)]
+pub struct CommitmentAnalytics {
+    pub series: Vec<CommitmentDayVolume>,
+    pub audit: Vec<CommitmentAuditEvent>,
+}
+
+/// The impact view's own read: this cycle against the one before it, totals and day-by-day.
+/// Separate from `CommitmentAnalytics` because it spans two windows, and only one page asks for it.
+#[derive(Debug, Clone, Default)]
+pub struct CommitmentImpactData {
+    pub before: Vec<CommitmentWindowTotals>,
+    pub during: Vec<CommitmentWindowTotals>,
+    pub baseline_days: Vec<CommitmentDayVolume>,
+    pub cycle_days: Vec<CommitmentDayVolume>,
+}
