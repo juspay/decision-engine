@@ -6,7 +6,7 @@ export type KnownFeature =
   | 'gsm-scoring-filter'
   | 'explore-exploit-srv3'
   | 'ab-test-real-payments'
-  | 'multi-objective-routing'
+  | 'cost-savings'
   | 'elimination'
   | 'autopilot'
   | 'volume-contracts'

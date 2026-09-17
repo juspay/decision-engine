@@ -4959,7 +4959,7 @@
               "type": "string"
             },
             "description": "Feature slug.",
-            "example": "multi-objective-routing"
+            "example": "cost-savings"
           }
         ],
         "requestBody": {
@@ -5367,7 +5367,7 @@
           },
           "enableMultiObjective": {
             "type": "boolean",
-            "description": "Per-request override for the multi-objective (cost-aware) post-step. true forces it on, false forces it off; omitted falls back to the merchant's multi_objective_routing_enabled feature flag."
+            "description": "Per-request override for the multi-objective (cost-aware) post-step. true forces it on, false forces it off; omitted falls back to the merchant's cost_savings_enabled feature flag."
           }
         }
       },
@@ -9139,7 +9139,7 @@
               "gsm-scoring-filter",
               "explore-exploit-srv3",
               "ab-test-real-payments",
-              "multi-objective-routing",
+              "cost-savings",
               "elimination",
               "autopilot",
               "volume-contracts",

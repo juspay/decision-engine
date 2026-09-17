@@ -74,7 +74,7 @@ pub struct SrConfigOverride {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub elimination_threshold: Option<f64>,
     /// Whether the multi-objective (cost-aware) post-step runs for this arm. Overrides the
-    /// merchant `multi_objective_routing_enabled` flag / per-request value. Used by the
+    /// merchant `cost_savings_enabled` flag / per-request value. Used by the
     /// "Turn cost on" experiment (control = false, variant = true).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_multi_objective: Option<bool>,

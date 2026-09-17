@@ -756,7 +756,7 @@ function SrRoutingMasterToggle({ features }: { features: ReturnType<typeof useMe
 // toggle is the real switch: it enables self-tuning plus cost savings, and
 // turning it OFF hard-disables those backend flags so the engine falls back to the Manual
 // configuration. SR base routing ("switch PSP on low auth") is always on and shown as a status
-// pill. Cost savings (`multi-objective-routing`) is surfaced independently in the Feature Flags
+// pill. Cost savings (`cost-savings`) is surfaced independently in the Feature Flags
 // tab so a Manual-config merchant can run cost-aware routing without Autopilot.
 function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
   const features = useMerchantFeatures(merchantId ?? undefined)
@@ -770,7 +770,7 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
   // Master is its own persisted backend flag (`autopilot`) so the toggle survives reloads.
   // Autopilot subsumes self-tuning: the only thing that distinguishes it from Manual is that the
   // engine adapts settings to your traffic, so `autopilot` alone gates the calibration job (see
-  // sr_auto_calibration.rs). Cost savings (`multi-objective-routing`) is orthogonal and now
+  // sr_auto_calibration.rs). Cost savings (`cost-savings`) is orthogonal and now
   // lives in the Feature Flags tab.
   const autopilotOn = features.isEnabled('autopilot')
 
@@ -786,14 +786,14 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
         // Enable unconditionally: the toggle is idempotent, and the captured `costOn` /
         // `autoCalibrationOn` booleans can be stale (the features list is SWR-cached for 5 min),
         // so guarding on them would silently skip the POST and leave the decision off.
-        await features.setFeatureEnabled('multi-objective-routing', true)
+        await features.setFeatureEnabled('cost-savings', true)
         if (merchantId) await enableAutopilotSrDimensions(merchantId)
       } else {
         // Hard-disable: turn every autopilot decision off so routing uses manual config.
         // Unconditional for the same reason as the enable path — stale cached booleans must not
         // gate the POST, or a flag that is actually on server-side would be left enabled.
         await features.setFeatureEnabled('elimination', false)
-        await features.setFeatureEnabled('multi-objective-routing', false)
+        await features.setFeatureEnabled('cost-savings', false)
       }
       setMessage(next
         ? 'Autopilot on — the engine self-tunes to your traffic (cost savings also enabled).'
@@ -899,7 +899,7 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string; 
     // Cost savings is orthogonal to Autopilot vs Manual — it applies to either scoring config.
     // Autopilot enables it as a convenience, but it lives here as the single, ungated source of
     // truth so a Manual-config merchant can run cost-aware routing without Autopilot.
-    feature: 'multi-objective-routing',
+    feature: 'cost-savings',
     title: 'Cost savings (optimize for economic value)',
     description:
       'Multi-objective routing: alongside approval rate, weighs each PSP\'s expected cost and picks the highest expected-value option. Works with either the Autopilot or Manual scoring config.',
