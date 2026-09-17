@@ -1,13 +1,12 @@
 use clickhouse::Row;
 use serde::Deserialize;
 
-use crate::analytics::flow::FlowType;
 use crate::analytics::models::AnalyticsQuery;
 use crate::error::ApiError;
 
-use super::super::common::{fetch_one, DOMAIN_TABLE};
+use super::super::common::{decision_shape, fetch_one, DOMAIN_TABLE};
 use super::super::filters::{base_window_filters, merchant_filter};
-use super::super::query::{BoundQueryBuilder, FilterClause};
+use super::super::query::BoundQueryBuilder;
 use super::super::time::effective_window_bounds;
 
 #[derive(Debug, Clone, Deserialize, Row)]
@@ -34,10 +33,7 @@ pub async fn load(
     ]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));
     builder.extend_filters(merchant_filter(&query.merchant_id));
-    builder.add_filter(FilterClause::raw(format!(
-        "flow_type = '{}'",
-        FlowType::DecideGatewayDecision.as_str()
-    )));
+    builder.add_filter(decision_shape(query.routing_kind).decision_filter());
 
     let row = fetch_one::<CountTileRow>(builder.build(client)).await?;
     Ok(DecisionTileSummary {

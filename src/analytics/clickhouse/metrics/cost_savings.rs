@@ -1,34 +1,21 @@
 use clickhouse::Row;
 use serde::Deserialize;
 
-use crate::analytics::flow::FlowType;
 use crate::analytics::models::{
     AnalyticsAvailableCurrency, AnalyticsCostSavingsTotals, AnalyticsCostSavingsTrendPoint,
     AnalyticsQuery,
 };
 use crate::error::ApiError;
 
-use super::super::common::{fetch_all, fetch_one, DOMAIN_TABLE};
+use super::super::common::{decision_shape, fetch_all, fetch_one, DOMAIN_TABLE};
 use super::super::filters::{analytics_dimension_filters, base_window_filters, merchant_filter};
 use super::super::query::{BoundQueryBuilder, FilterClause, OrderClause};
 use super::super::time::{effective_window_bounds, query_bucket_select_expr};
 
-const COST_SAVED_BPS_EXPR: &str =
-    "JSONExtractFloat(assumeNotNull(details), 'response', 'multi_objective_info', 'costSavedBps')";
-const MO_OUTCOME_EXPR: &str =
-    "JSONExtractString(assumeNotNull(details), 'response', 'multi_objective_info', 'outcome')";
-use crate::analytics::clickhouse::common::PAYMENT_AMOUNT_EXPR;
-// Currency lives in the request JSON, not the top-level `currency` column (which is NULL for
-// /decide-gateway events).
-const PAYMENT_CURRENCY_EXPR: &str =
-    "JSONExtractString(assumeNotNull(details), 'request', 'paymentInfo', 'currency')";
-
-fn decision_flow_filter() -> FilterClause {
-    FilterClause::raw(format!(
-        "flow_type = '{}'",
-        FlowType::DecideGatewayDecision.as_str()
-    ))
-}
+// The cost/amount/currency expressions all read the decider payload out of `details`, which sits
+// one level deeper on a hybrid event than on a decide-gateway one, so they come from the routing
+// kind's `DecisionShape` rather than module constants. Currency in particular is JSON-extracted
+// because the top-level `currency` column is NULL for decider events.
 
 #[derive(Debug, Deserialize, Row)]
 struct AvailableCurrencyRow {
@@ -47,16 +34,20 @@ pub async fn load_available_currencies(
     query: &AnalyticsQuery,
 ) -> Result<Vec<AnalyticsAvailableCurrency>, ApiError> {
     let (start_ms, end_ms) = effective_window_bounds(query);
+    let shape = decision_shape(query.routing_kind);
+    let currency_expr = shape.currency_expr;
+    let outcome_expr = shape.multi_objective_outcome_expr;
+    let bps_expr = shape.cost_saved_bps_expr;
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
     builder.extend_selects([
-        format!("{PAYMENT_CURRENCY_EXPR} AS currency"),
+        format!("{currency_expr} AS currency"),
         "count() AS decision_count".to_string(),
     ]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));
     builder.extend_filters(merchant_filter(&query.merchant_id));
-    builder.add_filter(decision_flow_filter());
-    builder.add_filter(FilterClause::raw(format!("{MO_OUTCOME_EXPR} = 'COST_WON'")));
-    builder.add_filter(FilterClause::raw(format!("{COST_SAVED_BPS_EXPR} > 0")));
+    builder.add_filter(shape.decision_filter());
+    builder.add_filter(FilterClause::raw(format!("{outcome_expr} = 'COST_WON'")));
+    builder.add_filter(FilterClause::raw(format!("{bps_expr} > 0")));
     builder.extend_group_bys(["currency"]);
     builder.add_order_by(OrderClause::desc("decision_count"));
     builder.set_limit(Some(20));
@@ -88,21 +79,26 @@ pub async fn load_cost_savings_trend(
     currency: &str,
 ) -> Result<Vec<AnalyticsCostSavingsTrendPoint>, ApiError> {
     let (start_ms, end_ms) = effective_window_bounds(query);
+    let shape = decision_shape(query.routing_kind);
+    let currency_expr = shape.currency_expr;
+    let outcome_expr = shape.multi_objective_outcome_expr;
+    let bps_expr = shape.cost_saved_bps_expr;
+    let amount_expr = shape.amount_expr;
     let mut scoped = query.clone();
     scoped.currency = None;
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
     builder.extend_selects([
         query_bucket_select_expr(query, start_ms, end_ms),
-        format!("sum(({COST_SAVED_BPS_EXPR} / 10000.0) * {PAYMENT_AMOUNT_EXPR}) AS saved_value"),
+        format!("sum(({bps_expr} / 10000.0) * {amount_expr}) AS saved_value"),
     ]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));
     builder.extend_filters(merchant_filter(&query.merchant_id));
     builder.extend_filters(analytics_dimension_filters(&scoped));
-    builder.add_filter(decision_flow_filter());
-    builder.add_filter(FilterClause::raw(format!("{MO_OUTCOME_EXPR} = 'COST_WON'")));
-    builder.add_filter(FilterClause::raw(format!("{COST_SAVED_BPS_EXPR} > 0")));
+    builder.add_filter(shape.decision_filter());
+    builder.add_filter(FilterClause::raw(format!("{outcome_expr} = 'COST_WON'")));
+    builder.add_filter(FilterClause::raw(format!("{bps_expr} > 0")));
     builder.add_filter(FilterClause::new(
-        format!("{PAYMENT_CURRENCY_EXPR} = ?"),
+        format!("{currency_expr} = ?"),
         vec![currency.to_string().into()],
     ));
     builder.extend_group_bys(["bucket_ms"]);
@@ -134,22 +130,27 @@ pub async fn load_cost_savings_totals(
     currency: &str,
 ) -> Result<AnalyticsCostSavingsTotals, ApiError> {
     let (start_ms, end_ms) = effective_window_bounds(query);
+    let shape = decision_shape(query.routing_kind);
+    let currency_expr = shape.currency_expr;
+    let outcome_expr = shape.multi_objective_outcome_expr;
+    let bps_expr = shape.cost_saved_bps_expr;
+    let amount_expr = shape.amount_expr;
     let mut scoped = query.clone();
     scoped.currency = None;
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
     builder.extend_selects([
         format!(
-            "sumIf(({COST_SAVED_BPS_EXPR} / 10000.0) * {PAYMENT_AMOUNT_EXPR}, {MO_OUTCOME_EXPR} = 'COST_WON') AS saved_value"
+            "sumIf(({bps_expr} / 10000.0) * {amount_expr}, {outcome_expr} = 'COST_WON') AS saved_value"
         ),
-        format!("countIf({MO_OUTCOME_EXPR} = 'COST_WON') AS cost_won_count"),
-        format!("countIf({MO_OUTCOME_EXPR} != '') AS total_decisions"),
+        format!("countIf({outcome_expr} = 'COST_WON') AS cost_won_count"),
+        format!("countIf({outcome_expr} != '') AS total_decisions"),
     ]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));
     builder.extend_filters(merchant_filter(&query.merchant_id));
     builder.extend_filters(analytics_dimension_filters(&scoped));
-    builder.add_filter(decision_flow_filter());
+    builder.add_filter(shape.decision_filter());
     builder.add_filter(FilterClause::new(
-        format!("{PAYMENT_CURRENCY_EXPR} = ?"),
+        format!("{currency_expr} = ?"),
         vec![currency.to_string().into()],
     ));
 
