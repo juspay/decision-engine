@@ -819,7 +819,7 @@ function CodeSnippet({ code, note, label }: { code: string; note?: string; label
   return (
     <div className="mt-3">
       <p className={`${type.labelSmall} mb-1.5`}>{label ?? 'Example request — required fields only'}</p>
-      <pre className="overflow-x-auto rounded-lg border border-slate-200 bg-white px-3 py-2.5 font-mono text-[10.5px] leading-[16px] text-slate-700 dark:border-[#1e2535] dark:bg-[#0d1118] dark:text-[#a8b4c8]">
+      <pre className="overflow-x-auto rounded-lg border border-slate-200 bg-white px-3 py-2.5 font-mono text-[11px] leading-[16px] text-slate-700 dark:border-[#1e2535] dark:bg-[#0d1118] dark:text-[#a8b4c8]">
         {code}
       </pre>
       {note ? <p className={`${type.bodySmall} mt-1.5`}>{note}</p> : null}
@@ -899,16 +899,19 @@ function FlowRail({
                       data-lane-gap={gapKind}
                       className={
                         gapKind === 'fan'
-                          ? 'h-[86px]'
+                          ? 'h-[92px]'
                           : gapKind === 'converge'
-                            ? 'h-[82px]'
+                            ? 'h-[88px]'
                             : gapKind === 'filter'
-                              ? 'h-[62px]'
+                              ? 'h-[70px]'
                               : gapKind === 'split'
-                                ? 'h-[46px]'
-                                : gapKind === 'sort' || gapKind === 'demote'
-                                  ? 'h-[64px]'
-                                  : 'h-[34px]'
+                                ? 'h-[54px]'
+                                : gapKind === 'sort'
+                                  ? // the lanes cross here, so the names need room to land apart
+                                    'h-[84px]'
+                                  : gapKind === 'demote'
+                                    ? 'h-[70px]'
+                                    : 'h-[36px]'
                       }
                     />
                   ) : null}
@@ -969,7 +972,7 @@ function StageRow({
         // Sits across the card's top-right border like a ribbon; the Card-background fill masks
         // the border segment beneath it.
         <span
-          className={`absolute -top-[7px] right-4 z-[1] rounded bg-white px-1.5 text-[9px] font-semibold uppercase tracking-wider dark:bg-[#11151d] ${kindTone}`}
+          className={`absolute -top-[9px] right-4 z-[1] rounded bg-white px-1.5 text-[11px] leading-4 font-semibold uppercase tracking-wide dark:bg-[#11151d] ${kindTone}`}
         >
           {view.kind}
         </span>
@@ -1007,7 +1010,7 @@ function StageRow({
               {outputOrder.map((name) => (
                 <span
                   key={name}
-                  className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-[3px] font-mono text-[10.5px] text-slate-700 dark:border-[#273141] dark:bg-[#0c1119] dark:text-[#c7cfdb]"
+                  className="flex items-center gap-1.5 rounded-md border border-slate-200 bg-slate-50 px-2 py-[3px] font-mono text-[11px] leading-4 text-slate-700 dark:border-[#273141] dark:bg-[#0c1119] dark:text-[#c7cfdb]"
                 >
                   <span
                     className="h-[5px] w-[5px] flex-shrink-0 rounded-[2px]"

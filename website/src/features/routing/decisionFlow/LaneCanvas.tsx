@@ -198,7 +198,7 @@ export function LaneCanvas({
         collect.labels.push({
           x,
           // Below the crossing on a re-rank row, mid-gap everywhere else.
-          y: gap.top + (gap.kind === 'sort' ? gap.height - 19 : gap.height * 0.5 - 8),
+          y: gap.top + (gap.kind === 'sort' ? gap.height - 26 : gap.height * 0.5 - 9),
           kind: 'statechip',
           text: lane.name,
           color: lane.color,
@@ -855,7 +855,7 @@ export function LaneCanvas({
                 data-gap-index={label.gapIndex}
                 data-slot-index={label.slotIndex}
                 data-gap-kind={label.gapKind}
-                className="de-state-chip absolute flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-[9.5px] shadow-sm dark:shadow-none"
+                className="de-state-chip absolute flex -translate-x-1/2 items-center gap-1 whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-[11px] leading-4 shadow-sm dark:shadow-none"
                 // Opaque by design: the chip sits on its ribbon and has to hide it.
                 style={{
                   left: label.x,
@@ -883,10 +883,10 @@ export function LaneCanvas({
             <span
               key={marker.id}
               data-marker-lane={marker.laneIndex}
-              className={`${marker.transient ? 'de-demote-flash' : 'de-cut-marker'} absolute whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-[10px] font-semibold shadow-[0_8px_20px_-10px_rgba(15,23,42,0.55)]`}
+              className={`${marker.transient ? 'de-demote-flash' : 'de-cut-marker'} absolute whitespace-nowrap rounded-md border px-1.5 py-px font-mono text-[11px] leading-4 font-semibold shadow-[0_8px_20px_-10px_rgba(15,23,42,0.55)]`}
               style={{
                 left: EVENT_X,
-                top: gap.top + gap.height * 0.5 - 9,
+                top: gap.top + gap.height * 0.5 - 10,
                 color,
                 borderColor: `${color}66`,
                 background: isDark ? `${color}1f` : `${color}14`,
@@ -928,7 +928,7 @@ export function LaneCanvas({
               <span
                 key={i}
                 title={label.text}
-                className="absolute flex max-w-[80px] -translate-x-1/2 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[10px] text-slate-600 dark:border-[#1e2535] dark:bg-[#0d1118] dark:text-[#9ca7ba]"
+                className="absolute flex max-w-[104px] -translate-x-1/2 items-center gap-1 rounded-full border border-slate-200 bg-white px-1.5 py-0.5 font-mono text-[11px] leading-4 text-slate-600 dark:border-[#1e2535] dark:bg-[#0d1118] dark:text-[#9ca7ba]"
                 style={{ left: label.x, top: label.y, boxShadow: knockout }}
               >
                 {label.color ? (
@@ -946,7 +946,7 @@ export function LaneCanvas({
             return (
               <span
                 key={i}
-                className="absolute -translate-x-1/2 rounded-md border border-slate-200 bg-white px-1.5 font-mono text-[10px] font-semibold tabular-nums dark:border-[#1e2535] dark:bg-[#0d1118]"
+                className="absolute -translate-x-1/2 rounded-md border border-slate-200 bg-white px-1.5 font-mono text-[11px] leading-4 font-semibold tabular-nums dark:border-[#1e2535] dark:bg-[#0d1118]"
                 style={{ left: label.x, top: label.y, color: laneColor(label.color ?? '#3b82f6'), boxShadow: knockout }}
               >
                 {label.text}
@@ -957,7 +957,7 @@ export function LaneCanvas({
             return (
               <span
                 key={i}
-                className="absolute whitespace-nowrap text-[10.5px] italic text-slate-400 dark:text-[#6d778a]"
+                className="absolute whitespace-nowrap text-[11px] leading-4 italic text-slate-400 dark:text-[#6d778a]"
                 style={{ left: label.x, top: label.y }}
               >
                 {label.text}
@@ -967,7 +967,7 @@ export function LaneCanvas({
           return (
             <span
               key={i}
-              className="absolute -translate-x-1/2 font-mono text-[10px]"
+              className="absolute -translate-x-1/2 font-mono text-[11px] leading-4"
               style={{ left: label.x, top: label.y, color: laneColor(label.color ?? '#8d96aa') }}
             >
               {label.text}
