@@ -280,11 +280,25 @@ pub async fn hybrid_routing_evaluate(
                 let fallback_gateways = req.fallback_output.clone();
 
                 // A/B arms are assigned by payment id; both halves must see the same one so the
-                // rule layer and the SR layer come from the same arm.
-                if req.payment_id.as_deref().is_none_or(str::is_empty) {
-                    req.payment_id = dynamic_routing_request
-                        .as_ref()
-                        .map(|dynamic| dynamic.payment_id().to_string());
+                // rule layer and the SR layer come from the same arm. The dynamic request's id is
+                // the one scores and outcomes are recorded under, so it wins.
+                let dynamic_payment_id = dynamic_routing_request
+                    .as_ref()
+                    .map(|dynamic| dynamic.payment_id())
+                    .filter(|id| !id.is_empty());
+                if let Some(dynamic_payment_id) = dynamic_payment_id {
+                    if req
+                        .payment_id
+                        .as_deref()
+                        .is_some_and(|id| !id.is_empty() && id != dynamic_payment_id)
+                    {
+                        crate::logger::warn!(
+                            "hybrid routing: static payment_id {:?} differs from dynamic payment_id {}; using the dynamic one",
+                            req.payment_id,
+                            dynamic_payment_id
+                        );
+                    }
+                    req.payment_id = Some(dynamic_payment_id.to_string());
                 }
 
                 // The decider half records the experiment decision when it runs; otherwise the

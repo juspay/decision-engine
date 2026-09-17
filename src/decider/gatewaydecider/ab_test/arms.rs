@@ -110,8 +110,19 @@ pub fn in_scope(data: &ABTestData, endpoint: ExperimentEndpoint) -> bool {
 /// Whether traffic on `endpoint` is split between the arms.
 pub fn splits_on(data: &ABTestData, endpoint: ExperimentEndpoint) -> bool {
     in_scope(data, endpoint)
-        && project(&resolved_arm(data, ArmSide::Control), endpoint)
-            != project(&resolved_arm(data, ArmSide::Variant), endpoint)
+        && routing_behaviour(&resolved_arm(data, ArmSide::Control), endpoint)
+            != routing_behaviour(&resolved_arm(data, ArmSide::Variant), endpoint)
+}
+
+/// The projection reduced to how the endpoint routes. `/decide-gateway` always runs SR, and an arm
+/// without an SR layer runs it with the merchant's settings, the same as an SR layer with no
+/// overrides. On `/routing/hybrid` the SR layer's presence decides whether SR runs at all.
+fn routing_behaviour(arm: &ExperimentArm, endpoint: ExperimentEndpoint) -> ArmProjection {
+    let mut projection = project(arm, endpoint);
+    if endpoint == ExperimentEndpoint::DecideGateway {
+        projection.sr = Some(projection.sr.unwrap_or_default());
+    }
+    projection
 }
 
 pub fn plan(data: &ABTestData, endpoint: ExperimentEndpoint, payment_id: &str) -> EndpointPlan {
@@ -254,6 +265,22 @@ mod tests {
         assert!(!served.in_experiment);
         assert_eq!(served.side, ArmSide::Control);
         assert_eq!(served.projection.sr, Some(sr(true, false)));
+    }
+
+    #[test]
+    fn no_sr_layer_and_empty_sr_layer_route_alike_on_decide_gateway() {
+        let data = layered(
+            ExperimentArm {
+                rule_algorithm_id: Some("rule_1".into()),
+                sr: None,
+            },
+            ExperimentArm {
+                rule_algorithm_id: None,
+                sr: Some(SrConfigOverride::default()),
+            },
+        );
+        assert!(!splits_on(&data, ExperimentEndpoint::DecideGateway));
+        assert!(splits_on(&data, ExperimentEndpoint::HybridRouting));
     }
 
     #[test]

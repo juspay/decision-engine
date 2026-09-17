@@ -155,7 +155,7 @@ pub async fn load(
     })
 }
 
-/// Events an experiment recorded for its arms, on any endpoint.
+/// Events an experiment recorded for real payments on its arms, on any endpoint.
 fn add_experiment_filters(builder: &mut BoundQueryBuilder, merchant_id: &str, experiment_id: &str) {
     builder.extend_filters(merchant_filter(merchant_id));
     builder.add_filter(FilterClause::raw(format!(
@@ -168,6 +168,14 @@ fn add_experiment_filters(builder: &mut BoundQueryBuilder, merchant_id: &str, ex
     )));
     builder.add_filter(FilterClause::raw(
         "JSONExtractString(assumeNotNull(details), 'variant_arm') IN ('control', 'variant')"
+            .to_string(),
+    ));
+    // Real payments only: a routing decision (`routing_source`) or an outcome after a score update
+    // (`outcome_source`). A `/routing/evaluate` preview, such as a Decision Explorer run, carries
+    // neither.
+    builder.add_filter(FilterClause::raw(
+        "(JSONExtractString(assumeNotNull(details), 'routing_source') = 'real_payment_intercept' \
+          OR JSONExtractString(assumeNotNull(details), 'outcome_source') = 'score_update')"
             .to_string(),
     ));
 }

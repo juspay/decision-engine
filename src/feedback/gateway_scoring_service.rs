@@ -590,11 +590,16 @@ pub async fn check_and_update_gateway_score_(
             Ok("Success".to_string())
         }
         Err(e) => {
-            if matches!(
-                e.current_context(),
-                redis_interface::errors::RedisError::NotFound
-                    | redis_interface::errors::RedisError::GetFailed
-            ) {
+            // With compression on, a missing key also reads as `GetFailed`, which is otherwise a
+            // read or decode failure. Only a key confirmed absent is skipped.
+            let scoring_data_absent = match e.current_context() {
+                redis_interface::errors::RedisError::NotFound => true,
+                redis_interface::errors::RedisError::GetFailed => {
+                    matches!(app_state.redis_conn.key_exists(&redis_key).await, Ok(false))
+                }
+                _ => false,
+            };
+            if scoring_data_absent {
                 logger::info!(
                     action = "GATEWAY_SCORING_DATA_NOT_FOUND_SKIP",
                     tag = "GATEWAY_SCORING_DATA_NOT_FOUND_SKIP",

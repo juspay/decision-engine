@@ -635,6 +635,11 @@ impl RedisConnectionWrapper {
 
         Ok(result)
     }
+    /// `EXISTS` on a key read through `get_key`, which applies the connection's key prefix.
+    pub async fn key_exists(&self, key: &str) -> Result<bool, errors::RedisError> {
+        self.conn.exists::<String>(key).await
+    }
+
     pub async fn exists(&self, key: &str) -> Result<bool, errors::RedisError> {
         self.conn
             .pool
@@ -748,7 +753,12 @@ impl RedisConnectionWrapper {
             .hset(key, (field, value))
             .await
             .change_context(errors::RedisError::SetHashFailed)?;
-        self.expire_key(key, ttl).await
+        if let Err(e) = self.expire_key(key, ttl).await {
+            // A hash left without a TTL would never expire, so it is removed instead.
+            let _ = self.delete_key(key).await;
+            return Err(e);
+        }
+        Ok(())
     }
 
     /// `HGETALL` as raw field → string value pairs; empty when the key does not exist.

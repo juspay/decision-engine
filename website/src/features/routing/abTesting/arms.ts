@@ -61,9 +61,16 @@ export function scopedEndpoints(data: ABTestAlgorithmData): ExperimentEndpoint[]
   return data.endpoints ?? EXPERIMENT_ENDPOINTS
 }
 
+// The projection reduced to how the endpoint routes: `/decide-gateway` always runs SR, and an arm
+// without an SR layer runs it with the merchant's settings, the same as an SR layer with no overrides.
+function routingBehaviour(arm: ExperimentArm, endpoint: ExperimentEndpoint): ExperimentArm {
+  const projection = projectArm(arm, endpoint)
+  return endpoint === 'decide_gateway' ? { sr: projection.sr ?? {} } : projection
+}
+
 export function splitsOn(data: ABTestAlgorithmData, endpoint: ExperimentEndpoint): boolean {
   return scopedEndpoints(data).includes(endpoint)
-    && !sameArm(projectArm(resolvedArm(data, 'control'), endpoint), projectArm(resolvedArm(data, 'variant'), endpoint))
+    && !sameArm(routingBehaviour(resolvedArm(data, 'control'), endpoint), routingBehaviour(resolvedArm(data, 'variant'), endpoint))
 }
 
 /** Endpoints where traffic is actually split, in display order. */

@@ -10,7 +10,7 @@ import {
   Coins,
   Database,
   FileText,
-  ToyBrick,
+  Activity,
   Gauge,
   LineChart,
   Key,
@@ -92,7 +92,7 @@ const ALL_SEARCH_GROUPS: SearchGroup[] = [
   {
     heading: 'Simulation',
     items: [
-      { to: '/decisions/simulator', label: 'Decision Simulator', icon: ToyBrick, keywords: ['simulate', 'test', 'preview'] },
+      { to: '/decisions/simulator', label: 'Decision Simulator', icon: Activity, keywords: ['simulate', 'test', 'preview'] },
     ],
   },
   {

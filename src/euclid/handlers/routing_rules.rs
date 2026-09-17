@@ -93,8 +93,7 @@ mod cache_key_tests {
 // An A/B experiment is activated into its own mapper slot, `{algorithm_for}_experiment`, beside
 // the active rule of its transaction type. Routing reads the experiment for the payments it
 // covers and the rule for everything else, so the rule stays active while the experiment runs and
-// stopping the experiment leaves it in place. Experiments activated before this slot existed sit
-// in the rule slot and are still honored there.
+// stopping the experiment leaves it in place.
 //
 // Key  : DE_routing_experiment:{merchant_id}:{algorithm_for}
 // Value: JSON { experiment: { id, algorithm_data } | null } — `null` caches "no experiment", so
@@ -161,53 +160,6 @@ async fn cache_activated_algorithm(
     }
 }
 
-/// Removes an experiment left in the rule slot by an activation from before experiments had their
-/// own slot. Activating a new experiment replaces it; there is no earlier rule to restore.
-async fn retire_rule_slot_experiment(
-    state: &crate::app::TenantAppState,
-    #[cfg(feature = "mysql")] conn: &crate::storage::MysqlPoolConn,
-    #[cfg(feature = "postgres")] conn: &crate::storage::PgPoolConn,
-    merchant_id: &str,
-    algorithm_for: &str,
-) -> Result<(), ContainerError<EuclidErrors>> {
-    let Some(mapping) = crate::generics::generic_find_one_optional::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(
-        &state.db,
-        mapper_dsl::created_by
-            .eq(merchant_id.to_string())
-            .and(mapper_dsl::algorithm_for.eq(algorithm_for.to_string())),
-    )
-    .await
-    .change_context(EuclidErrors::StorageError)?
-    else {
-        return Ok(());
-    };
-    let rule_slot_algorithm = crate::generics::generic_find_one_optional::<
-        <RoutingAlgorithm as HasTable>::Table,
-        _,
-        RoutingAlgorithm,
-    >(&state.db, dsl::id.eq(mapping.routing_algorithm_id.clone()))
-    .await
-    .change_context(EuclidErrors::StorageError)?;
-    if !rule_slot_algorithm
-        .as_ref()
-        .is_some_and(is_experiment_algorithm)
-    {
-        return Ok(());
-    }
-    crate::generics::generic_delete::<<RoutingAlgorithmMapper as HasTable>::Table, _>(
-        conn,
-        mapper_dsl::id.eq(mapping.id),
-    )
-    .await
-    .change_context(EuclidErrors::StorageError)?;
-    invalidate_routing_algorithm_cache(state, merchant_id).await;
-    Ok(())
-}
-
 /// The experiment active in the experiment slot for `algorithm_for`, if any: Redis first, then the
 /// database with a cache back-fill (including "none").
 async fn resolve_slot_experiment(
@@ -260,18 +212,14 @@ async fn resolve_slot_experiment(
     Ok(experiment)
 }
 
-/// The merchant's running payment experiment: the one in the experiment slot, else one activated
-/// into the rule slot before experiments had their own.
+/// The merchant's running payment experiment, from its experiment slot.
 pub(crate) async fn active_payment_experiment(
     merchant_id: &str,
 ) -> Option<(String, crate::euclid::types::ABTestData)> {
     let state = get_tenant_app_state().await;
     let payment = AlgorithmType::Payment.to_string();
     let algorithm = match resolve_slot_experiment(&state, merchant_id, &payment).await {
-        Ok(Some(experiment)) => experiment,
-        Ok(None) => resolve_active_algorithm(&state, merchant_id, Some(&payment))
-            .await
-            .ok()?,
+        Ok(experiment) => experiment?,
         Err(e) => {
             logger::warn!(error = ?e, merchant_id = %merchant_id, "Failed to read the active experiment");
             return None;
@@ -2051,16 +1999,6 @@ pub async fn activate_routing_rule(
     } else {
         algorithm_for.clone()
     };
-    if is_experiment {
-        if let Err(e) =
-            retire_rule_slot_experiment(&state, &conn, &payload.created_by, &algorithm_for).await
-        {
-            update_failure_metrics();
-            timer.observe_duration();
-            return Err(e);
-        }
-    }
-
     // === Step 2: Try to find existing entry for (created_by, slot) ===
     let maybe_existing = crate::generics::generic_find_one::<
         <RoutingAlgorithmMapper as HasTable>::Table,
@@ -2218,8 +2156,8 @@ pub async fn deactivate_routing_rule(
     };
 
     // === Step 2: Find the active mapping for (created_by, routing_algorithm_id) ===
-    // Any slot: an experiment is active in its experiment slot, or in the rule slot when it was
-    // activated before experiments had their own.
+    // Either slot: a rule is active in its transaction type's slot, an experiment in the
+    // experiment slot beside it.
     let existing_mapping = crate::generics::generic_find_one::<
         <RoutingAlgorithmMapper as HasTable>::Table,
         _,
