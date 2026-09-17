@@ -193,6 +193,9 @@ export async function seedHybridTraffic(
 ): Promise<SeededHybridTraffic> {
   const { scoreStatus = 'AUTHORIZED', prefix = 'hybrid' } = options
 
+  // The dynamic half of /routing/hybrid is gated per merchant; without this the response
+  // comes back with `static_routing` only and no decision to feed the score update below.
+  await api.setMerchantFeature(merchantId, 'sr-routing', true)
   await api.createSuccessRateConfig(merchantId)
   const created = await api.createRoutingAlgorithm(
     factory.singleRoutingPayload(merchantId, {

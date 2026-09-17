@@ -6,8 +6,8 @@ pub mod seed_store;
 
 use serde::{Deserialize, Serialize};
 
-pub const FEATURE_FLAG: &str = "cost_savings_enabled";
-pub const LEGACY_FEATURE_FLAG: &str = "multi_objective_routing_enabled";
+pub const COST_SAVINGS_FEATURE_FLAG: &str = "cost_savings_enabled";
+pub const COST_SAVINGS_LEGACY_FEATURE_FLAG: &str = "multi_objective_routing_enabled";
 
 /// Default merchant margin (fraction of ticket) when none is configured. Drives the
 /// expected-value calculation `EV = auth·(margin − cost)`. Margin is not currently a
