@@ -135,48 +135,41 @@ impl KnownFeature {
 
     /// Updates the FeatureConf row in service_configuration by adding or removing
     /// the merchant. This is the only write path — no per-merchant keys involved.
+    /// The read-modify-write runs under a row lock (update_config_atomic) because all
+    /// merchants share one row per feature — unlocked writers lose each other's updates.
     async fn update_conf(
         &self,
         merchant_id: &str,
         enabled: bool,
     ) -> error_stack::Result<(), crate::generics::MeshError> {
         let key = self.feature_conf_key().to_string();
+        let merchant_id = merchant_id.to_string();
 
-        let existing = service_configuration::find_config_by_name(key.clone())
-            .await
-            .unwrap_or(None);
+        service_configuration::update_config_atomic(key, move |current| {
+            let mut conf: FeatureConf = current
+                .and_then(|v| serde_json::from_str(&v).ok())
+                .unwrap_or(FeatureConf {
+                    enableAll: false,
+                    enableAllRollout: None,
+                    disableAny: None,
+                    merchants: Some(vec![]),
+                });
 
-        let exists = existing.is_some();
+            let mut merchants = conf.merchants.take().unwrap_or_default();
+            merchants.retain(|m| m.merchantId.to_lowercase() != merchant_id.to_lowercase());
+            if enabled {
+                merchants.push(FeatureMerchant {
+                    merchantId: merchant_id,
+                    rollout: 100,
+                });
+            }
+            conf.merchants = Some(merchants);
 
-        let mut conf: FeatureConf = existing
-            .and_then(|c| c.value)
-            .and_then(|v| serde_json::from_str(&v).ok())
-            .unwrap_or(FeatureConf {
-                enableAll: false,
-                enableAllRollout: None,
-                disableAny: None,
-                merchants: Some(vec![]),
-            });
-
-        let mut merchants = conf.merchants.take().unwrap_or_default();
-        merchants.retain(|m| m.merchantId.to_lowercase() != merchant_id.to_lowercase());
-        if enabled {
-            merchants.push(FeatureMerchant {
-                merchantId: merchant_id.to_string(),
-                rollout: 100,
-            });
-        }
-        conf.merchants = Some(merchants);
-
-        let serialized = serde_json::to_string(&conf)
-            .map_err(|e| error_stack::report!(e))
-            .change_context(crate::generics::MeshError::Others)?;
-
-        if exists {
-            service_configuration::update_config(key, Some(serialized)).await
-        } else {
-            service_configuration::insert_config(key, Some(serialized)).await
-        }
+            serde_json::to_string(&conf)
+                .map(Some)
+                .map_err(|_| crate::generics::MeshError::Others)
+        })
+        .await
     }
 }
 
