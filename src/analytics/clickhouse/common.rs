@@ -81,6 +81,7 @@ pub async fn fetch_all<T>(query: Query) -> Result<Vec<T>, ApiError>
 where
     T: Row + for<'de> Deserialize<'de>,
 {
+    let _permit = super::guard::acquire().await?;
     query.fetch_all::<T>().await.map_err(|error| {
         crate::logger::error!(?error, "clickhouse fetch_all failed");
         ApiError::DatabaseError
@@ -91,6 +92,7 @@ pub async fn fetch_one<T>(query: Query) -> Result<T, ApiError>
 where
     T: Row + for<'de> Deserialize<'de>,
 {
+    let _permit = super::guard::acquire().await?;
     query.fetch_one::<T>().await.map_err(|error| {
         crate::logger::error!(?error, "clickhouse fetch_one failed");
         ApiError::DatabaseError

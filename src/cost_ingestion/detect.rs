@@ -75,8 +75,7 @@ pub async fn price_changes(
     merchant_id: &str,
 ) -> Result<Vec<PriceChange>, IngestError> {
     let sql = CHANGES_SQL.replace("__DB__", &cfg.database);
-    let mut req = client()
-        .post(cfg.url.trim_end_matches('/'))
+    let mut req = super::ch_http::post(client(), &cfg.url)
         .query(&[
             ("param_merchant_id", merchant_id),
             ("param_tol_bps", &TOL_BPS.to_string()),

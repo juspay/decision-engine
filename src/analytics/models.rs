@@ -705,6 +705,9 @@ pub struct ExperimentResultsQuery {
     /// Common business margin (fraction of ticket) used to score net value for both arms.
     /// Defaults to `DEFAULT_EVALUATION_MARGIN` when the caller omits it.
     pub evaluation_margin: f64,
+    /// Restricts results to one endpoint. An experiment applies different layers per endpoint,
+    /// so arms are only comparable within one. `None` reads every endpoint together.
+    pub endpoint: Option<crate::euclid::types::ExperimentEndpoint>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -729,6 +732,7 @@ pub struct ExperimentTransactionsQuery {
     pub start_ms: Option<i64>,
     pub page: u64,
     pub page_size: u64,
+    pub endpoint: Option<crate::euclid::types::ExperimentEndpoint>,
 }
 
 pub const ROUTING_EVENTS_BUCKET_MS: i64 = 5 * 60 * 1000;

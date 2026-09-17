@@ -25,7 +25,8 @@ curl "$BASE_URL/merchant-account/merchant_demo/features" \
     { "feature": "elimination", "enabled": true },
     { "feature": "autopilot", "enabled": true },
     { "feature": "volume-contracts", "enabled": false },
-    { "feature": "sr-routing", "enabled": true }
+    { "feature": "sr-routing", "enabled": true },
+    { "feature": "sr-scores-from-rule-routing", "enabled": false }
   ]
 }
 ```
@@ -52,7 +53,8 @@ Response is the same shape as the list call, re-read after the change so you alw
 | `elimination` | Gateway-level SR-based elimination (excluding gateways in downtime). |
 | `autopilot` | Enables the self-tuning background job (see below). |
 | `volume-contracts` | Volume-commitment steering, a secondary objective alongside cost savings. |
-| `sr-routing` | Master switch for SR-based dynamic routing. With this off, hybrid routing never enters the decider and every other flag here is inert. |
+| `sr-routing` | Master switch for SR-based dynamic routing, shown as **Auth Rate routing** in the dashboard. With this off, hybrid routing never enters the decider and every other flag here is inert. Switching it off keeps the saved SR config and Autopilot settings. |
+| `sr-scores-from-rule-routing` | Outcomes of `/routing/hybrid` payments decided by their rule output (SR skipped because `sr-routing` is off or their A/B arm has no SR layer) also update SR scores. Off by default, so SR scores learn only from payments SR routed. |
 
 ## What Autopilot Does
 

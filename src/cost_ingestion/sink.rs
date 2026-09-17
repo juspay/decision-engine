@@ -119,8 +119,7 @@ async fn insert_chunk(
         "INSERT INTO {}.cost_daily_stats ({COLUMNS}) FORMAT JSONEachRow",
         cfg.database
     );
-    let mut req = client()
-        .post(cfg.url.trim_end_matches('/'))
+    let mut req = super::ch_http::post(client(), &cfg.url)
         .query(&[("query", query.as_str())])
         .body(body);
     if !cfg.user.is_empty() {
@@ -186,8 +185,7 @@ async fn insert_bin_chunk(
         "INSERT INTO {}.cost_bin_product ({BIN_COLUMNS}) FORMAT JSONEachRow",
         cfg.database
     );
-    let mut req = client()
-        .post(cfg.url.trim_end_matches('/'))
+    let mut req = super::ch_http::post(client(), &cfg.url)
         .query(&[("query", query.as_str())])
         .body(body);
     if !cfg.user.is_empty() {
@@ -223,7 +221,7 @@ SELECT bin, argMax(cp, s) FROM (\
 /// ingest or decide.
 pub async fn load_bin_product(cfg: &ClickHouseAnalyticsConfig) -> BinProductMap {
     let sql = LOAD_BIN_PRODUCT_SQL.replace("{db}", &cfg.database);
-    let mut req = client().post(cfg.url.trim_end_matches('/')).body(sql);
+    let mut req = super::ch_http::post(client(), &cfg.url).body(sql);
     if !cfg.user.is_empty() {
         req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
     }
@@ -276,8 +274,7 @@ pub async fn delete_ingestion_rows(
          AND ingestion_id = {{ingestion_id:String}}",
         cfg.database
     );
-    let mut req = client()
-        .post(cfg.url.trim_end_matches('/'))
+    let mut req = super::ch_http::post(client(), &cfg.url)
         .query(&[
             ("param_connector", connector),
             ("param_account", account),

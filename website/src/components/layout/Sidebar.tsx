@@ -2,22 +2,29 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard,
-  GitBranch,
   TrendingUp,
   BookOpen,
   PieChart,
-  Network,
   BarChart3,
-  Activity,
   BellRing,
   Moon,
   Sun,
   Users,
-  FlaskConical,
+  ToyBrick,
+  CircuitBoard,
+  Cpu,
+  PlaySquare,
+  Gauge,
+  Activity,
+  SlidersHorizontal,
   Key,
   ChevronDown,
   KeyRound,
   LogOut,
+  FileSearch,
+  Route,
+  CreditCard,
+  FlaskConical,
 } from 'lucide-react'
 import { useAuthStore } from '../../store/authStore'
 import { simulatorEnabled } from '../../lib/appConfig'
@@ -132,7 +139,7 @@ export function Sidebar() {
       <nav className="flex-1 space-y-0.5 overflow-y-auto px-4 py-4">
         <SideLink to="/" icon={LayoutDashboard} end selectedPath={selectedPath} onNavigate={setPendingPath}>Overview</SideLink>
         <SideLink to="/analytics" icon={BarChart3} selectedPath={selectedPath} onNavigate={setPendingPath}>Analytics</SideLink>
-        <SideLink to="/audit" icon={Activity} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Audit</SideLink>
+        <SideLink to="/audit" icon={FileSearch} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Audit</SideLink>
         <SideLink to="/events" icon={BellRing} selectedPath={selectedPath} onNavigate={setPendingPath}>Routing Events</SideLink>
 
         <div className="flex items-center gap-2 px-3 pb-2 pt-5">
@@ -141,12 +148,12 @@ export function Sidebar() {
           </span>
         </div>
 
-        <SideLink to="/routing" icon={GitBranch} end selectedPath={selectedPath} onNavigate={setPendingPath}>Routing Hub</SideLink>
+        <SideLink to="/routing" icon={Route} end selectedPath={selectedPath} onNavigate={setPendingPath}>Routing Hub</SideLink>
         <SideLink to="/routing/sr" icon={TrendingUp} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Multi Objective</SideLink>
         <SideLink to="/routing/rules" icon={BookOpen} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Rule-Based</SideLink>
         <SideLink to="/routing/volume" icon={PieChart} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Volume Split</SideLink>
-        <SideLink to="/routing/debit" icon={Network} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Debit Routing</SideLink>
-        <SideLink to="/routing/ab-testing" icon={FlaskConical} indent beta selectedPath={selectedPath} onNavigate={setPendingPath}>A/B Testing</SideLink>
+        <SideLink to="/routing/debit" icon={CreditCard} indent selectedPath={selectedPath} onNavigate={setPendingPath}>Debit Routing</SideLink>
+        <SideLink to="/routing/ab-testing" icon={FlaskConical} indent selectedPath={selectedPath} onNavigate={setPendingPath}>A/B Testing</SideLink>
 
         {simulatorEnabled ? (
           <>
@@ -157,7 +164,7 @@ export function Sidebar() {
             </div>
 
             {/* <SideLink to="/decisions" icon={Search} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Explorer</SideLink> */}
-            <SideLink to="/decisions/simulator" icon={FlaskConical} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Simulator</SideLink>
+            <SideLink to="/decisions/simulator" icon={Activity} selectedPath={selectedPath} onNavigate={setPendingPath}>Decision Simulator</SideLink>
           </>
         ) : null}
 

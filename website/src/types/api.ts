@@ -93,9 +93,26 @@ export interface SrConfigOverride {
   use_autopilot?: boolean
 }
 
+/** Routing API an experiment applies to. Each applies only the arm layers it supports. */
+export type ExperimentEndpoint = 'hybrid_routing' | 'decide_gateway' | 'evaluate'
+
+/** One experiment arm as a bundle of layers. An absent layer is not applied by the arm. */
+export interface ExperimentArm {
+  /** Saved routing config (rule-based / priority / volume split / single) for the rule layer. */
+  rule_algorithm_id?: string
+  /** SR routing with this arm's overrides (autopilot, cost savings, hedging, elimination). */
+  sr?: SrConfigOverride
+}
+
 export interface ABTestAlgorithmData {
-  control_algorithm_id: string
-  variant_algorithm_id: string
+  /** Layered arms. When present they define the experiment and the single-strategy fields are ignored. */
+  control?: ExperimentArm
+  variant?: ExperimentArm
+  /** Endpoints the experiment splits traffic on. Absent means every endpoint. */
+  endpoints?: ExperimentEndpoint[]
+  /** Single-strategy arm format: 'sr_routing' or a saved algorithm id. */
+  control_algorithm_id?: string
+  variant_algorithm_id?: string
   variant_split_pct: number
   min_sample_size: number
   guardrail_threshold_pp: number

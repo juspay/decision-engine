@@ -3,7 +3,9 @@ use crate::analytics::{
     global_request_id_from_headers, serialize_details, trace_id_from_headers, AnalyticsFlowContext,
     AnalyticsRoute, ApiFlow, DomainAnalyticsEvent, FlowType,
 };
-use crate::decider::gatewaydecider::flow_new::decider_full_payload_hs_function;
+use crate::decider::gatewaydecider::flow_new::{
+    decider_full_payload_hs_function, store_scoring_context_without_decider,
+};
 use crate::decider::gatewaydecider::types::DecidedGateway;
 use crate::error::ContainerError;
 use crate::euclid::ast::ConnectorInfo;
@@ -11,6 +13,7 @@ use crate::euclid::errors::EuclidErrors;
 use crate::euclid::handlers::routing_rules::{
     routing_evaluate_with_analytics, RoutingEvaluateAnalyticsFlows,
 };
+use crate::euclid::types::ExperimentEndpoint;
 use crate::feedback::constants::kvRedis;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::redis::feature::is_feature_enabled;
@@ -93,6 +96,8 @@ fn parse_dynamic_connector(connector_with_id: &str) -> ConnectorInfo {
 }
 
 pub const SR_ROUTING_FEATURE_FLAG: &str = "sr_routing_enabled";
+/// Whether outcomes of hybrid payments decided by their rule output (SR skipped) update SR scores.
+pub const SR_SCORES_FROM_RULE_ROUTING_FEATURE_FLAG: &str = "sr_scores_from_rule_routing_enabled";
 
 #[derive(Serialize)]
 struct DynamicRoutingEnvelope {
@@ -239,19 +244,58 @@ pub async fn hybrid_routing_evaluate(
 
     let is_empty_request = static_routing_request.is_none() && dynamic_routing_request.is_none();
 
+    // Whether the dynamic (SR) half runs. An active experiment decides for the payments it serves
+    // (its arm's SR layer); otherwise the merchant's `sr-routing` setting does. An arm without an SR
+    // layer needs the static half's rule output, so without one the setting decides.
+    let run_dynamic_routing = match dynamic_routing_request.as_ref() {
+        None => false,
+        Some(req) => {
+            let arm_has_sr_layer =
+                crate::decider::gatewaydecider::ab_test::interceptor::hybrid_arm_has_sr_layer(
+                    &req.merchant_id,
+                    req.payment_id(),
+                )
+                .await;
+            match arm_has_sr_layer {
+                Some(true) => true,
+                Some(false) if static_routing_request.is_some() => false,
+                _ => {
+                    is_feature_enabled(
+                        SR_ROUTING_FEATURE_FLAG.to_string(),
+                        req.merchant_id.clone(),
+                        kvRedis(),
+                    )
+                    .await
+                }
+            }
+        }
+    };
+
     // The static half runs silently, this call records one event for both halves below.
     let (static_routing_response, static_routing_error, static_fallback_gateways) =
         match static_routing_request {
-            Some(req) => {
+            Some(mut req) => {
                 // Preserve static fallback connectors even when static evaluation fails,
                 // so dynamic can still run with a bounded candidate set.
                 let fallback_gateways = req.fallback_output.clone();
 
+                // A/B arms are assigned by payment id; both halves must see the same one so the
+                // rule layer and the SR layer come from the same arm.
+                if req.payment_id.as_deref().is_none_or(str::is_empty) {
+                    req.payment_id = dynamic_routing_request
+                        .as_ref()
+                        .map(|dynamic| dynamic.payment_id().to_string());
+                }
+
+                // The decider half records the experiment decision when it runs; otherwise the
+                // rule output is the decision and is recorded here.
                 match routing_evaluate_with_analytics(
                     headers.clone(),
                     Json(req),
                     RoutingEvaluateAnalyticsFlows::routing_hybrid(),
                     Some(request_id.clone()),
+                    ExperimentEndpoint::HybridRouting,
+                    !run_dynamic_routing,
                 )
                 .await
                 {
@@ -274,14 +318,7 @@ pub async fn hybrid_routing_evaluate(
 
     let dynamic_eval_result = match dynamic_routing_request {
         Some(mut req) => {
-            let dynamic_routing_enabled = is_feature_enabled(
-                SR_ROUTING_FEATURE_FLAG.to_string(),
-                req.merchant_id.clone(),
-                kvRedis(),
-            )
-            .await;
-
-            if dynamic_routing_enabled {
+            if run_dynamic_routing {
                 let request_eligible_gateways = match req.eligible_gateway_list.take() {
                     Some(gateways) if gateways.is_empty() => None,
                     Some(gateways) => Some(gateways),
@@ -297,22 +334,43 @@ pub async fn hybrid_routing_evaluate(
                 req.eligible_gateway_list = static_eligible_gateway_ids
                     .or(request_eligible_gateways)
                     .or(fallback_eligible_gateways);
-                Some(
-                    run_decider_with_analytics(
-                        req,
-                        &x_request_id,
-                        global_request_id,
-                        trace_id,
-                        Instant::now(),
-                        DeciderAnalyticsFlows::routing_hybrid(),
-                    )
-                    .await,
+                let result = decider_full_payload_hs_function(
+                    req,
+                    Instant::now(),
+                    ExperimentEndpoint::HybridRouting,
                 )
+                .await;
+                API_REQUEST_COUNTER
+                    .with_label_values(&[
+                        "hybrid_routing_evaluate_dynamic",
+                        if result.is_ok() { "success" } else { "failure" },
+                    ])
+                    .inc();
+                Some(result)
             } else {
                 crate::logger::debug!(
-                    "SR routing feature is off for merchant {}; skipping dynamic routing",
+                    "dynamic routing skipped for merchant {}: sr_routing_enabled is off or the A/B arm has no SR layer",
                     req.merchant_id
                 );
+                // Saved before responding so the payment's `/update-gateway-score` finds it.
+                if static_routing_response.is_some()
+                    && is_feature_enabled(
+                        SR_SCORES_FROM_RULE_ROUTING_FEATURE_FLAG.to_string(),
+                        req.merchant_id.clone(),
+                        kvRedis(),
+                    )
+                    .await
+                {
+                    if let Err(err) =
+                        store_scoring_context_without_decider(&req, STATIC_ROUTING_APPROACH).await
+                    {
+                        crate::logger::warn!(
+                            "failed to store scoring context for rule-routed payment {}: {}",
+                            req.payment_id(),
+                            err.error_message
+                        );
+                    }
+                }
                 None
             }
         }

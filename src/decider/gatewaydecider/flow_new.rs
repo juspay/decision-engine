@@ -34,10 +34,10 @@ use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 use crate::types::routing_configuration::SuccessRateData;
 use crate::types::service_configuration;
 
-pub async fn decider_full_payload_hs_function(
-    dreq_: T::DomainDeciderRequestForApiCallV2,
-    cpu_start: Instant,
-) -> Result<T::DecidedGateway, T::ErrorResponse> {
+/// Loads the merchant and enriches the card details a decider run works from.
+async fn prepare_decider_params(
+    dreq_: &T::DomainDeciderRequestForApiCallV2,
+) -> Result<T::DeciderParams, T::ErrorResponse> {
     let merchant_account =
         ETM::merchant_account::load_merchant_by_merchant_id(dreq_.merchant_id.clone())
             .await
@@ -170,30 +170,32 @@ pub async fn decider_full_payload_hs_function(
         dpShouldConsumeResult: dreq.shouldConsumeResult,
         dpRedisCompressionConfig: None,
     };
+    Ok(decider_params)
+}
+
+/// `experiment_endpoint` selects which layers of an active A/B experiment apply: the SR layer on
+/// `/decide-gateway`, and on the dynamic half of `/routing/hybrid` the SR layer or, for an arm
+/// without one, its rule output.
+pub async fn decider_full_payload_hs_function(
+    dreq_: T::DomainDeciderRequestForApiCallV2,
+    cpu_start: Instant,
+    experiment_endpoint: crate::euclid::types::ExperimentEndpoint,
+) -> Result<T::DecidedGateway, T::ErrorResponse> {
+    let decider_params = prepare_decider_params(&dreq_).await?;
 
     // AB test intercept — must run before SR routing. Feature-flagged per merchant.
     // Disabled by default; enable via service config AB_TEST_REAL_PAYMENTS_ENABLED_{merchant_id}.
     let mut ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride> = None;
-    // For SR-arm A/B payments, keep (experiment_id, variant_arm) so we can attribute the
-    // multi-objective cost outcome to the arm after routing completes (see below).
-    let mut ab_test_experiment: Option<(String, String)> = None;
-    match super::ab_test::intercept(&dreq_).await {
-        super::ab_test::AbTestIntercept::StaticArm {
-            result,
-            experiment_id: _,
-            variant_arm: _,
-        } => {
-            return Ok(*result);
-        }
+    // For A/B payments attributed to an arm, keep the assignment so the multi-objective cost
+    // outcome can be attributed to the arm after routing completes (see below).
+    let mut ab_test_experiment: Option<super::ab_test::outcome::ExperimentAssignment> = None;
+    match super::ab_test::intercept(&dreq_, experiment_endpoint).await {
         super::ab_test::AbTestIntercept::SrArm {
             sr_config_override,
-            experiment_id,
-            variant_arm,
+            experiment,
         } => {
-            // Carry on with normal SR routing. sr_config_override carries the per-arm overrides
-            // (hedging / elimination / margin / multi-objective / autopilot) to apply at routing time.
             ab_test_sr_override = sr_config_override;
-            ab_test_experiment = Some((experiment_id, variant_arm));
+            ab_test_experiment = Some(experiment);
         }
         super::ab_test::AbTestIntercept::Disabled => {}
     }
@@ -261,21 +263,22 @@ pub async fn decider_full_payload_hs_function(
         // Cost measurement: for an SR-arm A/B payment, enrich the inflight record with the
         // decided gateway + multi-objective cost outcome so the later outcome event can
         // attribute cost per arm. No-op (aside from gateway backfill) when the arm ran auth-only.
-        if let (Ok(decided), Some((experiment_id, variant_arm))) = (&result, &ab_test_experiment) {
+        if let (Ok(decided), Some(assignment)) = (&result, &ab_test_experiment) {
             let mo = decided.multi_objective_info.as_ref();
             super::ab_test::record_cost_outcome(
                 dreq_.payment_id(),
-                experiment_id,
-                variant_arm,
+                assignment,
                 Some(decided.decided_gateway.as_str()),
-                mo.and_then(|m| m.cost_saved_bps),
-                mo.and_then(|m| {
-                    m.ranked
-                        .iter()
-                        .find(|r| r.is_chosen)
-                        .and_then(|r| r.summary.cost_bps)
-                }),
-                mo.map(|m| m.margin),
+                super::ab_test::outcome::CostOutcome {
+                    cost_saved_bps: mo.and_then(|m| m.cost_saved_bps),
+                    chosen_cost_bps: mo.and_then(|m| {
+                        m.ranked
+                            .iter()
+                            .find(|r| r.is_chosen)
+                            .and_then(|r| r.summary.cost_bps)
+                    }),
+                    margin: mo.map(|m| m.margin),
+                },
                 Some(dreq_.payment_info.amount),
             )
             .await;
@@ -368,6 +371,63 @@ pub async fn load_srv3_default_bucket_size(merchant_id: &str) -> i32 {
         .await
         .filter(|b| *b > 0)
         .unwrap_or(C::DEFAULT_SR_V3_BASED_BUCKET_SIZE)
+}
+
+/// Saves the scoring context `/update-gateway-score` reads to update SR scores for the payment.
+async fn write_gateway_scoring_data(txn_uuid: &str, data: &T::GatewayScoringData) {
+    let key = [C::GATEWAY_SCORING_DATA, txn_uuid].concat();
+    get_tenant_app_state()
+        .await
+        .redis_conn
+        .setx(
+            &key,
+            serde_json::to_string(data).unwrap_or_default().as_str(),
+            C::GATEWAY_SCORE_KEYS_TTL,
+            None,
+            RedisDataStruct::STRING,
+        )
+        .await
+        .unwrap_or_default();
+}
+
+/// Saves the scoring context for a payment routed without the decider, such as one decided by a
+/// hybrid call's rule output, so its outcome still updates SR scores. `routing_approach` is
+/// recorded as how the payment was routed.
+pub async fn store_scoring_context_without_decider(
+    dreq_: &T::DomainDeciderRequestForApiCallV2,
+    routing_approach: &str,
+) -> Result<(), T::ErrorResponse> {
+    let decider_params = prepare_decider_params(dreq_).await?;
+    let mut decider_state = T::initial_decider_state(
+        decider_params
+            .dpTxnDetail
+            .dateCreated
+            .to_string()
+            .replace(" ", "T")
+            .replace(" UTC", "Z"),
+    );
+    let mut logger = HashMap::new();
+    let mut decider_flow =
+        T::initial_decider_flow(decider_params.clone(), &mut logger, &mut decider_state).await;
+    let scoring_data = Utils::get_gateway_scoring_data(
+        &mut decider_flow,
+        decider_params.dpTxnDetail.clone(),
+        decider_params.dpTxnCardInfo.clone(),
+        decider_params.dpMerchantAccount.clone(),
+        false,
+    )
+    .await;
+    write_gateway_scoring_data(
+        &decider_params.dpTxnDetail.txnUuid,
+        &T::GatewayScoringData {
+            routingApproach: Some(routing_approach.to_string()),
+            eliminationEnabled: dreq_.elimination_enabled.unwrap_or_default(),
+            udfs: Some(decider_params.dpOrder.udfs.clone()),
+            ..scoring_data
+        },
+    )
+    .await;
+    Ok(())
 }
 
 pub async fn run_decider_flow(
@@ -913,33 +973,17 @@ pub async fn run_decider_flow(
         }
     };
 
-    let key = [
-        C::GATEWAY_SCORING_DATA,
-        &deciderParams.dpTxnDetail.txnUuid.clone(),
-    ]
-    .concat();
-    let updated_gateway_scoring_data = T::GatewayScoringData {
-        routingApproach: Some(decider_flow.writer.gwDeciderApproach.clone().to_string()),
-        eliminationEnabled: eliminationEnabled.unwrap_or_default(),
-        is_legacy_decider_flow,
-        udfs: Some(deciderParams.dpOrder.udfs.clone()),
-        ..decider_flow.writer.gateway_scoring_data.clone()
-    };
-    let app_state = get_tenant_app_state().await;
-    app_state
-        .redis_conn
-        .setx(
-            &key,
-            serde_json::to_string(&updated_gateway_scoring_data.clone())
-                .unwrap_or_default()
-                .as_str(),
-            C::GATEWAY_SCORE_KEYS_TTL,
-            None,
-            RedisDataStruct::STRING,
-        )
-        .await
-        .unwrap_or_default();
-    drop(updated_gateway_scoring_data);
+    write_gateway_scoring_data(
+        &deciderParams.dpTxnDetail.txnUuid,
+        &T::GatewayScoringData {
+            routingApproach: Some(decider_flow.writer.gwDeciderApproach.clone().to_string()),
+            eliminationEnabled: eliminationEnabled.unwrap_or_default(),
+            is_legacy_decider_flow,
+            udfs: Some(deciderParams.dpOrder.udfs.clone()),
+            ..decider_flow.writer.gateway_scoring_data.clone()
+        },
+    )
+    .await;
     match dResult {
         Ok(result) => Ok(result),
         Err((

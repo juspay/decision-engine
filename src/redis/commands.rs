@@ -733,6 +733,36 @@ impl RedisConnectionWrapper {
     }
 
     // Redis Hash Operations
+    /// `HSET key field value`, then refresh the key's TTL. The TTL covers the whole hash, so every
+    /// write extends the lifetime of all its fields.
+    pub async fn hset_with_ttl(
+        &self,
+        key: &str,
+        field: &str,
+        value: String,
+        ttl: i64,
+    ) -> Result<(), errors::RedisError> {
+        let _: i64 = self
+            .conn
+            .pool
+            .hset(key, (field, value))
+            .await
+            .change_context(errors::RedisError::SetHashFailed)?;
+        self.expire_key(key, ttl).await
+    }
+
+    /// `HGETALL` as raw field → string value pairs; empty when the key does not exist.
+    pub async fn hgetall_strings(
+        &self,
+        key: &str,
+    ) -> Result<std::collections::HashMap<String, String>, errors::RedisError> {
+        self.conn
+            .pool
+            .hgetall(key)
+            .await
+            .change_context(errors::RedisError::GetFailed)
+    }
+
     pub async fn hget<T>(
         &self,
         key: &str,

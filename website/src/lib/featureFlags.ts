@@ -6,4 +6,6 @@ export const FEATURE_FLAGS = {
   // delete routing rules yet (juspay/hyperswitch-control-center#5495, item 4).
   // Flip together with the commented-out /routing/delete route in src/app.rs.
   RULE_DELETION: false,
+  // The A/B experiment form's "What's compared on each endpoint" preview, hidden for now.
+  AB_TEST_ENDPOINT_PREVIEW: false,
 }

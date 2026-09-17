@@ -10,6 +10,7 @@ use crate::analytics::models::{CommitmentAnalyticsQuery, CommitmentWindowTotals}
 use crate::logger;
 
 use super::super::common::{fetch_all, DOMAIN_TABLE};
+use super::super::filters::{partition_lower_bound, partition_upper_bound_exclusive};
 use super::super::query::{BoundQueryBuilder, FilterClause};
 use super::commitment_common::{
     amount_expr, base_filters, connector_filter, nan_to_zero, steered_pred,
@@ -60,6 +61,8 @@ pub async fn load(
             base_filters(builder, merchant_id, FlowType::DecideGatewayDecision);
             builder.add_filter(FilterClause::raw(format!("created_at_ms >= {start_ms}")));
             builder.add_filter(FilterClause::raw(format!("created_at_ms < {end_ms}")));
+            builder.add_filter(partition_lower_bound(start_ms));
+            builder.add_filter(partition_upper_bound_exclusive(end_ms));
         };
 
         // What landed on each PSP, and how much of it the nudge put there.

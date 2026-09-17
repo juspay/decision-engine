@@ -11,6 +11,7 @@ use crate::analytics::models::{
 use crate::logger;
 
 use super::super::common::{fetch_all, DOMAIN_TABLE};
+use super::super::filters::{partition_lower_bound, partition_upper_bound_exclusive};
 use super::super::query::{BoundQueryBuilder, FilterClause, OrderClause};
 use super::commitment_common::{amount_expr, base_filters, steered_pred};
 
@@ -44,6 +45,7 @@ pub async fn load(
         merchant_id,
         FlowType::VolumeCommitmentForecast,
     );
+    cycle_span_filters(&mut builder, query);
     builder.add_order_by(OrderClause::desc("created_at_ms"));
     builder.set_limit(Some(query.audit_limit));
     match fetch_all::<ForecastEventRow>(builder.build(client)).await {
@@ -74,6 +76,7 @@ pub async fn load(
             .to_string(),
     ]);
     base_filters(&mut builder, merchant_id, FlowType::DecideGatewayDecision);
+    cycle_span_filters(&mut builder, query);
     builder.add_filter(FilterClause::raw(steered));
     builder.add_order_by(OrderClause::desc("created_at_ms"));
     builder.set_limit(Some(query.audit_limit));
@@ -111,6 +114,16 @@ pub async fn load(
 }
 
 /// One stored forecast event into audit entries: the run itself, then one per elimination.
+/// The audit trail covers the cycles being viewed, so both halves read only that span.
+fn cycle_span_filters(builder: &mut BoundQueryBuilder, query: &CommitmentAnalyticsQuery) {
+    if let Some((start_ms, end_ms)) = query.span_ms() {
+        builder.add_filter(FilterClause::gte("created_at_ms", start_ms));
+        builder.add_filter(FilterClause::raw(format!("created_at_ms < {end_ms}")));
+        builder.add_filter(partition_lower_bound(start_ms));
+        builder.add_filter(partition_upper_bound_exclusive(end_ms));
+    }
+}
+
 fn forecast_row_to_events(row: &ForecastEventRow) -> Vec<CommitmentAuditEvent> {
     let details: serde_json::Value = row
         .details

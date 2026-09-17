@@ -1,7 +1,7 @@
 use clickhouse::Row;
 use serde::Deserialize;
 
-use crate::analytics::clickhouse::common::{fetch_one, DOMAIN_TABLE};
+use crate::analytics::clickhouse::common::{fetch_all, fetch_one, DOMAIN_TABLE};
 use crate::analytics::clickhouse::query::{BoundQueryBuilder, FilterClause};
 use crate::analytics::flow::FlowType;
 use crate::analytics::models::{
@@ -50,6 +50,14 @@ fn experiment_filter(query: &ExperimentTransactionsQuery) -> Vec<FilterClause> {
     ];
     if let Some(start) = query.start_ms {
         filters.push(FilterClause::raw(format!("created_at_ms >= {start}")));
+        filters.push(FilterClause::raw(format!(
+            "created_at >= fromUnixTimestamp64Milli(toInt64({start}))"
+        )));
+    }
+    if let Some(endpoint) = query.endpoint {
+        filters.push(FilterClause::raw(
+            super::experiment_results::endpoint_filter(endpoint),
+        ));
     }
     filters
 }
@@ -93,14 +101,7 @@ pub async fn load(
          LIMIT {page_size} OFFSET {offset}",
     );
 
-    let rows = client
-        .query(&sql)
-        .fetch_all::<TxnRow>()
-        .await
-        .map_err(|e| {
-            crate::logger::error!(?e, "experiment_transactions fetch failed");
-            ApiError::DatabaseError
-        })?;
+    let rows = fetch_all::<TxnRow>(client.query(&sql)).await?;
 
     Ok(ExperimentTransactionsResponse {
         experiment_id: query.experiment_id.clone(),

@@ -74,16 +74,20 @@ async fn load_score_feedback(
         "flow_type = '{}'",
         FlowType::UpdateGatewayScoreRequestHit.as_str()
     )));
-    // Binds are emitted in the order filters are added, so this clause's three placeholders
+    // Binds are emitted in the order filters are added, so this clause's five placeholders
     // follow the window and merchant ones above.
     builder.add_filter(FilterClause::new(
         format!(
             "payment_id IN (SELECT payment_id FROM {DOMAIN_TABLE} \
-             WHERE created_at_ms >= ? AND created_at_ms <= ? AND merchant_id = ? \
-             AND flow_type = '{}')",
+             WHERE created_at_ms >= ? AND created_at_ms <= ? \
+             AND created_at >= fromUnixTimestamp64Milli(toInt64(?)) \
+             AND created_at <= fromUnixTimestamp64Milli(toInt64(?)) \
+             AND merchant_id = ? AND flow_type = '{}')",
             decision_flow_type.as_str()
         ),
         vec![
+            start_ms.into(),
+            end_ms.into(),
             start_ms.into(),
             end_ms.into(),
             query.merchant_id.clone().into(),

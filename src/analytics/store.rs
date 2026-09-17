@@ -117,6 +117,13 @@ pub trait AnalyticsReadStore: Send + Sync {
         query: &ExperimentTransactionsQuery,
     ) -> Result<ExperimentTransactionsResponse, ApiError>;
 
+    /// Whether the experiment has recorded any payments, so its results would describe its setup.
+    async fn experiment_has_recorded_payments(
+        &self,
+        merchant_id: &str,
+        experiment_id: &str,
+    ) -> Result<bool, ApiError>;
+
     async fn routing_events(
         &self,
         query: &RoutingEventsQuery,
@@ -216,6 +223,14 @@ impl AnalyticsReadStore for UnavailableAnalyticsReadStore {
         &self,
         _query: &ExperimentTransactionsQuery,
     ) -> Result<ExperimentTransactionsResponse, ApiError> {
+        Err(ApiError::DatabaseError)
+    }
+
+    async fn experiment_has_recorded_payments(
+        &self,
+        _merchant_id: &str,
+        _experiment_id: &str,
+    ) -> Result<bool, ApiError> {
         Err(ApiError::DatabaseError)
     }
 

@@ -52,6 +52,8 @@ pub enum KnownFeature {
     /// Volume-commitment steering — a secondary objective that runs alongside cost savings.
     VolumeContracts,
     SrRouting,
+    /// Outcomes of hybrid payments decided by their rule output also update SR scores.
+    SrScoresFromRuleRouting,
 }
 
 impl KnownFeature {
@@ -65,6 +67,7 @@ impl KnownFeature {
             Self::Autopilot,
             Self::VolumeContracts,
             Self::SrRouting,
+            Self::SrScoresFromRuleRouting,
         ]
     }
 
@@ -78,6 +81,7 @@ impl KnownFeature {
             "autopilot" => Some(Self::Autopilot),
             "volume-contracts" => Some(Self::VolumeContracts),
             "sr-routing" => Some(Self::SrRouting),
+            "sr-scores-from-rule-routing" => Some(Self::SrScoresFromRuleRouting),
             _ => None,
         }
     }
@@ -97,6 +101,9 @@ impl KnownFeature {
                 crate::decider::gatewaydecider::volume_commitment::FEATURE_FLAG
             }
             Self::SrRouting => crate::routes::hybrid_routing::SR_ROUTING_FEATURE_FLAG,
+            Self::SrScoresFromRuleRouting => {
+                crate::routes::hybrid_routing::SR_SCORES_FROM_RULE_ROUTING_FEATURE_FLAG
+            }
         }
     }
 

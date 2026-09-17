@@ -1,6 +1,8 @@
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum AuthKind {
     Jwt,
+    /// A JWT session minted by the Hyperswitch dashboard SSO handoff (`hs_redirect`).
+    HsRedirect,
     ApiKey,
 }
 
@@ -23,7 +25,11 @@ impl AuthContext {
     pub fn from_jwt(claims: &super::JwtClaims, require_explicit_permissions: bool) -> Self {
         Self {
             merchant_id: claims.merchant_id.clone(),
-            auth_kind: AuthKind::Jwt,
+            auth_kind: if claims.token_type == super::TOKEN_TYPE_HS_REDIRECT {
+                AuthKind::HsRedirect
+            } else {
+                AuthKind::Jwt
+            },
             user_id: Some(claims.user_id.clone()),
             email: Some(claims.email.clone()),
             role: Some(claims.role.clone()),
