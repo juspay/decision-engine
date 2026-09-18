@@ -77,13 +77,6 @@ type RoutingFilters = {
   gateways: string[]
 }
 
-/**
- * Every view this page can show, in tab order — adding a routing view means adding a line here and
- * a panel for it, nothing else. A tab with a `gate` is shown only to that feature's release
- * audience (featureReleases.ts). The AnalyticsView union, the `?view=` values the URL accepts and
- * the view menu are all derived from this list, so they cannot fall out of step; widening the union
- * is what makes the compiler point at every panel and label that still needs the new view.
- */
 const ANALYTICS_VIEW_TABS = [
   { value: 'hybrid', label: 'Hybrid Routing' },
   { value: 'multi_objective', label: 'Multi-objective' },
@@ -94,11 +87,6 @@ const ANALYTICS_VIEW_TABS = [
 type AnalyticsView = (typeof ANALYTICS_VIEW_TABS)[number]['value']
 const DEFAULT_ANALYTICS_VIEW: AnalyticsView = 'hybrid'
 
-/**
- * The panel chain's last branch. `view` narrows to `never` only while every entry in
- * ANALYTICS_VIEW_TABS has a panel, so a view added without one is a build error here rather than a
- * menu entry that quietly renders the panel next to it.
- */
 function unhandledView(view: never): null {
   console.warn(`Analytics view has no panel: ${String(view)}`)
   return null
@@ -994,7 +982,7 @@ export function AnalyticsPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const viewParam = searchParams.get('view')
   // A gated tab is hidden outside its release audience (featureReleases.ts), and a ?view= link to
-  // one behaves like an unknown view: canonicalised back to the default by the effect below.
+  // one behaves like an unknown view, canonicalised back to the default by the effect below.
   const user = useAuthStore((s) => s.user)
   const visibleViewTabs = ANALYTICS_VIEW_TABS.filter(
     (tab) => !('gate' in tab) || releaseAdmits(user, tab.gate),
@@ -1275,13 +1263,14 @@ export function AnalyticsPage() {
       ),
     [routeHits, decisionRouteKey],
   )
-  const overallAuthRate = useMemo(() => {
-    const scores = overview.data?.top_scores ?? []
-    const totalTx = scores.reduce((sum, s) => sum + s.transaction_count, 0)
-    if (!totalTx) return null
-    const weightedSum = scores.reduce((sum, s) => sum + s.score_value * s.transaction_count, 0)
-    return weightedSum / totalTx
-  }, [overview.data])
+  // From reported outcomes, not the SR score store — that holds one merchant-wide estimate over
+  // the model's fixed window, so every view read the same number.
+  const authRateCounts = overview.data?.auth_rate
+  const authRateSuccess = authRateCounts?.success_count ?? 0
+  const authRateTotal = authRateCounts
+    ? authRateCounts.success_count + authRateCounts.failure_count
+    : 0
+  const overallAuthRate = authRateTotal > 0 ? authRateSuccess / authRateTotal : null
   const ruleEvaluateHits = useMemo(
     () => routeHits.find((item) => item.route === '/rule_evaluate')?.count || 0,
     [routeHits],
@@ -1807,9 +1796,6 @@ export function AnalyticsPage() {
 
   return (
     <div className="space-y-8 px-5 sm:px-5 lg:px-8 xl:px-8">
-      {/* One row: title, then the controls that scope it. The view switcher is a menu rather than a
-          strip of tabs because the list of routing views keeps growing — a menu trigger is the same
-          width whether it holds four views or a dozen, so a new view never squeezes this row. */}
       <div className="grid grid-cols-1 items-center gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
         <PageHeading title="Analytics" description="Real-time multi-gateway routing performance overview." />
 
@@ -1862,13 +1848,13 @@ export function AnalyticsPage() {
                       {formatPercent(overallAuthRate)}
                     </p>
                     <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
-                      Weighted across all gateways
+                      {formatNumber(authRateSuccess, 0)} of {formatNumber(authRateTotal, 0)} reported outcomes
                     </p>
                   </>
                 ) : (
                   <>
                     <p className="mt-2 text-[34px] font-semibold text-slate-500 dark:text-slate-400 leading-[42px]">—</p>
-                    <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">No score data yet</p>
+                    <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">No reported outcomes yet</p>
                   </>
                 )}
               </CardBody>

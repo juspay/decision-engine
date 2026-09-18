@@ -17,11 +17,6 @@ type SelectMenuProps<Value extends string> = {
   className?: string
 }
 
-/**
- * A menu that picks one of `items`. Reach for it over a row of buttons when the list keeps growing:
- * the trigger is one fixed-width control whatever the list holds, so the row it sits in never has
- * to give up space for a new entry.
- */
 export function SelectMenu<Value extends string>({
   items,
   value,

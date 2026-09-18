@@ -199,8 +199,15 @@ pub struct AnalyticsOverviewResponse {
     pub top_errors: Vec<AnalyticsErrorSummary>,
     pub top_rules: Vec<AnalyticsRuleHit>,
     pub smart_retry_stats: SmartRetryStats,
+    pub auth_rate: AnalyticsAuthRate,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub hybrid_split: Option<AnalyticsHybridSplit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsAuthRate {
+    pub success_count: i64,
+    pub failure_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

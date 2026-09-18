@@ -18,11 +18,7 @@ import {
 
 test.use({ viewport: { width: 1600, height: 1200 } })
 
-/**
- * The views live behind one menu rather than a button each, so a view is only reachable with the
- * menu open. The trigger names the view it currently holds ("View: Hybrid Routing"), which is why
- * it is matched on the label prefix alone.
- */
+// Views live behind one menu, whose trigger's accessible name starts with "View".
 const viewMenuTrigger = (page: Page) => page.getByRole('button', { name: /^View:/ })
 const viewMenuItem = (page: Page, label: string) =>
   page.getByRole('menuitemradio', { name: label, exact: true })

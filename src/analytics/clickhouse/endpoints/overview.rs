@@ -38,10 +38,11 @@ pub async fn load(
     client: &clickhouse::Client,
     query: &AnalyticsQuery,
 ) -> Result<AnalyticsOverviewResponse, ApiError> {
-    let (counts, route_hits, top_scores, top_errors, top_rules, by_trigger, by_fallback) = tokio::join!(
+    let (counts, route_hits, top_scores, auth_rate, top_errors, top_rules, by_trigger, by_fallback) = tokio::join!(
         metrics::overview_counts::load(client, query),
         metrics::route_hits::load(client, query),
         metrics::score_snapshots::load(client, query, Some(5)),
+        metrics::auth_rate::load(client, query),
         metrics::error_summaries::load(client, query, Some(5)),
         metrics::rule_hits::load(client, query, Some(5)),
         metrics::smart_retry_stats::load_by_trigger(client, query),
@@ -59,6 +60,7 @@ pub async fn load(
         kpis: counts.into_kpis(query),
         route_hits: route_hits?,
         top_scores: top_scores?,
+        auth_rate: auth_rate?,
         top_errors: top_errors?,
         top_rules: top_rules?,
         smart_retry_stats: SmartRetryStats {

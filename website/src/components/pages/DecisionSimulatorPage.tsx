@@ -411,16 +411,11 @@ interface RuleEvaluateResponse {
   eligible_connectors?: GatewayConnector[]
 }
 
-/**
- * The routing_approach the simulator stamps on a hybrid decision the static rule answered — the
- * dynamic half returned nothing to score. See decisionFromHybrid().
- */
 const RULE_DECIDED_APPROACH = 'RULE_OUTPUT'
 
 /**
- * How a decision's routing approach is named and coloured in the Transaction Log. One entry per
- * approach, so its label, its badge and the filter option all follow from the same line; an
- * approach with no entry falls through to its raw value, unstyled.
+ * Label and badge for a routing approach — one source for both the cell and the filter.
+ * An approach with no entry falls through to its raw value, unstyled.
  */
 function routingApproachDisplay(approach?: string | null): { label: string; badgeClass: string | null } {
   if (approach?.includes('HEDGING')) {
@@ -433,8 +428,6 @@ function routingApproachDisplay(approach?: string | null): { label: string; badg
     return { label: 'Auth Based', badgeClass: 'bg-brand-50 text-brand-700 ring-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:ring-brand-800' }
   }
   if (approach === RULE_DECIDED_APPROACH) {
-    // Indigo because the near neighbours are all spoken for on this page: violet is stripe's
-    // connector colour, emerald is Cost Based (and CHARGED), amber is Hedging, red is FAILURE.
     return { label: 'Rule Based', badgeClass: 'bg-indigo-50 text-indigo-700 ring-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-300 dark:ring-indigo-800' }
   }
   return { label: approach ?? '—', badgeClass: null }
@@ -3289,9 +3282,8 @@ export function DecisionSimulatorPage() {
     }
   }, [deferredSimulationResults])
 
-  // Where each decision came from: the cost objective, the static rule, or SR. On a hybrid run the
-  // rule answers whenever the dynamic half doesn't, and those payments were being counted as
-  // SR-based — a run whose log was all RULE_OUTPUT still read "208 of 208 SR-based decisions".
+  // Each decision comes from cost, the static rule, or SR. On a hybrid run the rule answers
+  // whenever the dynamic half doesn't, and those were being counted as SR-based.
   const multiObjectiveStats = useMemo(() => {
     let costWon = 0
     let costSuccess = 0
@@ -3316,7 +3308,7 @@ export function DecisionSimulatorPage() {
         if (r.status === 'CHARGED') costSuccess++
         else costFailure++
       } else if (r.routingApproach === RULE_DECIDED_APPROACH) {
-        // Hybrid: the static rule produced the answer and SR never scored this payment.
+        // On hybrid, the static rule produced the answer and SR never scored this payment.
         ruleBased++
         if (r.status === 'CHARGED') ruleSuccess++
         else ruleFailure++
@@ -3337,11 +3329,9 @@ export function DecisionSimulatorPage() {
     }
   }, [deferredSimulationResults])
 
-  // Auth-rate view of the run, over every decision it made — rule-decided payments included, since
-  // they are payments the run routed and charged. Each row is one decision: `status` is the
-  // first-attempt outcome and `retryStatus` is the smart-retry outcome (only set when a soft
-  // decline was retried on an alternate PSP). FAAR credits only first-attempt charges; NAR credits
-  // the final outcome (first attempt OR a successful retry), so NAR ≥ FAAR whenever retry helps.
+  // Over every decision the run made, rule-decided included. `status` is the first attempt,
+  // `retryStatus` the smart-retry outcome. FAAR credits only first-attempt charges; NAR credits the
+  // final outcome, so NAR ≥ FAAR whenever retry helps.
   const authRateStats = useMemo(() => {
     let total = 0
     let firstAttemptSuccess = 0
@@ -3906,9 +3896,6 @@ export function DecisionSimulatorPage() {
                 <SurfaceLabel>
                   <span title="API each transaction is routed through. Hybrid routing also evaluates the active routing rule on the payment's attributes, and returns the rule output when Auth Rate routing doesn't run. Applies on the next run.">Endpoint</span>
                 </SurfaceLabel>
-                {/* The path is the hover, not the option text: 'Hybrid routing (/routing/hybrid)'
-                    runs about half as wide again as this field, and a native select paints what
-                    overflows straight over its own arrow rather than trimming it. */}
                 <select
                   value={simulationConfig.endpoint}
                   disabled={isSimulating}
