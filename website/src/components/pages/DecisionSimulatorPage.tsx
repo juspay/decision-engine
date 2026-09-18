@@ -27,6 +27,7 @@ import {
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import { BlockedCommitment, DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RankedPsp, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
+import { SIMULATION_ENDPOINTS, SimulationEndpoint, HybridRoutingResponse, decisionFromHybrid, hybridRuleParameters } from '../../features/routing/simulator/hybrid'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import {
@@ -274,6 +275,8 @@ interface SimulationConfig {
   // (uniform). Drives how much the fixed-fee term shows up in cost.
   minAmount: number
   maxAmount: number
+  // API each batch transaction is routed through. Read once at run start.
+  endpoint: SimulationEndpoint
 }
 
 interface GatewaySimConfig {
@@ -584,6 +587,7 @@ const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
   tps: DEFAULT_SIMULATION_TPS,
   minAmount: DEFAULT_SIMULATION_MIN_AMOUNT,
   maxAmount: DEFAULT_SIMULATION_MAX_AMOUNT,
+  endpoint: 'decide_gateway',
 }
 
 
@@ -732,7 +736,14 @@ function loadExplorerState(scopeKey: string): ExplorerPersistedState {
         // dynamic simulator drives the transaction variant, not the form.
         ranking_algorithm: 'SR_MULTI_OBJECTIVE',
       },
-      simulationConfig: { ...defaults.simulationConfig, ...(parsed.simulationConfig || {}), totalPayments: SIMULATION_TOTAL_PAYMENTS },
+      simulationConfig: {
+        ...defaults.simulationConfig,
+        ...(parsed.simulationConfig || {}),
+        totalPayments: SIMULATION_TOTAL_PAYMENTS,
+        endpoint: SIMULATION_ENDPOINTS.some(e => e.value === parsed.simulationConfig?.endpoint)
+          ? parsed.simulationConfig!.endpoint
+          : defaults.simulationConfig.endpoint,
+      },
       gatewaySimConfigs: parsed.gatewaySimConfigs || defaults.gatewaySimConfigs,
       errorInfo: { ...defaults.errorInfo, ...(parsed.errorInfo || {}) },
       debitForm: {
@@ -1398,7 +1409,7 @@ export function DecisionSimulatorPage() {
   // Poll tightly while a run is producing events so the Autopilot feed keeps up;
   // relax back to the idle cadence once it finishes.
   const routingEvents = useRoutingEvents('1h', {
-    refreshInterval: isSimulating && !isPaused ? 500 : 15_000,
+    refreshInterval: isSimulating && !isPaused ? 2_000 : 15_000,
   })
   const sessionRoutingEvents = useMemo(() => {
     if (simulationStartedAtMs == null) return []
@@ -2408,6 +2419,7 @@ export function DecisionSimulatorPage() {
     // pool size below). Read once here so a mid-run slider change can't reshape an in-flight run.
     // 1 reproduces the original strictly-sequential loop.
     const concurrency = Math.max(1, Math.min(MAX_SIMULATION_TPS, Math.round(simulationConfig.tps) || 1))
+    const endpoint = simulationConfig.endpoint
 
     // One full transaction (decide → score → optional smart retry). Returns the row to
     // append; throws on a backend error so the batch can tally it. `drawSuccess` mutates
@@ -2442,7 +2454,7 @@ export function DecisionSimulatorPage() {
         ? Math.floor(amtLo + Math.random() * (amtHi - amtLo + 1))
         : (parseFloat(form.amount) || 1000)
 
-      const decideRes = await apiPost<DecideGatewayResponse>('/decide-gateway', {
+      const decideRequest = {
         merchantId: effectiveMerchantId,
         paymentInfo: {
           paymentId: paymentId,
@@ -2463,7 +2475,26 @@ export function DecisionSimulatorPage() {
         rankingAlgorithm: 'SR_BASED_ROUTING',
         // Cost savings is driven by the merchant Autopilot flag, not this request.
         eliminationEnabled: eliminationEnabled,
-      })
+      }
+
+      const decideRes = endpoint === 'hybrid_routing'
+        ? decisionFromHybrid(await apiPost<HybridRoutingResponse>('/routing/hybrid', {
+          static_routing_request: {
+            created_by: effectiveMerchantId,
+            payment_id: paymentId,
+            parameters: hybridRuleParameters(routingKeysConfig, {
+              payment_method: paymentMethodType,
+              payment_method_type: paymentMethod,
+              card_network: cardBrand,
+              currency: formRef.current.currency,
+              authentication_type: form.auth_type,
+              amount,
+            }),
+            fallback_output: gateways.map(gateway_name => ({ gateway_name, gateway_id: null })),
+          },
+          dynamic_routing_request: decideRequest,
+        }))
+        : await apiPost<DecideGatewayResponse>('/decide-gateway', decideRequest)
 
       const decidedGateway = decideRes.decided_gateway
 
@@ -3132,9 +3163,10 @@ export function DecisionSimulatorPage() {
     })
   }, [deferredSimulationResults, txFilters])
 
-  // Newest first, so the tail of a long run is the part that stays on screen.
+  // The newest rows, oldest first: the log reads top to bottom and auto-scrolls to the latest
+  // transaction as rows arrive (see the `txLogRef` effect).
   const txVisibleRows = useMemo(
-    () => txFilteredRows.slice(-TX_TABLE_MAX_ROWS).reverse(),
+    () => txFilteredRows.slice(-TX_TABLE_MAX_ROWS),
     [txFilteredRows],
   )
 
@@ -3830,6 +3862,24 @@ export function DecisionSimulatorPage() {
               </div>
             )}
 
+            {showMoreInputs && (
+              <div className="flex w-[170px] flex-col gap-1.5">
+                <SurfaceLabel>
+                  <span title="API each transaction is routed through. Hybrid routing also evaluates the active routing rule on the payment's attributes, and returns the rule output when Auth Rate routing doesn't run. Applies on the next run.">Endpoint</span>
+                </SurfaceLabel>
+                <select
+                  value={simulationConfig.endpoint}
+                  disabled={isSimulating}
+                  onChange={e => setSimulationConfig(c => ({ ...c, endpoint: e.target.value as SimulationEndpoint }))}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
+                >
+                  {SIMULATION_ENDPOINTS.map(e => (
+                    <option key={e.value} value={e.value}>{e.label} ({e.path})</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {showMoreInputs && (() => {
               const tps = Math.max(1, Math.min(MAX_SIMULATION_TPS, simulationConfig.tps || 1))
               return (
@@ -3924,7 +3974,7 @@ export function DecisionSimulatorPage() {
                   size="sm"
                   variant="ghost"
                   onClick={() => setShowMoreInputs(v => !v)}
-                  title="Show or hide the advanced controls (TPS, Add processor)"
+                  title="Show or hide the advanced controls (endpoint, TPS, Add processor)"
                 >
                   <SlidersHorizontal size={14} />
                   {showMoreInputs ? 'Less' : 'More'}

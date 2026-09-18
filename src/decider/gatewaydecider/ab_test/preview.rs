@@ -1,5 +1,5 @@
-//! AB test arm evaluation for the Decision Explorer (routing evaluate / preview flow).
-//! Real payment intercept lives in interceptor.rs + evaluator.rs.
+//! Rule-layer evaluation of an A/B arm for `/routing/evaluate` and the static half of
+//! `/routing/hybrid`. The SR layer is applied by the decider intercept in interceptor.rs.
 
 #[cfg(feature = "mysql")]
 use crate::storage::schema::routing_algorithm::dsl;
@@ -26,40 +26,34 @@ pub struct AbTestArmOutput {
     pub flow_type: crate::analytics::flow::FlowType,
 }
 
-/// Evaluate the selected AB test arm for the Decision Explorer preview flow.
-/// Returns the routing output, evaluated connectors, rule name, and the arm's
-/// flow type (used so preview events get the correct summary_kind in the audit).
-pub async fn evaluate_arm(
-    arm: &str,
-    arm_algorithm_id: &str,
+/// Evaluate the rule layer of the served arm. An arm without a rule layer answers with the
+/// request's fallback connectors, the same answer `/routing/evaluate` gives when no rule applies.
+/// Returns the routing output, evaluated connectors, rule name, and the flow type the preview
+/// event is recorded under.
+pub async fn evaluate_rule_arm(
+    side: super::ArmSide,
+    rule_algorithm_id: Option<&str>,
     payload: &RoutingRequest,
     db: &crate::storage::Storage,
 ) -> Result<AbTestArmOutput, ContainerError<EuclidErrors>> {
-    // SR arm: in simulation, pick the first fallback connector as a proxy for what
-    // SR scoring would select in a real payment.
-    if arm_algorithm_id == "sr_routing" {
-        let chosen = payload
+    let arm = side.as_str();
+    let Some(arm_algorithm_id) = rule_algorithm_id else {
+        let fallback = payload
             .fallback_output
-            .as_deref()
-            .and_then(|cs| cs.first().cloned())
+            .clone()
+            .filter(|connectors| !connectors.is_empty())
             .ok_or_else(|| {
-                ContainerError::from(EuclidErrors::InvalidRequest(
-                    "SR routing arm requires at least one connector in fallback_output".into(),
-                ))
+                ContainerError::from(EuclidErrors::InvalidRequest(format!(
+                    "A/B {arm} arm has no rule layer; fallback_output must list the candidate connectors"
+                )))
             })?;
-        let out_enum = Output::Single(chosen.clone());
-        let evaluated = evaluate_output(&out_enum).map_err(|_| {
-            ContainerError::from(EuclidErrors::FailedToEvaluateOutput(
-                "ab_test sr routing arm evaluation".into(),
-            ))
-        })?;
         return Ok(AbTestArmOutput {
-            output: out_enum,
-            evaluated_output: evaluated,
-            rule_name: Some(format!("ab_test_{arm}_sr_routing")),
-            flow_type: crate::analytics::flow::FlowType::RoutingEvaluateSingle,
+            output: Output::Priority(fallback.clone()),
+            evaluated_output: fallback,
+            rule_name: Some("default_fallback".to_string()),
+            flow_type: crate::analytics::flow::FlowType::RoutingEvaluatePriority,
         });
-    }
+    };
 
     // Static arm: fetch the arm's algorithm from DB and evaluate it.
     let arm_algorithm = crate::generics::generic_find_one::<
@@ -151,15 +145,15 @@ pub fn serialize_analytics_details(
     request: &impl serde::Serialize,
     response: &impl serde::Serialize,
     rule_name: Option<&str>,
-    experiment_id: &str,
-    variant_arm: &str,
+    assignment: &super::outcome::ExperimentAssignment,
 ) -> Option<String> {
     crate::analytics::serialize_details(&serde_json::json!({
         "request": request,
         "response": response,
         "rule_name": rule_name,
         "preview_kind": "routing_evaluate_ab_test",
-        "experiment_id": experiment_id,
-        "variant_arm": variant_arm,
+        "experiment_id": assignment.experiment_id,
+        "variant_arm": assignment.side.as_str(),
+        "endpoint": assignment.endpoint.as_str(),
     }))
 }

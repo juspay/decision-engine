@@ -11,6 +11,8 @@ use serde::Deserialize;
 use super::inputs::{Commitment, MeasuredVolume};
 use super::math;
 use crate::analytics::clickhouse::common::{fetch_all, payment_amount_expr, DOMAIN_TABLE};
+use crate::analytics::clickhouse::filters::partition_lower_bound;
+use crate::analytics::clickhouse::guard;
 use crate::analytics::clickhouse::query::{BoundQueryBuilder, FilterClause};
 use crate::analytics::flow::FlowType;
 use crate::config::ClickHouseAnalyticsConfig;
@@ -147,12 +149,14 @@ impl ClickHouseVolumeSource {
         ]);
         base_filters(&mut builder, merchant_id, FlowType::DecideGatewayDecision);
         builder.add_filter(FilterClause::raw(format!("created_at_ms >= {from_ms}")));
+        builder.add_filter(partition_lower_bound(from_ms));
         // Deliberately unfiltered by connector: the per-PSP maps below still only take the
         // contract's own connectors, but the total traffic steering can draw on is every PSP the
         // merchant routed to, not just the ones under contract.
         builder.extend_group_bys(["gateway"]);
 
-        let rows = match fetch_all::<VolumeRow>(builder.build(&self.client)).await {
+        let rows = match fetch_all::<VolumeRow>(builder.build(&guard::bounded(&self.client))).await
+        {
             Ok(rows) => rows,
             Err(error) => {
                 // Zeroes read as "behind", but nudges stay within tolerance, so the cost is

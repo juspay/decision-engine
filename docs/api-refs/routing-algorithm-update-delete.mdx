@@ -44,6 +44,10 @@ curl --location "$BASE_URL/routing/update" \
 
 Returns an error if the algorithm is currently active, or if `created_by` doesn't own the algorithm.
 
+### Experiments with recorded payments
+
+An experiment's results are read against its current setup. Once it has recorded a payment, an update may change only `name`, `description`, `min_sample_size` and `guardrail_threshold_pp`; send every other field of `algorithm.data` as stored. Changing the arms, `variant_split_pct` or `endpoints` returns an error, and so does any setup change when the analytics store can't be read to check. To test a different setup, create a new experiment.
+
 ## Delete
 
 ```bash

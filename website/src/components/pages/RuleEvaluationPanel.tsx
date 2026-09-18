@@ -12,6 +12,7 @@ import {
   GatewayConnector,
   RoutingAlgorithm,
 } from '../../types/api'
+import { resolvedArm } from '../../features/routing/abTesting/arms'
 import { ChevronDown, ChevronUp, Code, Play, Plus, Trash2 } from 'lucide-react'
 
 import { Notice } from '../ui/Notice'
@@ -218,13 +219,11 @@ export function RuleEvaluationPanel({
 
     if (!source && activeAbTest) {
       const abData = (activeAbTest.algorithm_data || activeAbTest.algorithm)?.data as ABTestAlgorithmData | undefined
-      // Try control arm first, then variant — sr_routing has no saved algorithm to extract from.
-      const controlAlgo = abData?.control_algorithm_id
-        ? allAlgorithms.find(a => a.id === abData.control_algorithm_id)
-        : undefined
-      const variantAlgo = abData?.variant_algorithm_id
-        ? allAlgorithms.find(a => a.id === abData.variant_algorithm_id)
-        : undefined
+      // Try control arm first, then variant — an arm without a rule layer has no saved algorithm to extract from.
+      const controlRuleId = abData && resolvedArm(abData, 'control').rule_algorithm_id
+      const variantRuleId = abData && resolvedArm(abData, 'variant').rule_algorithm_id
+      const controlAlgo = controlRuleId ? allAlgorithms.find(a => a.id === controlRuleId) : undefined
+      const variantAlgo = variantRuleId ? allAlgorithms.find(a => a.id === variantRuleId) : undefined
 
       if (controlAlgo && extractRuleParams(controlAlgo, routingKeysConfig).length > 0) {
         source = controlAlgo

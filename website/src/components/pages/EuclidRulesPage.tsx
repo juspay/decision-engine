@@ -11,7 +11,8 @@ import { useMerchantStore } from '../../store/merchantStore'
 import { useCanEditRouting } from '../../store/authStore'
 import { apiPost } from '../../lib/api'
 import { formatLastModified, lastModifiedMs } from '../../lib/routingRuleTimestamps'
-import { RoutingAlgorithm } from '../../types/api'
+import { ABTestAlgorithmData, RoutingAlgorithm } from '../../types/api'
+import { resolvedArm } from '../../features/routing/abTesting/arms'
 import { RuleBreakdown } from '../routing/euclid/RuleBreakdown'
 import {
   summarizeConditions, summarizeDestination, destinationGateways,
@@ -61,9 +62,12 @@ export function EuclidRulesPage() {
   const abTestArmIds = activeAbTestAlgorithm
     ? (() => {
         const d = (activeAbTestAlgorithm.algorithm_data || activeAbTestAlgorithm.algorithm)?.data as
-          | { control_algorithm_id?: string; variant_algorithm_id?: string }
+          | ABTestAlgorithmData
           | undefined
-        return new Set([d?.control_algorithm_id, d?.variant_algorithm_id].filter(Boolean) as string[])
+        if (!d) return new Set<string>()
+        return new Set(
+          [resolvedArm(d, 'control').rule_algorithm_id, resolvedArm(d, 'variant').rule_algorithm_id].filter(Boolean) as string[],
+        )
       })()
     : new Set<string>()
 
@@ -412,7 +416,7 @@ export function EuclidRulesPage() {
       )}
       {activeAbTestAlgorithm && (
         <Notice tone="info">
-          <strong>A/B experiment "{activeAbTestAlgorithm.name}" is active</strong> — rules marked "In A/B test" are used as experiment arms. Activating a rule directly will stop the experiment.
+          <strong>A/B experiment "{activeAbTestAlgorithm.name}" is active</strong> — rules marked "In A/B test" are its arms. Payments the experiment covers are routed by its arms; all other payments use the active rule. Activating a different rule doesn't stop the experiment.
         </Notice>
       )}
     </div>

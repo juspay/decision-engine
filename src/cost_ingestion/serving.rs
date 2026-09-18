@@ -1200,7 +1200,7 @@ async fn query(
     merchant: Option<&str>,
 ) -> Result<String, String> {
     let sql = sql.replace("__DB__", &cfg.database);
-    let mut req = client().post(cfg.url.trim_end_matches('/')).body(sql);
+    let mut req = super::ch_http::post(client(), &cfg.url).body(sql);
     // Bound as `param_merchant` for the `{merchant:String}` placeholder in a single-merchant refresh.
     if let Some(m) = merchant {
         req = req.query(&[("param_merchant", m)]);

@@ -382,35 +382,32 @@ export function SRRoutingPage() {
     }
   }
 
-  // Every tab on this page configures the decider, which never runs while SR-based dynamic
-  // routing is off — so the tabs are locked until it is back on. `isEnabled` answers false
-  // while the features request is in flight, so wait for the response before restricting:
-  // otherwise the page flashes the locked state on every load.
+  // Every tab here configures the decider, which doesn't run while Auth Rate routing is off. The
+  // tabs stay open so settings can be explored and saved first; a notice says they aren't in
+  // effect yet. `isEnabled` answers false while the features request is in flight, so wait for the
+  // response before showing it, or it would flash on every load.
   const srRoutingResolved = Boolean(merchantId) && !features.isLoading && features.data != null
   const srRoutingOff = srRoutingResolved && !features.isEnabled('sr-routing')
-  const lockedTabTitle = 'Turn SR-based dynamic routing on to configure this'
 
   const tabClass = (tab: SRTab) =>
     `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-      srRoutingOff
-        ? 'border-transparent text-slate-400 dark:text-slate-600 cursor-not-allowed'
-        : activeTab === tab
-          ? 'border-brand-500 text-brand-600 dark:text-brand-400'
-          : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
+      activeTab === tab
+        ? 'border-brand-500 text-brand-600 dark:text-brand-400'
+        : 'border-transparent text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
     }`
 
   return (
-    // Cost Estimation and Manual are rail + content dashboards, so they take the full page width —
-    // constraining them would spend a quarter of an already-narrow column on the rail. The
-    // single-column tabs (Autopilot, Flags) still read better constrained.
-    <div className={`space-y-6 ${WIDE_TABS.includes(activeTab) ? 'w-full' : 'max-w-4xl'}`}>
-      {/* Page header. SR-based dynamic routing is the parent of everything on this page —
-          Autopilot, the Manual scoring config and every Feature Flags row only take effect
-          while it is on — so the switch lives here rather than as a sibling row in that list. */}
-      <div className="flex flex-wrap items-start justify-between gap-4">
-        <PageHeading title="Multi Objective Routing" description="Dynamic gateway scoring based on real-time success rates." />
-        <SrRoutingMasterToggle features={features} />
-      </div>
+    // The header and tabs span the page on every tab, so the Auth Rate routing switch stays at the right
+    // edge. Only the tab content narrows: Cost Estimation and Manual are rail + content dashboards
+    // that need the full width, while the single-column tabs (Autopilot, Flags) read better
+    // constrained.
+    <div className="w-full space-y-6">
+      {/* The heading and its tabs sit closer together than the page's sections. */}
+      <div className="space-y-4">
+      <PageHeading
+        title="Multi Objective Routing"
+        description="Dynamic gateway scoring based on real-time success rates."
+      />
 
       {!merchantId && (
         <Notice tone="warning">
@@ -418,15 +415,17 @@ export function SRRoutingPage() {
         </Notice>
       )}
 
-      {/* Tab navigation */}
-      <div className="border-b border-slate-200 dark:border-[#1c1c23]">
+      {/* Tab navigation. Auth Rate routing is the parent of everything on this page — Autopilot, the
+          Manual scoring config and every Feature Flags row only take effect while it is on — so its
+          switch sits with the tabs it governs, set apart from the page title. */}
+      <div className="flex flex-wrap items-center gap-x-4 border-b border-slate-200 dark:border-[#1c1c23]">
         <nav className="-mb-px flex gap-1">
-          <button type="button" disabled={srRoutingOff} title={srRoutingOff ? lockedTabTitle : undefined} className={tabClass('autopilot')} onClick={() => setActiveTab('autopilot')}>Autopilot</button>
-          <button type="button" disabled={srRoutingOff} title={srRoutingOff ? lockedTabTitle : undefined} className={tabClass('manual')} onClick={() => setActiveTab('manual')}>Manual</button>
-          <button type="button" disabled={srRoutingOff} title={srRoutingOff ? lockedTabTitle : undefined} className={tabClass('flags')} onClick={() => setActiveTab('flags')}>Feature Flags</button>
-          <button type="button" disabled={srRoutingOff} title={srRoutingOff ? lockedTabTitle : undefined} className={tabClass('cost')} onClick={() => setActiveTab('cost')}>Cost Estimation</button>
+          <button type="button" className={tabClass('autopilot')} onClick={() => setActiveTab('autopilot')}>Autopilot</button>
+          <button type="button" className={tabClass('manual')} onClick={() => setActiveTab('manual')}>Manual</button>
+          <button type="button" className={tabClass('flags')} onClick={() => setActiveTab('flags')}>Feature Flags</button>
+          <button type="button" className={tabClass('cost')} onClick={() => setActiveTab('cost')}>Cost Estimation</button>
           {volumeContractsBeta && (
-            <button type="button" disabled={srRoutingOff} title={srRoutingOff ? lockedTabTitle : undefined} className={`${tabClass('volume')} inline-flex items-center gap-1.5`} onClick={() => setActiveTab('volume')}>
+            <button type="button" className={`${tabClass('volume')} inline-flex items-center gap-1.5`} onClick={() => setActiveTab('volume')}>
               Volume Contracts
               <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-wide text-violet-600 dark:bg-violet-500/15 dark:text-violet-400">
                 Beta
@@ -434,17 +433,25 @@ export function SRRoutingPage() {
             </button>
           )}
         </nav>
+        <div className="flex items-center gap-4 pb-2 pt-1">
+          <span className="h-5 w-px bg-slate-200 dark:bg-[#2a2f3a]" aria-hidden />
+          <SrRoutingMasterToggle features={features} />
+        </div>
+      </div>
       </div>
 
+      <div className={`space-y-6 ${WIDE_TABS.includes(activeTab) ? '' : 'max-w-4xl'}`}>
       {isLoading ? (
         <div className="flex justify-center py-12"><Spinner /></div>
-      ) : srRoutingOff ? (
-        <Notice tone="warning">
-          SR-based dynamic routing is off for this merchant, so none of these settings are in
-          effect. Turn it on with the switch above to configure scoring.
-        </Notice>
       ) : (
         <>
+          {srRoutingOff && (
+            <Notice tone="warning">
+              Auth Rate routing is off for this merchant, so these settings aren't in effect yet. You
+              can still set them up here; they apply once you turn it on with the switch above.
+            </Notice>
+          )}
+
           {/* ── Autopilot tab ── */}
           {activeTab === 'autopilot' && <AutopilotConfig merchantId={merchantId} />}
 
@@ -643,6 +650,7 @@ export function SRRoutingPage() {
           {activeTab === 'volume' && volumeContractsBeta && <VolumeContractsPage embedded />}
         </>
       )}
+      </div>
     </div>
   )
 }
@@ -687,13 +695,14 @@ function ManualSectionRail({
   )
 }
 
-// Small on/off switch used by the Autopilot decision rows.
-function Switch({ on, onClick, disabled }: { on: boolean; onClick: () => void; disabled?: boolean }) {
+// Small on/off switch used by the page header and the Autopilot decision rows.
+function Switch({ on, onClick, disabled, labelledBy }: { on: boolean; onClick: () => void; disabled?: boolean; labelledBy?: string }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={on}
+      aria-labelledby={labelledBy}
       disabled={disabled}
       onClick={onClick}
       className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
@@ -732,22 +741,28 @@ function SrRoutingMasterToggle({ features }: { features: ReturnType<typeof useMe
   }
 
   return (
-    <div className="flex flex-col items-end gap-2">
-      <div className="flex items-center gap-2.5">
-        <div className="text-right">
-          <div className="text-sm font-medium text-slate-800 dark:text-white">SR-based dynamic routing</div>
-          <p className="text-xs leading-5 text-slate-500 dark:text-[#9aa6bb]">
-            {on ? 'Scoring eligible gateways on every payment.' : 'Gateway scoring is paused for this merchant.'}
-          </p>
-        </div>
-        {on ? <Badge variant="green">On</Badge> : <Badge variant="gray">Off</Badge>}
-        <Switch
-          on={on}
-          disabled={!canEditRouting || features.isLoading || toggling}
-          onClick={() => toggle(!on)}
-        />
-      </div>
-      <ErrorMessage error={error} />
+    <div
+      className={`inline-flex items-center gap-2.5 rounded-full border py-1 pl-3 pr-1.5 ${
+        error
+          ? 'border-red-200 bg-red-50 dark:border-red-500/30 dark:bg-red-500/10'
+          : on
+            ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10'
+            : 'border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10'
+      }`}
+      title={error ?? (on ? 'Scoring eligible gateways on every payment.' : 'Gateway scoring is paused for this merchant.')}
+    >
+      <span id="sr-routing-switch-label" className="whitespace-nowrap text-sm font-medium text-slate-800 dark:text-white">Auth Rate routing</span>
+      {error && (
+        <span className="text-xs font-semibold text-red-700 dark:text-red-300" aria-live="polite">
+          Couldn’t update
+        </span>
+      )}
+      <Switch
+        on={on}
+        labelledBy="sr-routing-switch-label"
+        disabled={!canEditRouting || features.isLoading || toggling}
+        onClick={() => toggle(!on)}
+      />
     </div>
   )
 }
@@ -777,6 +792,10 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
   async function toggleMaster(next: boolean) {
     setToggling('master'); setError(null); setMessage(null)
     try {
+      // Autopilot tunes Auth Rate routing, so turning it on turns that on first; if that fails,
+      // Autopilot is left as it was. Turning Autopilot off leaves Auth Rate routing on, running
+      // the Manual configuration.
+      if (next) await features.setFeatureEnabled('sr-routing', true)
       await features.setFeatureEnabled('autopilot', next)
       if (next) {
         // Turning Autopilot on enables its decisions by default — cost savings (multi-objective
@@ -888,6 +907,12 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string; 
     title: 'Explore-exploit on SRv3 (Card)',
     description:
       'Keeps all gateway ratings fresh by regularly sending a small share of payments to every gateway — not just the top performer. This ensures the system can quickly detect when a backup gateway becomes better than the current top, and reroute accordingly. The Hedging % setting controls how large this share is.',
+  },
+  {
+    feature: 'sr-scores-from-rule-routing',
+    title: 'Learn from rule-routed payments',
+    description:
+      'Hybrid routing payments decided by a routing rule, without SR (Auth Rate routing is off, or their A/B arm has no SR layer), also update gateway scores. Keeps scores warm for when SR routes them. Scores then reflect the rule\'s gateway mix, not only payments SR routed.',
   },
   {
     feature: 'ab-test-real-payments',
@@ -1003,7 +1028,10 @@ function SrDimensionsConfig({ merchantId }: { merchantId: string | null }) {
 function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
   const features = useMerchantFeatures(merchantId ?? undefined)
   const user = useAuthStore((s) => s.user)
-  const visibleFeatures = SR_FEATURES.filter((f) => !f.gate || releaseAdmits(user, f.gate))
+  // Listed alphabetically by title.
+  const visibleFeatures = SR_FEATURES
+    .filter((f) => !f.gate || releaseAdmits(user, f.gate))
+    .sort((a, b) => a.title.localeCompare(b.title))
   const [toggling, setToggling] = useState<KnownFeature | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)

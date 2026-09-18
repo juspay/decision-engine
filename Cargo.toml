@@ -122,6 +122,8 @@ regex = "1.10"
 # -------------------------------------
 
 [dev-dependencies]
+# `test-util` gives tests the paused clock the clickhouse guard's timing tests run on.
+tokio = { version = "1.44.2", features = ["macros", "rt", "test-util"] }
 rand = "0.8.5"
 rand_distr = "0.4"
 criterion = "0.5.1"

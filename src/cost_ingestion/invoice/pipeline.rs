@@ -240,8 +240,7 @@ pub(super) async fn exec(
         .iter()
         .map(|(k, v)| (format!("param_{k}"), v.clone()))
         .collect();
-    let mut req = reqwest::Client::new()
-        .post(cfg.url.trim_end_matches('/'))
+    let mut req = crate::cost_ingestion::ch_http::post(&reqwest::Client::new(), &cfg.url)
         .query(&q)
         .body(query.to_string());
     if !cfg.user.is_empty() {

@@ -13,6 +13,7 @@ use crate::analytics::models::{CommitmentAnalyticsQuery, CommitmentDayVolume};
 use crate::logger;
 
 use super::super::common::{fetch_all, DOMAIN_TABLE};
+use super::super::filters::{partition_lower_bound, partition_upper_bound_exclusive};
 use super::super::query::{BoundQueryBuilder, FilterClause};
 use super::super::time::origin_bucket_select_expr;
 use super::commitment_common::{
@@ -72,6 +73,8 @@ pub async fn load(
         )));
         // Bounded above too, or a later cycle's traffic lands in this one's last bucket.
         builder.add_filter(FilterClause::raw(format!("created_at_ms < {cycle_end_ms}")));
+        builder.add_filter(partition_lower_bound(cycle_start_ms));
+        builder.add_filter(partition_upper_bound_exclusive(cycle_end_ms));
         connector_filter(&mut builder, &connectors);
         builder.extend_group_bys(["gateway", "bucket_index"]);
 

@@ -19,7 +19,9 @@
 // };
 
 use crate::decider::gatewaydecider::types::ErrorResponse;
-use crate::feedback::gateway_scoring_service::check_and_update_gateway_score_;
+use crate::feedback::gateway_scoring_service::{
+    check_and_update_gateway_score_, SCORE_UPDATE_SKIPPED,
+};
 use crate::feedback::types::{UpdateScorePayload, UpdateScoreResponse};
 use crate::metrics::API_LATENCY_HISTOGRAM;
 use crate::metrics::API_REQUEST_COUNTER;
@@ -160,10 +162,6 @@ pub async fn update_gateway_score(
                 trace_id.clone(),
                 None,
             );
-            // Must happen before check_and_update_gateway_score_ consumes the inflight key.
-            let is_ab_test_payment =
-                crate::decider::gatewaydecider::ab_test::is_static_arm_inflight(&payment_id).await;
-
             // GSM lookup is a fast in-memory lookup — compute it synchronously so the
             // caller gets the result immediately without waiting for the score update.
             let gsm_info = payload.error_info.as_ref().and_then(|ei| {
@@ -193,8 +191,9 @@ pub async fn update_gateway_score(
                     .to_string();
 
                 match check_and_update_gateway_score_(payload.clone()).await {
-                    Ok(_) => {
-                        if !is_ab_test_payment {
+                    Ok(outcome) => {
+                        // A payment without a scoring context had no score to update.
+                        if outcome != SCORE_UPDATE_SKIPPED {
                             crate::analytics::DomainAnalyticsEvent::record_gateway_update(
                                 crate::analytics::AnalyticsFlowContext::new(
                                     crate::analytics::ApiFlow::DynamicRouting,

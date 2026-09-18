@@ -635,6 +635,11 @@ impl RedisConnectionWrapper {
 
         Ok(result)
     }
+    /// `EXISTS` on a key read through `get_key`, which applies the connection's key prefix.
+    pub async fn key_exists(&self, key: &str) -> Result<bool, errors::RedisError> {
+        self.conn.exists::<String>(key).await
+    }
+
     pub async fn exists(&self, key: &str) -> Result<bool, errors::RedisError> {
         self.conn
             .pool
@@ -733,6 +738,41 @@ impl RedisConnectionWrapper {
     }
 
     // Redis Hash Operations
+    /// `HSET key field value`, then refresh the key's TTL. The TTL covers the whole hash, so every
+    /// write extends the lifetime of all its fields.
+    pub async fn hset_with_ttl(
+        &self,
+        key: &str,
+        field: &str,
+        value: String,
+        ttl: i64,
+    ) -> Result<(), errors::RedisError> {
+        let _: i64 = self
+            .conn
+            .pool
+            .hset(key, (field, value))
+            .await
+            .change_context(errors::RedisError::SetHashFailed)?;
+        if let Err(e) = self.expire_key(key, ttl).await {
+            // A hash left without a TTL would never expire, so it is removed instead.
+            let _ = self.delete_key(key).await;
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// `HGETALL` as raw field → string value pairs; empty when the key does not exist.
+    pub async fn hgetall_strings(
+        &self,
+        key: &str,
+    ) -> Result<std::collections::HashMap<String, String>, errors::RedisError> {
+        self.conn
+            .pool
+            .hgetall(key)
+            .await
+            .change_context(errors::RedisError::GetFailed)
+    }
+
     pub async fn hget<T>(
         &self,
         key: &str,

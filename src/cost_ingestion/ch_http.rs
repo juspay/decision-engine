@@ -47,3 +47,15 @@ pub fn client(timeout: Duration) -> reqwest::Client {
         .build()
         .expect("failed to build clickhouse cost http client")
 }
+
+/// A POST to the ClickHouse HTTP endpoint at `url`, carrying the analytics read path's
+/// memory-bounded query settings when the ClickHouse user accepts them
+/// (`analytics::clickhouse::guard`).
+pub fn post(client: &reqwest::Client, url: &str) -> reqwest::RequestBuilder {
+    let request = client.post(url.trim_end_matches('/'));
+    if crate::analytics::clickhouse::guard::settings_accepted() {
+        request.query(crate::analytics::clickhouse::guard::MEMORY_BOUNDED_SETTINGS)
+    } else {
+        request
+    }
+}
