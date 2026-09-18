@@ -621,6 +621,8 @@ interface ExplorerPersistedState {
   volumeEvaluationLog: VolumePaymentEntry[]
   volumeProgress: number
   simulationResults: SimulationResult[]
+  // Persisted as its own value, not derived from the (capped) simulationResults on load — see EXPLORER_RESULT_HISTORY_PERSIST_LIMIT.
+  contractTally: ContractRunTally
   responseOpen: boolean
   debitResponseOpen: boolean
   volumeResponseOpen: boolean
@@ -670,6 +672,7 @@ function getDefaultExplorerState(): ExplorerPersistedState {
     volumeEvaluationLog: [],
     volumeProgress: 0,
     simulationResults: [],
+    contractTally: emptyRunTally(),
     responseOpen: false,
     debitResponseOpen: false,
     volumeResponseOpen: false,
@@ -699,7 +702,12 @@ function hasExpiredExplorerResults(resultDataUpdatedAtMs?: number | null) {
 
 function removeExplorerState(scopeKey: string) {
   if (typeof window === 'undefined') return
-  window.localStorage.removeItem(explorerStorageKey(scopeKey))
+  // Same failure guard as saveExplorerState/sweepExpiredExplorerState — this runs from mount/render paths too.
+  try {
+    window.localStorage.removeItem(explorerStorageKey(scopeKey))
+  } catch (err) {
+    console.warn('Could not clear explorer state; localStorage is unavailable', err)
+  }
 }
 
 function saveExplorerState(scopeKey: string, state: ExplorerPersistedState) {
@@ -722,21 +730,27 @@ function saveExplorerState(scopeKey: string, state: ExplorerPersistedState) {
 // Evicts every stored scope past its result TTL (or unparsable), not just the active one — call once per mount, safe to call repeatedly.
 function sweepExpiredExplorerState() {
   if (typeof window === 'undefined') return
-  const prefix = `${EXPLORER_STORAGE_KEY_PREFIX}:`
-  const staleKeys: string[] = []
-  for (let i = 0; i < window.localStorage.length; i++) {
-    const key = window.localStorage.key(i)
-    if (!key || !key.startsWith(prefix)) continue
-    const raw = window.localStorage.getItem(key)
-    if (!raw) continue
-    try {
-      const parsed = JSON.parse(raw) as Partial<ExplorerPersistedState>
-      if (hasExpiredExplorerResults(parsed.resultDataUpdatedAtMs)) staleKeys.push(key)
-    } catch {
-      staleKeys.push(key)
+  // Everything below, including obtaining window.localStorage itself, can throw in a browser where storage is blocked (e.g. some private-browsing modes) — never let mount-time housekeeping crash the page over it.
+  try {
+    const storage = window.localStorage
+    const prefix = `${EXPLORER_STORAGE_KEY_PREFIX}:`
+    const staleKeys: string[] = []
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i)
+      if (!key || !key.startsWith(prefix)) continue
+      const raw = storage.getItem(key)
+      if (!raw) continue
+      try {
+        const parsed = JSON.parse(raw) as Partial<ExplorerPersistedState>
+        if (hasExpiredExplorerResults(parsed.resultDataUpdatedAtMs)) staleKeys.push(key)
+      } catch {
+        staleKeys.push(key)
+      }
     }
+    staleKeys.forEach(staleKey => storage.removeItem(staleKey))
+  } catch (err) {
+    console.warn('Skipping explorer-state housekeeping; localStorage is unavailable', err)
   }
-  staleKeys.forEach(staleKey => window.localStorage.removeItem(staleKey))
 }
 
 function loadExplorerState(scopeKey: string): ExplorerPersistedState {
@@ -779,6 +793,8 @@ function loadExplorerState(scopeKey: string): ExplorerPersistedState {
       volumeDistribution: parsed.volumeDistribution || defaults.volumeDistribution,
       volumeEvaluationLog: parsed.volumeEvaluationLog || defaults.volumeEvaluationLog,
       simulationResults: parsed.simulationResults || defaults.simulationResults,
+      // Prefer the persisted tally; recompute from rows only for an entry saved before this field existed.
+      contractTally: parsed.contractTally || tallyOf(parsed.simulationResults || []),
       extraConnectors: parsed.extraConnectors || defaults.extraConnectors,
       removedConnectors: parsed.removedConnectors || defaults.removedConnectors,
     }
@@ -1809,7 +1825,8 @@ export function DecisionSimulatorPage() {
     setVolumeEvaluationLog(nextState.volumeEvaluationLog)
     setVolumeProgress(nextState.volumeProgress)
     liveRun.results = nextState.simulationResults
-    liveRun.contractTally = tallyOf(nextState.simulationResults)
+    // The persisted tally, not tallyOf(nextState.simulationResults) — that array is only a capped tail.
+    liveRun.contractTally = nextState.contractTally
     liveRun.running = false
     setSimulationResults(nextState.simulationResults)
     setContractTally(liveRun.contractTally)
@@ -1921,6 +1938,7 @@ export function DecisionSimulatorPage() {
       volumeEvaluationLog,
       volumeProgress,
       simulationResults,
+      contractTally,
       responseOpen,
       debitResponseOpen,
       volumeResponseOpen,
@@ -1960,6 +1978,7 @@ export function DecisionSimulatorPage() {
     volumeEvaluationLog,
     volumeProgress,
     simulationResults,
+    contractTally,
     responseOpen,
     debitResponseOpen,
     volumeResponseOpen,
@@ -2583,6 +2602,8 @@ export function DecisionSimulatorPage() {
       // times and stream each result the moment it lands: completions (and the chart) flow
       // smoothly, and one slow request no longer stalls the other in-flight ones.
       let dispatched = resumeFrom
+      // Absolute completed count, decoupled from results.length (which is only a capped tail after a reload) — used for the persisted resume index so a second pause/resume can't replay completed transactions.
+      let completedCount = resumeFrom
       let lastError: unknown = null
 
       // How long to leave between UI commits, as a function of how much there is to redraw.
@@ -2631,7 +2652,7 @@ export function DecisionSimulatorPage() {
           // and the resume index stays put; a Stop still breaks out. Flush once on the way in so a
           // page-leave/return resumes from exactly the committed rows.
           if (simulationPausedRef.current) {
-            runProgressRef.current = results.length
+            runProgressRef.current = completedCount
             flushResults(true)
             while (simulationPausedRef.current && !simulationAbortRef.current && isCurrentRun()) {
               await new Promise(resolve => setTimeout(resolve, 120))
@@ -2647,6 +2668,7 @@ export function DecisionSimulatorPage() {
             const row = await runTxn(i)
             results.push(row)
             countPayment(liveRun.contractTally, row)
+            completedCount++
             consecutiveErrors = 0
           } catch (e) {
             lastError = e
@@ -2664,7 +2686,7 @@ export function DecisionSimulatorPage() {
           // point, which now belongs to whichever run replaced this one.
           if (!isCurrentRun()) return
           // Record the resume point as the committed count and flush on the shared throttle.
-          runProgressRef.current = results.length
+          runProgressRef.current = completedCount
           flushResults(false)
 
         }
