@@ -29,6 +29,7 @@ import { useAuthStore } from './store/authStore'
 import { useMerchantStore } from './store/merchantStore'
 import { apiPost } from './lib/api'
 import { stampDashboardHandoffScope, takeDashboardRoute } from './lib/dashboardHandoff'
+import { postToDashboard } from './lib/embedBridge'
 
 interface ExchangeResponse {
   token: string
@@ -108,6 +109,8 @@ export default function App() {
         // never sees the pre-navigation location and AuthPage never gets to bounce us to "/".
         const route = res ? takeDashboardRoute() : null
         if (route) navigate(route, { replace: true })
+        // Tell an embedding dashboard the session is live; it holds its own loader until then.
+        if (res) postToDashboard({ type: 'de:ready' })
       } finally {
         stripCode()
         setExchangingCode(false)

@@ -23,6 +23,7 @@ export interface DashboardConnector {
 const STORAGE_KEY = 'hs-dashboard-handoff'
 const CONNECTORS_KEY = 'connectors'
 const RULE_ID_KEY = 'rule_id'
+const ROUTE_KEY = 'route'
 
 /**
  * The only DE pages that address a single rule. Hyperswitch's other deep-link targets are
@@ -65,16 +66,25 @@ function parseConnectors(raw: string): DashboardConnector[] | null {
   }
 }
 
-function readFragment(): Pick<Handoff, 'connectors' | 'ruleId'> | null {
+interface FragmentPayload {
+  connectors: DashboardConnector[] | null
+  ruleId: string | null
+  /** An explicit destination route, overriding the one derived from the URL's own path. */
+  route: string | null
+}
+
+function readFragment(): FragmentPayload | null {
   const hash = window.location.hash.replace(/^#/, '')
   if (!hash) return null
   const params = new URLSearchParams(hash)
   const rawConnectors = params.get(CONNECTORS_KEY)
   const rawRuleId = params.get(RULE_ID_KEY)
-  if (!rawConnectors && !rawRuleId) return null
+  const rawRoute = params.get(ROUTE_KEY)
+  if (!rawConnectors && !rawRuleId && !rawRoute) return null
   return {
     connectors: rawConnectors ? parseConnectors(rawConnectors) : null,
     ruleId: rawRuleId || null,
+    route: rawRoute || null,
   }
 }
 
@@ -103,9 +113,12 @@ function isSameOriginPath(path: string): boolean {
  * Only a hand-off has an intended route worth restoring — a plain page load routes itself, and
  * force-navigating there would fight normal use. `?code=` is what marks the arrival.
  */
-function intendedRoute(ruleId: string | null): string | null {
+function intendedRoute(ruleId: string | null, fragmentRoute: string | null): string | null {
   if (!new URLSearchParams(window.location.search).has('code')) return null
-  const path = routerPath().replace(/\/+$/, '') || '/'
+  // The dashboard's embedded workspace mints codes against one fixed deep-link path and names the
+  // real destination in the fragment instead; it wins over the URL's own path when valid.
+  const rawPath = fragmentRoute ?? routerPath()
+  const path = rawPath.replace(/\/+$/, '') || '/'
   if (!isSameOriginPath(path)) return null
   // The id is a path segment, so it must be escaped — an id of "../../admin" would otherwise
   // climb out of the route it belongs to.
@@ -141,12 +154,26 @@ function readStorage(): Handoff | null {
 }
 
 function capture(): Handoff | null {
-  const stored = readStorage()
+  // A `?code=` arrival is a fresh hand-off, and its fragment is authoritative: the embedded
+  // workspace hosts successive hand-offs in one tab (one shared sessionStorage), so merging with
+  // the stored copy would resurrect the previous hand-off's rule id or connector list — e.g. a
+  // plain "Rule-Based" hand-off landing in a stale rule's editor.
+  const fresh = new URLSearchParams(window.location.search).has('code')
+  const stored = fresh ? null : readStorage()
   const fragment = readFragment()
   const connectors = fragment?.connectors ?? stored?.connectors ?? null
   const ruleId = fragment?.ruleId ?? stored?.ruleId ?? null
-  const route = intendedRoute(ruleId) ?? stored?.route ?? null
-  if (!connectors && !ruleId && !route) return null
+  const route = intendedRoute(ruleId, fragment?.route ?? null) ?? stored?.route ?? null
+  if (!connectors && !ruleId && !route) {
+    if (fresh) {
+      try {
+        sessionStorage.removeItem(STORAGE_KEY)
+      } catch {
+        // Private mode — nothing stored to replace.
+      }
+    }
+    return null
+  }
   const next: Handoff = { connectors, ruleId, route, merchantId: stored?.merchantId ?? null }
   persist(next)
   return next
