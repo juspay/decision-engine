@@ -447,6 +447,8 @@ type VolumePaymentEntry = {
 
 const EXPLORER_STORAGE_KEY_PREFIX = 'decision-explorer-state-v2'
 const EXPLORER_RESULT_TTL_MS = 10 * 60 * 1000
+// Cap on persisted simulationResults/volumeEvaluationLog, so no stored entry can approach localStorage's per-origin quota.
+const EXPLORER_RESULT_HISTORY_PERSIST_LIMIT = 200
 
 /**
  * Run control and the committed rows, held outside the component tree.
@@ -702,7 +704,39 @@ function removeExplorerState(scopeKey: string) {
 
 function saveExplorerState(scopeKey: string, state: ExplorerPersistedState) {
   if (typeof window === 'undefined') return
-  window.localStorage.setItem(explorerStorageKey(scopeKey), JSON.stringify(state))
+  const key = explorerStorageKey(scopeKey)
+  // Bound on every write, not only after a failure — a reload of a paused run longer than this cap will show only the kept tail until resumed.
+  const bounded: ExplorerPersistedState = {
+    ...state,
+    simulationResults: state.simulationResults.slice(-EXPLORER_RESULT_HISTORY_PERSIST_LIMIT),
+    volumeEvaluationLog: state.volumeEvaluationLog.slice(-EXPLORER_RESULT_HISTORY_PERSIST_LIMIT),
+  }
+  try {
+    window.localStorage.setItem(key, JSON.stringify(bounded))
+  } catch (err) {
+    // Last-resort net for anything still outsized after capping — skip the save rather than let setItem's throw crash the page via the ErrorBoundary.
+    console.warn('Explorer state still exceeded localStorage quota after capping run history; skipping this save', err)
+  }
+}
+
+// Evicts every stored scope past its result TTL (or unparseable), not just the active one — call once per mount, safe to call repeatedly.
+function sweepExpiredExplorerState() {
+  if (typeof window === 'undefined') return
+  const prefix = `${EXPLORER_STORAGE_KEY_PREFIX}:`
+  const staleKeys: string[] = []
+  for (let i = 0; i < window.localStorage.length; i++) {
+    const key = window.localStorage.key(i)
+    if (!key || !key.startsWith(prefix)) continue
+    const raw = window.localStorage.getItem(key)
+    if (!raw) continue
+    try {
+      const parsed = JSON.parse(raw) as Partial<ExplorerPersistedState>
+      if (hasExpiredExplorerResults(parsed.resultDataUpdatedAtMs)) staleKeys.push(key)
+    } catch {
+      staleKeys.push(key)
+    }
+  }
+  staleKeys.forEach(staleKey => window.localStorage.removeItem(staleKey))
 }
 
 function loadExplorerState(scopeKey: string): ExplorerPersistedState {
@@ -1197,6 +1231,8 @@ export function DecisionSimulatorPage() {
   const hasRoutingKeys = Object.keys(routingKeysConfig).length > 0
   const routingConfigUnavailable = !routingKeysLoading && (!hasRoutingKeys || Boolean(routingKeysError))
   const initialState = useMemo(() => loadExplorerState(currentScopeKey), [currentScopeKey])
+  // Housekeeping for every merchant scope this browser has stored, not just this one — see sweepExpiredExplorerState.
+  useEffect(() => { sweepExpiredExplorerState() }, [])
   const [activeTab, setActiveTab] = useState<TabType>(initialState.activeTab)
   const [stateScopeKey, setStateScopeKey] = useState(initialState.scopeKey || currentScopeKey)
   const [resultDataUpdatedAtMs, setResultDataUpdatedAtMs] = useState<number | null>(
@@ -5112,8 +5148,8 @@ export function DecisionSimulatorPage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-[#263141]">
-                          {volumeEvaluationLog.slice(-200).map((entry, idx) => {
-                            const absIdx = Math.max(0, volumeEvaluationLog.length - 200) + idx
+                          {volumeEvaluationLog.slice(-EXPLORER_RESULT_HISTORY_PERSIST_LIMIT).map((entry, idx) => {
+                            const absIdx = Math.max(0, volumeEvaluationLog.length - EXPLORER_RESULT_HISTORY_PERSIST_LIMIT) + idx
                             return (
                             <tr
                               key={entry.paymentId}
