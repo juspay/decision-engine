@@ -128,7 +128,7 @@ export function MembersPage() {
             <select
               value={role}
               onChange={(e) => setRole(e.target.value)}
-              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-500 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-slate-200"
+              className="h-10 rounded-xl border border-slate-200 bg-white pl-3 pr-8 text-sm text-slate-700 outline-none transition focus:border-blue-500 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-slate-200"
             >
               <option value="member">Member</option>
               <option value="admin">Admin</option>

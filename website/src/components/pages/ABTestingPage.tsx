@@ -960,7 +960,7 @@ function ExperimentDetailPanel({
 
   function openAuditForTxn(paymentId: string, variantArm: string) {
     if (!txnHasAudit(variantArm) || !endpoint) return
-    const url = `/audit?range=1d&routing_kind=${AUDIT_ROUTING_KIND[endpoint]}&payment_id=${encodeURIComponent(paymentId)}`
+    const url = `${import.meta.env.BASE_URL}audit?range=1d&routing_kind=${AUDIT_ROUTING_KIND[endpoint]}&payment_id=${encodeURIComponent(paymentId)}`
     window.open(url, '_blank')
   }
 

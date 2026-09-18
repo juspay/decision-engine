@@ -685,6 +685,8 @@ export function PaymentAuditPage() {
   const loading = auditSearch.isLoading
   const resultRows = auditSearch.data?.results || []
   const totalMatches = auditSearch.data?.total_results || 0
+  const firstRowNumber = (page - 1) * pageSize + 1
+  const lastRowNumber = (page - 1) * pageSize + resultRows.length
   const totalEvents = timeline.length
   const successCount = auditSearch.data?.total_success ?? resultRows.filter((row) => summaryBadgeVariant(row.latest_status) === 'green').length
   const failureCount = auditSearch.data?.total_failure ?? resultRows.filter((row) => summaryBadgeVariant(row.latest_status) === 'red').length
@@ -1056,7 +1058,9 @@ export function PaymentAuditPage() {
                 {content.matchingLabel}
               </h2>
               <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
-                {resultRows.length} of {totalMatches.toLocaleString()}
+                {resultRows.length > 0
+                  ? `${firstRowNumber.toLocaleString()}–${lastRowNumber.toLocaleString()} of ${totalMatches.toLocaleString()}`
+                  : `0 of ${totalMatches.toLocaleString()}`}
               </span>
             </div>
             <div className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto border-t border-slate-100 dark:divide-[#1b2029] dark:border-[#1b2029]">

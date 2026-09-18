@@ -411,6 +411,35 @@ interface RuleEvaluateResponse {
   eligible_connectors?: GatewayConnector[]
 }
 
+/**
+ * The routing_approach the simulator stamps on a hybrid decision the static rule answered — the
+ * dynamic half returned nothing to score. See decisionFromHybrid().
+ */
+const RULE_DECIDED_APPROACH = 'RULE_OUTPUT'
+
+/**
+ * How a decision's routing approach is named and coloured in the Transaction Log. One entry per
+ * approach, so its label, its badge and the filter option all follow from the same line; an
+ * approach with no entry falls through to its raw value, unstyled.
+ */
+function routingApproachDisplay(approach?: string | null): { label: string; badgeClass: string | null } {
+  if (approach?.includes('HEDGING')) {
+    return { label: 'Hedging', badgeClass: 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:ring-amber-800' }
+  }
+  if (approach === 'SR_SELECTION_MULTI_OBJECTIVE') {
+    return { label: 'Cost Based', badgeClass: 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:ring-emerald-800' }
+  }
+  if (approach === 'SR_SELECTION_V3_ROUTING') {
+    return { label: 'Auth Based', badgeClass: 'bg-brand-50 text-brand-700 ring-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:ring-brand-800' }
+  }
+  if (approach === RULE_DECIDED_APPROACH) {
+    // Indigo because the near neighbours are all spoken for on this page: violet is stripe's
+    // connector colour, emerald is Cost Based (and CHARGED), amber is Hedging, red is FAILURE.
+    return { label: 'Rule Based', badgeClass: 'bg-indigo-50 text-indigo-700 ring-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-300 dark:ring-indigo-800' }
+  }
+  return { label: approach ?? '—', badgeClass: null }
+}
+
 function approachColor(approach: string): string {
   for (const [k, v] of Object.entries(ROUTING_APPROACH_COLORS)) {
     if (approach.includes(k) || k.includes(approach)) return v
@@ -3094,13 +3123,7 @@ export function DecisionSimulatorPage() {
 
   // Human-readable routing label, shared by the Transaction Log cell and its filter.
   const routingApproachLabel = (approach?: string | null): string =>
-    approach?.includes('HEDGING')
-      ? 'Hedging'
-      : approach === 'SR_SELECTION_MULTI_OBJECTIVE'
-        ? 'Cost Based'
-        : approach === 'SR_SELECTION_V3_ROUTING'
-          ? 'Auth Based'
-          : approach ?? '—'
+    routingApproachDisplay(approach).label
 
   // Distinct values that populate the categorical Transaction Log column filters.
   const txFilterOptions = useMemo(() => {
@@ -3266,12 +3289,16 @@ export function DecisionSimulatorPage() {
     }
   }, [deferredSimulationResults])
 
-  // Multi-objective outcome counts: how often the auth objective vs the cost
-  // objective won the routing decision across the run.
+  // Where each decision came from: the cost objective, the static rule, or SR. On a hybrid run the
+  // rule answers whenever the dynamic half doesn't, and those payments were being counted as
+  // SR-based — a run whose log was all RULE_OUTPUT still read "208 of 208 SR-based decisions".
   const multiObjectiveStats = useMemo(() => {
     let costWon = 0
     let costSuccess = 0
     let costFailure = 0
+    let ruleBased = 0
+    let ruleSuccess = 0
+    let ruleFailure = 0
     let srSuccess = 0
     let srFailure = 0
     let total = 0
@@ -3288,21 +3315,33 @@ export function DecisionSimulatorPage() {
         costWon++
         if (r.status === 'CHARGED') costSuccess++
         else costFailure++
+      } else if (r.routingApproach === RULE_DECIDED_APPROACH) {
+        // Hybrid: the static rule produced the answer and SR never scored this payment.
+        ruleBased++
+        if (r.status === 'CHARGED') ruleSuccess++
+        else ruleFailure++
       } else {
         // Everything else is SR-based — auth-won AND hedged decisions.
         if (r.status === 'CHARGED') srSuccess++
         else srFailure++
       }
     }
-    // Total = SR-based + cost-based by construction, and matches the Gateway Summary total.
-    const srBased = total - costWon
-    return { srBased, srSuccess, srFailure, costWon, costSuccess, costFailure, total, tpv, currency }
+    // Total = SR-based + rule-based + cost-based by construction, and matches the Gateway
+    // Summary total.
+    const srBased = total - costWon - ruleBased
+    return {
+      srBased, srSuccess, srFailure,
+      ruleBased, ruleSuccess, ruleFailure,
+      costWon, costSuccess, costFailure,
+      total, tpv, currency,
+    }
   }, [deferredSimulationResults])
 
-  // Auth-rate view of the run. Each row is one decision: `status` is the first-attempt
-  // outcome and `retryStatus` is the smart-retry outcome (only set when a soft decline was
-  // retried on an alternate PSP). FAAR credits only first-attempt charges; NAR credits the
-  // final outcome (first attempt OR a successful retry), so NAR ≥ FAAR whenever retry helps.
+  // Auth-rate view of the run, over every decision it made — rule-decided payments included, since
+  // they are payments the run routed and charged. Each row is one decision: `status` is the
+  // first-attempt outcome and `retryStatus` is the smart-retry outcome (only set when a soft
+  // decline was retried on an alternate PSP). FAAR credits only first-attempt charges; NAR credits
+  // the final outcome (first attempt OR a successful retry), so NAR ≥ FAAR whenever retry helps.
   const authRateStats = useMemo(() => {
     let total = 0
     let firstAttemptSuccess = 0
@@ -3867,14 +3906,18 @@ export function DecisionSimulatorPage() {
                 <SurfaceLabel>
                   <span title="API each transaction is routed through. Hybrid routing also evaluates the active routing rule on the payment's attributes, and returns the rule output when Auth Rate routing doesn't run. Applies on the next run.">Endpoint</span>
                 </SurfaceLabel>
+                {/* The path is the hover, not the option text: 'Hybrid routing (/routing/hybrid)'
+                    runs about half as wide again as this field, and a native select paints what
+                    overflows straight over its own arrow rather than trimming it. */}
                 <select
                   value={simulationConfig.endpoint}
                   disabled={isSimulating}
+                  title={SIMULATION_ENDPOINTS.find(e => e.value === simulationConfig.endpoint)?.path}
                   onChange={e => setSimulationConfig(c => ({ ...c, endpoint: e.target.value as SimulationEndpoint }))}
-                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
                 >
                   {SIMULATION_ENDPOINTS.map(e => (
-                    <option key={e.value} value={e.value}>{e.label} ({e.path})</option>
+                    <option key={e.value} value={e.value} title={e.path}>{e.label}</option>
                   ))}
                 </select>
               </div>
@@ -4946,6 +4989,21 @@ export function DecisionSimulatorPage() {
                           </span>
                         </p>
                       </div>
+                      {(simulationConfig.endpoint === 'hybrid_routing' || multiObjectiveStats.ruleBased > 0) && (
+                        <div className="flex min-w-0 flex-col gap-1.5">
+                          <StatLabel label="Rule-based decisions" />
+                          <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-700 dark:text-sky-400">
+                            {multiObjectiveStats.ruleBased.toLocaleString()}
+                            <span className="ml-1.5 text-xs font-medium tabular-nums" title="Charged / Failed">
+                              <span className="text-slate-500">(</span>
+                              <span className="text-emerald-700 dark:text-emerald-400">{multiObjectiveStats.ruleSuccess.toLocaleString()}</span>
+                              <span className="text-slate-500"> / </span>
+                              <span className="text-red-600 dark:text-red-400">{multiObjectiveStats.ruleFailure.toLocaleString()}</span>
+                              <span className="text-slate-500">)</span>
+                            </span>
+                          </p>
+                        </div>
+                      )}
                       <div className="flex min-w-0 flex-col gap-1.5">
                         <StatLabel label="Cost-based decisions" />
                         <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-700 dark:text-sky-400">
@@ -5821,15 +5879,14 @@ export function DecisionSimulatorPage() {
                           )}
                         </td>
                         <td className="px-3 py-2">
-                          {res.routingApproach?.includes('HEDGING') ? (
-                            <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:ring-amber-800 leading-4">Hedging</span>
-                          ) : res.routingApproach === 'SR_SELECTION_MULTI_OBJECTIVE' ? (
-                            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:ring-emerald-800 leading-4">Cost Based</span>
-                          ) : res.routingApproach === 'SR_SELECTION_V3_ROUTING' ? (
-                            <span className="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:ring-brand-800 leading-4">Auth Based</span>
-                          ) : (
-                            <span className="text-[11px] text-slate-500 leading-4">{res.routingApproach ?? '—'}</span>
-                          )}
+                          {(() => {
+                            const { label, badgeClass } = routingApproachDisplay(res.routingApproach)
+                            return badgeClass ? (
+                              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium leading-4 ring-1 ring-inset ${badgeClass}`}>{label}</span>
+                            ) : (
+                              <span className="text-[11px] text-slate-500 leading-4">{label}</span>
+                            )
+                          })()}
                         </td>
                         <td className="px-3 py-2">
                           <span className={`text-xs font-semibold ${res.status === 'CHARGED' ? 'text-emerald-700 dark:text-emerald-400' : res.status === 'PENDING_VBV' ? 'text-amber-700 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>{res.status}</span>

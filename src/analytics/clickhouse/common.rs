@@ -238,7 +238,7 @@ pub fn payment_audit_stage_label(stage: String) -> String {
     match stage.as_str() {
         "gateway_decided" => "Decide Gateway".to_string(),
         "hybrid_routed" => "Hybrid Routing".to_string(),
-        "score_updated" => "Update Gateway".to_string(),
+        "score_updated" | "score_skipped" => "Update Gateway".to_string(),
         "rule_applied" => "Rule Evaluate".to_string(),
         "preview_evaluated" => "Preview Result".to_string(),
         other => other.to_string(),
