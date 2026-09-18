@@ -137,35 +137,6 @@ impl KnownFeature {
         .await
     }
 
-    /// A merchant enabled before the cost-savings rename is listed only in the old row, so
-    /// `read_effective` reports it off while the decider's own fallback still routes on cost.
-    /// Migrating it here (`update_conf` writes the current key and clears the old entry) makes
-    /// the two agree and means the next read resolves on the current key alone.
-    async fn migrate_legacy_cost_savings(&self, merchant_id: &str) -> bool {
-        match self {
-            Self::CostSavings => {
-                let on = crate::redis::feature::is_feature_enabled(
-                    crate::decider::gatewaydecider::multi_objective::COST_SAVINGS_LEGACY_FEATURE_FLAG
-                        .to_string(),
-                    merchant_id.to_string(),
-                    crate::feedback::constants::kvRedis(),
-                )
-                .await;
-                if on {
-                    if let Err(err) = self.update_conf(merchant_id, true).await {
-                        logger::error!(
-                            "failed migrating merchant {} onto the cost-savings key: {:?}",
-                            merchant_id,
-                            err
-                        );
-                    }
-                }
-                on
-            }
-            _ => false,
-        }
-    }
-
     /// Updates the FeatureConf row in service_configuration by adding or removing
     /// the merchant. This is the only write path — no per-merchant keys involved.
     async fn update_conf(
@@ -206,51 +177,10 @@ impl KnownFeature {
             .change_context(crate::generics::MeshError::Others)?;
 
         if exists {
-            service_configuration::update_config(key, Some(serialized)).await?
+            service_configuration::update_config(key, Some(serialized)).await
         } else {
-            service_configuration::insert_config(key, Some(serialized)).await?
+            service_configuration::insert_config(key, Some(serialized)).await
         }
-
-        // Whichever way the toggle went, this merchant's answer now lives on the current key,
-        // so leaving it listed in the old cost-savings row would keep the decider's fallback
-        // returning true and silently undo a disable. Runs after the write above, so a failure
-        // here leaves the merchant in both rows (still enabled) rather than in neither.
-        if matches!(self, Self::CostSavings) {
-            let legacy =
-                crate::decider::gatewaydecider::multi_objective::COST_SAVINGS_LEGACY_FEATURE_FLAG;
-            let legacy_conf = service_configuration::find_config_by_name(legacy.to_string())
-                .await
-                .unwrap_or(None)
-                .and_then(|c| c.value)
-                .and_then(|v| serde_json::from_str::<FeatureConf>(&v).ok());
-
-            if let Some(mut conf) = legacy_conf {
-                let mut merchants = conf.merchants.take().unwrap_or_default();
-                let before = merchants.len();
-                merchants.retain(|m| m.merchantId.to_lowercase() != merchant_id.to_lowercase());
-                if merchants.len() != before {
-                    conf.merchants = Some(merchants);
-                    match serde_json::to_string(&conf) {
-                        Ok(v) => {
-                            if let Err(err) =
-                                service_configuration::update_config(legacy.to_string(), Some(v))
-                                    .await
-                            {
-                                logger::error!(
-                                    "failed removing merchant {} from {}: {:?}",
-                                    merchant_id,
-                                    legacy,
-                                    err
-                                );
-                            }
-                        }
-                        Err(err) => logger::error!("failed serializing {}: {:?}", legacy, err),
-                    }
-                }
-            }
-        }
-
-        Ok(())
     }
 }
 
@@ -538,8 +468,7 @@ pub async fn get_merchant_features(
 
         let mut features = Vec::new();
         for feature in KnownFeature::all() {
-            let enabled = feature.read_effective(&merchant_id).await
-                || feature.migrate_legacy_cost_savings(&merchant_id).await;
+            let enabled = feature.read_effective(&merchant_id).await;
             features.push(MerchantFeatureEntry {
                 feature: feature.clone(),
                 enabled,
@@ -597,11 +526,9 @@ pub async fn update_merchant_feature(
         Ok(_) => {
             let mut features = Vec::new();
             for f in KnownFeature::all() {
-                let enabled = f.read_effective(&merchant_id).await
-                    || f.migrate_legacy_cost_savings(&merchant_id).await;
                 features.push(MerchantFeatureEntry {
                     feature: f.clone(),
-                    enabled,
+                    enabled: f.read_effective(&merchant_id).await,
                 });
             }
             API_REQUEST_COUNTER

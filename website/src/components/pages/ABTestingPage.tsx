@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import useSWR, { useSWRConfig } from 'swr'
 import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Button } from '../ui/Button'
@@ -884,6 +884,12 @@ function formatTime(ms: number) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(new Date(ms))
 }
 
+// Sticky on the scroller, so the header stays put while the rows move under it. Header and rows
+// share one table: laying them out as two made each size its columns to its own contents, and they
+// only ever lined up by accident.
+const TXN_HEAD_CELL =
+  'sticky top-0 z-10 border-b border-slate-200 bg-slate-50 px-4 py-2.5 font-medium dark:border-[#222226] dark:bg-[#0c0c10]'
+
 function ExperimentDetailPanel({
   algorithm,
   isActive,
@@ -897,6 +903,7 @@ function ExperimentDetailPanel({
   onClone,
   realPaymentsOn,
 }: DetailPanelProps) {
+  const navigate = useNavigate()
   // Read-only sessions still see everything; the controls that would change it are inert.
   const canEditRouting = useCanEditRouting()
   const abData = (algorithm.algorithm_data || algorithm.algorithm)?.data as ABTestAlgorithmData | undefined
@@ -960,8 +967,9 @@ function ExperimentDetailPanel({
 
   function openAuditForTxn(paymentId: string, variantArm: string) {
     if (!txnHasAudit(variantArm) || !endpoint) return
-    const url = `${import.meta.env.BASE_URL}audit?range=1d&routing_kind=${AUDIT_ROUTING_KIND[endpoint]}&payment_id=${encodeURIComponent(paymentId)}`
-    window.open(url, '_blank')
+    // Routed in-app rather than opened in a new tab: the router owns the deployment base, so a
+    // bare `/audit` stays inside the dashboard instead of resolving against the host's own root.
+    navigate(`/audit?range=1d&routing_kind=${AUDIT_ROUTING_KIND[endpoint]}&payment_id=${encodeURIComponent(paymentId)}`)
   }
 
   // Page numbers to render in the transaction pager: always the first and last page, plus a
@@ -1205,21 +1213,19 @@ function ExperimentDetailPanel({
           </div>
           {txnsLoading && <Spinner size={14} />}
         </div>
-        <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-[#222226]">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-slate-500 bg-slate-50 dark:bg-[#0c0c10] border-b border-slate-200 dark:border-[#222226]">
-                <th className="px-4 py-2.5 font-medium">Arm</th>
-                <th className="px-4 py-2.5 font-medium">Routing</th>
-                <th className="px-4 py-2.5 font-medium">Payment ID</th>
-                <th className="px-4 py-2.5 font-medium">Gateway</th>
-                <th className="px-4 py-2.5 font-medium">Status</th>
-                <th className="px-4 py-2.5 font-medium">Time</th>
-              </tr>
-            </thead>
-          </table>
-          <div className="max-h-[400px] overflow-y-auto">
-            <table className="w-full text-base">
+        <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-[#222226]">
+          <div className="max-h-[400px] overflow-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-500">
+                  <th className={TXN_HEAD_CELL}>Arm</th>
+                  <th className={TXN_HEAD_CELL}>Routing</th>
+                  <th className={TXN_HEAD_CELL}>Payment ID</th>
+                  <th className={TXN_HEAD_CELL}>Gateway</th>
+                  <th className={TXN_HEAD_CELL}>Status</th>
+                  <th className={TXN_HEAD_CELL}>Time</th>
+                </tr>
+              </thead>
               <tbody>
                 {!txnData?.transactions.length ? (
                   <tr>
