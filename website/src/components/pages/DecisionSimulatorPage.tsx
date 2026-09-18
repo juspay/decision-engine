@@ -719,7 +719,7 @@ function saveExplorerState(scopeKey: string, state: ExplorerPersistedState) {
   }
 }
 
-// Evicts every stored scope past its result TTL (or unparseable), not just the active one — call once per mount, safe to call repeatedly.
+// Evicts every stored scope past its result TTL (or unparsable), not just the active one — call once per mount, safe to call repeatedly.
 function sweepExpiredExplorerState() {
   if (typeof window === 'undefined') return
   const prefix = `${EXPLORER_STORAGE_KEY_PREFIX}:`
