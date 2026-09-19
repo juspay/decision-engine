@@ -191,8 +191,24 @@ pub struct SmartRetryStats {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsGatewayVolume {
+    pub gateway: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsOverviewTotals {
+    pub request_count: i64,
+    pub error_count: i64,
+    pub auth_rate: AnalyticsAuthRate,
+    pub gateway_volumes: Vec<AnalyticsGatewayVolume>,
+    pub requests_by_route: Vec<AnalyticsRouteHit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsOverviewResponse {
     pub merchant_id: String,
+    pub totals: AnalyticsOverviewTotals,
     pub kpis: Vec<AnalyticsKpi>,
     pub route_hits: Vec<AnalyticsRouteHit>,
     pub top_scores: Vec<GatewayScoreSnapshot>,

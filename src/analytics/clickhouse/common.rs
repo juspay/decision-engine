@@ -19,6 +19,10 @@ pub const OVERVIEW_ERROR_FLOW_TYPES: &[FlowType] = &[
     FlowType::RoutingEvaluateError,
     FlowType::RoutingHybridError,
 ];
+pub const ALL_DECISION_FLOW_TYPES: &[FlowType] = &[
+    FlowType::DecideGatewayDecision,
+    FlowType::RoutingHybridDecision,
+];
 pub const ROUTE_HIT_FLOW_TYPES: &[FlowType] = &[
     FlowType::DecideGatewayRequestHit,
     FlowType::UpdateGatewayScoreRequestHit,
@@ -223,6 +227,13 @@ pub const fn decision_shape(kind: AnalyticsRoutingKind) -> DecisionShape {
         AnalyticsRoutingKind::MultiObjective => MULTI_OBJECTIVE_SHAPE,
         AnalyticsRoutingKind::Hybrid => HYBRID_SHAPE,
     }
+}
+
+pub fn all_decisions_filter() -> super::query::FilterClause {
+    super::query::FilterClause::raw(format!(
+        "flow_type IN {}",
+        static_flow_type_in_sql(ALL_DECISION_FLOW_TYPES)
+    ))
 }
 
 impl DecisionShape {

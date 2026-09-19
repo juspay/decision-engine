@@ -7,7 +7,9 @@ use crate::error::ApiError;
 use crate::feedback::gateway_scoring_service::{txn_failure_states, txn_success_states};
 use crate::types::txn_details::types::TxnStatus;
 
-use super::super::common::{decision_shape, fetch_one, static_flow_type_in_sql, DOMAIN_TABLE};
+use super::super::common::{
+    all_decisions_filter, decision_shape, fetch_one, static_flow_type_in_sql, DOMAIN_TABLE,
+};
 use super::super::filters::{analytics_dimension_filters, base_window_filters, merchant_filter};
 use super::super::query::{BoundQueryBuilder, FilterClause};
 use super::super::time::effective_window_bounds;
@@ -34,7 +36,22 @@ pub async fn load(
     client: &clickhouse::Client,
     query: &AnalyticsQuery,
 ) -> Result<AnalyticsAuthRate, ApiError> {
-    let row = fetch_one::<AuthRateRow>(outcome_query(query).build(client)).await?;
+    run(client, outcome_query(query)).await
+}
+
+/// The same rate over every payment the merchant routed, whichever kind decided it.
+pub async fn load_all(
+    client: &clickhouse::Client,
+    query: &AnalyticsQuery,
+) -> Result<AnalyticsAuthRate, ApiError> {
+    run(client, all_outcome_query(query)).await
+}
+
+async fn run(
+    client: &clickhouse::Client,
+    builder: BoundQueryBuilder,
+) -> Result<AnalyticsAuthRate, ApiError> {
+    let row = fetch_one::<AuthRateRow>(builder.build(client)).await?;
     Ok(AnalyticsAuthRate {
         success_count: row.success_count as i64,
         failure_count: row.failure_count as i64,
@@ -42,6 +59,17 @@ pub async fn load(
 }
 
 fn outcome_query(query: &AnalyticsQuery) -> BoundQueryBuilder {
+    scoped_outcome_query(query, decision_shape(query.routing_kind).decision_filter())
+}
+
+fn all_outcome_query(query: &AnalyticsQuery) -> BoundQueryBuilder {
+    scoped_outcome_query(query, all_decisions_filter())
+}
+
+fn scoped_outcome_query(
+    query: &AnalyticsQuery,
+    decision_filter: FilterClause,
+) -> BoundQueryBuilder {
     let (start_ms, end_ms) = effective_window_bounds(query);
 
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
@@ -63,16 +91,26 @@ fn outcome_query(query: &AnalyticsQuery) -> BoundQueryBuilder {
     )));
     // Binds are emitted in the order filters are added, so the subquery's own binds follow the
     // window and merchant ones above.
-    builder.add_filter(decided_payments_filter(query, start_ms, end_ms));
+    builder.add_filter(decided_payments_filter(
+        query,
+        start_ms,
+        end_ms,
+        decision_filter,
+    ));
 
     builder
 }
 
-/// `payment_id IN (…)` over the decisions this routing kind made in the window.
-fn decided_payments_filter(query: &AnalyticsQuery, start_ms: i64, end_ms: i64) -> FilterClause {
+/// `payment_id IN (…)` over the decisions `decision_filter` selects in the window.
+fn decided_payments_filter(
+    query: &AnalyticsQuery,
+    start_ms: i64,
+    end_ms: i64,
+    decision_filter: FilterClause,
+) -> FilterClause {
     let mut filters = base_window_filters(start_ms, end_ms);
     filters.extend(merchant_filter(&query.merchant_id));
-    filters.push(decision_shape(query.routing_kind).decision_filter());
+    filters.push(decision_filter);
     filters.extend(analytics_dimension_filters(query));
 
     let predicate = filters
@@ -139,6 +177,14 @@ mod tests {
             outcome_query(&analytics_query(AnalyticsRoutingKind::MultiObjective)).sql();
         assert!(multi_objective.contains("flow_type = 'decide_gateway_decision'"));
         assert!(!multi_objective.contains("flow_type = 'routing_hybrid_decision'"));
+    }
+
+    #[test]
+    fn the_merchant_wide_rate_counts_payments_either_kind_decided() {
+        let sql = all_outcome_query(&analytics_query(AnalyticsRoutingKind::MultiObjective)).sql();
+
+        assert!(sql.contains("'decide_gateway_decision'"));
+        assert!(sql.contains("'routing_hybrid_decision'"));
     }
 
     #[test]
