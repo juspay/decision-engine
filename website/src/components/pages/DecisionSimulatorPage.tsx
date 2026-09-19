@@ -450,6 +450,8 @@ type VolumePaymentEntry = {
 
 const EXPLORER_STORAGE_KEY_PREFIX = 'decision-explorer-state-v2'
 const EXPLORER_RESULT_TTL_MS = 10 * 60 * 1000
+// Cap on persisted simulationResults/volumeEvaluationLog, so no stored entry can approach localStorage's per-origin quota.
+const EXPLORER_RESULT_HISTORY_PERSIST_LIMIT = 200
 
 /**
  * Run control and the committed rows, held outside the component tree.
@@ -623,6 +625,8 @@ interface ExplorerPersistedState {
   volumeEvaluationLog: VolumePaymentEntry[]
   volumeProgress: number
   simulationResults: SimulationResult[]
+  // Persisted as its own value, not derived from the (capped) simulationResults on load — see EXPLORER_RESULT_HISTORY_PERSIST_LIMIT.
+  contractTally: ContractRunTally
   responseOpen: boolean
   debitResponseOpen: boolean
   volumeResponseOpen: boolean
@@ -672,6 +676,7 @@ function getDefaultExplorerState(): ExplorerPersistedState {
     volumeEvaluationLog: [],
     volumeProgress: 0,
     simulationResults: [],
+    contractTally: emptyRunTally(),
     responseOpen: false,
     debitResponseOpen: false,
     volumeResponseOpen: false,
@@ -701,12 +706,55 @@ function hasExpiredExplorerResults(resultDataUpdatedAtMs?: number | null) {
 
 function removeExplorerState(scopeKey: string) {
   if (typeof window === 'undefined') return
-  window.localStorage.removeItem(explorerStorageKey(scopeKey))
+  // Same failure guard as saveExplorerState/sweepExpiredExplorerState — this runs from mount/render paths too.
+  try {
+    window.localStorage.removeItem(explorerStorageKey(scopeKey))
+  } catch (err) {
+    console.warn('Could not clear explorer state; localStorage is unavailable', err)
+  }
 }
 
 function saveExplorerState(scopeKey: string, state: ExplorerPersistedState) {
   if (typeof window === 'undefined') return
-  window.localStorage.setItem(explorerStorageKey(scopeKey), JSON.stringify(state))
+  const key = explorerStorageKey(scopeKey)
+  // Bound on every write, not only after a failure — a reload of a paused run longer than this cap will show only the kept tail until resumed.
+  const bounded: ExplorerPersistedState = {
+    ...state,
+    simulationResults: state.simulationResults.slice(-EXPLORER_RESULT_HISTORY_PERSIST_LIMIT),
+    volumeEvaluationLog: state.volumeEvaluationLog.slice(-EXPLORER_RESULT_HISTORY_PERSIST_LIMIT),
+  }
+  try {
+    window.localStorage.setItem(key, JSON.stringify(bounded))
+  } catch (err) {
+    // Last-resort net for anything still outsized after capping — skip the save rather than let setItem's throw crash the page via the ErrorBoundary.
+    console.warn('Explorer state still exceeded localStorage quota after capping run history; skipping this save', err)
+  }
+}
+
+// Evicts every stored scope past its result TTL (or unparsable), not just the active one — call once per mount, safe to call repeatedly.
+function sweepExpiredExplorerState() {
+  if (typeof window === 'undefined') return
+  // Everything below, including obtaining window.localStorage itself, can throw in a browser where storage is blocked (e.g. some private-browsing modes) — never let mount-time housekeeping crash the page over it.
+  try {
+    const storage = window.localStorage
+    const prefix = `${EXPLORER_STORAGE_KEY_PREFIX}:`
+    const staleKeys: string[] = []
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i)
+      if (!key || !key.startsWith(prefix)) continue
+      const raw = storage.getItem(key)
+      if (!raw) continue
+      try {
+        const parsed = JSON.parse(raw) as Partial<ExplorerPersistedState>
+        if (hasExpiredExplorerResults(parsed.resultDataUpdatedAtMs)) staleKeys.push(key)
+      } catch {
+        staleKeys.push(key)
+      }
+    }
+    staleKeys.forEach(staleKey => storage.removeItem(staleKey))
+  } catch (err) {
+    console.warn('Skipping explorer-state housekeeping; localStorage is unavailable', err)
+  }
 }
 
 function loadExplorerState(scopeKey: string): ExplorerPersistedState {
@@ -756,6 +804,8 @@ function loadExplorerState(scopeKey: string): ExplorerPersistedState {
       volumeDistribution: parsed.volumeDistribution || defaults.volumeDistribution,
       volumeEvaluationLog: parsed.volumeEvaluationLog || defaults.volumeEvaluationLog,
       simulationResults: parsed.simulationResults || defaults.simulationResults,
+      // Prefer the persisted tally; recompute from rows only for an entry saved before this field existed.
+      contractTally: parsed.contractTally || tallyOf(parsed.simulationResults || []),
       extraConnectors: parsed.extraConnectors || defaults.extraConnectors,
       removedConnectors: parsed.removedConnectors || defaults.removedConnectors,
     }
@@ -1208,6 +1258,8 @@ export function DecisionSimulatorPage() {
   const hasRoutingKeys = Object.keys(routingKeysConfig).length > 0
   const routingConfigUnavailable = !routingKeysLoading && (!hasRoutingKeys || Boolean(routingKeysError))
   const initialState = useMemo(() => loadExplorerState(currentScopeKey), [currentScopeKey])
+  // Housekeeping for every merchant scope this browser has stored, not just this one — see sweepExpiredExplorerState.
+  useEffect(() => { sweepExpiredExplorerState() }, [])
   const [activeTab, setActiveTab] = useState<TabType>(initialState.activeTab)
   const [stateScopeKey, setStateScopeKey] = useState(initialState.scopeKey || currentScopeKey)
   const [resultDataUpdatedAtMs, setResultDataUpdatedAtMs] = useState<number | null>(
@@ -1784,7 +1836,8 @@ export function DecisionSimulatorPage() {
     setVolumeEvaluationLog(nextState.volumeEvaluationLog)
     setVolumeProgress(nextState.volumeProgress)
     liveRun.results = nextState.simulationResults
-    liveRun.contractTally = tallyOf(nextState.simulationResults)
+    // The persisted tally, not tallyOf(nextState.simulationResults) — that array is only a capped tail.
+    liveRun.contractTally = nextState.contractTally
     liveRun.running = false
     setSimulationResults(nextState.simulationResults)
     setContractTally(liveRun.contractTally)
@@ -1896,6 +1949,7 @@ export function DecisionSimulatorPage() {
       volumeEvaluationLog,
       volumeProgress,
       simulationResults,
+      contractTally,
       responseOpen,
       debitResponseOpen,
       volumeResponseOpen,
@@ -1935,6 +1989,7 @@ export function DecisionSimulatorPage() {
     volumeEvaluationLog,
     volumeProgress,
     simulationResults,
+    contractTally,
     responseOpen,
     debitResponseOpen,
     volumeResponseOpen,
@@ -2578,6 +2633,8 @@ export function DecisionSimulatorPage() {
       // times and stream each result the moment it lands: completions (and the chart) flow
       // smoothly, and one slow request no longer stalls the other in-flight ones.
       let dispatched = resumeFrom
+      // Absolute completed count, decoupled from results.length (which is only a capped tail after a reload) — used for the persisted resume index so a second pause/resume can't replay completed transactions.
+      let completedCount = resumeFrom
       let lastError: unknown = null
 
       // How long to leave between UI commits, as a function of how much there is to redraw.
@@ -2626,7 +2683,7 @@ export function DecisionSimulatorPage() {
           // and the resume index stays put; a Stop still breaks out. Flush once on the way in so a
           // page-leave/return resumes from exactly the committed rows.
           if (simulationPausedRef.current) {
-            runProgressRef.current = results.length
+            runProgressRef.current = completedCount
             flushResults(true)
             while (simulationPausedRef.current && !simulationAbortRef.current && isCurrentRun()) {
               await new Promise(resolve => setTimeout(resolve, 120))
@@ -2642,6 +2699,7 @@ export function DecisionSimulatorPage() {
             const row = await runTxn(i)
             results.push(row)
             countPayment(liveRun.contractTally, row)
+            completedCount++
             consecutiveErrors = 0
           } catch (e) {
             lastError = e
@@ -2659,7 +2717,7 @@ export function DecisionSimulatorPage() {
           // point, which now belongs to whichever run replaced this one.
           if (!isCurrentRun()) return
           // Record the resume point as the committed count and flush on the shared throttle.
-          runProgressRef.current = results.length
+          runProgressRef.current = completedCount
           flushResults(false)
 
         }
@@ -5162,8 +5220,8 @@ export function DecisionSimulatorPage() {
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-[#263141]">
-                          {volumeEvaluationLog.slice(-200).map((entry, idx) => {
-                            const absIdx = Math.max(0, volumeEvaluationLog.length - 200) + idx
+                          {volumeEvaluationLog.slice(-EXPLORER_RESULT_HISTORY_PERSIST_LIMIT).map((entry, idx) => {
+                            const absIdx = Math.max(0, volumeEvaluationLog.length - EXPLORER_RESULT_HISTORY_PERSIST_LIMIT) + idx
                             return (
                             <tr
                               key={entry.paymentId}
