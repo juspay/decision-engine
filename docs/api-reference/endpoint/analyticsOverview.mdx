@@ -68,15 +68,33 @@ curl "$BASE_URL/analytics/overview?range=1d" \
 ```json
 {
   "merchant_id": "merchant_demo",
+  "totals": {
+    "request_count": 95,
+    "error_count": 4,
+    "auth_rate": { "success_count": 39, "failure_count": 4 },
+    "gateway_volumes": [
+      { "gateway": "stripe", "count": 28 },
+      { "gateway": "adyen", "count": 14 }
+    ],
+    "requests_by_route": [
+      { "route": "/decide_gateway", "count": 42 },
+      { "route": "/update_gateway", "count": 53 },
+      { "route": "/rule_evaluate", "count": 0 },
+      { "route": "/routing_hybrid", "count": 0 }
+    ]
+  },
   "kpis": [
+    { "label": "Requests / 1d", "value": "95", "subtitle": "Across every routing entry point" },
     { "label": "Decision events / 1d", "value": "42", "subtitle": "Counts decision events, not unique payments" },
     { "label": "Score snapshots", "value": "18", "subtitle": "Latest gateway score updates" },
     { "label": "Rule hits", "value": "12", "subtitle": "Priority-logic hits" },
-    { "label": "Errors", "value": "3", "subtitle": "Recorded error events" }
+    { "label": "Errors", "value": "4", "subtitle": "Structured failure summaries" }
   ],
   "route_hits": [
-    { "route": "decide_gateway", "count": 42 },
-    { "route": "update_gateway_score", "count": 40 }
+    { "route": "/decide_gateway", "count": 42 },
+    { "route": "/update_gateway", "count": 40 },
+    { "route": "/rule_evaluate", "count": 0 },
+    { "route": "/routing_hybrid", "count": 0 }
   ],
   "top_scores": [
     {
@@ -114,6 +132,12 @@ curl "$BASE_URL/analytics/overview?range=1d" \
 ## Notes
 
 - Analytics reads are ClickHouse-backed and merchant-scoped by the authenticated context.
+- `totals` holds window-wide counts. `top_errors`, `top_scores` and `top_rules` list the largest few
+  rows only, so summing them is not the same number.
+- Everything under `totals` is merchant-wide: it counts both routing kinds whatever `routing_kind`
+  you ask for. The fields beside it are scoped to that kind, so a dashboard tab sees only its own
+  traffic — `route_hits` scopes `/update_gateway` to the payments that kind decided, and `auth_rate`
+  its outcomes. Use `totals` for a merchant-wide summary, the scoped fields for a per-kind view.
 - Use `range=15m|1h|12h|1d|1w` or `start_ms` plus `end_ms` for a custom window.
 - Use this for high-level status, not detailed payment debugging.
 

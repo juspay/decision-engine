@@ -1,5 +1,6 @@
 pub mod audit_summaries;
 pub mod audit_timeline;
+pub mod auth_rate;
 pub mod calibration_events;
 pub mod commitment_audit;
 pub mod commitment_common;
@@ -12,6 +13,7 @@ pub mod decision_tiles;
 pub mod error_summaries;
 pub mod filter_options;
 pub mod gateway_share;
+pub mod gateway_volumes;
 pub mod hybrid_split;
 pub mod log_samples;
 pub mod overview_counts;

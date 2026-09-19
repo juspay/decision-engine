@@ -5,7 +5,7 @@ use crate::analytics::models::{AnalyticsErrorSummary, AnalyticsQuery};
 use crate::error::ApiError;
 
 use super::super::common::{
-    fetch_all, static_flow_type_in_sql, DOMAIN_TABLE, OVERVIEW_ERROR_FLOW_TYPES,
+    fetch_all, fetch_one, static_flow_type_in_sql, DOMAIN_TABLE, OVERVIEW_ERROR_FLOW_TYPES,
 };
 use super::super::filters::{analytics_dimension_filters, base_window_filters, merchant_filter};
 use super::super::query::{BoundQueryBuilder, FilterClause, OrderClause};
@@ -20,20 +20,14 @@ struct ErrorSummaryRow {
     last_seen_ms: i64,
 }
 
-pub async fn load(
-    client: &clickhouse::Client,
-    query: &AnalyticsQuery,
-    limit: Option<usize>,
-) -> Result<Vec<AnalyticsErrorSummary>, ApiError> {
+#[derive(Debug, Clone, Deserialize, Row)]
+struct ErrorTotalRow {
+    count: u64,
+}
+
+fn scoped_builder(query: &AnalyticsQuery) -> BoundQueryBuilder {
     let (start_ms, end_ms) = effective_window_bounds(query);
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
-    builder.extend_selects([
-        "route".to_string(),
-        "error_code".to_string(),
-        "error_message".to_string(),
-        "count() AS count".to_string(),
-        "max(created_at_ms) AS last_seen_ms".to_string(),
-    ]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));
     builder.extend_filters(merchant_filter(&query.merchant_id));
     builder.extend_filters(analytics_dimension_filters(query));
@@ -41,12 +35,37 @@ pub async fn load(
         "flow_type IN {}",
         static_flow_type_in_sql(OVERVIEW_ERROR_FLOW_TYPES)
     )));
+    builder
+}
+
+fn summary_builder(query: &AnalyticsQuery, limit: Option<usize>) -> BoundQueryBuilder {
+    let mut builder = scoped_builder(query);
+    builder.extend_selects([
+        "route".to_string(),
+        "error_code".to_string(),
+        "error_message".to_string(),
+        "count() AS count".to_string(),
+        "max(created_at_ms) AS last_seen_ms".to_string(),
+    ]);
     builder.extend_group_bys(["route", "error_code", "error_message"]);
     builder.add_order_by(OrderClause::desc("count"));
     builder.add_order_by(OrderClause::desc("last_seen_ms"));
     builder.set_limit(limit.map(|value| value as u64));
+    builder
+}
 
-    let rows = fetch_all::<ErrorSummaryRow>(builder.build(client)).await?;
+fn total_builder(query: &AnalyticsQuery) -> BoundQueryBuilder {
+    let mut builder = scoped_builder(query);
+    builder.add_select("count() AS count");
+    builder
+}
+
+pub async fn load(
+    client: &clickhouse::Client,
+    query: &AnalyticsQuery,
+    limit: Option<usize>,
+) -> Result<Vec<AnalyticsErrorSummary>, ApiError> {
+    let rows = fetch_all::<ErrorSummaryRow>(summary_builder(query, limit).build(client)).await?;
     Ok(rows
         .into_iter()
         .map(|row| AnalyticsErrorSummary {
@@ -57,4 +76,12 @@ pub async fn load(
             last_seen_ms: row.last_seen_ms,
         })
         .collect())
+}
+
+pub async fn load_total(
+    client: &clickhouse::Client,
+    query: &AnalyticsQuery,
+) -> Result<i64, ApiError> {
+    let row = fetch_one::<ErrorTotalRow>(total_builder(query).build(client)).await?;
+    Ok(row.count as i64)
 }

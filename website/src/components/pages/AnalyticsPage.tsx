@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
-import { useFeatureReleased } from '../../lib/featureReleases'
+import { releaseAdmits, type ReleasedFeature } from '../../lib/featureReleases'
+import { useAuthStore } from '../../store/authStore'
 import useSWR from 'swr'
 import {
   Bar,
@@ -61,6 +62,7 @@ import { Badge } from '../ui/Badge'
 import { Spinner } from '../ui/Spinner'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { VolumeCommitmentAnalytics } from './VolumeCommitmentAnalytics'
+import { SelectMenu } from '../ui/SelectMenu'
 import { TimeRangeFilter } from '../ui/TimeRangeFilter'
 import {
   TimeWindow,
@@ -75,17 +77,22 @@ type RoutingFilters = {
   gateways: string[]
 }
 
-type AnalyticsView = 'hybrid' | 'multi_objective' | 'rule_based' | 'volume_commitments'
-const ANALYTICS_VIEWS: readonly AnalyticsView[] = ['hybrid', 'multi_objective', 'rule_based', 'volume_commitments']
+const ANALYTICS_VIEW_TABS = [
+  { value: 'hybrid', label: 'Hybrid Routing' },
+  { value: 'multi_objective', label: 'Multi-objective' },
+  { value: 'rule_based', label: 'Rule based / Volume based' },
+  { value: 'volume_commitments', label: 'Volume commitments', gate: 'volume-contracts' },
+] as const satisfies readonly { value: string; label: string; gate?: ReleasedFeature }[]
+
+type AnalyticsView = (typeof ANALYTICS_VIEW_TABS)[number]['value']
 const DEFAULT_ANALYTICS_VIEW: AnalyticsView = 'hybrid'
 
-type AnalyticsRoutingKindValue = 'multi_objective' | 'hybrid'
-const ANALYTICS_VIEW_LABELS: Record<AnalyticsView, string> = {
-  hybrid: 'Hybrid Routing',
-  multi_objective: 'Multi-objective',
-  rule_based: 'Rule based / Volume based',
-  volume_commitments: 'Volume commitments',
+function unhandledView(view: never): null {
+  console.warn(`Analytics view has no panel: ${String(view)}`)
+  return null
 }
+
+type AnalyticsRoutingKindValue = 'multi_objective' | 'hybrid'
 
 type PreviewTraceKey = readonly [
   'preview-trace-analytics',
@@ -404,12 +411,6 @@ function PendingState({ title, body }: { title: string; body: string }) {
 
 function controlClassName() {
   return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[13px] text-slate-700 shadow-sm outline-none transition focus:border-brand-500 dark:border-[#27272a] dark:bg-[#121214] dark:text-[#e5e7eb]'
-}
-
-function sectionButtonClass(active: boolean) {
-  return active
-    ? '!border-brand-500/70 !bg-white !text-slate-950 shadow-[0_14px_30px_-24px_rgba(59,130,246,0.55)] ring-2 ring-brand-500/55 dark:!border-brand-500/70 dark:!bg-[#161b24] dark:!text-white dark:ring-brand-500/55'
-    : '!border-transparent !bg-slate-100 !text-slate-600 hover:!bg-slate-200 hover:!text-slate-900 dark:!bg-[#161b24] dark:!text-[#a7b2c6] dark:hover:!bg-[#1c2330] dark:hover:!text-white'
 }
 
 function InfoButton({ content }: { content: InfoContent }) {
@@ -980,17 +981,15 @@ export function AnalyticsPage() {
   // reopens it directly; the default view is left out of the URL.
   const [searchParams, setSearchParams] = useSearchParams()
   const viewParam = searchParams.get('view')
-  // Volume commitments is gated by the release roster (featureReleases.ts). Outside the audience
-  // a ?view=volume_commitments link behaves like an unknown view and is canonicalised
-  // back to the default by the effect below.
-  const volumeContractsBeta = useFeatureReleased('volume-contracts')
-  const requestedView: AnalyticsView = ANALYTICS_VIEWS.includes(viewParam as AnalyticsView)
+  // A gated tab is hidden outside its release audience (featureReleases.ts), and a ?view= link to
+  // one behaves like an unknown view, canonicalised back to the default by the effect below.
+  const user = useAuthStore((s) => s.user)
+  const visibleViewTabs = ANALYTICS_VIEW_TABS.filter(
+    (tab) => !('gate' in tab) || releaseAdmits(user, tab.gate),
+  )
+  const view: AnalyticsView = visibleViewTabs.some((tab) => tab.value === viewParam)
     ? (viewParam as AnalyticsView)
     : DEFAULT_ANALYTICS_VIEW
-  const view: AnalyticsView =
-    requestedView === 'volume_commitments' && !volumeContractsBeta
-      ? DEFAULT_ANALYTICS_VIEW
-      : requestedView
   const setView = (nextView: AnalyticsView) => {
     setSearchParams(
       (prev) => {
@@ -1264,13 +1263,14 @@ export function AnalyticsPage() {
       ),
     [routeHits, decisionRouteKey],
   )
-  const overallAuthRate = useMemo(() => {
-    const scores = overview.data?.top_scores ?? []
-    const totalTx = scores.reduce((sum, s) => sum + s.transaction_count, 0)
-    if (!totalTx) return null
-    const weightedSum = scores.reduce((sum, s) => sum + s.score_value * s.transaction_count, 0)
-    return weightedSum / totalTx
-  }, [overview.data])
+  // From reported outcomes, not the SR score store — that holds one merchant-wide estimate over
+  // the model's fixed window, so every view read the same number.
+  const authRateCounts = overview.data?.auth_rate
+  const authRateSuccess = authRateCounts?.success_count ?? 0
+  const authRateTotal = authRateCounts
+    ? authRateCounts.success_count + authRateCounts.failure_count
+    : 0
+  const overallAuthRate = authRateTotal > 0 ? authRateSuccess / authRateTotal : null
   const ruleEvaluateHits = useMemo(
     () => routeHits.find((item) => item.route === '/rule_evaluate')?.count || 0,
     [routeHits],
@@ -1796,49 +1796,11 @@ export function AnalyticsPage() {
 
   return (
     <div className="space-y-8 px-5 sm:px-5 lg:px-8 xl:px-8">
-      <div className="grid grid-cols-1 items-center gap-3 xl:grid-cols-[1fr_auto_1fr]">
-        <div className="space-y-2">
-          <PageHeading title="Analytics" description="Real-time multi-gateway routing performance overview." />
-        </div>
+      <div className="grid grid-cols-1 items-center gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
+        <PageHeading title="Analytics" description="Real-time multi-gateway routing performance overview." />
 
-        <div className="inline-flex max-w-full flex-wrap items-center gap-1 justify-self-start rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d] xl:justify-self-center">
-          <Button
-            size="sm"
-            variant="secondary"
-            className={sectionButtonClass(view === 'hybrid')}
-            onClick={() => setView('hybrid')}
-          >
-            {ANALYTICS_VIEW_LABELS.hybrid}
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            className={sectionButtonClass(view === 'multi_objective')}
-            onClick={() => setView('multi_objective')}
-          >
-            {ANALYTICS_VIEW_LABELS.multi_objective}
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            className={sectionButtonClass(view === 'rule_based')}
-            onClick={() => setView('rule_based')}
-          >
-            {ANALYTICS_VIEW_LABELS.rule_based}
-          </Button>
-          {volumeContractsBeta && (
-            <Button
-              size="sm"
-              variant="secondary"
-              className={sectionButtonClass(view === 'volume_commitments')}
-              onClick={() => setView('volume_commitments')}
-            >
-              {ANALYTICS_VIEW_LABELS.volume_commitments}
-            </Button>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 justify-self-start xl:justify-self-end">
+        <div className="flex flex-wrap items-center gap-2 justify-self-start xl:justify-self-end">
+          <SelectMenu label="View" items={visibleViewTabs} value={view} onSelect={setView} />
           <TimeRangeFilter
             range={range}
             customStart={customStart}
@@ -1886,13 +1848,13 @@ export function AnalyticsPage() {
                       {formatPercent(overallAuthRate)}
                     </p>
                     <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
-                      Weighted across all gateways
+                      {formatNumber(authRateSuccess, 0)} of {formatNumber(authRateTotal, 0)} reported outcomes
                     </p>
                   </>
                 ) : (
                   <>
                     <p className="mt-2 text-[34px] font-semibold text-slate-500 dark:text-slate-400 leading-[42px]">—</p>
-                    <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">No score data yet</p>
+                    <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">No reported outcomes yet</p>
                   </>
                 )}
               </CardBody>
@@ -2234,7 +2196,7 @@ export function AnalyticsPage() {
         </div>
       ) : view === 'volume_commitments' ? (
         <VolumeCommitmentAnalytics />
-      ) : (
+      ) : view === 'rule_based' ? (
         <div className="space-y-5">
           <Card className="!rounded-2xl">
             <CardBody>
@@ -2492,6 +2454,8 @@ export function AnalyticsPage() {
             </div>
           </div>
         </div>
+      ) : (
+        unhandledView(view)
       )}
       </div>
     </div>
