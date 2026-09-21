@@ -447,6 +447,10 @@ pub fn invalid_request_error(detail: &str, e: &impl std::fmt::Display) -> T::Err
     }
 }
 
+/// What `check_and_update_gateway_score_` returns when the payment has no scoring context (it was
+/// never routed by the decider, and no context was stored for it), so no score was updated.
+pub const SCORE_UPDATE_SKIPPED: &str = "Skipped";
+
 pub async fn check_and_update_gateway_score_(
     api_payload: FT::UpdateScorePayload,
 ) -> Result<String, T::ErrorResponse> {
@@ -586,11 +590,16 @@ pub async fn check_and_update_gateway_score_(
             Ok("Success".to_string())
         }
         Err(e) => {
-            if matches!(
-                e.current_context(),
-                redis_interface::errors::RedisError::NotFound
-                    | redis_interface::errors::RedisError::GetFailed
-            ) {
+            // With compression on, a missing key also reads as `GetFailed`, which is otherwise a
+            // read or decode failure. Only a key confirmed absent is skipped.
+            let scoring_data_absent = match e.current_context() {
+                redis_interface::errors::RedisError::NotFound => true,
+                redis_interface::errors::RedisError::GetFailed => {
+                    matches!(app_state.redis_conn.key_exists(&redis_key).await, Ok(false))
+                }
+                _ => false,
+            };
+            if scoring_data_absent {
                 logger::info!(
                     action = "GATEWAY_SCORING_DATA_NOT_FOUND_SKIP",
                     tag = "GATEWAY_SCORING_DATA_NOT_FOUND_SKIP",
@@ -601,7 +610,7 @@ pub async fn check_and_update_gateway_score_(
                     api_payload.payment_id,
                     e,
                 );
-                return Ok("Skipped".to_string());
+                return Ok(SCORE_UPDATE_SKIPPED.to_string());
             }
             Err(T::ErrorResponse {
                 status: "400".to_string(),

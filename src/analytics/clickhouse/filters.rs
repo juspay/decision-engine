@@ -1,10 +1,12 @@
-use crate::analytics::flow::{AnalyticsRoute, FlowType};
+use crate::analytics::flow::{
+    AnalyticsRoute, SUMMARY_KIND_DYNAMIC, SUMMARY_KIND_HYBRID, SUMMARY_KIND_PREVIEW,
+};
 use crate::analytics::models::{
     AnalyticsQuery, PaymentAuditQuery, PaymentAuditRoutingKind, PaymentAuditScope,
 };
 
 use super::common::{
-    payment_audit_flow_types_in_sql, static_flow_type_array_sql, PAYMENT_AUDIT_HYBRID_FLOW_TYPES,
+    payment_audit_flow_types_in_sql, static_flow_type_in_sql, PAYMENT_AUDIT_HYBRID_FLOW_TYPES,
     PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES, PAYMENT_AUDIT_PREVIEW_FLOW_TYPES,
 };
 use super::query::FilterClause;
@@ -17,7 +19,30 @@ pub fn base_window_filters(start_ms: i64, end_ms: i64) -> Vec<FilterClause> {
     vec![
         FilterClause::gte("created_at_ms", start_ms),
         FilterClause::lte("created_at_ms", end_ms),
+        partition_lower_bound(start_ms),
+        FilterClause::new(
+            "created_at <= fromUnixTimestamp64Milli(toInt64(?))",
+            vec![end_ms.into()],
+        ),
     ]
+}
+
+/// `analytics_domain_events` is partitioned by `toYYYYMM(created_at)` and its sort key does not
+/// lead with time, so a predicate on `created_at_ms` alone reads every monthly partition of the
+/// merchant. The same bound on the partition column lets ClickHouse skip the months outside it.
+pub fn partition_lower_bound(start_ms: i64) -> FilterClause {
+    FilterClause::new(
+        "created_at >= fromUnixTimestamp64Milli(toInt64(?))",
+        vec![start_ms.into()],
+    )
+}
+
+/// Upper counterpart of [`partition_lower_bound`] for half-open windows (`created_at_ms < end`).
+pub fn partition_upper_bound_exclusive(end_ms: i64) -> FilterClause {
+    FilterClause::new(
+        "created_at < fromUnixTimestamp64Milli(toInt64(?))",
+        vec![end_ms.into()],
+    )
 }
 
 pub fn merchant_filter(merchant_id: &str) -> Vec<FilterClause> {
@@ -162,41 +187,59 @@ pub fn payment_audit_needs_raw_rows(query: &PaymentAuditQuery) -> bool {
         )
 }
 
-fn has_any_flow_type(flow_types: &[FlowType]) -> FilterClause {
-    FilterClause::raw(format!(
-        "hasAny(flow_types, {})",
-        static_flow_type_array_sql(flow_types)
-    ))
+/// The bit a payment's aggregated `routing_families` carries for each event family it produced
+/// (`flow::SUMMARY_KIND_*`). One family per event, so a payment's families fit in one byte.
+pub const PREVIEW_FAMILY_BIT: u8 = 1;
+pub const DYNAMIC_FAMILY_BIT: u8 = 2;
+pub const HYBRID_FAMILY_BIT: u8 = 4;
+
+/// `routing_families` over raw `analytics_domain_events` rows, decided by flow type.
+pub fn raw_routing_families_sql() -> String {
+    format!(
+        "groupBitOr(multiIf(flow_type IN {}, {PREVIEW_FAMILY_BIT}, flow_type IN {}, {DYNAMIC_FAMILY_BIT}, flow_type IN {}, {HYBRID_FAMILY_BIT}, 0)) AS routing_families",
+        static_flow_type_in_sql(PAYMENT_AUDIT_PREVIEW_FLOW_TYPES),
+        static_flow_type_in_sql(PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES),
+        static_flow_type_in_sql(PAYMENT_AUDIT_HYBRID_FLOW_TYPES),
+    )
 }
 
-fn has_no_flow_type(flow_types: &[FlowType]) -> FilterClause {
-    FilterClause::raw(format!(
-        "NOT hasAny(flow_types, {})",
-        static_flow_type_array_sql(flow_types)
-    ))
+/// `routing_families` over summary rows, whose `summary_kind` is the family the write path
+/// derived from the same flow-type sets.
+pub fn summary_routing_families_sql() -> String {
+    format!(
+        "groupBitOr(multiIf(summary_kind = '{SUMMARY_KIND_PREVIEW}', {PREVIEW_FAMILY_BIT}, summary_kind = '{SUMMARY_KIND_DYNAMIC}', {DYNAMIC_FAMILY_BIT}, summary_kind = '{SUMMARY_KIND_HYBRID}', {HYBRID_FAMILY_BIT}, 0)) AS routing_families"
+    )
 }
 
-/// The routing-kind filter over a payment's aggregated `flow_types`. A payment is listed under
-/// exactly one kind, by precedence: `hybrid` when it went through `/routing/hybrid`; otherwise
-/// `multi_objective` when an SR decision (or its score feedback) exists; otherwise `rule_based`
-/// when only rule evaluations exist. So a payment id that carries both a rule evaluation and an
-/// SR decision shows up under Multi-objective only, with its whole trail. Debit routing is
-/// decided by `routing_approach` on the raw rows instead (see
+fn has_family(bit: u8) -> FilterClause {
+    FilterClause::raw(format!("bitAnd(routing_families, {bit}) != 0"))
+}
+
+fn lacks_family(bit: u8) -> FilterClause {
+    FilterClause::raw(format!("bitAnd(routing_families, {bit}) = 0"))
+}
+
+/// The routing-kind filter over a payment's aggregated `routing_families`. A payment is listed
+/// under exactly one kind, by precedence: `hybrid` when it went through `/routing/hybrid`;
+/// otherwise `multi_objective` when an SR decision (or its score feedback) exists; otherwise
+/// `rule_based` when only rule evaluations exist. So a payment id that carries both a rule
+/// evaluation and an SR decision shows up under Multi-objective only, with its whole trail. Debit
+/// routing is decided by `routing_approach` on the raw rows instead (see
 /// `payment_audit_summary_scope_filters`).
 pub fn payment_audit_routing_kind_filters(kind: PaymentAuditRoutingKind) -> Vec<FilterClause> {
     match kind {
         PaymentAuditRoutingKind::MultiObjective => vec![
-            has_any_flow_type(PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES),
-            has_no_flow_type(PAYMENT_AUDIT_HYBRID_FLOW_TYPES),
+            has_family(DYNAMIC_FAMILY_BIT),
+            lacks_family(HYBRID_FAMILY_BIT),
         ],
         // Rule based = the rule evaluations recorded by direct `/routing/evaluate` calls, i.e.
-        // the same flow types the preview scope reads.
+        // the same family the preview scope reads.
         PaymentAuditRoutingKind::RuleBased => vec![
-            has_any_flow_type(PAYMENT_AUDIT_PREVIEW_FLOW_TYPES),
-            has_no_flow_type(PAYMENT_AUDIT_HYBRID_FLOW_TYPES),
-            has_no_flow_type(PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES),
+            has_family(PREVIEW_FAMILY_BIT),
+            lacks_family(HYBRID_FAMILY_BIT),
+            lacks_family(DYNAMIC_FAMILY_BIT),
         ],
-        PaymentAuditRoutingKind::Hybrid => vec![has_any_flow_type(PAYMENT_AUDIT_HYBRID_FLOW_TYPES)],
+        PaymentAuditRoutingKind::Hybrid => vec![has_family(HYBRID_FAMILY_BIT)],
         PaymentAuditRoutingKind::DebitRouting => Vec::new(),
     }
 }
@@ -250,11 +293,11 @@ pub fn payment_audit_summary_bucket_filters(
     let mut filters = vec![
         FilterClause::eq("merchant_id", query.merchant_id.clone()),
         FilterClause::new(
-            "bucket_start >= fromUnixTimestamp64Milli(?)",
+            "bucket_start >= fromUnixTimestamp64Milli(toInt64(?))",
             vec![start_ms.into()],
         ),
         FilterClause::new(
-            "bucket_start <= fromUnixTimestamp64Milli(?)",
+            "bucket_start <= fromUnixTimestamp64Milli(toInt64(?))",
             vec![end_ms.into()],
         ),
     ];
@@ -415,10 +458,10 @@ mod tests {
             .any(|predicate| predicate == "merchant_id = ?"));
         assert!(predicates
             .iter()
-            .any(|predicate| predicate == "bucket_start >= fromUnixTimestamp64Milli(?)"));
+            .any(|predicate| predicate == "bucket_start >= fromUnixTimestamp64Milli(toInt64(?))"));
         assert!(predicates
             .iter()
-            .any(|predicate| predicate == "bucket_start <= fromUnixTimestamp64Milli(?)"));
+            .any(|predicate| predicate == "bucket_start <= fromUnixTimestamp64Milli(toInt64(?))"));
         assert!(predicates
             .iter()
             .any(|predicate| predicate == "summary_kind IN (?)"));
@@ -548,7 +591,7 @@ mod tests {
     }
 
     #[test]
-    fn routing_kinds_are_exclusive_over_the_aggregated_flow_types() {
+    fn routing_kinds_are_exclusive_over_the_aggregated_families() {
         let predicates = |kind| {
             payment_audit_routing_kind_filters(kind)
                 .into_iter()
@@ -556,31 +599,41 @@ mod tests {
                 .collect::<Vec<_>>()
         };
 
-        let hybrid = predicates(PaymentAuditRoutingKind::Hybrid);
-        assert_eq!(hybrid.len(), 1);
-        assert!(hybrid[0].starts_with("hasAny(flow_types, ["));
-        assert!(hybrid[0].contains("routing_hybrid_decision"));
-        assert!(!hybrid[0].contains("update_gateway_score_update"));
-
-        let rule_based = predicates(PaymentAuditRoutingKind::RuleBased);
-        assert_eq!(rule_based.len(), 3);
-        assert!(rule_based[0].contains("routing_evaluate_advanced"));
-        assert!(!rule_based[0].contains("routing_hybrid_decision"));
-        assert!(rule_based[1].starts_with("NOT hasAny(flow_types, ["));
-        assert!(rule_based[1].contains("routing_hybrid_decision"));
+        assert_eq!(
+            predicates(PaymentAuditRoutingKind::Hybrid),
+            vec!["bitAnd(routing_families, 4) != 0"]
+        );
         // an SR decision on the same payment id takes precedence: rule based excludes it
-        assert!(rule_based[2].starts_with("NOT hasAny(flow_types, ["));
-        assert!(rule_based[2].contains("decide_gateway_decision"));
-        assert!(rule_based[2].contains("update_gateway_score_update"));
-
-        let multi = predicates(PaymentAuditRoutingKind::MultiObjective);
-        assert_eq!(multi.len(), 2);
-        assert!(multi[0].contains("decide_gateway_decision"));
-        assert!(multi[0].contains("update_gateway_score_update"));
-        assert!(!multi[0].contains("routing_hybrid_decision"));
-        assert!(multi[1].starts_with("NOT hasAny(flow_types, ["));
-
+        assert_eq!(
+            predicates(PaymentAuditRoutingKind::RuleBased),
+            vec![
+                "bitAnd(routing_families, 1) != 0",
+                "bitAnd(routing_families, 4) = 0",
+                "bitAnd(routing_families, 2) = 0",
+            ]
+        );
+        assert_eq!(
+            predicates(PaymentAuditRoutingKind::MultiObjective),
+            vec![
+                "bitAnd(routing_families, 2) != 0",
+                "bitAnd(routing_families, 4) = 0",
+            ]
+        );
         assert!(predicates(PaymentAuditRoutingKind::DebitRouting).is_empty());
+    }
+
+    #[test]
+    fn family_bits_follow_the_flow_type_families() {
+        let raw = super::raw_routing_families_sql();
+        let preview_arm = raw.split(", 1,").next().expect("preview arm");
+        assert!(preview_arm.contains("routing_evaluate_advanced"));
+        assert!(!preview_arm.contains("routing_hybrid_decision"));
+        assert!(raw.contains("'routing_hybrid_decision', 'routing_hybrid_error'), 4, 0)"));
+
+        let summary = super::summary_routing_families_sql();
+        assert!(summary.contains("summary_kind = 'preview', 1"));
+        assert!(summary.contains("summary_kind = 'dynamic', 2"));
+        assert!(summary.contains("summary_kind = 'hybrid', 4"));
     }
 
     #[test]

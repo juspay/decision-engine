@@ -19,6 +19,8 @@ curl "$BASE_URL/analytics/experiment/routing_a1b2c3d4-1111-2222-3333-44445555666
 
 Optional query parameters: `start_ms`, `end_ms`, `min_sample_size`, `guardrail_threshold_pp`, `evaluation_margin` — override the experiment's stored thresholds for an ad-hoc window or sensitivity check.
 
+`endpoint` (`hybrid_routing`, `decide_gateway` or `evaluate`) restricts the results to one endpoint. An experiment applies different arm layers on each endpoint, so the arms measure a different change on each — read results one endpoint at a time rather than pooled. Omitting it reads every endpoint together. Events recorded before endpoint tagging are counted under `decide_gateway`. The transactions endpoint below accepts the same `endpoint` parameter.
+
 ```json
 {
   "experiment_id": "routing_a1b2c3d4-1111-2222-3333-444455556666",

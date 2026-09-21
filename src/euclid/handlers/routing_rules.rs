@@ -10,9 +10,10 @@ use crate::{
         pm_filter_graph,
         types::{
             ActivateRoutingConfigRequest, AlgorithmType, Context, DeactivateRoutingConfigRequest,
-            JsonifiedRoutingAlgorithm, KeyDataType, RoutingAlgorithmMapperNew, RoutingBatchRequest,
-            RoutingBatchResponse, RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest,
-            RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
+            ExperimentEndpoint, JsonifiedRoutingAlgorithm, KeyDataType, RoutingAlgorithmMapperNew,
+            RoutingBatchRequest, RoutingBatchResponse, RoutingDictionaryRecord,
+            RoutingEvaluateResponse, RoutingRequest, RoutingRule, SrDimensionConfig,
+            StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
         },
         utils::{
             apply_default_fallback, generate_random_id, is_valid_enum_value,
@@ -87,6 +88,185 @@ mod cache_key_tests {
     }
 }
 
+// ── Experiment slot ───────────────────────────────────────────────────────────
+//
+// An A/B experiment is activated into its own mapper slot, `{algorithm_for}_experiment`, beside
+// the active rule of its transaction type. Routing reads the experiment for the payments it
+// covers and the rule for everything else, so the rule stays active while the experiment runs and
+// stopping the experiment leaves it in place.
+//
+// Key  : DE_routing_experiment:{merchant_id}:{algorithm_for}
+// Value: JSON { experiment: { id, algorithm_data } | null } — `null` caches "no experiment", so
+//        merchants without one skip the database on every evaluate.
+
+const EXPERIMENT_CACHE_PREFIX: &str = "DE_routing_experiment:";
+
+fn experiment_slot(algorithm_for: &str) -> String {
+    format!("{algorithm_for}_experiment")
+}
+
+fn experiment_cache_key(merchant_id: &str, algorithm_for: &str) -> String {
+    format!("{EXPERIMENT_CACHE_PREFIX}{merchant_id}:{algorithm_for}")
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct CachedExperimentSlot {
+    experiment: Option<CachedRoutingAlgorithm>,
+}
+
+fn is_experiment_algorithm(algorithm: &RoutingAlgorithm) -> bool {
+    matches!(
+        serde_json::from_str::<StaticRoutingAlgorithm>(&algorithm.algorithm_data),
+        Ok(StaticRoutingAlgorithm::AbTest(_))
+    )
+}
+
+async fn cache_experiment_slot(
+    state: &crate::app::TenantAppState,
+    merchant_id: &str,
+    algorithm_for: &str,
+    experiment: Option<&RoutingAlgorithm>,
+) {
+    let key = experiment_cache_key(merchant_id, algorithm_for);
+    let value = CachedExperimentSlot {
+        experiment: experiment.map(|algorithm| CachedRoutingAlgorithm {
+            id: algorithm.id.clone(),
+            algorithm_data: algorithm.algorithm_data.clone(),
+        }),
+    };
+    let ttl = state.config.cache_config.service_config_ttl;
+    if let Err(e) = state.redis_conn.set_key_with_ttl(&key, value, ttl).await {
+        logger::warn!(error = ?e, cache_key = %key, "Failed to cache active experiment in Redis");
+    }
+}
+
+/// Caches a just-activated algorithm under the slot it was activated into.
+async fn cache_activated_algorithm(
+    state: &crate::app::TenantAppState,
+    merchant_id: &str,
+    algorithm: &RoutingAlgorithm,
+    is_experiment: bool,
+) {
+    if is_experiment {
+        cache_experiment_slot(
+            state,
+            merchant_id,
+            &algorithm.algorithm_for,
+            Some(algorithm),
+        )
+        .await;
+    } else {
+        cache_routing_algorithm(state, merchant_id, algorithm).await;
+    }
+}
+
+/// The experiment active in the experiment slot for `algorithm_for`, if any: Redis first, then the
+/// database with a cache back-fill (including "none").
+async fn resolve_slot_experiment(
+    state: &crate::app::TenantAppState,
+    merchant_id: &str,
+    algorithm_for: &str,
+) -> Result<Option<RoutingAlgorithm>, ContainerError<EuclidErrors>> {
+    let key = experiment_cache_key(merchant_id, algorithm_for);
+    if let Ok(cached) = state
+        .redis_conn
+        .get_key::<CachedExperimentSlot>(&key, "CachedExperimentSlot")
+        .await
+    {
+        return Ok(cached.experiment.map(|experiment| RoutingAlgorithm {
+            id: experiment.id,
+            created_by: merchant_id.to_string(),
+            name: String::new(),
+            description: String::new(),
+            metadata: None,
+            algorithm_data: experiment.algorithm_data,
+            algorithm_for: algorithm_for.to_string(),
+            created_at: time::PrimitiveDateTime::MIN,
+            modified_at: time::PrimitiveDateTime::MIN,
+        }));
+    }
+
+    let mapping = crate::generics::generic_find_one_optional::<
+        <RoutingAlgorithmMapper as HasTable>::Table,
+        _,
+        RoutingAlgorithmMapper,
+    >(
+        &state.db,
+        mapper_dsl::created_by
+            .eq(merchant_id.to_string())
+            .and(mapper_dsl::algorithm_for.eq(experiment_slot(algorithm_for))),
+    )
+    .await
+    .change_context(EuclidErrors::StorageError)?;
+    let experiment = match mapping {
+        Some(mapping) => crate::generics::generic_find_one_optional::<
+            <RoutingAlgorithm as HasTable>::Table,
+            _,
+            RoutingAlgorithm,
+        >(&state.db, dsl::id.eq(mapping.routing_algorithm_id))
+        .await
+        .change_context(EuclidErrors::StorageError)?,
+        None => None,
+    };
+    cache_experiment_slot(state, merchant_id, algorithm_for, experiment.as_ref()).await;
+    Ok(experiment)
+}
+
+/// The merchant's running payment experiment, from its experiment slot.
+pub(crate) async fn active_payment_experiment(
+    merchant_id: &str,
+) -> Option<(String, crate::euclid::types::ABTestData)> {
+    let state = get_tenant_app_state().await;
+    let payment = AlgorithmType::Payment.to_string();
+    let algorithm = match resolve_slot_experiment(&state, merchant_id, &payment).await {
+        Ok(experiment) => experiment?,
+        Err(e) => {
+            logger::warn!(error = ?e, merchant_id = %merchant_id, "Failed to read the active experiment");
+            return None;
+        }
+    };
+    match serde_json::from_str::<StaticRoutingAlgorithm>(&algorithm.algorithm_data).ok()? {
+        StaticRoutingAlgorithm::AbTest(data) => Some((algorithm.id, data)),
+        _ => None,
+    }
+}
+
+/// The experiment-slot experiment that splits this payment on `endpoint`, with its parsed
+/// definition. `None` when there is none, live-traffic A/B testing is off for the merchant, or the
+/// experiment doesn't cover the payment; the active rule then routes it.
+async fn experiment_covering_payment(
+    state: &crate::app::TenantAppState,
+    payload: &RoutingRequest,
+    endpoint: ExperimentEndpoint,
+) -> Option<(RoutingAlgorithm, StaticRoutingAlgorithm)> {
+    let payment = AlgorithmType::Payment.to_string();
+    if payload
+        .algorithm_for
+        .as_deref()
+        .is_some_and(|algorithm_for| algorithm_for != payment)
+    {
+        return None;
+    }
+    let payment_id = payload.payment_id.as_deref().filter(|id| !id.is_empty())?;
+    if !crate::decider::gatewaydecider::ab_test::config::is_enabled(&payload.created_by).await {
+        return None;
+    }
+    let experiment = match resolve_slot_experiment(state, &payload.created_by, &payment).await {
+        Ok(experiment) => experiment?,
+        Err(e) => {
+            logger::warn!(error = ?e, merchant_id = %payload.created_by, "Failed to read the active experiment; routing by the active rule");
+            return None;
+        }
+    };
+    let data = serde_json::from_str::<StaticRoutingAlgorithm>(&experiment.algorithm_data).ok()?;
+    let StaticRoutingAlgorithm::AbTest(ab_data) = &data else {
+        return None;
+    };
+    crate::decider::gatewaydecider::ab_test::arms::plan(ab_data, endpoint, payment_id)
+        .in_experiment
+        .then_some((experiment, data))
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 struct CachedRoutingAlgorithm {
     id: String,
@@ -137,7 +317,12 @@ async fn invalidate_routing_algorithm_cache(state: &crate::app::TenantAppState, 
     let keys = ALGORITHM_FOR_VALUES
         .iter()
         .map(|algorithm_for| routing_algo_cache_key(merchant_id, Some(algorithm_for)))
-        .chain(std::iter::once(routing_algo_cache_key(merchant_id, None)));
+        .chain(std::iter::once(routing_algo_cache_key(merchant_id, None)))
+        .chain(
+            ALGORITHM_FOR_VALUES
+                .iter()
+                .map(|algorithm_for| experiment_cache_key(merchant_id, algorithm_for)),
+        );
     for key in keys {
         if let Err(e) = state.redis_conn.delete_key(&key).await {
             logger::warn!(error = ?e, merchant_id = %merchant_id, cache_key = %key, "Failed to invalidate routing algorithm cache");
@@ -389,8 +574,22 @@ pub async fn get_sr_dimensions(
     Ok(Json(config))
 }
 
+/// Hyperswitch SSO merchants route only through `/routing/hybrid`, so an experiment written from
+/// that session is scoped to it.
+fn scope_experiment_to_session(
+    algorithm: &mut StaticRoutingAlgorithm,
+    session: Option<&crate::auth::AuthContext>,
+) {
+    if let (StaticRoutingAlgorithm::AbTest(ab_data), Some(session)) = (algorithm, session) {
+        if session.auth_kind == crate::auth::AuthKind::HsRedirect {
+            ab_data.endpoints = Some(vec![ExperimentEndpoint::HybridRouting]);
+        }
+    }
+}
+
 pub async fn routing_create(
     headers: axum::http::HeaderMap,
+    session: Option<axum::Extension<crate::auth::AuthContext>>,
     Json(payload): Json<Value>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
     let timer = metrics::API_LATENCY_HISTOGRAM
@@ -432,6 +631,7 @@ pub async fn routing_create(
             ));
         }
     }
+    scope_experiment_to_session(&mut config.algorithm, session.as_deref());
     let create_flow_type = crate::analytics::refine_routing_create_flow_type(&config.algorithm);
     let analytics_created_by = config.created_by.clone();
     let analytics_config_name = config.name.clone();
@@ -774,8 +974,13 @@ struct EvaluationOutcome {
     response: RoutingEvaluateResponse,
     rule_name: Option<String>,
     flow_type: crate::analytics::FlowType,
-    ab_experiment_id: Option<String>,
-    ab_variant_arm: Option<String>,
+    /// Set when the active algorithm is an A/B experiment that attributes this payment to an arm.
+    ab_evaluation: Option<AbEvaluation>,
+}
+
+struct AbEvaluation {
+    assignment: crate::decider::gatewaydecider::ab_test::outcome::ExperimentAssignment,
+    projection: crate::decider::gatewaydecider::ab_test::arms::ArmProjection,
 }
 
 /// Evaluates one parsed algorithm against one request's parameters and assembles the
@@ -786,14 +991,14 @@ async fn evaluate_algorithm_data(
     algorithm: &RoutingAlgorithm,
     algorithm_data: &StaticRoutingAlgorithm,
     payload: &RoutingRequest,
+    experiment_endpoint: ExperimentEndpoint,
 ) -> Result<EvaluationOutcome, (ContainerError<EuclidErrors>, &'static str)> {
     let parameters = &payload.parameters;
 
     let mut preview_flow_type = crate::analytics::refine_routing_evaluate_flow_type(algorithm_data);
 
     // Populated by the AbTest arm to tag analytics events with experiment context.
-    let mut ab_experiment_id: Option<String> = None;
-    let mut ab_variant_arm: Option<String> = None;
+    let mut ab_evaluation: Option<AbEvaluation> = None;
 
     let (output, evaluated_output, rule_name): (Output, Vec<ConnectorInfo>, Option<String>) =
         match algorithm_data {
@@ -876,33 +1081,37 @@ async fn evaluate_algorithm_data(
             }
 
             StaticRoutingAlgorithm::AbTest(ab_data) => {
-                let payment_id = payload.payment_id.as_deref().unwrap_or("");
-                let arm = crate::decider::gatewaydecider::ab_test::assign_arm(
-                    payment_id,
-                    ab_data.variant_split_pct,
-                );
-                let arm_algorithm_id = if arm == "variant" {
-                    ab_data.variant_algorithm_id.as_str()
-                } else {
-                    ab_data.control_algorithm_id.as_str()
-                };
-                logger::debug!(
-                    "A/B test routing evaluate: payment_id={:?} arm={} algorithm={}",
-                    payload.payment_id,
-                    arm,
-                    arm_algorithm_id
-                );
-                ab_experiment_id = Some(algorithm.id.clone());
-                ab_variant_arm = Some(arm.to_string());
+                use crate::decider::gatewaydecider::ab_test::{arms, outcome, preview};
 
-                let result = crate::decider::gatewaydecider::ab_test::preview::evaluate_arm(
-                    arm,
-                    arm_algorithm_id,
+                let payment_id = payload.payment_id.as_deref().unwrap_or("");
+                let plan = arms::plan(ab_data, experiment_endpoint, payment_id);
+                logger::debug!(
+                    "A/B test routing evaluate: payment_id={:?} endpoint={} arm={} in_experiment={} rule={:?}",
+                    payload.payment_id,
+                    experiment_endpoint.as_str(),
+                    plan.side.as_str(),
+                    plan.in_experiment,
+                    plan.projection.rule_algorithm_id
+                );
+
+                let r = preview::evaluate_rule_arm(
+                    plan.side,
+                    plan.projection.rule_algorithm_id.as_deref(),
                     payload,
                     &state.db,
                 )
-                .await;
-                let r = result.map_err(|e| (e, "ab_test_evaluation_failed"))?;
+                .await
+                .map_err(|e| (e, "ab_test_evaluation_failed"))?;
+                if plan.in_experiment {
+                    ab_evaluation = Some(AbEvaluation {
+                        assignment: outcome::ExperimentAssignment {
+                            experiment_id: algorithm.id.clone(),
+                            side: plan.side,
+                            endpoint: experiment_endpoint,
+                        },
+                        projection: plan.projection,
+                    });
+                }
                 preview_flow_type = r.flow_type;
                 (r.output, r.evaluated_output, r.rule_name)
             }
@@ -940,9 +1149,49 @@ async fn evaluate_algorithm_data(
         response,
         rule_name,
         flow_type: preview_flow_type,
-        ab_experiment_id,
-        ab_variant_arm,
+        ab_evaluation,
     })
+}
+
+/// Attributes a real payment's rule decision to its A/B arm: the routing event the experiment
+/// results count, and the in-flight context the score update turns into an outcome event.
+/// Skipped when real-payment A/B tracking is off, the request carries no payment id, or no
+/// connector was selected.
+async fn track_ab_rule_decision(
+    payload: &RoutingRequest,
+    response: &RoutingEvaluateResponse,
+    ab: &AbEvaluation,
+) {
+    use crate::decider::gatewaydecider::ab_test::{config, interceptor, outcome};
+
+    let Some(payment_id) = payload.payment_id.as_deref().filter(|id| !id.is_empty()) else {
+        return;
+    };
+    let Some(gateway) = preview_gateway(response) else {
+        return;
+    };
+    if !config::is_enabled(&payload.created_by).await {
+        return;
+    }
+    let amount = match payload.parameters.get("amount") {
+        Some(Some(ValueType::Number(amount))) => Some(*amount as f64),
+        _ => None,
+    };
+    interceptor::emit_routing_event(
+        payment_id,
+        &payload.created_by,
+        &ab.assignment,
+        &ab.projection,
+        Some(gateway.as_str()),
+    );
+    outcome::store_inflight(
+        payment_id,
+        &ab.assignment,
+        Some(gateway.as_str()),
+        true,
+        amount,
+    )
+    .await;
 }
 
 pub async fn routing_evaluate(
@@ -958,15 +1207,23 @@ pub async fn routing_evaluate(
         Json(payload),
         RoutingEvaluateAnalyticsFlows::routing_evaluate(),
         request_id,
+        ExperimentEndpoint::Evaluate,
+        true,
     )
     .await
 }
 
+/// Evaluates the active routing algorithm for `experiment_endpoint`, whose rule layer of an active
+/// A/B experiment is applied. `track_experiment_outcome` records the arm attribution and in-flight
+/// outcome context for a real payment; `/routing/hybrid` clears it when its decider half records
+/// them instead.
 pub(crate) async fn routing_evaluate_with_analytics(
     headers: axum::http::HeaderMap,
     Json(payload): Json<RoutingRequest>,
     flows: RoutingEvaluateAnalyticsFlows,
     request_id: Option<String>,
+    experiment_endpoint: ExperimentEndpoint,
+    track_experiment_outcome: bool,
 ) -> Result<Json<RoutingEvaluateResponse>, ContainerError<EuclidErrors>> {
     let mut timer = Some(
         metrics::API_LATENCY_HISTOGRAM
@@ -1039,81 +1296,106 @@ pub(crate) async fn routing_evaluate_with_analytics(
         return fail_preview(e, "parameter_validation_failed");
     }
 
-    // ── Fetch active routing algorithm (Redis cache → DB fallback) ──────────
-    let algorithm_for = payload.algorithm_for.as_deref();
-    let algorithm = match resolve_active_algorithm(&state, &payload.created_by, algorithm_for).await
-    {
-        Ok(algo) => algo,
-        // A no-rule profile is an answer rather than a failure when the caller supplied a
-        // fallback to answer with; with nothing to answer with, that stays an error.
-        Err(e)
-            if matches!(
-                e.get_inner(),
-                EuclidErrors::ActiveRoutingAlgorithmNotFound(_)
-            ) && payload
-                .fallback_output
-                .as_ref()
-                .is_some_and(|fallback| !fallback.is_empty()) =>
-        {
-            API_REQUEST_COUNTER
-                .with_label_values(&[flows.metric_label, "success"])
-                .inc();
-            if let Some(timer) = timer.take() {
-                timer.observe_duration();
-            }
-            return Ok(Json(
-                no_active_algorithm_response(
-                    &flows,
+    // ── An experiment covering this payment routes it; otherwise the active rule does ──
+    let (algorithm, algorithm_data) =
+        match experiment_covering_payment(&state, &payload, experiment_endpoint).await {
+            Some(covering) => covering,
+            None => {
+                // ── Fetch active routing algorithm (Redis cache → DB fallback) ──────────
+                let algorithm_for = payload.algorithm_for.as_deref();
+                let algorithm = match resolve_active_algorithm(
                     &state,
-                    &payload,
-                    request_id,
-                    global_request_id,
-                    trace_id,
+                    &payload.created_by,
+                    algorithm_for,
                 )
-                .await,
-            ));
-        }
-        Err(e) => return fail_preview(e, "active_routing_lookup_failed"),
-    };
+                .await
+                {
+                    Ok(algo) => algo,
+                    // A no-rule profile is an answer rather than a failure when the caller supplied a
+                    // fallback to answer with; with nothing to answer with, that stays an error.
+                    Err(e)
+                        if matches!(
+                            e.get_inner(),
+                            EuclidErrors::ActiveRoutingAlgorithmNotFound(_)
+                        ) && payload
+                            .fallback_output
+                            .as_ref()
+                            .is_some_and(|fallback| !fallback.is_empty()) =>
+                    {
+                        API_REQUEST_COUNTER
+                            .with_label_values(&[flows.metric_label, "success"])
+                            .inc();
+                        if let Some(timer) = timer.take() {
+                            timer.observe_duration();
+                        }
+                        return Ok(Json(
+                            no_active_algorithm_response(
+                                &flows,
+                                &state,
+                                &payload,
+                                request_id,
+                                global_request_id,
+                                trace_id,
+                            )
+                            .await,
+                        ));
+                    }
+                    Err(e) => return fail_preview(e, "active_routing_lookup_failed"),
+                };
 
-    logger::debug!("Fetched routing algorithm: {:?}", algorithm);
-    let algorithm_data: StaticRoutingAlgorithm =
-        match serde_json::from_str(&algorithm.algorithm_data).map_err(|e| {
-            logger::error!(
-                error = ?e,
-                raw_data = %algorithm.algorithm_data,
-                "Failed to parse algorithm_data into StaticRoutingAlgorithm"
-            );
-            EuclidErrors::InvalidRequest(format!("Invalid algorithm data format: {}", e))
-        }) {
-            Ok(data) => data,
-            Err(e) => return fail_preview(e.into(), "routing_algorithm_parse_failed"),
+                logger::debug!("Fetched routing algorithm: {:?}", algorithm);
+                let algorithm_data: StaticRoutingAlgorithm =
+                    match serde_json::from_str(&algorithm.algorithm_data).map_err(|e| {
+                        logger::error!(
+                            error = ?e,
+                            raw_data = %algorithm.algorithm_data,
+                            "Failed to parse algorithm_data into StaticRoutingAlgorithm"
+                        );
+                        EuclidErrors::InvalidRequest(format!(
+                            "Invalid algorithm data format: {}",
+                            e
+                        ))
+                    }) {
+                        Ok(data) => data,
+                        Err(e) => return fail_preview(e.into(), "routing_algorithm_parse_failed"),
+                    };
+                (algorithm, algorithm_data)
+            }
         };
 
     let EvaluationOutcome {
         response,
         rule_name,
         flow_type: preview_flow_type,
-        ab_experiment_id,
-        ab_variant_arm,
-    } = match evaluate_algorithm_data(&state, &algorithm, &algorithm_data, &payload).await {
+        ab_evaluation,
+    } = match evaluate_algorithm_data(
+        &state,
+        &algorithm,
+        &algorithm_data,
+        &payload,
+        experiment_endpoint,
+    )
+    .await
+    {
         Ok(outcome) => outcome,
         Err((e, stage)) => return fail_preview(e, stage),
     };
 
     logger::debug!("Response: {response:?}");
+    if let (true, Some(ab)) = (track_experiment_outcome, &ab_evaluation) {
+        track_ab_rule_decision(&payload, &response, ab).await;
+    }
     if flows.emit_events {
-        let analytics_details = match (&ab_experiment_id, &ab_variant_arm) {
-            (Some(exp_id), Some(arm)) => {
+        let analytics_details = match &ab_evaluation {
+            Some(ab) => {
                 crate::decider::gatewaydecider::ab_test::preview::serialize_analytics_details(
                     &payload,
                     &response,
                     rule_name.as_deref(),
-                    exp_id,
-                    arm,
+                    &ab.assignment,
                 )
             }
-            _ => serialize_routing_evaluate_analytics_details(
+            None => serialize_routing_evaluate_analytics_details(
                 &payload,
                 &response,
                 rule_name.as_deref(),
@@ -1381,7 +1663,22 @@ pub async fn routing_evaluate_batch(
             algorithm_for: payload.algorithm_for.clone(),
         };
 
-        match evaluate_algorithm_data(&state, &algorithm, &algorithm_data, &entry_payload).await {
+        // An experiment covering the entry's payment routes it; otherwise the active rule does.
+        let covering =
+            experiment_covering_payment(&state, &entry_payload, ExperimentEndpoint::Evaluate).await;
+        let (entry_algorithm, entry_algorithm_data) = match &covering {
+            Some((experiment, experiment_data)) => (experiment, experiment_data),
+            None => (&algorithm, &algorithm_data),
+        };
+        match evaluate_algorithm_data(
+            &state,
+            entry_algorithm,
+            entry_algorithm_data,
+            &entry_payload,
+            ExperimentEndpoint::Evaluate,
+        )
+        .await
+        {
             Ok(outcome) => {
                 if first_success.is_none() {
                     first_success = Some((
@@ -1398,8 +1695,8 @@ pub async fn routing_evaluate_batch(
                     "status": outcome.response.status,
                     "gateway": preview_gateway(&outcome.response),
                     "rule_name": outcome.rule_name,
-                    "ab_experiment_id": outcome.ab_experiment_id,
-                    "ab_variant_arm": outcome.ab_variant_arm,
+                    "ab_experiment_id": outcome.ab_evaluation.as_ref().map(|ab| ab.assignment.experiment_id.as_str()),
+                    "ab_variant_arm": outcome.ab_evaluation.as_ref().map(|ab| ab.assignment.side.as_str()),
                 }));
                 results.push(outcome.response);
             }
@@ -1694,7 +1991,15 @@ pub async fn activate_routing_rule(
     };
     let algorithm_for = algorithm.algorithm_for.clone();
 
-    // === Step 2: Try to find existing entry for (created_by, algorithm_for) ===
+    // An experiment runs in its own slot beside the active rule for its transaction type, so the
+    // rule stays active, and listed as active, while the experiment runs and after it stops.
+    let is_experiment = is_experiment_algorithm(&algorithm);
+    let slot = if is_experiment {
+        experiment_slot(&algorithm_for)
+    } else {
+        algorithm_for.clone()
+    };
+    // === Step 2: Try to find existing entry for (created_by, slot) ===
     let maybe_existing = crate::generics::generic_find_one::<
         <RoutingAlgorithmMapper as HasTable>::Table,
         _,
@@ -1703,7 +2008,7 @@ pub async fn activate_routing_rule(
         &state.db,
         mapper_dsl::created_by
             .eq(payload.created_by.clone())
-            .and(mapper_dsl::algorithm_for.eq(algorithm_for.clone())),
+            .and(mapper_dsl::algorithm_for.eq(slot.clone())),
     )
     .await
     .ok();
@@ -1713,11 +2018,11 @@ pub async fn activate_routing_rule(
             // === Step 3a: Update routing_algorithm_id in place ===
             let predicate = mapper_dsl::created_by
                 .eq(payload.created_by.clone())
-                .and(mapper_dsl::algorithm_for.eq(algorithm_for.clone()));
+                .and(mapper_dsl::algorithm_for.eq(slot.clone()));
 
             let values = RoutingAlgorithmMapperUpdate {
                 routing_algorithm_id: payload.routing_algorithm_id.clone(),
-                algorithm_for: algorithm_for.clone(),
+                algorithm_for: slot.clone(),
             };
 
             match crate::generics::generic_update_if_present::<
@@ -1734,7 +2039,13 @@ pub async fn activate_routing_rule(
                         timer.observe_duration();
                         return Err(e);
                     }
-                    cache_routing_algorithm(&state, &payload.created_by, &algorithm).await;
+                    cache_activated_algorithm(
+                        &state,
+                        &payload.created_by,
+                        &algorithm,
+                        is_experiment,
+                    )
+                    .await;
                     // The old document's plan must not steer for the new one.
                     clear_volume_commitment_plan(&algorithm.algorithm_for, &payload.created_by)
                         .await;
@@ -1753,7 +2064,7 @@ pub async fn activate_routing_rule(
             }
         }
         // Already active with the same algorithm — refresh the cache TTL
-        cache_routing_algorithm(&state, &payload.created_by, &algorithm).await;
+        cache_activated_algorithm(&state, &payload.created_by, &algorithm, is_experiment).await;
         refresh_volume_commitment_plan(&algorithm.algorithm_for, &payload.created_by);
         API_REQUEST_COUNTER
             .with_label_values(&["activate_routing_rule", "success"])
@@ -1764,11 +2075,8 @@ pub async fn activate_routing_rule(
 
     // === Step 3b: Insert new if not present ===
     let merchant_id_for_cache = payload.created_by.clone();
-    let mapper_entry = RoutingAlgorithmMapperNew::new(
-        payload.created_by,
-        payload.routing_algorithm_id,
-        algorithm_for,
-    );
+    let mapper_entry =
+        RoutingAlgorithmMapperNew::new(payload.created_by, payload.routing_algorithm_id, slot);
 
     match crate::generics::generic_insert(&state.db, mapper_entry)
         .await
@@ -1780,7 +2088,8 @@ pub async fn activate_routing_rule(
                 timer.observe_duration();
                 return Err(e);
             }
-            cache_routing_algorithm(&state, &merchant_id_for_cache, &algorithm).await;
+            cache_activated_algorithm(&state, &merchant_id_for_cache, &algorithm, is_experiment)
+                .await;
             clear_volume_commitment_plan(&algorithm.algorithm_for, &merchant_id_for_cache).await;
             refresh_volume_commitment_plan(&algorithm.algorithm_for, &merchant_id_for_cache);
             API_REQUEST_COUNTER
@@ -1846,7 +2155,9 @@ pub async fn deactivate_routing_rule(
         }
     };
 
-    // === Step 2: Find the active mapping for (created_by, routing_algorithm_id, algorithm_for) ===
+    // === Step 2: Find the active mapping for (created_by, routing_algorithm_id) ===
+    // Either slot: a rule is active in its transaction type's slot, an experiment in the
+    // experiment slot beside it.
     let existing_mapping = crate::generics::generic_find_one::<
         <RoutingAlgorithmMapper as HasTable>::Table,
         _,
@@ -1855,8 +2166,7 @@ pub async fn deactivate_routing_rule(
         &state.db,
         mapper_dsl::created_by
             .eq(payload.created_by.clone())
-            .and(mapper_dsl::routing_algorithm_id.eq(payload.routing_algorithm_id.clone()))
-            .and(mapper_dsl::algorithm_for.eq(algorithm_for.clone())),
+            .and(mapper_dsl::routing_algorithm_id.eq(payload.routing_algorithm_id.clone())),
     )
     .await
     .ok();
@@ -1936,9 +2246,67 @@ async fn ensure_routing_algorithm_inactive(
     Ok(())
 }
 
+/// Whether an edit changes how an experiment routes payments. The sample target and guardrail only
+/// affect how its results are judged, so changing only those is not a routing change.
+fn changes_experiment_routing(
+    existing: &StaticRoutingAlgorithm,
+    updated: &StaticRoutingAlgorithm,
+) -> bool {
+    let routing_setup = |algorithm: &StaticRoutingAlgorithm| {
+        match algorithm {
+            StaticRoutingAlgorithm::AbTest(data) => serde_json::to_value(
+                StaticRoutingAlgorithm::AbTest(crate::euclid::types::ABTestData {
+                    min_sample_size: 0,
+                    guardrail_threshold_pp: 0.0,
+                    ..data.clone()
+                }),
+            ),
+            other => serde_json::to_value(other),
+        }
+        .ok()
+    };
+    routing_setup(existing) != routing_setup(updated)
+}
+
+/// An experiment's results are read against its current setup, so the setup of one that has
+/// recorded payments stays fixed.
+async fn ensure_experiment_has_no_recorded_payments(
+    merchant_id: &str,
+    experiment_id: &str,
+) -> Result<(), ContainerError<EuclidErrors>> {
+    let recorded = match crate::app::APP_STATE.get() {
+        Some(app) => {
+            app.analytics_runtime
+                .read_store()
+                .experiment_has_recorded_payments(merchant_id, experiment_id)
+                .await
+        }
+        None => Err(crate::error::ApiError::DatabaseError),
+    };
+    match recorded {
+        Ok(false) => Ok(()),
+        Ok(true) => Err(EuclidErrors::InvalidRequest(
+            "This experiment has recorded payments, so only its name, sample target and guardrail can change. Duplicate it to test a different setup.".to_string(),
+        )
+        .into()),
+        Err(e) => {
+            logger::warn!(
+                "could not check recorded payments for experiment {}: {:?}",
+                experiment_id,
+                e
+            );
+            Err(EuclidErrors::InvalidRequest(
+                "Couldn't check whether this experiment has recorded payments, so its routing setup can't change right now. Its name, sample target and guardrail can still change.".to_string(),
+            )
+            .into())
+        }
+    }
+}
+
 /// Edit an existing inactive routing algorithm in place (name/description/definition). Used by the
 /// A/B Testing dashboard's Edit action. Keeps the same id so history/links remain valid.
 pub async fn update_routing_rule(
+    session: Option<axum::Extension<crate::auth::AuthContext>>,
     Json(mut payload): Json<crate::euclid::types::UpdateRoutingConfigRequest>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
     let timer = API_LATENCY_HISTOGRAM
@@ -1994,6 +2362,20 @@ pub async fn update_routing_rule(
         // volume contracts and re-run the same write-time validation against the slot this row
         // already occupies (algorithm_for is preserved by this handler).
         let mut algorithm = payload.algorithm.clone();
+        scope_experiment_to_session(&mut algorithm, session.as_deref());
+        if let Ok(existing_algorithm) =
+            serde_json::from_str::<StaticRoutingAlgorithm>(&existing.algorithm_data)
+        {
+            if matches!(existing_algorithm, StaticRoutingAlgorithm::AbTest(_))
+                && changes_experiment_routing(&existing_algorithm, &algorithm)
+            {
+                ensure_experiment_has_no_recorded_payments(
+                    &payload.created_by,
+                    &payload.routing_algorithm_id,
+                )
+                .await?;
+            }
+        }
         if let StaticRoutingAlgorithm::VolumeContract(contract_config) = &mut algorithm {
             if let Err(errors) = crate::euclid::volume_contract::canonicalize(contract_config) {
                 return Err(field_validation_failure(
@@ -2421,5 +2803,46 @@ mod routing_evaluate_analytics_flows_tests {
         let flows = RoutingEvaluateAnalyticsFlows::routing_hybrid();
         assert!(!flows.emit_events);
         assert_eq!(flows.metric_label, "hybrid_routing_evaluate_static");
+    }
+}
+
+#[cfg(test)]
+mod experiment_edit_tests {
+    use super::changes_experiment_routing;
+    use crate::euclid::types::StaticRoutingAlgorithm;
+
+    fn experiment(split: u8, sample: u32, guardrail: f64, rule: &str) -> StaticRoutingAlgorithm {
+        serde_json::from_value(serde_json::json!({
+            "type": "ab_test",
+            "data": {
+                "control": { "rule_algorithm_id": rule },
+                "variant": { "sr": { "enable_multi_objective": false, "use_autopilot": true } },
+                "variant_split_pct": split,
+                "min_sample_size": sample,
+                "guardrail_threshold_pp": guardrail
+            }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn sample_target_and_guardrail_are_not_routing_changes() {
+        assert!(!changes_experiment_routing(
+            &experiment(10, 1000, 3.0, "routing_a"),
+            &experiment(10, 5000, 1.5, "routing_a"),
+        ));
+    }
+
+    #[test]
+    fn split_and_arms_are_routing_changes() {
+        let existing = experiment(10, 1000, 3.0, "routing_a");
+        assert!(changes_experiment_routing(
+            &existing,
+            &experiment(20, 1000, 3.0, "routing_a")
+        ));
+        assert!(changes_experiment_routing(
+            &existing,
+            &experiment(10, 1000, 3.0, "routing_b")
+        ));
     }
 }

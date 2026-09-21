@@ -82,12 +82,20 @@ pub async fn load(
         };
     let page = query.page;
     let page_size = query.page_size;
+    let exact_lookup = requested_lookup_key.is_some();
     let selected_lookup_key = results
         .first()
         .map(|row| row.lookup_key.clone())
         .or(requested_lookup_key);
 
-    let timeline = if let Some(lookup_key) = selected_lookup_key.clone() {
+    // The timeline belongs to the list's first result, so later pages of the same list don't
+    // re-read it.
+    let timeline_lookup_key = if exact_lookup || page == 1 {
+        selected_lookup_key.clone()
+    } else {
+        None
+    };
+    let timeline = if let Some(lookup_key) = timeline_lookup_key {
         metrics::audit_timeline::load(client, query, scope, &lookup_key)
             .await
             .map_err(|error| {

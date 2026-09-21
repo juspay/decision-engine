@@ -2,7 +2,7 @@ use clickhouse::Row;
 use serde::Deserialize;
 
 use crate::analytics::clickhouse::common::{fetch_all, DOMAIN_TABLE};
-use crate::analytics::clickhouse::filters::merchant_filter;
+use crate::analytics::clickhouse::filters::{merchant_filter, partition_lower_bound};
 use crate::analytics::clickhouse::query::{BoundQueryBuilder, FilterClause, OrderClause};
 use crate::analytics::flow::FlowType;
 use crate::analytics::models::{
@@ -85,25 +85,21 @@ pub async fn load(
         "sumIf((JSONExtractFloat(assumeNotNull(details), 'cost_saved_bps') / 10000.0) * JSONExtractFloat(assumeNotNull(details), 'amount'), lowerUTF8(status) = 'success') AS total_cost_saved".to_string(),
     ]);
 
-    builder.extend_filters(merchant_filter(&query.merchant_id));
-    builder.add_filter(FilterClause::raw(format!(
-        "flow_type = '{}'",
-        FlowType::RoutingEvaluateAbTest.as_str()
-    )));
-    builder.add_filter(FilterClause::raw(format!(
-        "JSONExtractString(assumeNotNull(details), 'experiment_id') = '{}'",
-        query.experiment_id.replace('\'', "\\'")
-    )));
-    builder.add_filter(FilterClause::raw(
-        "JSONExtractString(assumeNotNull(details), 'variant_arm') IN ('control', 'variant')"
-            .to_string(),
-    ));
+    add_experiment_filters(&mut builder, &query.merchant_id, &query.experiment_id);
+    if let Some(endpoint) = query.endpoint {
+        builder.add_filter(FilterClause::raw(endpoint_filter(endpoint)));
+    }
 
     if let Some(start) = query.start_ms {
         builder.add_filter(FilterClause::gte("created_at_ms", start));
+        builder.add_filter(partition_lower_bound(start));
     }
     if let Some(end) = query.end_ms {
         builder.add_filter(FilterClause::lte("created_at_ms", end));
+        builder.add_filter(FilterClause::new(
+            "created_at <= fromUnixTimestamp64Milli(toInt64(?))",
+            vec![end.into()],
+        ));
     }
 
     builder.add_group_by("arm");
@@ -157,6 +153,66 @@ pub async fn load(
         net_delta_bps,
         evaluation_margin: query.evaluation_margin,
     })
+}
+
+/// Events an experiment recorded for real payments on its arms, on any endpoint.
+fn add_experiment_filters(builder: &mut BoundQueryBuilder, merchant_id: &str, experiment_id: &str) {
+    builder.extend_filters(merchant_filter(merchant_id));
+    builder.add_filter(FilterClause::raw(format!(
+        "flow_type = '{}'",
+        FlowType::RoutingEvaluateAbTest.as_str()
+    )));
+    builder.add_filter(FilterClause::raw(format!(
+        "JSONExtractString(assumeNotNull(details), 'experiment_id') = '{}'",
+        experiment_id.replace('\'', "\\'")
+    )));
+    builder.add_filter(FilterClause::raw(
+        "JSONExtractString(assumeNotNull(details), 'variant_arm') IN ('control', 'variant')"
+            .to_string(),
+    ));
+    // Real payments only: a routing decision (`routing_source`) or an outcome after a score update
+    // (`outcome_source`). A `/routing/evaluate` preview, such as a Decision Explorer run, carries
+    // neither.
+    builder.add_filter(FilterClause::raw(
+        "(JSONExtractString(assumeNotNull(details), 'routing_source') = 'real_payment_intercept' \
+          OR JSONExtractString(assumeNotNull(details), 'outcome_source') = 'score_update')"
+            .to_string(),
+    ));
+}
+
+#[derive(Debug, Clone, Deserialize, Row)]
+struct RecordedRow {
+    recorded: u64,
+}
+
+/// Whether any payment was routed or resolved under the experiment, i.e. it has results.
+pub async fn has_recorded_payments(
+    client: &clickhouse::Client,
+    merchant_id: &str,
+    experiment_id: &str,
+) -> Result<bool, ApiError> {
+    let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
+    // Existence only: the first matching row answers it, so the scan stops there.
+    builder.extend_selects(["toUInt64(1) AS recorded".to_string()]);
+    add_experiment_filters(&mut builder, merchant_id, experiment_id);
+    builder.set_limit(Some(1));
+    let rows = fetch_all::<RecordedRow>(builder.build(client)).await?;
+    Ok(rows.first().is_some_and(|row| row.recorded > 0))
+}
+
+/// Matches events recorded on `endpoint`. Events without an endpoint tag were recorded by the
+/// decider intercept before endpoints were tagged, and are read as `decide_gateway`.
+pub(crate) fn endpoint_filter(endpoint: crate::euclid::types::ExperimentEndpoint) -> String {
+    let tagged = format!(
+        "JSONExtractString(assumeNotNull(details), 'endpoint') = '{}'",
+        endpoint.as_str()
+    );
+    match endpoint {
+        crate::euclid::types::ExperimentEndpoint::DecideGateway => format!(
+            "({tagged} OR NOT JSONHas(assumeNotNull(details), 'endpoint') OR JSONType(assumeNotNull(details), 'endpoint') = 'Null')"
+        ),
+        _ => tagged,
+    }
 }
 
 fn arm_metrics(arm: &str, row: Option<&ArmRow>, evaluation_margin: f64) -> ExperimentArmMetrics {

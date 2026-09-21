@@ -9143,7 +9143,8 @@
               "elimination",
               "autopilot",
               "volume-contracts",
-              "sr-routing"
+              "sr-routing",
+              "sr-scores-from-rule-routing"
             ]
           },
           "enabled": {

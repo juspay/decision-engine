@@ -1,5 +1,6 @@
 use std::{borrow::Cow, time::Instant};
 
+use crate::euclid::types::ExperimentEndpoint;
 use crate::{
     analytics::{
         global_request_id_from_headers, serialize_details, trace_id_from_headers,
@@ -127,7 +128,13 @@ pub(crate) async fn run_decider_with_analytics(
         auth_type.clone(),
     );
 
-    match decider_full_payload_hs_function(payload.clone(), cpu_start).await {
+    match decider_full_payload_hs_function(
+        payload.clone(),
+        cpu_start,
+        ExperimentEndpoint::DecideGateway,
+    )
+    .await
+    {
         Ok(decided_gateway) => {
             let routing_approach = decided_gateway.routing_approach.to_string();
 

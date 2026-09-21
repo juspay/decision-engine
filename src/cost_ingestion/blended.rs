@@ -489,8 +489,7 @@ pub async fn top_clusters(
         params.push(("param_ingestion_id".into(), i.to_string()));
     }
     filter.bind(&mut params);
-    let mut req = client()
-        .post(cfg.url.trim_end_matches('/'))
+    let mut req = super::ch_http::post(client(), &cfg.url)
         .query(&params)
         .body(sql);
     if !cfg.user.is_empty() {
@@ -652,8 +651,7 @@ pub async fn cluster_facets(
     if let Some(i) = scope.ingestion_id {
         params.push(("param_ingestion_id", i));
     }
-    let mut req = client()
-        .post(cfg.url.trim_end_matches('/'))
+    let mut req = super::ch_http::post(client(), &cfg.url)
         .query(&params)
         .body(sql);
     if !cfg.user.is_empty() {
@@ -714,8 +712,7 @@ pub async fn segmented_clusters(
     if let Some(i) = scope.ingestion_id {
         params.push(("param_ingestion_id", i));
     }
-    let mut req = client()
-        .post(cfg.url.trim_end_matches('/'))
+    let mut req = super::ch_http::post(client(), &cfg.url)
         .query(&params)
         .body(sql);
     if !cfg.user.is_empty() {
@@ -795,8 +792,7 @@ pub async fn by_connector(
     merchant_id: &str,
 ) -> Result<HashMap<String, ConnectorBlend>, IngestError> {
     let sql = BLEND_SQL.replace("__DB__", &cfg.database);
-    let mut req = client()
-        .post(cfg.url.trim_end_matches('/'))
+    let mut req = super::ch_http::post(client(), &cfg.url)
         .query(&[("param_merchant_id", merchant_id)])
         .body(sql);
     if !cfg.user.is_empty() {

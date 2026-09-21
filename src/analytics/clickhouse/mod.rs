@@ -15,6 +15,7 @@ use crate::error::ApiError;
 pub mod common;
 pub mod endpoints;
 pub mod filters;
+pub mod guard;
 pub mod metrics;
 pub mod query;
 pub mod time;
@@ -49,8 +50,11 @@ impl ClickHouseAnalyticsStore {
             );
             error
         })?;
+        guard::detect_settings_support(&client).await;
 
-        Ok(Self { client })
+        Ok(Self {
+            client: guard::bounded(&client),
+        })
     }
 }
 
@@ -150,6 +154,19 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         query: &ExperimentTransactionsQuery,
     ) -> Result<ExperimentTransactionsResponse, ApiError> {
         endpoints::experiment_transactions::load(&self.client, query).await
+    }
+
+    async fn experiment_has_recorded_payments(
+        &self,
+        merchant_id: &str,
+        experiment_id: &str,
+    ) -> Result<bool, ApiError> {
+        endpoints::experiment_results::has_recorded_payments(
+            &self.client,
+            merchant_id,
+            experiment_id,
+        )
+        .await
     }
 
     async fn routing_events(

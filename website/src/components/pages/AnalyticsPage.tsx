@@ -145,7 +145,9 @@ const MAX_VISIBLE_DIMENSIONS = 3
 const PREVIEW_TRACE_PAGE_SIZE = 50
 const MAX_PREVIEW_TRACE_PAGES = 5
 const PREVIEW_LIST_PAGE_SIZE = 10
-const CATCH_UP_REFRESH_DELAYS_MS = [750, 2000, 4000]
+// One delayed re-read picks up events still being ingested when the page opens. Each re-read of
+// the rule-based view queries ClickHouse several times, so it is not repeated.
+const CATCH_UP_REFRESH_DELAY_MS = 3000
 const CARD_INFO: Record<'hits' | 'share' | 'alignment' | 'sr' | 'preview_hits' | 'preview_activity' | 'preview_share', InfoContent> = {
   hits: {
     title: 'API call counts',
@@ -260,23 +262,18 @@ async function loadPreviewTraceSample(
     return firstPage
   }
 
-  const remainingPages = await Promise.all(
-    Array.from({ length: totalPages - 1 }, (_, index) =>
-      fetcher<PaymentAuditResponse>(
-        buildPreviewTraceUrl(
-          range,
-          index + 2,
-          PREVIEW_TRACE_PAGE_SIZE,
-          customWindow,
-        ),
-      ),
-    ),
-  )
-
-  return {
-    ...firstPage,
-    results: [firstPage.results, ...remainingPages.map((page) => page.results)].flat(),
+  // One page at a time: every page is its own set of ClickHouse queries, so they are not sent
+  // in parallel.
+  const results = [...firstPage.results]
+  for (let page = 2; page <= totalPages; page += 1) {
+    const nextPage = await fetcher<PaymentAuditResponse>(
+      buildPreviewTraceUrl(range, page, PREVIEW_TRACE_PAGE_SIZE, customWindow),
+    )
+    results.push(...nextPage.results)
+    if (nextPage.results.length < PREVIEW_TRACE_PAGE_SIZE) break
   }
+
+  return { ...firstPage, results }
 }
 
 function formatNumber(value: number | string | undefined, digits = 2) {
@@ -1130,6 +1127,9 @@ export function AnalyticsPage() {
     previewListSwrOptions,
   )
 
+  // SWR already fetches every key when the page mounts, so the first run of the effect below only
+  // schedules the catch-up re-read.
+  const hasMountedRef = useRef(false)
   useEffect(() => {
     const revalidateCurrentView = () => {
       void overview.mutate()
@@ -1142,13 +1142,14 @@ export function AnalyticsPage() {
       void previewList.mutate()
     }
 
-    revalidateCurrentView()
-    const timers = CATCH_UP_REFRESH_DELAYS_MS.map((delay) =>
-      window.setTimeout(revalidateCurrentView, delay),
-    )
+    if (hasMountedRef.current) {
+      revalidateCurrentView()
+    }
+    hasMountedRef.current = true
+    const timer = window.setTimeout(revalidateCurrentView, CATCH_UP_REFRESH_DELAY_MS)
 
     return () => {
-      timers.forEach((timer) => window.clearTimeout(timer))
+      window.clearTimeout(timer)
     }
   }, [location.key, view])
 

@@ -1,21 +1,5 @@
-use crate::app::get_tenant_app_state;
-use crate::euclid::types::{
-    ABTestData, RoutingAlgorithm, RoutingAlgorithmMapper, StaticRoutingAlgorithm,
-};
-use crate::generics::generic_find_one;
+use crate::euclid::types::ABTestData;
 use crate::types::service_configuration;
-use diesel::associations::HasTable;
-use diesel::prelude::*;
-
-#[cfg(feature = "mysql")]
-use crate::storage::schema::routing_algorithm::dsl as algo_dsl;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
-
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::routing_algorithm::dsl as algo_dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
 
 /// service_configuration key for the FeatureConf blob — same key the UI reads/writes.
 const FEATURE_CONF_KEY: &str = "ab_test_real_payments_enabled";
@@ -43,41 +27,13 @@ pub async fn is_enabled(merchant_id: &str) -> bool {
     false
 }
 
+/// The merchant's running payment experiment, which sits beside the active rule in its own slot
+/// (see the experiment slot in `euclid::handlers::routing_rules`).
 pub async fn load_active_ab_test(merchant_id: &str) -> Option<AbTestConfig> {
-    let state = get_tenant_app_state().await;
-
-    // Load the active *payment* routing algorithm mapper for this merchant. The merchant can
-    // hold one mapper row per algorithm_for slot (payout, 3DS, volume_commitment as well) and an
-    // A/B experiment only ever lives in the payment slot.
-    let mapper =
-        generic_find_one::<<RoutingAlgorithmMapper as HasTable>::Table, _, RoutingAlgorithmMapper>(
-            &state.db,
-            mapper_dsl::created_by.eq(merchant_id.to_string()).and(
-                mapper_dsl::algorithm_for
-                    .eq(crate::euclid::types::AlgorithmType::Payment.to_string()),
-            ),
-        )
-        .await
-        .ok()?;
-
-    let experiment_id = mapper.routing_algorithm_id.clone();
-
-    // Load the routing algorithm record
-    let algorithm = generic_find_one::<<RoutingAlgorithm as HasTable>::Table, _, RoutingAlgorithm>(
-        &state.db,
-        algo_dsl::id.eq(experiment_id.clone()),
-    )
-    .await
-    .ok()?;
-
-    // Parse and check it's an AB test
-    let parsed: StaticRoutingAlgorithm = serde_json::from_str(&algorithm.algorithm_data).ok()?;
-
-    match parsed {
-        StaticRoutingAlgorithm::AbTest(data) => Some(AbTestConfig {
-            experiment_id,
-            data,
-        }),
-        _ => None,
-    }
+    let (experiment_id, data) =
+        crate::euclid::handlers::routing_rules::active_payment_experiment(merchant_id).await?;
+    Some(AbTestConfig {
+        experiment_id,
+        data,
+    })
 }
