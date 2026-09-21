@@ -73,7 +73,7 @@ For local source-run development with the full PostgreSQL analytics stack:
 ./oneclick.sh
 ```
 
-For the full end-to-end regression gate owned by the Cypress branch:
+For the full end-to-end regression gate:
 
 ```bash
 npm run test:e2e
@@ -83,7 +83,7 @@ That command runs:
 
 - source-run validation through `oneclick.sh`
 - Docker Compose validation through `dashboard-postgres-local`
-- the full Cypress API/UI/docs smoke contract against both modes
+- the full Playwright API/UI/docs smoke contract against both modes
 
 Mode-specific entrypoints:
 

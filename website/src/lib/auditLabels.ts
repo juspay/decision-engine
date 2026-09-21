@@ -75,7 +75,7 @@ export function stageLabel(event: PaymentAuditEvent) {
   const flowType = flowTypeValue(event)
   if (event.event_stage === 'hybrid_routed' || isHybridFlow(flowType)) return 'Hybrid Routing'
   if (event.event_stage === 'gateway_decided') return 'Decide Gateway'
-  if (event.event_stage === 'score_updated') return 'Update Gateway'
+  if (event.event_stage === 'score_updated' || event.event_stage === 'score_skipped') return 'Update Gateway'
   if (event.event_stage === 'rule_applied') return 'Rule Evaluate'
   if (event.event_stage === 'preview_evaluated' || isPreviewFlow(flowType)) return 'Decision Result'
   if (isErrorFlow(flowType)) return 'Errors'

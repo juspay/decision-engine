@@ -4,10 +4,10 @@ import { Link } from 'react-router-dom'
 import useSWR, { useSWRConfig } from 'swr'
 import {
   ChevronRight,
-  PieChart,
   PowerOff,
-  Target,
-  SignpostBig,
+  TrendingUp,
+  BookOpen,
+  PieChart,
   CreditCard,
   FlaskConical,
 } from 'lucide-react'
@@ -176,7 +176,7 @@ export function RoutingHubPage() {
       title: 'Multi-objective',
       description: 'Steers traffic toward the best authorization rate using live connector score signals.',
       useCase: 'Use when you want automatic gateway selection driven by real-time success-rate data.',
-      icon: Target,
+      icon: TrendingUp,
       state: !authRateRoutingOn ? 'off' : autopilotOn ? 'autopilot' : hasMultiObjectiveConfig ? 'configured' : 'default',
       canDeactivate: authRateRoutingKnown && authRateRoutingOn,
       canActivate: authRateRoutingKnown && !authRateRoutingOn,
@@ -187,7 +187,7 @@ export function RoutingHubPage() {
       title: 'Rule based',
       description: 'Evaluates explicit business conditions before traffic reaches connector selection.',
       useCase: 'Use for BIN, network, country, amount, metadata, or merchant policy overrides.',
-      icon: SignpostBig,
+      icon: BookOpen,
       state: hasRuleBasedRouting ? 'enabled' : 'not_set',
       canDeactivate: Boolean(activeRuleAlgorithm),
       href: 'rules',

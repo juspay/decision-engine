@@ -72,6 +72,24 @@ export function expectValidAnalyticsOverview(obj: any) {
   expect(typeof obj.merchant_id).toBe('string')
   expect(Array.isArray(obj.kpis)).toBe(true)
   expect(Array.isArray(obj.route_hits)).toBe(true)
+
+  // Merchant-wide counts, not a sum of the truncated, routing-kind-scoped lists beside them.
+  expectObject(obj.totals, 'analytics overview totals')
+  expectObject(obj.totals.auth_rate, 'analytics overview merchant-wide auth rate')
+  expect(Array.isArray(obj.totals.gateway_volumes)).toBe(true)
+  expect(typeof obj.totals.request_count).toBe('number')
+  expect(typeof obj.totals.error_count).toBe('number')
+  expect(Array.isArray(obj.totals.requests_by_route)).toBe(true)
+  expect(obj.totals.request_count).toBe(
+    (obj.totals.requests_by_route as { count: number }[]).reduce((sum, hit) => sum + hit.count, 0),
+  )
+  // `route_hits` scopes /update_gateway to one routing kind's payments; the total counts them all.
+  expect(obj.totals.request_count).toBeGreaterThanOrEqual(
+    (obj.route_hits as { count: number }[]).reduce((sum, hit) => sum + hit.count, 0),
+  )
+  expect(obj.totals.error_count).toBeGreaterThanOrEqual(
+    (obj.top_errors as { count: number }[]).reduce((sum, row) => sum + row.count, 0),
+  )
 }
 
 export function expectValidRoutingStats(obj: any) {

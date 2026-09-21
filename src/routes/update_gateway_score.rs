@@ -62,6 +62,12 @@ struct UpdateGatewayScoreSuccessDetail<'a> {
 }
 
 #[derive(Debug, Serialize)]
+struct UpdateGatewayScoreSkippedDetail<'a> {
+    request: UpdateGatewayScoreRequestDetail<'a>,
+    selection_reason: UpdateGatewayScoreSelectionReason<'a>,
+}
+
+#[derive(Debug, Serialize)]
 struct UpdateGatewayScoreFailureDetail<'a> {
     payment_id: &'a str,
     request_id: Option<&'a str>,
@@ -238,6 +244,44 @@ pub async fn update_gateway_score(
                                 global_request_id.clone(),
                                 trace_id.clone(),
                                 Some("score_updated".to_string()),
+                            );
+                        } else {
+                            crate::analytics::DomainAnalyticsEvent::record_gateway_update(
+                                crate::analytics::AnalyticsFlowContext::new(
+                                    crate::analytics::ApiFlow::DynamicRouting,
+                                    crate::analytics::FlowType::UpdateGatewayScoreSkipped,
+                                ),
+                                Some(merchant_id.clone()),
+                                Some(gateway.clone()),
+                                Some(transaction_status.clone()),
+                                crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+                                crate::analytics::serialize_details(
+                                    &UpdateGatewayScoreSkippedDetail {
+                                        request: UpdateGatewayScoreRequestDetail {
+                                            merchant_id: &merchant_id,
+                                            gateway: &gateway,
+                                            payment_id: &payment_id,
+                                            status: &transaction_status,
+                                            gateway_reference_id: payload
+                                                .gateway_reference_id
+                                                .as_deref(),
+                                            enforce_dynamic_routing_failure: payload
+                                                .enforce_dynamic_routing_failure,
+                                            txn_latency: payload.txn_latency.as_ref(),
+                                            error_info: payload.error_info.as_ref(),
+                                            is_smart_retry: payload.is_smart_retry,
+                                        },
+                                        selection_reason: UpdateGatewayScoreSelectionReason {
+                                            transaction_status: &transaction_status,
+                                            stage: "no scoring context; nothing to update",
+                                        },
+                                    },
+                                ),
+                                Some(payment_id.clone()),
+                                x_request_id.clone(),
+                                global_request_id.clone(),
+                                trace_id.clone(),
+                                Some("score_skipped".to_string()),
                             );
                         }
                         API_REQUEST_COUNTER
