@@ -1582,6 +1582,19 @@ pub async fn verify_jwt_not_revoked(
 ) -> Result<auth::JwtClaims, ContainerError<UserAuthError>> {
     let claims = auth::verify_jwt(token, secret).change_context(UserAuthError::InvalidToken)?;
 
+    // A token this process has already seen as live stays trusted for the configured window,
+    // which keeps the denylist read off the hot path. Only the "not revoked" answer is cached:
+    // a revoked token returns below without ever being stored, so the cache can let a session
+    // live slightly too long but can never resurrect one that was refused.
+    let cache_ttl_ms = APP_STATE
+        .get()
+        .map(|state| state.global_config.user_auth.jwt_revocation_cache_ttl_ms)
+        .unwrap_or(0);
+
+    if cache_ttl_ms > 0 && jwt_live_cache(cache_ttl_ms).get(&claims.jti).is_some() {
+        return Ok(claims);
+    }
+
     let app_state = get_tenant_app_state().await;
     let deny_key = format!("{}{}", JWT_DENYLIST_PREFIX, claims.jti);
     if let Ok(val) = app_state.redis_conn.get_key_string(&deny_key).await {
@@ -1590,7 +1603,22 @@ pub async fn verify_jwt_not_revoked(
         }
     }
 
+    if cache_ttl_ms > 0 {
+        jwt_live_cache(cache_ttl_ms).store(claims.jti.clone(), true);
+    }
+
     Ok(claims)
+}
+
+/// Tokens seen as not revoked, keyed by `jti`.
+///
+/// Built on the first call, so the TTL is whatever config held then — it is read once per process
+/// and never changes at runtime, exactly like the other hot-path caches. Sized for the number of
+/// sessions a single process serves concurrently; entries expire on their own.
+fn jwt_live_cache(ttl_ms: u64) -> &'static crate::redis::mem_cache::TypedCache<bool> {
+    static CACHE: std::sync::OnceLock<crate::redis::mem_cache::TypedCache<bool>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| crate::redis::mem_cache::TypedCache::new(ttl_ms, 50_000))
 }
 
 #[derive(Debug, Deserialize)]

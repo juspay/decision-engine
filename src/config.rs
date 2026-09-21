@@ -164,6 +164,20 @@ pub struct UserAuthConfig {
     /// and a caller that omits them is a bug rather than an old build.
     #[serde(default)]
     pub require_explicit_permissions: bool,
+    /// How long (ms) a token that was found *not* revoked may be trusted without re-reading the
+    /// denylist from Redis. Every authenticated request reads `jwt_revoked:<jti>`, which is one
+    /// Redis round-trip ahead of any real work, so caching that answer removes a hop from every
+    /// request on every endpoint.
+    ///
+    /// The cost is revocation latency: a token revoked by `/auth/logout` stays usable for up to
+    /// this long. Only the "not revoked" answer is cached — a token seen as revoked is refused
+    /// immediately and is never re-admitted by the cache.
+    ///
+    /// `0` (the default) disables the cache and reads Redis on every request, which is the
+    /// behaviour this key was introduced against. `1000` bounds revocation to a second and is the
+    /// value the latency benchmarks use.
+    #[serde(default)]
+    pub jwt_revocation_cache_ttl_ms: u64,
 }
 
 /// Deserialize a `Vec<String>` from either a sequence (TOML array) or a single comma-separated
@@ -254,6 +268,7 @@ impl Default for UserAuthConfig {
             signup_requires_admin_secret: true,
             super_admin_emails: Vec::new(),
             require_explicit_permissions: false,
+            jwt_revocation_cache_ttl_ms: 0,
         }
     }
 }

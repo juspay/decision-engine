@@ -591,13 +591,25 @@ pub async fn get_cached_scores_based_on_srv3(
     // snap the gateway to a fake 100%). The score key is left intact.
     Utils::set_srv3_bucket_size(decider_flow, merchant_bucket_size);
 
-    let mut score_map = GatewayScoreMap::new();
-    for gw in functional_gateways.clone() {
-        if let Some(key) = sr_gateway_redis_key_map.get(&gw) {
-            let score = get_cached_score_from_redis(merchant_bucket_size, key).await;
-            score_map.insert(gw, score);
-        }
-    }
+    // Fetched concurrently rather than one gateway at a time: on a score-cache miss each gateway
+    // costs a Redis round-trip, and the client pipelines commands issued together, so awaiting
+    // them as a group collapses N round-trips into roughly one. Scores are independent of each
+    // other, and the map they land in is unordered, so the result is the same either way.
+    let score_futures = functional_gateways.iter().filter_map(|gw| {
+        sr_gateway_redis_key_map.get(gw).map(|key| {
+            let gw = gw.clone();
+            async move {
+                (
+                    gw,
+                    get_cached_score_from_redis(merchant_bucket_size, key).await,
+                )
+            }
+        })
+    });
+    let score_map: GatewayScoreMap = futures::future::join_all(score_futures)
+        .await
+        .into_iter()
+        .collect();
     logger::debug!(
         tag = "get_cached_scores_based_on_srv3",
         action = "get_cached_scores_based_on_srv3",
