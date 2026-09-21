@@ -71,7 +71,7 @@ export function TimeRangeFilter({
 
   return (
     <div ref={containerRef} className={`relative ${className}`}>
-      <div className="flex flex-wrap items-center gap-1 rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
+      <div className="flex flex-nowrap items-center gap-1 rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
         {RANGE_OPTIONS.map((option) => (
           <Button
             key={option.value}

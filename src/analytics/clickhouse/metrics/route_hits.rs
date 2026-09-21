@@ -7,7 +7,7 @@ use crate::error::ApiError;
 
 use super::super::common::{
     decision_shape, fetch_all, fetch_one, ordered_route_hits_from_counts, static_flow_type_in_sql,
-    DOMAIN_TABLE, ROUTE_HIT_ENTRY_POINT_FLOW_TYPES,
+    DOMAIN_TABLE, ROUTE_HIT_ENTRY_POINT_FLOW_TYPES, ROUTE_HIT_FLOW_TYPES,
 };
 use super::super::filters::{base_window_filters, merchant_filter};
 use super::super::query::{BoundQueryBuilder, FilterClause};
@@ -49,6 +49,33 @@ pub async fn load(
                 FlowType::UpdateGatewayScoreRequestHit.as_str().to_string(),
                 score_feedback,
             ))),
+    ))
+}
+
+/// Hits on every routing entry point, merchant-wide.
+///
+/// `/update_gateway` is counted as the endpoint was called, not scoped to the payments one routing
+/// kind decided the way [`load`] scopes it: hybrid and decide-gateway traffic both report outcomes
+/// through it, so a total that leaves either out is not the merchant's request count.
+pub async fn load_endpoint_totals(
+    client: &clickhouse::Client,
+    query: &AnalyticsQuery,
+) -> Result<Vec<AnalyticsRouteHit>, ApiError> {
+    let (start_ms, end_ms) = effective_window_bounds(query);
+    let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
+    builder.extend_selects(["flow_type", "count() AS count"]);
+    builder.extend_filters(base_window_filters(start_ms, end_ms));
+    builder.extend_filters(merchant_filter(&query.merchant_id));
+    builder.add_filter(FilterClause::raw(format!(
+        "flow_type IN {}",
+        static_flow_type_in_sql(ROUTE_HIT_FLOW_TYPES)
+    )));
+    builder.add_group_by("flow_type");
+
+    let rows = fetch_all::<RouteHitRow>(builder.build(client)).await?;
+    Ok(ordered_route_hits_from_counts(
+        rows.into_iter()
+            .map(|row| (row.flow_type, row.count as i64)),
     ))
 }
 

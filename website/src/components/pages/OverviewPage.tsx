@@ -16,12 +16,12 @@ import {
   AnalyticsRange,
   AnalyticsRangeValue,
   AnalyticsOverviewResponse,
-  AnalyticsRoutingStatsResponse,
   RoutingAlgorithm,
   RuleConfig,
 } from '../../types/api'
 import { Badge } from '../ui/Badge'
 import { Card as GlassCard, SurfaceLabel } from '../ui/Card'
+import { humanizeAuditValue, routeLabel } from '../../lib/auditLabels'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { TimeRangeFilter } from '../ui/TimeRangeFilter'
@@ -41,6 +41,15 @@ const PRESET_WINDOW_COPY: Record<AnalyticsRange, { detail: string; badge: string
   '1w': { detail: 'Last 1 week', badge: 'Live 1w' },
 }
 
+const GATEWAY_ACTIVITY_LIMIT = 6
+
+const ROUTE_HIT_LABELS: Record<string, string> = {
+  '/decide_gateway': 'Decide Gateway',
+  '/routing_hybrid': 'Hybrid Routing',
+  '/update_gateway': 'Update Gateway',
+  '/rule_evaluate': 'Rule Evaluate',
+}
+
 function formatCompactNumber(value: number | undefined) {
   return new Intl.NumberFormat(undefined, {
     notation: 'compact',
@@ -48,9 +57,25 @@ function formatCompactNumber(value: number | undefined) {
   }).format(value || 0)
 }
 
+function formatExactNumber(value: number | undefined) {
+  return new Intl.NumberFormat().format(value || 0)
+}
+
+/** Exact digits until the number stops fitting the card — "2K" for 2,063 hides what it's read for. */
+function formatStatNumber(value: number | undefined) {
+  const safe = value || 0
+  return safe < 1_000_000 ? formatExactNumber(safe) : formatCompactNumber(safe)
+}
+
 function formatPercent(value: number | undefined) {
   if (value === undefined || value === null || Number.isNaN(value)) return '0%'
   return `${value.toFixed(value >= 100 ? 0 : 1)}%`
+}
+
+/** "0.0% of requests" beside a visibly non-zero error count reads as a contradiction. */
+function formatRate(value: number) {
+  if (value > 0 && value < 0.1) return '<0.1%'
+  return formatPercent(value)
 }
 
 function timeAgo(ms: number) {
@@ -159,13 +184,8 @@ export function OverviewPage() {
         : null
       : `range=${range}`
   const analyticsOverviewUrl = windowQuery ? `/analytics/overview?${windowQuery}` : null
-  const analyticsRoutingUrl = windowQuery ? `/analytics/routing-stats?${windowQuery}` : null
 
   const analyticsOverview = useSWR<AnalyticsOverviewResponse>(analyticsOverviewUrl, fetcher, {
-    shouldRetryOnError: false,
-    keepPreviousData: true,
-  })
-  const analyticsRouting = useSWR<AnalyticsRoutingStatsResponse>(analyticsRoutingUrl, fetcher, {
     shouldRetryOnError: false,
     keepPreviousData: true,
   })
@@ -180,47 +200,68 @@ export function OverviewPage() {
   )
 
   const routeHits = analyticsOverview.data?.route_hits || []
-  const decideHits = routeHits.find((item) => item.route === '/decide_gateway')?.count || 0
-  const totalErrors =
-    analyticsOverview.data?.top_errors?.reduce((sum, item) => sum + item.count, 0) || 0
-
   const topErrors = analyticsOverview.data?.top_errors || []
 
+  // `totals` are the server's window-wide counts; the fallbacks only cover a response cached from
+  // before that field existed. `top_errors` is capped at five groups, so summing it undercounts.
+  const totalRequests =
+    analyticsOverview.data?.totals?.request_count ??
+    routeHits.reduce((sum, item) => sum + item.count, 0)
+  const totalErrors =
+    analyticsOverview.data?.totals?.error_count ??
+    topErrors.reduce((sum, item) => sum + item.count, 0)
+  const listedErrors = topErrors.reduce((sum, item) => sum + item.count, 0)
+  const errorRate = totalRequests > 0 ? (totalErrors / totalRequests) * 100 : 0
+
+  const requestBreakdown = (analyticsOverview.data?.totals?.requests_by_route ?? routeHits)
+    .filter((item) => item.count > 0)
+    .sort((left, right) => right.count - left.count)
+
+  // A still-pending outcome is in neither count, so the denominator is the resolved ones — fewer
+  // than the calls to /update-gateway-score the Requests card counts.
+  const authRate = analyticsOverview.data?.totals?.auth_rate ?? analyticsOverview.data?.auth_rate
+  const authRateResolved = (authRate?.success_count || 0) + (authRate?.failure_count || 0)
+  const authRatePercent =
+    authRateResolved > 0 ? ((authRate?.success_count || 0) / authRateResolved) * 100 : null
+
+  // Every snapshot field is nullable server-side: rows without a gateway are dropped, and a gateway
+  // with no transaction counts falls back to a plain mean instead of reporting 0%.
   const gatewayScores = useMemo(() => {
-    const map = new Map<string, { scoreSum: number; txSum: number }>()
+    const map = new Map<string, { scoreSum: number; txSum: number; plainSum: number; rows: number }>()
     for (const s of analyticsOverview.data?.top_scores || []) {
-      const e = map.get(s.gateway) ?? { scoreSum: 0, txSum: 0 }
-      e.scoreSum += s.score_value * s.transaction_count
-      e.txSum += s.transaction_count
+      if (!s.gateway) continue
+      const score = s.score_value || 0
+      const txCount = s.transaction_count || 0
+      const e = map.get(s.gateway) ?? { scoreSum: 0, txSum: 0, plainSum: 0, rows: 0 }
+      e.scoreSum += score * txCount
+      e.txSum += txCount
+      e.plainSum += score
+      e.rows += 1
       map.set(s.gateway, e)
     }
     return Array.from(map.entries())
       .map(([gateway, e]) => ({
         gateway,
-        score: e.txSum > 0 ? e.scoreSum / e.txSum : 0,
+        score: e.txSum > 0 ? e.scoreSum / e.txSum : e.rows > 0 ? e.plainSum / e.rows : 0,
         txCount: e.txSum,
       }))
-      .sort((a, b) => b.txCount - a.txCount)
+      .sort((a, b) => b.txCount - a.txCount || b.score - a.score)
   }, [analyticsOverview.data])
 
   const gatewayUsage = useMemo(() => {
-    const totals = new Map<string, number>()
+    const volumes = analyticsOverview.data?.totals?.gateway_volumes || []
+    const totalTraffic = volumes.reduce((sum, item) => sum + item.count, 0)
 
-    for (const point of analyticsRouting.data?.gateway_share || []) {
-      totals.set(point.gateway, (totals.get(point.gateway) || 0) + point.count)
-    }
-
-    const totalTraffic = Array.from(totals.values()).reduce((sum, count) => sum + count, 0)
-
-    return Array.from(totals.entries())
-      .map(([gateway, count]) => ({
-        gateway,
-        count,
-        share: totalTraffic ? (count / totalTraffic) * 100 : 0,
+    return volumes
+      .map((item) => ({
+        gateway: item.gateway,
+        count: item.count,
+        share: totalTraffic ? (item.count / totalTraffic) * 100 : 0,
       }))
       .sort((left, right) => right.count - left.count)
-  }, [analyticsRouting.data])
+  }, [analyticsOverview.data])
 
+  const gatewayTrafficTotal = gatewayUsage.reduce((sum, item) => sum + item.count, 0)
   const topGateway = gatewayUsage[0]?.gateway || analyticsOverview.data?.top_scores?.[0]?.gateway
   const selectedWindow =
     range === 'custom'
@@ -293,14 +334,11 @@ export function OverviewPage() {
     },
   ]
 
-  const analyticsLoading =
-    (!analyticsOverview.data && analyticsOverview.isLoading) ||
-    (!analyticsRouting.data && analyticsRouting.isLoading)
-  const analyticsRefreshing =
-    !analyticsLoading &&
-    (analyticsOverview.isValidating || analyticsRouting.isValidating)
+  const analyticsLoading = !analyticsOverview.data && analyticsOverview.isLoading
+  const analyticsRefreshing = !analyticsLoading && analyticsOverview.isValidating
 
-  const gatewayColors = ['#38bdf8', '#60a5fa', '#22c55e', '#f59e0b']
+  // At least GATEWAY_ACTIVITY_LIMIT long, or two rows share a swatch.
+  const gatewayColors = ['#38bdf8', '#60a5fa', '#22c55e', '#f59e0b', '#a78bfa', '#f472b6']
 
   return (
     <div className="space-y-6 px-5 sm:px-6 lg:px-8 xl:px-10">
@@ -345,51 +383,100 @@ export function OverviewPage() {
         <>
 
           {/* ── top stat row ─────────────────────────────────────── */}
-          <div className={`grid gap-4 sm:grid-cols-3 transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
-            <GlassCard className="p-5">
+          <div className={`grid gap-6 sm:grid-cols-2 xl:grid-cols-4 transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
+            <GlassCard className="flex flex-col p-5">
               <SurfaceLabel>Requests</SurfaceLabel>
-              <p className="mt-3 text-[2rem] font-semibold leading-none tracking-tight text-slate-950 dark:text-white">
-                {formatCompactNumber(decideHits)}
+              <p
+                className="mt-3 text-[2rem] font-semibold leading-none tracking-tight text-slate-950 dark:text-white"
+                title={formatExactNumber(totalRequests)}
+              >
+                {formatStatNumber(totalRequests)}
               </p>
               <p className="mt-2 text-xs text-slate-500 dark:text-[#8d96aa]">
-                /decide-gateway · {selectedWindow.detail.toLowerCase()}
+                All routing endpoints · {selectedWindow.detail.toLowerCase()}
               </p>
+              {requestBreakdown.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 border-t border-slate-100 pt-3 dark:border-[#1e2535]">
+                  {requestBreakdown.map((item) => (
+                    <span
+                      key={item.route}
+                      className="text-[11px] leading-4 text-slate-500 dark:text-[#8d96aa]"
+                    >
+                      {ROUTE_HIT_LABELS[item.route] || item.route}{' '}
+                      <span className="font-semibold tabular-nums text-slate-700 dark:text-[#c6cfdd]">
+                        {formatExactNumber(item.count)}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              )}
             </GlassCard>
 
-            <GlassCard className={`p-5 transition-colors ${totalErrors > 0 ? 'border-red-300/60 dark:border-red-500/30' : ''}`}>
+            <GlassCard className={`flex flex-col p-5 transition-colors ${totalErrors > 0 ? 'border-red-300/60 dark:border-red-500/30' : ''}`}>
               <SurfaceLabel>Errors</SurfaceLabel>
-              <p className={`mt-3 text-[2rem] font-semibold leading-none tracking-tight ${totalErrors > 0 ? 'text-red-600 dark:text-red-400' : 'text-slate-950 dark:text-white'}`}>
-                {formatCompactNumber(totalErrors)}
+              <p
+                className={`mt-3 text-[2rem] font-semibold leading-none tracking-tight ${totalErrors > 0 ? 'text-red-600 dark:text-red-400' : 'text-slate-950 dark:text-white'}`}
+                title={formatExactNumber(totalErrors)}
+              >
+                {formatStatNumber(totalErrors)}
               </p>
               <p className="mt-2 text-xs text-slate-500 dark:text-[#8d96aa]">
-                {totalErrors > 0 ? 'Issues detected in window' : 'No issues in window'}
+                {totalErrors > 0
+                  ? totalRequests > 0
+                    ? `${formatRate(errorRate)} of requests in window`
+                    : 'Issues detected in window'
+                  : 'No issues in window'}
               </p>
             </GlassCard>
 
-            <GlassCard className="p-5">
-              <SurfaceLabel>Top gateway</SurfaceLabel>
+            <GlassCard className="flex flex-col p-5">
+              <SurfaceLabel>Auth rate</SurfaceLabel>
               <p className="mt-3 text-[2rem] font-semibold leading-none tracking-tight text-slate-950 dark:text-white">
-                {topGateway?.toUpperCase() || '—'}
+                {authRatePercent === null ? '—' : formatPercent(authRatePercent)}
+              </p>
+              <p
+                className="mt-2 text-xs text-slate-500 dark:text-[#8d96aa]"
+                title="Outcomes reported through /update-gateway-score that resolved to a success or failure status. Still-pending ones are in neither count, so this is smaller than the endpoint's call count."
+              >
+                {authRatePercent === null
+                  ? 'No resolved outcomes yet'
+                  : `${formatExactNumber(authRate?.success_count)} of ${formatExactNumber(authRateResolved)} resolved outcomes`}
+              </p>
+            </GlassCard>
+
+            <GlassCard className="flex flex-col p-5">
+              <SurfaceLabel>Top gateway</SurfaceLabel>
+              <p className="mt-3 truncate text-[2rem] font-semibold leading-none tracking-tight text-slate-950 dark:text-white">
+                {topGateway ? humanizeAuditValue(topGateway) : '—'}
               </p>
               <p className="mt-2 text-xs text-slate-500 dark:text-[#8d96aa] max-w-[57ch]">
-                {gatewayUsage[0] ? `${formatPercent(gatewayUsage[0].share)} of traffic` : 'No activity yet'}
+                {gatewayUsage[0]
+                  ? `${formatPercent(gatewayUsage[0].share)} of ${formatExactNumber(gatewayTrafficTotal)} decisions`
+                  : 'No activity yet'}
               </p>
             </GlassCard>
           </div>
 
           {/* ── main content ─────────────────────────────────────── */}
-          <div className={`grid gap-6 xl:grid-cols-[1.1fr_0.9fr] transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
+          <div className={`grid gap-6 xl:grid-cols-2 transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
 
             {/* Gateway activity */}
             <GlassCard className="p-6">
-              <div className="flex items-center justify-between gap-4">
-                <SurfaceLabel>Gateway activity</SurfaceLabel>
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <SurfaceLabel>Gateway activity</SurfaceLabel>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8d96aa]">
+                    {gatewayUsage.length
+                      ? `${formatExactNumber(gatewayTrafficTotal)} decisions across ${gatewayUsage.length} ${gatewayUsage.length === 1 ? 'gateway' : 'gateways'}`
+                      : 'Routing decisions by gateway'}
+                  </p>
+                </div>
                 <Badge variant="blue">{selectedWindow.badge}</Badge>
               </div>
 
               <div className="mt-6 space-y-3">
                 {gatewayUsage.length ? (
-                  gatewayUsage.slice(0, 4).map((item, index) => (
+                  gatewayUsage.slice(0, GATEWAY_ACTIVITY_LIMIT).map((item, index) => (
                     <div
                       key={item.gateway}
                       className="rounded-[20px] border border-slate-200 bg-slate-50/80 p-4 dark:border-[#2a303a] dark:bg-[#121720]"
@@ -402,10 +489,10 @@ export function OverviewPage() {
                           />
                           <div>
                             <p className="text-sm font-semibold text-slate-950 dark:text-white">
-                              {item.gateway.toUpperCase()}
+                              {humanizeAuditValue(item.gateway)}
                             </p>
                             <p className="mt-0.5 text-xs text-slate-500 dark:text-[#98a3b8]">
-                              {formatCompactNumber(item.count)} requests
+                              {formatExactNumber(item.count)} decisions
                             </p>
                           </div>
                         </div>
@@ -435,13 +522,28 @@ export function OverviewPage() {
                     </p>
                   </div>
                 )}
+
+                {gatewayUsage.length > GATEWAY_ACTIVITY_LIMIT && (
+                  <Link
+                    to="/analytics"
+                    className="flex items-center justify-center gap-1 rounded-[20px] border border-dashed border-slate-200 px-4 py-2.5 text-xs font-medium text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-700 dark:border-[#2a303a] dark:text-[#8d96aa] dark:hover:border-[#3a4252] dark:hover:text-[#c6cfdd]"
+                  >
+                    {gatewayUsage.length - GATEWAY_ACTIVITY_LIMIT} more in Analytics
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Link>
+                )}
               </div>
             </GlassCard>
 
             {/* Setup */}
             <GlassCard className="p-6">
-              <div className="flex items-center justify-between gap-4">
-                <SurfaceLabel>Setup</SurfaceLabel>
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <SurfaceLabel>Setup</SurfaceLabel>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8d96aa]">
+                    Routing capabilities on this merchant
+                  </p>
+                </div>
                 <Badge variant={configuredBasics >= 2 ? 'green' : 'orange'}>
                   {configuredBasics}/4 ready
                 </Badge>
@@ -524,8 +626,13 @@ export function OverviewPage() {
 
             {/* Gateway health */}
             <GlassCard className="p-6">
-              <div className="flex items-center justify-between gap-4">
-                <SurfaceLabel>Gateway health</SurfaceLabel>
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <SurfaceLabel>Gateway health</SurfaceLabel>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8d96aa]">
+                    Success-rate score, weighted by scored transactions
+                  </p>
+                </div>
                 <Badge variant="blue">{selectedWindow.badge}</Badge>
               </div>
 
@@ -540,9 +647,12 @@ export function OverviewPage() {
                       >
                         <span className={`h-2 w-2 flex-shrink-0 rounded-full ${color.dot}`} />
                         <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-950 dark:text-white">
-                          {gw.gateway.toUpperCase()}
+                          {humanizeAuditValue(gw.gateway)}
                         </span>
-                        <span className={`text-sm font-semibold tabular-nums ${color.text}`}>
+                        <span className="flex-shrink-0 text-xs tabular-nums text-slate-500 dark:text-[#8d96aa]">
+                          {formatExactNumber(gw.txCount)} txns
+                        </span>
+                        <span className={`w-14 flex-shrink-0 text-right text-sm font-semibold tabular-nums ${color.text}`}>
                           {(gw.score * 100).toFixed(1)}%
                         </span>
                       </div>
@@ -561,43 +671,60 @@ export function OverviewPage() {
 
             {/* Recent errors */}
             <GlassCard className={`p-6 transition-colors ${totalErrors > 0 ? 'border-red-300/40 dark:border-red-500/20' : ''}`}>
-              <div className="flex items-center justify-between gap-4">
-                <SurfaceLabel>Recent errors</SurfaceLabel>
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <SurfaceLabel>Recent errors</SurfaceLabel>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8d96aa]">
+                    Largest failure groups in the window
+                  </p>
+                </div>
                 {totalErrors > 0 ? (
-                  <Badge variant="red">{formatCompactNumber(totalErrors)} total</Badge>
+                  <Badge variant="red">{formatExactNumber(totalErrors)} total</Badge>
                 ) : (
                   <Badge variant="green">Clean</Badge>
                 )}
               </div>
 
               {topErrors.length ? (
-                <div className="mt-4 divide-y divide-slate-100 dark:divide-[#1e2535]">
-                  {topErrors.slice(0, 5).map((err, index) => (
-                    <div key={index} className="flex items-start justify-between gap-3 py-3">
-                      <div className="min-w-0 flex-1">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className="rounded bg-red-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-400 leading-4">
-                            {err.error_code}
-                          </span>
-                          <span className="truncate text-xs text-slate-500 dark:text-[#8d96aa]">
-                            {err.route}
-                          </span>
+                <>
+                  <div className="mt-4 divide-y divide-slate-100 dark:divide-[#1e2535]">
+                    {topErrors.slice(0, 5).map((err, index) => (
+                      <div key={index} className="flex items-start justify-between gap-3 py-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded bg-red-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-400 leading-4">
+                              {err.error_code || 'unknown'}
+                            </span>
+                            <span className="truncate text-xs text-slate-500 dark:text-[#8d96aa]">
+                              {routeLabel(err.route)}
+                            </span>
+                          </div>
+                          <p className="mt-1 truncate text-xs text-slate-500 dark:text-[#8d96aa]" title={err.error_message}>
+                            {err.error_message}
+                          </p>
                         </div>
-                        <p className="mt-1 truncate text-xs text-slate-500 dark:text-[#8d96aa]">
-                          {err.error_message}
-                        </p>
+                        <div className="flex-shrink-0 text-right">
+                          <p className="text-sm font-semibold tabular-nums text-slate-950 dark:text-white">
+                            {formatExactNumber(err.count)}
+                          </p>
+                          <p className="text-[11px] text-slate-500 dark:text-[#78849a] leading-4">
+                            {timeAgo(err.last_seen_ms)}
+                          </p>
+                        </div>
                       </div>
-                      <div className="flex-shrink-0 text-right">
-                        <p className="text-sm font-semibold tabular-nums text-slate-950 dark:text-white">
-                          {formatCompactNumber(err.count)}
-                        </p>
-                        <p className="text-[11px] text-slate-500 dark:text-[#78849a] leading-4">
-                          {timeAgo(err.last_seen_ms)}
-                        </p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                    ))}
+                  </div>
+
+                  {totalErrors > listedErrors && (
+                    <Link
+                      to="/audit"
+                      className="mt-3 flex items-center justify-center gap-1 rounded-xl border border-dashed border-slate-200 px-4 py-2.5 text-xs font-medium text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-700 dark:border-[#2a303a] dark:text-[#8d96aa] dark:hover:border-[#3a4252] dark:hover:text-[#c6cfdd]"
+                    >
+                      {formatExactNumber(totalErrors - listedErrors)} more in Decision Audit
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </Link>
+                  )}
+                </>
               ) : (
                 <div className="mt-5 flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 px-5 py-10 text-center dark:border-[#2a303a]">
                   <CheckCircle2 className="h-8 w-8 text-emerald-700" />

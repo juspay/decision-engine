@@ -22,6 +22,6 @@ jobs:
         run: echo $TITLE > pr_title.txt
 
       - name: Spell check
-        uses: crate-ci/typos@master
+        uses: crate-ci/typos@v1
         with:
           files: ./pr_title.txt

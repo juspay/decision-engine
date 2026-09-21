@@ -30,6 +30,7 @@ pub const PAYMENT_AUDIT_HYBRID_FLOW_TYPES: &[FlowType] = &[
 pub const PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES: &[FlowType] = &[
     FlowType::DecideGatewayDecision,
     FlowType::UpdateGatewayScoreUpdate,
+    FlowType::UpdateGatewayScoreSkipped,
     FlowType::UpdateScoreLegacyScoreSnapshot,
     FlowType::DecideGatewayRuleHit,
     FlowType::DecideGatewayError,
@@ -112,6 +113,7 @@ pub enum FlowType {
     DecideGatewayError,
     UpdateGatewayScoreRequestHit,
     UpdateGatewayScoreUpdate,
+    UpdateGatewayScoreSkipped,
     UpdateGatewayScoreScoreSnapshot,
     UpdateGatewayScoreError,
     UpdateScoreLegacyScoreSnapshot,
@@ -186,6 +188,7 @@ impl FlowType {
             Self::DecideGatewayError => "decide_gateway_error",
             Self::UpdateGatewayScoreRequestHit => "update_gateway_score_request_hit",
             Self::UpdateGatewayScoreUpdate => "update_gateway_score_update",
+            Self::UpdateGatewayScoreSkipped => "update_gateway_score_skipped",
             Self::UpdateGatewayScoreScoreSnapshot => "update_gateway_score_score_snapshot",
             Self::UpdateGatewayScoreError => "update_gateway_score_error",
             Self::UpdateScoreLegacyScoreSnapshot => "update_score_legacy_score_snapshot",

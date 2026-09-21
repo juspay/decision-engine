@@ -19,6 +19,10 @@ pub const OVERVIEW_ERROR_FLOW_TYPES: &[FlowType] = &[
     FlowType::RoutingEvaluateError,
     FlowType::RoutingHybridError,
 ];
+pub const ALL_DECISION_FLOW_TYPES: &[FlowType] = &[
+    FlowType::DecideGatewayDecision,
+    FlowType::RoutingHybridDecision,
+];
 pub const ROUTE_HIT_FLOW_TYPES: &[FlowType] = &[
     FlowType::DecideGatewayRequestHit,
     FlowType::UpdateGatewayScoreRequestHit,
@@ -225,6 +229,13 @@ pub const fn decision_shape(kind: AnalyticsRoutingKind) -> DecisionShape {
     }
 }
 
+pub fn all_decisions_filter() -> super::query::FilterClause {
+    super::query::FilterClause::raw(format!(
+        "flow_type IN {}",
+        static_flow_type_in_sql(ALL_DECISION_FLOW_TYPES)
+    ))
+}
+
 impl DecisionShape {
     pub fn decision_filter(&self) -> super::query::FilterClause {
         super::query::FilterClause::raw(format!(
@@ -238,7 +249,7 @@ pub fn payment_audit_stage_label(stage: String) -> String {
     match stage.as_str() {
         "gateway_decided" => "Decide Gateway".to_string(),
         "hybrid_routed" => "Hybrid Routing".to_string(),
-        "score_updated" => "Update Gateway".to_string(),
+        "score_updated" | "score_skipped" => "Update Gateway".to_string(),
         "rule_applied" => "Rule Evaluate".to_string(),
         "preview_evaluated" => "Preview Result".to_string(),
         other => other.to_string(),

@@ -1,4 +1,5 @@
 import { test, expect } from '../../fixtures/test'
+import type { Page } from '@playwright/test'
 import {
   seedHybridTraffic,
   seedRoutedTraffic,
@@ -17,6 +18,16 @@ import {
 
 test.use({ viewport: { width: 1600, height: 1200 } })
 
+// Views live behind one menu, whose trigger's accessible name starts with "View".
+const viewMenuTrigger = (page: Page) => page.getByRole('button', { name: /^View:/ })
+const viewMenuItem = (page: Page, label: string) =>
+  page.getByRole('menuitemradio', { name: label, exact: true })
+
+async function selectAnalyticsView(page: Page, label: string) {
+  await viewMenuTrigger(page).click()
+  await viewMenuItem(page, label).click()
+}
+
 test.describe('Analytics UI', () => {
   test('renders transaction and rule-based analytics with refresh', async ({
     api,
@@ -31,12 +42,12 @@ test.describe('Analytics UI', () => {
     await authedPage.goto('/analytics')
 
     await expect(authedPage.getByRole('heading', { level: 1, name: 'Analytics' })).toBeVisible()
-    await expect(authedPage.getByRole('button', { name: 'Multi-objective', exact: true })).toBeVisible()
-    await expect(
-      authedPage.getByRole('button', { name: 'Rule based / Volume based', exact: true }),
-    ).toBeVisible()
 
-    await authedPage.getByRole('button', { name: 'Multi-objective', exact: true }).click({ force: true })
+    await viewMenuTrigger(authedPage).click()
+    await expect(viewMenuItem(authedPage, 'Multi-objective')).toBeVisible()
+    await expect(viewMenuItem(authedPage, 'Rule based / Volume based')).toBeVisible()
+
+    await viewMenuItem(authedPage, 'Multi-objective').click()
     await expect(authedPage).toHaveURL(/view=multi_objective/)
 
     // Change the window and force a reload of both panels.
@@ -50,9 +61,7 @@ test.describe('Analytics UI', () => {
     await expect(authedPage.getByText('Decide Gateway')).toBeVisible({ timeout: 30_000 })
 
     // Switching views must swap in the rule-based panel.
-    await authedPage
-      .getByRole('button', { name: 'Rule based / Volume based', exact: true })
-      .click({ force: true })
+    await selectAnalyticsView(authedPage, 'Rule based / Volume based')
     await expect(authedPage.getByText('Latest decisions from')).toBeVisible({ timeout: 30_000 })
   })
 
@@ -84,7 +93,7 @@ test.describe('Analytics UI', () => {
     // The decision card counts hybrid calls rather than /decide_gateway ones.
     await expect(authedPage.getByText('Decide Gateway')).toHaveCount(0)
     await expect(authedPage).not.toHaveURL(/view=/)
-    await authedPage.getByRole('button', { name: 'Multi-objective', exact: true }).click({ force: true })
+    await selectAnalyticsView(authedPage, 'Multi-objective')
     await expect(authedPage).toHaveURL(/view=multi_objective/)
   })
 })
