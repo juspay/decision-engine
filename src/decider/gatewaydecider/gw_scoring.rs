@@ -815,6 +815,20 @@ pub fn sample_from_binomial_distribution(
     sample_value as f64 / merchant_bucket_size as f64
 }
 
+/// Draw a gateway's score from the Beta posterior over its success rate.
+///
+/// The bucket's successes and failures are the two Beta parameters, each smoothed by +1
+/// (Laplace smoothing — equivalently, a uniform `Beta(1, 1)` prior).
+///
+/// The smoothing is load-bearing, not cosmetic. `Beta::new` rejects a parameter of zero, and an
+/// unsmoothed bucket that is all successes (or all failures) produces exactly that. It is
+/// reachable on a merchant's very first request, because `create_score_map` seeds every gateway
+/// at 1.0 — as does the `unwrap_or(1.0)` below for a gateway absent from the map. Before the
+/// smoothing those cases panicked, failing the whole `/decide-gateway` call.
+///
+/// Both parameters are then floored at 1.0 so a misconfigured (negative) bucket size degrades to
+/// a uniform draw rather than panicking. `f64::max` returns the other operand when one side is
+/// NaN, so a NaN score lands on the floor too.
 pub fn sample_from_beta_distribution(
     final_score_map: GatewayScoreMap,
     merchant_bucket_size: i32,
@@ -824,8 +838,14 @@ pub fn sample_from_beta_distribution(
     let mut rng = rand::thread_rng();
     let gw_success = merchant_bucket_size as f64 * gw_score;
     let gw_failure = merchant_bucket_size as f64 - gw_success;
-    let beta = Beta::new(gw_success, gw_failure).unwrap();
-    beta.sample(&mut rng)
+    let alpha = (gw_success + 1.0).max(1.0);
+    let beta_param = (gw_failure + 1.0).max(1.0);
+    match Beta::new(alpha, beta_param) {
+        Ok(beta) => beta.sample(&mut rng),
+        // Unreachable given the floors above. Returning the unsampled score keeps a future change
+        // to the parameters from reintroducing a panic on the routing path.
+        Err(_) => gw_score,
+    }
 }
 
 pub fn add_extra_score(
@@ -3616,4 +3636,572 @@ async fn fetch_from_redis(key: &str, dim_key: &Option<String>) -> Option<MetricE
 }
 fn construct_aggregate_key(merchant_id: &str) -> String {
     format!("{}{}", C::AGGREGATE_KEY_PREFIX, merchant_id)
+}
+
+#[cfg(test)]
+mod gw_scoring_pure_fn_tests {
+    use super::*;
+    use crate::decider::gatewaydecider::types::GatewayWiseExtraScore;
+    use time::{Date, Month, Time};
+
+    /// `GatewayOutage` with every optional field empty — each test sets only what it exercises.
+    fn outage() -> ETGO::GatewayOutage {
+        ETGO::GatewayOutage {
+            id: ETGO::to_gateway_outage_id("outage_1".to_string()),
+            version: 1,
+            startTime: at(12, 0, 0),
+            endTime: at(12, 30, 0),
+            gateway: None,
+            merchantId: None,
+            bank: None,
+            paymentMethodType: None,
+            paymentMethod: None,
+            description: None,
+            dateCreated: None,
+            lastUpdated: None,
+            juspayBankCodeId: None,
+            metadata: None,
+        }
+    }
+
+    /// A fixed calendar day, so only the time-of-day varies across outage windows.
+    fn at(hour: u8, minute: u8, second: u8) -> PrimitiveDateTime {
+        PrimitiveDateTime::new(
+            Date::from_calendar_date(2026, Month::January, 1).unwrap(),
+            Time::from_hms(hour, minute, second).unwrap(),
+        )
+    }
+
+    fn score_map(entries: &[(&str, f64)]) -> GatewayScoreMap {
+        entries
+            .iter()
+            .map(|(gw, score)| (gw.to_string(), *score))
+            .collect()
+    }
+
+    fn gws(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+
+    fn no_dimensions() -> SrRoutingDimensions {
+        SrRoutingDimensions {
+            card_network: None,
+            card_isin: None,
+            currency: None,
+            country: None,
+            auth_type: None,
+        }
+    }
+
+    // ── make_first_letter_small ───────────────────────────────────────────────
+    // Feeds the `scoringName` in the debug scoring trail, which the dashboard renders verbatim.
+
+    #[test]
+    fn make_first_letter_small_lowercases_only_the_first_character() {
+        assert_eq!(
+            make_first_letter_small("SrV3Scoring".to_string()),
+            "srV3Scoring"
+        );
+    }
+
+    #[test]
+    fn make_first_letter_small_leaves_an_empty_string_alone() {
+        assert_eq!(make_first_letter_small(String::new()), "");
+    }
+
+    #[test]
+    fn make_first_letter_small_handles_a_single_character() {
+        assert_eq!(make_first_letter_small("S".to_string()), "s");
+    }
+
+    // ── create_score_map ──────────────────────────────────────────────────────
+
+    #[test]
+    fn create_score_map_starts_every_gateway_at_one() {
+        let map = create_score_map(gws(&["stripe", "adyen", "checkout"]));
+
+        assert_eq!(map.len(), 3);
+        for gw in ["stripe", "adyen", "checkout"] {
+            assert_eq!(map.get(gw), Some(&1.0), "{gw} should start at 1.0");
+        }
+    }
+
+    #[test]
+    fn create_score_map_of_no_gateways_is_empty() {
+        assert!(create_score_map(vec![]).is_empty());
+    }
+
+    // ── get_score_with_priority ───────────────────────────────────────────────
+    // Priority routing is expressed as a score, so ordering IS the contract: the nth
+    // priority gateway must outrank the (n+1)th, and anything unlisted must rank below
+    // every listed one.
+
+    #[test]
+    fn priority_list_scores_descend_in_listed_order() {
+        let map = get_score_with_priority(
+            gws(&["stripe", "adyen", "checkout"]),
+            gws(&["stripe", "adyen", "checkout"]),
+        );
+
+        let stripe = map["stripe"];
+        let adyen = map["adyen"];
+        let checkout = map["checkout"];
+
+        assert_eq!(stripe, 1.0);
+        assert!(
+            stripe > adyen && adyen > checkout,
+            "priority order must be strictly descending, got {stripe} / {adyen} / {checkout}"
+        );
+    }
+
+    #[test]
+    fn functional_gateways_outside_the_priority_list_rank_below_every_listed_one() {
+        let map = get_score_with_priority(
+            gws(&["stripe", "adyen", "razorpay"]),
+            gws(&["stripe", "adyen"]),
+        );
+
+        assert!(
+            map["razorpay"] < map["adyen"],
+            "unlisted gateway {} should rank below the last listed one {}",
+            map["razorpay"],
+            map["adyen"]
+        );
+    }
+
+    #[test]
+    fn a_priority_gateway_that_is_not_functional_is_left_out_entirely() {
+        let map = get_score_with_priority(gws(&["adyen"]), gws(&["stripe", "adyen"]));
+
+        assert!(
+            !map.contains_key("stripe"),
+            "non-functional gateway must not be scored"
+        );
+        // stripe never consumed a decrement, so adyen still takes the top score.
+        assert_eq!(map["adyen"], 1.0);
+    }
+
+    #[test]
+    fn an_empty_priority_list_leaves_every_gateway_tied_at_one() {
+        let map = get_score_with_priority(gws(&["stripe", "adyen"]), vec![]);
+
+        assert_eq!(map["stripe"], 1.0);
+        assert_eq!(map["adyen"], 1.0);
+    }
+
+    #[test]
+    fn a_priority_list_longer_than_ten_drives_scores_to_zero_and_below() {
+        // Each listed gateway costs 0.1 off a base of 1.0, with no floor. Past the tenth
+        // entry the score reaches 0.0 and then goes negative, so a twelve-gateway priority
+        // list ranks its tail BELOW an eliminated gateway. Pinned so the boundary is a
+        // deliberate choice rather than an accident if the step size ever changes.
+        let names: Vec<String> = (0..12).map(|i| format!("gw_{i}")).collect();
+        let map = get_score_with_priority(names.clone(), names.clone());
+
+        assert!(
+            map["gw_10"].abs() < 1e-9,
+            "the eleventh priority gateway lands on zero, got {}",
+            map["gw_10"]
+        );
+        assert!(
+            map["gw_11"] < 0.0,
+            "the twelfth priority gateway goes negative, got {}",
+            map["gw_11"]
+        );
+    }
+
+    // ── add_extra_score ───────────────────────────────────────────────────────
+    // The exploration bonus: score + sigma * sigma_factor, clamped to [0, 1].
+
+    fn extra_score(map: &GatewayScoreMap, bucket: i32, gw: &str) -> f64 {
+        add_extra_score(
+            map.clone(),
+            bucket,
+            None,
+            None,
+            CARD.to_string(),
+            "CREDIT".to_string(),
+            gw.to_string(),
+            no_dimensions(),
+        )
+    }
+
+    #[test]
+    fn exploration_is_off_until_a_sigma_factor_is_configured() {
+        // DEFAULT_SR_V3_BASED_GATEWAY_SIGMA_FACTOR is 0.0, so with neither a merchant nor a
+        // default config the bonus is nil and the score passes through untouched. This is the
+        // difference between "explore-exploit is enabled" and "explore-exploit does anything".
+        assert_eq!(C::DEFAULT_SR_V3_BASED_GATEWAY_SIGMA_FACTOR, 0.0);
+
+        let map = score_map(&[("stripe", 0.5)]);
+        assert_eq!(extra_score(&map, 100, "stripe"), 0.5);
+    }
+
+    #[test]
+    fn an_unknown_gateway_is_treated_as_a_perfect_score() {
+        // `unwrap_or(1.0)` — a gateway with no recorded score is optimistically ranked top.
+        let map = score_map(&[("stripe", 0.5)]);
+        assert_eq!(extra_score(&map, 100, "never_seen"), 1.0);
+    }
+
+    #[test]
+    fn a_perfect_score_has_no_variance_left_to_explore() {
+        // var = score * (1 - score) / bucket, so at 1.0 sigma is 0 regardless of sigma factor.
+        let map = score_map(&[("stripe", 1.0)]);
+        assert_eq!(extra_score(&map, 100, "stripe"), 1.0);
+    }
+
+    #[test]
+    fn a_zero_score_stays_at_zero() {
+        let map = score_map(&[("stripe", 0.0)]);
+        assert_eq!(extra_score(&map, 100, "stripe"), 0.0);
+    }
+
+    /// An `SrV3InputConfig` that gives one gateway a sigma factor, via the default (non
+    /// sub-level) path, so the exploration bonus is actually non-zero.
+    fn config_with_sigma_factor(gw: &str, sigma: f64) -> SrV3InputConfig {
+        SrV3InputConfig {
+            defaultLatencyThreshold: None,
+            defaultBucketSize: None,
+            defaultHedgingPercent: None,
+            defaultLowerResetFactor: None,
+            defaultUpperResetFactor: None,
+            defaultGatewayExtraScore: Some(vec![GatewayWiseExtraScore {
+                gatewayName: gw.to_string(),
+                gatewaySigmaFactor: sigma,
+            }]),
+            subLevelInputConfig: None,
+        }
+    }
+
+    fn extra_score_with_config(
+        map: &GatewayScoreMap,
+        bucket: i32,
+        gw: &str,
+        config: SrV3InputConfig,
+    ) -> f64 {
+        add_extra_score(
+            map.clone(),
+            bucket,
+            Some(config),
+            None,
+            CARD.to_string(),
+            "CREDIT".to_string(),
+            gw.to_string(),
+            no_dimensions(),
+        )
+    }
+
+    #[test]
+    fn a_configured_sigma_factor_raises_the_score_by_one_sigma_step() {
+        // score 0.5, bucket 100 -> var = 0.25/100, sigma = 0.05. A factor of 2 adds 0.10.
+        let map = score_map(&[("stripe", 0.5)]);
+        let scored =
+            extra_score_with_config(&map, 100, "stripe", config_with_sigma_factor("stripe", 2.0));
+
+        assert!(
+            (scored - 0.6).abs() < 1e-9,
+            "expected 0.5 + 2 * 0.05 = 0.6, got {scored}"
+        );
+    }
+
+    #[test]
+    fn the_exploration_bonus_cannot_push_a_score_past_one() {
+        // sigma = 0.05 here, so a factor of 50 would reach 3.0 unclamped. Scores above 1.0
+        // would outrank a perfect gateway and break the ordering the score map encodes.
+        let map = score_map(&[("stripe", 0.5)]);
+        let scored = extra_score_with_config(
+            &map,
+            100,
+            "stripe",
+            config_with_sigma_factor("stripe", 50.0),
+        );
+
+        assert_eq!(
+            scored, 1.0,
+            "the bonus must be clamped to 1.0, got {scored}"
+        );
+    }
+
+    #[test]
+    fn the_exploration_bonus_cannot_push_a_score_below_zero() {
+        // A negative sigma factor is a misconfiguration, but it must not produce a negative
+        // score: that would rank the gateway below an eliminated one.
+        let map = score_map(&[("stripe", 0.5)]);
+        let scored = extra_score_with_config(
+            &map,
+            100,
+            "stripe",
+            config_with_sigma_factor("stripe", -50.0),
+        );
+
+        assert_eq!(
+            scored, 0.0,
+            "the bonus must be clamped to 0.0, got {scored}"
+        );
+    }
+
+    #[test]
+    fn a_sigma_factor_configured_for_another_gateway_does_not_leak() {
+        let map = score_map(&[("stripe", 0.5), ("adyen", 0.5)]);
+        let scored =
+            extra_score_with_config(&map, 100, "adyen", config_with_sigma_factor("stripe", 2.0));
+
+        assert_eq!(
+            scored, 0.5,
+            "adyen has no configured sigma factor, so its score should pass through"
+        );
+    }
+
+    // ── check_duration ────────────────────────────────────────────────────────
+
+    #[test]
+    fn an_outage_shorter_than_the_validation_window_is_accepted() {
+        let mut o = outage();
+        o.startTime = at(12, 0, 0);
+        o.endTime = at(12, 30, 0); // 1800s
+
+        assert!(check_duration(o, 3600));
+    }
+
+    #[test]
+    fn an_outage_longer_than_the_validation_window_is_rejected() {
+        let mut o = outage();
+        o.startTime = at(12, 0, 0);
+        o.endTime = at(14, 0, 0); // 7200s
+
+        assert!(!check_duration(o, 3600));
+    }
+
+    #[test]
+    fn an_inverted_outage_window_is_measured_by_absolute_length() {
+        // endTime before startTime: `.abs()` means a backwards window is judged on length
+        // alone rather than being rejected outright.
+        let mut o = outage();
+        o.startTime = at(14, 0, 0);
+        o.endTime = at(12, 0, 0);
+
+        assert!(!check_duration(o.clone(), 3600));
+        assert!(check_duration(o, 10_800));
+    }
+
+    // ── check_pmt_outage ──────────────────────────────────────────────────────
+    // Guards against a blanket outage row taking out far more traffic than intended: a
+    // non-UPI outage has to name SOMETHING it applies to.
+
+    #[test]
+    fn an_outage_with_no_payment_method_type_applies() {
+        assert!(check_pmt_outage(outage()));
+    }
+
+    #[test]
+    fn a_upi_outage_applies_without_further_qualification() {
+        let mut o = outage();
+        o.paymentMethodType = Some(UPI.to_string());
+
+        assert!(check_pmt_outage(o));
+    }
+
+    #[test]
+    fn an_unqualified_non_upi_outage_is_rejected() {
+        let mut o = outage();
+        o.paymentMethodType = Some(CARD.to_string());
+
+        assert!(
+            !check_pmt_outage(o),
+            "a CARD outage naming no gateway/bank/method must not apply to everything"
+        );
+    }
+
+    #[test]
+    fn a_non_upi_outage_qualified_by_any_single_field_is_accepted() {
+        for (label, apply) in [
+            (
+                "gateway",
+                (|o: &mut ETGO::GatewayOutage| o.gateway = Some("stripe".into()))
+                    as fn(&mut ETGO::GatewayOutage),
+            ),
+            ("bank", |o| o.bank = Some("HDFC".into())),
+            ("paymentMethod", |o| o.paymentMethod = Some("CREDIT".into())),
+        ] {
+            let mut o = outage();
+            o.paymentMethodType = Some(CARD.to_string());
+            apply(&mut o);
+
+            assert!(
+                check_pmt_outage(o),
+                "a CARD outage qualified by {label} should apply"
+            );
+        }
+    }
+
+    // ── sample_from_binomial_distribution ─────────────────────────────────────
+
+    #[test]
+    fn binomial_sampling_of_a_certain_gateway_returns_one() {
+        let map = score_map(&[("stripe", 1.0)]);
+        assert_eq!(
+            sample_from_binomial_distribution(map, 100, "stripe".to_string()),
+            1.0
+        );
+    }
+
+    #[test]
+    fn binomial_sampling_of_a_dead_gateway_returns_zero() {
+        let map = score_map(&[("stripe", 0.0)]);
+        assert_eq!(
+            sample_from_binomial_distribution(map, 100, "stripe".to_string()),
+            0.0
+        );
+    }
+
+    #[test]
+    fn binomial_sampling_stays_within_zero_and_one() {
+        let map = score_map(&[("stripe", 0.5)]);
+        for _ in 0..200 {
+            let sampled = sample_from_binomial_distribution(map.clone(), 100, "stripe".to_string());
+            assert!(
+                (0.0..=1.0).contains(&sampled),
+                "sampled score {sampled} escaped [0, 1]"
+            );
+        }
+    }
+
+    // ── sample_from_beta_distribution ─────────────────────────────────────────
+
+    #[test]
+    fn beta_sampling_stays_within_zero_and_one_for_a_mixed_score() {
+        let map = score_map(&[("stripe", 0.5)]);
+        for _ in 0..200 {
+            let sampled = sample_from_beta_distribution(map.clone(), 100, "stripe".to_string());
+            assert!(
+                (0.0..=1.0).contains(&sampled),
+                "sampled score {sampled} escaped [0, 1]"
+            );
+        }
+    }
+
+    // The boundary cases below used to panic: unsmoothed, a score of exactly 1.0 or 0.0 makes one
+    // Beta parameter zero, which `Beta::new` rejects. Laplace smoothing keeps both positive, so
+    // each of these now has to return a usable score instead of failing the routing call.
+
+    /// Draw repeatedly, assert every sample is a usable score, and return the draws.
+    fn beta_draws(map: &GatewayScoreMap, bucket: i32, gw: &str) -> Vec<f64> {
+        (0..200)
+            .map(|_| {
+                let sampled = sample_from_beta_distribution(map.clone(), bucket, gw.to_string());
+                assert!(
+                    sampled.is_finite() && (0.0..=1.0).contains(&sampled),
+                    "sampled score {sampled} is not a usable score in [0, 1]"
+                );
+                sampled
+            })
+            .collect()
+    }
+
+    fn beta_samples(map: &GatewayScoreMap, bucket: i32, gw: &str) -> f64 {
+        let draws = beta_draws(map, bucket, gw);
+        draws.iter().sum::<f64>() / draws.len() as f64
+    }
+
+    /// Assert the draws form a real distribution rather than the same number 200 times.
+    ///
+    /// This is what separates "the Beta was constructed and sampled" from "construction failed
+    /// and the `Err` arm handed back the raw score". Both land in the right range, but only the
+    /// former explores — a degenerate constant means exploration is silently dead, which no
+    /// range or mean assertion can see.
+    fn assert_draws_vary(draws: &[f64], context: &str) {
+        let min = draws.iter().copied().fold(f64::INFINITY, f64::min);
+        let max = draws.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        assert!(
+            max > min,
+            "{context}: all {} draws were identical ({min}) — the distribution is degenerate, \
+             so no exploration is happening",
+            draws.len()
+        );
+    }
+
+    #[test]
+    fn beta_sampling_handles_a_perfect_score() {
+        // Reachable on a merchant's first request: create_score_map seeds every gateway at 1.0.
+        // Unsmoothed this is Beta(100, 0), which cannot be constructed.
+        let draws = beta_draws(&score_map(&[("stripe", 1.0)]), 100, "stripe");
+        let mean = draws.iter().sum::<f64>() / draws.len() as f64;
+
+        // Beta(101, 1) — a flawless bucket still samples close to the top.
+        assert!(
+            mean > 0.9,
+            "a gateway with no recorded failures should sample near 1.0, got mean {mean}"
+        );
+        // ...but it must still be a draw, not a hardcoded 1.0.
+        assert_draws_vary(&draws, "perfect score");
+    }
+
+    #[test]
+    fn beta_sampling_handles_a_gateway_missing_from_the_score_map() {
+        // Defaults to 1.0 via `unwrap_or`, so this takes the same path as a perfect score.
+        let draws = beta_draws(&score_map(&[("stripe", 0.5)]), 100, "never_seen");
+        let mean = draws.iter().sum::<f64>() / draws.len() as f64;
+
+        assert!(
+            mean > 0.9,
+            "unscored gateway should sample near 1.0, got {mean}"
+        );
+        assert_draws_vary(&draws, "gateway missing from the score map");
+    }
+
+    #[test]
+    fn beta_sampling_handles_a_zero_score() {
+        // The mirror image: an all-failure bucket zeroes the OTHER parameter, Beta(0, 100).
+        let draws = beta_draws(&score_map(&[("stripe", 0.0)]), 100, "stripe");
+        let mean = draws.iter().sum::<f64>() / draws.len() as f64;
+
+        assert!(
+            mean < 0.1,
+            "a gateway with no recorded successes should sample near 0.0, got mean {mean}"
+        );
+        assert_draws_vary(&draws, "zero score");
+    }
+
+    #[test]
+    fn beta_sampling_survives_a_zero_bucket_size() {
+        // No observations at all: both parameters smooth to 1.0, i.e. a uniform draw.
+        let draws = beta_draws(&score_map(&[("stripe", 1.0)]), 0, "stripe");
+        assert_draws_vary(&draws, "zero bucket size");
+    }
+
+    #[test]
+    fn beta_sampling_survives_a_negative_bucket_size() {
+        // Misconfiguration rather than a real bucket. The floor keeps it to a uniform draw
+        // instead of handing `Beta::new` a negative parameter.
+        let draws = beta_draws(&score_map(&[("stripe", 0.5)]), -10, "stripe");
+        assert_draws_vary(&draws, "negative bucket size");
+    }
+
+    #[test]
+    fn beta_sampling_ranks_a_strong_gateway_above_a_weak_one() {
+        // The property the whole distribution exists to provide: sampling adds exploration
+        // noise, but it must not invert the ordering the success rates imply.
+        let map = score_map(&[("strong", 0.9), ("weak", 0.3)]);
+
+        let strong = beta_samples(&map, 125, "strong");
+        let weak = beta_samples(&map, 125, "weak");
+
+        assert!(
+            strong > weak,
+            "sampling inverted the ranking: strong {strong} vs weak {weak}"
+        );
+    }
+
+    #[test]
+    fn beta_sampling_tracks_the_underlying_success_rate() {
+        // Smoothing pulls the mean slightly toward 0.5 — with a 125 bucket that shift is well
+        // under a point, so the sampled mean must still track the configured rate closely.
+        let mean = beta_samples(&score_map(&[("stripe", 0.8)]), 125, "stripe");
+
+        assert!(
+            (mean - 0.8).abs() < 0.05,
+            "sampled mean {mean} drifted too far from the 0.8 success rate"
+        );
+    }
 }

@@ -7,9 +7,6 @@ dump.rdb
 **/node_modules
 **/.env.local
 **/.env.*.local
-cypress/screenshots
-cypress/videos
-cypress/fixtures
 
 # Playwright generated artifacts (HTML report, traces, screenshots)
 playwright-report/

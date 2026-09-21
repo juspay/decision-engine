@@ -11,7 +11,7 @@ function uniqueSuffix() {
 }
 
 function merchantId(suite = 'merchant') {
-  return `cy_${suite}_${uniqueSuffix()}`
+  return `de_${suite}_${uniqueSuffix()}`
 }
 
 function paymentId(prefix = 'pay') {
