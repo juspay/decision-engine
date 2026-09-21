@@ -25,6 +25,7 @@ test.describe('Decision Simulator — persisted state cap, sweep, and resume int
       Object.keys(localStorage).find(k => k.startsWith('decision-explorer-state-v2:')) ?? null,
     )
     expect(key, 'the app should have written its explorer-state key by now').toBeTruthy()
+    if (!key) throw new Error('unreachable — asserted above')
 
     // 3,000 rows lands fine under a real browser's quota but is far past the app's own 200-row
     // persist cap — the actual "long run, one prior successful save" scenario the fix targets.
@@ -69,6 +70,7 @@ test.describe('Decision Simulator — persisted state cap, sweep, and resume int
       Object.keys(localStorage).find(k => k.startsWith('decision-explorer-state-v2:')) ?? null,
     )
     expect(key).toBeTruthy()
+    if (!key) throw new Error('unreachable — asserted above')
 
     // 60,000 rows is large enough to exceed real quota on the write itself — the exact original
     // crash condition, reproduced with real numbers rather than assumed.
@@ -114,6 +116,7 @@ test.describe('Decision Simulator — persisted state cap, sweep, and resume int
       Object.keys(localStorage).find(k => k.startsWith('decision-explorer-state-v2:')) ?? null,
     )
     expect(key, 'expected a persisted snapshot to exist after pausing').toBeTruthy()
+    if (!key) throw new Error('unreachable — asserted above')
 
     const beforeTamper = await authedPage.evaluate((k) => JSON.parse(localStorage.getItem(k)!), key)
     const trueNextIndex = beforeTamper.resumableRun?.nextIndex
