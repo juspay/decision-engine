@@ -6,6 +6,8 @@ import { useAuthStore, type AccountHierarchy, type MerchantInfo, type Permission
 import { useMerchantStore } from '../../store/merchantStore'
 import { fetcher } from '../../lib/api'
 import { refreshSessionScopedSWRCache } from '../../lib/swrCache'
+import { isEmbedded } from '../../lib/embedMode'
+import { postToDashboard } from '../../lib/embedBridge'
 
 interface MeResponse {
   user_id: string
@@ -31,10 +33,27 @@ function SessionSpinner({ label }: { label: string }) {
   )
 }
 
+/**
+ * Inside the dashboard's iframe there is no tab to close and no login page worth showing (the SSO
+ * user is synthetic, with no password). Ask the dashboard for a fresh hand-off — it re-mints a
+ * code and replaces this frame's document — and hold a spinner until that happens.
+ */
+function EmbedSessionRefresh() {
+  useEffect(() => {
+    // Keep asking while this screen is up: the dashboard throttles re-mints, so a single message
+    // landing inside its cool-down would be dropped with nothing left to retry.
+    postToDashboard({ type: 'de:session-expired' })
+    const timer = window.setInterval(() => postToDashboard({ type: 'de:session-expired' }), 6000)
+    return () => window.clearInterval(timer)
+  }, [])
+  return <SessionSpinner label="Refreshing your routing session" />
+}
+
 // An HS-redirect (SSO) session has a synthetic user with no password, so the DE login page is a
 // dead end once its short-lived token expires. Send the user back to Hyperswitch instead, where a
 // fresh session is minted on demand.
 function RedirectSessionExpired() {
+  if (isEmbedded()) return <EmbedSessionRefresh />
   return (
     <div className="flex min-h-screen items-center justify-center bg-white px-4 text-slate-900 dark:bg-[#030507] dark:text-white">
       <div className="flex max-w-sm flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-white px-6 py-6 text-center shadow-[0_16px_40px_-30px_rgba(15,23,42,0.35)] dark:border-[#1d1d23] dark:bg-[#111318] dark:shadow-none">
@@ -99,6 +118,9 @@ export function AuthGuard() {
 
   if (!hasHydrated) return <SessionSpinner label="Restoring session" />
   if (redirectSessionExpired) return <RedirectSessionExpired />
+  // No session in the embed (a spent or failed code) — the frame's login page is a dead end,
+  // so ask the dashboard to re-mint instead of navigating to it.
+  if (!token && isEmbedded()) return <EmbedSessionRefresh />
   if (!token) return <Navigate to="/login" replace />
   if (!me && !error) return <SessionSpinner label="Validating session" />
 

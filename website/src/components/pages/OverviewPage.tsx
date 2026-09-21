@@ -170,7 +170,11 @@ export function OverviewPage() {
     keepPreviousData: true,
   })
 
-  const activeRouting = activeAlgorithms?.[0] || null
+  // A running experiment is listed beside the active rule; the rule is the routing that's set up.
+  const activeRouting =
+    activeAlgorithms?.find((algorithm) => (algorithm.algorithm_data || algorithm.algorithm)?.type !== 'ab_test') ||
+    activeAlgorithms?.[0] ||
+    null
   const hasRuleBasedRouting = (activeAlgorithms || []).some(
     (algorithm) => (algorithm.algorithm_data || algorithm.algorithm)?.type === 'advanced',
   )

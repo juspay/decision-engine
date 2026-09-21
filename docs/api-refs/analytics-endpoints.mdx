@@ -17,6 +17,8 @@ Common query parameters:
 | `start_ms`, `end_ms` | custom epoch-millisecond window |
 | `page`, `page_size` | paginated list endpoints |
 | `gateway`, `status`, `route`, `flow_type`, `routing_approach`, `exclude_routing_approach` | filters |
+| `scope` | `all`, `dynamic`, `preview` |
+| `routing_kind` | `multi_objective`, `rule_based`, `debit_routing`, `hybrid` |
 | `payment_id` | exact payment lookup for audit and trace views |
 | `error_code` | failure filtering |
 
@@ -112,7 +114,10 @@ curl "$BASE_URL/analytics/log-summaries?range=1d&status=failure" \
 
 ## Payment Audit
 
-Payment-level trail search. Prefer `payment_id` for exact lookup.
+Payment-level trail search. Prefer `payment_id` for exact lookup. One result per payment, whose
+`timeline` holds every audit event for it (rule evaluation, gateway decision, score update,
+errors); `routing_kind` narrows which payments are listed, `scope` narrows which events are read
+(`all` by default).
 
 ```bash
 curl "$BASE_URL/analytics/payment-audit?range=1d&page=1&page_size=12&payment_id=pay_001" \
@@ -122,6 +127,12 @@ curl "$BASE_URL/analytics/payment-audit?range=1d&page=1&page_size=12&payment_id=
 
 ```bash
 curl "$BASE_URL/analytics/payment-audit?range=1d&gateway=stripe&status=success&page=1&page_size=10" \
+  --header "$AUTH_HEADER" \
+  --header "$TENANT_HEADER"
+```
+
+```bash
+curl "$BASE_URL/analytics/payment-audit?range=1d&routing_kind=hybrid" \
   --header "$AUTH_HEADER" \
   --header "$TENANT_HEADER"
 ```
@@ -138,6 +149,8 @@ curl "$BASE_URL/analytics/payment-audit?range=1d&gateway=stripe&status=success&p
   "flow_type": null,
   "routing_approach": null,
   "error_code": null,
+  "scope": "all",
+  "routing_kind": null,
   "page": 1,
   "page_size": 12,
   "total_results": 1,

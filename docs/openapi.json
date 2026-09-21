@@ -1117,6 +1117,36 @@
             "schema": {
               "type": "string"
             }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "description": "Which audit kinds to read: all (default, merged per payment), dynamic, or preview.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "dynamic",
+                "preview"
+              ],
+              "default": "all"
+            }
+          },
+          {
+            "name": "routing_kind",
+            "in": "query",
+            "required": false,
+            "description": "List only payments whose trail holds this kind of event (the dashboard's Routing type filter).",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "multi_objective",
+                "rule_based",
+                "debit_routing",
+                "hybrid"
+              ]
+            }
           }
         ],
         "responses": {
@@ -4929,7 +4959,7 @@
               "type": "string"
             },
             "description": "Feature slug.",
-            "example": "multi-objective-routing"
+            "example": "cost-savings"
           }
         ],
         "requestBody": {
@@ -5337,7 +5367,7 @@
           },
           "enableMultiObjective": {
             "type": "boolean",
-            "description": "Per-request override for the multi-objective (cost-aware) post-step. true forces it on, false forces it off; omitted falls back to the merchant's multi_objective_routing_enabled feature flag."
+            "description": "Per-request override for the multi-objective (cost-aware) post-step. true forces it on, false forces it off; omitted falls back to the merchant's cost_savings_enabled feature flag."
           }
         }
       },
@@ -8007,6 +8037,14 @@
             "items": {
               "$ref": "#/components/schemas/PaymentAuditEvent"
             }
+          },
+          "scope": {
+            "type": "string",
+            "description": "all | dynamic | preview"
+          },
+          "routing_kind": {
+            "type": "string",
+            "nullable": true
           }
         }
       },
@@ -9101,10 +9139,12 @@
               "gsm-scoring-filter",
               "explore-exploit-srv3",
               "ab-test-real-payments",
-              "multi-objective-routing",
+              "cost-savings",
               "elimination",
-              "auto-calibration",
-              "autopilot"
+              "autopilot",
+              "volume-contracts",
+              "sr-routing",
+              "sr-scores-from-rule-routing"
             ]
           },
           "enabled": {

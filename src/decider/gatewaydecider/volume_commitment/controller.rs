@@ -5,6 +5,8 @@ use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 
 use super::inputs::CommitmentInputs;
+use std::collections::{HashMap, HashSet};
+
 use super::math::{self, PACE_WINDOW_DAYS};
 use super::plan::{self, PspPlan, SteeringPlan};
 use super::volume::VolumeError;
@@ -12,15 +14,18 @@ use super::Deps;
 use crate::config::VolumeCommitmentConfig;
 use crate::logger;
 
-/// This merchant's forecast cadence: its own override, else the config default.
-pub fn interval_secs(inputs: &CommitmentInputs, config: &VolumeCommitmentConfig) -> u64 {
-    inputs
-        .forecast_interval_secs
-        .unwrap_or(config.default_forecast_interval_secs)
-        .max(1)
+/// This merchant's forecast cadence: its own override, else one derived from the contract's day
+/// so the plan is re-cut as often relative to the cycle whatever the day is worth in seconds —
+/// see `math::forecast_interval_for_day`.
+pub fn interval_secs(inputs: &CommitmentInputs, _config: &VolumeCommitmentConfig) -> u64 {
+    match inputs.forecast_interval_secs {
+        Some(explicit) => explicit.max(1),
+        None => math::forecast_interval_for_day(inputs.day_secs()),
+    }
 }
 
-/// The cadence to fall back on when no merchant ran.
+/// How long the scheduler waits when no merchant ran at all — a plain sleep with no contract day
+/// to be a share of, so it stays the deployment's own figure.
 pub fn default_interval_secs(config: &VolumeCommitmentConfig) -> u64 {
     config.default_forecast_interval_secs.max(1)
 }
@@ -119,19 +124,58 @@ pub async fn run_for_merchant(
     }))
 }
 
-/// Measure, position, choose what to chase, mark who is behind — from scratch every run — then store.
-///
-/// An unmeasurable merchant gets no plan at all: the previous one keeps steering until it goes
-/// stale. Building on "nothing delivered" would steer every PSP at its maximum rate and, late in
-/// a cycle, eliminate commitments that are in fact on pace.
+/// The scheduled forecast: work the plan out, then publish it to the routing path and the audit trail.
 pub async fn build_plan(
     deps: &Deps,
     inputs: &CommitmentInputs,
 ) -> Result<SteeringPlan, VolumeError> {
+    let (plan, measured) = compute_plan(deps, inputs).await?;
+    // Which of the drops this forecast ordered, as against the ones it merely carried forward.
+    let carried_over = deps
+        .state
+        .load_plan(&inputs.merchant_id)
+        .await
+        .filter(|prev| prev.run_id == plan.run_id)
+        .map(|prev| {
+            prev.dropped
+                .into_iter()
+                .map(|d| d.connector)
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let newly_dropped: Vec<String> = plan
+        .dropped
+        .iter()
+        .map(|d| d.connector.clone())
+        .filter(|c| !carried_over.contains(c))
+        .collect();
+    log_plan(&plan, &measured, &newly_dropped);
+    deps.state.store_plan(&inputs.merchant_id, &plan).await;
+    audit_plan(&plan);
+    Ok(plan)
+}
+
+/// The plan `build_plan` would publish, worked out and handed back without being published: no
+/// stored plan for the routing path to pick up, no forecast on the audit trail. Callers that only
+/// want to *report* a position use this; the scheduled forecast uses `build_plan`.
+///
+/// Returns what was measured alongside the plan, because a plan alone cannot say what each PSP has
+/// delivered or how fast — `PspPlan` carries the decision, `MeasuredVolume` the evidence for it.
+pub async fn compute_plan(
+    deps: &Deps,
+    inputs: &CommitmentInputs,
+) -> Result<(SteeringPlan, super::inputs::MeasuredVolume), VolumeError> {
     let now = Utc::now();
+    // Unmeasurable is an error, not zeros: a plan built on an empty measurement would read every
+    // PSP as owing its whole goal, steering each at its maximum rate.
     let measured = deps
         .volume
-        .measure(&inputs.merchant_id, &inputs.commitments, PACE_WINDOW_DAYS)
+        .measure(
+            &inputs.merchant_id,
+            &inputs.commitments,
+            PACE_WINDOW_DAYS,
+            inputs.amount_scale,
+        )
         .await
         .map_err(|error| {
             logger::error!(
@@ -142,9 +186,15 @@ pub async fn build_plan(
             error
         })?;
 
+    // Steering can only divert traffic that exists. `expected_daily_traffic` is a contract term —
+    // what the merchant told us to expect — and a wrong one silently breaks both decisions that
+    // depend on it: a commitment reads as reachable when it is not, and the steer rate is a share
+    // of a flow that never arrives. `TrafficRates` prefers what was measured, and names which of
+    // its two rates answers which question.
+    let traffic = super::inputs::TrafficRates::read(&measured, inputs.expected_daily_traffic);
+
     // Where each PSP stands, and the longest horizon any commitment still runs for.
-    let starting_pace =
-        math::starting_pace(inputs.expected_daily_traffic, inputs.commitments.len());
+    let starting_pace = traffic.starting_pace(inputs.commitments.len());
     let mut psps = Vec::with_capacity(inputs.commitments.len());
     let mut longest_period = 0.0_f64;
     for commitment in &inputs.commitments {
@@ -165,19 +215,110 @@ pub async fn build_plan(
 
     // First contract day: drop only the unreachable; afterwards the reward-ranked budget pass
     // (see `plan::drop_unreachable`).
-    let traffic_left = math::traffic_left(inputs.expected_daily_traffic, longest_period);
     let first_day = math::day_index(cycle_start_ms, now.timestamp_millis(), day_secs) < 1;
-    let (mut kept, dropped) = if first_day {
-        plan::drop_unreachable(psps, inputs.expected_daily_traffic)
+    let run_id = math::run_id(cycle_start_ms);
+
+    // Every commitment, so one reprieved below can be put back exactly as it was.
+    let by_connector: HashMap<String, plan::PspPlan> = psps
+        .iter()
+        .map(|psp| (psp.connector.clone(), psp.clone()))
+        .collect();
+
+    // What the last forecast of *this* run read as unreachable, and what it had already given up
+    // on. A plan from another run or another contract describes a different race, so neither
+    // carries any weight here.
+    let previous = deps
+        .state
+        .load_plan(&inputs.merchant_id)
+        .await
+        .filter(|prev| {
+            prev.run_id == run_id && prev.contract_anchor_ms == inputs.contract_anchor_ms
+        });
+    let previously_flagged: HashSet<String> = previous
+        .as_ref()
+        .map(|prev| prev.flagged_unreachable.iter().cloned().collect())
+        .unwrap_or_default();
+    let previously_reachable: HashSet<String> = previous
+        .as_ref()
+        .map(|prev| prev.flagged_reachable.iter().cloned().collect())
+        .unwrap_or_default();
+    let previously_dropped: HashMap<String, plan::DroppedPsp> = previous
+        .map(|prev| {
+            prev.dropped
+                .into_iter()
+                .map(|d| (d.connector.clone(), d))
+                .collect()
+        })
+        .unwrap_or_default();
+
+    // Nothing is written off inside the first contract day.
+    //
+    // A commitment is judged against the flow measured around it, and inside that first day the
+    // flow is mostly whatever preceded the cycle — an idle gap between runs reads as a merchant
+    // that has stopped trading. Two forecasts seconds apart then agree with each other about a
+    // race that has barely started, and a reachable commitment is given up on before it has been
+    // given a day to arrive. Approval rate governs until the cycle has a day of its own evidence,
+    // which is the contract's own promise: steer only once there is reason to.
+    let (mut kept, verdict) = if first_day {
+        (psps, Vec::new())
     } else {
-        plan::choose_commitments_to_keep(psps, traffic_left, inputs.expected_daily_traffic)
+        plan::choose_commitments_to_keep(psps, traffic, longest_period)
     };
 
-    plan::mark_who_needs_steering(&mut kept);
-    // Then set each behind-pace PSP's share of the eligible flow, which is what the payment path
-    // samples instead of counting.
+    // A drop is permanent in effect — a dropped commitment receives only natural traffic, so its
+    // remaining never falls while the days left do, and its required rate climbs out of reach. One
+    // forecast is a thin basis for that: the estimate behind it follows a rate, and rates move.
+    // So the verdict has to repeat. A commitment reading unreachable for the first time is kept
+    // for one more interval and merely flagged; if the next forecast agrees, it drops.
+    let flagged_unreachable: Vec<String> = verdict.iter().map(|d| d.connector.clone()).collect();
+    let (mut dropped, reprieved): (Vec<_>, Vec<_>) = verdict
+        .into_iter()
+        .partition(|d| previously_flagged.contains(&d.connector));
+    for psp in reprieved {
+        if let Some(restored) = by_connector.get(&psp.connector) {
+            kept.push(restored.clone());
+        }
+    }
+
+    // A commitment given up on is chased again only on evidence that clearly reverses the
+    // verdict — traffic that genuinely came back, not an estimate that wandered back over the
+    // line it was dropped at. Reversal is the mirror of the drop: the flow has to clear the
+    // commitment's need with headroom (`math::reclaimable`), and two forecasts have to agree.
+    //
+    // Without the headroom the two decisions share a threshold and flap, which is a commitment
+    // paying approval rate to re-enter a race the last forecast conceded, over and over. Without
+    // the reversal a real spike in the days that remain is left on the table, and the reward with
+    // it — a commitment the merchant could still land, not chased because of how an earlier,
+    // quieter stretch read.
+    let (returning, staying): (Vec<plan::PspPlan>, Vec<plan::PspPlan>) = kept
+        .into_iter()
+        .partition(|psp| previously_dropped.contains_key(&psp.connector));
+    kept = staying;
+    let mut flagged_reachable = Vec::new();
+    for psp in returning {
+        let recovered = math::reclaimable(psp.needed_daily, traffic.forward_daily);
+        if recovered && previously_reachable.contains(&psp.connector) {
+            // Two forecasts agree the traffic is there: back in the race, ranked with the rest.
+            kept.push(psp);
+            continue;
+        }
+        if recovered {
+            flagged_reachable.push(psp.connector.clone());
+        }
+        if let Some(already) = previously_dropped.get(&psp.connector) {
+            dropped.push(already.clone());
+        }
+    }
+
+    let now_ms = now.timestamp_millis();
+    plan::mark_who_needs_steering(&mut kept, now_ms);
+    // Then set each behind-pace PSP's share of the divertible flow, which is what the payment path
+    // samples instead of counting. Both the mark and the share come from `paced_daily_need`, so a
+    // PSP is never marked behind at one urgency and steered at another.
     for psp in kept.iter_mut().filter(|p| p.needs_steering) {
-        psp.steer_rate = rate_for(psp, &measured, inputs, now);
+        let already_today = measured.steered_today_for(&psp.connector);
+        let divertible = traffic.divertible_daily(psp.routing_gives_daily);
+        psp.steer_rate = psp.steer_rate_for(now_ms, already_today, divertible);
     }
 
     let computed_at = now.timestamp();
@@ -193,7 +334,7 @@ pub async fn build_plan(
 
     let plan = SteeringPlan {
         merchant_id: inputs.merchant_id.clone(),
-        run_id: math::run_id(cycle_start_ms),
+        run_id,
         contract_anchor_ms: inputs.contract_anchor_ms,
         computed_at_epoch_secs: computed_at,
         stale_after_epoch_secs: computed_at
@@ -202,13 +343,11 @@ pub async fn build_plan(
         tolerance: inputs.tolerance,
         psps: kept,
         dropped,
+        flagged_unreachable,
+        flagged_reachable,
     };
 
-    log_plan(&plan, &measured);
-    deps.state.store_plan(&inputs.merchant_id, &plan).await;
-    audit_plan(&plan);
-
-    Ok(plan)
+    Ok((plan, measured))
 }
 
 /// Record the run as a domain analytics event so the audit trail survives this process.
@@ -245,27 +384,6 @@ fn audit_plan(plan: &SteeringPlan) {
         Some(details.to_string()),
         None,
     );
-}
-
-/// Steer rate = (today's shortfall − already steered today) / traffic expected for the rest of
-/// the contract day.
-fn rate_for(
-    psp: &PspPlan,
-    measured: &super::inputs::MeasuredVolume,
-    inputs: &CommitmentInputs,
-    now: chrono::DateTime<Utc>,
-) -> f64 {
-    let shortfall = math::daily_shortfall(psp.needed_daily, psp.routing_gives_daily);
-    let already = measured.steered_today_for(&psp.connector);
-
-    let day_ms = math::day_ms(psp.day_secs) as f64;
-    let elapsed_ms = ((now.timestamp_millis() - psp.period_start_ms).max(0) as f64) % day_ms;
-    let day_remaining = ((day_ms - elapsed_ms) / day_ms).clamp(0.0, 1.0);
-
-    math::steer_rate(
-        (shortfall - already).max(0.0),
-        inputs.expected_daily_traffic * day_remaining,
-    )
 }
 
 /// One commitment's position: what is owed, what each remaining day must bring, and what routing
@@ -307,6 +425,8 @@ fn position(
         PspPlan {
             connector: commitment.connector.clone(),
             reward: commitment.reward,
+            goal: commitment.goal,
+            achieved,
             remaining,
             needed_daily: math::needed_daily(remaining, days_left),
             routing_gives_daily,
@@ -320,10 +440,24 @@ fn position(
     )
 }
 
-/// One log line per PSP, so the merchant can be shown why volume went where it did.
-fn log_plan(plan: &SteeringPlan, measured: &super::inputs::MeasuredVolume) {
+/// What a forecast is worth saying out loud.
+///
+/// A forecast runs on the contract's own cadence, which on a demo's compressed day is every few
+/// seconds, for as long as the contract is active — a cycle rolls whether or not anyone is sending
+/// payments, so the loop never goes quiet on its own. At INFO, one line per PSP per forecast is a
+/// console nobody can read anything else in, and it says the same thing each time: the standing of
+/// each commitment, which the dashboard already shows and the analytics event already records.
+///
+/// So the standing is DEBUG, and only what *changed* is INFO. A commitment being given up on is a
+/// decision about the rest of the cycle and worth a line; the same commitment still being dropped
+/// on the next forecast, and the next, is not.
+fn log_plan(
+    plan: &SteeringPlan,
+    measured: &super::inputs::MeasuredVolume,
+    newly_dropped: &[String],
+) {
     for psp in &plan.psps {
-        logger::info!(
+        logger::debug!(
             tag = "volume_commitment",
             merchant_id = plan.merchant_id.as_str(),
             connector = psp.connector.as_str(),
@@ -338,7 +472,11 @@ fn log_plan(plan: &SteeringPlan, measured: &super::inputs::MeasuredVolume) {
         );
     }
 
-    for psp in &plan.dropped {
+    for psp in plan
+        .dropped
+        .iter()
+        .filter(|d| newly_dropped.contains(&d.connector))
+    {
         logger::info!(
             tag = "volume_commitment_dropped",
             merchant_id = plan.merchant_id.as_str(),
@@ -353,31 +491,33 @@ fn log_plan(plan: &SteeringPlan, measured: &super::inputs::MeasuredVolume) {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Arc;
-
-    use async_trait::async_trait;
-
     use super::*;
-    use crate::decider::gatewaydecider::volume_commitment::inputs::Commitment;
+    use crate::decider::gatewaydecider::volume_commitment::inputs::{
+        Commitment, InputSource, MeasuredVolume,
+    };
     use crate::decider::gatewaydecider::volume_commitment::state::StateStore;
     use crate::decider::gatewaydecider::volume_commitment::volume::FixtureVolumeSource;
-    use crate::decider::gatewaydecider::volume_commitment::DslInputSource;
+    use async_trait::async_trait;
+    use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
 
-    /// Records whether a plan was ever written; every other operation is inert.
+    /// Records writes instead of performing them, so a test can assert none happened.
     #[derive(Default)]
-    struct RecordingStore {
-        stored: AtomicBool,
+    struct CountingStateStore {
+        stores: AtomicUsize,
+        /// What a previous forecast left behind. A drop needs the verdict twice, so a test that
+        /// wants one has to hand the second forecast the first forecast's plan.
+        previous: std::sync::Mutex<Option<SteeringPlan>>,
     }
 
     #[async_trait]
-    impl StateStore for RecordingStore {
+    impl StateStore for CountingStateStore {
         async fn load_plan(&self, _merchant_id: &str) -> Option<SteeringPlan> {
-            None
+            self.previous.lock().ok().and_then(|prev| prev.clone())
         }
         async fn store_plan(&self, _merchant_id: &str, _plan: &SteeringPlan) {
-            self.stored.store(true, Ordering::SeqCst);
+            self.stores.fetch_add(1, Ordering::SeqCst);
         }
         async fn clear_plan(&self, _merchant_id: &str) {}
         async fn try_acquire_run_lease(&self, _merchant_id: &str, _ttl_secs: u64) -> bool {
@@ -389,67 +529,386 @@ mod tests {
         }
     }
 
-    fn inputs() -> CommitmentInputs {
+    /// `compute_plan` takes inputs directly, so this only has to satisfy the `Deps` field.
+    struct NoInputs;
+
+    #[async_trait]
+    impl InputSource for NoInputs {
+        async fn feature_enabled(&self, _merchant_id: &str) -> bool {
+            false
+        }
+        async fn load_configured(&self, _merchant_id: &str) -> Option<CommitmentInputs> {
+            None
+        }
+        async fn list_active(&self) -> Vec<String> {
+            Vec::new()
+        }
+    }
+
+    /// A cycle that opened `elapsed_days` ago and runs for `total_days`, with one commitment.
+    fn inputs_at(elapsed_days: f64, total_days: i64, goal: f64) -> CommitmentInputs {
+        let day_ms = math::day_ms(math::SECS_PER_DAY);
         let now_ms = Utc::now().timestamp_millis();
+        let start_ms = now_ms - (elapsed_days * day_ms as f64) as i64;
         CommitmentInputs {
             merchant_id: "m1".to_string(),
-            contract_anchor_ms: now_ms,
-            contract_rule_id: "rule".to_string(),
+            contract_anchor_ms: start_ms,
+            contract_rule_id: "routing_test".to_string(),
             tolerance: 0.05,
-            expected_daily_traffic: 1_000.0,
+            // 120M a day, the rate the day-31 incident ran at.
+            expected_daily_traffic: 120_000_000.0,
             forecast_interval_secs: None,
-            currency: None,
+            currency: Some("USD".to_string()),
+            // USD: two decimal places between the traffic's units and the contract's.
+            amount_scale: 100.0,
             commitments: vec![Commitment {
                 connector: "adyen".to_string(),
-                goal: 10_000.0,
-                reward: 100.0,
-                reward_note: "lump sum".to_string(),
-                period_start_ms: now_ms,
-                period_end_ms: now_ms + 30 * math::SECS_PER_DAY as i64 * 1000,
+                goal,
+                reward: 120_000.0,
+                reward_note: "2bps rebate".to_string(),
+                period_start_ms: start_ms,
+                period_end_ms: start_ms + total_days * day_ms,
                 day_secs: math::SECS_PER_DAY,
                 timezone: "UTC".to_string(),
             }],
         }
     }
 
-    /// A ClickHouse outage (or no ClickHouse at all) must leave the previous plan in place, not
-    /// replace it with one that reads every PSP as owing its whole goal.
-    #[tokio::test]
-    async fn an_unmeasurable_merchant_gets_no_plan() {
-        let store = Arc::new(RecordingStore::default());
+    fn deps_with(measured: MeasuredVolume) -> (Deps, Arc<CountingStateStore>) {
+        let state = Arc::new(CountingStateStore::default());
         let deps = Deps {
             config: VolumeCommitmentConfig::default(),
-            inputs: Arc::new(DslInputSource),
-            state: store.clone(),
-            volume: Arc::new(FixtureVolumeSource::new(HashMap::new())),
+            inputs: Arc::new(NoInputs),
+            state: state.clone(),
+            volume: Arc::new(FixtureVolumeSource::new(HashMap::from([(
+                "m1".to_string(),
+                measured,
+            )]))),
         };
+        (deps, state)
+    }
 
-        let outcome = build_plan(&deps, &inputs()).await;
+    /// Two forecasts, the second seeing the first — the shape a scheduled run has, and the only
+    /// one in which a commitment is actually dropped.
+    async fn settled_plan(
+        deps: &Deps,
+        state: &std::sync::Arc<CountingStateStore>,
+        inputs: &CommitmentInputs,
+    ) -> SteeringPlan {
+        let (first, _) = compute_plan(deps, inputs).await.expect("fixture measures");
+        *state.previous.lock().expect("not poisoned") = Some(first);
+        let (second, _) = compute_plan(deps, inputs).await.expect("fixture measures");
+        second
+    }
 
-        assert!(matches!(outcome, Err(VolumeError::Unavailable)));
+    fn measured_with(achieved: f64) -> MeasuredVolume {
+        MeasuredVolume {
+            achieved: HashMap::from([("adyen".to_string(), achieved)]),
+            ..Default::default()
+        }
+    }
+
+    /// The declared traffic says the goal is comfortably reachable; the traffic actually flowing
+    /// says it is nowhere near. The measurement wins — declaring a flow does not create it.
+    #[tokio::test]
+    async fn a_goal_is_judged_against_measured_traffic_not_the_declaration() {
+        let measured = MeasuredVolume {
+            achieved: HashMap::from([("adyen".to_string(), 0.0)]),
+            // 120_000_000 a day is declared by `inputs_at`; this is what is really flowing.
+            total_daily: Some(25_000.0),
+            ..Default::default()
+        };
+        let (deps, state) = deps_with(measured);
+        // Needs 200_000 a day: under the declared 120_000_000, far over the measured 25_000.
+        let inputs = inputs_at(1.5, 30, 6_000_000.0);
+
+        let plan = settled_plan(&deps, &state, &inputs).await;
+
         assert!(
-            !store.stored.load(Ordering::SeqCst),
-            "no plan may be written"
+            plan.psps.is_empty(),
+            "unreachable on the traffic that exists"
+        );
+        assert_eq!(plan.dropped.len(), 1);
+        assert!(
+            plan.dropped[0].reason.contains("25000"),
+            "the reason should quote the measured flow, got: {}",
+            plan.dropped[0].reason
         );
     }
 
-    /// The same inputs with a measurement behind them do produce and store a plan.
+    /// The regression: a merchant whose volume is climbing. The wide window averages the whole
+    /// cycle so far and reports half the rate now flowing; feasibility must read the recent rate,
+    /// or a commitment needing more than that half is written off while comfortably reachable.
     #[tokio::test]
-    async fn a_measured_merchant_gets_a_plan() {
-        let store = Arc::new(RecordingStore::default());
+    async fn feasibility_reads_the_recent_rate_not_the_cycle_average() {
+        let measured = MeasuredVolume {
+            achieved: HashMap::from([("adyen".to_string(), 0.0)]),
+            // Averaged over the cycle so far — half of what is arriving now.
+            total_daily: Some(100_000.0),
+            recent_daily: Some(250_000.0),
+            ..Default::default()
+        };
+        let (deps, state) = deps_with(measured);
+        // Needs 200_000 a day: over the cycle average, under the rate actually flowing.
+        let inputs = inputs_at(1.5, 30, 6_000_000.0);
+
+        let plan = settled_plan(&deps, &state, &inputs).await;
+
+        assert_eq!(plan.psps.len(), 1, "reachable at the rate arriving now");
+        assert!(plan.dropped.is_empty());
+    }
+
+    /// Without a recent rate — too early in the cycle for the short window to be one — the wide
+    /// window still answers, rather than the question going unanswered.
+    #[tokio::test]
+    async fn the_cycle_average_is_the_fallback_before_a_recent_rate_exists() {
+        let measured = MeasuredVolume {
+            achieved: HashMap::from([("adyen".to_string(), 0.0)]),
+            total_daily: Some(100_000.0),
+            recent_daily: None,
+            ..Default::default()
+        };
+        let (deps, state) = deps_with(measured);
+        let inputs = inputs_at(1.5, 30, 6_000_000.0);
+
+        let plan = settled_plan(&deps, &state, &inputs).await;
+
+        assert!(
+            plan.psps.is_empty(),
+            "200_000 a day against 100_000 flowing"
+        );
+    }
+
+    /// A drop is permanent in effect, so one forecast is not enough to order it. The first
+    /// unreachable reading keeps the commitment and only flags it.
+    #[tokio::test]
+    async fn one_unreachable_forecast_only_flags_the_commitment() {
+        let measured = MeasuredVolume {
+            achieved: HashMap::from([("adyen".to_string(), 0.0)]),
+            total_daily: Some(25_000.0),
+            recent_daily: Some(25_000.0),
+            ..Default::default()
+        };
+        let (deps, _state) = deps_with(measured);
+        let inputs = inputs_at(1.5, 30, 6_000_000.0);
+
+        let (plan, _measured) = compute_plan(&deps, &inputs)
+            .await
+            .expect("fixture measures");
+
+        assert_eq!(plan.psps.len(), 1, "kept for one more forecast");
+        assert!(plan.dropped.is_empty(), "not dropped on a single reading");
+        assert_eq!(plan.flagged_unreachable, vec!["adyen".to_string()]);
+    }
+
+    /// The run that gave up on both commitments seconds in. Inside the first contract day the
+    /// measured flow is mostly whatever preceded the cycle — between two runs, an idle gap — so a
+    /// commitment reads hopeless against a merchant that had simply stopped trading. Nothing is
+    /// written off until the cycle has a day of its own behind it.
+    #[tokio::test]
+    async fn nothing_is_written_off_inside_the_first_contract_day() {
+        let measured = MeasuredVolume {
+            achieved: HashMap::from([("adyen".to_string(), 0.0)]),
+            // A twentieth of what the commitment needs: hopeless, if this were evidence.
+            total_daily: Some(10_000.0),
+            recent_daily: Some(10_000.0),
+            ..Default::default()
+        };
+        let (deps, state) = deps_with(measured);
+        let inputs = inputs_at(0.2, 30, 6_000_000.0);
+
+        let plan = settled_plan(&deps, &state, &inputs).await;
+
+        assert_eq!(plan.psps.len(), 1, "still chased through its first day");
+        assert!(plan.dropped.is_empty());
+        assert!(
+            plan.flagged_unreachable.is_empty(),
+            "not even flagged: two forecasts seconds apart are not two opinions"
+        );
+    }
+
+    /// A commitment already given up on, replanned against `flowing` a day.
+    async fn replanned_after_drop(flowing: f64) -> SteeringPlan {
+        // Hopeless at first: 10k a day against the 200k the goal needs.
+        let starved = MeasuredVolume {
+            achieved: HashMap::from([("adyen".to_string(), 0.0)]),
+            total_daily: Some(10_000.0),
+            recent_daily: Some(10_000.0),
+            ..Default::default()
+        };
+        let (deps, state) = deps_with(starved);
+        let inputs = inputs_at(1.5, 30, 6_000_000.0);
+
+        let dropped = settled_plan(&deps, &state, &inputs).await;
+        assert_eq!(dropped.dropped.len(), 1, "given up on");
+        assert!(dropped.psps.is_empty());
+
+        let now = MeasuredVolume {
+            achieved: HashMap::from([("adyen".to_string(), 0.0)]),
+            total_daily: Some(flowing),
+            recent_daily: Some(flowing),
+            ..Default::default()
+        };
+        let (deps, _) = deps_with(now);
+        *state.previous.lock().expect("not poisoned") = Some(dropped);
         let deps = Deps {
-            config: VolumeCommitmentConfig::default(),
-            inputs: Arc::new(DslInputSource),
-            state: store.clone(),
-            volume: Arc::new(FixtureVolumeSource::new(HashMap::from([(
-                "m1".to_string(),
-                super::super::inputs::MeasuredVolume::default(),
-            )]))),
+            state: state.clone(),
+            ..deps
         };
 
-        let plan = build_plan(&deps, &inputs()).await.expect("measured");
+        // Twice: reversing a drop takes two agreeing forecasts, as ordering one does.
+        let (first, _) = compute_plan(&deps, &inputs)
+            .await
+            .expect("fixture measures");
+        *state.previous.lock().expect("not poisoned") = Some(first);
+        let (second, _) = compute_plan(&deps, &inputs)
+            .await
+            .expect("fixture measures");
+        second
+    }
 
-        assert_eq!(plan.psps.len() + plan.dropped.len(), 1);
-        assert!(store.stored.load(Ordering::SeqCst));
+    /// Traffic that genuinely comes back in the days that remain is chased again — the reward is
+    /// still there to win, and refusing it because an earlier, quieter stretch read badly leaves
+    /// the merchant's money on the table.
+    #[tokio::test]
+    async fn a_real_recovery_puts_a_dropped_commitment_back_in_the_race() {
+        // 200k a day is what it needs; 5M is unambiguously enough.
+        let plan = replanned_after_drop(5_000_000.0).await;
+
+        assert_eq!(plan.psps.len(), 1, "chased again");
+        assert!(plan.dropped.is_empty());
+    }
+
+    /// The wobble that used to resurrect it does not. A rate a few percent over the line it was
+    /// dropped at is the same estimate moving, not the traffic returning.
+    #[tokio::test]
+    async fn an_estimate_drifting_back_over_the_line_does_not() {
+        // Needs ~200k a day; 210k clears the drop threshold but not the re-entry headroom.
+        let plan = replanned_after_drop(210_000.0).await;
+
+        assert!(plan.psps.is_empty(), "still conceded");
+        assert_eq!(plan.dropped.len(), 1);
+        assert_eq!(plan.dropped[0].connector, "adyen");
+    }
+
+    /// One agreeing forecast is not two: a single clear reading flags the recovery and waits,
+    /// exactly as a single unreachable reading flags a drop and waits.
+    #[tokio::test]
+    async fn one_recovered_forecast_only_flags_the_return() {
+        let starved = MeasuredVolume {
+            achieved: HashMap::from([("adyen".to_string(), 0.0)]),
+            total_daily: Some(10_000.0),
+            recent_daily: Some(10_000.0),
+            ..Default::default()
+        };
+        let (deps, state) = deps_with(starved);
+        let inputs = inputs_at(1.5, 30, 6_000_000.0);
+        let dropped = settled_plan(&deps, &state, &inputs).await;
+
+        let recovered = MeasuredVolume {
+            achieved: HashMap::from([("adyen".to_string(), 0.0)]),
+            total_daily: Some(5_000_000.0),
+            recent_daily: Some(5_000_000.0),
+            ..Default::default()
+        };
+        let (deps, _) = deps_with(recovered);
+        *state.previous.lock().expect("not poisoned") = Some(dropped);
+        let deps = Deps { state, ..deps };
+
+        let (plan, _measured) = compute_plan(&deps, &inputs)
+            .await
+            .expect("fixture measures");
+
+        assert!(plan.psps.is_empty(), "kept out for one more forecast");
+        assert_eq!(plan.flagged_reachable, vec!["adyen".to_string()]);
+    }
+
+    /// A flag from another run describes a different race. Carrying it over would drop a
+    /// commitment on its first reading of a cycle it has barely started.
+    #[tokio::test]
+    async fn a_flag_from_another_run_does_not_confirm_a_drop() {
+        let measured = MeasuredVolume {
+            achieved: HashMap::from([("adyen".to_string(), 0.0)]),
+            total_daily: Some(25_000.0),
+            recent_daily: Some(25_000.0),
+            ..Default::default()
+        };
+        let (deps, state) = deps_with(measured);
+        let inputs = inputs_at(1.5, 30, 6_000_000.0);
+
+        let (mut stale, _) = compute_plan(&deps, &inputs)
+            .await
+            .expect("fixture measures");
+        stale.run_id = "some-other-run".to_string();
+        *state.previous.lock().expect("not poisoned") = Some(stale);
+
+        let (plan, _measured) = compute_plan(&deps, &inputs)
+            .await
+            .expect("fixture measures");
+
+        assert_eq!(
+            plan.psps.len(),
+            1,
+            "the stale flag must not confirm anything"
+        );
+        assert!(plan.dropped.is_empty());
+    }
+
+    /// With nothing measured yet there is only the declaration to go on, so it is still used.
+    #[tokio::test]
+    async fn the_declaration_is_the_fallback_before_anything_is_measured() {
+        let (deps, _state) = deps_with(MeasuredVolume::default());
+        let inputs = inputs_at(1.5, 30, 6_000_000.0);
+
+        let (plan, _measured) = compute_plan(&deps, &inputs)
+            .await
+            .expect("fixture measures");
+
+        assert_eq!(plan.psps.len(), 1, "kept on the declared 120M a day");
+        assert!(plan.dropped.is_empty());
+    }
+
+    /// The property the split exists for: working a plan out must not publish it, or a merchant
+    /// with the feature off would have one waiting for the routing path the moment it flipped.
+    #[tokio::test]
+    async fn compute_plan_stores_nothing() {
+        let (deps, state) = deps_with(measured_with(99_311.0));
+        let inputs = inputs_at(30.49, 31, 600_000_000.0);
+
+        let (_plan, _measured) = compute_plan(&deps, &inputs)
+            .await
+            .expect("fixture measures");
+
+        assert_eq!(state.stores.load(Ordering::SeqCst), 0);
+    }
+
+    /// Day 31 of 31 with almost nothing delivered: the daily need dwarfs the day's whole traffic,
+    /// so the commitment is dropped rather than chased. This is the position the projection has to
+    /// be able to report before a merchant enables the feature.
+    #[tokio::test]
+    async fn late_in_cycle_an_untouched_commitment_is_unreachable() {
+        let (deps, state) = deps_with(measured_with(99_311.0));
+        let inputs = inputs_at(30.49, 31, 600_000_000.0);
+
+        let plan = settled_plan(&deps, &state, &inputs).await;
+
+        assert!(plan.psps.is_empty(), "nothing should still be chased");
+        assert_eq!(plan.dropped.len(), 1);
+        assert_eq!(plan.dropped[0].connector, "adyen");
+    }
+
+    /// The same contract at the start of a fresh cycle is comfortably winnable — the difference
+    /// between the two verdicts is only *when* the merchant enabled.
+    #[tokio::test]
+    async fn early_in_cycle_the_same_commitment_is_kept() {
+        let (deps, _state) = deps_with(measured_with(0.0));
+        let inputs = inputs_at(0.5, 31, 600_000_000.0);
+
+        let (plan, _measured) = compute_plan(&deps, &inputs)
+            .await
+            .expect("fixture measures");
+
+        assert!(plan.dropped.is_empty(), "30 days left is ample");
+        assert_eq!(plan.psps.len(), 1);
     }
 }

@@ -4,7 +4,8 @@ use crate::analytics::events::{ApiEvent, DomainAnalyticsEvent};
 use crate::analytics::models::{
     AnalyticsCostSavingsResponse, AnalyticsDecisionResponse, AnalyticsGatewayScoresResponse,
     AnalyticsLogSummariesResponse, AnalyticsOverviewResponse, AnalyticsQuery,
-    AnalyticsRoutingStatsResponse, ExperimentResultsQuery, ExperimentResultsResponse,
+    AnalyticsRoutingStatsResponse, CommitmentAnalytics, CommitmentAnalyticsQuery,
+    CommitmentImpactData, ExperimentResultsQuery, ExperimentResultsResponse,
     ExperimentTransactionsQuery, ExperimentTransactionsResponse, PaymentAuditQuery,
     PaymentAuditResponse, RoutingEventsQuery, RoutingEventsResponse,
 };
@@ -51,6 +52,26 @@ pub trait AnalyticsReadStore: Send + Sync {
         Ok(Vec::new())
     }
 
+    /// Series, audit trail and per-PSP impact for a merchant's volume commitments, read together.
+    /// Defaults to empty so a store without analytics degrades to "nothing measured" rather than
+    /// failing the dashboard.
+    async fn volume_commitment(
+        &self,
+        _query: &CommitmentAnalyticsQuery,
+    ) -> Result<CommitmentAnalytics, ApiError> {
+        Ok(CommitmentAnalytics::default())
+    }
+
+    /// Each PSP's cycle against the period before it, for the impact view. The windows on the
+    /// query say which cycle each one is; the period before is derived from them. Defaults to
+    /// empty for the same reason as `volume_commitment`.
+    async fn volume_commitment_impact(
+        &self,
+        _query: &CommitmentAnalyticsQuery,
+    ) -> Result<CommitmentImpactData, ApiError> {
+        Ok(CommitmentImpactData::default())
+    }
+
     async fn gateway_scores(
         &self,
         query: &AnalyticsQuery,
@@ -95,6 +116,13 @@ pub trait AnalyticsReadStore: Send + Sync {
         &self,
         query: &ExperimentTransactionsQuery,
     ) -> Result<ExperimentTransactionsResponse, ApiError>;
+
+    /// Whether the experiment has recorded any payments, so its results would describe its setup.
+    async fn experiment_has_recorded_payments(
+        &self,
+        merchant_id: &str,
+        experiment_id: &str,
+    ) -> Result<bool, ApiError>;
 
     async fn routing_events(
         &self,
@@ -195,6 +223,14 @@ impl AnalyticsReadStore for UnavailableAnalyticsReadStore {
         &self,
         _query: &ExperimentTransactionsQuery,
     ) -> Result<ExperimentTransactionsResponse, ApiError> {
+        Err(ApiError::DatabaseError)
+    }
+
+    async fn experiment_has_recorded_payments(
+        &self,
+        _merchant_id: &str,
+        _experiment_id: &str,
+    ) -> Result<bool, ApiError> {
         Err(ApiError::DatabaseError)
     }
 

@@ -1,6 +1,10 @@
 pub mod audit_summaries;
 pub mod audit_timeline;
 pub mod calibration_events;
+pub mod commitment_audit;
+pub mod commitment_common;
+pub mod commitment_impact;
+pub mod commitment_series;
 pub mod cost_savings;
 pub mod decision_approaches;
 pub mod decision_series;
@@ -8,6 +12,7 @@ pub mod decision_tiles;
 pub mod error_summaries;
 pub mod filter_options;
 pub mod gateway_share;
+pub mod hybrid_split;
 pub mod log_samples;
 pub mod overview_counts;
 pub mod route_hits;

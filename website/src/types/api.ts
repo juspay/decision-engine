@@ -93,9 +93,26 @@ export interface SrConfigOverride {
   use_autopilot?: boolean
 }
 
+/** Routing API an experiment applies to. Each applies only the arm layers it supports. */
+export type ExperimentEndpoint = 'hybrid_routing' | 'decide_gateway' | 'evaluate'
+
+/** One experiment arm as a bundle of layers. An absent layer is not applied by the arm. */
+export interface ExperimentArm {
+  /** Saved routing config (rule-based / priority / volume split / single) for the rule layer. */
+  rule_algorithm_id?: string
+  /** SR routing with this arm's overrides (autopilot, cost savings, hedging, elimination). */
+  sr?: SrConfigOverride
+}
+
 export interface ABTestAlgorithmData {
-  control_algorithm_id: string
-  variant_algorithm_id: string
+  /** Layered arms. When present they define the experiment and the single-strategy fields are ignored. */
+  control?: ExperimentArm
+  variant?: ExperimentArm
+  /** Endpoints the experiment splits traffic on. Absent means every endpoint. */
+  endpoints?: ExperimentEndpoint[]
+  /** Single-strategy arm format: 'sr_routing' or a saved algorithm id. */
+  control_algorithm_id?: string
+  variant_algorithm_id?: string
   variant_split_pct: number
   min_sample_size: number
   guardrail_threshold_pp: number
@@ -156,7 +173,6 @@ export interface VolumeContractConfig {
   currency: { denomination: string; amount_units?: 'major' | 'minor' }
   expected_daily_traffic: VolumeContractAmount
   forecast_interval_secs?: number
-  steering_interval_secs?: number
   volume_contracts: VolumeContract[]
 }
 
@@ -431,6 +447,22 @@ export interface AnalyticsOverviewResponse {
   top_errors: AnalyticsErrorSummary[]
   top_rules: AnalyticsRuleHit[]
   smart_retry_stats: SmartRetryStats
+  hybrid_split?: AnalyticsHybridSplit
+}
+
+export interface AnalyticsHybridSplit {
+  decisions: number
+  dynamic_success: number
+  dynamic_fallback: number
+  dynamic_skipped: number
+  static_decided: number
+  failed: number
+  static_connectors: AnalyticsHybridConnectorPick[]
+}
+
+export interface AnalyticsHybridConnectorPick {
+  connector: string
+  count: number
 }
 
 export interface AnalyticsRouteHit {
@@ -667,6 +699,8 @@ export interface PaymentAuditResponse {
   flow_type?: string | null
   routing_approach?: string | null
   error_code?: string | null
+  scope?: string
+  routing_kind?: string | null
   page: number
   page_size: number
   total_results: number
@@ -704,21 +738,72 @@ export interface EliminatedPspView {
 
 export interface VolumeCommitmentView {
   merchantId: string
+  /** A contract document is live *and* the feature is on — i.e. payments are being paced. */
   active: boolean
+  /** A contract document is activated, whether or not the feature is switched on. */
+  contractConfigured: boolean
+  /** The merchant's volume-contract routing flag. Off means nothing is steered. */
+  featureEnabled: boolean
   computedAtEpochSecs?: number | null
   tolerance?: number | null
-  /** Total volume the merchant expects per day, from the contract document. */
+  /** Total volume the merchant expects per day, from the contract document — a declaration. */
   expectedDailyTraffic?: number | null
+  /** Total volume per day actually flowing across every PSP; what feasibility and steer rates
+   *  are judged against. A wide gap from `expectedDailyTraffic` means the declaration is wrong. */
+  measuredDailyTraffic?: number | null
   /** How long one contract day lasts in seconds — 86400 for calendar cycles, 60 on a test cycle. */
   daySecs?: number | null
   /** Routing rule holding the active contract, so the dashboard can act on it. */
   ruleId?: string | null
   rewardAtStake: number
+  /** RFC 3339 bounds of the billing cycle these commitments race. */
+  cycleStart?: string | null
+  cycleEnd?: string | null
+  /** Contract days in the cycle — minutes on a test cycle. */
+  daysTotal?: number | null
+  /** ISO-4217 code every amount here is denominated in, for rendering major units. */
+  currency?: string | null
+  /** False when a measurement query failed: positions are floors, not readings. */
+  measurementAvailable: boolean
   psps: PspPacing[]
   eliminated: EliminatedPspView[]
 }
 
 /** One PSP-day of delivered volume on the commitment chart. */
+/**
+ * Why a commitment that wanted a payment did not get it. `UNKNOWN` covers a gate written by a
+ * newer backend than this build knows about.
+ */
+export type SteerBlock =
+  | 'ALREADY_CHOSEN'
+  | 'NOT_OFFERED'
+  | 'CYCLE_CLOSED'
+  | 'OUTSIDE_TOLERANCE'
+  | 'LOST_ROLL'
+  | 'UNKNOWN'
+
+/** One commitment that wanted a payment, and the gate that stopped it. */
+export interface BlockedCommitment {
+  connector: string
+  gate: SteerBlock
+}
+
+/** A demo contract template the deployment offers, ready to load into the builder. */
+export interface VolumeContractSample {
+  id: string
+  title: string
+  /** One line: the situation the contract puts the engine in. */
+  summary: string
+  /** What the dashboard should show if the engine is working. */
+  expectedOutcome: string
+  contract: VolumeContractConfig
+}
+
+export interface VolumeContractSamplesResponse {
+  merchantId: string
+  samples: VolumeContractSample[]
+}
+
 export interface CommitmentDayVolume {
   connector: string
   dayIndex: number
@@ -842,4 +927,14 @@ export interface VolumeSteerInfo {
   steeringCount: number
   /** The contract execution this steer belongs to. */
   runId?: string | null
+  /** Every commitment that wanted this payment and did not get it, with the gate that stopped it.
+   *  Absent when nothing was behind, or the first commitment considered took it. */
+  blocked?: BlockedCommitment[]
+}
+
+/** Pacing, series and audit for one merchant, composed server-side into a single request. */
+export interface CommitmentDashboardResponse {
+  pacing: VolumeCommitmentView
+  series: CommitmentSeriesResponse
+  audit: CommitmentAuditResponse
 }

@@ -184,11 +184,35 @@ pub fn validate_routing_rule(
     match &rule.algorithm {
         StaticRoutingAlgorithm::Single(_)
         | StaticRoutingAlgorithm::Priority(_)
-        | StaticRoutingAlgorithm::VolumeSplit(_)
-        | StaticRoutingAlgorithm::AbTest(_) => Ok(ValidationResult::success()),
+        | StaticRoutingAlgorithm::VolumeSplit(_) => Ok(ValidationResult::success()),
+        StaticRoutingAlgorithm::AbTest(ab_data) => {
+            let validation_errors: Vec<ValidationErrorDetails> =
+                crate::decider::gatewaydecider::ab_test::arms::validate(ab_data)
+                    .into_iter()
+                    .map(|(field, message)| {
+                        ValidationErrorDetails::new(
+                            format!("algorithm.data.{field}"),
+                            "invalid_value",
+                            message,
+                        )
+                    })
+                    .collect();
+            if validation_errors.is_empty() {
+                Ok(ValidationResult::success())
+            } else {
+                Ok(ValidationResult::failure(validation_errors))
+            }
+        }
         StaticRoutingAlgorithm::VolumeContract(contract_config) => {
-            let validation_errors =
-                crate::euclid::volume_contract::validate_volume_contract_config(contract_config);
+            // `test_minutes` cycles are a deployment-level permission, and `deps()` is where the
+            // volume-commitment config is already reachable without threading it through every
+            // caller. Absent deps — the feature never started — is the closed answer.
+            let allow_test_cycles = crate::decider::gatewaydecider::volume_commitment::deps()
+                .is_some_and(|deps| deps.config.allow_test_cycles);
+            let validation_errors = crate::euclid::volume_contract::validate_volume_contract_config(
+                contract_config,
+                allow_test_cycles,
+            );
             if validation_errors.is_empty() {
                 Ok(ValidationResult::success())
             } else {

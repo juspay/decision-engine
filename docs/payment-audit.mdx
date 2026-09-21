@@ -10,9 +10,15 @@ Payment Audit is the operator-facing timeline view for a single payment or reque
 Use it when you want to answer questions like:
 
 - which gateway was decided for this payment
-- which priority rule was hit
+- which rule was evaluated, and which priority rule was hit
 - whether a score update succeeded or failed
 - what structured event payload was captured at each step
+
+Every payment is one entry. Its trail holds every audit event recorded for that payment,
+whatever produced it - the rule evaluation, the gateway decision, the later score update, and
+any errors. A payment routed through `/routing/hybrid` reads as `routing_hybrid_decision`
+(Hybrid Routing - one event carrying the whole hybrid request and response, the connector
+scores and the selection reason) → `update_gateway_score_update` (Update Gateway).
 
 The page is designed for exact lookups first and broad operator filtering second.
 
@@ -22,6 +28,7 @@ The page supports these filters:
 
 - `payment_id`
 - `request_id`
+- `routing_kind`
 - `gateway`
 - `route`
 - `status`
@@ -39,6 +46,7 @@ The timeline is built from analytics events captured by the live request flows.
 Current stages include:
 
 - `gateway_decided`
+- `hybrid_routed`
 - `rule_applied`
 - `score_updated`
 - `preview_evaluated`
@@ -48,7 +56,8 @@ Current stages include:
 - `score_update_failed`
 
 The raw flow type remains visible as well, for example `decide_gateway_decision`,
-`decide_gateway_rule_hit`, `update_gateway_score_update`, or `routing_evaluate_advanced`.
+`decide_gateway_rule_hit`, `update_gateway_score_update`, `routing_evaluate_advanced`, or
+`routing_hybrid_decision`.
 
 ## Data Sources
 
@@ -57,7 +66,8 @@ Payment Audit reads from the same ClickHouse analytics store used by the analyti
 The read path is split intentionally:
 
 - exact `payment_id` / `request_id` lookups read the raw `analytics_domain_events` timeline
-- broad search results read pre-aggregated `analytics_payment_audit_summary_buckets`
+- broad search results read the pre-aggregated `analytics_payment_audit_lookup_summaries`,
+  merging its per-kind rows (`preview`, `hybrid`, `dynamic`) into one row per payment.
 
 Both views correlate events through the write-time `lookup_key`, which prefers `payment_id` and
 falls back to `request_id`.

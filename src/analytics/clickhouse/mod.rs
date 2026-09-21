@@ -15,6 +15,7 @@ use crate::error::ApiError;
 pub mod common;
 pub mod endpoints;
 pub mod filters;
+pub mod guard;
 pub mod metrics;
 pub mod query;
 pub mod time;
@@ -49,8 +50,11 @@ impl ClickHouseAnalyticsStore {
             );
             error
         })?;
+        guard::detect_settings_support(&client).await;
 
-        Ok(Self { client })
+        Ok(Self {
+            client: guard::bounded(&client),
+        })
     }
 }
 
@@ -73,6 +77,20 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         query: &AnalyticsQuery,
     ) -> Result<AnalyticsOverviewResponse, ApiError> {
         endpoints::overview::load(&self.client, query).await
+    }
+
+    async fn volume_commitment(
+        &self,
+        query: &CommitmentAnalyticsQuery,
+    ) -> Result<CommitmentAnalytics, ApiError> {
+        Ok(endpoints::volume_commitment::load(&self.client, query).await)
+    }
+
+    async fn volume_commitment_impact(
+        &self,
+        query: &CommitmentAnalyticsQuery,
+    ) -> Result<CommitmentImpactData, ApiError> {
+        Ok(endpoints::volume_commitment::load_impact(&self.client, query).await)
     }
 
     async fn gateway_scores(
@@ -114,7 +132,7 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         &self,
         query: &PaymentAuditQuery,
     ) -> Result<PaymentAuditResponse, ApiError> {
-        endpoints::payment_audit::load(&self.client, query, false).await
+        endpoints::payment_audit::load(&self.client, query, query.scope).await
     }
 
     async fn preview_trace(
@@ -136,6 +154,19 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         query: &ExperimentTransactionsQuery,
     ) -> Result<ExperimentTransactionsResponse, ApiError> {
         endpoints::experiment_transactions::load(&self.client, query).await
+    }
+
+    async fn experiment_has_recorded_payments(
+        &self,
+        merchant_id: &str,
+        experiment_id: &str,
+    ) -> Result<bool, ApiError> {
+        endpoints::experiment_results::has_recorded_payments(
+            &self.client,
+            merchant_id,
+            experiment_id,
+        )
+        .await
     }
 
     async fn routing_events(

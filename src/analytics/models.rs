@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-use crate::analytics::flow::AnalyticsRoute;
+use crate::analytics::flow::{
+    AnalyticsRoute, SUMMARY_KIND_DYNAMIC, SUMMARY_KIND_HYBRID, SUMMARY_KIND_PREVIEW,
+};
 
 pub const MAX_ANALYTICS_LOOKBACK_MS: i64 = 18 * 30 * 24 * 60 * 60 * 1000;
 pub const MIN_ANALYTICS_PAGE: usize = 1;
@@ -29,6 +31,38 @@ fn normalise_gateways(raw: Option<String>) -> Vec<String> {
         .collect()
 }
 
+/// Which decision family the analytics charts read. `/decide_gateway` and `/routing/hybrid`
+/// both run the same decider and record the same columns, but under different flow types and
+/// with the decider payload nested one level deeper in `details`. Every decision-based metric
+/// resolves its flow type and JSON paths through this so the two never have to be special-cased
+/// at the call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalyticsRoutingKind {
+    #[default]
+    MultiObjective,
+    Hybrid,
+}
+
+impl AnalyticsRoutingKind {
+    pub fn from_query(value: Option<&str>) -> Self {
+        match value
+            .map(|value| value.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("hybrid") => Self::Hybrid,
+            _ => Self::MultiObjective,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MultiObjective => "multi_objective",
+            Self::Hybrid => "hybrid",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsQuery {
     pub merchant_id: String,
@@ -45,6 +79,7 @@ pub struct AnalyticsQuery {
     pub country: Option<String>,
     pub auth_type: Option<String>,
     pub gateways: Vec<String>,
+    pub routing_kind: AnalyticsRoutingKind,
 }
 
 impl AnalyticsQuery {
@@ -64,6 +99,7 @@ impl AnalyticsQuery {
         country: Option<String>,
         auth_type: Option<String>,
         gateways: Option<String>,
+        routing_kind: Option<String>,
     ) -> Self {
         let range = AnalyticsRange::from_query(range.as_deref());
         let (start_ms, end_ms) = match (start_ms, end_ms) {
@@ -88,6 +124,7 @@ impl AnalyticsQuery {
             country: country.filter(|value| !value.is_empty()),
             auth_type: auth_type.filter(|value| !value.is_empty()),
             gateways: normalise_gateways(gateways),
+            routing_kind: AnalyticsRoutingKind::from_query(routing_kind.as_deref()),
         }
     }
 }
@@ -162,6 +199,25 @@ pub struct AnalyticsOverviewResponse {
     pub top_errors: Vec<AnalyticsErrorSummary>,
     pub top_rules: Vec<AnalyticsRuleHit>,
     pub smart_retry_stats: SmartRetryStats,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hybrid_split: Option<AnalyticsHybridSplit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsHybridSplit {
+    pub decisions: i64,
+    pub dynamic_success: i64,
+    pub dynamic_fallback: i64,
+    pub dynamic_skipped: i64,
+    pub static_decided: i64,
+    pub failed: i64,
+    pub static_connectors: Vec<AnalyticsHybridConnectorPick>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsHybridConnectorPick {
+    pub connector: String,
+    pub count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -327,6 +383,77 @@ pub struct AnalyticsRuleHit {
     pub count: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentAuditScope {
+    #[default]
+    All,
+    Dynamic,
+    Preview,
+}
+
+impl PaymentAuditScope {
+    pub fn from_query(value: Option<&str>) -> Self {
+        match value
+            .map(|value| value.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("dynamic") => Self::Dynamic,
+            Some("preview") => Self::Preview,
+            _ => Self::All,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Dynamic => "dynamic",
+            Self::Preview => "preview",
+        }
+    }
+
+    pub const fn summary_kinds(self) -> Option<&'static [&'static str]> {
+        match self {
+            Self::All => None,
+            Self::Dynamic => Some(&[SUMMARY_KIND_DYNAMIC, SUMMARY_KIND_HYBRID]),
+            Self::Preview => Some(&[SUMMARY_KIND_PREVIEW]),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentAuditRoutingKind {
+    MultiObjective,
+    RuleBased,
+    DebitRouting,
+    Hybrid,
+}
+
+impl PaymentAuditRoutingKind {
+    pub fn from_query(value: Option<&str>) -> Option<Self> {
+        match value
+            .map(|value| value.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("multi_objective") => Some(Self::MultiObjective),
+            Some("rule_based") => Some(Self::RuleBased),
+            Some("debit_routing") => Some(Self::DebitRouting),
+            Some("hybrid") => Some(Self::Hybrid),
+            _ => None,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MultiObjective => "multi_objective",
+            Self::RuleBased => "rule_based",
+            Self::DebitRouting => "debit_routing",
+            Self::Hybrid => "hybrid",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentAuditQuery {
     pub merchant_id: String,
@@ -344,6 +471,8 @@ pub struct PaymentAuditQuery {
     pub routing_approach: Option<String>,
     pub exclude_routing_approach: Option<String>,
     pub error_code: Option<String>,
+    pub scope: PaymentAuditScope,
+    pub routing_kind: Option<PaymentAuditRoutingKind>,
 }
 
 impl PaymentAuditQuery {
@@ -390,6 +519,8 @@ impl PaymentAuditQuery {
         routing_approach: Option<String>,
         exclude_routing_approach: Option<String>,
         error_code: Option<String>,
+        scope: Option<String>,
+        routing_kind: Option<String>,
     ) -> Self {
         let range = AnalyticsRange::from_query(range.as_deref());
         let (start_ms, end_ms) = match (start_ms, end_ms) {
@@ -415,6 +546,8 @@ impl PaymentAuditQuery {
             routing_approach,
             exclude_routing_approach,
             error_code,
+            scope: PaymentAuditScope::from_query(scope.as_deref()),
+            routing_kind: PaymentAuditRoutingKind::from_query(routing_kind.as_deref()),
         }
     }
 }
@@ -476,6 +609,8 @@ pub struct PaymentAuditResponse {
     pub flow_type: Option<String>,
     pub routing_approach: Option<String>,
     pub error_code: Option<String>,
+    pub scope: String,
+    pub routing_kind: Option<String>,
     pub page: usize,
     pub page_size: usize,
     pub total_results: usize,
@@ -570,6 +705,9 @@ pub struct ExperimentResultsQuery {
     /// Common business margin (fraction of ticket) used to score net value for both arms.
     /// Defaults to `DEFAULT_EVALUATION_MARGIN` when the caller omits it.
     pub evaluation_margin: f64,
+    /// Restricts results to one endpoint. An experiment applies different layers per endpoint,
+    /// so arms are only comparable within one. `None` reads every endpoint together.
+    pub endpoint: Option<crate::euclid::types::ExperimentEndpoint>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -594,6 +732,7 @@ pub struct ExperimentTransactionsQuery {
     pub start_ms: Option<i64>,
     pub page: u64,
     pub page_size: u64,
+    pub endpoint: Option<crate::euclid::types::ExperimentEndpoint>,
 }
 
 pub const ROUTING_EVENTS_BUCKET_MS: i64 = 5 * 60 * 1000;
@@ -829,4 +968,288 @@ mod tests {
             MAX_ANALYTICS_PAGE_SIZE
         );
     }
+}
+
+#[cfg(test)]
+mod payment_audit_filter_tests {
+    use super::{PaymentAuditRoutingKind, PaymentAuditScope};
+
+    #[test]
+    fn scope_defaults_to_all_and_only_narrow_scopes_pin_a_summary_kind() {
+        assert_eq!(PaymentAuditScope::from_query(None), PaymentAuditScope::All);
+        assert_eq!(
+            PaymentAuditScope::from_query(Some("nonsense")),
+            PaymentAuditScope::All
+        );
+        assert_eq!(
+            PaymentAuditScope::from_query(Some(" Dynamic ")),
+            PaymentAuditScope::Dynamic
+        );
+        assert_eq!(
+            PaymentAuditScope::from_query(Some("preview")),
+            PaymentAuditScope::Preview
+        );
+        assert_eq!(PaymentAuditScope::All.summary_kinds(), None);
+        assert_eq!(
+            PaymentAuditScope::Dynamic.summary_kinds(),
+            Some(&["dynamic", "hybrid"][..])
+        );
+        assert_eq!(
+            PaymentAuditScope::Preview.summary_kinds(),
+            Some(&["preview"][..])
+        );
+    }
+
+    #[test]
+    fn routing_kind_parses_the_dashboard_filter_values_and_ignores_the_rest() {
+        assert_eq!(
+            PaymentAuditRoutingKind::from_query(Some("multi_objective")),
+            Some(PaymentAuditRoutingKind::MultiObjective)
+        );
+        assert_eq!(
+            PaymentAuditRoutingKind::from_query(Some("RULE_BASED")),
+            Some(PaymentAuditRoutingKind::RuleBased)
+        );
+        assert_eq!(
+            PaymentAuditRoutingKind::from_query(Some("debit_routing")),
+            Some(PaymentAuditRoutingKind::DebitRouting)
+        );
+        assert_eq!(
+            PaymentAuditRoutingKind::from_query(Some("hybrid")),
+            Some(PaymentAuditRoutingKind::Hybrid)
+        );
+        assert_eq!(PaymentAuditRoutingKind::from_query(Some("")), None);
+        assert_eq!(PaymentAuditRoutingKind::from_query(Some("tabs")), None);
+        assert_eq!(PaymentAuditRoutingKind::from_query(None), None);
+        assert_eq!(PaymentAuditRoutingKind::Hybrid.as_str(), "hybrid");
+    }
+
+    #[test]
+    fn analytics_routing_kind_defaults_to_multi_objective_for_anything_but_hybrid() {
+        use super::AnalyticsRoutingKind;
+
+        assert_eq!(
+            AnalyticsRoutingKind::from_query(Some("hybrid")),
+            AnalyticsRoutingKind::Hybrid
+        );
+        assert_eq!(
+            AnalyticsRoutingKind::from_query(Some(" HYBRID ")),
+            AnalyticsRoutingKind::Hybrid
+        );
+        assert_eq!(
+            AnalyticsRoutingKind::from_query(Some("rule_based")),
+            AnalyticsRoutingKind::MultiObjective
+        );
+        assert_eq!(
+            AnalyticsRoutingKind::from_query(None),
+            AnalyticsRoutingKind::MultiObjective
+        );
+        assert_eq!(
+            AnalyticsRoutingKind::default(),
+            AnalyticsRoutingKind::MultiObjective
+        );
+    }
+}
+
+// ── Volume commitments ───────────────────────────────────────────────────────────────────────
+//
+// A billing cycle is not a time range, so these do not use `AnalyticsQuery`: buckets are numbered
+// from the instant a cycle opened rather than from the wall clock, and each connector can be on a
+// cycle of its own. What analytics needs is only the windows to read; nothing here knows what a
+// contract is.
+
+/// One connector's cycle: the span to read, and how long a contract "day" lasts inside it.
+#[derive(Debug, Clone)]
+pub struct CommitmentWindow {
+    pub connector: String,
+    pub cycle_start_ms: i64,
+    pub cycle_end_ms: i64,
+    /// 86_400 on a calendar cycle, 60 on a test cycle, where a minute stands in for a day.
+    pub day_secs: u64,
+}
+
+/// Everything the commitment dashboard reads, in one query.
+#[derive(Debug, Clone)]
+pub struct CommitmentAnalyticsQuery {
+    pub merchant_id: String,
+    /// Empty means there is nothing to read; every metric returns empty rather than querying.
+    pub windows: Vec<CommitmentWindow>,
+    /// Buckets per contract day: 1 for a day-resolution series, more for an intraday one.
+    pub per_day: u32,
+    /// How many events each half of the audit trail may return.
+    pub audit_limit: u64,
+    /// The `routing_approach` value the nudge stamps on a diverted decision. Passed in so this
+    /// layer keeps no dependency on the decider's enums — the caller owns that vocabulary.
+    pub steered_approach: String,
+    /// Multiplier that puts a measured payment amount on the same scale as the contract's goals.
+    /// Traffic reaches `/decide-gateway` in major currency units while goals are stored in minor
+    /// ones; `1.0` where a contract counts transactions rather than money.
+    pub amount_scale: f64,
+}
+
+impl CommitmentAnalyticsQuery {
+    /// The cycle spanning every window — the widest audit range worth reading.
+    pub fn span_ms(&self) -> Option<(i64, i64)> {
+        let start = self.windows.iter().map(|w| w.cycle_start_ms).min()?;
+        let end = self.windows.iter().map(|w| w.cycle_end_ms).max()?;
+        Some((start, end))
+    }
+
+    pub fn connectors(&self) -> Vec<String> {
+        self.windows.iter().map(|w| w.connector.clone()).collect()
+    }
+
+    /// The same connectors over the period immediately before each one's *own* cycle — the
+    /// comparison the impact view makes. Every window is shifted back by its own length, because
+    /// cycles can differ in both start and duration: shifting them all by one shared figure reads
+    /// part of a later-starting connector's current cycle as its history.
+    pub fn previous_cycle(&self) -> Self {
+        Self {
+            windows: self
+                .windows
+                .iter()
+                .map(|w| CommitmentWindow {
+                    connector: w.connector.clone(),
+                    cycle_start_ms: w
+                        .cycle_start_ms
+                        .saturating_sub((w.cycle_end_ms - w.cycle_start_ms).max(1)),
+                    cycle_end_ms: w.cycle_start_ms,
+                    day_secs: w.day_secs,
+                })
+                .collect(),
+            ..self.clone()
+        }
+    }
+
+    /// The same windows read at a different bucket size.
+    pub fn at_resolution(&self, per_day: u32) -> Self {
+        Self {
+            per_day,
+            ..self.clone()
+        }
+    }
+}
+
+#[cfg(test)]
+mod commitment_query_tests {
+    use super::*;
+
+    fn window(connector: &str, start_ms: i64, end_ms: i64) -> CommitmentWindow {
+        CommitmentWindow {
+            connector: connector.to_string(),
+            cycle_start_ms: start_ms,
+            cycle_end_ms: end_ms,
+            day_secs: 86_400,
+        }
+    }
+
+    fn query(windows: Vec<CommitmentWindow>) -> CommitmentAnalyticsQuery {
+        CommitmentAnalyticsQuery {
+            merchant_id: "m1".to_string(),
+            windows,
+            per_day: 24,
+            audit_limit: 50,
+            steered_approach: "SR_SELECTION_VOLUME_COMMITMENT".to_string(),
+            amount_scale: 100.0,
+        }
+    }
+
+    const DAY: i64 = 86_400_000;
+
+    /// Each commitment's history is the period before *its* cycle. A document whose cycles open on
+    /// different days would otherwise read the later one's opening days as its own baseline.
+    #[test]
+    fn every_window_steps_back_by_its_own_length() {
+        let q = query(vec![
+            window("stripe", 30 * DAY, 61 * DAY),
+            window("adyen", 33 * DAY, 64 * DAY),
+        ]);
+        let previous = q.previous_cycle();
+        let bounds: Vec<(i64, i64)> = previous
+            .windows
+            .iter()
+            .map(|w| (w.cycle_start_ms / DAY, w.cycle_end_ms / DAY))
+            .collect();
+        assert_eq!(bounds, vec![(-1, 30), (2, 33)]);
+    }
+
+    #[test]
+    fn resolution_changes_the_bucket_size_and_nothing_else() {
+        let q = query(vec![window("stripe", 0, 31 * DAY)]);
+        let daily = q.at_resolution(1);
+        assert_eq!(daily.per_day, 1);
+        assert_eq!(daily.windows.len(), 1);
+        assert_eq!(daily.amount_scale, q.amount_scale);
+    }
+}
+
+/// One PSP's volume in one bucket of its cycle, for the pacing chart.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitmentDayVolume {
+    pub connector: String,
+    /// Whole contract days since this PSP's cycle opened (0 = the first day).
+    pub day_index: u32,
+    /// Where the bucket starts in fractional contract days, at the resolution asked for.
+    pub day: f64,
+    pub total: f64,
+    /// Of `total`, what the nudge moved here.
+    pub steered: f64,
+    pub payments: u64,
+    pub steered_payments: u64,
+}
+
+/// What kind of audit entry an event is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommitmentAuditKind {
+    Forecast,
+    Steered,
+    Eliminated,
+}
+
+/// One entry in the audit trail, reconstructed from stored events so it survives restarts.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitmentAuditEvent {
+    pub at_epoch_ms: i64,
+    pub kind: CommitmentAuditKind,
+    /// The contract execution this belongs to. `None` on events written before runs were named.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connector: Option<String>,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount: Option<f64>,
+}
+
+/// Per-PSP totals over one window: `steered_*` moved *to* it, `ceded_*` moved *away* from it.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitmentWindowTotals {
+    pub connector: String,
+    pub payments: u64,
+    pub volume: f64,
+    pub steered_payments: u64,
+    pub steered_volume: f64,
+    pub ceded_payments: u64,
+    pub ceded_volume: f64,
+}
+
+/// What the pacing dashboard reads from analytics, gathered in one pass.
+#[derive(Debug, Clone, Default)]
+pub struct CommitmentAnalytics {
+    pub series: Vec<CommitmentDayVolume>,
+    pub audit: Vec<CommitmentAuditEvent>,
+}
+
+/// The impact view's own read: this cycle against the one before it, totals and day-by-day.
+/// Separate from `CommitmentAnalytics` because it spans two windows, and only one page asks for it.
+#[derive(Debug, Clone, Default)]
+pub struct CommitmentImpactData {
+    pub before: Vec<CommitmentWindowTotals>,
+    pub during: Vec<CommitmentWindowTotals>,
+    pub baseline_days: Vec<CommitmentDayVolume>,
+    pub cycle_days: Vec<CommitmentDayVolume>,
 }

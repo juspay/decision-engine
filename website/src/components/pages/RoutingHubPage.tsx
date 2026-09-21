@@ -3,13 +3,13 @@ import { useState } from 'react'
 import { Link } from 'react-router-dom'
 import useSWR, { useSWRConfig } from 'swr'
 import {
-  BookOpen,
   ChevronRight,
-  FlaskConical,
-  Network,
   PieChart,
   PowerOff,
-  TrendingUp,
+  Target,
+  SignpostBig,
+  CreditCard,
+  FlaskConical,
 } from 'lucide-react'
 import { Card, CardBody, SurfaceLabel } from '../ui/Card'
 import { Badge } from '../ui/Badge'
@@ -24,7 +24,8 @@ import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 
 import { PageHeading } from '../ui/PageHeading'
 type StrategyId = 'auth-rate' | 'rules' | 'volume' | 'debit' | 'ab-test'
-type StrategyState = 'configured' | 'enabled' | 'autopilot' | 'not_set'
+// `off` is a strategy that is set up but switched off; `not_set` one that isn't set up.
+type StrategyState = 'configured' | 'enabled' | 'autopilot' | 'default' | 'off' | 'not_set'
 
 interface StrategyRow {
   id: StrategyId
@@ -34,11 +35,12 @@ interface StrategyRow {
   icon: ElementType
   state: StrategyState
   canDeactivate: boolean
+  canActivate?: boolean
   href: string
 }
 
 const strategyLabels: Record<StrategyId, string> = {
-  'auth-rate': 'Multi-Objective Configuration',
+  'auth-rate': 'Auth Rate routing',
   rules: 'Rule-Based Routing',
   volume: 'Volume Split Routing',
   debit: 'Debit Routing',
@@ -60,6 +62,8 @@ function isRuleBasedAlgorithmType(type: string) {
 function strategyStateLabel(state: StrategyState) {
   if (state === 'configured') return 'Configured'
   if (state === 'autopilot') return 'Auto-pilot'
+  if (state === 'default') return 'Default settings'
+  if (state === 'off') return 'Off'
   return 'Enabled'
 }
 
@@ -71,6 +75,7 @@ export function RoutingHubPage() {
   const debitRoutingFlag = useDebitRoutingFlag(merchantId)
   const merchantFeatures = useMerchantFeatures(merchantId || undefined)
   const [deactivatingStrategy, setDeactivatingStrategy] = useState<StrategyId | null>(null)
+  const [activatingStrategy, setActivatingStrategy] = useState<StrategyId | null>(null)
   const [pendingDeactivateStrategy, setPendingDeactivateStrategy] = useState<StrategyId | null>(null)
   const [actionMessage, setActionMessage] = useState<string | null>(null)
   const [actionError, setActionError] = useState<string | null>(null)
@@ -80,7 +85,7 @@ export function RoutingHubPage() {
     () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`),
   )
 
-  const { data: srConfig, isLoading: srLoading, mutate: mutateSrConfig } = useSWR<RuleConfig>(
+  const { data: srConfig, isLoading: srLoading } = useSWR<RuleConfig>(
     merchantId ? ['/rule/get', 'successRate', merchantId] : null,
     () => apiPost('/rule/get', { merchant_id: merchantId, algorithm: 'successRate' }),
   )
@@ -91,12 +96,16 @@ export function RoutingHubPage() {
     { shouldRetryOnError: false },
   )
 
-  const activeAlgorithm = activeAlgorithms?.[0]
+  // A running experiment is listed beside the active rule; the rule is the routing that's set up.
+  const activeAlgorithm = activeAlgorithms?.find((a) => algorithmType(a) !== 'ab_test') ?? activeAlgorithms?.[0]
   const srData = ((srConfig as any)?.config?.data ?? srConfig?.data) as SRConfigData | undefined
-  // Manual config saved on /routing/sr and Autopilot mode (the `autopilot` merchant
-  // feature flag toggled there) are both valid multi-objective setups.
+  // Auth Rate routing (the `sr-routing` feature) decides whether the SR decider runs at all. While
+  // it is on, Autopilot, a manual config saved on /routing/sr, or neither (the default settings)
+  // says how it is tuned.
   const hasMultiObjectiveConfig = Boolean(srData)
   const autopilotOn = merchantFeatures.isEnabled('autopilot')
+  const authRateRoutingOn = merchantFeatures.isEnabled('sr-routing')
+  const authRateRoutingKnown = !merchantFeatures.isLoading && merchantFeatures.data != null
   const hasRuleBasedRouting = (activeAlgorithms || []).some((a) => isRuleBasedAlgorithmType(algorithmType(a)))
   const hasVolumeSplit = (activeAlgorithms || []).some((a) => algorithmType(a) === 'volume_split')
   const hasDebitRouting = debitRoutingFlag.isEnabled
@@ -105,6 +114,21 @@ export function RoutingHubPage() {
   const activeRuleAlgorithm = (activeAlgorithms || []).find((a) => isRuleBasedAlgorithmType(algorithmType(a)))
   const activeVolumeAlgorithm = (activeAlgorithms || []).find((a) => algorithmType(a) === 'volume_split')
 
+
+  async function activateStrategy(strategyId: StrategyId) {
+    if (!merchantId || strategyId !== 'auth-rate') return
+    setActivatingStrategy(strategyId)
+    setActionMessage(null)
+    setActionError(null)
+    try {
+      await merchantFeatures.setFeatureEnabled('sr-routing', true)
+      setActionMessage(`${strategyLabels[strategyId]} activated.`)
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setActivatingStrategy(null)
+    }
+  }
 
   async function deactivateStrategy(strategyId: StrategyId) {
     if (!merchantId) return
@@ -117,18 +141,8 @@ export function RoutingHubPage() {
     setActionError(null)
     try {
       if (strategyId === 'auth-rate') {
-        if (hasMultiObjectiveConfig) {
-          await apiPost('/rule/delete', { merchant_id: merchantId, algorithm: 'successRate' })
-          await mutateSrConfig(undefined, { revalidate: false })
-        }
-        if (autopilotOn) {
-          // Mirror the Autopilot master-off behaviour on /routing/sr: turning the
-          // master off also hard-disables its decision flags.
-          await merchantFeatures.setFeatureEnabled('autopilot', false)
-          await merchantFeatures.setFeatureEnabled('elimination', false)
-          await merchantFeatures.setFeatureEnabled('multi-objective-routing', false)
-          await merchantFeatures.setFeatureEnabled('auto-calibration', false)
-        }
+        // Switching off keeps the saved config and Autopilot, so switching back on restores them.
+        await merchantFeatures.setFeatureEnabled('sr-routing', false)
       } else if (strategyId === 'rules' && activeRuleAlgorithm) {
         await apiPost('/routing/deactivate', { created_by: merchantId, routing_algorithm_id: activeRuleAlgorithm.id })
         await Promise.all([
@@ -162,9 +176,10 @@ export function RoutingHubPage() {
       title: 'Multi-objective',
       description: 'Steers traffic toward the best authorization rate using live connector score signals.',
       useCase: 'Use when you want automatic gateway selection driven by real-time success-rate data.',
-      icon: TrendingUp,
-      state: hasMultiObjectiveConfig ? 'configured' : autopilotOn ? 'autopilot' : 'not_set',
-      canDeactivate: hasMultiObjectiveConfig || autopilotOn,
+      icon: Target,
+      state: !authRateRoutingOn ? 'off' : autopilotOn ? 'autopilot' : hasMultiObjectiveConfig ? 'configured' : 'default',
+      canDeactivate: authRateRoutingKnown && authRateRoutingOn,
+      canActivate: authRateRoutingKnown && !authRateRoutingOn,
       href: 'sr',
     },
     {
@@ -172,7 +187,7 @@ export function RoutingHubPage() {
       title: 'Rule based',
       description: 'Evaluates explicit business conditions before traffic reaches connector selection.',
       useCase: 'Use for BIN, network, country, amount, metadata, or merchant policy overrides.',
-      icon: BookOpen,
+      icon: SignpostBig,
       state: hasRuleBasedRouting ? 'enabled' : 'not_set',
       canDeactivate: Boolean(activeRuleAlgorithm),
       href: 'rules',
@@ -192,7 +207,7 @@ export function RoutingHubPage() {
       title: 'Debit routing',
       description: 'Enables debit-network decisions for co-badged card payment flows.',
       useCase: 'Use when debit network cost, issuer country, or regulated-card behavior matters.',
-      icon: Network,
+      icon: CreditCard,
       state: hasDebitRouting ? 'enabled' : 'not_set',
       canDeactivate: hasDebitRouting,
       href: 'debit',
@@ -209,7 +224,7 @@ export function RoutingHubPage() {
     },
   ]
 
-  const activeStrategies = strategies.filter((s) => s.state !== 'not_set')
+  const activeStrategies = strategies.filter((s) => s.state !== 'not_set' && s.state !== 'off')
 
   const topRules = analyticsData?.top_rules || []
   const activeNamedAlgorithm = activeAlgorithm?.name
@@ -221,7 +236,9 @@ export function RoutingHubPage() {
       <ConfirmDialog
         open={pendingDeactivateStrategy !== null}
         title={`Deactivate ${pendingDeactivateStrategy ? strategyLabels[pendingDeactivateStrategy] : ''}?`}
-        description="This will stop routing decisions from using this strategy. You can reactivate it at any time."
+        description={pendingDeactivateStrategy === 'auth-rate'
+          ? 'Routing stops scoring gateways by auth rate, and hybrid routing answers from your routing rules. Your saved settings and Autopilot are kept, so turning it back on restores them.'
+          : 'This will stop routing decisions from using this strategy. You can reactivate it at any time.'}
         confirmLabel="Deactivate"
         variant="danger"
         onConfirm={() => { const s = pendingDeactivateStrategy!; setPendingDeactivateStrategy(null); doDeactivateStrategy(s) }}
@@ -254,7 +271,7 @@ export function RoutingHubPage() {
             <div className="mt-3 divide-y divide-slate-100 dark:divide-[#1e2535]">
               {strategies.map((strategy) => {
                 const Icon = strategy.icon
-                const active = strategy.state !== 'not_set'
+                const active = strategy.state !== 'not_set' && strategy.state !== 'off'
                 return (
                   <div
                     key={strategy.id}
@@ -271,9 +288,9 @@ export function RoutingHubPage() {
                     <div className="min-w-0 flex-1">
                       <div className="flex flex-wrap items-center gap-2">
                         <p className="text-sm font-semibold text-slate-950 dark:text-white">{strategy.title}</p>
-                        {strategy.state !== 'not_set'
+                        {active
                           ? <Badge variant="green">{strategyStateLabel(strategy.state)}</Badge>
-                          : <Badge variant="gray">Not set</Badge>}
+                          : <Badge variant="gray">{strategy.state === 'off' ? 'Off' : 'Not set'}</Badge>}
                       </div>
                       <p className="mt-1 text-xs leading-5 text-slate-500 dark:text-[#8d96aa]">
                         {strategy.description}
@@ -284,6 +301,16 @@ export function RoutingHubPage() {
                     </div>
 
                     <div className="flex flex-shrink-0 items-center gap-2">
+                      {strategy.canActivate && (
+                        <Button
+                          size="sm"
+                          variant="primary"
+                          onClick={() => activateStrategy(strategy.id)}
+                          disabled={activatingStrategy === strategy.id || loading}
+                        >
+                          {activatingStrategy === strategy.id ? 'Activating' : 'Activate'}
+                        </Button>
+                      )}
                       {strategy.canDeactivate && (
                         <Button
                           size="sm"

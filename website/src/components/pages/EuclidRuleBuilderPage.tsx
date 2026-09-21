@@ -339,6 +339,13 @@ export function EuclidRuleBuilderPage() {
               <p className="border-b border-slate-100 pb-2.5 text-xs font-semibold uppercase tracking-widest text-slate-500 dark:border-[#1c1c24] dark:text-[#8d96a8]">
                 Configured Rules
               </p>
+              {/* Same warning the Hyperswitch dashboard shows on its rule builder — amounts are
+                  easy to get wrong by a factor of 100 without it. */}
+              <p className="text-[13px] text-slate-500 dark:text-[#8d96a8] leading-[18px]">
+                Enter payment amounts in the smallest currency unit (cents for USD, yen for JPY).
+                For instance, <code className="font-mono">100</code> matches $1.00 (USD) but ¥100
+                (JPY), since ¥ is a zero-decimal currency.
+              </p>
               {routingKeysLoading && (
                 <p className="text-sm text-slate-500">Loading routing keys from backend...</p>
               )}

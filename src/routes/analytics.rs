@@ -38,6 +38,8 @@ pub struct AnalyticsQueryParams {
     pub routing_approach: Option<String>,
     pub exclude_routing_approach: Option<String>,
     pub error_code: Option<String>,
+    pub scope: Option<String>,
+    pub routing_kind: Option<String>,
 }
 
 fn analytics_query_from_params(
@@ -59,6 +61,7 @@ fn analytics_query_from_params(
         params.country.clone(),
         params.auth_type.clone(),
         params.gateway.clone(),
+        params.routing_kind.clone(),
     )
 }
 
@@ -82,6 +85,8 @@ fn payment_audit_query_from_params(
         params.routing_approach.clone(),
         params.exclude_routing_approach.clone(),
         params.error_code.clone(),
+        params.scope.clone(),
+        params.routing_kind.clone(),
     )
 }
 
@@ -248,7 +253,7 @@ pub async fn routing_events(
 ///
 /// ```ignore
 /// let multi_objective_on = crate::redis::feature::is_feature_enabled(
-///     "multi_objective_routing_enabled".to_string(),
+///     "cost_savings_enabled".to_string(),
 ///     merchant_id.to_string(),
 ///     crate::feedback::constants::kvRedis(),
 /// ).await;
@@ -266,6 +271,23 @@ async fn resolve_auth_band(_merchant_id: &str, _explicit: Option<f64>) -> AuthBa
     AuthBandSpec::Off
 }
 
+/// Rejects an `endpoint` query value this build does not recognise, which would otherwise match
+/// no events and read as an experiment with no traffic.
+fn known_experiment_endpoint(
+    endpoint: Option<crate::euclid::types::ExperimentEndpoint>,
+) -> Result<Option<crate::euclid::types::ExperimentEndpoint>, error::ContainerError<error::ApiError>>
+{
+    match endpoint {
+        Some(crate::euclid::types::ExperimentEndpoint::Unknown) => {
+            Err(error::ApiError::ValidationError(
+                "endpoint must be one of hybrid_routing, decide_gateway, evaluate",
+            )
+            .into())
+        }
+        other => Ok(other),
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ExperimentResultsParams {
     pub start_ms: Option<i64>,
@@ -275,6 +297,8 @@ pub struct ExperimentResultsParams {
     /// Common business margin (fraction of ticket) to value net EV for cost/autopilot
     /// experiments. Omitted → `DEFAULT_EVALUATION_MARGIN`.
     pub evaluation_margin: Option<f64>,
+    /// `hybrid_routing`, `decide_gateway` or `evaluate`. Omitted → every endpoint.
+    pub endpoint: Option<crate::euclid::types::ExperimentEndpoint>,
 }
 
 pub async fn experiment_results(
@@ -294,6 +318,7 @@ pub async fn experiment_results(
         evaluation_margin: params.evaluation_margin.unwrap_or(
             crate::analytics::clickhouse::endpoints::experiment_results::DEFAULT_EVALUATION_MARGIN,
         ),
+        endpoint: known_experiment_endpoint(params.endpoint)?,
     };
     Ok(Json(fetch_experiment_results(&state, &query).await?))
 }
@@ -303,6 +328,7 @@ pub struct ExperimentTransactionsParams {
     pub start_ms: Option<i64>,
     pub page: Option<u64>,
     pub page_size: Option<u64>,
+    pub endpoint: Option<crate::euclid::types::ExperimentEndpoint>,
 }
 
 pub async fn experiment_transactions(
@@ -320,6 +346,7 @@ pub async fn experiment_transactions(
         start_ms: params.start_ms,
         page: params.page.unwrap_or(1),
         page_size: params.page_size.unwrap_or(50).min(100),
+        endpoint: known_experiment_endpoint(params.endpoint)?,
     };
     Ok(Json(fetch_experiment_transactions(&state, &query).await?))
 }

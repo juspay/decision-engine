@@ -14,7 +14,9 @@ use crate::{
 
 use crate::feedback::constants as C;
 
-use crate::decider::gatewaydecider::constants::{EnableEliminationV2, EnableOutageV2};
+use crate::decider::gatewaydecider::constants::{
+    EnableEliminationV2, EnableOutageV2, ENABLE_GW_LEVEL_SR_ELIMINATION,
+};
 
 // use crate::feedback::types as F_TYPES;
 
@@ -586,7 +588,14 @@ pub async fn getAllUnifiedKeys(
         C::kvRedis(),
     )
     .await;
+    let is_elimination_feature_flag_enabled = is_feature_enabled(
+        ENABLE_GW_LEVEL_SR_ELIMINATION.get_key(),
+        merchant_id.clone(),
+        C::kvRedis(),
+    )
+    .await;
     let is_key_enabled_for_merchant_gateway_scoring = gateway_scoring_data.eliminationEnabled
+        || is_elimination_feature_flag_enabled
         || MCU::isPaymentFlowEnabledWithHierarchyCheckCached(
             mer_acc_p_id,
             mer_acc.tenantAccountId.clone(),

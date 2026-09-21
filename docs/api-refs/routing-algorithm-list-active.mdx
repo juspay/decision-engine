@@ -36,4 +36,4 @@ curl --location --request POST "$BASE_URL/routing/list/active/merchant_demo" \
 ]
 ```
 
-Returns an empty array `[]` when no rule is active.
+Returns an empty array `[]` when no rule is active. While an A/B experiment runs it is listed too, next to the active rule of its `algorithm_for`; tell them apart by `algorithm_data.type` (`ab_test`).

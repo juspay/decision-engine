@@ -130,6 +130,14 @@ pub static ANALYTICS_KAFKA_DELIVERY_LATENCY_HISTOGRAM: LazyLock<HistogramVec> =
         )
     });
 
+pub static CARD_INFO_LOOKUP_FAILURE_COUNTER: LazyLock<CounterVec> = LazyLock::new(|| {
+    CounterVec::new(
+        "card_info_lookup_failures_total",
+        "Count of failed outbound card-info (BIN) lookups grouped by error code, upstream error code and error message",
+        &["error_code", "upstream_code", "error_message"],
+    )
+});
+
 /// `count` bucket boundaries starting at `start`, each `factor` times the previous one.
 fn exponential_buckets(start: f64, factor: f64, count: i32) -> Vec<f64> {
     (0..count).map(|i| start * factor.powi(i)).collect()

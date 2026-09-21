@@ -63,7 +63,7 @@ pub enum StaticRoutingAlgorithm {
 /// multi-objective post-step before gateway selection, so no isolated score pools are
 /// needed. All fields are optional — an absent field falls through to the merchant
 /// config / feature flag / default, exactly as if no override were present.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SrConfigOverride {
     /// Share of traffic (0–100) sent to non-top gateways to keep scores fresh (explore-exploit).
     /// Overrides `defaultHedgingPercent` from the merchant's SR config.
@@ -74,7 +74,7 @@ pub struct SrConfigOverride {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub elimination_threshold: Option<f64>,
     /// Whether the multi-objective (cost-aware) post-step runs for this arm. Overrides the
-    /// merchant `multi_objective_routing_enabled` flag / per-request value. Used by the
+    /// merchant `cost_savings_enabled` flag / per-request value. Used by the
     /// "Turn cost on" experiment (control = false, variant = true).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_multi_objective: Option<bool>,
@@ -90,23 +90,84 @@ pub struct SrConfigOverride {
     pub use_autopilot: Option<bool>,
 }
 
+/// The routing API an experiment is applied on. Each endpoint applies only the arm layers it
+/// supports: `/routing/evaluate` the rule layer, `/decide-gateway` the SR layer, and
+/// `/routing/hybrid` both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExperimentEndpoint {
+    HybridRouting,
+    DecideGateway,
+    Evaluate,
+    /// An endpoint name this build does not know. Never matches a live endpoint.
+    #[serde(other)]
+    Unknown,
+}
+
+impl ExperimentEndpoint {
+    pub const ALL: [Self; 3] = [Self::HybridRouting, Self::DecideGateway, Self::Evaluate];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::HybridRouting => "hybrid_routing",
+            Self::DecideGateway => "decide_gateway",
+            Self::Evaluate => "evaluate",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// One side of an A/B experiment, as a bundle of routing layers. An absent layer is not applied
+/// by that arm; an endpoint that supports the layer runs without it (no rule → the request's
+/// fallback connectors, no SR layer → the merchant's live SR config).
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ExperimentArm {
+    /// Saved routing algorithm (single / priority / volume split / rule-based) that produces the
+    /// arm's candidate connectors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_algorithm_id: Option<String>,
+    /// SR routing with per-arm overrides (autopilot, cost savings, hedging, elimination).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sr: Option<SrConfigOverride>,
+}
+
+impl ExperimentArm {
+    pub fn is_empty(&self) -> bool {
+        self.rule_algorithm_id.is_none() && self.sr.is_none()
+    }
+}
+
+/// Algorithm id the single-strategy arm format uses for "SR routing" rather than a saved
+/// algorithm.
+pub const SR_ROUTING_ARM_ID: &str = "sr_routing";
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ABTestData {
-    pub control_algorithm_id: String,
-    pub variant_algorithm_id: String,
+    /// Layered arms. When present they define the experiment and the single-strategy fields
+    /// below are ignored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<ExperimentArm>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant: Option<ExperimentArm>,
+    /// Endpoints the experiment splits traffic on. Absent means every endpoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoints: Option<Vec<ExperimentEndpoint>>,
+    /// Single-strategy arm format: `sr_routing` or a saved algorithm id, read as an arm with only
+    /// that layer (see `ab_test::arms::resolved_arm`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_algorithm_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant_algorithm_id: Option<String>,
     /// Percentage of traffic routed to the variant arm (1–49).
     pub variant_split_pct: u8,
     /// Minimum transactions to collect before reporting a significance verdict.
     pub min_sample_size: u32,
     /// Auto-pause threshold: if variant auth rate drops more than this many pp below control, flag for pause.
     pub guardrail_threshold_pp: f64,
-    /// Routing overrides for the variant arm. Absent means the variant uses the live SR config
-    /// (standard A/B test / algorithm comparison).
+    /// SR overrides for a single-strategy `sr_routing` variant arm.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub variant_sr_config: Option<SrConfigOverride>,
-    /// Routing overrides for the control arm. Absent means the control uses the live SR config
-    /// (the common case). Set by experiments that need to pin the control arm — e.g. "Turn cost
-    /// on" (control = multi-objective off) or "Autopilot value" (control = manual config).
+    /// SR overrides for a single-strategy `sr_routing` control arm.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub control_sr_config: Option<SrConfigOverride>,
 }
