@@ -17,7 +17,7 @@ pub struct AbTestConfig {
 const FEATURE_CONF_CACHE_TTL_MS: u64 = 5_000;
 
 /// Parsed `FeatureConf` for [`FEATURE_CONF_KEY`], or `None` when the row is absent or
-/// unparseable. Both outcomes are cached: a missing row is the common case for a deployment
+/// unparsable. Both outcomes are cached: a missing row is the common case for a deployment
 /// not running experiments, and re-reading it per payment is the cost this avoids.
 static FEATURE_CONF_CACHE: once_cell::sync::Lazy<
     crate::redis::mem_cache::TypedCache<Option<crate::redis::types::FeatureConf>>,
