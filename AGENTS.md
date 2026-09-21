@@ -41,7 +41,7 @@ Do not treat README claims or marketing language as definitive implementation tr
 - `.github/workflows/`: CI expectations and release automation
 - `scripts/ci-checks.sh`: DB feature compile matrix enforced by CI
 - `website/`: dashboard/frontend assets
-- `cypress/`: frontend/end-to-end test area
+- `tests/`: Playwright end-to-end and API test suite (`tests/api`, `tests/e2e`)
 
 ## Which Docs to Open First
 

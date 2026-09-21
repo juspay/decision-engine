@@ -1,15 +1,12 @@
 /**
- * Test-data factory.
+ * Test-data factory — the single source of truth for request payloads across the suite.
  *
- * The pure, runner-agnostic payload/data builders currently live alongside the (now frozen)
- * Cypress suite in `cypress/support/test-data-factory.js`. That file contains ZERO `cy.*` calls —
- * it is plain CommonJS — so we re-export it verbatim to keep a SINGLE source of truth for request
- * payloads across both the Playwright and Cypress suites during the transition.
- *
- * Do not fork this. If a builder needs to change, change it in the shared file.
+ * The builders live in `test-data-factory.js`: plain CommonJS, no runner dependency, so they
+ * stay readable as data. This file is the typed face of that module — the shape is asserted
+ * once here rather than repeated at every call site.
  */
 // @ts-ignore - pure JS CommonJS module without type declarations
-import factory from '../../cypress/support/test-data-factory.js'
+import factory from './test-data-factory.js'
 
 export default factory as {
   CONNECTORS: Record<string, { gateway_name: string; gateway_id: string }>
