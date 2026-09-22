@@ -122,9 +122,25 @@ Redis is required — it's used for caching routing config and service config. F
 jwt_secret = "change_me_in_production_use_32chars!!"
 jwt_expiry_seconds = 86400
 email_verification_enabled = false
+jwt_revocation_cache_ttl_ms = 0
 ```
 
 Use a strong, random `jwt_secret` — 32+ characters recommended. Set `email_verification_enabled = true` if you've wired an email provider.
+
+`jwt_revocation_cache_ttl_ms` trades revocation latency for throughput. Every authenticated
+request reads the JWT denylist from Redis before any other work; setting this above `0` lets a
+token that was found live be trusted for that many milliseconds without re-reading it, removing
+one Redis round-trip from every request.
+
+The cost is that **a logged-out session keeps working until the window expires** — revocation is
+no longer immediate. Only a confirmed "not revoked" answer is cached: a token seen on the denylist
+is refused and never stored, and a failed Redis read is not stored either, so an outage cannot
+extend a revoked session beyond the window. Token expiry (`exp`) is always enforced first and is
+unaffected.
+
+`0` (the default) keeps the pre-existing behaviour of reading Redis on every request. `1000`
+bounds revocation to a second and is the value used for latency benchmarking. Choose it against
+your own tolerance for how long a revoked session may remain usable.
 
 ### Admin Secret
 

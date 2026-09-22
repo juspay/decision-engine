@@ -81,8 +81,10 @@ const _loadProfile = RATE
           duration:        DURATION,
           // Headroom so the generator itself never becomes the bottleneck;
           // k6 warns if it has to grow past maxVUs to keep up.
-          preAllocatedVUs: parseInt(__ENV.PRE_VUS || String(Math.max(50, RATE / 4))),
-          maxVUs:          parseInt(__ENV.MAX_VUS || String(Math.max(200, RATE))),
+          // k6 rejects fractional VU counts before the run starts, and RATE/4 is
+          // fractional for most rates, so round here rather than at the call site.
+          preAllocatedVUs: parseInt(__ENV.PRE_VUS || String(Math.ceil(Math.max(50, RATE / 4)))),
+          maxVUs:          parseInt(__ENV.MAX_VUS || String(Math.ceil(Math.max(200, RATE)))),
         },
       },
     }
@@ -143,6 +145,29 @@ const ADMIN_SECRET       = __ENV.ADMIN_SECRET || "test_admin";
 // Both the rule-only and the hybrid flow evaluate the active priority rule.
 const NEEDS_ROUTING_RULE = ALGORITHM === "RULE_BASED_ROUTING" || ALGORITHM === "HYBRID_ROUTING";
 
+// `/routing/hybrid` runs its dynamic half only when `sr_routing_enabled` covers the
+// merchant; without it the endpoint answers 200 with rule output alone and the
+// "dynamic half ran" check fails on every iteration.
+function _ensureSrRoutingEnabled(baseUrl, token, merchantId, jsonHeaders) {
+  const authHeaders = { ...jsonHeaders, Authorization: `Bearer ${token}` };
+  const res = http.post(
+    `${baseUrl}/merchant-account/${merchantId}/features/sr-routing`,
+    JSON.stringify({ enabled: true }),
+    { headers: authHeaders }
+  );
+  if (res.status === 200) {
+    console.log(`[setup] sr-routing enabled for ${merchantId}`);
+    return;
+  }
+  // Better to stop than to spend the run measuring the rule-only path, which is
+  // cheaper than hybrid and would look like a surprisingly good result.
+  fail(
+    `Could not enable sr-routing for ${merchantId} (${res.status}): ${res.body}. ` +
+    `/routing/hybrid would skip its SR half and the measurement would be of the ` +
+    `static fallback path.`
+  );
+}
+
 // Priority rule used for RULE_BASED_ROUTING and the static half of HYBRID_ROUTING:
 // checkout > stripe > adyen
 const PRIORITY_RULE = {
@@ -169,6 +194,9 @@ export function setup() {
     if (NEEDS_ROUTING_RULE) {
       _ensureRoutingRule(baseUrl, data.token, data.merchantId, jsonHeaders);
     }
+    if (ALGORITHM === "HYBRID_ROUTING") {
+      _ensureSrRoutingEnabled(baseUrl, data.token, data.merchantId, jsonHeaders);
+    }
     return data;
   }
 
@@ -179,6 +207,9 @@ export function setup() {
     const data = { token: __ENV.TOKEN, merchantId };
     if (NEEDS_ROUTING_RULE) {
       _ensureRoutingRule(baseUrl, data.token, data.merchantId, jsonHeaders);
+    }
+    if (ALGORITHM === "HYBRID_ROUTING") {
+      _ensureSrRoutingEnabled(baseUrl, data.token, data.merchantId, jsonHeaders);
     }
     return data;
   }
@@ -225,6 +256,9 @@ export function setup() {
 
   if (NEEDS_ROUTING_RULE) {
     _ensureRoutingRule(baseUrl, token, merchantId, jsonHeaders);
+  }
+  if (ALGORITHM === "HYBRID_ROUTING") {
+    _ensureSrRoutingEnabled(baseUrl, token, merchantId, jsonHeaders);
   }
 
   return { token, merchantId };
