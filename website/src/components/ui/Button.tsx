@@ -29,7 +29,7 @@ export function Button({
 }: ButtonProps) {
   return (
     <button
-      className={`relative inline-flex items-center justify-center gap-2 rounded-full transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-brand-500/50 focus:ring-offset-1 focus:ring-offset-transparent focus:border-transparent ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
+      className={`relative inline-flex items-center justify-center gap-2 rounded-full transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 focus-visible:ring-offset-1 focus-visible:ring-offset-transparent focus-visible:border-transparent ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
       {...props}
     >
       {props.children}

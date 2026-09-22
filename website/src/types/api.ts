@@ -439,15 +439,37 @@ export interface SmartRetryStats {
   by_fallback: SmartRetryFallback[]
 }
 
+export interface AnalyticsGatewayVolume {
+  gateway: string
+  count: number
+}
+
+export interface AnalyticsOverviewTotals {
+  request_count: number
+  error_count: number
+  auth_rate: AnalyticsAuthRate
+  gateway_volumes: AnalyticsGatewayVolume[]
+  requests_by_route: AnalyticsRouteHit[]
+}
+
 export interface AnalyticsOverviewResponse {
   merchant_id: string
+  totals: AnalyticsOverviewTotals
   kpis: AnalyticsKpi[]
   route_hits: AnalyticsRouteHit[]
   top_scores: GatewayScoreSnapshot[]
   top_errors: AnalyticsErrorSummary[]
   top_rules: AnalyticsRuleHit[]
   smart_retry_stats: SmartRetryStats
+  auth_rate: AnalyticsAuthRate
   hybrid_split?: AnalyticsHybridSplit
+}
+
+/** Reported outcomes for the payments the selected view decided. Statuses that are neither a
+ *  success nor a failure state (a payment still pending, say) are in neither count. */
+export interface AnalyticsAuthRate {
+  success_count: number
+  failure_count: number
 }
 
 export interface AnalyticsHybridSplit {

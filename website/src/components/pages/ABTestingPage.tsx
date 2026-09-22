@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import useSWR, { useSWRConfig } from 'swr'
 import { Card, CardBody, CardHeader } from '../ui/Card'
 import { Button } from '../ui/Button'
@@ -37,7 +37,6 @@ import {
   projectArm,
   resolvedArm,
   sameArm,
-  scopedEndpoints,
   splitEndpoints,
 } from '../../features/routing/abTesting/arms'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
@@ -884,6 +883,9 @@ function formatTime(ms: number) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(new Date(ms))
 }
 
+const TXN_HEAD_CELL =
+  'sticky top-0 z-10 border-b border-slate-200 bg-slate-50 px-4 py-2.5 font-medium dark:border-[#222226] dark:bg-[#0c0c10]'
+
 function ExperimentDetailPanel({
   algorithm,
   isActive,
@@ -897,6 +899,7 @@ function ExperimentDetailPanel({
   onClone,
   realPaymentsOn,
 }: DetailPanelProps) {
+  const navigate = useNavigate()
   // Read-only sessions still see everything; the controls that would change it are inert.
   const canEditRouting = useCanEditRouting()
   const abData = (algorithm.algorithm_data || algorithm.algorithm)?.data as ABTestAlgorithmData | undefined
@@ -960,8 +963,8 @@ function ExperimentDetailPanel({
 
   function openAuditForTxn(paymentId: string, variantArm: string) {
     if (!txnHasAudit(variantArm) || !endpoint) return
-    const url = `/audit?range=1d&routing_kind=${AUDIT_ROUTING_KIND[endpoint]}&payment_id=${encodeURIComponent(paymentId)}`
-    window.open(url, '_blank')
+    // Routed in-app rather than opened in a new tab.
+    navigate(`/audit?range=1d&routing_kind=${AUDIT_ROUTING_KIND[endpoint]}&payment_id=${encodeURIComponent(paymentId)}`)
   }
 
   // Page numbers to render in the transaction pager: always the first and last page, plus a
@@ -991,7 +994,12 @@ function ExperimentDetailPanel({
 
   const totalTxns = results ? results.control.transaction_count + results.variant.transaction_count : 0
   const minSample = abData?.min_sample_size ?? 1000
-  const progress = Math.min(100, Math.round((totalTxns / minSample) * 100))
+  const collectedShare = minSample > 0 ? Math.min(1, totalTxns / minSample) : 0
+  const progress = Math.round(collectedShare * 100)
+  // A handful of transactions against a 5,000 target rounds to 0% and paints an empty track, which
+  // reads as "nothing collected". Keep a sliver of bar, and say "<1%" rather than "0%".
+  const progressLabel = progress === 0 && totalTxns > 0 ? '<1%' : `${progress}%`
+  const progressWidth = totalTxns > 0 ? Math.max(collectedShare * 100, 1.5) : 0
   const controlPct = 100 - (abData?.variant_split_pct ?? 10)
   const variantPct = abData?.variant_split_pct ?? 10
 
@@ -1020,13 +1028,32 @@ function ExperimentDetailPanel({
 
   const statCols = abData
     ? [
-        { label: 'Traffic split', value: `${controlPct}% / ${variantPct}%` },
         {
-          label: 'Endpoints',
-          value: hybridOnly ? ENDPOINT_LABELS.hybrid_routing : scopedEndpoints(abData).map(e => ENDPOINT_LABELS[e]).join(', '),
+          label: 'Traffic split',
+          value: `${controlPct}% / ${variantPct}%`,
+          icon: Sliders,
+          caption: 'Control / Variant allocation',
+          visual: (
+            <div className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-[#232833]">
+              <div className="bg-slate-400 dark:bg-slate-500" style={{ width: `${controlPct}%` }} />
+              <div className="bg-brand-500" style={{ width: `${variantPct}%` }} />
+            </div>
+          ),
         },
-        { label: 'Sample target', value: `${minSample.toLocaleString()} txns` },
-        { label: 'Guardrail', value: `${abData.guardrail_threshold_pp}pp` },
+        {
+          label: 'Sample target',
+          value: `${minSample.toLocaleString()} txns`,
+          icon: BarChart3,
+          caption: 'Collected before a significance verdict',
+          visual: null,
+        },
+        {
+          label: 'Guardrail',
+          value: `${abData.guardrail_threshold_pp}pp`,
+          icon: ShieldAlert,
+          caption: 'Auth drop under control that flags the test',
+          visual: null,
+        },
       ]
     : []
 
@@ -1074,19 +1101,30 @@ function ExperimentDetailPanel({
           </div>
         </div>
 
-        {/* Config at a glance — labelled columns split by hairline dividers */}
+        {/* One tile per setting. Tiles rather than hairline-split columns, which left the
+            dividers stranded in empty space with no caption to anchor. */}
         {statCols.length > 0 && (
-          <div className="mt-4 flex flex-wrap gap-y-3">
-            {statCols.map((s, i) => (
-              <div
-                key={s.label}
-                className={`min-w-[8rem] pr-6 ${i > 0 ? 'border-l border-slate-200 pl-6 dark:border-[#222226]' : ''}`}
-              >
-                <p className="text-[12px] text-slate-500 dark:text-[#8d96aa] leading-4">{s.label}</p>
-                <p className="mt-0.5 text-[15px] font-semibold text-slate-800 dark:text-slate-100 [font-variant-numeric:tabular-nums] leading-[22px]">{s.value}</p>
-              </div>
-            ))}
-          </div>
+          <dl className="mt-4 grid gap-3 sm:grid-cols-3">
+            {statCols.map(s => {
+              const Icon = s.icon
+              return (
+                <div
+                  key={s.label}
+                  className="flex flex-col rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 dark:border-[#1e1e24] dark:bg-[#121218]"
+                >
+                  <dt className="flex items-center gap-1.5 text-[12px] text-slate-500 dark:text-[#8d96aa] leading-4">
+                    <Icon size={13} className="shrink-0" />
+                    {s.label}
+                  </dt>
+                  <dd className="mt-1 text-[17px] font-semibold text-slate-900 dark:text-white [font-variant-numeric:tabular-nums] leading-6">{s.value}</dd>
+                  {s.visual}
+                  {/* Pushed to the bottom so every caption sits on the same line, whether or not
+                      its tile carries a bar above it. */}
+                  <p className="mt-auto pt-2 text-[11.5px] text-slate-500 dark:text-[#7c8496] leading-4">{s.caption}</p>
+                </div>
+              )
+            })}
+          </dl>
         )}
 
         {/* Progress toward the sample target */}
@@ -1101,11 +1139,11 @@ function ExperimentDetailPanel({
             <div className="h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-[#232833]">
               <div
                 className={`h-full rounded-full transition-all duration-500 ${significant ? 'bg-emerald-500' : 'bg-brand-500'}`}
-                style={{ width: `${progress}%` }}
+                style={{ width: `${progressWidth}%` }}
               />
             </div>
             <p className="text-[12px] text-slate-500 max-w-[57ch] leading-4">
-              {progress}% of the {minSample.toLocaleString()}-transaction target{remainingEta ? ` · ${remainingEta}` : ''}
+              {progressLabel} of the {minSample.toLocaleString()}-transaction target{remainingEta ? ` · ${remainingEta}` : ''}
             </p>
           </div>
         )}
@@ -1205,21 +1243,19 @@ function ExperimentDetailPanel({
           </div>
           {txnsLoading && <Spinner size={14} />}
         </div>
-        <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-[#222226]">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs text-slate-500 bg-slate-50 dark:bg-[#0c0c10] border-b border-slate-200 dark:border-[#222226]">
-                <th className="px-4 py-2.5 font-medium">Arm</th>
-                <th className="px-4 py-2.5 font-medium">Routing</th>
-                <th className="px-4 py-2.5 font-medium">Payment ID</th>
-                <th className="px-4 py-2.5 font-medium">Gateway</th>
-                <th className="px-4 py-2.5 font-medium">Status</th>
-                <th className="px-4 py-2.5 font-medium">Time</th>
-              </tr>
-            </thead>
-          </table>
-          <div className="max-h-[400px] overflow-y-auto">
-            <table className="w-full text-base">
+        <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-[#222226]">
+          <div className="max-h-[400px] overflow-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-xs text-slate-500">
+                  <th className={TXN_HEAD_CELL}>Arm</th>
+                  <th className={TXN_HEAD_CELL}>Routing</th>
+                  <th className={TXN_HEAD_CELL}>Payment ID</th>
+                  <th className={TXN_HEAD_CELL}>Gateway</th>
+                  <th className={TXN_HEAD_CELL}>Status</th>
+                  <th className={TXN_HEAD_CELL}>Time</th>
+                </tr>
+              </thead>
               <tbody>
                 {!txnData?.transactions.length ? (
                   <tr>

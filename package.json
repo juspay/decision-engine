@@ -1,30 +1,21 @@
 {
-  "name": "decision-engine-cypress-tests",
+  "name": "decision-engine-e2e-tests",
   "version": "1.0.0",
-  "description": "Cypress tests for Decision Engine routing flows",
+  "description": "Playwright end-to-end tests for Decision Engine routing flows",
   "scripts": {
-    "cypress:open": "cypress open",
-    "cypress:run": "cypress run",
-    "cypress:run:headless": "cypress run --headless",
-    "test:api": "cypress run --spec 'cypress/e2e/api/**/*.cy.js'",
-    "test:ui": "cypress run --spec 'cypress/e2e/ui/**/*.cy.js'",
-    "test:analytics": "cypress run --spec 'cypress/e2e/api/analytics-api.cy.js,cypress/e2e/ui/analytics-page.cy.js,cypress/e2e/ui/payment-audit.cy.js,cypress/e2e/ui/dashboard-overview.cy.js'",
-    "test:all": "cypress run --spec 'cypress/e2e/**/*.cy.js'",
-    "test:e2e": "node cypress/scripts/run-e2e.js all",
-    "test:e2e:source": "node cypress/scripts/run-e2e.js source",
-    "test:e2e:docker": "node cypress/scripts/run-e2e.js docker",
-    "test": "npm run test:all",
-    "e2e": "node cypress/scripts/run-e2e.js source",
-    "e2e:docker": "node cypress/scripts/run-e2e.js docker",
     "typecheck": "tsc --noEmit",
-    "e2e:pw": "playwright test",
-    "e2e:pw:api": "playwright test --project=api",
-    "e2e:pw:ui": "playwright test --project=ui"
+    "test": "playwright test",
+    "test:api": "playwright test --project=api",
+    "test:ui": "playwright test --project=ui",
+    "test:e2e": "node scripts/run-e2e.js all",
+    "test:e2e:source": "node scripts/run-e2e.js source",
+    "test:e2e:docker": "node scripts/run-e2e.js docker",
+    "e2e": "node scripts/run-e2e.js source",
+    "e2e:docker": "node scripts/run-e2e.js docker"
   },
   "devDependencies": {
-    "@cypress/grep": "^4.0.1",
     "@playwright/test": "^1.48.0",
-    "cypress": "^13.6.0"
+    "@types/node": "^24.13.6"
   },
   "dependencies": {
     "typescript": "^6.0.3",
