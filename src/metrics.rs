@@ -138,7 +138,7 @@ pub static CARD_INFO_LOOKUP_FAILURE_COUNTER: LazyLock<CounterVec> = LazyLock::ne
     )
 });
 
-/// Count of HTTP responses grouped by matched route template, method and status code; the only metric that sees 4xx/5xx as such, including auth rejections and unmatched paths.
+/// Count of HTTP responses to routes this service defines, grouped by matched route template, method and status code; the only metric that sees 4xx/5xx as such, including auth rejections. Paths no route serves are not counted.
 pub static API_RESPONSE_COUNTER: LazyLock<CounterVec> = LazyLock::new(|| {
     CounterVec::new(
         "api_responses_total",
