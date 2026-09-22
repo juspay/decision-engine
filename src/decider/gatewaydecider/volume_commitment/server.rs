@@ -1,4 +1,4 @@
-//! The scheduler's own axum listener (like the metrics server): `/health`, `/schedule`, and the loop.
+//! The scheduler's own axum listener: `/health`, `/schedule`, and the loop.
 
 use std::sync::Arc;
 
@@ -9,8 +9,8 @@ use tokio::signal::unix::{signal, SignalKind};
 
 use super::scheduler::{ScheduleEntry, Scheduler};
 use super::Deps;
+use crate::error::ConfigurationError;
 use crate::logger;
-use crate::metrics::ConfigurationError;
 
 /// Serve the scheduler's port, and run its loop, until SIGTERM. A no-op unless
 /// `volume_commitment.enabled` — two schedulers would double every run.

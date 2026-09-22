@@ -12,7 +12,6 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-      - "9094:9094"
     depends_on:
       postgresql:
         condition: service_healthy
@@ -36,6 +35,9 @@ services:
           - decision-engine-api
     environment:
       - GROOVY_RUNNER_HOST=host.docker.internal:8085
+      # Metrics are pushed to the otel-collector (monitoring profile); off unless asked for.
+      - DECISION_ENGINE__LOG__TELEMETRY__METRICS_ENABLED=${DE_METRICS_ENABLED:-false}
+      - DECISION_ENGINE__LOG__TELEMETRY__OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
 
   open-router-mysql-ghcr:
     image: ghcr.io/juspay/decision-engine:${DECISION_ENGINE_TAG:-v1.4}
@@ -72,6 +74,9 @@ services:
           - decision-engine-api
     environment:
       - GROOVY_RUNNER_HOST=host.docker.internal:8085
+      # Metrics are pushed to the otel-collector (monitoring profile); off unless asked for.
+      - DECISION_ENGINE__LOG__TELEMETRY__METRICS_ENABLED=${DE_METRICS_ENABLED:-false}
+      - DECISION_ENGINE__LOG__TELEMETRY__OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
 
   # ==========================================
   # Decision Engine Runtime (Local Build)
@@ -90,7 +95,6 @@ services:
     restart: unless-stopped
     ports:
       - "8080:8080"
-      - "9094:9094"
     depends_on:
       postgresql:
         condition: service_healthy
@@ -114,6 +118,9 @@ services:
           - decision-engine-api
     environment:
       - GROOVY_RUNNER_HOST=host.docker.internal:8085
+      # Metrics are pushed to the otel-collector (monitoring profile); off unless asked for.
+      - DECISION_ENGINE__LOG__TELEMETRY__METRICS_ENABLED=${DE_METRICS_ENABLED:-false}
+      - DECISION_ENGINE__LOG__TELEMETRY__OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
 
   open-router-mysql-local:
     build:
@@ -154,6 +161,9 @@ services:
           - decision-engine-api
     environment:
       - GROOVY_RUNNER_HOST=host.docker.internal:8085
+      # Metrics are pushed to the otel-collector (monitoring profile); off unless asked for.
+      - DECISION_ENGINE__LOG__TELEMETRY__METRICS_ENABLED=${DE_METRICS_ENABLED:-false}
+      - DECISION_ENGINE__LOG__TELEMETRY__OTEL_EXPORTER_OTLP_ENDPOINT=http://otel-collector:4317
 
   # ==========================================
   # Dashboard and Docs
@@ -203,12 +213,29 @@ services:
   # ==========================================
   # Supporting Services
   # ==========================================
+  # Receives OTLP metrics from the app and re-exposes them for Prometheus, as in the Hyperswitch clusters.
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.116.1
+    profiles:
+      - monitoring
+    networks:
+      - open-router-network
+    command: ["--config=/etc/otelcol/config.yaml"]
+    volumes:
+      - ./config/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    ports:
+      - "4317:4317"
+      - "9898:9898"
+    restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:latest
     profiles:
       - monitoring
     networks:
       - open-router-network
+    depends_on:
+      - otel-collector
     volumes:
       - ./config/prometheus.yaml:/etc/prometheus/prometheus.yml
     ports:
