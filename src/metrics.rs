@@ -138,6 +138,15 @@ pub static CARD_INFO_LOOKUP_FAILURE_COUNTER: LazyLock<CounterVec> = LazyLock::ne
     )
 });
 
+/// Count of HTTP responses grouped by matched route template, method and status code; the only metric that sees 4xx/5xx as such, including auth rejections and unmatched paths.
+pub static API_RESPONSE_COUNTER: LazyLock<CounterVec> = LazyLock::new(|| {
+    CounterVec::new(
+        "api_responses_total",
+        "Count of HTTP responses grouped by matched route, method and status code",
+        &["route", "method", "status_code"],
+    )
+});
+
 /// `count` bucket boundaries starting at `start`, each `factor` times the previous one.
 fn exponential_buckets(start: f64, factor: f64, count: i32) -> Vec<f64> {
     (0..count).map(|i| start * factor.powi(i)).collect()
