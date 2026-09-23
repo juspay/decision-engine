@@ -433,7 +433,7 @@ pub async fn store_scoring_context_without_decider(
 pub async fn run_decider_flow(
     deciderParams: T::DeciderParams,
     rankingAlgorithm: Option<RankingAlgorithm>,
-    eliminationEnabled: Option<bool>,
+    mut eliminationEnabled: Option<bool>,
     is_legacy_decider_flow: bool,
     cpu_start: Instant,
     ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride>,
@@ -486,77 +486,47 @@ pub async fn run_decider_flow(
         preferredGateway.clone(),
         deciderParams.dpMerchantPrefs.dynamicSwitchingEnabled,
     ) {
-        (Some(pgw), false) => {
-            if functionalGateways.contains(&pgw) {
-                Utils::log_gateway_decider_approach(
-                    &mut decider_flow,
-                    Some(pgw.clone()),
-                    None,
-                    Vec::new(),
-                    T::GatewayDeciderApproach::MerchantPreference,
-                    None,
-                    functionalGateways,
-                    None,
-                )
-                .await;
-                let cpu_time = cpu_start.elapsed().as_millis() as u64;
-                Ok(T::DecidedGateway {
-                    decided_gateway: pgw.clone(),
-                    fallback_gateways: vec![],
-                    gateway_priority_map: Some(json!(HashMap::from([(pgw.to_string(), 1.0)]))),
-                    filter_wise_gateways: None,
-                    priority_logic_tag: None,
-                    routing_approach: T::GatewayDeciderApproach::MerchantPreference,
-                    gateway_before_evaluation: Some(pgw.clone()),
-                    priority_logic_output: None,
-                    reset_approach: T::ResetApproach::NoReset,
-                    routing_dimension: None,
-                    routing_dimension_level: None,
-                    is_scheduled_outage: false,
-                    is_dynamic_mga_enabled: decider_flow.writer.is_dynamic_mga_enabled,
-                    gateway_mga_id_map: None,
-                    debit_routing_output: None,
-                    is_rust_based_decider: true,
-                    latency: Some(cpu_time),
-                    multi_objective_info: None,
-                    volume_steer_info: None,
-                })
-            } else {
-                decider_flow
-                    .writer
-                    .debugFilterList
-                    .push(T::DebugFilterEntry {
-                        filterName: "preferredGateway".to_string(),
-                        gateways: vec![],
-                    });
-                logger::info!(
-                    action = "PreferredGateway",
-                    tag = "PreferredGateway",
-                    "Preferred gateway {:?} functional/valid for merchant {:?} in txn {:?}",
-                    pgw,
-                    &deciderParams.dpMerchantAccount.merchantId,
-                    deciderParams.dpTxnDetail.txnId
-                );
-                Utils::log_gateway_decider_approach(
-                    &mut decider_flow,
-                    None,
-                    None,
-                    Vec::new(),
-                    T::GatewayDeciderApproach::None,
-                    None,
-                    functionalGateways,
-                    None,
-                )
-                .await;
-                Err((
-                    decider_flow.writer.debugFilterList.clone(),
-                    decider_flow.writer.debugScoringList.clone(),
-                    None,
-                    T::GatewayDeciderApproach::None,
-                    None,
-                    decider_flow.writer.is_dynamic_mga_enabled,
-                ))
-            }
+        // A non-functional preference falls through to the `_` arm (the no-preference
+        // flow) instead of hard-failing: on the V2 path dynamicSwitchingEnabled is
+        // synthesized from the eligible-list size, so this arm firing must never make
+        // a routable payment error with GATEWAY_NOT_FOUND.
+        (Some(pgw), false) if functionalGateways.contains(&pgw) => {
+            // A functional preference implies the elimination veto and its feedback
+            // score production, without the caller having to ask for it.
+            eliminationEnabled = Some(true);
+            Utils::log_gateway_decider_approach(
+                &mut decider_flow,
+                Some(pgw.clone()),
+                None,
+                Vec::new(),
+                T::GatewayDeciderApproach::MerchantPreference,
+                None,
+                functionalGateways,
+                None,
+            )
+            .await;
+            let cpu_time = cpu_start.elapsed().as_millis() as u64;
+            Ok(T::DecidedGateway {
+                decided_gateway: pgw.clone(),
+                fallback_gateways: vec![],
+                gateway_priority_map: Some(json!(HashMap::from([(pgw.to_string(), 1.0)]))),
+                filter_wise_gateways: None,
+                priority_logic_tag: None,
+                routing_approach: T::GatewayDeciderApproach::MerchantPreference,
+                gateway_before_evaluation: Some(pgw.clone()),
+                priority_logic_output: None,
+                reset_approach: T::ResetApproach::NoReset,
+                routing_dimension: None,
+                routing_dimension_level: None,
+                is_scheduled_outage: false,
+                is_dynamic_mga_enabled: decider_flow.writer.is_dynamic_mga_enabled,
+                gateway_mga_id_map: None,
+                debit_routing_output: None,
+                is_rust_based_decider: true,
+                latency: Some(cpu_time),
+                multi_objective_info: None,
+                volume_steer_info: None,
+            })
         }
         _ => {
             let gwPLogic = if rankingAlgorithm != Some(RankingAlgorithm::SrBasedRouting) {
@@ -597,6 +567,8 @@ pub async fn run_decider_flow(
                 &deciderParams.dpTxnDetail.txnId,
                 gatewayPriorityList
             );
+
+            let preferred_gateway_candidate = preferredGateway.clone();
 
             let (mut functionalGateways, updatedPriorityLogicOutput) = if gwPLogic.is_enforcement {
                 logger::info!(
@@ -655,14 +627,47 @@ pub async fn run_decider_flow(
             //     updatedPriorityLogicOutput.gws.clone(),
             // );
 
-            let currentGatewayScoreMap = GS::scoring_flow(
+            // A preferred gateway is honored only while it stays functional; it heads the
+            // priority order and switches scoring to the pinned (no-SR-reorder) mode.
+            let functional_preferred_gateway = preferred_gateway_candidate
+                .filter(|preferred| uniqueFunctionalGateways.contains(preferred));
+            // A functional preference implies the elimination veto and its feedback
+            // score production, without the caller having to ask for it.
+            if functional_preferred_gateway.is_some() {
+                eliminationEnabled = Some(true);
+            }
+            let scoring_priority_list = add_preferred_gateways_to_priority_list(
+                updatedPriorityLogicOutput.gws.clone(),
+                functional_preferred_gateway.clone(),
+            );
+
+            let mut currentGatewayScoreMap = GS::scoring_flow(
                 &mut decider_flow,
                 uniqueFunctionalGateways.clone(),
-                updatedPriorityLogicOutput.gws.clone(),
+                scoring_priority_list,
                 rankingAlgorithm,
                 eliminationEnabled,
+                functional_preferred_gateway.clone(),
             )
             .await;
+
+            // The pin heads the priority ladder at exactly 1.0, so any lower score means
+            // outage/elimination divided it. The 0.1-step ladder makes a divided pin
+            // (1.0/5 = 0.2) still outrank healthy connectors from the 10th position on;
+            // floor it below the whole map so a demoted pin never wins on that artifact.
+            if let Some(pin) = &functional_preferred_gateway {
+                if currentGatewayScoreMap
+                    .get(pin)
+                    .is_some_and(|score| *score < 1.0)
+                {
+                    let min_score = currentGatewayScoreMap
+                        .values()
+                        .fold(f64::INFINITY, |acc, score| acc.min(*score));
+                    if let Some(score) = currentGatewayScoreMap.get_mut(pin) {
+                        *score = min_score - 1.0;
+                    }
+                }
+            }
 
             logger::info!(
                 tag = "GW_Scoring",
@@ -740,7 +745,8 @@ pub async fn run_decider_flow(
                     );
 
                     let mut cost_fallbacks_override: Option<Vec<String>> = None;
-                    if multi_obj_on && !hedging_on {
+                    // A pinned payment must not be re-steered by cost or volume goals.
+                    if multi_obj_on && !hedging_on && functional_preferred_gateway.is_none() {
                         // An A/B arm can override the EV margin (the auth↔cost dial); otherwise
                         // load it from the merchant SR config (default 1.0 ≈ auth-dominant).
                         let margin = match decider_flow
@@ -781,6 +787,7 @@ pub async fn run_decider_flow(
                     // Volume-commitment nudge runs last on its own flag; fails open when flag,
                     // deps or plan is absent. Under hedging the flag is not even read.
                     let volume_commitment_on = !hedging_on
+                        && functional_preferred_gateway.is_none()
                         && is_feature_enabled(
                             volume_commitment::FEATURE_FLAG.to_string(),
                             merchant_id_text.clone(),

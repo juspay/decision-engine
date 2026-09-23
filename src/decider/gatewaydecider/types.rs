@@ -661,6 +661,14 @@ pub enum GatewayDeciderApproach {
     /// A volume-contract nudge moved the payment off the SR head — the volume-driven sibling of
     /// [`Self::SrSelectionMultiObjective`].
     SrSelectionVolumeCommitment,
+    /// The caller's preferredGateway was functional and pinned: SR reordering was skipped,
+    /// only outage/elimination could demote it.
+    PreferredGatewayRouting,
+    /// Preferred-connector pin with downtime relabeling — its label token is kept (like the SR family
+    /// keeps V3) so feedback admission of pinned traffic survives elimination events.
+    PreferredGatewayAllDowntimeRouting,
+    PreferredGatewayDowntimeRouting,
+    PreferredGatewayGlobalDowntimeRouting,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -1017,6 +1025,9 @@ pub struct PaymentInfo {
     #[serde(default, deserialize_with = "deserialize_optional_udfs_to_hashmap")]
     udfs: Option<UDFs>,
     preferred_gateway: Option<String>,
+    // Plural array form is the primary contract field ("preferredGateways");
+    // the first entry wins, and the legacy singular stays accepted as fallback.
+    preferred_gateways: Option<Vec<String>>,
     payment_type: TxnObjectType,
     pub metadata: Option<String>,
     internal_metadata: Option<String>,
@@ -1106,7 +1117,12 @@ impl DomainDeciderRequestForApiCallV2 {
                     .udfs
                     .clone()
                     .unwrap_or(UDFs(HashMap::new())),
-                preferredGateway: self.payment_info.preferred_gateway.clone(),
+                preferredGateway: self
+                    .payment_info
+                    .preferred_gateways
+                    .as_ref()
+                    .and_then(|gateways| gateways.first().cloned())
+                    .or_else(|| self.payment_info.preferred_gateway.clone()),
                 productId: None,
                 orderType: ETO::OrderType::from_txn_object_type(
                     self.payment_info.payment_type.clone(),
@@ -1602,6 +1618,16 @@ impl fmt::Display for GatewayDeciderApproach {
             }
             Self::SrSelectionVolumeCommitment => {
                 write!(f, "SR_SELECTION_VOLUME_COMMITMENT")
+            }
+            Self::PreferredGatewayRouting => write!(f, "PREFERRED_GATEWAY_ROUTING"),
+            Self::PreferredGatewayAllDowntimeRouting => {
+                write!(f, "PREFERRED_GATEWAY_ALL_DOWNTIME_ROUTING")
+            }
+            Self::PreferredGatewayDowntimeRouting => {
+                write!(f, "PREFERRED_GATEWAY_DOWNTIME_ROUTING")
+            }
+            Self::PreferredGatewayGlobalDowntimeRouting => {
+                write!(f, "PREFERRED_GATEWAY_GLOBAL_DOWNTIME_ROUTING")
             }
         }
     }

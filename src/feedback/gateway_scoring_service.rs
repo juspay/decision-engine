@@ -1160,9 +1160,15 @@ pub fn isRoutingApproachInSRV2(maybe_text: Option<String>) -> bool {
 // (`SR_SELECTION_MULTI_OBJECTIVE`) carries no "V3" token, so match it explicitly —
 // otherwise producer isolation silently drops every cost-routed outcome and the
 // chosen gateway's score never moves on success or failure.
+// PREFERRED_GATEWAY_ROUTING outcomes must keep feeding SRv3 too: pinned traffic can dominate a
+// merchant's volume, and frozen windows would blind the elimination veto.
 pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
     match maybe_text {
-        Some(text) => text.contains("V3") || text.contains("MULTI_OBJECTIVE"),
+        Some(text) => {
+            text.contains("V3")
+                || text.contains("MULTI_OBJECTIVE")
+                || text.contains("PREFERRED_GATEWAY")
+        }
         None => false,
     }
 }
@@ -1174,9 +1180,15 @@ pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
 // (cost) routing is also off-policy: it deliberately picks a *non-top*, SR-equivalent
 // (cheaper) PSP, which is exploration of that PSP. Treat it as explore too, otherwise
 // cost-routed outcomes are excluded from scoring whenever explore/exploit is enabled.
+// Preferred-connector pins are off-policy in the same sense: the pinned PSP need not be the SR top
+// pick, so its outcomes count as exploration of that PSP.
 pub fn is_routing_approach_in_explore(maybe_text: Option<String>) -> bool {
     match maybe_text {
-        Some(text) => text.contains("HEDGING") || text.contains("MULTI_OBJECTIVE"),
+        Some(text) => {
+            text.contains("HEDGING")
+                || text.contains("MULTI_OBJECTIVE")
+                || text.contains("PREFERRED_GATEWAY")
+        }
         None => false,
     }
 }

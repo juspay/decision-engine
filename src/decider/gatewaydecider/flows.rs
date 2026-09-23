@@ -530,6 +530,8 @@ pub async fn run_decider_flow(
                 updatedPriorityLogicOutput.gws.clone(),
                 None,
                 None,
+                // Preferred-gateway pinning is a V2-contract feature; the legacy path never sends it.
+                None,
             )
             .await;
 
