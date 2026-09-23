@@ -2,18 +2,18 @@ apiVersion: v2
 name: decision-engine
 description: A Helm chart for the Decision Engine with PostgreSQL and Redis support
 type: application
-version: 0.1.0
-appVersion: "1.0.0"
+version: 0.2.0
+appVersion: "v1.4.35"
 dependencies:
   - name: postgresql
-    version: ~18.5.14
+    version: 15.5.38
     repository: https://charts.bitnami.com/bitnami
     condition: postgresql.enabled
   - name: mysql
-    version: ~13.0.4
+    version: 9.16.3
     repository: https://charts.bitnami.com/bitnami
     condition: mysql.enabled
   - name: redis
-    version: ~25.3.9
+    version: 18.6.1
     repository: https://charts.bitnami.com/bitnami
     condition: redis.enabled

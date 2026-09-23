@@ -83,13 +83,6 @@ Create the name for the MySQL Migration Job
 {{- end }}
 
 {{/*
-Create the name for the Routing Config Job
-*/}}
-{{- define "decision-engine.routingConfigName" -}}
-{{- printf "%s-routing-config" (include "decision-engine.fullname" .) }}
-{{- end }}
-
-{{/*
 Create the name for the analytics ClickHouse bootstrap configmap
 */}}
 {{- define "decision-engine.analyticsClickhouseConfigName" -}}
@@ -108,7 +101,11 @@ Define the PostgreSQL hostname
 */}}
 {{- define "decision-engine.postgresqlHost" -}}
 {{- if .Values.postgresql.enabled }}
+{{- if .Values.postgresql.fullnameOverride }}
+{{- .Values.postgresql.fullnameOverride }}
+{{- else }}
 {{- printf "%s-postgresql" .Release.Name }}
+{{- end }}
 {{- else }}
 {{- .Values.postgresql.hostname | default (printf "%s-postgresql" .Release.Name) }}
 {{- end }}
@@ -119,84 +116,14 @@ Define the Redis hostname
 */}}
 {{- define "decision-engine.redisHost" -}}
 {{- if .Values.redis.enabled }}
+{{- if .Values.redis.fullnameOverride }}
+{{- printf "%s-master" .Values.redis.fullnameOverride }}
+{{- else }}
 {{- printf "%s-redis-master" .Release.Name }}
+{{- end }}
 {{- else }}
 {{- .Values.redis.hostname | default (printf "%s-redis" .Release.Name) }}
 {{- end }}
-{{- end }}
-
-{{/*
-Generate decision engine config file
-*/}}
-{{- define "decision-engine.configFile" -}}
-[log.console]
-enabled = true
-level = {{ .Values.decisionEngine.logging.level | quote }}
-log_format = {{ .Values.decisionEngine.logging.format | quote }}
-
-[server]
-host = {{ .Values.decisionEngine.server.host | quote }}
-port = {{ .Values.decisionEngine.server.port }}
-
-[metrics]
-host = {{ .Values.decisionEngine.metrics.host | quote }}
-port = {{ .Values.decisionEngine.metrics.port }}
-
-[limit]
-request_count = {{ .Values.decisionEngine.rateLimit.requestCount }}
-duration = {{ .Values.decisionEngine.rateLimit.duration }}
-
-{{- if .Values.decisionEngine.useMySQL }}
-[database]
-username = {{ .Values.mysql.auth.username | default "root" | quote }}
-password = {{ .Values.mysql.auth.password | default "root" | quote }}
-host = {{ include "decision-engine.mysqlHost" . | quote }}
-port = 3306
-dbname = {{ .Values.mysql.auth.database | default "jdb" | quote }}
-{{- end }}
-
-{{- if .Values.decisionEngine.usePostgreSQL }}
-[pg_database]
-pg_username = {{ .Values.postgresql.auth.username | quote }}
-pg_password = {{ .Values.postgresql.auth.password | quote }}
-pg_host = {{ include "decision-engine.postgresqlHost" . | quote }}
-pg_port = 5432
-pg_dbname = {{ .Values.postgresql.auth.database | quote }}
-{{- end }}
-
-[redis]
-host = {{ include "decision-engine.redisHost" . | quote }}
-port = 6379
-pool_size = 5
-reconnect_max_attempts = 5
-reconnect_delay = 5
-use_legacy_version = false
-stream_read_count = 1
-auto_pipeline = true
-disable_auto_backpressure = false
-max_in_flight_commands = 5000
-default_command_timeout = 30
-unresponsive_timeout = 10
-max_feed_count = 200
-
-[cache]
-tti = {{ .Values.decisionEngine.cache.tti }}
-max_capacity = {{ .Values.decisionEngine.cache.maxCapacity }}
-
-[tenant_secrets]
-public = { schema = "public" }
-
-[secrets_management]
-secrets_manager = {{ .Values.decisionEngine.secrets.secretsManager | quote }}
-
-[secrets_management.aws_kms]
-key_id = {{ .Values.decisionEngine.secrets.awsKms.keyId | quote }}
-region = {{ .Values.decisionEngine.secrets.awsKms.region | quote }}
-
-[api_client]
-client_idle_timeout = {{ .Values.decisionEngine.apiClient.clientIdleTimeout }}
-pool_max_idle_per_host = {{ .Values.decisionEngine.apiClient.poolMaxIdlePerHost }}
-identity = {{ .Values.decisionEngine.apiClient.identity | quote }}
 {{- end }}
 
 {{/*
@@ -204,7 +131,11 @@ Define the MySQL hostname
 */}}
 {{- define "decision-engine.mysqlHost" -}}
 {{- if .Values.mysql.enabled }}
+{{- if .Values.mysql.fullnameOverride }}
+{{- .Values.mysql.fullnameOverride }}
+{{- else }}
 {{- printf "%s-mysql" .Release.Name }}
+{{- end }}
 {{- else }}
 {{- .Values.mysql.hostname | default (printf "%s-mysql" .Release.Name) }}
 {{- end }}

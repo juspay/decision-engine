@@ -1,40 +1,50 @@
-# Default values for decision-engine
+# -- Number of Decision Engine replicas
 replicaCount: 1
 
 image:
-  # Updated to include the registry URL
+  # -- Decision Engine image repository. The `/postgres` variant is built with the postgres feature
   repository: ghcr.io/juspay/decision-engine/postgres
+  # -- Image pull policy
   pullPolicy: Always
-  version: "v1.4"
+  # -- Image tag. Also used as the git tag the migration Job pulls migrations from, so keep it on a
+  # released `vX.Y.Z` tag - the moving `v1.4` image tag has no matching git tag to download
+  version: "v1.4.35"
 
-# Configure these if your images are in a private registry
-imagePullSecrets:
-  # - name: regcred
+# -- Image pull secrets for private registries
+imagePullSecrets: []
+# -- Override the chart name used in resource names
 nameOverride: ""
+# -- Override the fully qualified name of the released resources
 fullnameOverride: ""
 
 serviceAccount:
-  # Specifies whether a service account should be created
+  # -- Create a service account for the Decision Engine pods
   create: true
-  # Annotations to add to the service account
+  # -- Annotations to add to the service account
   annotations: {}
-  # The name of the service account to use.
-  # If not set and create is true, a name is generated using the fullname template
+  # -- Name of the service account to use. Generated from the fullname when empty
   name: ""
 
+# -- Annotations added to the Decision Engine pods
 podAnnotations: {}
 
+# -- Pod-level security context
 podSecurityContext: {}
   # fsGroup: 2000
 
 initContainers:
-  # Set to false to disable all init containers
+  # -- Run the wait-for-dependency init containers
   enabled: true
   busybox:
+    # -- Image used by the wait-for-dependency init containers
     repository: public.ecr.aws/docker/library/busybox
-    tag: "1.28"
+    # -- Busybox image tag. Must exist on the registry above: the ECR public mirror carries 1.32
+    # and newer, so the older tags from Docker Hub fail to pull
+    tag: "1.37"
+    # -- Busybox image pull policy
     pullPolicy: IfNotPresent
 
+# -- Container-level security context
 securityContext: {}
   # capabilities:
   #   drop:
@@ -44,7 +54,9 @@ securityContext: {}
   # runAsUser: 1000
 
 service:
+  # -- Service type
   type: ClusterIP
+  # -- Service ports. `http` carries the API, `metrics` the Prometheus endpoint
   ports:
     - name: http
       port: 80
@@ -56,21 +68,27 @@ service:
       protocol: TCP
 
 ingress:
+  # -- Create an Ingress for the Decision Engine API
   enabled: false
+  # -- Ingress class name
   className: ""
+  # -- Ingress annotations
   annotations: {}
     # kubernetes.io/ingress.class: nginx
     # kubernetes.io/tls-acme: "true"
+  # -- Ingress hosts
   hosts:
     - host: chart-example.local
       paths:
         - path: /
           pathType: ImplementationSpecific
+  # -- Ingress TLS configuration
   tls: []
   #  - secretName: chart-example-tls
   #    hosts:
   #      - chart-example.local
 
+# -- Resource requests and limits for the Decision Engine container
 resources: {}
   # limits:
   #   cpu: 100m
@@ -79,175 +97,267 @@ resources: {}
   #   cpu: 100m
   #   memory: 128Mi
 
+# -- Node selector for the Decision Engine pods
 nodeSelector: {}
 
+# -- Tolerations for the Decision Engine pods
 tolerations: []
 
+# -- Affinity rules for the Decision Engine pods
 affinity: {}
 
-# Decision Engine configurations
+# Decision Engine application configuration. Rendered into the `development.toml` the container reads.
 decisionEngine:
-  # Set to false to use PostgreSQL instead of MySQL
+  # -- Use MySQL as the application database
   useMySQL: false
-  # Set to true to enable PostgreSQL support
+  # -- Use PostgreSQL as the application database
   usePostgreSQL: true
-  # Set to true to enable Redis support
+  # -- Connect to Redis
   useRedis: true
-  # Configuration for logging
   logging:
+    # -- Console log level
     level: "DEBUG"
+    # -- Console log format
     format: "default"
-  # API server configurations
   server:
+    # -- API bind address. Must stay 0.0.0.0 for the kubelet probes to reach the container
     host: "0.0.0.0"
+    # -- API port
     port: 8080
-  # Metrics server configurations
   metrics:
+    # -- Metrics bind address
     host: "0.0.0.0"
+    # -- Metrics port
     port: 9090
-  # Rate limiting
   rateLimit:
+    # -- Requests allowed per window
     requestCount: 1
+    # -- Rate limit window in seconds
     duration: 60
-  # Cache settings
   cache:
+    # -- Cache time-to-idle in seconds
     tti: 7200
+    # -- Maximum number of cached entries
     maxCapacity: 5000
-  # Secrets management
   secrets:
+    # -- Open router private key
     openRouterPrivateKey: ""
+    # -- Secrets manager backend: `no_encryption` or `aws_kms`
     secretsManager: "no_encryption"
     awsKms:
+      # -- AWS KMS key id
       keyId: "us-west-2"
+      # -- AWS KMS region
       region: "abc"
-  # API client settings
   apiClient:
+    # -- Outbound client idle timeout in seconds
     clientIdleTimeout: 90
+    # -- Maximum idle connections kept per host
     poolMaxIdlePerHost: 10
+    # -- Client identity
     identity: ""
   metadata:
     labels:
+      # -- Value of the `app.kubernetes.io/component` label on Decision Engine resources
       component: decision-engine
 
 analytics:
+  # -- Emit analytics events to Kafka and ClickHouse. The server must start after Kafka is reachable
   enabled: false
   kafka:
+    # -- Kafka bootstrap servers
     brokers: "kafka:19092"
+    # -- Topic for API events
     apiTopic: "decision-engine.analytics.api.v1"
+    # -- Topic for domain events
     domainTopic: "decision-engine.analytics.domain.v1"
   clickhouse:
+    # -- ClickHouse host
     host: "clickhouse"
+    # -- ClickHouse HTTP port
     httpPort: 8123
+    # -- ClickHouse native port
     nativePort: 9000
+    # -- ClickHouse database
     database: "decision_engine_analytics"
+    # -- ClickHouse user
     user: "decision_engine"
+    # -- ClickHouse password
     password: "decision_engine"
+    # -- Broker list the ClickHouse Kafka engine tables consume from
     kafkaBrokerList: "kafka:19092"
+    # -- Consumer group for the API events table
     apiConsumerGroup: "decision-engine-analytics-api-v1"
+    # -- Consumer group for the domain events table
     domainConsumerGroup: "decision-engine-analytics-domain-v1"
     bootstrap:
+      # -- Run the Job that creates the analytics database, tables and materialized views
       enabled: false
       image:
+        # -- Image carrying `clickhouse-client`
         repository: "clickhouse/clickhouse-server"
+        # -- Tag of the bootstrap image
         tag: "26.1"
+        # -- Pull policy of the bootstrap image
         pullPolicy: "IfNotPresent"
 
-# MySQL configuration (used when decisionEngine.useMySQL is true)
+# MySQL sub-chart, used when `decisionEngine.useMySQL` is true.
 mysql:
+  # -- Deploy the Bitnami MySQL sub-chart
   enabled: false
+  # -- Existing MySQL host, used when the sub-chart is disabled
+  hostname: ""
+  image:
+    # -- Bitnami's free images now live under `bitnamilegacy`
+    repository: bitnamilegacy/mysql
+    # -- MySQL image tag
+    tag: 8.0.35-debian-11-r3
   auth:
+    # -- MySQL root password
     rootPassword: "root"
+    # -- MySQL database
     database: "jdb"
   primary:
     persistence:
+      # -- Persist MySQL data
       enabled: true
+      # -- MySQL volume size
       size: 8Gi
 
-# PostgreSQL configuration (used when decisionEngine.usePostgreSQL is true)
+# PostgreSQL sub-chart, used when `decisionEngine.usePostgreSQL` is true.
+# Set `enabled: false` and point `hostname` at an existing server when running inside a stack that
+# already has one - two enabled sub-charts in the same release would both claim `<release>-postgresql`.
 postgresql:
+  # -- Deploy the Bitnami PostgreSQL sub-chart
   enabled: true
+  # -- Existing PostgreSQL host, used when the sub-chart is disabled
+  hostname: ""
+  image:
+    # -- Bitnami's free images now live under `bitnamilegacy`
+    repository: bitnamilegacy/postgresql
+    # -- PostgreSQL image tag
+    tag: 16.1.0-debian-11-r18
   auth:
+    # -- PostgreSQL username
     username: "db_user"
+    # -- PostgreSQL password
     password: "db_pass"
+    # -- PostgreSQL database
     database: "decision_engine_db"
   primary:
     persistence:
+      # -- Persist PostgreSQL data
       enabled: true
+      # -- PostgreSQL volume size
       size: 8Gi
 
-# Redis configuration
+# Redis sub-chart. Same collision caveat as postgresql above.
 redis:
+  # -- Deploy the Bitnami Redis sub-chart
   enabled: true
+  # -- Existing Redis host, used when the sub-chart is disabled
+  hostname: ""
+  image:
+    # -- Bitnami's free images now live under `bitnamilegacy`
+    repository: bitnamilegacy/redis
+    # -- Redis image tag
+    tag: 7.2.3-debian-11-r2
   auth:
+    # -- Require a password for Redis
     enabled: false
   master:
     persistence:
+      # -- Persist Redis master data
       enabled: true
+      # -- Redis master volume size
       size: 8Gi
   replica:
+    # -- Number of Redis replicas
     replicaCount: 1
     persistence:
+      # -- Persist Redis replica data
       enabled: true
+      # -- Redis replica volume size
       size: 8Gi
 
-# Groovy Runner configuration
 groovyRunner:
+  # -- Deploy the Groovy rule runner. The Decision Engine waits for it before starting
   enabled: true
   image:
+    # -- Groovy runner image repository
     repository: "ghcr.io/juspay/decision-engine/groovy-runner"
-    version: "v1.4"
+    # -- Groovy runner image tag
+    version: "v1.4.35"
+    # -- Groovy runner image pull policy
     pullPolicy: "Always"
   service:
+    # -- Groovy runner service port
     port: 8085
+  # -- Resource requests and limits for the Groovy runner
   resources: {}
+  # -- Node selector for the Groovy runner. Falls back to the chart-wide `nodeSelector`.
+  # Pin an architecture here if the published image is single-arch on your registry
+  nodeSelector: {}
   healthcheck:
+    # -- Add liveness and readiness probes to the Groovy runner
     enabled: true
+    # -- Health endpoint path
     path: "/health"
+    # -- Delay before the first probe
     initialDelaySeconds: 10
+    # -- Probe interval
     periodSeconds: 5
+    # -- Probe timeout
     timeoutSeconds: 5
+    # -- Failures tolerated before the container is restarted
     failureThreshold: 5
   metadata:
     labels:
+      # -- Value of the `app.kubernetes.io/component` label on Groovy runner resources
       component: groovy-runner
 
-# Database Migration Job
 dbMigration:
+  # -- Run the schema migration Job as a post-install/post-upgrade hook
   enabled: true
-  # PostgreSQL migrations
+  # -- Git reference kind the migrations are fetched from: `tags` or `heads`
+  refs: tags
+  # -- Git reference to fetch migrations from. Defaults to `image.version`
+  version: ""
   postgresql:
+    # -- Run the PostgreSQL migration Job
     enabled: true
     image:
-      repository: "postgres"
-      tag: "latest"
+      # -- Registry of the migration base image
+      registry: docker.io
+      # -- Base image for the migration Job. It needs `bash`, `apt-get` and network access: the Job
+      # installs diesel_cli into it, as the hyperswitch-app chart does
+      repository: debian:trixie-slim
+      # -- Migration image pull policy
       pullPolicy: "IfNotPresent"
     migrations:
-      path: "/app/migrations_pg"
-  # MySQL migrations (not used with PostgreSQL)
+      # -- Migration directory inside the source tree
+      path: "migrations_pg"
+    # -- Installer used to place diesel_cli in the migration Job. Pin a release tag instead of
+    # `latest` if you need the CLI version to be reproducible
+    dieselInstaller: https://github.com/diesel-rs/diesel/releases/latest/download/diesel_cli-installer.sh
   mysql:
+    # -- Run the MySQL migration Job
     enabled: false
     image:
+      # -- Registry of the MySQL migration base image
+      registry: docker.io
+      # -- Base image for the MySQL migration Job
+      repository: debian:stable-slim
+      # -- Migration image pull policy
       pullPolicy: IfNotPresent
+    # -- SQL files applied by the MySQL migration Job, in order
     scriptUrls:
       - https://raw.githubusercontent.com/juspay/decision-engine/431b1b2/migrations/00000000000000_diesel_initial_setup/up.sql
       - https://raw.githubusercontent.com/juspay/decision-engine/431b1b2/migrations/2025-04-23-103603_add_routing_algorithm_mapper_table/up.sql
       - https://raw.githubusercontent.com/juspay/decision-engine/431b1b2/migrations/2025-05-09-112540_add_metadata_to_routing_algorithm/up.sql
 
-# Routing Config Job
-routingConfig:
-  enabled: false
-  image:
-    repository: "python"
-    tag: "3.10-slim"
-    pullPolicy: "IfNotPresent"
-  command: ["bash", "run_setup.sh"]
-  configVolume:
-    enabled: true
-    # Path to mount routing config files
-    mountPath: "/app"
-
-# Additional environment variables to inject into the main container (map format for proper merging)
-# Supports both simple values and valueFrom references for secrets/configmaps
+# -- Extra environment variables for the Decision Engine container. Values may be plain or a
+# `valueFrom` reference, e.g. `DECISION_ENGINE__PG_DATABASE__PG_PASSWORD: {valueFrom: {secretKeyRef: ...}}`
 extraEnvVars: {}
   # Simple value example:
   # MY_VAR: "my-value"
@@ -256,38 +366,35 @@ extraEnvVars: {}
   #   valueFrom:
   #     secretKeyRef:
   #       name: decision-engine-secrets
-  #       key: LOCKER__PG_DATABASE__PG_PASSWORD
-  # ConfigMap reference example:
-  # APP_CONFIG:
-  #   valueFrom:
-  #     configMapKeyRef:
-  #       name: app-config
-  #       key: config.json
+  #       key: DECISION_ENGINE__PG_DATABASE__PG_PASSWORD
 
-# Istio configuration (optional)
 istio:
+  # -- Enable Istio resources
   enabled: false
   virtualService:
+    # -- Create a VirtualService
     enabled: false
+    # -- Hosts for the VirtualService
     hosts: []
+    # -- Gateways for the VirtualService
     gateways: []
-    # HTTP routing rules - route destination will be automatically set to control center service
+    # -- HTTP routing rules. The route destination is set to the Decision Engine service
     http: []
     # Example configuration:
     # http:
-    #   - name: "control-center-routes"
+    #   - name: "decision-engine-routes"
     #     match:
     #       - uri:
     #           prefix: /
-    #     rewrite:
-    #       uri: "/dashboard"
     #     weight: 100
     #     timeout: 30s
     #     retries:
     #       attempts: 3
     #       perTryTimeout: 10s
   destinationRule:
+    # -- Create a DestinationRule
     enabled: false
+    # -- Traffic policy for the DestinationRule
     trafficPolicy: {}
     # Example traffic policy:
     # trafficPolicy:

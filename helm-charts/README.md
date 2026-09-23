@@ -60,12 +60,12 @@ Then, to install the chart with the release name `my-release`:
 helm install my-release .
 ```
 
-To pin a specific on-prem image version (for example `v1.4`):
+To pin a specific on-prem image version (for example `v1.4.35`):
 
 ```bash
 helm install my-release . \
   --set image.repository=ghcr.io/juspay/decision-engine/postgres \
-  --set image.version=v1.4 \
+  --set image.version=v1.4.35 \
   --set image.pullPolicy=Always
 ```
 
@@ -88,6 +88,27 @@ To uninstall/delete the `my-release` deployment:
 helm delete my-release
 ```
 
+## Configuration model
+
+The ConfigMap mounted at `/local/config/development.toml` is the repository's own
+`config/development.toml`, symlinked into the chart, so it always matches the source tree it ships
+with. It keeps its `localhost` defaults; everything that differs per deployment - database and Redis
+hosts, credentials, bind addresses, log level, rate limits, cache, analytics - is overridden with
+`DECISION_ENGINE__<section>__<key>` environment variables on the container (the application reads
+them with prefix `DECISION_ENGINE` and separator `__`, see `src/config.rs`).
+
+Two consequences worth knowing:
+
+- Reading the ConfigMap alone will show `pg_host = "localhost"`. Check the container's environment
+  to see what the pod actually connects to:
+  `kubectl get deploy <release>-decision-engine -o jsonpath='{.spec.template.spec.containers[0].env}'`
+- Adding a new knob means adding the corresponding env var in `templates/deployment.yaml`; the
+  config file is not templated.
+
+After installing, `helm test <release>` runs a pod that calls `/health` through the service. For a
+deeper check, `GET /health/diagnostics` with an `x-tenant-id: public` header reports the real
+database connection, read, write and delete status.
+
 ## Parameters
 
 ### Common parameters
@@ -96,7 +117,7 @@ helm delete my-release
 |---------------------|---------------------------------------------------------------------------------------|-----------------|
 | `replicaCount`      | Number of Decision Engine replicas                                                    | `1`             |
 | `image.repository`  | Decision Engine image repository                                                      | `ghcr.io/juspay/decision-engine/postgres` |
-| `image.version`         | Decision Engine image tag                                                             | `v1.4`          |
+| `image.version`         | Decision Engine image tag. Also the git tag the migration Job pulls migrations from, so keep it on a released `vX.Y.Z` | `v1.4.35`       |
 | `image.pullPolicy`  | Decision Engine image pull policy                                                     | `Always`        |
 | `imagePullSecrets`  | Image pull secrets                                                                    | `[]`            |
 | `nameOverride`      | Override the name of the chart                                                        | `""`            |
@@ -119,18 +140,20 @@ helm delete my-release
 | `decisionEngine.cache.maxCapacity`         | Cache maximum capacity                                     | `5000`          |
 | `decisionEngine.secrets.openRouterPrivateKey` | Open Router private key                                  | `""`            |
 | `decisionEngine.secrets.secretsManager`    | Secrets manager                                            | `"no_encryption"` |
-| `decisionEngine.secrets.awsKms.keyId`      | AWS KMS key ID                                             | `"us-west-2"`   |
-| `decisionEngine.secrets.awsKms.region`     | AWS KMS region                                             | `"abc"`         |
+| `decisionEngine.secrets.awsKms.keyId`      | AWS KMS key ID. Only sent when `secretsManager` is not `no_encryption` | `""`            |
+| `decisionEngine.secrets.awsKms.region`     | AWS KMS region. Only sent when `secretsManager` is not `no_encryption` | `""`            |
 | `decisionEngine.apiClient.clientIdleTimeout` | API client idle timeout                                  | `90`            |
 | `decisionEngine.apiClient.poolMaxIdlePerHost` | API client pool max idle per host                       | `10`            |
 | `decisionEngine.apiClient.identity`        | API client identity                                        | `""`            |
-| `decisionEngine.routingConfig.enabled`     | Enable routing config                                      | `true`          |
 
 ### PostgreSQL Configuration
 
 | Name                              | Description                                                | Value           |
 |-----------------------------------|------------------------------------------------------------|-----------------|
-| `postgresql.enabled`              | Deploy PostgreSQL                                          | `true`          |
+| `postgresql.enabled`              | Deploy the Bitnami PostgreSQL sub-chart                    | `true`          |
+| `postgresql.hostname`             | Existing PostgreSQL host, used when the sub-chart is disabled | `""`         |
+| `postgresql.image.repository`     | Bitnami's free images now live under `bitnamilegacy`       | `bitnamilegacy/postgresql` |
+| `postgresql.image.tag`            | PostgreSQL image tag                                       | `16.1.0-debian-11-r18` |
 | `postgresql.auth.username`        | PostgreSQL username                                        | `"db_user"`     |
 | `postgresql.auth.password`        | PostgreSQL password                                        | `"db_pass"`     |
 | `postgresql.auth.database`        | PostgreSQL database name                                   | `"decision_engine_db"` |
@@ -141,7 +164,10 @@ helm delete my-release
 
 | Name                           | Description                                                | Value           |
 |--------------------------------|------------------------------------------------------------|-----------------|
-| `redis.enabled`                | Deploy Redis                                               | `true`          |
+| `redis.enabled`                | Deploy the Bitnami Redis sub-chart                         | `true`          |
+| `redis.hostname`               | Existing Redis host, used when the sub-chart is disabled   | `""`            |
+| `redis.image.repository`       | Bitnami's free images now live under `bitnamilegacy`       | `bitnamilegacy/redis` |
+| `redis.image.tag`              | Redis image tag                                            | `7.2.3-debian-11-r2` |
 | `redis.auth.enabled`           | Enable Redis authentication                                | `false`         |
 | `redis.master.persistence.enabled` | Enable Redis persistence                               | `true`          |
 | `redis.master.persistence.size` | Redis PVC size                                            | `8Gi`           |
@@ -173,7 +199,7 @@ The chart can wire Decision Engine to external Kafka and ClickHouse analytics in
 |-----------------------------------------|------------------------------------------------------------|-----------------|
 | `groovyRunner.enabled`                  | Deploy Groovy Runner                                       | `true`          |
 | `groovyRunner.image.repository`         | Groovy Runner image repository                             | `"ghcr.io/juspay/decision-engine/groovy-runner"` |
-| `groovyRunner.image.version`                | Groovy Runner image tag                                    | `"v1.4"`      |
+| `groovyRunner.image.version`                | Groovy Runner image tag                                    | `"v1.4.35"`   |
 | `groovyRunner.image.pullPolicy`         | Groovy Runner image pull policy                            | `"Always"`      |
 | `groovyRunner.service.port`             | Groovy Runner service port                                 | `8085`          |
 | `groovyRunner.resources`                | Groovy Runner resources                                    | `{}`            |
@@ -186,28 +212,26 @@ The chart can wire Decision Engine to external Kafka and ClickHouse analytics in
 
 ### Database Migration Configuration
 
+The migration Job is a post-install/post-upgrade hook. It downloads the release tarball for
+`dbMigration.version` (defaulting to `image.version`), installs `diesel_cli` from the upstream
+installer and runs the Diesel migrations. Budget several minutes for it, and note that it runs
+again on every `helm upgrade` unless you pass `--no-hooks` or set `dbMigration.enabled=false`.
+
 | Name                                      | Description                                                | Value           |
 |-------------------------------------------|------------------------------------------------------------|-----------------|
-| `dbMigration.enabled`                     | Enable database migration                                  | `true`          |
-| `dbMigration.postgresql.enabled`          | Enable PostgreSQL migration                                | `true`          |
-| `dbMigration.postgresql.image.repository` | PostgreSQL migration image repository                      | `"postgres"`    |
-| `dbMigration.postgresql.image.tag`        | PostgreSQL migration image tag                             | `"latest"`      |
-| `dbMigration.postgresql.image.pullPolicy` | PostgreSQL migration image pull policy                     | `"IfNotPresent"` |
-| `dbMigration.postgresql.migrations.path`  | PostgreSQL migrations path                                 | `"/app/migrations_pg"` |
-| `dbMigration.postgresql.initSqlScript`    | PostgreSQL initial SQL script                              | `"-- This will be the initial migration script"` |
-| `dbMigration.mysql.enabled`               | Enable MySQL migration                                     | `false`         |
-
-### Routing Config Configuration
-
-| Name                                     | Description                                                | Value           |
-|------------------------------------------|------------------------------------------------------------|-----------------|
-| `routingConfig.enabled`                  | Enable routing config job                                  | `true`          |
-| `routingConfig.image.repository`         | Routing config image repository                            | `"python"`      |
-| `routingConfig.image.tag`                | Routing config image tag                                   | `"3.10-slim"`   |
-| `routingConfig.image.pullPolicy`         | Routing config image pull policy                           | `"IfNotPresent"` |
-| `routingConfig.command`                  | Routing config command                                     | `["bash", "run_setup.sh"]` |
-| `routingConfig.configVolume.enabled`     | Enable routing config volume                               | `true`          |
-| `routingConfig.configVolume.mountPath`   | Routing config volume mount path                           | `"/app"`        |
+| `dbMigration.enabled`                     | Run the migration Job                                      | `true`          |
+| `dbMigration.refs`                        | Git reference kind the migrations come from: `tags` or `heads` | `tags`      |
+| `dbMigration.version`                     | Git reference to fetch. Defaults to `image.version`        | `""`            |
+| `dbMigration.postgresql.enabled`          | Run the PostgreSQL migration Job                           | `true`          |
+| `dbMigration.postgresql.image.registry`   | Registry of the migration base image                       | `docker.io`     |
+| `dbMigration.postgresql.image.repository` | Base image for the Job. Needs `bash`, `apt-get` and network access | `debian:trixie-slim` |
+| `dbMigration.postgresql.image.pullPolicy` | Migration image pull policy                                | `"IfNotPresent"` |
+| `dbMigration.postgresql.migrations.path`  | Migration directory inside the source tree                 | `"migrations_pg"` |
+| `dbMigration.postgresql.dieselInstaller`  | Installer used to place `diesel_cli` in the Job            | diesel-rs release installer |
+| `dbMigration.mysql.enabled`               | Run the MySQL migration Job                                | `false`         |
+| `dbMigration.mysql.image.registry`        | Registry of the MySQL migration base image                 | `docker.io`     |
+| `dbMigration.mysql.image.repository`      | Base image for the MySQL migration Job                     | `debian:stable-slim` |
+| `dbMigration.mysql.scriptUrls`            | SQL files applied by the MySQL migration Job, in order     | three upstream URLs |
 
 ## Examples
 

@@ -1,14 +1,4 @@
 {{- if and .Values.dbMigration.enabled .Values.dbMigration.postgresql.enabled .Values.decisionEngine.usePostgreSQL -}}
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: {{ include "decision-engine.postgresqlMigrationName" . }}-script
-  labels:
-    {{- include "decision-engine.labels" . | nindent 4 }}
-    app.kubernetes.io/component: pg-migration
-data:
-  up.sql: ""
----
 apiVersion: batch/v1
 kind: Job
 metadata:
@@ -27,6 +17,7 @@ spec:
       labels:
         {{- include "decision-engine.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: pg-migration
+        sidecar.istio.io/inject: "false"
     spec:
       restartPolicy: OnFailure
       {{- with .Values.imagePullSecrets }}
@@ -45,52 +36,57 @@ spec:
       {{- end }}
       containers:
         - name: migration
-          image: rust:latest
+          image: "{{ .Values.dbMigration.postgresql.image.registry }}/{{ .Values.dbMigration.postgresql.image.repository }}"
           imagePullPolicy: {{ .Values.dbMigration.postgresql.image.pullPolicy }}
-          env:
-            - name: PGPASSWORD
-              value: {{ .Values.postgresql.auth.password | quote }}
-            - name: DATABASE_URL
-              value: postgresql://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ include "decision-engine.postgresqlHost" . }}:5432/{{ .Values.postgresql.auth.database }}
-          command:
-            - /bin/sh
-            - -c
+          command: ['/bin/bash', '-c']
+          #language=bash
+          args:
             - |-
-             version={{ .Values.image.version }}
-             database_url = "postgresql://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ include "decision-engine.postgresqlHost" . }}:5432/{{ .Values.postgresql.auth.database}}"
-             echo "INFO: Starting migration process for version: $version"
-             echo "INFO: Using database URL: $database_url"
-
-             DOWNLOAD_URL="https://github.com/juspay/decision-engine/archive/refs/tags/$version.tar.gz"
-
-             echo "INFO: Downloading source code from $DOWNLOAD_URL"
-             # -L: follow redirects
-             # -f: fail script if server returns an error (e.g., 404). Requires "set -e".
-             # -sS: silent mode, but still show errors.
-             curl -LfsS -o decision-engine.tar.gz "$DOWNLOAD_URL"
-
-
-             tar -xzvf decision-engine.tar.gz --transform 's|[^/]*/|decision-engine/|'
-
-             echo "INFO: Changing directory to ./decision-engine"
-             cd decision-engine
-
-             echo "INFO: Contents of ./decision-engine (current directory):"
-             ls -la
-
-             echo "INFO: Installing tools (diesel_cli, just)..."
-             cargo install diesel_cli --no-default-features --features postgres
-             cargo install just
-
-             echo "INFO: Running database migrations using 'just migrate-pg'..."
-             just migrate-pg
-
-             echo "INFO: Migration job completed successfully."
-          volumeMounts:
-            - name: migration-script
-              mountPath: /app/config
-      volumes:
-        - name: migration-script
-          configMap:
-            name: {{ include "decision-engine.postgresqlMigrationName" . }}-script
+              set -eo pipefail
+              apt-get update -qq
+              apt-get install -y -qq curl tar xz-utils libpq5 ca-certificates
+              # diesel_cli comes from the upstream installer rather than `cargo install`, which
+              # would compile it from source on every run (minutes) and needs a Rust toolchain.
+              curl --proto '=https' --tlsv1.2 -LsSf "$DIESEL_INSTALLER" | sh
+              export PATH="$HOME/.cargo/bin:$PATH"
+              diesel --version
+              curl -fsSL --retry 3 --retry-delay 5 -o decision-engine.tar.gz \
+                https://github.com/juspay/decision-engine/archive/refs/$REFERENCE/$VERSION.tar.gz
+              tar -xzf decision-engine.tar.gz --transform 's|[^/]*/|decision-engine/|'
+              cd decision-engine
+              diesel migration \
+                --database-url "postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:5432/$DBNAME" \
+                run \
+                --migration-dir "$MIGRATION_DIR" \
+                --config-file diesel_pg.toml
+              echo "Completed decision engine database migration"
+          env:
+            - name: DIESEL_INSTALLER
+              value: {{ .Values.dbMigration.postgresql.dieselInstaller | quote }}
+            - name: REFERENCE
+              value: {{ .Values.dbMigration.refs }}
+            - name: VERSION
+              value: {{ .Values.dbMigration.version | default .Values.image.version | quote }}
+            - name: MIGRATION_DIR
+              value: {{ .Values.dbMigration.postgresql.migrations.path | quote }}
+            - name: POSTGRES_HOST
+              value: {{ include "decision-engine.postgresqlHost" . | quote }}
+            - name: DBNAME
+              value: {{ .Values.postgresql.auth.database | quote }}
+            - name: POSTGRES_USER
+              value: {{ .Values.postgresql.auth.username | quote }}
+            - name: POSTGRES_PASSWORD
+              value: {{ .Values.postgresql.auth.password | quote }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
 {{- end }}
