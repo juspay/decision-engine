@@ -33,8 +33,7 @@ const VUS       = parseInt(__ENV.VUS || "20");
 const DURATION  = __ENV.DURATION  || "30s";
 const RAMP_DURATION = __ENV.RAMP_DURATION || "10s";
 const ALGORITHM = __ENV.ALGORITHM || "SR_BASED_ROUTING";
-// Think time between iterations. 0 lets each VU run flat out, which is what a
-// saturation run needs; the default paces a VU at roughly 10 req/s.
+// Think time between iterations. 0 lets each VU run flat out (saturation run).
 const SLEEP     = parseFloat(__ENV.SLEEP ?? "0.1");
 
 const VALID_ALGORITHMS = ["SR_BASED_ROUTING", "RULE_BASED_ROUTING", "HYBRID_ROUTING"];
@@ -46,8 +45,7 @@ function fail(msg) { throw new Error(msg); }
 
 const ENVS = {
   local: {
-    // BASE_URL lets the test run from inside the Docker network (e.g.
-    // http://de-bench:8080), so the request never crosses the host boundary.
+    // BASE_URL lets the test run inside the Docker network (e.g. http://de-bench:8080).
     baseUrl: __ENV.BASE_URL || "http://127.0.0.1:8080",
     merchantId: __ENV.MERCHANT_ID || null,
   },
@@ -66,9 +64,8 @@ if (ENV === "sandbox") {
 
 // ── k6 options ────────────────────────────────────────────────────────────────
 
-// RATE (req/s) switches to an open model: arrivals are paced by the clock rather
-// than by how fast the server replies, which is what "p99 at N req/s" means.
-// Without it, VU stages form a closed loop that always settles at saturation.
+// RATE (req/s) switches to an open model: the clock paces arrivals, not the server's
+// reply speed — what "p99 at N req/s" means. VU stages instead settle at saturation.
 const RATE = __ENV.RATE ? parseInt(__ENV.RATE) : null;
 
 const _loadProfile = RATE
@@ -79,10 +76,8 @@ const _loadProfile = RATE
           rate:            RATE,
           timeUnit:        "1s",
           duration:        DURATION,
-          // Headroom so the generator itself never becomes the bottleneck;
-          // k6 warns if it has to grow past maxVUs to keep up.
-          // k6 rejects fractional VU counts before the run starts, and RATE/4 is
-          // fractional for most rates, so round here rather than at the call site.
+          // Headroom so the generator never becomes the bottleneck (k6 warns if it
+          // has to grow past maxVUs). Rounded because k6 rejects fractional VU counts.
           preAllocatedVUs: parseInt(__ENV.PRE_VUS || String(Math.ceil(Math.max(50, RATE / 4)))),
           maxVUs:          parseInt(__ENV.MAX_VUS || String(Math.ceil(Math.max(200, RATE)))),
         },
@@ -145,9 +140,8 @@ const ADMIN_SECRET       = __ENV.ADMIN_SECRET || "test_admin";
 // Both the rule-only and the hybrid flow evaluate the active priority rule.
 const NEEDS_ROUTING_RULE = ALGORITHM === "RULE_BASED_ROUTING" || ALGORITHM === "HYBRID_ROUTING";
 
-// `/routing/hybrid` runs its dynamic half only when `sr_routing_enabled` covers the
-// merchant; without it the endpoint answers 200 with rule output alone and the
-// "dynamic half ran" check fails on every iteration.
+// `/routing/hybrid` runs its dynamic half only when `sr_routing_enabled` covers the merchant;
+// without it the endpoint answers 200 with rule output alone and "dynamic half ran" fails.
 function _ensureSrRoutingEnabled(baseUrl, token, merchantId, jsonHeaders) {
   const authHeaders = { ...jsonHeaders, Authorization: `Bearer ${token}` };
   const res = http.post(
@@ -159,8 +153,8 @@ function _ensureSrRoutingEnabled(baseUrl, token, merchantId, jsonHeaders) {
     console.log(`[setup] sr-routing enabled for ${merchantId}`);
     return;
   }
-  // Better to stop than to spend the run measuring the rule-only path, which is
-  // cheaper than hybrid and would look like a surprisingly good result.
+  // Better to stop than to measure the rule-only path, which is cheaper than hybrid
+  // and would read as a surprisingly good result.
   fail(
     `Could not enable sr-routing for ${merchantId} (${res.status}): ${res.body}. ` +
     `/routing/hybrid would skip its SR half and the measurement would be of the ` +
@@ -462,8 +456,8 @@ function _runHybrid(merchantId, headers, idx) {
   const srVariant   = srPayloads[idx];
   const paymentId   = `lt_hyb_${Date.now()}_${__VU}_${__ITER}`;
 
-  // Both halves in one call: the rule narrows the candidate set, SR ranks what survives.
-  // The dynamic half carries no eligibleGatewayList — the endpoint fills it from the rule's output.
+  // Both halves in one call: the rule narrows the candidates, SR ranks what survives. The
+  // dynamic half carries no eligibleGatewayList — the endpoint fills it from the rule's output.
   const body = JSON.stringify({
     static_routing_request: {
       payment_id: paymentId,
@@ -504,8 +498,8 @@ function _runHybrid(merchantId, headers, idx) {
       try { const b = JSON.parse(r.body); return Array.isArray(b.evaluated_connectors) && b.evaluated_connectors.length > 0; }
       catch { return false; }
     },
-    // A hybrid call that silently degrades to rule-only is a different (cheaper) code path,
-    // so it must not pass as a hybrid measurement.
+    // A call that silently degrades to rule-only is a cheaper code path, so it must not
+    // pass as a hybrid measurement.
     "dynamic half ran": (r) => {
       try { const b = JSON.parse(r.body); return b.dynamic_routing?.status === "success"; }
       catch { return false; }
@@ -539,7 +533,7 @@ function _runHybrid(merchantId, headers, idx) {
         }
       }
       // Pod time for the dynamic half only — the handler starts that timer after the static
-      // half has already run, so it undercounts the call. Round-trip is the whole-call number.
+      // half ran, so it undercounts. Round-trip is the whole-call number.
       const podMs = decision?.latency;
       if (typeof podMs === "number" && podMs >= 0) {
         serverLatency.add(podMs);

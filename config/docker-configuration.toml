@@ -77,6 +77,9 @@ identity = ""
 jwt_secret = "change_me_in_production_use_32chars!!"
 jwt_expiry_seconds = 86400
 email_verification_enabled = false
+# Trust a token found not revoked for this long instead of re-reading the Redis denylist.
+# Above 0, a logged-out session keeps working until the window expires.
+jwt_revocation_cache_ttl_ms = 0
 
 [admin_secret]
 secret = "test_admin"

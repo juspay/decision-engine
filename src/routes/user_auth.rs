@@ -1582,10 +1582,9 @@ pub async fn verify_jwt_not_revoked(
 ) -> Result<auth::JwtClaims, ContainerError<UserAuthError>> {
     let claims = auth::verify_jwt(token, secret).change_context(UserAuthError::InvalidToken)?;
 
-    // A token this process has confirmed live stays trusted for the configured window, which
-    // keeps the denylist read off the hot path. Only a confirmed "not revoked" answer is
-    // cached — neither a refusal nor a failed read is — so the cache can let a session live
-    // slightly too long but can never resurrect one that was refused.
+    // A token confirmed live stays trusted for the configured window, keeping the denylist read
+    // off the hot path. Only that answer is cached, so the cache can let a session live slightly
+    // too long but can never resurrect one that was refused.
     let cache_ttl_ms = APP_STATE
         .get()
         .map(|state| state.global_config.user_auth.jwt_revocation_cache_ttl_ms)
@@ -1598,32 +1597,28 @@ pub async fn verify_jwt_not_revoked(
     let app_state = get_tenant_app_state().await;
     let deny_key = format!("{}{}", JWT_DENYLIST_PREFIX, claims.jti);
     match app_state.redis_conn.get_key_string(&deny_key).await {
-        // Present on the denylist: refused, and never cached.
+        // On the denylist: refused, and never cached.
         Ok(value) if !value.is_empty() => {
             return Err(ContainerError::from(UserAuthError::InvalidToken))
         }
-        // Read succeeded and the token is absent from the denylist. Only this answer is
-        // worth remembering, because only this one was actually confirmed.
+        // Confirmed absent from the denylist — the only answer worth remembering.
         Ok(_) => {
             if cache_ttl_ms > 0 {
                 jwt_live_cache(cache_ttl_ms).store(claims.jti.clone(), true);
             }
         }
-        // The denylist could not be read. The request is admitted, as it was before this
-        // cache existed, but the outcome is not stored: caching an unverified token would
-        // turn a momentary Redis failure into a full TTL of accepting a revoked session.
-        // The next request reads the denylist again.
+        // Denylist unreadable: admit the request, but store nothing. Caching an unverified
+        // token would turn a momentary Redis failure into a full TTL of accepting revoked
+        // sessions; the next request reads the denylist again.
         Err(_) => {}
     }
 
     Ok(claims)
 }
 
-/// Tokens seen as not revoked, keyed by `jti`.
-///
-/// Built on the first call, so the TTL is whatever config held then — it is read once per process
-/// and never changes at runtime, exactly like the other hot-path caches. Sized for the number of
-/// sessions a single process serves concurrently; entries expire on their own.
+/// Tokens seen as not revoked, keyed by `jti`. Built on the first call, so the TTL is whatever
+/// config held then — config is read once per process and never changes at runtime. Capacity is
+/// sized for the concurrent sessions one process serves; entries expire on their own.
 fn jwt_live_cache(ttl_ms: u64) -> &'static crate::redis::mem_cache::TypedCache<bool> {
     static CACHE: std::sync::OnceLock<crate::redis::mem_cache::TypedCache<bool>> =
         std::sync::OnceLock::new();

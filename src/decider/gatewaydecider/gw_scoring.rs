@@ -591,16 +591,10 @@ pub async fn get_cached_scores_based_on_srv3(
     // snap the gateway to a fake 100%). The score key is left intact.
     Utils::set_srv3_bucket_size(decider_flow, merchant_bucket_size);
 
-    // Fetched concurrently rather than one gateway at a time. Redis still receives the same
-    // commands — one `LRANGE` per missing gateway, plus a `GET` where the queue is empty — so
-    // this overlaps the waiting rather than reducing the command count. What it removes is the
-    // serialisation: the client writes commands issued together in one batch, so N misses cost
-    // about one round-trip of latency instead of N. Scores are independent and the map they
-    // land in is unordered, so the result is identical either way.
-    //
-    // Measured with the score cache disabled and 8 gateways, where every request runs this
-    // loop: mean latency fell in 4 of 4 paired rounds (3.01ms -> 2.70ms). With the cache warm
-    // it makes no measurable difference, because the loop rarely runs at all.
+    // Fetched concurrently: the command count is unchanged, but the client batches commands
+    // issued together, so N gateways cost about one round-trip of latency instead of N. Scores
+    // are independent and the map is unordered, so the result is identical to a serial loop.
+    // Measured with the score cache disabled and 8 gateways: 3.01ms -> 2.70ms mean.
     let score_futures = functional_gateways.iter().filter_map(|gw| {
         sr_gateway_redis_key_map.get(gw).map(|key| {
             let gw = gw.clone();

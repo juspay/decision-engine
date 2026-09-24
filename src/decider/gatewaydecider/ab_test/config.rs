@@ -9,16 +9,12 @@ pub struct AbTestConfig {
     pub data: ABTestData,
 }
 
-/// How long the parsed `FeatureConf` blob is reused before Postgres is read again.
-///
-/// The decider asks this on every payment, so without a cache each one costs a database
-/// round-trip — more expensive than anything else on the path. The window is short so a
-/// change made in the UI still shows up promptly.
+/// How long the parsed `FeatureConf` blob is reused before Postgres is read again. The decider
+/// asks on every payment; the window is short so a change made in the UI still lands promptly.
 const FEATURE_CONF_CACHE_TTL_MS: u64 = 5_000;
 
-/// Parsed `FeatureConf` for [`FEATURE_CONF_KEY`], or `None` when the row is absent or
-/// unparsable. Both outcomes are cached: a missing row is the common case for a deployment
-/// not running experiments, and re-reading it per payment is the cost this avoids.
+/// Parsed `FeatureConf` for [`FEATURE_CONF_KEY`], or `None` when the row is absent or unparsable.
+/// `None` is cached too — a missing row is the common case, and it costs a query to discover.
 static FEATURE_CONF_CACHE: once_cell::sync::Lazy<
     crate::redis::mem_cache::TypedCache<Option<crate::redis::types::FeatureConf>>,
 > = once_cell::sync::Lazy::new(|| {
