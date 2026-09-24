@@ -75,8 +75,16 @@ KAFKA_HOST="${KAFKA_HOST:-localhost}"
 KAFKA_PORT="${KAFKA_PORT:-9092}"
 MAILPIT_HOST="${MAILPIT_HOST:-localhost}"
 MAILPIT_UI_PORT="${MAILPIT_UI_PORT:-8025}"
+# Metrics: the API pushes OTLP to the collector, which re-exposes them for Prometheus to scrape.
+OTEL_COLLECTOR_HOST="${OTEL_COLLECTOR_HOST:-localhost}"
+OTEL_COLLECTOR_GRPC_PORT="${OTEL_COLLECTOR_GRPC_PORT:-4317}"
+OTEL_COLLECTOR_PROM_PORT="${OTEL_COLLECTOR_PROM_PORT:-9898}"
+OTEL_COLLECTOR_ENDPOINT="http://${OTEL_COLLECTOR_HOST}:${OTEL_COLLECTOR_GRPC_PORT}"
+OTEL_COLLECTOR_METRICS_URL="http://${OTEL_COLLECTOR_HOST}:${OTEL_COLLECTOR_PROM_PORT}/metrics"
 
-PORTS=(8080 5173 "$DOCS_PORT" 9094)
+PORTS=(8080 5173 "$DOCS_PORT")
+# Ports of Compose-managed infra oneclick starts itself; our own containers on them are reused, anything else is a conflict.
+INFRA_PORTS=("$OTEL_COLLECTOR_GRPC_PORT" "$OTEL_COLLECTOR_PROM_PORT" 9090)
 EXPECTED_CLICKHOUSE_TABLES=(
     analytics_api_events_queue
     analytics_domain_events_queue
@@ -88,14 +96,22 @@ EXPECTED_CLICKHOUSE_TABLES=(
     cost_bin_product
 )
 
+# True when the container publishing $1 belongs to this Compose project (so it is ours to reuse).
+is_own_compose_container() {
+    local port="$1"
+    local container_id
+    container_id=$(docker ps --filter "publish=$port" -q 2>/dev/null | head -1 || true)
+    [ -n "$container_id" ] && docker compose ps -q 2>/dev/null | grep -q "^${container_id}"
+}
+
 check_and_kill_ports() {
     local pids_to_kill=()
     local ports_in_use=()
 
-    echo "Checking for processes on ports ${PORTS[*]}..."
+    echo "Checking for processes on ports ${PORTS[*]} ${INFRA_PORTS[*]}..."
     echo ""
 
-    for port in "${PORTS[@]}"; do
+    for port in "${PORTS[@]}" "${INFRA_PORTS[@]}"; do
         local pids
         pids=$(lsof -t -iTCP:$port -sTCP:LISTEN 2>/dev/null || true)
         if [ -n "$pids" ]; then
@@ -108,6 +124,10 @@ check_and_kill_ports() {
                 # processes. Killing them would take down the entire container runtime.
                 # Stop the container instead.
                 if echo "$cmd" | grep -qiE "OrbStack|com\.docker\.backend|dockerd"; then
+                    if is_own_compose_container "$port"; then
+                        echo "  [ok] Port $port is forwarded by this project's own container — reusing it."
+                        continue
+                    fi
                     local container_id
                     container_id=$(docker ps --filter "publish=$port" -q 2>/dev/null | head -1 || true)
                     if [ -n "$container_id" ]; then
@@ -154,10 +174,14 @@ check_and_kill_ports() {
 
         sleep 1
 
-        for port in "${PORTS[@]}"; do
+        for port in "${PORTS[@]}" "${INFRA_PORTS[@]}"; do
             local pid
             pid=$(lsof -t -iTCP:$port -sTCP:LISTEN 2>/dev/null || true)
             if [ -n "$pid" ]; then
+                # Never force-kill the container runtime's port forwarder: that takes down every container.
+                if ps -p "$pid" -o command= 2>/dev/null | grep -qiE "OrbStack|com\.docker\.backend|dockerd"; then
+                    continue
+                fi
                 kill -9 "$pid" 2>/dev/null || true
                 echo "  Force killed PID $pid on port $port"
             fi
@@ -166,7 +190,7 @@ check_and_kill_ports() {
         echo "Done. All ports cleared."
         echo ""
     else
-        echo "No processes found on ports ${PORTS[*]}."
+        echo "No conflicting processes found on ports ${PORTS[*]} ${INFRA_PORTS[*]}."
         echo ""
     fi
 }
@@ -239,6 +263,11 @@ check_mailpit() {
     # `/api/v1/messages` is the message-listing endpoint — it confirms the API is serving, not
     # just that the web UI's index renders.
     curl -fsS "http://${MAILPIT_HOST}:${MAILPIT_UI_PORT}/api/v1/messages" >/dev/null 2>&1
+}
+
+check_otel_collector() {
+    # The collector's Prometheus-format endpoint is up once OTLP ingest is up.
+    curl -fsS "${OTEL_COLLECTOR_METRICS_URL}" >/dev/null 2>&1
 }
 
 check_clickhouse_schema() {
@@ -413,12 +442,19 @@ run_infra_checklist() {
         MAILPIT_READY=0
     fi
 
+    if check_otel_collector; then
+        OTEL_READY=1
+    else
+        OTEL_READY=0
+    fi
+
     print_service_status "Docker daemon" "$DOCKER_READY"
     print_service_status "Postgres (${POSTGRES_HOST}:${POSTGRES_PORT})" "$POSTGRES_READY"
     print_service_status "Redis (${REDIS_HOST}:${REDIS_PORT})" "$REDIS_READY"
     print_service_status "Kafka (${KAFKA_HOST}:${KAFKA_PORT})" "$KAFKA_READY"
     print_service_status "ClickHouse (${CLICKHOUSE_HTTP_URL})" "$CLICKHOUSE_READY"
     print_service_status "Mailpit UI (${MAILPIT_HOST}:${MAILPIT_UI_PORT}) / SMTP :1025" "$MAILPIT_READY"
+    print_service_status "OpenTelemetry collector (${OTEL_COLLECTOR_HOST}:${OTEL_COLLECTOR_PROM_PORT}) / OTLP :${OTEL_COLLECTOR_GRPC_PORT}" "$OTEL_READY"
     echo ""
 }
 
@@ -527,6 +563,27 @@ wait_for_mailpit() {
     return 1
 }
 
+wait_for_otel_collector() {
+    local attempts=0
+    local max_attempts=30
+
+    echo "Waiting for the OpenTelemetry collector on ${OTEL_COLLECTOR_METRICS_URL}..."
+
+    while [ $attempts -lt $max_attempts ]; do
+        if check_otel_collector; then
+            echo "OpenTelemetry collector is healthy."
+            echo ""
+            return 0
+        fi
+
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    echo "OpenTelemetry collector did not become healthy within ${max_attempts}s."
+    return 1
+}
+
 wait_for_backend() {
     local attempts=0
     local max_attempts=480
@@ -584,15 +641,16 @@ wait_for_docs() {
 check_and_kill_ports
 run_infra_checklist
 
-if [ "${DOCKER_READY}" -eq 0 ] && ([ "${POSTGRES_READY}" -eq 0 ] || [ "${REDIS_READY}" -eq 0 ] || [ "${KAFKA_READY}" -eq 0 ] || [ "${CLICKHOUSE_READY}" -eq 0 ] || [ "${MAILPIT_READY}" -eq 0 ]); then
+if [ "${DOCKER_READY}" -eq 0 ] && ([ "${POSTGRES_READY}" -eq 0 ] || [ "${REDIS_READY}" -eq 0 ] || [ "${KAFKA_READY}" -eq 0 ] || [ "${CLICKHOUSE_READY}" -eq 0 ] || [ "${MAILPIT_READY}" -eq 0 ] || [ "${OTEL_READY}" -eq 0 ]); then
     echo "Cannot start missing infrastructure services because Docker is not available."
     echo "Start Docker/OrbStack first, then rerun ./oneclick.sh."
     cleanup 1
 fi
 
-if [ "${POSTGRES_READY}" -eq 0 ] || [ "${REDIS_READY}" -eq 0 ] || [ "${KAFKA_READY}" -eq 0 ] || [ "${CLICKHOUSE_READY}" -eq 0 ] || [ "${MAILPIT_READY}" -eq 0 ]; then
+if [ "${POSTGRES_READY}" -eq 0 ] || [ "${REDIS_READY}" -eq 0 ] || [ "${KAFKA_READY}" -eq 0 ] || [ "${CLICKHOUSE_READY}" -eq 0 ] || [ "${MAILPIT_READY}" -eq 0 ] || [ "${OTEL_READY}" -eq 0 ]; then
     echo "Starting infrastructure services..."
-    COMPOSE_PROFILES= docker compose --profile postgres-ghcr --profile analytics-clickhouse up -d postgresql redis kafka kafka-init clickhouse mailpit
+    # otel-collector and prometheus are named explicitly so the monitoring profile's Grafana (port 3000, the docs preview here) stays off.
+    COMPOSE_PROFILES= docker compose --profile postgres-ghcr --profile analytics-clickhouse up -d postgresql redis kafka kafka-init clickhouse mailpit otel-collector prometheus
     echo ""
 fi
 
@@ -613,6 +671,10 @@ if [ "${CLICKHOUSE_READY}" -eq 0 ] && ! wait_for_clickhouse; then
 fi
 
 if [ "${MAILPIT_READY}" -eq 0 ] && ! wait_for_mailpit; then
+    cleanup 1
+fi
+
+if [ "${OTEL_READY}" -eq 0 ] && ! wait_for_otel_collector; then
     cleanup 1
 fi
 
@@ -668,6 +730,8 @@ if [ "${CARGO_BUILD_MODE}" = "release" ]; then
     echo "  (release build: the first compile takes longer, but runtime — including large report ingestion — is far faster)"
 fi
 
+DECISION_ENGINE__LOG__TELEMETRY__METRICS_ENABLED=true \
+DECISION_ENGINE__LOG__TELEMETRY__OTEL_EXPORTER_OTLP_ENDPOINT="${OTEL_COLLECTOR_ENDPOINT}" \
 cargo run ${CARGO_PROFILE_FLAG} --no-default-features --features postgres &
 SERVER_PID=$!
 

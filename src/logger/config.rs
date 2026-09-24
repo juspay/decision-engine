@@ -9,6 +9,23 @@ use serde::Deserialize;
 pub struct Log {
     /// Logging to a console.
     pub console: LogConsole,
+    /// Telemetry export.
+    #[serde(default)]
+    pub telemetry: LogTelemetry,
+}
+
+/// Telemetry export: metrics pushed to an OpenTelemetry collector over OTLP/gRPC.
+#[derive(Debug, Deserialize, Clone, Default)]
+#[serde(default)]
+pub struct LogTelemetry {
+    /// Whether metrics are pushed to the collector; when off, every instrument is a no-op.
+    pub metrics_enabled: bool,
+    /// Whether a failure to build the exporter is logged and ignored instead of failing startup.
+    pub ignore_errors: bool,
+    /// OTLP/gRPC endpoint of the collector, e.g. `http://otel-collector:4317`.
+    pub otel_exporter_otlp_endpoint: Option<String>,
+    /// Timeout (in milliseconds) for one export.
+    pub otel_exporter_otlp_timeout: Option<u64>,
 }
 
 /// Logging to a console.
