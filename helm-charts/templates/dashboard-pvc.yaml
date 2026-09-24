@@ -1,0 +1,18 @@
+{{- if and .Values.dashboard.enabled .Values.dashboard.build.persistence.enabled -}}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "decision-engine.dashboardName" . }}-assets
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ .Values.dashboard.metadata.labels.component }}
+spec:
+  accessModes:
+    {{- toYaml .Values.dashboard.build.persistence.accessModes | nindent 4 }}
+  {{- with .Values.dashboard.build.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.dashboard.build.persistence.size }}
+{{- end }}

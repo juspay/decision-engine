@@ -316,6 +316,76 @@ groovyRunner:
       # -- Value of the `app.kubernetes.io/component` label on Groovy runner resources
       component: groovy-runner
 
+# The `website/` bundle, built in an init container and served by nginx, which also proxies the API
+# prefix so both answer on one origin.
+dashboard:
+  # -- Deploy the dashboard
+  enabled: false
+  # -- Number of replicas. Keep at 1 with a ReadWriteOnce assets volume
+  replicaCount: 1
+  build:
+    image:
+      # -- Image the build runs in. Needs node, npm, wget and tar
+      repository: node
+      # -- Build image tag
+      tag: 20-alpine
+      # -- Build image pull policy
+      pullPolicy: IfNotPresent
+    # -- Git reference kind the source is fetched from: `tags` or `heads`
+    refs: tags
+    # -- Git reference to build from. Defaults to `image.version`
+    sourceRef: ""
+    # -- Rebuild even when the volume already holds those assets
+    forceBuild: false
+    # -- Resources for the build container
+    resources:
+      requests:
+        cpu: 500m
+        memory: 1Gi
+      limits:
+        memory: 2Gi
+    persistence:
+      # -- Keep assets on a volume so a replaced pod skips the build
+      enabled: false
+      # -- Access modes for the assets volume
+      accessModes:
+        - ReadWriteOnce
+      # -- Storage class. Empty uses the cluster default
+      storageClass: ""
+      # -- Size of the assets volume
+      size: 1Gi
+  nginx:
+    # -- Image serving the built assets
+    repository: nginx
+    # -- nginx image tag
+    tag: alpine
+    # -- nginx image pull policy
+    pullPolicy: IfNotPresent
+  service:
+    # -- Dashboard service type
+    type: ClusterIP
+    # -- Dashboard service port
+    port: 80
+  # -- Port nginx listens on inside the container
+  containerPort: 8080
+  # -- Path the bundle is served from. Baked in at build time by website/vite.config.ts
+  basePath: /decision-engine/
+  # -- Path prefix proxied to the Decision Engine. Must match `website/src/lib/api.ts`
+  apiBasePath: /decision-engine/api
+  # -- Upstream read timeout for proxied API calls
+  proxyReadTimeout: 60s
+  ingress:
+    # -- Add a `basePath` rule to the chart's Ingress. API calls ride through it too
+    enabled: true
+  # -- Resource requests and limits for the nginx container
+  resources: {}
+  # -- Node selector. Falls back to the chart-wide `nodeSelector`
+  nodeSelector: {}
+  metadata:
+    labels:
+      # -- Value of the `app.kubernetes.io/component` label
+      component: dashboard
+
 dbMigration:
   # -- Run the schema migration Job as a post-install/post-upgrade hook
   enabled: true

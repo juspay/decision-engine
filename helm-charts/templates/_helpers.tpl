@@ -69,6 +69,20 @@ Create the name for the Groovy Runner
 {{- end }}
 
 {{/*
+Create the name for the Dashboard
+*/}}
+{{- define "decision-engine.dashboardName" -}}
+{{- printf "%s-dashboard" (include "decision-engine.fullname" .) }}
+{{- end }}
+
+{{/*
+Git reference the dashboard is built from. Defaults to the image tag, which is a released tag.
+*/}}
+{{- define "decision-engine.dashboardSourceRef" -}}
+{{- .Values.dashboard.build.sourceRef | default .Values.image.version | default .Chart.AppVersion }}
+{{- end }}
+
+{{/*
 Create the name for the PostgreSQL Migration Job
 */}}
 {{- define "decision-engine.postgresqlMigrationName" -}}
