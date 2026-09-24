@@ -106,7 +106,7 @@ tolerations: []
 # -- Affinity rules for the Decision Engine pods
 affinity: {}
 
-# Where the migration Job and the dashboard build fetch the source tarball from. Point `repoUrl` at
+# Where the migration Job and the dashboard assets are fetched from. Point `repoUrl` at
 # a mirror when the cluster cannot reach github.com; override a `sourceUrl` below for a mirror that
 # does not serve GitHub-style `archive/refs/<kind>/<ref>.tar.gz` paths.
 source:
@@ -329,48 +329,39 @@ groovyRunner:
       # -- Value of the `app.kubernetes.io/component` label on Groovy runner resources
       component: groovy-runner
 
-# The `website/` bundle, built in an init container and served by nginx, which also proxies the API
-# prefix so both answer on one origin.
+# The dashboard: `website/dist`, which ships already built in the release tarball. An init container
+# unpacks it into a volume and nginx serves it, proxying the API prefix to the Decision Engine so
+# both answer on one origin (the application has no CORS layer). Nothing is built or pulled here.
 dashboard:
   # -- Deploy the dashboard
   enabled: false
-  # -- Number of replicas. Keep at 1 with a ReadWriteOnce assets volume
+  # -- Number of dashboard replicas
   replicaCount: 1
-  build:
+  assets:
     image:
-      # -- Image the build runs in. Needs node, npm, wget and tar
-      repository: node
-      # -- Build image tag
-      tag: 20-alpine
-      # -- Build image pull policy
+      # -- Image that fetches and unpacks the assets. Needs wget and tar
+      repository: public.ecr.aws/docker/library/alpine
+      # -- Fetch image tag
+      tag: "3.20"
+      # -- Fetch image pull policy
       pullPolicy: IfNotPresent
-    # -- Git reference kind the source is fetched from: `tags` or `heads`
+    # -- Git reference kind the tarball is fetched from: `tags` or `heads`
     refs: tags
-    # -- Git reference to build from. Defaults to `image.version`
+    # -- Git reference to take the assets from. Defaults to `image.version`
     sourceRef: ""
     # -- Full tarball URL. Defaults to `source.repoUrl` plus the reference above
     sourceUrl: ""
-    # -- Rebuild even when the volume already holds those assets
-    forceBuild: false
-    # -- Resources for the build container
+    # -- Fetch again even when the volume already holds assets for `sourceRef`
+    forceRefresh: false
+    # -- Resources for the fetch container
     resources:
       requests:
-        cpu: 500m
-        memory: 1Gi
+        cpu: 50m
+        memory: 64Mi
       limits:
-        memory: 2Gi
-    persistence:
-      # -- Keep assets on a volume so a replaced pod skips the build
-      enabled: false
-      # -- Access modes for the assets volume
-      accessModes:
-        - ReadWriteOnce
-      # -- Storage class. Empty uses the cluster default
-      storageClass: ""
-      # -- Size of the assets volume
-      size: 1Gi
+        memory: 256Mi
   nginx:
-    # -- Image serving the built assets
+    # -- Image serving the assets
     repository: nginx
     # -- nginx image tag
     tag: alpine

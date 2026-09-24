@@ -110,28 +110,22 @@ database connection, read, write and delete status.
 
 ## Dashboard
 
-The dashboard is the static bundle from `website/`. nginx serves it under `/decision-engine/` and
-forwards `/decision-engine/api/` to the Decision Engine service, stripping the prefix on the way.
-Both halves matter: the bundle calls the API on its own origin (`website/src/lib/api.ts`) and the
-application has no CORS layer, so the two have to answer on one hostname.
+The dashboard is `website/dist` - the bundle is committed to the repository, so it ships already
+built inside the release tarball. An init container unpacks it into a volume and nginx serves it
+under `/decision-engine/`, forwarding `/decision-engine/api/` to the Decision Engine service and
+stripping the prefix on the way. Both halves matter: the bundle calls the API on its own origin
+(`website/src/lib/api.ts`) and the application has no CORS layer, so the two have to answer on one
+hostname.
 
 ```bash
 helm upgrade --install my-release ./helm-charts --set dashboard.enabled=true
 ```
 
-That is all it takes. There is no dashboard image to build or publish: an init container on
-`node:20-alpine` fetches the source tarball for `dashboard.build.sourceRef` (defaulting to
-`image.version`), runs `npm ci && npm run build`, and writes the result into a volume that an
-`nginx:alpine` container serves. Both base images are stock.
-
-What it costs:
-
-- The build needs egress to `github.com` and `registry.npmjs.org`. On a test cluster it took about
-  half a minute; with a tighter CPU limit, expect a few minutes.
-- It runs again whenever the pod is replaced. Set `dashboard.build.persistence.enabled=true` to keep
-  the assets on a volume - the init container then compares `sourceRef` against a marker file it
-  wrote and skips the build when they match. With a ReadWriteOnce volume, stay at one replica.
-- The dashboard's availability at pod start depends on GitHub and the npm registry being reachable.
+Nothing is built and no dashboard image is pulled. The assets come from the tag in `image.version`,
+so they always match the Decision Engine the same release runs. The fetch needs egress to the source
+host - `source.repoUrl`, or a full `dashboard.assets.sourceUrl` for a mirror - and repeats whenever
+the pod is replaced, which is a few seconds and a 3 MB download. A pod whose tag has no
+`website/dist` fails the init container with a clear message rather than serving an empty site.
 
 With `dashboard.ingress.enabled`, the chart's Ingress gets a single `/decision-engine` rule pointing
 at the dashboard service. API calls ride through it, so the Decision Engine needs no public rule of
@@ -152,16 +146,14 @@ so `dashboard.basePath` describes where the assets expect to be served rather th
 |------------------------------------------|------------------------------------------------------------|-----------------|
 | `dashboard.enabled`                      | Deploy the dashboard                                       | `false`         |
 | `dashboard.replicaCount`                 | Number of dashboard replicas                               | `1`             |
-| `dashboard.build.image.repository`       | Image the build runs in                                    | `node`          |
-| `dashboard.build.image.tag`              | Build image tag                                            | `20-alpine`     |
-| `dashboard.build.refs`                   | Git reference kind: `tags` or `heads`                      | `tags`          |
-| `dashboard.build.sourceRef`              | Git reference to build. Defaults to `image.version`        | `""`            |
-| `dashboard.build.sourceUrl`              | Full tarball URL. Defaults to `source.repoUrl` plus the reference | `""`     |
-| `dashboard.build.forceBuild`             | Rebuild even when the volume already holds those assets    | `false`         |
-| `dashboard.build.resources`              | Resources for the build container                          | 500m / 1Gi      |
-| `dashboard.build.persistence.enabled`    | Keep built assets on a volume, so replaced pods reuse them | `false`         |
-| `dashboard.build.persistence.size`       | Size of the assets volume                                  | `1Gi`           |
-| `dashboard.nginx.repository`             | Image serving the built assets                             | `nginx`         |
+| `dashboard.assets.image.repository`      | Image that fetches and unpacks the assets                  | `public.ecr.aws/docker/library/alpine` |
+| `dashboard.assets.image.tag`             | Fetch image tag                                            | `3.20`          |
+| `dashboard.assets.refs`                  | Git reference kind: `tags` or `heads`                      | `tags`          |
+| `dashboard.assets.sourceRef`             | Git reference to take assets from. Defaults to `image.version` | `""`        |
+| `dashboard.assets.sourceUrl`             | Full tarball URL. Defaults to `source.repoUrl` plus the reference | `""`     |
+| `dashboard.assets.forceRefresh`          | Fetch again even when the volume already holds those assets | `false`        |
+| `dashboard.assets.resources`             | Resources for the fetch container                          | 50m / 64Mi      |
+| `dashboard.nginx.repository`             | Image serving the assets                                   | `nginx`         |
 | `dashboard.nginx.tag`                    | nginx image tag                                            | `alpine`        |
 | `dashboard.service.port`                 | Dashboard service port                                     | `80`            |
 | `dashboard.containerPort`                | Port nginx listens on inside the container                 | `8080`          |

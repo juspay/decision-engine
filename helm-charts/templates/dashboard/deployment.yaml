@@ -32,31 +32,29 @@ spec:
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       initContainers:
-        # Builds the bundle into the shared volume. Needs egress to GitHub and npm.
-        - name: build-dashboard
-          image: "{{ .Values.dashboard.build.image.repository }}:{{ .Values.dashboard.build.image.tag }}"
-          imagePullPolicy: {{ .Values.dashboard.build.image.pullPolicy }}
+        # The release tarball ships website/dist already built, so this only unpacks it.
+        - name: fetch-dashboard
+          image: "{{ .Values.dashboard.assets.image.repository }}:{{ .Values.dashboard.assets.image.tag }}"
+          imagePullPolicy: {{ .Values.dashboard.assets.image.pullPolicy }}
           command: ["/bin/sh", "-c"]
           args:
             - |-
               set -e
               MARKER=/usr/share/nginx/html/.dashboard-version
-              if [ "$FORCE_BUILD" != "true" ] && [ -f "$MARKER" ] && [ "$(cat $MARKER)" = "$SOURCE_REF" ]; then
-                echo "Assets for $SOURCE_REF are already present, skipping the build."
+              if [ "$FORCE_REFRESH" != "true" ] && [ -f "$MARKER" ] && [ "$(cat $MARKER)" = "$SOURCE_REF" ]; then
+                echo "Assets for $SOURCE_REF are already present."
                 exit 0
               fi
               echo "Fetching $SOURCE_URL"
               rm -rf /tmp/src && mkdir -p /tmp/src
               wget -qO /tmp/src.tgz "$SOURCE_URL"
               tar -xzf /tmp/src.tgz -C /tmp/src --strip-components=1
-              cd /tmp/src/website
-              echo "Installing dependencies"
-              npm ci --no-audit --no-fund
-              echo "Building the dashboard"
-              npm run build
-              echo "Publishing assets"
+              if [ ! -d /tmp/src/website/dist ]; then
+                echo "No website/dist in $SOURCE_REF - the tag must carry the built assets." >&2
+                exit 1
+              fi
               rm -rf /usr/share/nginx/html/* /usr/share/nginx/html/.dashboard-version
-              cp -r dist/. /usr/share/nginx/html/
+              cp -r /tmp/src/website/dist/. /usr/share/nginx/html/
               echo "$SOURCE_REF" > "$MARKER"
               echo "Done"
           env:
@@ -64,10 +62,10 @@ spec:
               value: {{ include "decision-engine.dashboardSourceRef" . | quote }}
             - name: SOURCE_URL
               value: {{ include "decision-engine.dashboardSourceUrl" . | quote }}
-            - name: FORCE_BUILD
-              value: {{ .Values.dashboard.build.forceBuild | quote }}
+            - name: FORCE_REFRESH
+              value: {{ .Values.dashboard.assets.forceRefresh | quote }}
           resources:
-            {{- toYaml .Values.dashboard.build.resources | nindent 12 }}
+            {{- toYaml .Values.dashboard.assets.resources | nindent 12 }}
           volumeMounts:
             - name: html
               mountPath: /usr/share/nginx/html
@@ -106,12 +104,7 @@ spec:
           configMap:
             name: {{ include "decision-engine.dashboardName" . }}-nginx
         - name: html
-          {{- if .Values.dashboard.build.persistence.enabled }}
-          persistentVolumeClaim:
-            claimName: {{ include "decision-engine.dashboardName" . }}-assets
-          {{- else }}
           emptyDir: {}
-          {{- end }}
       {{- with (default .Values.nodeSelector .Values.dashboard.nodeSelector) }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

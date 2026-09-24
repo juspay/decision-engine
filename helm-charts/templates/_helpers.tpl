@@ -79,17 +79,17 @@ Create the name for the Dashboard
 Git reference the dashboard is built from. Defaults to the image tag, which is a released tag.
 */}}
 {{- define "decision-engine.dashboardSourceRef" -}}
-{{- .Values.dashboard.build.sourceRef | default .Values.image.version | default .Chart.AppVersion }}
+{{- .Values.dashboard.assets.sourceRef | default .Values.image.version | default .Chart.AppVersion }}
 {{- end }}
 
 {{/*
 Tarball URL the dashboard is built from.
 */}}
 {{- define "decision-engine.dashboardSourceUrl" -}}
-{{- if .Values.dashboard.build.sourceUrl }}
-{{- .Values.dashboard.build.sourceUrl }}
+{{- if .Values.dashboard.assets.sourceUrl }}
+{{- .Values.dashboard.assets.sourceUrl }}
 {{- else }}
-{{- printf "%s/archive/refs/%s/%s.tar.gz" (trimSuffix "/" .Values.source.repoUrl) .Values.dashboard.build.refs (include "decision-engine.dashboardSourceRef" .) }}
+{{- printf "%s/archive/refs/%s/%s.tar.gz" (trimSuffix "/" .Values.source.repoUrl) .Values.dashboard.assets.refs (include "decision-engine.dashboardSourceRef" .) }}
 {{- end }}
 {{- end }}
 
