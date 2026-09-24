@@ -106,6 +106,13 @@ tolerations: []
 # -- Affinity rules for the Decision Engine pods
 affinity: {}
 
+# Where the migration Job and the dashboard build fetch the source tarball from. Point `repoUrl` at
+# a mirror when the cluster cannot reach github.com; override a `sourceUrl` below for a mirror that
+# does not serve GitHub-style `archive/refs/<kind>/<ref>.tar.gz` paths.
+source:
+  # -- Base URL the source tarball is fetched from
+  repoUrl: https://github.com/juspay/decision-engine
+
 # Decision Engine application configuration. Rendered into the `development.toml` the container reads.
 decisionEngine:
   # -- Use MySQL as the application database
@@ -207,6 +214,8 @@ mysql:
   enabled: false
   # -- Existing MySQL host, used when the sub-chart is disabled
   hostname: ""
+  # -- MySQL port
+  port: 3306
   image:
     # -- Bitnami's free images now live under `bitnamilegacy`
     repository: bitnamilegacy/mysql
@@ -232,6 +241,8 @@ postgresql:
   enabled: true
   # -- Existing PostgreSQL host, used when the sub-chart is disabled
   hostname: ""
+  # -- PostgreSQL port
+  port: 5432
   image:
     # -- Bitnami's free images now live under `bitnamilegacy`
     repository: bitnamilegacy/postgresql
@@ -257,6 +268,8 @@ redis:
   enabled: true
   # -- Existing Redis host, used when the sub-chart is disabled
   hostname: ""
+  # -- Redis port
+  port: 6379
   image:
     # -- Bitnami's free images now live under `bitnamilegacy`
     repository: bitnamilegacy/redis
@@ -335,6 +348,8 @@ dashboard:
     refs: tags
     # -- Git reference to build from. Defaults to `image.version`
     sourceRef: ""
+    # -- Full tarball URL. Defaults to `source.repoUrl` plus the reference above
+    sourceUrl: ""
     # -- Rebuild even when the volume already holds those assets
     forceBuild: false
     # -- Resources for the build container

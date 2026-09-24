@@ -105,8 +105,7 @@ Two consequences worth knowing:
 - Adding a new knob means adding the corresponding env var in `templates/deployment.yaml`; the
   config file is not templated.
 
-After installing, `helm test <release>` runs a pod that calls `/health` through the service. For a
-deeper check, `GET /health/diagnostics` with an `x-tenant-id: public` header reports the real
+To check an install, `GET /health/diagnostics` with an `x-tenant-id: public` header reports the real
 database connection, read, write and delete status.
 
 ## Dashboard
@@ -138,6 +137,14 @@ With `dashboard.ingress.enabled`, the chart's Ingress gets a single `/decision-e
 at the dashboard service. API calls ride through it, so the Decision Engine needs no public rule of
 its own for the dashboard to work.
 
+### Hosting the assets yourself
+
+To serve the bundle from S3, a CDN or any other host instead, leave `dashboard.enabled` off and
+route it there. The one thing to get right is that the bundle calls the API on its own origin, so
+whatever fronts the assets has to forward `/decision-engine/api/` to the Decision Engine service -
+a CloudFront behavior, an Ingress rule, whatever your edge uses. Serving the files alone leaves a
+dashboard that loads and then fails every request.
+
 `/decision-engine/` is baked into the bundle's asset URLs at build time (`website/vite.config.ts`),
 so `dashboard.basePath` describes where the assets expect to be served rather than moving them.
 
@@ -149,6 +156,7 @@ so `dashboard.basePath` describes where the assets expect to be served rather th
 | `dashboard.build.image.tag`              | Build image tag                                            | `20-alpine`     |
 | `dashboard.build.refs`                   | Git reference kind: `tags` or `heads`                      | `tags`          |
 | `dashboard.build.sourceRef`              | Git reference to build. Defaults to `image.version`        | `""`            |
+| `dashboard.build.sourceUrl`              | Full tarball URL. Defaults to `source.repoUrl` plus the reference | `""`     |
 | `dashboard.build.forceBuild`             | Rebuild even when the volume already holds those assets    | `false`         |
 | `dashboard.build.resources`              | Resources for the build container                          | 500m / 1Gi      |
 | `dashboard.build.persistence.enabled`    | Keep built assets on a volume, so replaced pods reuse them | `false`         |
@@ -205,6 +213,7 @@ so `dashboard.basePath` describes where the assets expect to be served rather th
 |-----------------------------------|------------------------------------------------------------|-----------------|
 | `postgresql.enabled`              | Deploy the Bitnami PostgreSQL sub-chart                    | `true`          |
 | `postgresql.hostname`             | Existing PostgreSQL host, used when the sub-chart is disabled | `""`         |
+| `postgresql.port`                 | PostgreSQL port                                            | `5432`          |
 | `postgresql.image.repository`     | Bitnami's free images now live under `bitnamilegacy`       | `bitnamilegacy/postgresql` |
 | `postgresql.image.tag`            | PostgreSQL image tag                                       | `16.1.0-debian-11-r18` |
 | `postgresql.auth.username`        | PostgreSQL username                                        | `"db_user"`     |
@@ -219,6 +228,7 @@ so `dashboard.basePath` describes where the assets expect to be served rather th
 |--------------------------------|------------------------------------------------------------|-----------------|
 | `redis.enabled`                | Deploy the Bitnami Redis sub-chart                         | `true`          |
 | `redis.hostname`               | Existing Redis host, used when the sub-chart is disabled   | `""`            |
+| `redis.port`                   | Redis port                                                 | `6379`          |
 | `redis.image.repository`       | Bitnami's free images now live under `bitnamilegacy`       | `bitnamilegacy/redis` |
 | `redis.image.tag`              | Redis image tag                                            | `7.2.3-debian-11-r2` |
 | `redis.auth.enabled`           | Enable Redis authentication                                | `false`         |
@@ -272,6 +282,8 @@ again on every `helm upgrade` unless you pass `--no-hooks` or set `dbMigration.e
 
 | Name                                      | Description                                                | Value           |
 |-------------------------------------------|------------------------------------------------------------|-----------------|
+| `source.repoUrl`                          | Base URL the source tarball is fetched from                | `https://github.com/juspay/decision-engine` |
+| `dbMigration.sourceUrl`                   | Full tarball URL. Defaults to `source.repoUrl` plus the reference | `""`      |
 | `dbMigration.enabled`                     | Run the migration Job                                      | `true`          |
 | `dbMigration.refs`                        | Git reference kind the migrations come from: `tags` or `heads` | `tags`      |
 | `dbMigration.version`                     | Git reference to fetch. Defaults to `image.version`        | `""`            |

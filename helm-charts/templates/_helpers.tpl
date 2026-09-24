@@ -83,6 +83,28 @@ Git reference the dashboard is built from. Defaults to the image tag, which is a
 {{- end }}
 
 {{/*
+Tarball URL the dashboard is built from.
+*/}}
+{{- define "decision-engine.dashboardSourceUrl" -}}
+{{- if .Values.dashboard.build.sourceUrl }}
+{{- .Values.dashboard.build.sourceUrl }}
+{{- else }}
+{{- printf "%s/archive/refs/%s/%s.tar.gz" (trimSuffix "/" .Values.source.repoUrl) .Values.dashboard.build.refs (include "decision-engine.dashboardSourceRef" .) }}
+{{- end }}
+{{- end }}
+
+{{/*
+Tarball URL the migration Job runs against.
+*/}}
+{{- define "decision-engine.migrationSourceUrl" -}}
+{{- if .Values.dbMigration.sourceUrl }}
+{{- .Values.dbMigration.sourceUrl }}
+{{- else }}
+{{- printf "%s/archive/refs/%s/%s.tar.gz" (trimSuffix "/" .Values.source.repoUrl) .Values.dbMigration.refs (.Values.dbMigration.version | default .Values.image.version) }}
+{{- end }}
+{{- end }}
+
+{{/*
 Create the name for the PostgreSQL Migration Job
 */}}
 {{- define "decision-engine.postgresqlMigrationName" -}}

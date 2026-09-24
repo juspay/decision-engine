@@ -32,7 +32,7 @@ spec:
         - name: wait-for-postgresql
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
           imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
-          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} 5432; do echo waiting for postgresql; sleep 2; done;']
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} {{ .Values.postgresql.port }}; do echo waiting for postgresql; sleep 2; done;']
       {{- end }}
       containers:
         - name: migration
@@ -50,12 +50,11 @@ spec:
               curl --proto '=https' --tlsv1.2 -LsSf "$DIESEL_INSTALLER" | sh
               export PATH="$HOME/.cargo/bin:$PATH"
               diesel --version
-              curl -fsSL --retry 3 --retry-delay 5 -o decision-engine.tar.gz \
-                https://github.com/juspay/decision-engine/archive/refs/$REFERENCE/$VERSION.tar.gz
+              curl -fsSL --retry 3 --retry-delay 5 -o decision-engine.tar.gz "$SOURCE_URL"
               tar -xzf decision-engine.tar.gz --transform 's|[^/]*/|decision-engine/|'
               cd decision-engine
               diesel migration \
-                --database-url "postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:5432/$DBNAME" \
+                --database-url "postgres://$POSTGRES_USER:$POSTGRES_PASSWORD@$POSTGRES_HOST:$POSTGRES_PORT/$DBNAME" \
                 run \
                 --migration-dir "$MIGRATION_DIR" \
                 --config-file diesel_pg.toml
@@ -63,14 +62,14 @@ spec:
           env:
             - name: DIESEL_INSTALLER
               value: {{ .Values.dbMigration.postgresql.dieselInstaller | quote }}
-            - name: REFERENCE
-              value: {{ .Values.dbMigration.refs }}
-            - name: VERSION
-              value: {{ .Values.dbMigration.version | default .Values.image.version | quote }}
+            - name: SOURCE_URL
+              value: {{ include "decision-engine.migrationSourceUrl" . | quote }}
             - name: MIGRATION_DIR
               value: {{ .Values.dbMigration.postgresql.migrations.path | quote }}
             - name: POSTGRES_HOST
               value: {{ include "decision-engine.postgresqlHost" . | quote }}
+            - name: POSTGRES_PORT
+              value: {{ .Values.postgresql.port | quote }}
             - name: DBNAME
               value: {{ .Values.postgresql.auth.database | quote }}
             - name: POSTGRES_USER

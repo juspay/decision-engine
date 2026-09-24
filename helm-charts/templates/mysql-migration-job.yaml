@@ -31,7 +31,7 @@ spec:
         - name: wait-for-mysql
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
           imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
-          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.mysqlHost" . }} 3306; do echo waiting for mysql; sleep 2; done;']
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.mysqlHost" . }} {{ .Values.mysql.port }}; do echo waiting for mysql; sleep 2; done;']
       {{- end }}
       containers:
         - name: migration
@@ -47,12 +47,13 @@ spec:
               # Download and execute SQL scripts
               apt-get update && apt-get install -y curl default-mysql-client
               host={{ include "decision-engine.mysqlHost" . }}
+              port={{ .Values.mysql.port }}
               db_name={{ .Values.mysql.auth.database  }}
               {{- range $url := .Values.dbMigration.mysql.scriptUrls }}
               echo "Downloading {{ $url }}"
               curl -sSL "{{ $url }}" -o /tmp/init.sql
               if [ -f /tmp/init.sql ]; then
-                mysql --host="$host" -u root -p"$MYSQL_ROOT_PASSWORD" -e "SOURCE /tmp/init.sql" $db_name
+                mysql --host="$host" --port="$port" -u root -p"$MYSQL_ROOT_PASSWORD" -e "SOURCE /tmp/init.sql" $db_name
               else
                 echo "Error: /tmp/init.sql not found"
                 exit 1

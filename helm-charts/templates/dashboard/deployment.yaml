@@ -16,7 +16,7 @@ spec:
     metadata:
       annotations:
         # nginx reads the config only at startup.
-        checksum/nginx-config: {{ include (print $.Template.BasePath "/dashboard-configmap.yaml") . | sha256sum }}
+        checksum/nginx-config: {{ include (print $.Template.BasePath "/dashboard/configmap.yaml") . | sha256sum }}
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
@@ -63,7 +63,7 @@ spec:
             - name: SOURCE_REF
               value: {{ include "decision-engine.dashboardSourceRef" . | quote }}
             - name: SOURCE_URL
-              value: {{ printf "https://github.com/juspay/decision-engine/archive/refs/%s/%s.tar.gz" .Values.dashboard.build.refs (include "decision-engine.dashboardSourceRef" .) | quote }}
+              value: {{ include "decision-engine.dashboardSourceUrl" . | quote }}
             - name: FORCE_BUILD
               value: {{ .Values.dashboard.build.forceBuild | quote }}
           resources:

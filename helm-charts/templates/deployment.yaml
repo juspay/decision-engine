@@ -34,13 +34,13 @@ spec:
         - name: wait-for-postgresql
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
           imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
-          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} 5432; do echo waiting for postgresql; sleep 2; done;']
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} {{ .Values.postgresql.port }}; do echo waiting for postgresql; sleep 2; done;']
         {{- end }}
         {{- if .Values.decisionEngine.useRedis }}
         - name: wait-for-redis
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
           imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
-          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.redisHost" . }} 6379; do echo waiting for redis; sleep 2; done;']
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.redisHost" . }} {{ .Values.redis.port }}; do echo waiting for redis; sleep 2; done;']
         {{- end }}
         - name: wait-for-groovy-runner
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
@@ -50,7 +50,7 @@ spec:
         - name: wait-for-mysql
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
           imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
-          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.mysqlHost" . }} 3306; do echo waiting for mysql; sleep 2; done;']
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.mysqlHost" . }} {{ .Values.mysql.port }}; do echo waiting for mysql; sleep 2; done;']
         {{- end }}
       {{- end }}
       containers:
@@ -95,7 +95,7 @@ spec:
             - name: DECISION_ENGINE__PG_DATABASE__PG_HOST
               value: {{ include "decision-engine.postgresqlHost" . | quote }}
             - name: DECISION_ENGINE__PG_DATABASE__PG_PORT
-              value: "5432"
+              value: {{ .Values.postgresql.port | quote }}
             - name: DECISION_ENGINE__PG_DATABASE__PG_USERNAME
               value: {{ .Values.postgresql.auth.username | quote }}
             - name: DECISION_ENGINE__PG_DATABASE__PG_PASSWORD
@@ -107,7 +107,7 @@ spec:
             - name: DECISION_ENGINE__DATABASE__HOST
               value: {{ include "decision-engine.mysqlHost" . | quote }}
             - name: DECISION_ENGINE__DATABASE__PORT
-              value: "3306"
+              value: {{ .Values.mysql.port | quote }}
             - name: DECISION_ENGINE__DATABASE__USERNAME
               value: {{ .Values.mysql.auth.username | default "root" | quote }}
             - name: DECISION_ENGINE__DATABASE__PASSWORD
@@ -119,7 +119,7 @@ spec:
             - name: DECISION_ENGINE__REDIS__HOST
               value: {{ include "decision-engine.redisHost" . | quote }}
             - name: DECISION_ENGINE__REDIS__PORT
-              value: "6379"
+              value: {{ .Values.redis.port | quote }}
             {{- end }}
             {{- if ne .Values.decisionEngine.secrets.secretsManager "no_encryption" }}
             - name: DECISION_ENGINE__SECRETS_MANAGEMENT__SECRETS_MANAGER
