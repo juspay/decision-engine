@@ -34,13 +34,13 @@ spec:
         - name: wait-for-postgresql
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
           imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
-          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} 5432; do echo waiting for postgresql; sleep 2; done;']
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} {{ .Values.postgresql.port }}; do echo waiting for postgresql; sleep 2; done;']
         {{- end }}
         {{- if .Values.decisionEngine.useRedis }}
         - name: wait-for-redis
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
           imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
-          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.redisHost" . }} 6379; do echo waiting for redis; sleep 2; done;']
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.redisHost" . }} {{ .Values.redis.port }}; do echo waiting for redis; sleep 2; done;']
         {{- end }}
         - name: wait-for-groovy-runner
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
@@ -50,7 +50,7 @@ spec:
         - name: wait-for-mysql
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
           imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
-          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.mysqlHost" . }} 3306; do echo waiting for mysql; sleep 2; done;']
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.mysqlHost" . }} {{ .Values.mysql.port }}; do echo waiting for mysql; sleep 2; done;']
         {{- end }}
       {{- end }}
       containers:
@@ -65,10 +65,81 @@ spec:
               containerPort: {{ .targetPort }}
               protocol: {{ .protocol | default "TCP" }}
             {{- end }}
+          # The ConfigMap carries the full upstream config for this appVersion. Only the values that
+          # differ per deployment are overridden here, through DECISION_ENGINE__<section>__<key>
+          # (src/config.rs: prefix DECISION_ENGINE, separator __).
           env:
             - name: GROOVY_RUNNER_HOST
               value: "{{ include "decision-engine.groovyRunnerName" . }}:{{ .Values.groovyRunner.service.port }}"
-            - name: DECISION_ENGINE__ANALYTICS__ENABLED
+            - name: DECISION_ENGINE__SERVER__HOST
+              value: {{ .Values.decisionEngine.server.host | quote }}
+            - name: DECISION_ENGINE__SERVER__PORT
+              value: {{ .Values.decisionEngine.server.port | quote }}
+            - name: DECISION_ENGINE__METRICS__HOST
+              value: {{ .Values.decisionEngine.metrics.host | quote }}
+            - name: DECISION_ENGINE__METRICS__PORT
+              value: {{ .Values.decisionEngine.metrics.port | quote }}
+            - name: DECISION_ENGINE__LOG__CONSOLE__LEVEL
+              value: {{ .Values.decisionEngine.logging.level | quote }}
+            - name: DECISION_ENGINE__LOG__CONSOLE__LOG_FORMAT
+              value: {{ .Values.decisionEngine.logging.format | quote }}
+            - name: DECISION_ENGINE__LIMIT__REQUEST_COUNT
+              value: {{ .Values.decisionEngine.rateLimit.requestCount | quote }}
+            - name: DECISION_ENGINE__LIMIT__DURATION
+              value: {{ .Values.decisionEngine.rateLimit.duration | quote }}
+            - name: DECISION_ENGINE__CACHE__TTI
+              value: {{ .Values.decisionEngine.cache.tti | quote }}
+            - name: DECISION_ENGINE__CACHE__MAX_CAPACITY
+              value: {{ .Values.decisionEngine.cache.maxCapacity | quote }}
+            {{- if .Values.decisionEngine.usePostgreSQL }}
+            - name: DECISION_ENGINE__PG_DATABASE__PG_HOST
+              value: {{ include "decision-engine.postgresqlHost" . | quote }}
+            - name: DECISION_ENGINE__PG_DATABASE__PG_PORT
+              value: {{ .Values.postgresql.port | quote }}
+            - name: DECISION_ENGINE__PG_DATABASE__PG_USERNAME
+              value: {{ .Values.postgresql.auth.username | quote }}
+            - name: DECISION_ENGINE__PG_DATABASE__PG_PASSWORD
+              value: {{ .Values.postgresql.auth.password | quote }}
+            - name: DECISION_ENGINE__PG_DATABASE__PG_DBNAME
+              value: {{ .Values.postgresql.auth.database | quote }}
+            {{- end }}
+            {{- if .Values.decisionEngine.useMySQL }}
+            - name: DECISION_ENGINE__DATABASE__HOST
+              value: {{ include "decision-engine.mysqlHost" . | quote }}
+            - name: DECISION_ENGINE__DATABASE__PORT
+              value: {{ .Values.mysql.port | quote }}
+            - name: DECISION_ENGINE__DATABASE__USERNAME
+              value: {{ .Values.mysql.auth.username | default "root" | quote }}
+            - name: DECISION_ENGINE__DATABASE__PASSWORD
+              value: {{ .Values.mysql.auth.rootPassword | default "root" | quote }}
+            - name: DECISION_ENGINE__DATABASE__DBNAME
+              value: {{ .Values.mysql.auth.database | default "jdb" | quote }}
+            {{- end }}
+            {{- if .Values.decisionEngine.useRedis }}
+            - name: DECISION_ENGINE__REDIS__HOST
+              value: {{ include "decision-engine.redisHost" . | quote }}
+            - name: DECISION_ENGINE__REDIS__PORT
+              value: {{ .Values.redis.port | quote }}
+            {{- end }}
+            {{- if ne .Values.decisionEngine.secrets.secretsManager "no_encryption" }}
+            - name: DECISION_ENGINE__SECRETS_MANAGEMENT__SECRETS_MANAGER
+              value: {{ .Values.decisionEngine.secrets.secretsManager | quote }}
+            - name: DECISION_ENGINE__SECRETS_MANAGEMENT__AWS_KMS__KEY_ID
+              value: {{ .Values.decisionEngine.secrets.awsKms.keyId | quote }}
+            - name: DECISION_ENGINE__SECRETS_MANAGEMENT__AWS_KMS__REGION
+              value: {{ .Values.decisionEngine.secrets.awsKms.region | quote }}
+            {{- end }}
+            - name: DECISION_ENGINE__API_CLIENT__CLIENT_IDLE_TIMEOUT
+              value: {{ .Values.decisionEngine.apiClient.clientIdleTimeout | quote }}
+            - name: DECISION_ENGINE__API_CLIENT__POOL_MAX_IDLE_PER_HOST
+              value: {{ .Values.decisionEngine.apiClient.poolMaxIdlePerHost | quote }}
+            {{- with .Values.decisionEngine.apiClient.identity }}
+            - name: DECISION_ENGINE__API_CLIENT__IDENTITY
+              value: {{ . | quote }}
+            {{- end }}
+            # analytics.kafka.enabled / analytics.clickhouse.enabled are the real switches; there is
+            # no top-level `analytics.enabled` field in the config schema.
+            - name: DECISION_ENGINE__ANALYTICS__KAFKA__ENABLED
               value: {{ ternary "true" "false" .Values.analytics.enabled | quote }}
             - name: DECISION_ENGINE__ANALYTICS__KAFKA__BROKERS
               value: {{ .Values.analytics.kafka.brokers | quote }}
@@ -76,6 +147,8 @@ spec:
               value: {{ .Values.analytics.kafka.apiTopic | quote }}
             - name: DECISION_ENGINE__ANALYTICS__KAFKA__DOMAIN_TOPIC
               value: {{ .Values.analytics.kafka.domainTopic | quote }}
+            - name: DECISION_ENGINE__ANALYTICS__CLICKHOUSE__ENABLED
+              value: {{ ternary "true" "false" .Values.analytics.enabled | quote }}
             - name: DECISION_ENGINE__ANALYTICS__CLICKHOUSE__URL
               value: {{ printf "http://%s:%v" .Values.analytics.clickhouse.host .Values.analytics.clickhouse.httpPort | quote }}
             - name: DECISION_ENGINE__ANALYTICS__CLICKHOUSE__DATABASE
