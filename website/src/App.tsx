@@ -25,6 +25,7 @@ import { ForgotPasswordPage } from './pages/ForgotPasswordPage'
 import { ResetPasswordPage } from './pages/ResetPasswordPage'
 import { AccountPage } from './pages/AccountPage'
 import { signupEnabled, simulatorEnabled } from './lib/appConfig'
+import { isEmbedded } from './lib/embedMode'
 import { useAuthStore } from './store/authStore'
 import { useMerchantStore } from './store/merchantStore'
 import { apiPost } from './lib/api'
@@ -45,6 +46,27 @@ interface ExchangeResponse {
 // "already started" branch and opened the gate while the exchange was still in flight, so <Routes>
 // mounted with no token, AuthGuard replaced the URL with /login, and the deep-linked path was lost.
 let hsSsoExchange: Promise<ExchangeResponse | null> | null = null
+
+/**
+ * Unknown path. Standalone this is a stray URL, so fall back to the overview as before. Embedded,
+ * the dashboard chose this route from its own section list — silently swapping in the overview
+ * just looks like the wrong screen loaded, so name the problem instead. Reachable in practice:
+ * `simulatorEnabled` compiles the Decision Simulator route out of some builds while the dashboard
+ * still offers that section.
+ */
+function UnknownRoute() {
+  if (!isEmbedded()) return <Navigate to="." replace />
+  return (
+    <div className="flex min-h-[320px] items-center justify-center px-4">
+      <div className="flex max-w-sm flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-white px-6 py-6 text-center shadow-[0_16px_40px_-30px_rgba(15,23,42,0.35)] dark:border-[#1d1d23] dark:bg-[#111318] dark:shadow-none">
+        <p className="text-sm font-medium text-slate-900 dark:text-white">This section isn't available</p>
+        <p className="text-sm text-slate-600 dark:text-[#c7cfdb]">
+          It may not be enabled for this environment. Pick another section from the dashboard.
+        </p>
+      </div>
+    </div>
+  )
+}
 
 export default function App() {
   const setAuth = useAuthStore((s) => s.setAuth)
@@ -164,7 +186,7 @@ export default function App() {
           <Route path="members" element={<MembersPage />} />
           <Route path="api-keys" element={<ApiKeysPage />} />
           <Route path="account" element={<AccountPage />} />
-          <Route path="*" element={<Navigate to="." replace />} />
+          <Route path="*" element={<UnknownRoute />} />
         </Route>
       </Route>
     </Routes>

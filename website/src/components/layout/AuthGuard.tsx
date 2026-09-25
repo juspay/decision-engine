@@ -38,15 +38,43 @@ function SessionSpinner({ label }: { label: string }) {
  * user is synthetic, with no password). Ask the dashboard for a fresh hand-off — it re-mints a
  * code and replaces this frame's document — and hold a spinner until that happens.
  */
+const EMBED_REFRESH_ATTEMPTS = 4
+const EMBED_REFRESH_INTERVAL_MS = 6000
+
+/** Shown once the dashboard has had several chances to re-mint and the frame is still unauthorized. */
+function EmbedSessionUnavailable() {
+  return (
+    <div className="flex min-h-screen items-center justify-center bg-white px-4 text-slate-900 dark:bg-[#030507] dark:text-white">
+      <div className="flex max-w-sm flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-white px-6 py-6 text-center shadow-[0_16px_40px_-30px_rgba(15,23,42,0.35)] dark:border-[#1d1d23] dark:bg-[#111318] dark:shadow-none">
+        <p className="text-sm font-medium text-slate-900 dark:text-white">Couldn't restore your routing session</p>
+        <p className="text-sm text-slate-600 dark:text-[#c7cfdb]">
+          Reopen Routing from the dashboard to continue.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 function EmbedSessionRefresh() {
+  const [exhausted, setExhausted] = useState(false)
   useEffect(() => {
     // Keep asking while this screen is up: the dashboard throttles re-mints, so a single message
-    // landing inside its cool-down would be dropped with nothing left to retry.
+    // landing inside its cool-down would be dropped with nothing left to retry. A successful
+    // re-mint replaces this frame's document, unmounting us — so the cap only bites when the
+    // session genuinely cannot be restored, instead of reposting forever.
+    let attempts = 1
     postToDashboard({ type: 'de:session-expired' })
-    const timer = window.setInterval(() => postToDashboard({ type: 'de:session-expired' }), 6000)
+    const timer = window.setInterval(() => {
+      attempts += 1
+      postToDashboard({ type: 'de:session-expired' })
+      if (attempts >= EMBED_REFRESH_ATTEMPTS) {
+        window.clearInterval(timer)
+        setExhausted(true)
+      }
+    }, EMBED_REFRESH_INTERVAL_MS)
     return () => window.clearInterval(timer)
   }, [])
-  return <SessionSpinner label="Refreshing your routing session" />
+  return exhausted ? <EmbedSessionUnavailable /> : <SessionSpinner label="Refreshing your routing session" />
 }
 
 // An HS-redirect (SSO) session has a synthetic user with no password, so the DE login page is a
@@ -133,6 +161,9 @@ export function AuthGuard() {
       // A redirect session can't recover on /login (synthetic user, no password) — the effect
       // above also latches this, but guard here so the first render doesn't flash /login.
       if (user?.isRedirectSession) return <RedirectSessionExpired />
+      // A password login cannot happen inside the dashboard's pane, so ask for a re-mint instead
+      // of rendering /login in the frame.
+      if (isEmbedded()) return <EmbedSessionRefresh />
       return <Navigate to="/login" replace />
     }
     // Transient failure (network/5xx): keep the session, let the user through.

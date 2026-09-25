@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown, Search, Check, X, MoreVertical, type LucideIcon } from 'lucide-react'
+import { useCloseOnFrameBlur } from '../../hooks/useCloseOnFrameBlur'
 
 /**
  * A column header that doubles as its own filter. `all` is the unfiltered state; any other value
@@ -22,6 +23,8 @@ export function HeaderFilter({
   const [open, setOpen] = useState(false)
   const isFiltered = value !== 'all'
   const current = options.find((o) => o.value === value)
+
+  useCloseOnFrameBlur(open, () => setOpen(false))
 
   return (
     <div className="relative inline-flex">
@@ -167,6 +170,8 @@ export function RowMenu({ items }: { items: RowMenuItem[] }) {
       window.removeEventListener('scroll', onReflow, true)
     }
   }, [open])
+
+  useCloseOnFrameBlur(open, () => setOpen(false))
 
   function toggle() {
     if (open) { setOpen(false); return }
