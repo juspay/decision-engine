@@ -3,6 +3,7 @@ import { AnalyticsRangeValue } from '../../types/api'
 import { Button } from './Button'
 import { DateRangeCalendar } from './DateRangeCalendar'
 import { RANGE_OPTIONS, customWindowFrom, formatWindowLabel } from '../../lib/timeRange'
+import { useCloseOnFrameBlur } from '../../hooks/useCloseOnFrameBlur'
 
 type TimeRangeFilterProps = {
   range: AnalyticsRangeValue
@@ -50,6 +51,8 @@ export function TimeRangeFilter({
       document.removeEventListener('keydown', handleEscape)
     }
   }, [open])
+
+  useCloseOnFrameBlur(open, () => setOpen(false))
 
   // A page can drop out of custom on its own (a URL change, a reset); the popover follows.
   useEffect(() => {

@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
 import type { GatewayOption } from '../../lib/connectors'
+import { useCloseOnFrameBlur } from '../../hooks/useCloseOnFrameBlur'
 
 const MAX_LIST_HEIGHT = 272
 const MIN_LIST_HEIGHT = 160
@@ -74,6 +75,8 @@ export function GatewaySelect({
     document.addEventListener('mousedown', onOutside)
     return () => document.removeEventListener('mousedown', onOutside)
   }, [open])
+
+  useCloseOnFrameBlur(open, close)
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'ArrowDown') {

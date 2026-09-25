@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
+import { useCloseOnFrameBlur } from '../../hooks/useCloseOnFrameBlur'
 
 interface Option {
   value: string
@@ -89,6 +90,8 @@ export function SearchableSelect({
       document.removeEventListener('keydown', onKey)
     }
   }, [open])
+
+  useCloseOnFrameBlur(open, close)
 
   function close() {
     setOpen(false)
