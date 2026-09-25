@@ -44,3 +44,14 @@ const embedded = capture()
 export function isEmbedded(): boolean {
   return embedded
 }
+
+/**
+ * Inset classes for a full-bleed overlay. Standalone, an overlay has to clear this app's own
+ * chrome (16rem sidebar, 76px top bar); embedded, the dashboard renders that chrome outside the
+ * iframe, so reserving the same space leaves the overlay short of the frame on two sides.
+ * Pass false for overlays that already span the full width.
+ */
+export function overlayInsetClass(clearsSidebar = true): string {
+  if (embedded) return 'inset-0'
+  return clearsSidebar ? 'bottom-0 left-64 right-0 top-[76px]' : 'bottom-0 left-0 right-0 top-[76px]'
+}
