@@ -39,6 +39,7 @@ import {
 } from '../../hooks/useCostRouting'
 import { describeRoutingEvent, useRoutingEvents } from '../../hooks/useRoutingEvents'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
+import { overlayInsetClass } from '../../lib/embedMode'
 import { Play, Pause, RefreshCw, ChevronDown, ChevronUp, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings, ArrowRightLeft, Target, TrendingDown, Flag, SlidersHorizontal } from 'lucide-react'
 
 import { PageHeading } from '../ui/PageHeading'
@@ -6000,7 +6001,7 @@ export function DecisionSimulatorPage() {
       )}
 
       {setupPrompt && (
-        <div className="fixed bottom-0 left-0 right-0 top-[76px] z-[140] flex items-center justify-center p-4">
+        <div className={`fixed ${overlayInsetClass(false)} z-[140] flex items-center justify-center p-4`}>
           <button
             type="button"
             aria-label="Close setup prompt"
@@ -6063,7 +6064,7 @@ export function DecisionSimulatorPage() {
       )}
 
       {selectedAuditPaymentId && (
-        <div className="fixed bottom-0 left-64 right-0 top-[76px] z-[130] p-8">
+        <div className={`fixed ${overlayInsetClass()} z-[130] p-8`}>
           <button
             type="button"
             aria-label="Close payment audit"
@@ -6291,7 +6292,7 @@ export function DecisionSimulatorPage() {
       )}
 
       {selectedPreviewPaymentId && (
-        <div className="fixed bottom-0 left-64 right-0 top-[76px] z-[130] p-8">
+        <div className={`fixed ${overlayInsetClass()} z-[130] p-8`}>
           <button
             type="button"
             aria-label="Close decision trace"

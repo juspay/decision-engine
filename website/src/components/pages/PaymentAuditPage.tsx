@@ -3,6 +3,7 @@ import useSWR from 'swr'
 import { useSearchParams } from 'react-router-dom'
 import { ArrowLeft, RefreshCw, Search as SearchIcon, SlidersHorizontal } from 'lucide-react'
 import { fetcher } from '../../lib/api'
+import { shellHeightClass } from '../../lib/embedMode'
 import {
   AnalyticsGatewayScoresResponse,
   AnalyticsRangeValue,
@@ -857,10 +858,11 @@ export function PaymentAuditPage() {
     syncSearch(range, page, appliedFilters, undefined, customWindow)
   }
 
-  // Full-height column so the two panels fill the shell (78px top bar + main's vertical padding)
+  // Full-height column so the two panels fill the shell (top bar, which embed mode hides, plus
+  // main's vertical padding — see shellHeightClass)
   // and scroll internally, as they did before the header moved into the page.
   return (
-    <div className="flex min-h-[620px] flex-col gap-5 xl:h-[calc(100vh-140px)]">
+    <div className={`flex min-h-[620px] flex-col gap-5 ${shellHeightClass()}`}>
       {/* The mock draws these controls in an app-wide bar; the shell already owns that strip, so the
           time range lives at the top of the page's own content instead. */}
       <div className="grid grid-cols-1 items-center gap-3 xl:grid-cols-[1fr_auto]">
