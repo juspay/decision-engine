@@ -661,6 +661,18 @@ pub enum GatewayDeciderApproach {
     /// A volume-contract nudge moved the payment off the SR head — the volume-driven sibling of
     /// [`Self::SrSelectionMultiObjective`].
     SrSelectionVolumeCommitment,
+    /// The caller's preferredConnector was functional and pinned: SR reordering was skipped,
+    /// only outage/elimination could demote it.
+    #[serde(alias = "PREFERRED_GATEWAY_ROUTING")]
+    PreferredConnectorRouting,
+    /// Preferred-connector pin with downtime relabeling — its label token is kept (like the SR family
+    /// keeps V3) so feedback admission of pinned traffic survives elimination events.
+    #[serde(alias = "PREFERRED_GATEWAY_ALL_DOWNTIME_ROUTING")]
+    PreferredConnectorAllDowntimeRouting,
+    #[serde(alias = "PREFERRED_GATEWAY_DOWNTIME_ROUTING")]
+    PreferredConnectorDowntimeRouting,
+    #[serde(alias = "PREFERRED_GATEWAY_GLOBAL_DOWNTIME_ROUTING")]
+    PreferredConnectorGlobalDowntimeRouting,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -1016,7 +1028,12 @@ pub struct PaymentInfo {
     customer_id: Option<ETCu::CustomerId>,
     #[serde(default, deserialize_with = "deserialize_optional_udfs_to_hashmap")]
     udfs: Option<UDFs>,
-    preferred_gateway: Option<String>,
+    // Keep the legacy singular request field as a fallback during rollout.
+    #[serde(rename = "preferredGateway", skip_serializing_if = "Option::is_none")]
+    legacy_preferred_connector: Option<String>,
+    /// Ordered connector:account preferences supplied by orchestration; the first entry wins.
+    #[serde(alias = "preferredGateways", skip_serializing_if = "Option::is_none")]
+    preferred_connector: Option<Vec<String>>,
     payment_type: TxnObjectType,
     pub metadata: Option<String>,
     internal_metadata: Option<String>,
@@ -1106,7 +1123,7 @@ impl DomainDeciderRequestForApiCallV2 {
                     .udfs
                     .clone()
                     .unwrap_or(UDFs(HashMap::new())),
-                preferredGateway: self.payment_info.preferred_gateway.clone(),
+                preferredGateway: self.payment_info.preferred_connector_for_routing(),
                 productId: None,
                 orderType: ETO::OrderType::from_txn_object_type(
                     self.payment_info.payment_type.clone(),
@@ -1603,6 +1620,16 @@ impl fmt::Display for GatewayDeciderApproach {
             Self::SrSelectionVolumeCommitment => {
                 write!(f, "SR_SELECTION_VOLUME_COMMITMENT")
             }
+            Self::PreferredConnectorRouting => write!(f, "PREFERRED_CONNECTOR_ROUTING"),
+            Self::PreferredConnectorAllDowntimeRouting => {
+                write!(f, "PREFERRED_CONNECTOR_ALL_DOWNTIME_ROUTING")
+            }
+            Self::PreferredConnectorDowntimeRouting => {
+                write!(f, "PREFERRED_CONNECTOR_DOWNTIME_ROUTING")
+            }
+            Self::PreferredConnectorGlobalDowntimeRouting => {
+                write!(f, "PREFERRED_CONNECTOR_GLOBAL_DOWNTIME_ROUTING")
+            }
         }
     }
 }
@@ -2067,4 +2094,91 @@ pub struct MetricEntry {
 pub struct SrMetrics {
     pub dimension: String,
     pub value: MetricEntry,
+}
+
+impl PaymentInfo {
+    fn preferred_connector_for_routing(&self) -> Option<String> {
+        self.preferred_connector
+            .as_ref()
+            .and_then(|connectors| connectors.first().cloned())
+            .or_else(|| self.legacy_preferred_connector.clone())
+    }
+}
+
+#[cfg(test)]
+mod preferred_connector_contract_tests {
+    use super::{GatewayDeciderApproach, PaymentInfo};
+    use serde_json::json;
+
+    #[test]
+    fn canonical_and_legacy_contracts_select_the_first_connector() -> Result<(), serde_json::Error>
+    {
+        for field in [
+            "preferredConnector",
+            "preferredGateways",
+            "preferredGateway",
+        ] {
+            let mut value = json!({"paymentId":"pay_test", "amount":100, "currency":"CAD",
+                "paymentType":"ORDER_PAYMENT", "paymentMethodType":"interac", "paymentMethod":"bank_redirect"});
+            value[field] = if field == "preferredGateway" {
+                json!("loonio:mca_one")
+            } else {
+                json!(["loonio:mca_one", "gigadat:mca_two"])
+            };
+            let info: PaymentInfo = serde_json::from_value(value)?;
+            assert_eq!(
+                info.preferred_connector_for_routing().as_deref(),
+                Some("loonio:mca_one")
+            );
+            if field != "preferredGateway" {
+                let serialized = serde_json::to_value(info)?;
+                assert_eq!(
+                    serialized.get("preferredConnector"),
+                    Some(&json!(["loonio:mca_one", "gigadat:mca_two"]))
+                );
+                assert!(serialized.get("preferredGateways").is_none());
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn canonical_preference_takes_priority_and_empty_array_uses_legacy_fallback(
+    ) -> Result<(), serde_json::Error> {
+        let base = json!({"paymentId":"pay_test", "amount":100, "currency":"CAD", "paymentType":"ORDER_PAYMENT", "paymentMethodType":"interac", "paymentMethod":"bank_redirect"});
+        let no_preference: PaymentInfo = serde_json::from_value(base.clone())?;
+        assert_eq!(no_preference.preferred_connector_for_routing(), None);
+        for (connectors, expected) in [
+            (json!(["loonio:mca_one"]), "loonio:mca_one"),
+            (json!([]), "gigadat:mca_two"),
+        ] {
+            let mut value = base.clone();
+            value["preferredConnector"] = connectors;
+            value["preferredGateway"] = json!("gigadat:mca_two");
+            let info: PaymentInfo = serde_json::from_value(value)?;
+            assert_eq!(
+                info.preferred_connector_for_routing().as_deref(),
+                Some(expected)
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn routing_labels_accept_legacy_names_and_serialize_connector_names(
+    ) -> Result<(), serde_json::Error> {
+        for suffix in [
+            "ROUTING",
+            "ALL_DOWNTIME_ROUTING",
+            "DOWNTIME_ROUTING",
+            "GLOBAL_DOWNTIME_ROUTING",
+        ] {
+            let old = format!("PREFERRED_GATEWAY_{suffix}");
+            let new = format!("PREFERRED_CONNECTOR_{suffix}");
+            let approach: GatewayDeciderApproach = serde_json::from_value(json!(old))?;
+            assert_eq!(approach.to_string(), new);
+            assert_eq!(serde_json::to_value(approach)?, json!(new));
+        }
+        Ok(())
+    }
 }

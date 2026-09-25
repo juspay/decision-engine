@@ -188,6 +188,7 @@ pub async fn scoring_flow(
     gateway_priority_list: Vec<String>,
     ranking_algorithm: Option<RankingAlgorithm>,
     elimination_enabled: Option<bool>,
+    functional_preferred_connector: Option<String>,
 ) -> GatewayScoreMap {
     let merchant = decider_flow.get().dpMerchantAccount.clone();
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
@@ -236,7 +237,11 @@ pub async fn scoring_flow(
             isMerchantEnabledForPaymentFlows(merchant.id, vec![PaymentFlow::SrBasedRouting]).await
                 || ranking_algorithm == Some(RankingAlgorithm::SrBasedRouting);
 
-        let is_sr_v3_metric_enabled = if is_merchant_enabled_for_sr_based_routing {
+        // A functional preferred gateway pins the order: SR must not reorder,
+        // while outage/elimination below keep their veto.
+        let is_sr_v3_metric_enabled = if is_merchant_enabled_for_sr_based_routing
+            && functional_preferred_connector.is_none()
+        {
             let is_sr_v3_metric_enabled = is_feature_enabled(
                 C::enable_gateway_selection_based_on_sr_v3_input(pmt_str.clone()).get_key(),
                 Utils::get_m_id(merchant.merchantId.clone()),
@@ -458,7 +463,14 @@ pub async fn scoring_flow(
                 Utils::get_m_id(merchant.merchantId.clone()),
                 txn_detail.txnId.clone()
             );
-            set_decider_approach(decider_flow, GatewayDeciderApproach::PriorityLogic);
+            if functional_preferred_connector.is_some() {
+                set_decider_approach(
+                    decider_flow,
+                    GatewayDeciderApproach::PreferredConnectorRouting,
+                );
+            } else {
+                set_decider_approach(decider_flow, GatewayDeciderApproach::PriorityLogic);
+            }
             let gateway_score =
                 get_score_with_priority(functional_gateways.clone(), gateway_priority_list.clone());
             set_gwsm(decider_flow, gateway_score.clone());

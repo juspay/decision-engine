@@ -5191,11 +5191,21 @@
             },
             "description": "Positional user-defined fields."
           },
+          "preferredConnector": {
+            "type": ["array", "null"],
+            "items": { "type": "string" },
+            "description": "Ordered connector:mca_id preferences from the customer's profile-scoped history. The first entry is considered; health and eligibility checks still apply."
+          },
+          "preferredGateways": {
+            "type": ["array", "null"],
+            "items": { "type": "string" },
+            "deprecated": true,
+            "description": "Compatibility alias for preferredConnector. Send only one of these array fields."
+          },
           "preferredGateway": {
-            "type": [
-              "string",
-              "null"
-            ]
+            "type": ["string", "null"],
+            "deprecated": true,
+            "description": "Legacy singular fallback when no non-empty preferredConnector array is provided."
           },
           "metadata": {
             "type": [
