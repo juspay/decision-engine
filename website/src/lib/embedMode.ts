@@ -55,3 +55,12 @@ export function overlayInsetClass(clearsSidebar = true): string {
   if (embedded) return 'inset-0'
   return clearsSidebar ? 'bottom-0 left-64 right-0 top-[76px]' : 'bottom-0 left-0 right-0 top-[76px]'
 }
+
+/**
+ * Height class for a page that fills the shell. Standalone the scroller also holds the 78px top
+ * bar, so the page subtracts that plus main's 56px of vertical padding (and keeps 6px of slack);
+ * embedded there is no top bar, so subtracting it too leaves a dead band at the foot of the frame.
+ */
+export function shellHeightClass(): string {
+  return embedded ? 'xl:h-[calc(100vh-62px)]' : 'xl:h-[calc(100vh-140px)]'
+}
