@@ -1335,17 +1335,17 @@ pub fn modify_gateway_decider_approach(
         // The preferred-gateway family keeps its label token under downtime relabeling (as the SR
         // family keeps V3): feedback admission of pinned traffic must survive
         // elimination events, which fire whenever ANY sibling is below threshold.
-        types::GatewayDeciderApproach::PreferredGatewayRouting => match down_time {
+        types::GatewayDeciderApproach::PreferredConnectorRouting => match down_time {
             types::DownTime::AllDowntime => {
-                types::GatewayDeciderApproach::PreferredGatewayAllDowntimeRouting
+                types::GatewayDeciderApproach::PreferredConnectorAllDowntimeRouting
             }
             types::DownTime::GlobalDowntime => {
-                types::GatewayDeciderApproach::PreferredGatewayGlobalDowntimeRouting
+                types::GatewayDeciderApproach::PreferredConnectorGlobalDowntimeRouting
             }
             types::DownTime::Downtime => {
-                types::GatewayDeciderApproach::PreferredGatewayDowntimeRouting
+                types::GatewayDeciderApproach::PreferredConnectorDowntimeRouting
             }
-            types::DownTime::NoDowntime => types::GatewayDeciderApproach::PreferredGatewayRouting,
+            types::DownTime::NoDowntime => types::GatewayDeciderApproach::PreferredConnectorRouting,
         },
         _ => match down_time {
             types::DownTime::AllDowntime => types::GatewayDeciderApproach::PlAllDowntimeRouting,

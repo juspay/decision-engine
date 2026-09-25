@@ -568,7 +568,7 @@ pub async fn run_decider_flow(
                 gatewayPriorityList
             );
 
-            let preferred_gateway_candidate = preferredGateway.clone();
+            let preferred_connector_candidate = preferredGateway.clone();
 
             let (mut functionalGateways, updatedPriorityLogicOutput) = if gwPLogic.is_enforcement {
                 logger::info!(
@@ -629,16 +629,16 @@ pub async fn run_decider_flow(
 
             // A preferred gateway is honored only while it stays functional; it heads the
             // priority order and switches scoring to the pinned (no-SR-reorder) mode.
-            let functional_preferred_gateway = preferred_gateway_candidate
+            let functional_preferred_connector = preferred_connector_candidate
                 .filter(|preferred| uniqueFunctionalGateways.contains(preferred));
             // A functional preference implies the elimination veto and its feedback
             // score production, without the caller having to ask for it.
-            if functional_preferred_gateway.is_some() {
+            if functional_preferred_connector.is_some() {
                 eliminationEnabled = Some(true);
             }
             let scoring_priority_list = add_preferred_gateways_to_priority_list(
                 updatedPriorityLogicOutput.gws.clone(),
-                functional_preferred_gateway.clone(),
+                functional_preferred_connector.clone(),
             );
 
             let mut currentGatewayScoreMap = GS::scoring_flow(
@@ -647,7 +647,7 @@ pub async fn run_decider_flow(
                 scoring_priority_list,
                 rankingAlgorithm,
                 eliminationEnabled,
-                functional_preferred_gateway.clone(),
+                functional_preferred_connector.clone(),
             )
             .await;
 
@@ -655,7 +655,7 @@ pub async fn run_decider_flow(
             // outage/elimination divided it. The 0.1-step ladder makes a divided pin
             // (1.0/5 = 0.2) still outrank healthy connectors from the 10th position on;
             // floor it below the whole map so a demoted pin never wins on that artifact.
-            if let Some(pin) = &functional_preferred_gateway {
+            if let Some(pin) = &functional_preferred_connector {
                 if currentGatewayScoreMap
                     .get(pin)
                     .is_some_and(|score| *score < 1.0)
@@ -746,7 +746,7 @@ pub async fn run_decider_flow(
 
                     let mut cost_fallbacks_override: Option<Vec<String>> = None;
                     // A pinned payment must not be re-steered by cost or volume goals.
-                    if multi_obj_on && !hedging_on && functional_preferred_gateway.is_none() {
+                    if multi_obj_on && !hedging_on && functional_preferred_connector.is_none() {
                         // An A/B arm can override the EV margin (the auth↔cost dial); otherwise
                         // load it from the merchant SR config (default 1.0 ≈ auth-dominant).
                         let margin = match decider_flow
@@ -787,7 +787,7 @@ pub async fn run_decider_flow(
                     // Volume-commitment nudge runs last on its own flag; fails open when flag,
                     // deps or plan is absent. Under hedging the flag is not even read.
                     let volume_commitment_on = !hedging_on
-                        && functional_preferred_gateway.is_none()
+                        && functional_preferred_connector.is_none()
                         && is_feature_enabled(
                             volume_commitment::FEATURE_FLAG.to_string(),
                             merchant_id_text.clone(),
