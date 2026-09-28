@@ -661,13 +661,9 @@ pub enum GatewayDeciderApproach {
     /// A volume-contract nudge moved the payment off the SR head — the volume-driven sibling of
     /// [`Self::SrSelectionMultiObjective`].
     SrSelectionVolumeCommitment,
-    #[serde(alias = "PREFERRED_GATEWAY_ROUTING")]
     PreferredConnectorRouting,
-    #[serde(alias = "PREFERRED_GATEWAY_ALL_DOWNTIME_ROUTING")]
     PreferredConnectorAllDowntimeRouting,
-    #[serde(alias = "PREFERRED_GATEWAY_DOWNTIME_ROUTING")]
     PreferredConnectorDowntimeRouting,
-    #[serde(alias = "PREFERRED_GATEWAY_GLOBAL_DOWNTIME_ROUTING")]
     PreferredConnectorGlobalDowntimeRouting,
 }
 
@@ -2097,6 +2093,7 @@ impl PaymentInfo {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic_in_result_fn)]
 mod preferred_connectors_contract_tests {
     use super::{GatewayDeciderApproach, PaymentInfo};
     use serde_json::json;
@@ -2117,19 +2114,11 @@ mod preferred_connectors_contract_tests {
             serialized.get("preferredConnectors"),
             Some(&json!(["loonio:mca_one", "gigadat:mca_two"]))
         );
-        for removed_field in [
-            "preferredConnector",
-            "preferredGateways",
-            "preferredGateway",
-        ] {
-            assert!(serialized.get(removed_field).is_none());
-        }
         Ok(())
     }
 
     #[test]
-    fn absent_empty_and_removed_fields_do_not_select_a_connector() -> Result<(), serde_json::Error>
-    {
+    fn absent_and_empty_fields_do_not_select_a_connector() -> Result<(), serde_json::Error> {
         let base = json!({"paymentId":"pay_test", "amount":100, "currency":"CAD", "paymentType":"ORDER_PAYMENT", "paymentMethodType":"interac", "paymentMethod":"bank_redirect"});
         let no_preference: PaymentInfo = serde_json::from_value(base.clone())?;
         assert_eq!(no_preference.preferred_connector_for_routing(), None);
@@ -2138,38 +2127,21 @@ mod preferred_connectors_contract_tests {
         empty["preferredConnectors"] = json!([]);
         let empty: PaymentInfo = serde_json::from_value(empty)?;
         assert_eq!(empty.preferred_connector_for_routing(), None);
-
-        for removed_field in [
-            "preferredConnector",
-            "preferredGateways",
-            "preferredGateway",
-        ] {
-            let mut value = base.clone();
-            value[removed_field] = if removed_field == "preferredGateway" {
-                json!("gigadat:mca_two")
-            } else {
-                json!(["gigadat:mca_two"])
-            };
-            let info: PaymentInfo = serde_json::from_value(value)?;
-            assert_eq!(info.preferred_connector_for_routing(), None);
-        }
         Ok(())
     }
 
     #[test]
-    fn routing_labels_accept_legacy_names_and_serialize_connector_names(
-    ) -> Result<(), serde_json::Error> {
+    fn routing_labels_use_only_connector_names() -> Result<(), serde_json::Error> {
         for suffix in [
             "ROUTING",
             "ALL_DOWNTIME_ROUTING",
             "DOWNTIME_ROUTING",
             "GLOBAL_DOWNTIME_ROUTING",
         ] {
-            let old = format!("PREFERRED_GATEWAY_{suffix}");
-            let new = format!("PREFERRED_CONNECTOR_{suffix}");
-            let approach: GatewayDeciderApproach = serde_json::from_value(json!(old))?;
-            assert_eq!(approach.to_string(), new);
-            assert_eq!(serde_json::to_value(approach)?, json!(new));
+            let label = format!("PREFERRED_CONNECTOR_{suffix}");
+            let approach: GatewayDeciderApproach = serde_json::from_value(json!(label.clone()))?;
+            assert_eq!(approach.to_string(), label);
+            assert_eq!(serde_json::to_value(approach)?, json!(label));
         }
         Ok(())
     }

@@ -1166,7 +1166,6 @@ pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
             text.contains("V3")
                 || text.contains("MULTI_OBJECTIVE")
                 || text.contains("PREFERRED_CONNECTOR")
-                || text.contains("PREFERRED_GATEWAY")
         }
         None => false,
     }
@@ -1185,7 +1184,6 @@ pub fn is_routing_approach_in_explore(maybe_text: Option<String>) -> bool {
             text.contains("HEDGING")
                 || text.contains("MULTI_OBJECTIVE")
                 || text.contains("PREFERRED_CONNECTOR")
-                || text.contains("PREFERRED_GATEWAY")
         }
         None => false,
     }
@@ -1554,18 +1552,16 @@ mod preferred_connector_feedback_tests {
     use super::{is_routing_approach_in_explore, is_routing_approach_in_srv3};
 
     #[test]
-    fn current_and_legacy_pins_keep_training_scores_during_downtime() {
-        for prefix in ["PREFERRED_CONNECTOR", "PREFERRED_GATEWAY"] {
-            for suffix in [
-                "ROUTING",
-                "ALL_DOWNTIME_ROUTING",
-                "DOWNTIME_ROUTING",
-                "GLOBAL_DOWNTIME_ROUTING",
-            ] {
-                let label = format!("{prefix}_{suffix}");
-                assert!(is_routing_approach_in_srv3(Some(label.clone())));
-                assert!(is_routing_approach_in_explore(Some(label)));
-            }
+    fn preferred_connector_pins_keep_training_scores_during_downtime() {
+        for suffix in [
+            "ROUTING",
+            "ALL_DOWNTIME_ROUTING",
+            "DOWNTIME_ROUTING",
+            "GLOBAL_DOWNTIME_ROUTING",
+        ] {
+            let label = format!("PREFERRED_CONNECTOR_{suffix}");
+            assert!(is_routing_approach_in_srv3(Some(label.clone())));
+            assert!(is_routing_approach_in_explore(Some(label)));
         }
     }
 }

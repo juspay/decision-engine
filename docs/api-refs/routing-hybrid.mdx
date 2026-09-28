@@ -93,5 +93,5 @@ checks remain active. Responses use `PREFERRED_CONNECTOR_ROUTING` or its
 `PREFERRED_CONNECTOR_*_DOWNTIME_ROUTING` variants. Stale or ineligible preferences
 fall through to normal routing.
 
-Feedback accepts both old `PREFERRED_GATEWAY_*` and new `PREFERRED_CONNECTOR_*`
-labels so in-flight payments continue updating scores.
+Feedback recognizes `PREFERRED_CONNECTOR_*` labels so preferred-routing outcomes
+continue updating scores.
