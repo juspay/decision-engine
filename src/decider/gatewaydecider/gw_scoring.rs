@@ -237,8 +237,6 @@ pub async fn scoring_flow(
             isMerchantEnabledForPaymentFlows(merchant.id, vec![PaymentFlow::SrBasedRouting]).await
                 || ranking_algorithm == Some(RankingAlgorithm::SrBasedRouting);
 
-        // A functional preferred gateway pins the order: SR must not reorder,
-        // while outage/elimination below keep their veto.
         let is_sr_v3_metric_enabled = if is_merchant_enabled_for_sr_based_routing
             && functional_preferred_connector.is_none()
         {

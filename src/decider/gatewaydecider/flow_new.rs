@@ -486,13 +486,7 @@ pub async fn run_decider_flow(
         preferredGateway.clone(),
         deciderParams.dpMerchantPrefs.dynamicSwitchingEnabled,
     ) {
-        // A non-functional preference falls through to the `_` arm (the no-preference
-        // flow) instead of hard-failing: on the V2 path dynamicSwitchingEnabled is
-        // synthesized from the eligible-list size, so this arm firing must never make
-        // a routable payment error with GATEWAY_NOT_FOUND.
         (Some(pgw), false) if functionalGateways.contains(&pgw) => {
-            // A functional preference implies the elimination veto and its feedback
-            // score production, without the caller having to ask for it.
             eliminationEnabled = Some(true);
             Utils::log_gateway_decider_approach(
                 &mut decider_flow,
@@ -627,12 +621,8 @@ pub async fn run_decider_flow(
             //     updatedPriorityLogicOutput.gws.clone(),
             // );
 
-            // A preferred gateway is honored only while it stays functional; it heads the
-            // priority order and switches scoring to the pinned (no-SR-reorder) mode.
             let functional_preferred_connector = preferred_connector_candidate
                 .filter(|preferred| uniqueFunctionalGateways.contains(preferred));
-            // A functional preference implies the elimination veto and its feedback
-            // score production, without the caller having to ask for it.
             if functional_preferred_connector.is_some() {
                 eliminationEnabled = Some(true);
             }
@@ -651,10 +641,6 @@ pub async fn run_decider_flow(
             )
             .await;
 
-            // The pin heads the priority ladder at exactly 1.0, so any lower score means
-            // outage/elimination divided it. The 0.1-step ladder makes a divided pin
-            // (1.0/5 = 0.2) still outrank healthy connectors from the 10th position on;
-            // floor it below the whole map so a demoted pin never wins on that artifact.
             if let Some(pin) = &functional_preferred_connector {
                 if currentGatewayScoreMap
                     .get(pin)
@@ -745,7 +731,6 @@ pub async fn run_decider_flow(
                     );
 
                     let mut cost_fallbacks_override: Option<Vec<String>> = None;
-                    // A pinned payment must not be re-steered by cost or volume goals.
                     if multi_obj_on && !hedging_on && functional_preferred_connector.is_none() {
                         // An A/B arm can override the EV margin (the auth↔cost dial); otherwise
                         // load it from the merchant SR config (default 1.0 ≈ auth-dominant).

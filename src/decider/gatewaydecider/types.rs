@@ -661,12 +661,8 @@ pub enum GatewayDeciderApproach {
     /// A volume-contract nudge moved the payment off the SR head — the volume-driven sibling of
     /// [`Self::SrSelectionMultiObjective`].
     SrSelectionVolumeCommitment,
-    /// The caller's preferredConnectors entry was functional and pinned: SR reordering was skipped,
-    /// only outage/elimination could demote it.
     #[serde(alias = "PREFERRED_GATEWAY_ROUTING")]
     PreferredConnectorRouting,
-    /// Preferred-connector pin with downtime relabeling — its label token is kept (like the SR family
-    /// keeps V3) so feedback admission of pinned traffic survives elimination events.
     #[serde(alias = "PREFERRED_GATEWAY_ALL_DOWNTIME_ROUTING")]
     PreferredConnectorAllDowntimeRouting,
     #[serde(alias = "PREFERRED_GATEWAY_DOWNTIME_ROUTING")]
@@ -1028,7 +1024,6 @@ pub struct PaymentInfo {
     customer_id: Option<ETCu::CustomerId>,
     #[serde(default, deserialize_with = "deserialize_optional_udfs_to_hashmap")]
     udfs: Option<UDFs>,
-    /// Ordered connector:account preferences supplied by orchestration; the first entry wins.
     #[serde(skip_serializing_if = "Option::is_none")]
     preferred_connectors: Option<Vec<String>>,
     payment_type: TxnObjectType,
