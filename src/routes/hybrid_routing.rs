@@ -6,7 +6,7 @@ use crate::analytics::{
 use crate::decider::gatewaydecider::flow_new::{
     decider_full_payload_hs_function, store_scoring_context_without_decider,
 };
-use crate::decider::gatewaydecider::types::DecidedGateway;
+use crate::decider::gatewaydecider::types::{DecidedGateway, DomainDeciderRequestForApiCallV2};
 use crate::error::ContainerError;
 use crate::euclid::ast::ConnectorInfo;
 use crate::euclid::errors::EuclidErrors;
@@ -197,11 +197,17 @@ pub async fn hybrid_routing_evaluate(
         .with_label_values(&["hybrid_routing_evaluate"])
         .inc();
 
-    let recorded_request = payload.clone();
     let HybridRoutingRequest {
         static_routing_request,
-        dynamic_routing_request,
+        dynamic_routing_request: _,
     } = payload;
+    let dynamic_routing_request = static_routing_request
+        .as_ref()
+        .map(DomainDeciderRequestForApiCallV2::from);
+    let recorded_request = HybridRoutingRequest {
+        static_routing_request: static_routing_request.clone(),
+        dynamic_routing_request: dynamic_routing_request.clone(),
+    };
 
     let request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
