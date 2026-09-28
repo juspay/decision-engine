@@ -86,7 +86,7 @@ you have. The BIN (`cardIsin`) is what makes card-aware routing work.
 | `currency` | enum | yes | ISO code, e.g. `USD`, `INR`. |
 | `country` | string | optional | ISO-2, e.g. `US`. |
 | `customerId` | string | optional | |
-| `preferredGateway` | string | optional | Hint a specific gateway. |
+| `preferredConnectors` | string[] \| null | optional | Ordered `connector:mca_id` routing hints. The first entry is considered. |
 | `paymentType` | enum | yes | Usually `ORDER_PAYMENT`. Also `MANDATE_PAYMENT`, `MANDATE_REGISTER`, `TPV_PAYMENT`, etc. |
 | `paymentMethodType` | string | yes | `CARD` for card flows. |
 | `paymentMethod` | string | yes | `CREDIT` or `DEBIT` (or `NET_BANKING`, `WALLET`, …). |
@@ -99,6 +99,10 @@ you have. The BIN (`cardIsin`) is what makes card-aware routing work.
 | `isEmi` / `emiBank` / `emiTenure` | bool/string/int | optional | EMI payments. |
 | `udfs` | string[] | optional | User-defined fields. |
 | `cardSwitchProvider` | string | optional | |
+
+During rolling upgrades, `preferredConnector` and `preferredGateways` are accepted
+as array aliases, while `preferredGateway` remains a legacy singular fallback.
+New integrations should send only `preferredConnectors`.
 
 ### decide-gateway response
 
