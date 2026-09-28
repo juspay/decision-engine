@@ -100,10 +100,6 @@ you have. The BIN (`cardIsin`) is what makes card-aware routing work.
 | `udfs` | string[] | optional | User-defined fields. |
 | `cardSwitchProvider` | string | optional | |
 
-During rolling upgrades, `preferredConnector` and `preferredGateways` are accepted
-as array aliases, while `preferredGateway` remains a legacy singular fallback.
-New integrations should send only `preferredConnectors`.
-
 ### decide-gateway response
 
 ```json

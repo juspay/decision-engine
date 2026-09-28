@@ -1028,15 +1028,8 @@ pub struct PaymentInfo {
     customer_id: Option<ETCu::CustomerId>,
     #[serde(default, deserialize_with = "deserialize_optional_udfs_to_hashmap")]
     udfs: Option<UDFs>,
-    // Keep the legacy singular request field as a fallback during rollout.
-    #[serde(rename = "preferredGateway", skip_serializing_if = "Option::is_none")]
-    legacy_preferred_connector: Option<String>,
     /// Ordered connector:account preferences supplied by orchestration; the first entry wins.
-    #[serde(
-        alias = "preferredConnector",
-        alias = "preferredGateways",
-        skip_serializing_if = "Option::is_none"
-    )]
+    #[serde(skip_serializing_if = "Option::is_none")]
     preferred_connectors: Option<Vec<String>>,
     payment_type: TxnObjectType,
     pub metadata: Option<String>,
@@ -2105,7 +2098,6 @@ impl PaymentInfo {
         self.preferred_connectors
             .as_ref()
             .and_then(|connectors| connectors.first().cloned())
-            .or_else(|| self.legacy_preferred_connector.clone())
     }
 }
 
@@ -2115,56 +2107,56 @@ mod preferred_connectors_contract_tests {
     use serde_json::json;
 
     #[test]
-    fn canonical_and_legacy_contracts_select_the_first_connector() -> Result<(), serde_json::Error>
-    {
-        for field in [
-            "preferredConnectors",
+    fn canonical_contract_selects_and_serializes_the_first_connector(
+    ) -> Result<(), serde_json::Error> {
+        let value = json!({"paymentId":"pay_test", "amount":100, "currency":"CAD",
+            "preferredConnectors":["loonio:mca_one", "gigadat:mca_two"],
+            "paymentType":"ORDER_PAYMENT", "paymentMethodType":"interac", "paymentMethod":"bank_redirect"});
+        let info: PaymentInfo = serde_json::from_value(value)?;
+        assert_eq!(
+            info.preferred_connector_for_routing().as_deref(),
+            Some("loonio:mca_one")
+        );
+        let serialized = serde_json::to_value(info)?;
+        assert_eq!(
+            serialized.get("preferredConnectors"),
+            Some(&json!(["loonio:mca_one", "gigadat:mca_two"]))
+        );
+        for removed_field in [
             "preferredConnector",
             "preferredGateways",
             "preferredGateway",
         ] {
-            let mut value = json!({"paymentId":"pay_test", "amount":100, "currency":"CAD",
-                "paymentType":"ORDER_PAYMENT", "paymentMethodType":"interac", "paymentMethod":"bank_redirect"});
-            value[field] = if field == "preferredGateway" {
-                json!("loonio:mca_one")
-            } else {
-                json!(["loonio:mca_one", "gigadat:mca_two"])
-            };
-            let info: PaymentInfo = serde_json::from_value(value)?;
-            assert_eq!(
-                info.preferred_connector_for_routing().as_deref(),
-                Some("loonio:mca_one")
-            );
-            if field != "preferredGateway" {
-                let serialized = serde_json::to_value(info)?;
-                assert_eq!(
-                    serialized.get("preferredConnectors"),
-                    Some(&json!(["loonio:mca_one", "gigadat:mca_two"]))
-                );
-                assert!(serialized.get("preferredGateways").is_none());
-            }
+            assert!(serialized.get(removed_field).is_none());
         }
         Ok(())
     }
 
     #[test]
-    fn canonical_preference_takes_priority_and_empty_array_uses_legacy_fallback(
-    ) -> Result<(), serde_json::Error> {
+    fn absent_empty_and_removed_fields_do_not_select_a_connector() -> Result<(), serde_json::Error>
+    {
         let base = json!({"paymentId":"pay_test", "amount":100, "currency":"CAD", "paymentType":"ORDER_PAYMENT", "paymentMethodType":"interac", "paymentMethod":"bank_redirect"});
         let no_preference: PaymentInfo = serde_json::from_value(base.clone())?;
         assert_eq!(no_preference.preferred_connector_for_routing(), None);
-        for (connectors, expected) in [
-            (json!(["loonio:mca_one"]), "loonio:mca_one"),
-            (json!([]), "gigadat:mca_two"),
+
+        let mut empty = base.clone();
+        empty["preferredConnectors"] = json!([]);
+        let empty: PaymentInfo = serde_json::from_value(empty)?;
+        assert_eq!(empty.preferred_connector_for_routing(), None);
+
+        for removed_field in [
+            "preferredConnector",
+            "preferredGateways",
+            "preferredGateway",
         ] {
             let mut value = base.clone();
-            value["preferredConnectors"] = connectors;
-            value["preferredGateway"] = json!("gigadat:mca_two");
+            value[removed_field] = if removed_field == "preferredGateway" {
+                json!("gigadat:mca_two")
+            } else {
+                json!(["gigadat:mca_two"])
+            };
             let info: PaymentInfo = serde_json::from_value(value)?;
-            assert_eq!(
-                info.preferred_connector_for_routing().as_deref(),
-                Some(expected)
-            );
+            assert_eq!(info.preferred_connector_for_routing(), None);
         }
         Ok(())
     }
