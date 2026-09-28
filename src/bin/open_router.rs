@@ -16,6 +16,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ["tower_http"],
     );
 
+    // Instruments bind to the global meter provider at first use, so this must run before anything records a metric.
+    let _metrics_guard = open_router::metrics::init(&global_config.log.telemetry)
+        .expect("Failed to set up the metrics pipeline");
+
     #[allow(clippy::expect_used)]
     global_config
         .validate()
@@ -52,12 +56,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .expect("Failed while building the main server")
     });
 
-    let metrics_server_handle = tokio::spawn(async move {
-        open_router::metrics::metrics_server_builder(global_config.clone())
-            .await
-            .expect("Failed while building the metrics server")
-    });
-
     // The pacing scheduler, on a port of its own. It owns the clock: when a merchant's forecast
     // comes due it calls the main server, which does the work.
     let volume_commitment_server_handle = tokio::spawn(async move {
@@ -70,11 +68,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     // Wait for the servers to complete (they should run indefinitely)
-    tokio::try_join!(
-        main_server_handle,
-        metrics_server_handle,
-        volume_commitment_server_handle
-    )?;
+    tokio::try_join!(main_server_handle, volume_commitment_server_handle)?;
 
     Ok(())
 }

@@ -4,15 +4,16 @@ const { spawn } = require('child_process')
 const net = require('net')
 const path = require('path')
 
-const ROOT = path.resolve(__dirname, '../..')
+const ROOT = path.resolve(__dirname, '..')
 const VALID_MODES = new Set(['source', 'docker', 'all'])
-const DEFAULT_SPEC = 'cypress/e2e/**/*.cy.js'
 const READINESS_TIMEOUT_MS = Number(process.env.E2E_READINESS_TIMEOUT_MS) || 180000
 const READINESS_INTERVAL_MS = 2000
 const KNOWN_COMPOSE_PROJECTS = [
   'decision-engine',
   'decision-engine-ui',
   'decision-engine-docs',
+  // Legacy: nothing creates this any more, but dev machines that ran the old Cypress
+  // suite can still have one lying around. Tearing it down is a no-op otherwise.
   'decision-engine-ccypress',
 ]
 const EXPECTED_CLICKHOUSE_TABLES = [
@@ -24,25 +25,16 @@ const EXPECTED_CLICKHOUSE_TABLES = [
   'analytics_payment_audit_lookup_summaries',
 ]
 
-const VALID_RUNNERS = new Set(['playwright', 'cypress'])
-
 function parseArgs() {
   const args = process.argv.slice(2)
   const mode = args[0] || 'all'
   const keepAlive = args.includes('--keep-alive')
-  const runnerArg = args.find((a) => a.startsWith('--runner='))
-  // Playwright is the default runner; Cypress (frozen) is still selectable via --runner=cypress
-  // or E2E_RUNNER=cypress for the legacy suite.
-  const runner = (runnerArg ? runnerArg.split('=')[1] : process.env.E2E_RUNNER) || 'playwright'
 
   if (!VALID_MODES.has(mode)) {
     throw new Error(`Unsupported E2E mode '${mode}'. Use source, docker, or all.`)
   }
-  if (!VALID_RUNNERS.has(runner)) {
-    throw new Error(`Unsupported E2E runner '${runner}'. Use playwright or cypress.`)
-  }
 
-  return { mode, keepAlive, runner }
+  return { mode, keepAlive }
 }
 
 function sleep(ms) {
@@ -237,29 +229,7 @@ async function waitForRuntime(runtime, processHandle = null) {
   await waitForHttpOk('Docs site', `${runtime.docsBaseUrl}/introduction`, { process: processHandle })
 }
 
-async function runCypress(runtime) {
-  console.log(`\n[${runtime.mode}] Running Cypress suite...`)
-
-  await runCommand(
-    `cypress-${runtime.mode}`,
-    'npx',
-    ['cypress', 'run', '--spec', process.env.CYPRESS_E2E_SPEC || DEFAULT_SPEC],
-    {
-      env: {
-        CYPRESS_RUNTIME_MODE: runtime.mode,
-        CYPRESS_API_BASE_URL: runtime.apiBaseUrl,
-        CYPRESS_UI_BASE_URL: runtime.uiBaseUrl,
-        CYPRESS_DOCS_BASE_URL: runtime.docsBaseUrl,
-        CYPRESS_CLICKHOUSE_HTTP_URL: runtime.clickhouseHttpUrl,
-        CYPRESS_CLICKHOUSE_DATABASE: runtime.clickhouseDatabase,
-        CYPRESS_CLICKHOUSE_USER: runtime.clickhouseUser,
-        CYPRESS_CLICKHOUSE_PASSWORD: runtime.clickhousePassword,
-      },
-    },
-  )
-}
-
-async function runPlaywright(runtime) {
+async function runTests(runtime) {
   console.log(`\n[${runtime.mode}] Running Playwright suite...`)
 
   // Pass-through for extra CLI flags (e.g. sharding in CI): PLAYWRIGHT_ARGS="--shard=1/4".
@@ -273,7 +243,6 @@ async function runPlaywright(runtime) {
     ['playwright', 'test', ...extraArgs],
     {
       env: {
-        // playwright.config.ts reads these plain env vars (no CYPRESS_ prefix).
         // This script already booted the API and dashboard, so tell Playwright not to start its own.
         PW_NO_WEBSERVER: '1',
         RUNTIME_MODE: runtime.mode,
@@ -287,13 +256,6 @@ async function runPlaywright(runtime) {
       },
     },
   )
-}
-
-async function runTests(runtime, runner) {
-  if (runner === 'cypress') {
-    return runCypress(runtime)
-  }
-  return runPlaywright(runtime)
 }
 
 async function stopDockerServices(profile) {
@@ -347,7 +309,7 @@ async function killProcessGroup(child) {
   }
 }
 
-async function runSourceMode(keepAlive, runner) {
+async function runSourceMode(keepAlive) {
   const runtime = {
     mode: 'source',
     apiBaseUrl: 'http://localhost:8080',
@@ -376,13 +338,13 @@ async function runSourceMode(keepAlive, runner) {
 
   try {
     await waitForRuntime(runtime, sourceProcess)
-    await runTests(runtime, runner)
+    await runTests(runtime)
   } finally {
     await cleanup()
   }
 }
 
-async function runDockerMode(keepAlive, runner) {
+async function runDockerMode(keepAlive) {
   const runtime = {
     mode: 'docker',
     apiBaseUrl: 'http://localhost:8080',
@@ -411,23 +373,23 @@ async function runDockerMode(keepAlive, runner) {
 
   try {
     await waitForRuntime(runtime)
-    await runTests(runtime, runner)
+    await runTests(runtime)
   } finally {
     await cleanup()
   }
 }
 
 async function main() {
-  const { mode, keepAlive, runner } = parseArgs()
+  const { mode, keepAlive } = parseArgs()
   const modes = mode === 'all' ? ['source', 'docker'] : [mode]
 
-  console.log(`[E2E] runner=${runner} mode=${mode}`)
+  console.log(`[E2E] mode=${mode}`)
 
   for (const selectedMode of modes) {
     if (selectedMode === 'source') {
-      await runSourceMode(keepAlive, runner)
+      await runSourceMode(keepAlive)
     } else {
-      await runDockerMode(keepAlive, runner)
+      await runDockerMode(keepAlive)
     }
   }
 }

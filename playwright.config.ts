@@ -5,7 +5,7 @@ import { SUPER_ADMIN_EMAIL } from './tests/fixtures/super-admin'
  * Playwright config for Decision Engine e2e.
  *
  * Datastores (Postgres/Redis/Kafka/ClickHouse) are brought up out of band — by `docker compose` in
- * CI, or by `cypress/scripts/run-e2e.js` locally. The two APPLICATION processes are started by the
+ * CI, or by `scripts/run-e2e.js` locally. The two APPLICATION processes are started by the
  * `webServer` block below, so Playwright owns their readiness and teardown.
  *
  * `reuseExistingServer` is on outside CI: if you already have the API and dashboard running, Playwright
@@ -16,7 +16,7 @@ import { SUPER_ADMIN_EMAIL } from './tests/fixtures/super-admin'
  *   - `api` — no browser; API-contract specs in tests/api (baseURL = decision-engine API).
  *   - `ui`  — chromium; user-journey specs in tests/e2e (baseURL = dashboard UI).
  *
- * Local: `node cypress/scripts/run-e2e.js source` (E2E_RUNNER defaults to playwright),
+ * Local: `node scripts/run-e2e.js source` (or `just e2e`),
  * or against an already-up stack: `npx playwright test --project=api`.
  */
 
