@@ -661,7 +661,7 @@ pub enum GatewayDeciderApproach {
     /// A volume-contract nudge moved the payment off the SR head — the volume-driven sibling of
     /// [`Self::SrSelectionMultiObjective`].
     SrSelectionVolumeCommitment,
-    /// The caller's preferredConnector was functional and pinned: SR reordering was skipped,
+    /// The caller's preferredConnectors entry was functional and pinned: SR reordering was skipped,
     /// only outage/elimination could demote it.
     #[serde(alias = "PREFERRED_GATEWAY_ROUTING")]
     PreferredConnectorRouting,
@@ -1032,8 +1032,12 @@ pub struct PaymentInfo {
     #[serde(rename = "preferredGateway", skip_serializing_if = "Option::is_none")]
     legacy_preferred_connector: Option<String>,
     /// Ordered connector:account preferences supplied by orchestration; the first entry wins.
-    #[serde(alias = "preferredGateways", skip_serializing_if = "Option::is_none")]
-    preferred_connector: Option<Vec<String>>,
+    #[serde(
+        alias = "preferredConnector",
+        alias = "preferredGateways",
+        skip_serializing_if = "Option::is_none"
+    )]
+    preferred_connectors: Option<Vec<String>>,
     payment_type: TxnObjectType,
     pub metadata: Option<String>,
     internal_metadata: Option<String>,
@@ -2098,7 +2102,7 @@ pub struct SrMetrics {
 
 impl PaymentInfo {
     fn preferred_connector_for_routing(&self) -> Option<String> {
-        self.preferred_connector
+        self.preferred_connectors
             .as_ref()
             .and_then(|connectors| connectors.first().cloned())
             .or_else(|| self.legacy_preferred_connector.clone())
@@ -2106,7 +2110,7 @@ impl PaymentInfo {
 }
 
 #[cfg(test)]
-mod preferred_connector_contract_tests {
+mod preferred_connectors_contract_tests {
     use super::{GatewayDeciderApproach, PaymentInfo};
     use serde_json::json;
 
@@ -2114,6 +2118,7 @@ mod preferred_connector_contract_tests {
     fn canonical_and_legacy_contracts_select_the_first_connector() -> Result<(), serde_json::Error>
     {
         for field in [
+            "preferredConnectors",
             "preferredConnector",
             "preferredGateways",
             "preferredGateway",
@@ -2133,7 +2138,7 @@ mod preferred_connector_contract_tests {
             if field != "preferredGateway" {
                 let serialized = serde_json::to_value(info)?;
                 assert_eq!(
-                    serialized.get("preferredConnector"),
+                    serialized.get("preferredConnectors"),
                     Some(&json!(["loonio:mca_one", "gigadat:mca_two"]))
                 );
                 assert!(serialized.get("preferredGateways").is_none());
@@ -2153,7 +2158,7 @@ mod preferred_connector_contract_tests {
             (json!([]), "gigadat:mca_two"),
         ] {
             let mut value = base.clone();
-            value["preferredConnector"] = connectors;
+            value["preferredConnectors"] = connectors;
             value["preferredGateway"] = json!("gigadat:mca_two");
             let info: PaymentInfo = serde_json::from_value(value)?;
             assert_eq!(

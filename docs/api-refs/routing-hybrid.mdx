@@ -80,12 +80,12 @@ curl --location "$BASE_URL/routing/hybrid" \
 
 Hyperswitch stores preferred-connector history only on the customer record, keyed by
 payment method type and business profile. It sends the matching profile's preference
-in `paymentInfo.preferredConnector` as an ordered array of `connector:mca_id` strings.
+in `paymentInfo.preferredConnectors` as an ordered array of `connector:mca_id` strings.
 Decision Engine consumes the first entry; it does not store or look up customer or
 payment-method records.
 
 ```json
-{"paymentInfo": {"preferredConnector": ["loonio:mca_123"]}}
+{"paymentInfo": {"preferredConnectors": ["loonio:mca_123"]}}
 ```
 
 A functional preference skips success-rate reordering, but outage and elimination
@@ -93,9 +93,9 @@ checks remain active. Responses use `PREFERRED_CONNECTOR_ROUTING` or its
 `PREFERRED_CONNECTOR_*_DOWNTIME_ROUTING` variants. Stale or ineligible preferences
 fall through to normal routing.
 
-For rolling upgrades, `preferredGateways` remains an alias for the array field,
-and legacy `preferredGateway` remains a singular fallback. Send only one array
-field; a non-empty array takes precedence over the singular fallback. Deploy
-Decision Engine before switching Hyperswitch to `preferredConnector`.
+For rolling upgrades, `preferredConnector` and `preferredGateways` remain aliases
+for the array field, and legacy `preferredGateway` remains a singular fallback.
+Send only one array field; a non-empty array takes precedence over the singular fallback. Deploy
+Decision Engine before switching Hyperswitch to `preferredConnectors`.
 Feedback accepts both old `PREFERRED_GATEWAY_*` and new `PREFERRED_CONNECTOR_*`
 labels so in-flight payments continue updating scores.
