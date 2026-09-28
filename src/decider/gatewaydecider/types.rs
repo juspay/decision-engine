@@ -1,5 +1,6 @@
 use crate::app::{get_tenant_app_state, TenantAppState};
 use crate::decider::network_decider;
+use crate::euclid::{ast::ValueType, types::RoutingRequest};
 use crate::redis::feature::RedisCompressionConfigCombined;
 use crate::types::country::country_iso::CountryISO2;
 use crate::types::currency::Currency;
@@ -1039,6 +1040,92 @@ pub struct PaymentInfo {
     /// (the strongest signal between online and in-person interchange categories). Optional.
     #[serde(default, rename = "channel")]
     channel: Option<String>,
+}
+
+fn routing_param_text(request: &RoutingRequest, key: &str) -> Option<String> {
+    request.parameters.get(key).and_then(|value| match value {
+        Some(ValueType::EnumVariant(value))
+        | Some(ValueType::StrValue(value))
+        | Some(ValueType::GlobalRef(value)) => Some(value.clone()),
+        Some(ValueType::MetadataVariant(value)) => Some(value.value.clone()),
+        _ => None,
+    })
+}
+
+fn routing_param_number(request: &RoutingRequest, key: &str) -> Option<u64> {
+    request.parameters.get(key).and_then(|value| match value {
+        Some(ValueType::Number(value)) => Some(*value),
+        _ => None,
+    })
+}
+
+fn normalize_static_enum(value: String) -> String {
+    value.replace('-', "_").to_ascii_uppercase()
+}
+
+impl From<&RoutingRequest> for DomainDeciderRequestForApiCallV2 {
+    fn from(request: &RoutingRequest) -> Self {
+        Self {
+            payment_info: PaymentInfo {
+                payment_id: request.payment_id.clone().unwrap_or_default(),
+                amount: routing_param_number(request, "amount").unwrap_or_default() as f64,
+                currency: routing_param_text(request, "currency")
+                    .and_then(|value| Currency::text_to_curr(&normalize_static_enum(value)).ok())
+                    .unwrap_or(Currency::USD),
+                country: routing_param_text(request, "billing_country")
+                    .or_else(|| routing_param_text(request, "business_country"))
+                    .and_then(|value| {
+                        CountryISO2::text_to_country(&normalize_static_enum(value)).ok()
+                    }),
+                customer_id: None,
+                udfs: None,
+                preferred_gateway: None,
+                payment_type: routing_param_text(request, "payment_type")
+                    .and_then(|value| TxnObjectType::from_text(normalize_static_enum(value)))
+                    .unwrap_or(TxnObjectType::Unknown),
+                metadata: None,
+                internal_metadata: None,
+                is_emi: None,
+                emi_bank: None,
+                emi_tenure: None,
+                payment_method_type: routing_param_text(request, "payment_method_type")
+                    .map(normalize_static_enum)
+                    .unwrap_or_else(|| "null".to_string()),
+                payment_method: routing_param_text(request, "payment_method")
+                    .map(normalize_static_enum)
+                    .unwrap_or_default(),
+                payment_source: None,
+                auth_type: routing_param_text(request, "authentication_type")
+                    .or_else(|| routing_param_text(request, "auth_type"))
+                    .and_then(|value| {
+                        ETCa::txn_card_info::text_to_auth_type(&normalize_static_enum(value)).ok()
+                    }),
+                card_issuer_bank_name: None,
+                card_isin: routing_param_text(request, "card_bin")
+                    .or_else(|| routing_param_text(request, "extended_card_bin")),
+                card_type: routing_param_text(request, "card_type").and_then(|value| {
+                    ETCa::card_type::CardType::try_from(normalize_static_enum(value)).ok()
+                }),
+                card_switch_provider: routing_param_text(request, "card_network").map(Secret::new),
+                card_program: None,
+                card_issuer_country: routing_param_text(request, "issuer_country"),
+                channel: None,
+            },
+            merchant_id: request.created_by.clone(),
+            eligible_gateway_list: request.fallback_output.as_ref().map(|connectors| {
+                connectors
+                    .iter()
+                    .map(|connector| match &connector.gateway_id {
+                        Some(gateway_id) => format!("{}:{}", connector.gateway_name, gateway_id),
+                        None => connector.gateway_name.clone(),
+                    })
+                    .collect()
+            }),
+            ranking_algorithm: Some(RankingAlgorithm::SrBasedRouting),
+            elimination_enabled: None,
+            enable_multi_objective: None,
+        }
+    }
 }
 
 // write a function to transfer DomainDeciderRequestForApiCallV2 to DomainDeciderRequest
