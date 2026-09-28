@@ -1084,7 +1084,7 @@ impl From<&RoutingRequest> for DomainDeciderRequestForApiCallV2 {
                     }),
                 customer_id: None,
                 udfs: None,
-                preferred_gateway: None,
+                preferred_connectors: None,
                 payment_type: routing_param_text(request, "payment_type")
                     .and_then(|value| TxnObjectType::from_text(normalize_static_enum(value)))
                     .unwrap_or(TxnObjectType::Unknown),
