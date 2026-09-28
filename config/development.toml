@@ -1102,6 +1102,8 @@ jwt_expiry_seconds = 86400
 hs_redirect_jwt_expiry_seconds = 28800
 email_verification_enabled = false
 signup_requires_admin_secret = false
+# Local default keeps logout immediate; raise it to skip the denylist read per request.
+jwt_revocation_cache_ttl_ms = 0
 super_admin_emails = ["test@gmail.com"]
 
 [admin_secret]
