@@ -145,7 +145,7 @@ export default function App() {
 
   if (exchangingCode) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-white text-sm text-slate-600 dark:bg-[#030507] dark:text-[#c7cfdb]">
+      <div className="flex min-h-screen items-center justify-center bg-page text-sm text-slate-600 dark:bg-[#030507] dark:text-[#c7cfdb]">
         Signing you in…
       </div>
     )

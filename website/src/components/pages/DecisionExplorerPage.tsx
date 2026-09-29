@@ -3738,7 +3738,7 @@ export function DecisionExplorerPage() {
                                 key={i}
                                 fill={
                                   entry.name === result.decided_gateway
-                                    ? '#0069ED'
+                                    ? 'rgb(var(--de-brand-600, 0 105 237))'
                                     : entry.score < 30 ? '#ef4444'
                                       : entry.score < 60 ? '#f59e0b'
                                         : '#10b981'

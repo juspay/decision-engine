@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import { ErrorBoundary } from './ErrorBoundary'
 import { applyThemePreference } from './lib/theme'
+import { initializeEmbeddedTheme } from './lib/embedTheme'
 import './index.css'
 
 const routerBaseName = import.meta.env.BASE_URL.endsWith('/')
@@ -16,6 +17,7 @@ if (import.meta.env.DEV && window.location.hostname === '127.0.0.1') {
   window.location.replace(nextUrl.toString())
 } else {
 applyThemePreference()
+initializeEmbeddedTheme()
 
 console.log('\n' + '='.repeat(80))
 console.log('[APP STARTUP] Dashboard initializing...')

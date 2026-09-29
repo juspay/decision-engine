@@ -240,3 +240,7 @@ Selected values can be overridden at runtime via environment variables. This is 
 - [Local Setup Guide](https://github.com/juspay/decision-engine/blob/main/docs/local-setup.md)
 - [API Guide](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx)
 - [API Reference](https://github.com/juspay/decision-engine/blob/main/docs/api-reference.md)
+
+## Embedded dashboard branding
+
+For merchant themes passed from the HS routing workspace, see [Embedded dashboard themes](embedded-theming.md). Theme delivery is a frontend iframe contract and does not require a DE database or runtime configuration change.

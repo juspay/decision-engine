@@ -1049,7 +1049,7 @@ function SegmentRow({
                 disabled={busy !== null}
                 title="Save fee"
                 aria-label="Save fee"
-                className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-brand-600 text-white transition-colors hover:bg-brand-700 disabled:opacity-40 dark:bg-white dark:text-black dark:hover:bg-slate-200"
+                className="inline-flex h-7 w-7 items-center justify-center rounded-md bg-button-primary text-button-primary transition-colors hover:bg-button-primary-hover disabled:opacity-40 dark:bg-white dark:text-black dark:hover:bg-slate-200"
               >
                 {busy === 'save' ? <Spinner size={13} /> : <Check size={14} />}
               </button>

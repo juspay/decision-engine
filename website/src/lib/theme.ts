@@ -30,10 +30,7 @@ export function applyThemePreference(theme: ThemePreference = getResolvedThemePr
     return
   }
 
-  // Embedded in the dashboard, the theme is fixed to light and unchangeable: the frame must match
-  // the host's white chrome. This is the sole class-writer, so guarding here also neutralizes every
-  // toggle (they still persist to localStorage, but it is never read into the class while embedded)
-  // and overrides the system `prefers-color-scheme` preference.
+  // Embedded branding uses the host's light palette without changing the standalone preference.
   const effective = isEmbedded() ? 'light' : theme
   document.documentElement.classList.toggle('dark', effective === 'dark')
 }

@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { clearDashboardHandoff } from '../lib/dashboardHandoff'
 import { persist } from 'zustand/middleware'
 import { tokenRef } from '../lib/tokenRef'
+import { clearEmbeddedTheme } from '../lib/embedTheme'
 
 /**
  * One scope this session can switch to.
@@ -106,6 +107,7 @@ export const useAuthStore = create<AuthStore>()(
         set({ token, user, merchants })
       },
       updateMerchant: (token, merchantId, merchants) => {
+        clearEmbeddedTheme()
         tokenRef.set(token)
         set((state) => ({
           token,
@@ -117,6 +119,7 @@ export const useAuthStore = create<AuthStore>()(
         tokenRef.set(null)
         set({ token: null, user: null, merchants: [] })
         clearDashboardHandoff()
+        clearEmbeddedTheme()
       },
       setHasHydrated: (hasHydrated) => set({ hasHydrated }),
     }),

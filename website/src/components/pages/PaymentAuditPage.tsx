@@ -435,7 +435,7 @@ function ConnectorScorePanel({
               <div className="h-2 overflow-hidden rounded-full bg-slate-200/70 dark:bg-[#1e2330]">
                 <div
                   className="h-full rounded-full transition-all"
-                  style={{ width: `${width}%`, backgroundColor: isWinner ? '#0069ED' : '#94a3b8' }}
+                  style={{ width: `${width}%`, backgroundColor: isWinner ? 'rgb(var(--de-brand-600, 0 105 237))' : '#94a3b8' }}
                 />
               </div>
             </div>

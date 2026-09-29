@@ -14,6 +14,8 @@ export type EmbedMessage =
   | { type: 'de:ready' }
   | { type: 'de:route-changed'; path: string }
   | { type: 'de:session-expired' }
+  | { type: 'de:theme-ready'; version: 1; frameId: string }
+  | { type: 'de:theme-applied'; version: 1; frameId: string; revision: number }
 
 export function postToDashboard(message: EmbedMessage): void {
   if (!isEmbedded() || window.parent === window) return

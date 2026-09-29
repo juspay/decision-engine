@@ -24,7 +24,7 @@ interface MeResponse {
 
 function SessionSpinner({ label }: { label: string }) {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-white text-slate-900 dark:bg-[#030507] dark:text-white">
+    <div className="flex min-h-screen items-center justify-center bg-page text-slate-900 dark:bg-[#030507] dark:text-white">
       <div className="flex items-center gap-3 rounded-2xl border border-slate-200 bg-white px-5 py-4 text-sm text-slate-600 shadow-[0_16px_40px_-30px_rgba(15,23,42,0.35)] dark:border-[#1d1d23] dark:bg-[#111318] dark:text-[#c7cfdb] dark:shadow-none">
         <Loader2 size={16} className="animate-spin text-brand-600 dark:text-[#7ea4ff]" />
         {label}
@@ -44,7 +44,7 @@ const EMBED_REFRESH_INTERVAL_MS = 6000
 /** Shown once the dashboard has had several chances to re-mint and the frame is still unauthorized. */
 function EmbedSessionUnavailable() {
   return (
-    <div className="flex min-h-screen items-center justify-center bg-white px-4 text-slate-900 dark:bg-[#030507] dark:text-white">
+    <div className="flex min-h-screen items-center justify-center bg-page px-4 text-slate-900 dark:bg-[#030507] dark:text-white">
       <div className="flex max-w-sm flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-white px-6 py-6 text-center shadow-[0_16px_40px_-30px_rgba(15,23,42,0.35)] dark:border-[#1d1d23] dark:bg-[#111318] dark:shadow-none">
         <p className="text-sm font-medium text-slate-900 dark:text-white">Couldn't restore your routing session</p>
         <p className="text-sm text-slate-600 dark:text-[#c7cfdb]">
@@ -83,7 +83,7 @@ function EmbedSessionRefresh() {
 function RedirectSessionExpired() {
   if (isEmbedded()) return <EmbedSessionRefresh />
   return (
-    <div className="flex min-h-screen items-center justify-center bg-white px-4 text-slate-900 dark:bg-[#030507] dark:text-white">
+    <div className="flex min-h-screen items-center justify-center bg-page px-4 text-slate-900 dark:bg-[#030507] dark:text-white">
       <div className="flex max-w-sm flex-col items-center gap-3 rounded-2xl border border-slate-200 bg-white px-6 py-6 text-center shadow-[0_16px_40px_-30px_rgba(15,23,42,0.35)] dark:border-[#1d1d23] dark:bg-[#111318] dark:shadow-none">
         <p className="text-sm font-medium text-slate-900 dark:text-white">Your routing session has expired</p>
         <p className="text-sm text-slate-600 dark:text-[#c7cfdb]">

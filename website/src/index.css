@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Google+Sans:ital,opsz,wght@0,17..18,400..700;1,17..18,400..700&family=Inter:ital,opsz,wght@0,14..32,400..700;1,14..32,400..700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Google+Sans:ital,opsz,wght@0,17..18,400..700;1,17..18,400..700&family=Inter:ital,opsz,wght@0,14..32,400..700;1,14..32,400..700&family=Roboto:wght@400;500;600;700&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -55,7 +55,7 @@
     line-height: 1.5;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
-    @apply bg-[#ffffff] text-slate-800 dark:bg-[#000000] dark:text-[#f4f4f5] transition-colors duration-300;
+    @apply bg-page text-slate-800 dark:bg-[#000000] dark:text-[#f4f4f5] transition-colors duration-300;
   }
 
   #root {
@@ -284,4 +284,41 @@
   .input-bare:focus {
     @apply rounded-md bg-slate-100/80 dark:bg-white/[0.06];
   }
+}
+
+html[data-embedded='true'] {
+  font-size: var(--de-font-size, 16px);
+  --chart-tooltip-bg: rgb(var(--de-surface, 248 250 252) / 0.98);
+  --chart-tooltip-border: rgb(var(--de-border, 203 213 225));
+  --chart-tooltip-label: rgb(var(--de-text, 15 23 42));
+  --chart-tooltip-text: rgb(var(--de-muted-text, 51 65 85));
+}
+
+html[data-embedded='true'] h1 {
+  font-size: var(--de-heading-size, revert-layer);
+}
+
+html[data-embedded='true'] :where(input:not([type='radio']):not([type='checkbox']), select, textarea) {
+  border-radius: var(--de-radius, revert-layer);
+}
+
+html[data-theme-pending='true'] #root {
+  visibility: hidden;
+}
+
+html[data-embedded='true'] body {
+  transition: none;
+}
+
+html[data-theme-pending='true'],
+html[data-theme-pending='true'] body {
+  background: transparent;
+}
+
+html[data-embedded='true'] a.text-brand-600 {
+  color: rgb(var(--de-link, var(--de-brand-600, 12 105 238)));
+}
+
+html[data-embedded='true'] a.text-brand-600:hover {
+  color: rgb(var(--de-link-hover, var(--de-brand-700, 9 84 190)));
 }

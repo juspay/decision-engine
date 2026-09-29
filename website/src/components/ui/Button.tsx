@@ -7,9 +7,9 @@ interface ButtonProps extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const variantClasses = {
   primary:
-    'bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 shadow-sm border border-transparent dark:bg-white dark:text-black dark:hover:bg-slate-200',
+    'bg-button-primary text-button-primary hover:bg-button-primary-hover disabled:opacity-50 shadow-sm border border-transparent dark:bg-white dark:text-black dark:hover:bg-slate-200',
   secondary:
-    'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50 hover:text-slate-900 disabled:opacity-40 shadow-sm dark:bg-[#121214] dark:text-[#a1a1aa] dark:border-[#27272a] dark:hover:bg-[#18181b] dark:hover:text-white',
+    'bg-button-secondary text-button-secondary border border-slate-200 hover:bg-button-secondary-hover hover:text-button-secondary-hover disabled:opacity-40 shadow-sm dark:bg-[#121214] dark:text-[#a1a1aa] dark:border-[#27272a] dark:hover:bg-[#18181b] dark:hover:text-white',
   ghost:
     'text-slate-500 hover:text-slate-900 hover:bg-slate-100 disabled:opacity-40 dark:text-[#a1a1aa] dark:hover:text-white dark:hover:bg-[#121214]',
   danger:
@@ -29,7 +29,7 @@ export function Button({
 }: ButtonProps) {
   return (
     <button
-      className={`relative inline-flex items-center justify-center gap-2 rounded-full transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 focus-visible:ring-offset-1 focus-visible:ring-offset-transparent focus-visible:border-transparent ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
+      className={`relative inline-flex items-center justify-center gap-2 rounded-[var(--de-radius,9999px)] transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-500/50 focus-visible:ring-offset-1 focus-visible:ring-offset-transparent focus-visible:border-transparent ${variantClasses[variant]} ${sizeClasses[size]} ${className}`}
       {...props}
     >
       {props.children}
