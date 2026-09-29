@@ -1,5 +1,7 @@
-# MySQL profile. The published image is the PostgreSQL build and the MySQL path applies a fixed
-# list of SQL files rather than the Diesel migration history, so treat this as legacy.
+# Use the MySQL image instead of the chart's PostgreSQL default.
+image:
+  repository: ghcr.io/juspay/decision-engine
+
 decisionEngine:
   useMySQL: true
   usePostgreSQL: false

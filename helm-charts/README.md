@@ -105,8 +105,22 @@ Two consequences worth knowing:
 - Adding a new knob means adding the corresponding env var in `templates/deployment.yaml`; the
   config file is not templated.
 
+Metrics use OTLP/gRPC export, not a Prometheus HTTP port. Set
+`decisionEngine.telemetry.metricsEnabled=true` and point
+`decisionEngine.telemetry.otelExporterOtlpEndpoint` at a collector reachable from the pod.
+`otelExporterOtlpTimeout` is in milliseconds. By default export is disabled.
+
 To check an install, `GET /health/diagnostics` with an `x-tenant-id: public` header reports the real
 database connection, read, write and delete status.
+
+For MySQL, pass `-f helm-charts/values-mysql.yaml`: it selects the MySQL application image instead of
+the chart's PostgreSQL image, disables the PostgreSQL migration Job and enables the MySQL Job. The
+MySQL Job applies the pinned SQL scripts listed in `dbMigration.mysql.scriptUrls`.
+
+The optional `routingConfig` post-install/post-upgrade Job remains disabled by default. To enable it,
+provide `routingConfig.image.repository` and `routingConfig.image.tag` for an image containing the
+script in `routingConfig.command` (by default, `run_setup.sh`). The chart does not ship this script;
+`routingConfig.configVolume`, when enabled, is an empty volume and does not provide it either.
 
 ## Dashboard
 
@@ -185,6 +199,10 @@ so `dashboard.basePath` describes where the assets expect to be served rather th
 | `decisionEngine.useRedis`                  | Use Redis                                                  | `true`          |
 | `decisionEngine.logging.level`             | Logging level                                              | `"DEBUG"`       |
 | `decisionEngine.logging.format`            | Logging format                                             | `"default"`     |
+| `decisionEngine.telemetry.metricsEnabled`  | Export metrics over OTLP/gRPC                              | `false`         |
+| `decisionEngine.telemetry.ignoreErrors`    | Continue if the exporter cannot be built                  | `true`          |
+| `decisionEngine.telemetry.otelExporterOtlpEndpoint` | Collector OTLP/gRPC endpoint                      | `"http://otel-collector:4317"` |
+| `decisionEngine.telemetry.otelExporterOtlpTimeout` | Export timeout in milliseconds                    | `10000`         |
 | `decisionEngine.server.host`               | Server host                                                | `"0.0.0.0"`     |
 | `decisionEngine.server.port`               | Server port                                                | `8080`          |
 | `decisionEngine.rateLimit.requestCount`    | Rate limit request count                                   | `1`             |

@@ -75,14 +75,18 @@ spec:
               value: {{ .Values.decisionEngine.server.host | quote }}
             - name: DECISION_ENGINE__SERVER__PORT
               value: {{ .Values.decisionEngine.server.port | quote }}
-            - name: DECISION_ENGINE__METRICS__HOST
-              value: {{ .Values.decisionEngine.metrics.host | quote }}
-            - name: DECISION_ENGINE__METRICS__PORT
-              value: {{ .Values.decisionEngine.metrics.port | quote }}
             - name: DECISION_ENGINE__LOG__CONSOLE__LEVEL
               value: {{ .Values.decisionEngine.logging.level | quote }}
             - name: DECISION_ENGINE__LOG__CONSOLE__LOG_FORMAT
               value: {{ .Values.decisionEngine.logging.format | quote }}
+            - name: DECISION_ENGINE__LOG__TELEMETRY__METRICS_ENABLED
+              value: {{ .Values.decisionEngine.telemetry.metricsEnabled | quote }}
+            - name: DECISION_ENGINE__LOG__TELEMETRY__IGNORE_ERRORS
+              value: {{ .Values.decisionEngine.telemetry.ignoreErrors | quote }}
+            - name: DECISION_ENGINE__LOG__TELEMETRY__OTEL_EXPORTER_OTLP_ENDPOINT
+              value: {{ .Values.decisionEngine.telemetry.otelExporterOtlpEndpoint | quote }}
+            - name: DECISION_ENGINE__LOG__TELEMETRY__OTEL_EXPORTER_OTLP_TIMEOUT
+              value: {{ .Values.decisionEngine.telemetry.otelExporterOtlpTimeout | quote }}
             - name: DECISION_ENGINE__LIMIT__REQUEST_COUNT
               value: {{ .Values.decisionEngine.rateLimit.requestCount | quote }}
             - name: DECISION_ENGINE__LIMIT__DURATION

@@ -119,6 +119,13 @@ Create the name for the MySQL Migration Job
 {{- end }}
 
 {{/*
+Create the name for the optional routing configuration Job
+*/}}
+{{- define "decision-engine.routingConfigName" -}}
+{{- printf "%s-routing-config" (include "decision-engine.fullname" .) }}
+{{- end }}
+
+{{/*
 Create the name for the analytics ClickHouse bootstrap configmap
 */}}
 {{- define "decision-engine.analyticsClickhouseConfigName" -}}
