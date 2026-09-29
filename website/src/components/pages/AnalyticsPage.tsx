@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
 import { releaseAdmits, type ReleasedFeature } from '../../lib/featureReleases'
+import { useCloseOnFrameBlur } from '../../hooks/useCloseOnFrameBlur'
 import { useAuthStore } from '../../store/authStore'
 import useSWR from 'swr'
 import {
@@ -434,6 +435,8 @@ function InfoButton({ content }: { content: InfoContent }) {
     document.addEventListener('mousedown', handlePointerDown)
     return () => document.removeEventListener('mousedown', handlePointerDown)
   }, [open])
+
+  useCloseOnFrameBlur(open, () => setOpen(false))
 
   useLayoutEffect(() => {
     if (!open || !containerRef.current) return

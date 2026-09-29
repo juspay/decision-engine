@@ -5191,11 +5191,10 @@
             },
             "description": "Positional user-defined fields."
           },
-          "preferredGateway": {
-            "type": [
-              "string",
-              "null"
-            ]
+          "preferredConnectors": {
+            "type": ["array", "null"],
+            "items": { "type": "string" },
+            "description": "Ordered connector:mca_id preferences from the customer's profile-scoped history. The first entry is considered; health and eligibility checks still apply."
           },
           "metadata": {
             "type": [

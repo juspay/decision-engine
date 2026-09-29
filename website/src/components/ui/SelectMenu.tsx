@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, ChevronDown } from 'lucide-react'
+import { useCloseOnFrameBlur } from '../../hooks/useCloseOnFrameBlur'
 
 export type SelectMenuItem<Value extends string> = {
   value: Value
@@ -48,6 +49,8 @@ export function SelectMenu<Value extends string>({
       document.removeEventListener('keydown', handleEscape)
     }
   }, [open])
+
+  useCloseOnFrameBlur(open, () => setOpen(false))
 
   const selected = items.find((item) => item.value === value)
 

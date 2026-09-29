@@ -16,6 +16,8 @@
  * ALGORITHM options:
  *   SR_BASED_ROUTING   → POST /decide-gateway  (default)
  *   RULE_BASED_ROUTING → POST /routing/evaluate (setup creates + activates a priority rule once)
+ *   HYBRID_ROUTING     → POST /routing/hybrid   (rule narrows the candidates, SR picks among them;
+ *                        needs the same priority rule plus the sr_routing_enabled feature flag)
  *
  * Never commit TOKEN values.
  */
@@ -31,8 +33,10 @@ const VUS       = parseInt(__ENV.VUS || "20");
 const DURATION  = __ENV.DURATION  || "30s";
 const RAMP_DURATION = __ENV.RAMP_DURATION || "10s";
 const ALGORITHM = __ENV.ALGORITHM || "SR_BASED_ROUTING";
+// Think time between iterations. 0 lets each VU run flat out (saturation run).
+const SLEEP     = parseFloat(__ENV.SLEEP ?? "0.1");
 
-const VALID_ALGORITHMS = ["SR_BASED_ROUTING", "RULE_BASED_ROUTING"];
+const VALID_ALGORITHMS = ["SR_BASED_ROUTING", "RULE_BASED_ROUTING", "HYBRID_ROUTING"];
 if (!VALID_ALGORITHMS.includes(ALGORITHM)) {
   throw new Error(`Unknown ALGORITHM="${ALGORITHM}". Valid: ${VALID_ALGORITHMS.join(", ")}`);
 }
@@ -41,7 +45,8 @@ function fail(msg) { throw new Error(msg); }
 
 const ENVS = {
   local: {
-    baseUrl: "http://127.0.0.1:8080",
+    // BASE_URL lets the test run inside the Docker network (e.g. http://de-bench:8080).
+    baseUrl: __ENV.BASE_URL || "http://127.0.0.1:8080",
     merchantId: __ENV.MERCHANT_ID || null,
   },
   sandbox: {
@@ -59,12 +64,37 @@ if (ENV === "sandbox") {
 
 // ── k6 options ────────────────────────────────────────────────────────────────
 
+// RATE (req/s) switches to an open model: the clock paces arrivals, not the server's
+// reply speed — what "p99 at N req/s" means. VU stages instead settle at saturation.
+const RATE = __ENV.RATE ? parseInt(__ENV.RATE) : null;
+
+const _loadProfile = RATE
+  ? {
+      scenarios: {
+        fixed_rate: {
+          executor:        "constant-arrival-rate",
+          rate:            RATE,
+          timeUnit:        "1s",
+          duration:        DURATION,
+          // Headroom so the generator never becomes the bottleneck (k6 warns if it
+          // has to grow past maxVUs). Rounded because k6 rejects fractional VU counts.
+          preAllocatedVUs: parseInt(__ENV.PRE_VUS || String(Math.ceil(Math.max(50, RATE / 4)))),
+          maxVUs:          parseInt(__ENV.MAX_VUS || String(Math.ceil(Math.max(200, RATE)))),
+        },
+      },
+    }
+  : {
+      stages: [
+        { duration: RAMP_DURATION, target: VUS },
+        { duration: DURATION,      target: VUS },
+        { duration: "5s",          target: 0   },
+      ],
+    };
+
 export const options = {
-  stages: [
-    { duration: RAMP_DURATION, target: VUS },
-    { duration: DURATION,      target: VUS },
-    { duration: "5s",          target: 0   },
-  ],
+  // k6's default trend stats stop at p(95); p(99) is the number these runs are judged on.
+  summaryTrendStats: ["avg", "min", "med", "p(90)", "p(95)", "p(99)", "max"],
+  ..._loadProfile,
   thresholds: {
     http_req_duration:     ["p(95)<500", "p(99)<1000"],
     http_req_failed:       ["rate<0.01"],
@@ -107,7 +137,33 @@ const LOAD_TEST_EMAIL    = "loadtest@decision-engine.local";
 const LOAD_TEST_PASSWORD = "LoadTest#123456";
 const ADMIN_SECRET       = __ENV.ADMIN_SECRET || "test_admin";
 
-// Priority rule used for RULE_BASED_ROUTING: checkout > stripe > adyen
+// Both the rule-only and the hybrid flow evaluate the active priority rule.
+const NEEDS_ROUTING_RULE = ALGORITHM === "RULE_BASED_ROUTING" || ALGORITHM === "HYBRID_ROUTING";
+
+// `/routing/hybrid` runs its dynamic half only when `sr_routing_enabled` covers the merchant;
+// without it the endpoint answers 200 with rule output alone and "dynamic half ran" fails.
+function _ensureSrRoutingEnabled(baseUrl, token, merchantId, jsonHeaders) {
+  const authHeaders = { ...jsonHeaders, Authorization: `Bearer ${token}` };
+  const res = http.post(
+    `${baseUrl}/merchant-account/${merchantId}/features/sr-routing`,
+    JSON.stringify({ enabled: true }),
+    { headers: authHeaders }
+  );
+  if (res.status === 200) {
+    console.log(`[setup] sr-routing enabled for ${merchantId}`);
+    return;
+  }
+  // Better to stop than to measure the rule-only path, which is cheaper than hybrid
+  // and would read as a surprisingly good result.
+  fail(
+    `Could not enable sr-routing for ${merchantId} (${res.status}): ${res.body}. ` +
+    `/routing/hybrid would skip its SR half and the measurement would be of the ` +
+    `static fallback path.`
+  );
+}
+
+// Priority rule used for RULE_BASED_ROUTING and the static half of HYBRID_ROUTING:
+// checkout > stripe > adyen
 const PRIORITY_RULE = {
   name:          "load-test-priority",
   description:   "Load test priority rule: checkout > stripe > adyen",
@@ -129,8 +185,11 @@ export function setup() {
   // Sandbox: token must be provided via env
   if (ENV !== "local") {
     const data = { token: __ENV.TOKEN, merchantId: envDefaults.merchantId };
-    if (ALGORITHM === "RULE_BASED_ROUTING") {
+    if (NEEDS_ROUTING_RULE) {
       _ensureRoutingRule(baseUrl, data.token, data.merchantId, jsonHeaders);
+    }
+    if (ALGORITHM === "HYBRID_ROUTING") {
+      _ensureSrRoutingEnabled(baseUrl, data.token, data.merchantId, jsonHeaders);
     }
     return data;
   }
@@ -140,8 +199,11 @@ export function setup() {
     const merchantId = envDefaults.merchantId;
     if (!merchantId) fail('MERCHANT_ID is required when using TOKEN override: -e MERCHANT_ID=<id>');
     const data = { token: __ENV.TOKEN, merchantId };
-    if (ALGORITHM === "RULE_BASED_ROUTING") {
+    if (NEEDS_ROUTING_RULE) {
       _ensureRoutingRule(baseUrl, data.token, data.merchantId, jsonHeaders);
+    }
+    if (ALGORITHM === "HYBRID_ROUTING") {
+      _ensureSrRoutingEnabled(baseUrl, data.token, data.merchantId, jsonHeaders);
     }
     return data;
   }
@@ -186,8 +248,11 @@ export function setup() {
 
   console.log(`[setup] merchant_id=${merchantId}  algorithm=${ALGORITHM}`);
 
-  if (ALGORITHM === "RULE_BASED_ROUTING") {
+  if (NEEDS_ROUTING_RULE) {
     _ensureRoutingRule(baseUrl, token, merchantId, jsonHeaders);
+  }
+  if (ALGORITHM === "HYBRID_ROUTING") {
+    _ensureSrRoutingEnabled(baseUrl, token, merchantId, jsonHeaders);
   }
 
   return { token, merchantId };
@@ -261,11 +326,13 @@ export default function (data) {
 
   if (ALGORITHM === "RULE_BASED_ROUTING") {
     _runRuleEvaluate(merchantId, headers, idx);
+  } else if (ALGORITHM === "HYBRID_ROUTING") {
+    _runHybrid(merchantId, headers, idx);
   } else {
     _runSrDecide(merchantId, headers, idx);
   }
 
-  sleep(0.1);
+  if (SLEEP > 0) sleep(SLEEP);
 }
 
 function _runSrDecide(merchantId, headers, idx) {
@@ -290,13 +357,12 @@ function _runSrDecide(merchantId, headers, idx) {
   });
 
   decideReqs.add(1);
-  const start = Date.now();
   const res   = http.post(
     `${envDefaults.baseUrl}/decide-gateway`,
     body,
     { headers, tags: { name: "decide" } }
   );
-  latencyTrend.add(Date.now() - start);
+  latencyTrend.add(res.timings.duration);
 
   const ok = check(res, {
     "status is 200":      (r) => r.status === 200,
@@ -321,13 +387,12 @@ function _runSrDecide(merchantId, headers, idx) {
           paymentId,
           status,
         });
-        const fbStart = Date.now();
         const fbRes = http.post(
           `${envDefaults.baseUrl}/update-gateway-score`,
           fbBody,
           { headers, tags: { name: "feedback" }, responseCallback: http.expectedStatuses({ min: 200, max: 299 }) }
         );
-        feedbackLatency.add(Date.now() - fbStart);
+        feedbackLatency.add(fbRes.timings.duration);
         if (fbRes.status < 200 || fbRes.status >= 300) {
           feedbackErrors.add(1);
           if (__ENV.VERBOSE) console.error(`[VU ${__VU}] feedback ${fbRes.status}: ${fbRes.body?.substring(0, 200)}`);
@@ -358,9 +423,8 @@ function _runRuleEvaluate(merchantId, headers, idx) {
     },
   });
 
-  const start = Date.now();
   const res   = http.post(`${envDefaults.baseUrl}/routing/evaluate`, body, { headers });
-  latencyTrend.add(Date.now() - start);
+  latencyTrend.add(res.timings.duration);
 
   const ok = check(res, {
     "status is 200":     (r) => r.status === 200,
@@ -384,6 +448,101 @@ function _runRuleEvaluate(merchantId, headers, idx) {
   } else {
     gatewayErrors.add(1);
     if (__ENV.VERBOSE) console.error(`[VU ${__VU}] RULE ${res.status}: ${res.body?.substring(0, 200)}`);
+  }
+}
+
+function _runHybrid(merchantId, headers, idx) {
+  const ruleVariant = rulePayloads[idx];
+  const srVariant   = srPayloads[idx];
+  const paymentId   = `lt_hyb_${Date.now()}_${__VU}_${__ITER}`;
+
+  // Both halves in one call: the rule narrows the candidates, SR ranks what survives. The
+  // dynamic half carries no eligibleGatewayList — the endpoint fills it from the rule's output.
+  const body = JSON.stringify({
+    static_routing_request: {
+      payment_id: paymentId,
+      created_by: merchantId,
+      parameters: {
+        amount:              { type: "number",       value: ruleVariant.amount              },
+        authentication_type: { type: "enum_variant", value: ruleVariant.authentication_type },
+      },
+    },
+    dynamic_routing_request: {
+      merchantId,
+      paymentInfo: {
+        paymentId,
+        amount:            srVariant.amount,
+        currency:          srVariant.currency,
+        paymentType:       "ORDER_PAYMENT",
+        paymentMethodType: srVariant.paymentMethodType,
+        paymentMethod:     srVariant.paymentMethod,
+        authType:          srVariant.authType,
+        cardBrand:         srVariant.cardBrand,
+      },
+      rankingAlgorithm:   "SR_BASED_ROUTING",
+      eliminationEnabled: false,
+    },
+  });
+
+  decideReqs.add(1);
+  const res   = http.post(
+    `${envDefaults.baseUrl}/routing/hybrid`,
+    body,
+    { headers, tags: { name: "hybrid" } }
+  );
+  latencyTrend.add(res.timings.duration);
+
+  const ok = check(res, {
+    "status is 200": (r) => r.status === 200,
+    "has evaluated_connectors": (r) => {
+      try { const b = JSON.parse(r.body); return Array.isArray(b.evaluated_connectors) && b.evaluated_connectors.length > 0; }
+      catch { return false; }
+    },
+    // A call that silently degrades to rule-only is a cheaper code path, so it must not
+    // pass as a hybrid measurement.
+    "dynamic half ran": (r) => {
+      try { const b = JSON.parse(r.body); return b.dynamic_routing?.status === "success"; }
+      catch { return false; }
+    },
+  });
+  successRate.add(ok);
+
+  if (res.status === 200) {
+    try {
+      const json = JSON.parse(res.body);
+      const decision = json.dynamic_routing?.decision;
+      const gw = json.evaluated_connectors?.[0]?.gateway_name;
+      if (gw) {
+        gatewaySelected.add(1, { gateway: gw });
+        const status  = Math.random() < 0.85 ? "CHARGED" : "FAILURE";
+        const fbBody  = JSON.stringify({
+          merchantId,
+          gateway: decision?.decided_gateway || gw,
+          paymentId,
+          status,
+        });
+        const fbRes = http.post(
+          `${envDefaults.baseUrl}/update-gateway-score`,
+          fbBody,
+          { headers, tags: { name: "feedback" }, responseCallback: http.expectedStatuses({ min: 200, max: 299 }) }
+        );
+        feedbackLatency.add(fbRes.timings.duration);
+        if (fbRes.status < 200 || fbRes.status >= 300) {
+          feedbackErrors.add(1);
+          if (__ENV.VERBOSE) console.error(`[VU ${__VU}] feedback ${fbRes.status}: ${fbRes.body?.substring(0, 200)}`);
+        }
+      }
+      // Pod time for the dynamic half only — the handler starts that timer after the static
+      // half ran, so it undercounts. Round-trip is the whole-call number.
+      const podMs = decision?.latency;
+      if (typeof podMs === "number" && podMs >= 0) {
+        serverLatency.add(podMs);
+        networkLatency.add(Math.max(0, res.timings.duration - podMs));
+      }
+    } catch (_) { gatewayErrors.add(1); }
+  } else {
+    gatewayErrors.add(1);
+    if (__ENV.VERBOSE) console.error(`[VU ${__VU}] HYBRID ${res.status}: ${res.body?.substring(0, 200)}`);
   }
 }
 
@@ -433,7 +592,12 @@ export function handleSummary(data) {
 ║    avg             : ${String(fbAvg).padEnd(36)}║
 ║    p95             : ${String(fbP95).padEnd(36)}║` : ""}` : "";
 
-  const endpoint = ALGORITHM === "RULE_BASED_ROUTING" ? "/routing/evaluate" : "/decide-gateway";
+  const ENDPOINTS = {
+    RULE_BASED_ROUTING: "/routing/evaluate",
+    HYBRID_ROUTING:     "/routing/hybrid",
+    SR_BASED_ROUTING:   "/decide-gateway",
+  };
+  const endpoint = ENDPOINTS[ALGORITHM];
 
   const summary = `
 ╔══════════════════════════════════════════════════════════╗
