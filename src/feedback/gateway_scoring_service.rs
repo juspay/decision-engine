@@ -1162,7 +1162,11 @@ pub fn isRoutingApproachInSRV2(maybe_text: Option<String>) -> bool {
 // chosen gateway's score never moves on success or failure.
 pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
     match maybe_text {
-        Some(text) => text.contains("V3") || text.contains("MULTI_OBJECTIVE"),
+        Some(text) => {
+            text.contains("V3")
+                || text.contains("MULTI_OBJECTIVE")
+                || text.contains("PREFERRED_CONNECTOR")
+        }
         None => false,
     }
 }
@@ -1176,7 +1180,11 @@ pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
 // cost-routed outcomes are excluded from scoring whenever explore/exploit is enabled.
 pub fn is_routing_approach_in_explore(maybe_text: Option<String>) -> bool {
     match maybe_text {
-        Some(text) => text.contains("HEDGING") || text.contains("MULTI_OBJECTIVE"),
+        Some(text) => {
+            text.contains("HEDGING")
+                || text.contains("MULTI_OBJECTIVE")
+                || text.contains("PREFERRED_CONNECTOR")
+        }
         None => false,
     }
 }
@@ -1538,3 +1546,22 @@ mod tests {
 }
 
 // Helper function to filter by gateway only
+
+#[cfg(test)]
+mod preferred_connector_feedback_tests {
+    use super::{is_routing_approach_in_explore, is_routing_approach_in_srv3};
+
+    #[test]
+    fn preferred_connector_pins_keep_training_scores_during_downtime() {
+        for suffix in [
+            "ROUTING",
+            "ALL_DOWNTIME_ROUTING",
+            "DOWNTIME_ROUTING",
+            "GLOBAL_DOWNTIME_ROUTING",
+        ] {
+            let label = format!("PREFERRED_CONNECTOR_{suffix}");
+            assert!(is_routing_approach_in_srv3(Some(label.clone())));
+            assert!(is_routing_approach_in_explore(Some(label)));
+        }
+    }
+}

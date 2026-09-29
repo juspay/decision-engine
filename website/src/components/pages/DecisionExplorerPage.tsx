@@ -21,6 +21,7 @@ import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
+import { overlayInsetClass } from '../../lib/embedMode'
 import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings } from 'lucide-react'
 
 import { PageHeading } from '../ui/PageHeading'
@@ -3817,7 +3818,7 @@ export function DecisionExplorerPage() {
       </div>
 
       {setupPrompt && (
-        <div className="fixed bottom-0 left-0 right-0 top-[76px] z-[140] flex items-center justify-center p-4">
+        <div className={`fixed ${overlayInsetClass(false)} z-[140] flex items-center justify-center p-4`}>
           <button
             type="button"
             aria-label="Close setup prompt"
@@ -3880,7 +3881,7 @@ export function DecisionExplorerPage() {
       )}
 
       {selectedAuditPaymentId && (
-        <div className="fixed bottom-0 left-64 right-0 top-[76px] z-[130] p-8">
+        <div className={`fixed ${overlayInsetClass()} z-[130] p-8`}>
           <button
             type="button"
             aria-label="Close payment audit"
@@ -4108,7 +4109,7 @@ export function DecisionExplorerPage() {
       )}
 
       {selectedPreviewPaymentId && (
-        <div className="fixed bottom-0 left-64 right-0 top-[76px] z-[130] p-8">
+        <div className={`fixed ${overlayInsetClass()} z-[130] p-8`}>
           <button
             type="button"
             aria-label="Close decision trace"
