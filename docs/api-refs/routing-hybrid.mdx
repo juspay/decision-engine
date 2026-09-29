@@ -74,3 +74,24 @@ curl --location "$BASE_URL/routing/hybrid" \
   ]
 }
 ```
+
+
+## Customer preferred connector
+
+Hyperswitch stores preferred-connector history only on the customer record, keyed by
+payment method type and business profile. It sends the matching profile's preference
+in `paymentInfo.preferredConnectors` as an ordered array of `connector:mca_id` strings.
+Decision Engine consumes the first entry; it does not store or look up customer or
+payment-method records.
+
+```json
+{"paymentInfo": {"preferredConnectors": ["loonio:mca_123"]}}
+```
+
+A functional preference skips success-rate reordering, but outage and elimination
+checks remain active. Responses use `PREFERRED_CONNECTOR_ROUTING` or its
+`PREFERRED_CONNECTOR_*_DOWNTIME_ROUTING` variants. Stale or ineligible preferences
+fall through to normal routing.
+
+Feedback recognizes `PREFERRED_CONNECTOR_*` labels so preferred-routing outcomes
+continue updating scores.

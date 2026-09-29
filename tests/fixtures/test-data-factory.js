@@ -89,7 +89,7 @@ function paymentInfo(overrides = {}) {
     currency: 'USD',
     customerId: customerId(),
     udfs: null,
-    preferredGateway: null,
+    preferredConnectors: null,
     paymentType: 'ORDER_PAYMENT',
     metadata: null,
     internalMetadata: null,

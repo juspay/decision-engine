@@ -662,6 +662,10 @@ pub enum GatewayDeciderApproach {
     /// A volume-contract nudge moved the payment off the SR head — the volume-driven sibling of
     /// [`Self::SrSelectionMultiObjective`].
     SrSelectionVolumeCommitment,
+    PreferredConnectorRouting,
+    PreferredConnectorAllDowntimeRouting,
+    PreferredConnectorDowntimeRouting,
+    PreferredConnectorGlobalDowntimeRouting,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -1017,7 +1021,8 @@ pub struct PaymentInfo {
     customer_id: Option<ETCu::CustomerId>,
     #[serde(default, deserialize_with = "deserialize_optional_udfs_to_hashmap")]
     udfs: Option<UDFs>,
-    preferred_gateway: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    preferred_connectors: Option<Vec<String>>,
     payment_type: TxnObjectType,
     pub metadata: Option<String>,
     internal_metadata: Option<String>,
@@ -1079,7 +1084,7 @@ impl From<&RoutingRequest> for DomainDeciderRequestForApiCallV2 {
                     }),
                 customer_id: None,
                 udfs: None,
-                preferred_gateway: None,
+                preferred_connectors: None,
                 payment_type: routing_param_text(request, "payment_type")
                     .and_then(|value| TxnObjectType::from_text(normalize_static_enum(value)))
                     .unwrap_or(TxnObjectType::Unknown),
@@ -1193,7 +1198,7 @@ impl DomainDeciderRequestForApiCallV2 {
                     .udfs
                     .clone()
                     .unwrap_or(UDFs(HashMap::new())),
-                preferredGateway: self.payment_info.preferred_gateway.clone(),
+                preferredGateway: self.payment_info.preferred_connector_for_routing(),
                 productId: None,
                 orderType: ETO::OrderType::from_txn_object_type(
                     self.payment_info.payment_type.clone(),
@@ -1690,6 +1695,16 @@ impl fmt::Display for GatewayDeciderApproach {
             Self::SrSelectionVolumeCommitment => {
                 write!(f, "SR_SELECTION_VOLUME_COMMITMENT")
             }
+            Self::PreferredConnectorRouting => write!(f, "PREFERRED_CONNECTOR_ROUTING"),
+            Self::PreferredConnectorAllDowntimeRouting => {
+                write!(f, "PREFERRED_CONNECTOR_ALL_DOWNTIME_ROUTING")
+            }
+            Self::PreferredConnectorDowntimeRouting => {
+                write!(f, "PREFERRED_CONNECTOR_DOWNTIME_ROUTING")
+            }
+            Self::PreferredConnectorGlobalDowntimeRouting => {
+                write!(f, "PREFERRED_CONNECTOR_GLOBAL_DOWNTIME_ROUTING")
+            }
         }
     }
 }
@@ -2154,4 +2169,67 @@ pub struct MetricEntry {
 pub struct SrMetrics {
     pub dimension: String,
     pub value: MetricEntry,
+}
+
+impl PaymentInfo {
+    fn preferred_connector_for_routing(&self) -> Option<String> {
+        self.preferred_connectors
+            .as_ref()
+            .and_then(|connectors| connectors.first().cloned())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::panic_in_result_fn)]
+mod preferred_connectors_contract_tests {
+    use super::{GatewayDeciderApproach, PaymentInfo};
+    use serde_json::json;
+
+    #[test]
+    fn canonical_contract_selects_and_serializes_the_first_connector(
+    ) -> Result<(), serde_json::Error> {
+        let value = json!({"paymentId":"pay_test", "amount":100, "currency":"CAD",
+            "preferredConnectors":["loonio:mca_one", "gigadat:mca_two"],
+            "paymentType":"ORDER_PAYMENT", "paymentMethodType":"interac", "paymentMethod":"bank_redirect"});
+        let info: PaymentInfo = serde_json::from_value(value)?;
+        assert_eq!(
+            info.preferred_connector_for_routing().as_deref(),
+            Some("loonio:mca_one")
+        );
+        let serialized = serde_json::to_value(info)?;
+        assert_eq!(
+            serialized.get("preferredConnectors"),
+            Some(&json!(["loonio:mca_one", "gigadat:mca_two"]))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn absent_and_empty_fields_do_not_select_a_connector() -> Result<(), serde_json::Error> {
+        let base = json!({"paymentId":"pay_test", "amount":100, "currency":"CAD", "paymentType":"ORDER_PAYMENT", "paymentMethodType":"interac", "paymentMethod":"bank_redirect"});
+        let no_preference: PaymentInfo = serde_json::from_value(base.clone())?;
+        assert_eq!(no_preference.preferred_connector_for_routing(), None);
+
+        let mut empty = base.clone();
+        empty["preferredConnectors"] = json!([]);
+        let empty: PaymentInfo = serde_json::from_value(empty)?;
+        assert_eq!(empty.preferred_connector_for_routing(), None);
+        Ok(())
+    }
+
+    #[test]
+    fn routing_labels_use_only_connector_names() -> Result<(), serde_json::Error> {
+        for suffix in [
+            "ROUTING",
+            "ALL_DOWNTIME_ROUTING",
+            "DOWNTIME_ROUTING",
+            "GLOBAL_DOWNTIME_ROUTING",
+        ] {
+            let label = format!("PREFERRED_CONNECTOR_{suffix}");
+            let approach: GatewayDeciderApproach = serde_json::from_value(json!(label.clone()))?;
+            assert_eq!(approach.to_string(), label);
+            assert_eq!(serde_json::to_value(approach)?, json!(label));
+        }
+        Ok(())
+    }
 }
