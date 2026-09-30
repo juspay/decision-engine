@@ -5,7 +5,7 @@ description: "Curl example for /routing/hybrid."
 
 # Hybrid Routing Evaluation
 
-`/routing/hybrid` evaluates the active rule and derives the SR request from `static_routing_request`, which is required. Optional `dynamic_routing_request.paymentInfo.preferredConnectors` supplies ordered connector preferences; other dynamic request fields are ignored. Preferences remain subject to connector eligibility and health checks.
+`/routing/hybrid` evaluates the active rule path (`static_routing_request`) together with runtime SR/decision context (`dynamic_routing_request`) in one call. At least one of the two must be provided.
 
 - `static_routing_request` uses the same shape as [`/routing/evaluate`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-evaluate.mdx) (`created_by` + `parameters`).
 - `dynamic_routing_request` uses the same shape as [`/decide-gateway`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-sr-based.mdx) (`merchantId`, `eligibleGatewayList`, `rankingAlgorithm`, `paymentInfo`).

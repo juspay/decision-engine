@@ -1068,8 +1068,8 @@ fn normalize_static_enum(value: String) -> String {
     value.replace('-', "_").to_ascii_uppercase()
 }
 
-impl From<&RoutingRequest> for DomainDeciderRequestForApiCallV2 {
-    fn from(request: &RoutingRequest) -> Self {
+impl From<(&RoutingRequest, Option<Self>)> for DomainDeciderRequestForApiCallV2 {
+    fn from((request, dynamic): (&RoutingRequest, Option<Self>)) -> Self {
         Self {
             payment_info: PaymentInfo {
                 payment_id: request.payment_id.clone().unwrap_or_default(),
@@ -1084,7 +1084,7 @@ impl From<&RoutingRequest> for DomainDeciderRequestForApiCallV2 {
                     }),
                 customer_id: None,
                 udfs: None,
-                preferred_connectors: None,
+                preferred_connectors: dynamic.and_then(|r| r.payment_info.preferred_connectors),
                 payment_type: routing_param_text(request, "payment_type")
                     .and_then(|value| TxnObjectType::from_text(normalize_static_enum(value)))
                     .unwrap_or(TxnObjectType::Unknown),
@@ -1136,12 +1136,6 @@ impl From<&RoutingRequest> for DomainDeciderRequestForApiCallV2 {
 // write a function to transfer DomainDeciderRequestForApiCallV2 to DomainDeciderRequest
 
 impl DomainDeciderRequestForApiCallV2 {
-    pub(crate) fn with_preferred_connectors_from(mut self, request: Option<Self>) -> Self {
-        self.payment_info.preferred_connectors =
-            request.and_then(|request| request.payment_info.preferred_connectors);
-        self
-    }
-
     pub fn payment_id(&self) -> &str {
         &self.payment_info.payment_id
     }
