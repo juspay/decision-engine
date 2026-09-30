@@ -199,11 +199,11 @@ pub async fn hybrid_routing_evaluate(
 
     let HybridRoutingRequest {
         static_routing_request,
-        dynamic_routing_request: _,
+        dynamic_routing_request,
     } = payload;
     let dynamic_routing_request = static_routing_request
         .as_ref()
-        .map(DomainDeciderRequestForApiCallV2::from);
+        .map(|request| DomainDeciderRequestForApiCallV2::from((request, dynamic_routing_request)));
     let recorded_request = HybridRoutingRequest {
         static_routing_request: static_routing_request.clone(),
         dynamic_routing_request: dynamic_routing_request.clone(),

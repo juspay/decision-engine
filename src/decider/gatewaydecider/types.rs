@@ -1068,8 +1068,8 @@ fn normalize_static_enum(value: String) -> String {
     value.replace('-', "_").to_ascii_uppercase()
 }
 
-impl From<&RoutingRequest> for DomainDeciderRequestForApiCallV2 {
-    fn from(request: &RoutingRequest) -> Self {
+impl From<(&RoutingRequest, Option<Self>)> for DomainDeciderRequestForApiCallV2 {
+    fn from((request, dynamic): (&RoutingRequest, Option<Self>)) -> Self {
         Self {
             payment_info: PaymentInfo {
                 payment_id: request.payment_id.clone().unwrap_or_default(),
@@ -1084,7 +1084,7 @@ impl From<&RoutingRequest> for DomainDeciderRequestForApiCallV2 {
                     }),
                 customer_id: None,
                 udfs: None,
-                preferred_connectors: None,
+                preferred_connectors: dynamic.and_then(|r| r.payment_info.preferred_connectors),
                 payment_type: routing_param_text(request, "payment_type")
                     .and_then(|value| TxnObjectType::from_text(normalize_static_enum(value)))
                     .unwrap_or(TxnObjectType::Unknown),
