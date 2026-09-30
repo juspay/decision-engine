@@ -6977,7 +6977,7 @@
             ]
           }
         },
-        "description": "At least one of `static_routing_request` or `dynamic_routing_request` must be provided."
+        "description": "static_routing_request is required and supplies the SR request fields. Only paymentInfo.preferredConnectors is retained from an optional dynamic_routing_request; preferences remain subject to connector eligibility and health checks."
       },
       "HybridRoutingResponse": {
         "type": "object",

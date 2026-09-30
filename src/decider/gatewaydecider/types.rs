@@ -1136,6 +1136,12 @@ impl From<&RoutingRequest> for DomainDeciderRequestForApiCallV2 {
 // write a function to transfer DomainDeciderRequestForApiCallV2 to DomainDeciderRequest
 
 impl DomainDeciderRequestForApiCallV2 {
+    pub(crate) fn with_preferred_connectors_from(mut self, request: Option<Self>) -> Self {
+        self.payment_info.preferred_connectors =
+            request.and_then(|request| request.payment_info.preferred_connectors);
+        self
+    }
+
     pub fn payment_id(&self) -> &str {
         &self.payment_info.payment_id
     }

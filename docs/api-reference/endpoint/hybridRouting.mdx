@@ -28,7 +28,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 - Method and path: `POST /routing/hybrid`
 - Parameters: none.
-- Body: JSON body with `static_routing_request` and/or `dynamic_routing_request` (at least one required). `static_routing_request` uses the `/routing/evaluate` shape (`created_by` + `parameters`); `dynamic_routing_request` uses the `/decide-gateway` shape (`merchantId`, `eligibleGatewayList`, `rankingAlgorithm`, `paymentInfo`).
+- Body: JSON body with required `static_routing_request`, using the `/routing/evaluate` shape (`created_by` + `parameters`). The SR request is derived from it. Optional `dynamic_routing_request` uses the `/decide-gateway` shape; only `paymentInfo.preferredConnectors` is retained. Preferences remain subject to connector eligibility and health checks.
 
 ## Example
 

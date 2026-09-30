@@ -185,6 +185,25 @@ struct HybridFailure {
     error: serde_json::Value,
 }
 
+fn prepare_hybrid_request(payload: HybridRoutingRequest) -> HybridRoutingRequest {
+    let HybridRoutingRequest {
+        static_routing_request,
+        dynamic_routing_request,
+    } = payload;
+    let dynamic_routing_request = static_routing_request.as_ref().map(|request| {
+        DomainDeciderRequestForApiCallV2::from(request)
+            .with_preferred_connectors_from(dynamic_routing_request)
+    });
+    HybridRoutingRequest {
+        static_routing_request,
+        dynamic_routing_request,
+    }
+}
+
+#[cfg(test)]
+#[path = "../../tests/routing/hybrid_request.rs"]
+mod hybrid_request_tests;
+
 #[axum::debug_handler]
 pub async fn hybrid_routing_evaluate(
     headers: axum::http::HeaderMap,
@@ -199,11 +218,8 @@ pub async fn hybrid_routing_evaluate(
 
     let HybridRoutingRequest {
         static_routing_request,
-        dynamic_routing_request: _,
-    } = payload;
-    let dynamic_routing_request = static_routing_request
-        .as_ref()
-        .map(DomainDeciderRequestForApiCallV2::from);
+        dynamic_routing_request,
+    } = prepare_hybrid_request(payload);
     let recorded_request = HybridRoutingRequest {
         static_routing_request: static_routing_request.clone(),
         dynamic_routing_request: dynamic_routing_request.clone(),
