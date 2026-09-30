@@ -388,10 +388,8 @@ pub async fn update_gateway_score(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::feedback::types::{RetryDecision, UpdateScoreResponse};
-    use crate::gsm::types::GsmDecision;
-    use crate::gsm::GsmInfo;
+    use crate::feedback::types::RetryDecision;
+    use ::gsm::types::GsmDecision;
     use std::str::FromStr;
 
     #[test]
