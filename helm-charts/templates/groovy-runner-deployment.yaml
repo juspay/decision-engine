@@ -55,8 +55,10 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.groovyRunner.resources | nindent 12 }}
+      {{- with (default .Values.nodeSelector .Values.groovyRunner.nodeSelector) }}
       nodeSelector:
-        kubernetes.io/arch: arm64
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       {{- with .Values.affinity }}
       affinity:
         {{- toYaml . | nindent 8 }}

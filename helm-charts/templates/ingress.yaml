@@ -35,6 +35,17 @@ spec:
     - host: {{ .host | quote }}
       http:
         paths:
+          {{- if and $.Values.dashboard.enabled $.Values.dashboard.ingress.enabled }}
+          - path: {{ $.Values.dashboard.basePath | trimSuffix "/" }}
+            {{- if semverCompare ">=1.18-0" $.Capabilities.KubeVersion.GitVersion }}
+            pathType: Prefix
+            {{- end }}
+            backend:
+              service:
+                name: {{ include "decision-engine.dashboardName" $ }}
+                port:
+                  name: http
+          {{- end }}
           {{- range .paths }}
           - path: {{ .path }}
             {{- if and .pathType (semverCompare ">=1.18-0" $.Capabilities.KubeVersion.GitVersion) }}
