@@ -12,9 +12,9 @@ pub enum AbTestIntercept {
     Disabled,
     /// Run SR routing with this arm's SR layer; the decision is attributed to `experiment`'s arm.
     SrArm {
-        /// SR overrides (hedging / elimination / margin / multi-objective / autopilot). `None`
-        /// when the served arm has no SR layer, which routes with the live SR config.
-        sr_config_override: Option<crate::euclid::types::SrConfigOverride>,
+        /// Keep the served layers until routing completes so the A/B event records the
+        /// selected gateway alongside the same rule and SR configuration used to route it.
+        projection: arms::ArmProjection,
         experiment: ExperimentAssignment,
     },
 }
@@ -129,15 +129,8 @@ pub async fn intercept(
         return AbTestIntercept::Disabled;
     }
 
-    // SR layer (or none): the gateway is unknown until the decider runs, so the routing event
-    // carries no gateway and the decided gateway is backfilled by `record_cost_outcome`.
-    emit_routing_event(
-        payment_id,
-        &dreq.merchant_id,
-        &assignment,
-        &plan.projection,
-        None,
-    );
+    // Keep outcome tracking ready before routing. The caller emits the routing event after
+    // the decider returns, when the selected gateway is known, without waiting for feedback.
     outcome::store_inflight(
         payment_id,
         &assignment,
@@ -148,7 +141,7 @@ pub async fn intercept(
     .await;
 
     AbTestIntercept::SrArm {
-        sr_config_override: plan.projection.sr,
+        projection: plan.projection,
         experiment: assignment,
     }
 }

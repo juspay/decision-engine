@@ -116,7 +116,9 @@ pub async fn load(
 
     Ok(PaymentAuditResponse {
         merchant_id: query.merchant_id.clone(),
-        range: if query.start_ms.is_some() && query.end_ms.is_some() {
+        range: if exact_lookup {
+            "all".to_string()
+        } else if query.start_ms.is_some() && query.end_ms.is_some() {
             "custom".to_string()
         } else {
             payment_audit_range(query)
