@@ -186,16 +186,15 @@ pub async fn decider_full_payload_hs_function(
     // AB test intercept — must run before SR routing. Feature-flagged per merchant.
     // Disabled by default; enable via service config AB_TEST_REAL_PAYMENTS_ENABLED_{merchant_id}.
     let mut ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride> = None;
-    // For A/B payments attributed to an arm, keep the assignment so the multi-objective cost
-    // outcome can be attributed to the arm after routing completes (see below).
-    let mut ab_test_experiment: Option<super::ab_test::outcome::ExperimentAssignment> = None;
+    // Keep the assignment and layers so the routing event can include the final gateway.
+    let mut ab_test_experiment = None;
     match super::ab_test::intercept(&dreq_, experiment_endpoint).await {
         super::ab_test::AbTestIntercept::SrArm {
-            sr_config_override,
+            projection,
             experiment,
         } => {
-            ab_test_sr_override = sr_config_override;
-            ab_test_experiment = Some(experiment);
+            ab_test_sr_override = projection.sr.clone();
+            ab_test_experiment = Some((experiment, projection));
         }
         super::ab_test::AbTestIntercept::Disabled => {}
     }
@@ -203,6 +202,17 @@ pub async fn decider_full_payload_hs_function(
     let is_hybrid_routing = dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwSrHybridRouting);
 
     if dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwBasedRouting) || is_hybrid_routing {
+        // Preserve attribution for the network routing path, which does not use the SR
+        // experiment overrides or the SR completion tracking below.
+        if let Some((assignment, projection)) = &ab_test_experiment {
+            super::ab_test::interceptor::emit_routing_event(
+                dreq_.payment_id(),
+                &dreq_.merchant_id,
+                assignment,
+                projection,
+                None,
+            );
+        }
         let config_name = format!("DEBIT_ROUTING_ENABLED_{}", dreq_.merchant_id);
         let debit_routing_enabled = service_configuration::find_config_by_name(config_name)
             .await
@@ -260,10 +270,23 @@ pub async fn decider_full_payload_hs_function(
         )
         .await;
 
+        if let Some((assignment, projection)) = &ab_test_experiment {
+            super::ab_test::interceptor::emit_routing_event(
+                dreq_.payment_id(),
+                &dreq_.merchant_id,
+                assignment,
+                projection,
+                result
+                    .as_ref()
+                    .ok()
+                    .map(|decided| decided.decided_gateway.as_str()),
+            );
+        }
+
         // Cost measurement: for an SR-arm A/B payment, enrich the inflight record with the
         // decided gateway + multi-objective cost outcome so the later outcome event can
         // attribute cost per arm. No-op (aside from gateway backfill) when the arm ran auth-only.
-        if let (Ok(decided), Some(assignment)) = (&result, &ab_test_experiment) {
+        if let (Ok(decided), Some((assignment, _))) = (&result, &ab_test_experiment) {
             let mo = decided.multi_objective_info.as_ref();
             super::ab_test::record_cost_outcome(
                 dreq_.payment_id(),

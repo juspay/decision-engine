@@ -159,14 +159,24 @@ pub fn payment_audit_raw_filters(
 /// fragment it — e.g. a `status=failure` filter drops the `decide_gateway` events (whose status is
 /// `received`/`success`) and leaves only the `update_gateway_score` failure event. Once a transaction
 /// is selected (via `lookup_key`, added by the caller), its full trace should be returned. Only the
-/// scope needed to identify that trace is kept: time window, merchant, and the preview/live flow-type
-/// category (plus the preview route for preview traces).
+/// scope needed to identify that trace is kept: merchant and the preview/live flow-type category
+/// (plus the preview route for preview traces). Exact ID searches read all retained history;
+/// browsing without an ID keeps the selected time window.
 pub fn payment_audit_timeline_filters(
     query: &PaymentAuditQuery,
     scope: PaymentAuditScope,
 ) -> Vec<FilterClause> {
-    let (start_ms, end_ms) = effective_payment_audit_window_bounds(query);
-    let mut filters = base_window_filters(start_ms, end_ms);
+    let exact_lookup = crate::analytics::derive_lookup_key(
+        query.payment_id.as_deref(),
+        query.request_id.as_deref(),
+    )
+    .is_some();
+    let mut filters = if exact_lookup {
+        Vec::new()
+    } else {
+        let (start_ms, end_ms) = effective_payment_audit_window_bounds(query);
+        base_window_filters(start_ms, end_ms)
+    };
 
     filters.extend(merchant_filter(&query.merchant_id));
     filters.extend(scope_flow_type_filters(scope));

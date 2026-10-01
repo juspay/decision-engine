@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigationType, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, RefreshCw, Search as SearchIcon, SlidersHorizontal } from 'lucide-react'
 import { fetcher } from '../../lib/api'
 import { shellHeightClass } from '../../lib/embedMode'
@@ -555,6 +555,7 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
 
 export function PaymentAuditPage() {
   const [searchParams, setSearchParams] = useSearchParams()
+  const navigationType = useNavigationType()
 
   const initialRange = searchParams.get('start_ms') && searchParams.get('end_ms')
     ? 'custom'
@@ -586,13 +587,40 @@ export function PaymentAuditPage() {
   )
   const pageSize = 12
 
+  useEffect(() => {
+    if (navigationType !== 'POP') return
+
+    const nextRange = searchParams.get('start_ms') && searchParams.get('end_ms')
+      ? 'custom'
+      : parseRange(searchParams.get('range'))
+    const nextFilters = parseFilters(searchParams)
+    const nextSelectedKey = searchParams.get('selected') || ''
+    const startMs = Number(searchParams.get('start_ms') || '0')
+    const endMs = Number(searchParams.get('end_ms') || '0')
+    const nextWindow = startMs > 0 && endMs > startMs
+      ? { start_ms: startMs, end_ms: endMs }
+      : presetWindow(nextRange === 'custom' ? '1d' : nextRange)
+
+    setRange(nextRange)
+    setFilters(nextFilters)
+    setAppliedFilters(nextFilters)
+    setPage(Math.max(1, Number(searchParams.get('page') || '1')))
+    setSelectedKey(nextSelectedKey)
+    setTrailFocused(Boolean(nextSelectedKey))
+    setSelectedEventId(null)
+    setInspectorTab('summary')
+    setCustomStart(toDateTimeInputValue(nextWindow.start_ms))
+    setCustomEnd(toDateTimeInputValue(nextWindow.end_ms))
+  }, [navigationType, searchParams])
+
   const customWindow = useMemo(
     () => (range === 'custom' ? customWindowFrom(customStart, customEnd) : undefined),
     [customEnd, customStart, range],
   )
 
+  const isExactSearch = Boolean(appliedFilters.paymentId || appliedFilters.requestId)
   const searchUrl =
-    range !== 'custom' || customWindow
+    isExactSearch || range !== 'custom' || customWindow
       ? buildAuditUrl(range, page, pageSize, appliedFilters, customWindow)
       : null
 
@@ -723,7 +751,9 @@ export function PaymentAuditPage() {
     summaryLabel: 'Selected Payment Timeline',
     summaryEmpty: 'Pick a payment from the left column to see the full transaction trail.',
     noMatchesTitle: 'No matching payments found',
-    noMatchesBody: 'Try widening the time range, clearing the routing type filter, or searching by a single payment ID, request ID, or error code.',
+    noMatchesBody: isExactSearch
+      ? 'No retained audit history matches this ID. Check the payment or request ID and try again.'
+      : 'Try widening the time range, clearing the routing type filter, or searching by a single payment ID, request ID, or error code.',
   }
 
   function syncSearch(
@@ -821,7 +851,7 @@ export function PaymentAuditPage() {
       nextRange,
       nextPage,
       appliedFilters,
-      selectedKey,
+      undefined,
       nextCustomWindow,
     )
   }
@@ -838,7 +868,7 @@ export function PaymentAuditPage() {
       'custom',
       nextPage,
       appliedFilters,
-      selectedKey,
+      undefined,
       customWindowFrom(nextStart, nextEnd),
     )
   }
@@ -869,13 +899,22 @@ export function PaymentAuditPage() {
         <PageHeading title={content.title} />
 
         <div className="flex items-center gap-2 justify-self-start xl:justify-self-end">
-          <TimeRangeFilter
-            range={range}
-            customStart={customStart}
-            customEnd={customEnd}
-            onRangeChange={updateRange}
-            onCustomChange={applyCustomWindow}
-          />
+          {isExactSearch ? (
+            <span
+              className="rounded-full border border-slate-200 px-4 py-2 text-sm font-medium text-slate-600 dark:border-[#2a303a] dark:text-slate-300"
+              title="Payment ID and request ID searches include all retained audit history."
+            >
+              All history
+            </span>
+          ) : (
+            <TimeRangeFilter
+              range={range}
+              customStart={customStart}
+              customEnd={customEnd}
+              onRangeChange={updateRange}
+              onCustomChange={applyCustomWindow}
+            />
+          )}
           <Button
             size="sm"
             variant="secondary"
@@ -1137,7 +1176,7 @@ export function PaymentAuditPage() {
                   const nextPage = Math.max(1, page - 1)
                   setPage(nextPage)
                   setTrailFocused(false)
-                  syncSearch(range, nextPage, appliedFilters, selectedKey)
+                  syncSearch(range, nextPage, appliedFilters, undefined, customWindow)
                 }}
               >
                 Prev
@@ -1150,7 +1189,7 @@ export function PaymentAuditPage() {
                   const nextPage = page + 1
                   setPage(nextPage)
                   setTrailFocused(false)
-                  syncSearch(range, nextPage, appliedFilters, selectedKey)
+                  syncSearch(range, nextPage, appliedFilters, undefined, customWindow)
                 }}
               >
                 Next
