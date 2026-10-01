@@ -178,11 +178,20 @@ pub async fn update_gateway_score(
             });
 
             let analytics_gsm_info = gsm_info.clone();
+            let retry_decision = crate::feedback::types::RetryDecision::from_gsm_decision_str(
+                gsm_info.as_ref().map(|g| g.decision.as_str()),
+            );
+            let unified_code = gsm_info.as_ref().and_then(|g| g.unified_code.clone());
+            let unified_message = gsm_info.as_ref().and_then(|g| g.unified_message.clone());
+
             let response = UpdateScoreResponse {
                 message: "Gateway score updated successfully".to_string(),
                 merchant_id: merchant_id.clone(),
                 gateway: gateway.clone(),
                 payment_id: payment_id.clone(),
+                retry_decision,
+                unified_code,
+                unified_message,
                 gsm_info,
             };
 
@@ -231,6 +240,11 @@ pub async fn update_gateway_score(
                                             merchant_id: merchant_id.clone(),
                                             gateway: gateway.clone(),
                                             payment_id: payment_id.clone(),
+                                            retry_decision: crate::feedback::types::RetryDecision::from_gsm_decision_str(
+                                                analytics_gsm_info.as_ref().map(|g| g.decision.as_str()),
+                                            ),
+                                            unified_code: analytics_gsm_info.as_ref().and_then(|g| g.unified_code.clone()),
+                                            unified_message: analytics_gsm_info.as_ref().and_then(|g| g.unified_message.clone()),
                                             gsm_info: analytics_gsm_info.clone(),
                                         },
                                         selection_reason: UpdateGatewayScoreSelectionReason {
@@ -369,5 +383,57 @@ pub async fn update_gateway_score(
             timer.observe_duration();
             Err(error_response)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use crate::feedback::types::RetryDecision;
+    use ::gsm::types::GsmDecision;
+    use std::str::FromStr;
+
+    #[test]
+    fn test_retry_decision_mapping() {
+        // 1. Retry -> RETRY_SAME_GATEWAY
+        assert_eq!(
+            RetryDecision::from_gsm_decision_str(Some("retry")),
+            RetryDecision::RetrySameGateway
+        );
+
+        // 2. Requeue -> RETRY_DIFFERENT_GATEWAY
+        assert_eq!(
+            RetryDecision::from_gsm_decision_str(Some("requeue")),
+            RetryDecision::RetryDifferentGateway
+        );
+
+        // 3. DoDefault -> DO_NOT_RETRY
+        assert_eq!(
+            RetryDecision::from_gsm_decision_str(Some("do_default")),
+            RetryDecision::DoNotRetry
+        );
+
+        // 4. Missing GSM mapping -> documented fallback (DO_NOT_RETRY)
+        assert_eq!(
+            RetryDecision::from_gsm_decision_str(None),
+            RetryDecision::DoNotRetry
+        );
+
+        // 5. Parsing "retry"
+        assert_eq!(GsmDecision::from_str("retry").unwrap(), GsmDecision::Retry);
+
+        // 6. Parsing "requeue"
+        assert_eq!(
+            GsmDecision::from_str("requeue").unwrap(),
+            GsmDecision::Requeue
+        );
+
+        // 7. Parsing "do_default"
+        assert_eq!(
+            GsmDecision::from_str("do_default").unwrap(),
+            GsmDecision::DoDefault
+        );
+
+        // 8. Invalid decision string -> appropriate error behavior
+        assert!(GsmDecision::from_str("invalid_string").is_err());
     }
 }
