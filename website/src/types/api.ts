@@ -712,7 +712,7 @@ export interface RoutingEventsResponse {
 
 export interface PaymentAuditResponse {
   merchant_id: string
-  range: AnalyticsRangeValue
+  range: AnalyticsRangeValue | 'all'
   payment_id?: string | null
   request_id?: string | null
   gateway?: string | null

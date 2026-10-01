@@ -489,10 +489,6 @@ pub async fn load_exact(
     scope: PaymentAuditScope,
     lookup_key: &str,
 ) -> Result<Vec<PaymentAuditSummary>, ApiError> {
-    let mut exact_query = query.clone();
-    exact_query.payment_id = None;
-    exact_query.request_id = None;
-
     let mut source = BoundQueryBuilder::new(DOMAIN_TABLE);
     source.extend_selects([
         "lookup_key".to_string(),
@@ -507,7 +503,7 @@ pub async fn load_exact(
     ]);
     // A specific transaction's summary should report its full curated trace (like the timeline),
     // not just events matching the list's dimension filters.
-    source.extend_filters(payment_audit_timeline_filters(&exact_query, scope));
+    source.extend_filters(payment_audit_timeline_filters(query, scope));
     source.add_filter(exact_lookup_filter(lookup_key));
 
     let source = source.into_fragment();
