@@ -1081,10 +1081,14 @@ async fn evaluate_algorithm_data(
             }
 
             StaticRoutingAlgorithm::AbTest(ab_data) => {
-                use crate::decider::gatewaydecider::ab_test::{arms, outcome, preview};
+                use crate::decider::gatewaydecider::ab_test::{guardrail, outcome, preview};
 
                 let payment_id = payload.payment_id.as_deref().unwrap_or("");
-                let plan = arms::plan(ab_data, experiment_endpoint, payment_id);
+                let plan = if crate::decider::gatewaydecider::ab_test::config::is_enabled(&payload.created_by).await && !payment_id.is_empty() {
+                    guardrail::plan(&payload.created_by, &algorithm.id, ab_data, experiment_endpoint, payment_id)
+                } else {
+                    crate::decider::gatewaydecider::ab_test::arms::plan(ab_data, experiment_endpoint, payment_id)
+                };
                 logger::debug!(
                     "A/B test routing evaluate: payment_id={:?} endpoint={} arm={} in_experiment={} rule={:?}",
                     payload.payment_id,
@@ -2039,6 +2043,16 @@ pub async fn activate_routing_rule(
                         timer.observe_duration();
                         return Err(e);
                     }
+                    if is_experiment {
+                        crate::decider::gatewaydecider::ab_test::guardrail::reset(
+                            &payload.created_by,
+                            &existing.routing_algorithm_id,
+                        );
+                        crate::decider::gatewaydecider::ab_test::guardrail::reset(
+                            &payload.created_by,
+                            &algorithm.id,
+                        );
+                    }
                     cache_activated_algorithm(
                         &state,
                         &payload.created_by,
@@ -2087,6 +2101,12 @@ pub async fn activate_routing_rule(
                 update_failure_metrics();
                 timer.observe_duration();
                 return Err(e);
+            }
+            if is_experiment {
+                crate::decider::gatewaydecider::ab_test::guardrail::reset(
+                    &merchant_id_for_cache,
+                    &algorithm.id,
+                );
             }
             cache_activated_algorithm(&state, &merchant_id_for_cache, &algorithm, is_experiment)
                 .await;
@@ -2187,6 +2207,10 @@ pub async fn deactivate_routing_rule(
                     payload.routing_algorithm_id,
                     payload.created_by
                 );
+                crate::decider::gatewaydecider::ab_test::guardrail::reset(
+                    &payload.created_by,
+                    &payload.routing_algorithm_id,
+                );
                 invalidate_routing_algorithm_cache(&state, &payload.created_by).await;
                 clear_volume_commitment_plan(&algorithm_for, &payload.created_by).await;
                 API_REQUEST_COUNTER
@@ -2214,6 +2238,67 @@ pub async fn deactivate_routing_rule(
         timer.observe_duration();
         Ok(())
     }
+}
+
+/// Stop only the experiment that breached its guardrail. The regular routing rule remains active.
+/// The conditional delete cannot remove a replacement experiment activated in the meantime.
+pub(crate) async fn stop_breached_payment_experiment(
+    merchant_id: &str,
+    experiment_id: &str,
+) -> Result<(), String> {
+    let state = get_tenant_app_state().await;
+    let conn = state.db.get_conn().await.map_err(|e| format!("{e:?}"))?;
+    let payment = AlgorithmType::Payment.to_string();
+    let predicate = mapper_dsl::created_by
+        .eq(merchant_id.to_owned())
+        .and(mapper_dsl::algorithm_for.eq(experiment_slot(&payment)))
+        .and(mapper_dsl::routing_algorithm_id.eq(experiment_id.to_owned()));
+    let deleted = match crate::generics::generic_delete::<
+        <RoutingAlgorithmMapper as HasTable>::Table,
+        _,
+    >(&conn, predicate)
+    .await
+    {
+        Ok(_) => true,
+        Err(crate::generics::MeshError::NoRowstoDelete) => false,
+        Err(e) => return Err(format!("{e:?}")),
+    };
+    if !deleted {
+        // A previous attempt may have deleted the mapping but failed to update Redis. Retry the
+        // cache write only when the slot is empty; never hide a replacement experiment.
+        let active = crate::generics::generic_find_one_optional::<
+            <RoutingAlgorithmMapper as HasTable>::Table,
+            _,
+            RoutingAlgorithmMapper,
+        >(
+            &state.db,
+            mapper_dsl::created_by
+                .eq(merchant_id.to_owned())
+                .and(mapper_dsl::algorithm_for.eq(experiment_slot(&payment))),
+        )
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+        if active.is_some() {
+            crate::decider::gatewaydecider::ab_test::guardrail::mark_stopped(
+                merchant_id,
+                experiment_id,
+            );
+            return Ok(());
+        }
+    }
+    // Publish the empty experiment slot so other replicas stop reading the old cache. Retry this
+    // write on later feedback if Redis is unavailable.
+    let key = experiment_cache_key(merchant_id, &payment);
+    let ttl = state.config.cache_config.service_config_ttl;
+    state
+        .redis_conn
+        .set_key_with_ttl(&key, CachedExperimentSlot { experiment: None }, ttl)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    crate::decider::gatewaydecider::ab_test::guardrail::mark_stopped(merchant_id, experiment_id);
+    logger::warn!(merchant_id = %merchant_id, experiment_id = %experiment_id,
+        "A/B experiment stopped after guardrail breach");
+    Ok(())
 }
 
 /// Guard for the edit/delete flows: reject the operation if this algorithm is the merchant's
