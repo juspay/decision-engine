@@ -95,7 +95,7 @@ where
                 error_category = "API_ERROR",
                 request_time = request_time,
                 query_params = query_params,
-                req_headers = format!("{:?}", headers),
+                req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                 latency = latency.to_string(),
                 x_request_id = x_request_id,
                 request_cputime = cpu_time.to_string(),
@@ -191,7 +191,7 @@ where
                             std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
                         action = "POST",
                         req_body = format!("{:?}", payload),
-                        req_headers = format!("{:?}", headers),
+                        req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                         res_body = res_body,
                         res_code = 200,
                         // res_headers = res_headers,
@@ -226,7 +226,7 @@ where
                         developer_message = e.error_info.developer_message,
                         user_message = e.error_info.user_message,
                         req_body = String::from_utf8_lossy(&body).to_string(),
-                        req_headers = format!("{:?}", headers),
+                        req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                         category = "INCOMING_API",
                         "Error occurred while processing decider function"
                     );
@@ -280,7 +280,7 @@ where
                 req_body = String::from_utf8_lossy(&body).to_string(),
                 // req_headers = req_headers,
                 category = "INCOMING_API",
-                req_headers = format!("{:?}", headers),
+                req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                 "Error occurred while parsing request payload"
             );
 

@@ -124,7 +124,7 @@ pub async fn update_score(
                 developer_message = error_response.error_info.developer_message.clone(),
                 user_message = error_response.error_info.user_message.clone(),
                 req_body = "Failed to parse body",
-                req_headers = format!("{:?}", headers),
+                req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                 level = "Error",
                 category = "INCOMING_API",
                 "Error occurred while parsing request"
@@ -204,7 +204,7 @@ pub async fn update_score(
                     developer_message = error_response.error_info.developer_message,
                     user_message = error_response.error_info.user_message,
                     req_body = req_body,
-                    req_headers = format!("{:?}", headers),
+                    req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                     category = "INCOMING_API",
                     "Gateway field is empty"
                 );
@@ -291,7 +291,7 @@ pub async fn update_score(
                 action = "POST",
                 req_body = format!("{:?}", payload.clone()),
                 category = "INCOMING_API",
-                req_headers = format!("{:?}", headers),
+                req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                 "Successfully updated score"
             );
 
@@ -337,7 +337,7 @@ pub async fn update_score(
                 developer_message = error_response.error_info.developer_message,
                 user_message = error_response.error_info.user_message,
                 req_body = req_body,
-                req_headers = format!("{:?}", headers),
+                req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                 category = "INCOMING_API",
                 "Error occurred while parsing request payload"
             );

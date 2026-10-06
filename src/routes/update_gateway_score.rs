@@ -111,6 +111,7 @@ pub async fn update_gateway_score(
 
     let headers = req.headers();
     for (name, value) in headers.iter() {
+        let value = masking::Secret::<_>::new(value);
         crate::logger::debug!(tag = "UpdateGatewayScore", "Header: {}: {:?}", name, value);
     }
     let body = match crate::routes::body::read_request_body(req.into_body()).await {
