@@ -1597,7 +1597,7 @@ pub async fn routing_evaluate_batch(
             let response = RoutingBatchResponse { results };
             // One preview event for the whole call: the batch is one evaluation moment,
             // and its per-entry answers live in the event's details.
-            crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
+            crate::analytics::DomainAnalyticsEvent::rule_evaluation_preview(
                 crate::analytics::AnalyticsFlowContext::new(
                     crate::analytics::ApiFlow::RuleBasedRouting,
                     crate::analytics::FlowType::RoutingEvaluatePreview,
@@ -1607,11 +1607,24 @@ pub async fn routing_evaluate_batch(
                 response.results.first().and_then(preview_gateway),
                 None,
                 Some("no_active_algorithm".to_string()),
-                serialize_batch_analytics_details(&payload, &response, &entry_outcomes, 0),
+                None,
                 request_id.clone(),
                 global_request_id.clone(),
                 trace_id.clone(),
-            );
+                crate::analytics::now_ms(),
+            )
+            .emit_with_details(|| {
+                let response = response.clone();
+                move |max_bytes| {
+                    serialize_batch_analytics_details(
+                        &payload,
+                        &response,
+                        &entry_outcomes,
+                        0,
+                        max_bytes,
+                    )
+                }
+            });
             API_REQUEST_COUNTER
                 .with_label_values(&["routing_evaluate_batch", "success"])
                 .inc();
@@ -1740,7 +1753,7 @@ pub async fn routing_evaluate_batch(
         ok_status
     };
     let response = RoutingBatchResponse { results };
-    crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
+    crate::analytics::DomainAnalyticsEvent::rule_evaluation_preview(
         crate::analytics::AnalyticsFlowContext::new(
             crate::analytics::ApiFlow::RuleBasedRouting,
             call_flow_type,
@@ -1750,11 +1763,24 @@ pub async fn routing_evaluate_batch(
         call_gateway,
         call_rule_name,
         Some(call_status),
-        serialize_batch_analytics_details(&payload, &response, &entry_outcomes, failed_entries),
+        None,
         request_id.clone(),
         global_request_id.clone(),
         trace_id.clone(),
-    );
+        crate::analytics::now_ms(),
+    )
+    .emit_with_details(|| {
+        let response = response.clone();
+        move |max_bytes| {
+            serialize_batch_analytics_details(
+                &payload,
+                &response,
+                &entry_outcomes,
+                failed_entries,
+                max_bytes,
+            )
+        }
+    });
     // Failed entries also surface once in error analytics, carrying the first
     // failure's error and stage; the details above name every failed entry.
     if let Some((error, stage)) = first_entry_error {
@@ -1793,18 +1819,43 @@ fn serialize_batch_analytics_details(
     response: &RoutingBatchResponse,
     entries: &[Value],
     failed_count: usize,
+    max_bytes: usize,
 ) -> Option<String> {
-    serde_json::to_string(&json!({
-        "request": request,
-        "response": response,
-        "created_by": request.created_by,
-        "algorithm_for": request.algorithm_for,
-        "fallback_output": request.fallback_output,
-        "entry_count": entries.len(),
-        "failed_count": failed_count,
-        "entries": entries,
-    }))
-    .ok()
+    #[derive(serde::Serialize)]
+    struct BatchDetails<'a> {
+        #[serde(skip_serializing_if = "Option::is_none")]
+        request: Option<&'a RoutingBatchRequest>,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        response: Option<&'a RoutingBatchResponse>,
+        created_by: &'a str,
+        algorithm_for: &'a Option<String>,
+        fallback_output: &'a Option<Vec<ConnectorInfo>>,
+        entry_count: usize,
+        failed_count: usize,
+        entries: &'a [Value],
+        #[serde(skip_serializing_if = "Option::is_none")]
+        truncated: Option<bool>,
+    }
+
+    let mut details = BatchDetails {
+        request: Some(request),
+        response: Some(response),
+        created_by: &request.created_by,
+        algorithm_for: &request.algorithm_for,
+        fallback_output: &request.fallback_output,
+        entry_count: entries.len(),
+        failed_count,
+        entries,
+        truncated: None,
+    };
+    crate::analytics::serialize_bounded_details(&details, max_bytes).or_else(|| {
+        details.request = None;
+        details.response = None;
+        details.truncated = Some(true);
+        crate::analytics::serialize_bounded_details(&details, max_bytes).or_else(|| {
+            crate::analytics::serialize_bounded_details(&json!({ "truncated": true }), max_bytes)
+        })
+    })
 }
 
 fn record_routing_evaluate_preview_error(

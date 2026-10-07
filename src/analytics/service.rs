@@ -52,7 +52,6 @@ pub fn trace_id_from_headers(headers: &HeaderMap) -> Option<String> {
 }
 
 fn enqueue_domain_event(event: DomainAnalyticsEvent) {
-    let event = truncate_domain_event_details(event);
     ANALYTICS_EVENT_COUNTER
         .with_label_values(&[event.flow_type.as_str()])
         .inc();
@@ -62,28 +61,22 @@ fn enqueue_domain_event(event: DomainAnalyticsEvent) {
     }
 }
 
-fn truncate_domain_event_details(mut event: DomainAnalyticsEvent) -> DomainAnalyticsEvent {
-    let Some(details) = event.details.take() else {
-        return event;
-    };
-
-    let max_bytes = crate::app::APP_STATE
-        .get()
-        .map(|state| state.analytics_runtime.details_max_bytes())
-        .unwrap_or_else(|| crate::config::AnalyticsCaptureConfig::default().details_max_bytes);
-
-    if details.len() <= max_bytes {
-        event.details = Some(details);
-        return event;
+impl DomainAnalyticsEvent {
+    pub(crate) fn emit_with_details<F, D>(self, make_details: F)
+    where
+        F: FnOnce() -> D,
+        D: FnOnce(usize) -> Option<String> + Send + 'static,
+    {
+        ANALYTICS_EVENT_COUNTER
+            .with_label_values(&[self.flow_type.as_str()])
+            .inc();
+        if let Some(global_state) = crate::app::APP_STATE.get() {
+            global_state
+                .analytics_runtime
+                .enqueue_domain_event_with_details(self, make_details);
+        }
     }
 
-    let mut truncated = details;
-    truncated.truncate(max_bytes);
-    event.details = Some(truncated);
-    event
-}
-
-impl DomainAnalyticsEvent {
     fn emit(self) {
         enqueue_domain_event(self);
     }

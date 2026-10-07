@@ -138,6 +138,67 @@ test.describe('Analytics API', () => {
     })
   }
 
+  for (const oversizedCase of [
+    { name: 'Unicode request metadata', unicode: true, gateways: ['mifinity'] },
+    { name: 'ASCII responses with multiple fallbacks', unicode: false, gateways: ['stripe', 'adyen', 'checkout', 'paypal'] },
+  ]) {
+    test(`keeps oversized batch audit details parseable for ${oversizedCase.name}`, async ({ api, merchant }) => {
+      const requestId = randomUUID()
+      const paymentId = factory.paymentId('batch_audit_oversize')
+      const payload = {
+        created_by: merchant.id,
+        algorithm_for: 'payment',
+        fallback_output: oversizedCase.gateways.map((gateway, index) =>
+          factory.gatewayConnector(gateway, `mca_${String(index).repeat(24)}`)),
+        requests: Array.from({ length: 50 }, () => ({
+          payment_id: paymentId,
+          parameters: {
+            amount: { type: 'number', value: 50 },
+            ...(oversizedCase.unicode
+              ? { note: { type: 'metadata_variant', value: { key: 'note', value: '界'.repeat(512) } } }
+              : { currency: { type: 'enum_variant', value: 'USD' } }),
+          },
+        })),
+      }
+      const evaluated = await api.raw('POST', '/routing/evaluate/batch', {
+        body: payload,
+        headers: { 'x-request-id': requestId },
+      })
+      expect(evaluated.status).toBe(200)
+      expect(evaluated.body.results).toHaveLength(50)
+      for (const result of evaluated.body.results) {
+        expect(result.payment_id).toBe(paymentId)
+        expect(result.status).toBe('no_active_algorithm')
+        expect(result.evaluated_output).toEqual(payload.fallback_output)
+      }
+
+      const audit = await poll(
+        () => api.raw('GET', '/analytics/payment-audit', {
+          qs: { range: '1h', request_id: requestId },
+          failOnStatusCode: false,
+        }),
+        ({ body }) => body?.timeline?.some((event: any) => event.flow_type === 'routing_evaluate_preview'),
+        { message: `Expected oversized batch audit outcome for ${requestId}` },
+      )
+      expect(audit.status).toBe(200)
+      expect(audit.body.timeline).toHaveLength(1)
+      const event = audit.body.timeline[0]
+      const details = event.details_json
+      expect(details).toMatchObject({ truncated: true, entry_count: 50, failed_count: 0 })
+      expect(details.request).toBeUndefined()
+      expect(details.response).toBeUndefined()
+      expect(details.entries).toEqual(payload.requests.map((entry) => ({
+        payment_id: entry.payment_id,
+        payment_method: null,
+        payment_method_type: null,
+        status: 'no_active_algorithm',
+        gateway: payload.fallback_output[0].gateway_name,
+      })))
+      expect(JSON.parse(event.details)).toEqual(details)
+      expect(Buffer.byteLength(event.details, 'utf8')).toBeLessThanOrEqual(65_536)
+    })
+  }
+
   test('returns populated overview, routing stats, payment audit, and preview trace after traffic is generated', async ({
     api,
     merchant,

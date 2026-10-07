@@ -230,7 +230,7 @@ pub struct RoutingBatchRequest {
 
 /// Positional results for a batch evaluation. An entry the engine could not evaluate
 /// has `status: "error"` and empty outputs, so one failing entry does not fail the rest.
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct RoutingBatchResponse {
     pub results: Vec<RoutingEvaluateResponse>,
 }
@@ -286,7 +286,7 @@ pub const ELIGIBLE_DIMENSIONS: [&str; 5] = [
     "card_is_in",
     "card_network",
 ];
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Clone, serde::Serialize)]
 pub struct RoutingEvaluateResponse {
     pub payment_id: Option<String>,
     pub status: String,

@@ -177,7 +177,9 @@ password = "decision_engine"
 
 Decision outcomes are published to Kafka and consumed into ClickHouse. Both are required for analytics and audit dashboard views. For Docker runs, these are pre-configured and enabled via the Compose profiles.
 
-Completed `/routing/evaluate/batch` audit events include the full `request` and `response` alongside the entry count, failed count, and per-entry summaries. Each nonempty batch still produces one outcome event, with one additional error event if any entries fail. Audit details remain subject to `analytics.capture.details_max_bytes` (64 KiB by default).
+Completed `/routing/evaluate/batch` audit events include the full `request` and `response` alongside the entry count, failed count, and per-entry summaries. Each nonempty batch still produces one outcome event, with one additional error event if any entries fail.
+
+Batch payload serialization runs in the background analytics publisher. Admission is nonblocking, with at most 16 pending full-payload captures; disabled publishing or a full queue skips capture without delaying the routing response. Audit details remain subject to `analytics.capture.details_max_bytes` (64 KiB by default). Oversized batch details omit `request` and `response`, retain the compact summaries, and include `truncated: true`. If the summaries also exceed the limit, only the marker is retained, or details are omitted if even the marker cannot fit. Other oversized domain details are replaced by a valid JSON marker containing `truncated` and `original_bytes`.
 
 ### TLS
 
