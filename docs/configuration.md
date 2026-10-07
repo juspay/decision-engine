@@ -177,6 +177,8 @@ password = "decision_engine"
 
 Decision outcomes are published to Kafka and consumed into ClickHouse. Both are required for analytics and audit dashboard views. For Docker runs, these are pre-configured and enabled via the Compose profiles.
 
+Completed `/routing/evaluate/batch` audit events include the full `request` and `response` alongside the entry count, failed count, and per-entry summaries. Each nonempty batch still produces one outcome event, with one additional error event if any entries fail. Audit details remain subject to `analytics.capture.details_max_bytes` (64 KiB by default).
+
 ### TLS
 
 ```toml

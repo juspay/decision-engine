@@ -1,4 +1,5 @@
-import { test, expect, factory } from '../../fixtures/test'
+import { randomUUID } from 'node:crypto'
+import { test, expect, factory, poll } from '../../fixtures/test'
 import {
   HYBRID_AUDIT_TRAIL,
   seedHybridTraffic,
@@ -29,6 +30,114 @@ import {
  * identical setup. The remaining analytics endpoints are covered in analytics-extended.spec.ts.
  */
 test.describe('Analytics API', () => {
+  for (const batchCase of [
+    {
+      name: 'an active advanced rule with fallback and matched entries',
+      activeRule: true,
+      firstAmount: { type: 'number', value: 50 },
+      statuses: ['default_selection', 'success'],
+      flowType: 'routing_evaluate_advanced',
+      failedCount: 0,
+    },
+    {
+      name: 'no active algorithm with supplied fallback',
+      activeRule: false,
+      firstAmount: { type: 'number', value: 50 },
+      statuses: ['no_active_algorithm', 'no_active_algorithm'],
+      flowType: 'routing_evaluate_preview',
+      failedCount: 0,
+    },
+    {
+      name: 'an active advanced rule with failed and matched entries',
+      activeRule: true,
+      firstAmount: { type: 'str_value', value: 'bad' },
+      statuses: ['error', 'success'],
+      flowType: 'routing_evaluate_advanced',
+      failedCount: 1,
+    },
+  ]) {
+    test(`preserves complete batch audit payloads for ${batchCase.name}`, async ({ api, merchant }) => {
+      if (batchCase.activeRule) {
+        const created = await api.createRoutingAlgorithm(
+          factory.advancedRoutingPayload(merchant.id, {
+            rules: [{
+              name: 'amount_gt_100',
+              routing_type: 'priority',
+              output: { priority: [factory.gatewayConnector('checkout')] },
+              statements: [{
+                condition: [{
+                  lhs: 'amount',
+                  comparison: 'greater_than',
+                  value: { type: 'number', value: 100 },
+                  metadata: {},
+                }],
+              }],
+            }],
+          }),
+        )
+        await api.activateRoutingAlgorithm(merchant.id, created.body.rule_id)
+      }
+
+      const requestId = randomUUID()
+      const payload = {
+        created_by: merchant.id,
+        algorithm_for: 'payment',
+        fallback_output: [factory.gatewayConnector('mifinity')],
+        requests: [batchCase.firstAmount, { type: 'number', value: 150 }].map((amount, index) => ({
+          payment_id: factory.paymentId(`batch_audit_${index}`),
+          parameters: {
+            amount,
+            payment_method: { type: 'enum_variant', value: 'card' },
+          },
+        })),
+      }
+      const evaluated = await api.raw('POST', '/routing/evaluate/batch', {
+        body: payload,
+        headers: { 'x-request-id': requestId },
+      })
+      expect(evaluated.status).toBe(200)
+      expect(evaluated.body.results.map((result: any) => result.status)).toEqual(batchCase.statuses)
+      expect(evaluated.body.results.map((result: any) => result.payment_id)).toEqual(
+        payload.requests.map((entry) => entry.payment_id),
+      )
+
+      const expectedFlows = [
+        batchCase.flowType,
+        ...(batchCase.failedCount ? ['routing_evaluate_error'] : []),
+      ]
+      const audit = await poll(
+        () => api.raw('GET', '/analytics/payment-audit', {
+          qs: { range: '1h', request_id: requestId },
+          failOnStatusCode: false,
+        }),
+        ({ body }) => expectedFlows.every((flowType) =>
+          body?.timeline?.some((event: any) => event.flow_type === flowType)),
+        { message: `Expected batch audit outcomes for ${requestId}` },
+      )
+      expect(audit.status).toBe(200)
+      expect(audit.body.timeline.map((event: any) => event.flow_type).sort()).toEqual(expectedFlows.sort())
+      const outcomes = audit.body.timeline.filter((event: any) => event.flow_type === batchCase.flowType)
+      expect(outcomes).toHaveLength(1)
+      const details = outcomes[0].details_json
+      expect(details.created_by).toBe(payload.created_by)
+      expect(details.algorithm_for).toBe(payload.algorithm_for)
+      expect(details.fallback_output).toEqual(payload.fallback_output)
+      expect(details.entry_count).toBe(payload.requests.length)
+      expect(details.failed_count).toBe(batchCase.failedCount)
+      expect(details.entries.map((entry: any) => ({
+        payment_id: entry.payment_id,
+        status: entry.status,
+        gateway: entry.gateway ?? null,
+      }))).toEqual(evaluated.body.results.map((result: any) => ({
+        payment_id: result.payment_id,
+        status: result.status,
+        gateway: result.evaluated_output[0]?.gateway_name ?? null,
+      })))
+      expect(details.request).toEqual(payload)
+      expect(details.response).toEqual(evaluated.body)
+    })
+  }
+
   test('returns populated overview, routing stats, payment audit, and preview trace after traffic is generated', async ({
     api,
     merchant,
