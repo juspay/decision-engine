@@ -147,6 +147,7 @@ export interface GatewayOption {
   gatewayId?: string
   /** The merchant's own label for the account, when the dashboard handed one over. */
   label?: string
+  disabled?: boolean
 }
 
 /**
@@ -185,8 +186,10 @@ export function gatewayOptions(
           name: connector.connector_name,
           gatewayId: connector.merchant_connector_id,
           label: label && label !== connector.connector_name ? label : undefined,
+          disabled: connector.disabled === true,
         }
       })
+      .sort((a, b) => Number(a.disabled) - Number(b.disabled))
   }
 
   const seen = new Set<string>()
