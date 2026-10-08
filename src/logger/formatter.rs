@@ -222,6 +222,11 @@ where
         ];
 
         let domain_keys = [
+            "route",
+            "method",
+            "status_code",
+            "request_id",
+            "latency_ms",
             "message_number",
             "error_category",
             "error",
@@ -273,13 +278,37 @@ where
         // Initialize the explicit entries set.
         let mut explicit_entries_set: HashSet<&str> = HashSet::default();
 
+        if storage.values.get("message").and_then(Value::as_str) == Some("api_response_failed") {
+            for key in ["route", "method", "status_code", "request_id", "latency_ms"] {
+                if let Some(value) = storage.values.get(key) {
+                    map_serializer.serialize_entry(key, value)?;
+                    explicit_entries_set.insert(key);
+                }
+            }
+            for (canonical, source) in [("x-request-id", "request_id"), ("endpoint", "route")] {
+                if let Some(value) = storage
+                    .values
+                    .get(canonical)
+                    .filter(|value| !value.is_null())
+                    .or_else(|| storage.values.get(source))
+                {
+                    map_serializer.serialize_entry(canonical, value)?;
+                    explicit_entries_set.insert(canonical);
+                }
+            }
+        }
+
         if category == "INCOMING_API" {
             // Serialize keys from the span that match the incoming_api keys array.
             if let Some(span) = span {
                 let extensions = span.extensions();
                 if let Some(visitor) = extensions.get::<Storage<'_>>() {
                     for key in &incoming_api_keys {
-                        if let Some(value) = visitor.values.get(*key) {
+                        if let Some(value) = visitor
+                            .values
+                            .get(*key)
+                            .filter(|_| !explicit_entries_set.contains(*key))
+                        {
                             map_serializer.serialize_entry(*key, value)?;
                             explicit_entries_set.insert(*key);
                         }
@@ -368,7 +397,11 @@ where
                 let extensions = span.extensions();
                 if let Some(visitor) = extensions.get::<Storage<'_>>() {
                     for key in &domain_keys {
-                        if let Some(value) = visitor.values.get(*key) {
+                        if let Some(value) = visitor
+                            .values
+                            .get(*key)
+                            .filter(|_| !explicit_entries_set.contains(*key))
+                        {
                             map_serializer.serialize_entry(*key, value)?;
                             explicit_entries_set.insert(*key);
                         }
@@ -640,4 +673,79 @@ where
     fn on_enter(&self, _id: &tracing::Id, _ctx: Context<'_, S>) {}
 
     fn on_close(&self, _id: tracing::Id, _ctx: Context<'_, S>) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::prelude::*;
+
+    struct LogWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for LogWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .map_err(|_| std::io::Error::other("log buffer poisoned"))?
+                .extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn failed_response_fields_survive_json_formatting() -> Result<(), Box<dyn std::error::Error>> {
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let output = bytes.clone();
+        let subscriber = tracing_subscriber::registry()
+            .with(super::super::storage::StorageSubscription)
+            .with(FormattingLayer::new("open_router", move || {
+                LogWriter(output.clone())
+            }));
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!("request", route = "/old", "x-request-id" = "old-id");
+            let _entered = span.enter();
+            tracing::warn!(
+                route = "/rule/get",
+                method = "POST",
+                status_code = 404_u16,
+                request_id = "request-404",
+                latency_ms = 2_u64,
+                "api_response_failed"
+            );
+            tracing::error!(
+                route = "/routing/hybrid",
+                method = "POST",
+                status_code = 500_u16,
+                request_id = "request-500",
+                latency_ms = 9_u64,
+                "api_response_failed"
+            );
+        });
+        let buffer = bytes.lock().map_err(|_| "log buffer poisoned")?;
+        let lines: Vec<Value> = std::str::from_utf8(&buffer)?
+            .lines()
+            .map(serde_json::from_str)
+            .collect::<Result<_, _>>()?;
+        assert_eq!(lines.len(), 2);
+        for (line, route, status, id, latency) in [
+            (&lines[0], "/rule/get", 404, "request-404", 2),
+            (&lines[1], "/routing/hybrid", 500, "request-500", 9),
+        ] {
+            assert_eq!(line["message"], "api_response_failed");
+            assert_eq!(line["route"], route);
+            assert_eq!(line["endpoint"], route);
+            assert_eq!(line["method"], "POST");
+            assert_eq!(line["status_code"], status);
+            assert_eq!(line["request_id"], id);
+            assert_eq!(line["x-request-id"], id);
+            assert_eq!(line["latency_ms"], latency);
+        }
+        assert_eq!(lines[0]["level"], "Warn");
+        assert_eq!(lines[1]["level"], "Error");
+        Ok(())
+    }
 }
