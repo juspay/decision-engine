@@ -1,25 +1,18 @@
-# Default values for decision-engine
 replicaCount: 1
 
 image:
-  # Updated to include the registry URL
   repository: ghcr.io/juspay/decision-engine/postgres
   pullPolicy: Always
-  version: "v1.4"
+  # Also used as the git tag for migrations; use a released tag.
+  version: "v1.4.35"
 
-# Configure these if your images are in a private registry
-imagePullSecrets:
-  # - name: regcred
+imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
 
 serviceAccount:
-  # Specifies whether a service account should be created
   create: true
-  # Annotations to add to the service account
   annotations: {}
-  # The name of the service account to use.
-  # If not set and create is true, a name is generated using the fullname template
   name: ""
 
 podAnnotations: {}
@@ -28,11 +21,10 @@ podSecurityContext: {}
   # fsGroup: 2000
 
 initContainers:
-  # Set to false to disable all init containers
   enabled: true
   busybox:
     repository: public.ecr.aws/docker/library/busybox
-    tag: "1.28"
+    tag: "1.37"
     pullPolicy: IfNotPresent
 
 securityContext: {}
@@ -49,10 +41,6 @@ service:
     - name: http
       port: 80
       targetPort: 8080
-      protocol: TCP
-    - name: metrics
-      port: 9090
-      targetPort: 9090
       protocol: TCP
 
 ingress:
@@ -85,42 +73,40 @@ tolerations: []
 
 affinity: {}
 
-# Decision Engine configurations
+# Where the migration Job and the dashboard assets are fetched from. Point `repoUrl` at
+# a mirror when the cluster cannot reach github.com; override a `sourceUrl` below for a mirror that
+# does not serve GitHub-style `archive/refs/<kind>/<ref>.tar.gz` paths.
+source:
+  repoUrl: https://github.com/juspay/decision-engine
+
 decisionEngine:
-  # Set to false to use PostgreSQL instead of MySQL
   useMySQL: false
-  # Set to true to enable PostgreSQL support
   usePostgreSQL: true
-  # Set to true to enable Redis support
   useRedis: true
-  # Configuration for logging
   logging:
     level: "DEBUG"
     format: "default"
-  # API server configurations
+  telemetry:
+    metricsEnabled: false
+    ignoreErrors: true
+    otelExporterOtlpEndpoint: "http://otel-collector:4317"
+    # Milliseconds per export request.
+    otelExporterOtlpTimeout: 10000
   server:
     host: "0.0.0.0"
     port: 8080
-  # Metrics server configurations
-  metrics:
-    host: "0.0.0.0"
-    port: 9090
-  # Rate limiting
   rateLimit:
     requestCount: 1
     duration: 60
-  # Cache settings
   cache:
     tti: 7200
     maxCapacity: 5000
-  # Secrets management
   secrets:
     openRouterPrivateKey: ""
     secretsManager: "no_encryption"
     awsKms:
       keyId: "us-west-2"
       region: "abc"
-  # API client settings
   apiClient:
     clientIdleTimeout: 90
     poolMaxIdlePerHost: 10
@@ -152,9 +138,13 @@ analytics:
         tag: "26.1"
         pullPolicy: "IfNotPresent"
 
-# MySQL configuration (used when decisionEngine.useMySQL is true)
 mysql:
   enabled: false
+  hostname: ""
+  port: 3306
+  image:
+    repository: bitnamilegacy/mysql
+    tag: 8.0.35-debian-11-r3
   auth:
     rootPassword: "root"
     database: "jdb"
@@ -163,9 +153,16 @@ mysql:
       enabled: true
       size: 8Gi
 
-# PostgreSQL configuration (used when decisionEngine.usePostgreSQL is true)
+# PostgreSQL sub-chart, used when `decisionEngine.usePostgreSQL` is true.
+# Set `enabled: false` and point `hostname` at an existing server when running inside a stack that
+# already has one - two enabled sub-charts in the same release would both claim `<release>-postgresql`.
 postgresql:
   enabled: true
+  hostname: ""
+  port: 5432
+  image:
+    repository: bitnamilegacy/postgresql
+    tag: 16.1.0-debian-11-r18
   auth:
     username: "db_user"
     password: "db_pass"
@@ -175,9 +172,14 @@ postgresql:
       enabled: true
       size: 8Gi
 
-# Redis configuration
+# Redis sub-chart. Same collision caveat as postgresql above.
 redis:
   enabled: true
+  hostname: ""
+  port: 6379
+  image:
+    repository: bitnamilegacy/redis
+    tag: 7.2.3-debian-11-r2
   auth:
     enabled: false
   master:
@@ -190,16 +192,16 @@ redis:
       enabled: true
       size: 8Gi
 
-# Groovy Runner configuration
 groovyRunner:
   enabled: true
   image:
     repository: "ghcr.io/juspay/decision-engine/groovy-runner"
-    version: "v1.4"
+    version: "v1.4.35"
     pullPolicy: "Always"
   service:
     port: 8085
   resources: {}
+  nodeSelector: {}
   healthcheck:
     enabled: true
     path: "/health"
@@ -211,43 +213,88 @@ groovyRunner:
     labels:
       component: groovy-runner
 
-# Database Migration Job
+# The dashboard: `website/dist`, which ships already built in the release tarball. An init container
+# unpacks it into a volume and nginx serves it, proxying the API prefix to the Decision Engine so
+# both answer on one origin (the application has no CORS layer). Nothing is built or pulled here.
+dashboard:
+  enabled: false
+  replicaCount: 1
+  assets:
+    image:
+      repository: public.ecr.aws/docker/library/alpine
+      tag: "3.20"
+      pullPolicy: IfNotPresent
+    refs: tags
+    sourceRef: ""
+    sourceUrl: ""
+    forceRefresh: false
+    resources:
+      requests:
+        cpu: 50m
+        memory: 64Mi
+      limits:
+        memory: 256Mi
+  nginx:
+    repository: nginx
+    tag: alpine
+    pullPolicy: IfNotPresent
+  service:
+    type: ClusterIP
+    port: 80
+  containerPort: 8080
+  # -- Path the bundle is served from. Baked in at build time by website/vite.config.ts
+  basePath: /decision-engine/
+  # -- Path prefix proxied to the Decision Engine. Must match `website/src/lib/api.ts`
+  apiBasePath: /decision-engine/api
+  proxyReadTimeout: 60s
+  ingress:
+    enabled: true
+  resources: {}
+  nodeSelector: {}
+  metadata:
+    labels:
+      component: dashboard
+
 dbMigration:
   enabled: true
-  # PostgreSQL migrations
+  refs: tags
+  version: ""
   postgresql:
     enabled: true
     image:
-      repository: "postgres"
-      tag: "latest"
+      registry: docker.io
+      # -- Base image for the migration Job. It needs `bash`, `apt-get` and network access: the Job
+      # installs diesel_cli into it, as the hyperswitch-app chart does
+      repository: debian:trixie-slim
       pullPolicy: "IfNotPresent"
     migrations:
-      path: "/app/migrations_pg"
-  # MySQL migrations (not used with PostgreSQL)
+      path: "migrations_pg"
+    # -- Installer used to place diesel_cli in the migration Job. Pin a release tag instead of
+    # `latest` if you need the CLI version to be reproducible
+    dieselInstaller: https://github.com/diesel-rs/diesel/releases/latest/download/diesel_cli-installer.sh
   mysql:
     enabled: false
     image:
+      registry: docker.io
+      repository: debian:stable-slim
       pullPolicy: IfNotPresent
     scriptUrls:
       - https://raw.githubusercontent.com/juspay/decision-engine/431b1b2/migrations/00000000000000_diesel_initial_setup/up.sql
       - https://raw.githubusercontent.com/juspay/decision-engine/431b1b2/migrations/2025-04-23-103603_add_routing_algorithm_mapper_table/up.sql
       - https://raw.githubusercontent.com/juspay/decision-engine/431b1b2/migrations/2025-05-09-112540_add_metadata_to_routing_algorithm/up.sql
 
-# Routing Config Job
 routingConfig:
   enabled: false
   image:
-    repository: "python"
-    tag: "3.10-slim"
-    pullPolicy: "IfNotPresent"
+    repository: ""
+    tag: ""
+    pullPolicy: IfNotPresent
   command: ["bash", "run_setup.sh"]
   configVolume:
-    enabled: true
-    # Path to mount routing config files
-    mountPath: "/app"
+    enabled: false
+    mountPath: /app
 
-# Additional environment variables to inject into the main container (map format for proper merging)
-# Supports both simple values and valueFrom references for secrets/configmaps
+# Values may be plain or a `valueFrom` reference (e.g. a Secret key).
 extraEnvVars: {}
   # Simple value example:
   # MY_VAR: "my-value"
@@ -256,31 +303,21 @@ extraEnvVars: {}
   #   valueFrom:
   #     secretKeyRef:
   #       name: decision-engine-secrets
-  #       key: LOCKER__PG_DATABASE__PG_PASSWORD
-  # ConfigMap reference example:
-  # APP_CONFIG:
-  #   valueFrom:
-  #     configMapKeyRef:
-  #       name: app-config
-  #       key: config.json
+  #       key: DECISION_ENGINE__PG_DATABASE__PG_PASSWORD
 
-# Istio configuration (optional)
 istio:
   enabled: false
   virtualService:
     enabled: false
     hosts: []
     gateways: []
-    # HTTP routing rules - route destination will be automatically set to control center service
     http: []
     # Example configuration:
     # http:
-    #   - name: "control-center-routes"
+    #   - name: "decision-engine-routes"
     #     match:
     #       - uri:
     #           prefix: /
-    #     rewrite:
-    #       uri: "/dashboard"
     #     weight: 100
     #     timeout: 30s
     #     retries:
