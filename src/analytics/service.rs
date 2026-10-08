@@ -52,31 +52,33 @@ pub fn trace_id_from_headers(headers: &HeaderMap) -> Option<String> {
 }
 
 fn enqueue_domain_event(event: DomainAnalyticsEvent) {
-    ANALYTICS_EVENT_COUNTER
-        .with_label_values(&[event.flow_type.as_str()])
-        .inc();
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let event = limit_domain_event_details(event);
+        ANALYTICS_EVENT_COUNTER
+            .with_label_values(&[event.flow_type.as_str()])
+            .inc();
 
-    if let Some(global_state) = crate::app::APP_STATE.get() {
-        global_state.analytics_runtime.enqueue_domain_event(event);
+        if let Some(global_state) = crate::app::APP_STATE.get() {
+            global_state.analytics_runtime.enqueue_domain_event(event);
+        }
+    }))
+    .is_err()
+    {
+        crate::logger::warn!("Skipping analytics event after an unexpected capture failure");
     }
 }
 
-impl DomainAnalyticsEvent {
-    pub(crate) fn emit_with_details<F, D>(self, make_details: F)
-    where
-        F: FnOnce() -> D,
-        D: FnOnce(usize) -> Option<String> + Send + 'static,
-    {
-        ANALYTICS_EVENT_COUNTER
-            .with_label_values(&[self.flow_type.as_str()])
-            .inc();
-        if let Some(global_state) = crate::app::APP_STATE.get() {
-            global_state
-                .analytics_runtime
-                .enqueue_domain_event_with_details(self, make_details);
-        }
-    }
+fn limit_domain_event_details(mut event: DomainAnalyticsEvent) -> DomainAnalyticsEvent {
+    let max_bytes = crate::app::APP_STATE
+        .get()
+        .map(|state| state.analytics_runtime.details_max_bytes())
+        .unwrap_or_else(|| crate::config::AnalyticsCaptureConfig::default().details_max_bytes);
 
+    event.details = event.details.filter(|details| details.len() <= max_bytes);
+    event
+}
+
+impl DomainAnalyticsEvent {
     fn emit(self) {
         enqueue_domain_event(self);
     }
@@ -582,5 +584,49 @@ pub fn format_range(query: &AnalyticsQuery) -> String {
         AnalyticsRange::H12 => "12h".to_string(),
         AnalyticsRange::D1 => "1d".to_string(),
         AnalyticsRange::W1 => "1w".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::analytics::{ApiFlow, FlowType};
+
+    fn event(details: String) -> DomainAnalyticsEvent {
+        DomainAnalyticsEvent::rule_evaluation_preview(
+            AnalyticsFlowContext::new(ApiFlow::RuleBasedRouting, FlowType::RoutingEvaluatePreview),
+            Some("merchant".to_string()),
+            Some("payment".to_string()),
+            Some("stripe".to_string()),
+            None,
+            Some("success".to_string()),
+            Some(details),
+            Some("request".to_string()),
+            None,
+            None,
+            1234,
+        )
+    }
+
+    #[test]
+    fn oversized_unicode_details_are_omitted_without_losing_event_metadata() {
+        let details = serde_json::json!({ "note": "é".repeat(40_000) }).to_string();
+        assert!(!details.is_char_boundary(65_536));
+        let event = limit_domain_event_details(event(details));
+        assert!(event.details.is_none());
+        assert_eq!(event.merchant_id.as_deref(), Some("merchant"));
+        assert_eq!(event.payment_id.as_deref(), Some("payment"));
+        assert_eq!(event.request_id.as_deref(), Some("request"));
+        assert_eq!(event.gateway.as_deref(), Some("stripe"));
+        assert_eq!(event.status.as_deref(), Some("success"));
+    }
+
+    #[test]
+    fn details_within_limit_are_unchanged() {
+        let limit = crate::config::AnalyticsCaptureConfig::default().details_max_bytes;
+        for details in ["{}".to_string(), format!("\"{}\"", "x".repeat(limit - 2))] {
+            let event = limit_domain_event_details(event(details.clone()));
+            assert_eq!(event.details.as_deref(), Some(details.as_str()));
+        }
     }
 }

@@ -142,7 +142,7 @@ test.describe('Analytics API', () => {
     { name: 'Unicode request metadata', unicode: true, gateways: ['mifinity'] },
     { name: 'ASCII responses with multiple fallbacks', unicode: false, gateways: ['stripe', 'adyen', 'checkout', 'paypal'] },
   ]) {
-    test(`keeps oversized batch audit details parseable for ${oversizedCase.name}`, async ({ api, merchant }) => {
+    test(`omits oversized batch audit details without changing routing for ${oversizedCase.name}`, async ({ api, merchant }) => {
       const requestId = randomUUID()
       const paymentId = factory.paymentId('batch_audit_oversize')
       const payload = {
@@ -183,19 +183,10 @@ test.describe('Analytics API', () => {
       expect(audit.status).toBe(200)
       expect(audit.body.timeline).toHaveLength(1)
       const event = audit.body.timeline[0]
-      const details = event.details_json
-      expect(details).toMatchObject({ truncated: true, entry_count: 50, failed_count: 0 })
-      expect(details.request).toBeUndefined()
-      expect(details.response).toBeUndefined()
-      expect(details.entries).toEqual(payload.requests.map((entry) => ({
-        payment_id: entry.payment_id,
-        payment_method: null,
-        payment_method_type: null,
-        status: 'no_active_algorithm',
-        gateway: payload.fallback_output[0].gateway_name,
-      })))
-      expect(JSON.parse(event.details)).toEqual(details)
-      expect(Buffer.byteLength(event.details, 'utf8')).toBeLessThanOrEqual(65_536)
+      expect(event.status).toBe('no_active_algorithm')
+      expect(event.gateway).toBe(payload.fallback_output[0].gateway_name)
+      expect(event.details).toBeNull()
+      expect(event.details_json).toBeNull()
     })
   }
 
