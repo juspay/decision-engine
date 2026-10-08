@@ -993,6 +993,11 @@ function ExperimentDetailPanel({
   }
 
   const totalTxns = results ? results.control.transaction_count + results.variant.transaction_count : 0
+  const controlResolved = results ? results.control.success_count + results.control.failure_count : 0
+  const variantResolved = results ? results.variant.success_count + results.variant.failure_count : 0
+  const guardrailDropPp = results && controlResolved > 0 && variantResolved > 0
+    ? 100 * (results.control.success_count / controlResolved - results.variant.success_count / variantResolved)
+    : null
   const minSample = abData?.min_sample_size ?? 1000
   const collectedShare = minSample > 0 ? Math.min(1, totalTxns / minSample) : 0
   const progress = Math.round(collectedShare * 100)
@@ -1051,7 +1056,7 @@ function ExperimentDetailPanel({
           label: 'Guardrail',
           value: `${abData.guardrail_threshold_pp}pp`,
           icon: ShieldAlert,
-          caption: 'Auth drop under control that flags the test',
+          caption: 'Auth drop under control that stops the experiment',
           visual: null,
         },
       ]
@@ -1212,6 +1217,12 @@ function ExperimentDetailPanel({
           </p>
         ) : (
           <div className="space-y-4">
+            {totalTxns === 0 && (
+              <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-200">
+                No payments have been recorded for this experiment on {endpoint === 'hybrid_routing' ? 'Hybrid routing' : endpoint === 'decide_gateway' ? 'Decide gateway' : 'Rule evaluate'}.
+                {endpoint === 'hybrid_routing' && ' Decision Simulator uses Decide gateway by default. To test this view, choose More → Endpoint → Hybrid routing, then run new payments for the same merchant while this experiment is active.'}
+              </div>
+            )}
             {/* Statistical rigor first: while the verdict isn't trustworthy, lead with the confidence
                 notice and keep every delta neutral (handled inside the table). */}
             {!significant && <ConfidenceBanner verdict={results.verdict} />}
@@ -1224,8 +1235,7 @@ function ExperimentDetailPanel({
             />
             {results.verdict === 'guardrail_breached' && (
               <Notice tone="danger">
-                <ShieldAlert size={12} />
-                Variant auth rate dropped {Math.abs(results.delta_pp).toFixed(2)}pp below control — beyond the {abData?.guardrail_threshold_pp}pp guardrail. Consider stopping the experiment.
+                Among completed payments, variant auth rate dropped {guardrailDropPp?.toFixed(2)}pp below control — beyond the {abData?.guardrail_threshold_pp}pp guardrail. {isActive ? 'The experiment stops when payment feedback confirms the breach; check feedback delivery if it remains active.' : 'This experiment is inactive. Payments use your active routing setup.'}
               </Notice>
             )}
           </div>
@@ -1260,7 +1270,7 @@ function ExperimentDetailPanel({
                 {!txnData?.transactions.length ? (
                   <tr>
                     <td colSpan={6} className="px-4 py-8 text-base text-slate-500 text-center">
-                      {txnsLoading ? 'Loading…' : 'No transactions logged yet for this experiment.'}
+                      {txnsLoading ? 'Loading…' : 'No payments recorded for this experiment on this endpoint yet.'}
                     </td>
                   </tr>
                 ) : txnData.transactions.map((txn, idx) => {
@@ -1505,7 +1515,7 @@ function CreateForm({
   // The pp-vs-% nuance lives in the tooltip so the line stays a single row.
   const guardrailField = (
     <label className="flex flex-wrap items-center gap-x-2 gap-y-2 text-sm text-slate-700 dark:text-[#c7cfdd]">
-      <span>Flag if variant auth drops by</span>
+      <span>Stop automatically if variant auth drops by more than</span>
       <input
         type="number" min={0.5} max={20} step={0.5}
         className={`w-16 ${fieldCls}`}
@@ -1513,7 +1523,7 @@ function CreateForm({
         onChange={e => setForm(f => ({ ...f, guardrailThresholdPp: Number(e.target.value) }))}
       />
       <span>percentage points below control</span>
-      <InfoHint text="Percentage points, not percent — a 3 here flags the test when the variant's auth rate is 3+ points under control (say 89% vs 92%)." />
+      <InfoHint text="After both arms have a completed payment, each new outcome checks the saved guardrail and stops a breached experiment, even before the sample target. A value of 3 stops the experiment at 88% vs 92%; new payments use the active routing rule." />
     </label>
   )
 
@@ -1960,6 +1970,7 @@ export function ABTestingPage() {
   const { data: activeAlgorithms, error: activeAlgorithmsError, mutate: mutateActive } = useSWR<RoutingAlgorithm[]>(
     merchantId ? ['active-routing', merchantId] : null,
     () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`),
+    { refreshInterval: 10_000 },
   )
 
   // Activation routes live traffic through the experiment, but stats only record when the

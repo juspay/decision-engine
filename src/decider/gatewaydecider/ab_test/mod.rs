@@ -1,6 +1,7 @@
 pub mod arms;
 pub mod common;
 pub mod config;
+pub mod guardrail;
 pub mod interceptor;
 pub mod outcome;
 pub mod preview;
