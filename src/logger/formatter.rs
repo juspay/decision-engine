@@ -222,11 +222,6 @@ where
         ];
 
         let domain_keys = [
-            "route",
-            "method",
-            "status_code",
-            "request_id",
-            "latency_ms",
             "message_number",
             "error_category",
             "error",
@@ -278,13 +273,30 @@ where
         // Initialize the explicit entries set.
         let mut explicit_entries_set: HashSet<&str> = HashSet::default();
 
-        if storage.values.get("message").and_then(Value::as_str) == Some("api_response_failed") {
-            for key in ["route", "method", "status_code", "request_id", "latency_ms"] {
-                if let Some(value) = storage.values.get(key) {
-                    map_serializer.serialize_entry(key, value)?;
-                    explicit_entries_set.insert(key);
-                }
+        let is_custom_field = |key: &str| {
+            !IMPLICIT_KEYS.contains(key)
+                && !matches!(
+                    key,
+                    "message"
+                        | "timestamp"
+                        | "@timestamp"
+                        | "app_framework"
+                        | "source_commit"
+                        | "env"
+                        | "message_number"
+                )
+        };
+        for (key, value) in &storage.values {
+            if is_custom_field(key) {
+                map_serializer.serialize_entry(key, value)?;
+                explicit_entries_set.insert(key);
             }
+        }
+        if category != "INCOMING_API" {
+            map_serializer.serialize_entry("message", &get_normalized_message::<W>(storage))?;
+            explicit_entries_set.insert("message");
+        }
+        if storage.values.get("message").and_then(Value::as_str) == Some("api_response_failed") {
             for (canonical, source) in [("x-request-id", "request_id"), ("endpoint", "route")] {
                 if let Some(value) = storage
                     .values
@@ -292,8 +304,22 @@ where
                     .filter(|value| !value.is_null())
                     .or_else(|| storage.values.get(source))
                 {
-                    map_serializer.serialize_entry(canonical, value)?;
-                    explicit_entries_set.insert(canonical);
+                    if !explicit_entries_set.contains(canonical) {
+                        map_serializer.serialize_entry(canonical, value)?;
+                        explicit_entries_set.insert(canonical);
+                    }
+                }
+            }
+        }
+
+        if let Some(span) = span {
+            let extensions = span.extensions();
+            if let Some(visitor) = extensions.get::<Storage<'_>>() {
+                for (key, value) in &visitor.values {
+                    if is_custom_field(key) && !explicit_entries_set.contains(key) {
+                        map_serializer.serialize_entry(key, value)?;
+                        explicit_entries_set.insert(key);
+                    }
                 }
             }
         }
@@ -706,7 +732,13 @@ mod tests {
                 LogWriter(output.clone())
             }));
         tracing::subscriber::with_default(subscriber, || {
-            let span = tracing::info_span!("request", route = "/old", "x-request-id" = "old-id");
+            let span = tracing::info_span!(
+                "request",
+                route = "/old",
+                "x-request-id" = "old-id",
+                custom_context = "span-context",
+                custom_result = "stale"
+            );
             let _entered = span.enter();
             tracing::warn!(
                 route = "/rule/get",
@@ -724,13 +756,26 @@ mod tests {
                 latency_ms = 9_u64,
                 "api_response_failed"
             );
+            tracing::info!(
+                custom_result = "success",
+                custom_count = 7_u64,
+                custom_flag = true,
+                "operation_succeeded"
+            );
+            tracing::info!(
+                category = "INCOMING_API",
+                custom_result = "incoming",
+                custom_count = 3_u64,
+                method = "GET",
+                "incoming_request"
+            );
         });
         let buffer = bytes.lock().map_err(|_| "log buffer poisoned")?;
         let lines: Vec<Value> = std::str::from_utf8(&buffer)?
             .lines()
             .map(serde_json::from_str)
             .collect::<Result<_, _>>()?;
-        assert_eq!(lines.len(), 2);
+        assert_eq!(lines.len(), 4);
         for (line, route, status, id, latency) in [
             (&lines[0], "/rule/get", 404, "request-404", 2),
             (&lines[1], "/routing/hybrid", 500, "request-500", 9),
@@ -746,6 +791,15 @@ mod tests {
         }
         assert_eq!(lines[0]["level"], "Warn");
         assert_eq!(lines[1]["level"], "Error");
+        assert_eq!(lines[2]["custom_result"], "success");
+        assert_eq!(lines[2]["custom_context"], "span-context");
+        assert_eq!(lines[2]["custom_count"], 7);
+        assert_eq!(lines[2]["custom_flag"], true);
+        assert_eq!(lines[2]["message"], "operation_succeeded");
+        assert_eq!(lines[3]["custom_result"], "incoming");
+        assert_eq!(lines[3]["custom_count"], 3);
+        assert_eq!(lines[3]["custom_context"], "span-context");
+        assert!(lines[3]["message"].is_object());
         Ok(())
     }
 }
