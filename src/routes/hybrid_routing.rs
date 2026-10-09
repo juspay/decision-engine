@@ -198,9 +198,12 @@ pub async fn hybrid_routing_evaluate(
         .inc();
 
     let HybridRoutingRequest {
-        static_routing_request,
+        mut static_routing_request,
         dynamic_routing_request,
     } = payload;
+    if let Some(request) = static_routing_request.as_mut() {
+        crate::routes::profile_connectors::transform_fallback(request).await?;
+    }
     let dynamic_routing_request = static_routing_request
         .as_ref()
         .map(|request| DomainDeciderRequestForApiCallV2::from((request, dynamic_routing_request)));

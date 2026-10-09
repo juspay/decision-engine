@@ -16,6 +16,7 @@ pub mod health;
 pub mod hierarchy;
 pub mod invoice_upload;
 pub mod merchant_account_config;
+pub mod profile_connectors;
 pub mod report_upload;
 pub mod rule_configuration;
 pub mod seed_costs;
