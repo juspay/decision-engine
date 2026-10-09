@@ -60,6 +60,22 @@ pub static IMPLICIT_KEYS: Lazy<rustc_hash::FxHashSet<&str>> = Lazy::new(|| {
     set
 });
 
+/// Fields handled by the formatter rather than copied as custom JSON fields.
+/// Keep separate from IMPLICIT_KEYS so message and schema fields remain recordable.
+static FORMATTER_MANAGED_KEYS: Lazy<rustc_hash::FxHashSet<&'static str>> = Lazy::new(|| {
+    let mut keys = IMPLICIT_KEYS.clone();
+    keys.extend([
+        "message",
+        "timestamp",
+        "@timestamp",
+        "app_framework",
+        "source_commit",
+        "env",
+        "message_number",
+    ]);
+    keys
+});
+
 /// Global counter for auto-incrementing message numbers
 pub static MESSAGE_NUMBER: AtomicU64 = AtomicU64::new(1);
 
@@ -273,19 +289,7 @@ where
         // Initialize the explicit entries set.
         let mut explicit_entries_set: HashSet<&str> = HashSet::default();
 
-        let is_custom_field = |key: &str| {
-            !IMPLICIT_KEYS.contains(key)
-                && !matches!(
-                    key,
-                    "message"
-                        | "timestamp"
-                        | "@timestamp"
-                        | "app_framework"
-                        | "source_commit"
-                        | "env"
-                        | "message_number"
-                )
-        };
+        let is_custom_field = |key: &str| !FORMATTER_MANAGED_KEYS.contains(key);
         for (key, value) in &storage.values {
             if is_custom_field(key) {
                 map_serializer.serialize_entry(key, value)?;
