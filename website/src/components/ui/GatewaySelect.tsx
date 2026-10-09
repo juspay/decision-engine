@@ -182,6 +182,11 @@ export function GatewaySelect({
                         {o.label}
                       </span>
                     )}
+                    {o.disabled && (
+                      <span className="shrink-0 font-sans text-xs font-normal text-slate-500">
+                        (disabled)
+                      </span>
+                    )}
                   </span>
                   {o.gatewayId && (
                     <span

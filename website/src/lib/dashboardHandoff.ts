@@ -18,6 +18,7 @@ export interface DashboardConnector {
   merchant_connector_id: string
   connector_name: string
   connector_label: string
+  disabled?: boolean
 }
 
 const STORAGE_KEY = 'hs-dashboard-handoff'
