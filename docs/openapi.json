@@ -5647,11 +5647,25 @@
           "payment_id": {
             "type": "string"
           },
+          "retry_decision": {
+            "type": "string",
+            "enum": [
+              "RETRY_SAME_GATEWAY",
+              "RETRY_DIFFERENT_GATEWAY",
+              "DO_NOT_RETRY"
+            ]
+          },
+          "unified_code": {
+            "type": "string",
+            "nullable": true
+          },
+          "unified_message": {
+            "type": "string",
+            "nullable": true
+          },
           "gsm_info": {
-            "type": [
-              "object",
-              "null"
-            ],
+            "type": "object",
+            "nullable": true,
             "description": "GSM lookup result. Present only when `errorInfo` was supplied and a matching rule was found."
           }
         }
