@@ -291,7 +291,7 @@ mod tests {
                 input("debit", "card", "debit", false),
             ],
         )
-        .unwrap_or_default();
+        .expect("valid connector fixtures must compact successfully");
         assert_eq!(
             eligible_fallback(&request(None), &snapshot),
             vec![ConnectorInfo {
@@ -327,7 +327,7 @@ mod tests {
                 input("wallet", "wallet", "apple_pay", false),
             ],
         )
-        .unwrap_or_default();
+        .expect("valid connector fixtures must compact successfully");
         let mut request = request(None);
         request.parameters.remove("payment_method_type");
         assert_eq!(eligible_fallback(&request, &snapshot).len(), 1);
@@ -377,7 +377,8 @@ mod tests {
                 }]),
             });
         }
-        let snapshot = compact_snapshot("profile", vec![connector]).unwrap_or_default();
+        let snapshot = compact_snapshot("profile", vec![connector])
+            .expect("valid connector fixtures must compact successfully");
         assert!(eligible_fallback(&request(None), &snapshot).is_empty());
     }
 
@@ -390,7 +391,7 @@ mod tests {
                 input("two", "card", "credit", false),
             ],
         )
-        .unwrap_or_default();
+        .expect("valid connector fixtures must compact successfully");
         let mut request = request(Some("two"));
         if let Some(fallback) = request.fallback_output.as_mut() {
             fallback.push(ConnectorInfo {
