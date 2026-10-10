@@ -52,11 +52,14 @@ use crate::redis::cache::{self as RService, findByNameFromRedis};
 // use utils::wai::middleware::options as Options;
 // use eulerhs::art::v2::types::ArtRecordable;
 use crate::decider::gatewaydecider::constants as C;
+use crate::decider::gatewaydecider::sr_prior::{self, SrPrior, WindowStats};
 use crate::decider::gatewaydecider::utils as Utils;
+use crate::redis::commands::RedisConnectionWrapper;
 use crate::redis::mem_cache::{mem_cache_config, TypedCache};
 use crate::types::bank_code as ETJ;
 use crate::types::gateway_outage::{self as ETGO, GatewayOutage};
 use once_cell::sync::Lazy;
+use std::sync::Arc;
 
 // TTL is read from [mem_cache] gw_outage_ttl_ms in the TOML config (default 30 000ms = 30s).
 // Outages change only on admin action; the stale window eliminates a per-request DB full-scan.
@@ -601,6 +604,20 @@ pub async fn get_cached_scores_based_on_srv3(
     // snap the gateway to a fake 100%). The score key is left intact.
     Utils::set_srv3_bucket_size(decider_flow, merchant_bucket_size);
 
+    // Cold-start prior: gateways with a usable prior are scored by the posterior mean over the
+    // window's real outcomes; every other gateway keeps the legacy read. Empty when the flag is
+    // off, in which case every gateway takes the legacy path below.
+    let raw_payment_method = decider_flow.get().dpTxnCardInfo.paymentMethod.clone();
+    let cold_start_priors = load_cold_start_priors(
+        &Utils::get_m_id(merchant.merchantId.clone()),
+        &pmt_str,
+        &raw_payment_method,
+        &functional_gateways,
+        merchant_srv3_input_config.as_ref(),
+        default_srv3_input_config.as_ref(),
+    )
+    .await;
+
     // Fetched concurrently: the command count is unchanged, but the client batches commands
     // issued together, so N gateways cost about one round-trip of latency instead of N. Scores
     // are independent and the map is unordered, so the result is identical to a serial loop.
@@ -608,18 +625,42 @@ pub async fn get_cached_scores_based_on_srv3(
     let score_futures = functional_gateways.iter().filter_map(|gw| {
         sr_gateway_redis_key_map.get(gw).map(|key| {
             let gw = gw.clone();
+            let prior = cold_start_priors.get(&gw).copied();
             async move {
-                (
-                    gw,
-                    get_cached_score_from_redis(merchant_bucket_size, key).await,
-                )
+                match prior {
+                    None => (
+                        gw,
+                        get_cached_score_from_redis(merchant_bucket_size, key).await,
+                        None,
+                    ),
+                    Some(prior) => {
+                        let window =
+                            get_cached_window_stats_from_redis(merchant_bucket_size, key).await;
+                        let posterior = ColdStartPosterior { prior, window };
+                        (gw, prior.posterior_mean(&window), Some(posterior))
+                    }
+                }
             }
         })
     });
-    let score_map: GatewayScoreMap = futures::future::join_all(score_futures)
-        .await
-        .into_iter()
+    let scored = futures::future::join_all(score_futures).await;
+    let mut cold_start_posteriors: MP<String, ColdStartPosterior> = scored
+        .iter()
+        .filter_map(|(gw, _, posterior)| posterior.map(|p| (gw.clone(), p)))
         .collect();
+    let score_map: GatewayScoreMap = scored
+        .into_iter()
+        .map(|(gw, score, _)| (gw, score))
+        .collect();
+    if !cold_start_posteriors.is_empty() {
+        logger::debug!(
+            tag = "get_cached_scores_based_on_srv3",
+            action = "sr_v3_cold_start_prior",
+            "Cold-start posteriors for txn Id {:?}: {:?}",
+            order_ref,
+            cold_start_posteriors
+        );
+    }
     logger::debug!(
         tag = "get_cached_scores_based_on_srv3",
         action = "get_cached_scores_based_on_srv3",
@@ -684,7 +725,7 @@ pub async fn get_cached_scores_based_on_srv3(
             "Lower Reset Factor: {:?}",
             lower_reset_factor
         );
-        let (updated_score_map_after_reset, is_reset_done) = reset_sr_v3_score(
+        let (mut updated_score_map_after_reset, reset_gateways) = reset_sr_v3_score(
             score_map.clone(),
             merchant_bucket_size,
             sr_gateway_redis_key_map.clone(),
@@ -692,6 +733,18 @@ pub async fn get_cached_scores_based_on_srv3(
             lower_reset_factor,
         )
         .await;
+        // A reset rewrites the window with synthetic entries only, so a prior-scored gateway is
+        // reset to its prior mean rather than to the synthetic window's value.
+        for gw in &reset_gateways {
+            if let Some(posterior) = cold_start_posteriors.get_mut(gw) {
+                posterior.window = WindowStats::default();
+                updated_score_map_after_reset.insert(
+                    gw.clone(),
+                    posterior.prior.posterior_mean(&posterior.window),
+                );
+            }
+        }
+        let is_reset_done = !reset_gateways.is_empty();
         if is_reset_done {
             logger::debug!(
                 tag = "get_cached_scores_based_on_srv3",
@@ -721,9 +774,14 @@ pub async fn get_cached_scores_based_on_srv3(
     let final_score_map = if is_srv3_extra_score_enabled {
         let mut final_score_map = GatewayScoreMap::new();
         for gw in functional_gateways.clone() {
-            let extra_score = add_extra_score(
+            // The posterior is worth `m + n` observations, not a full bucket.
+            let observations = cold_start_posteriors
+                .get(&gw)
+                .map(|p| p.prior.effective_observations(&p.window))
+                .unwrap_or(f64::from(merchant_bucket_size));
+            let extra_score = add_extra_score_with_observations(
                 updated_score_map_after_reset.clone(),
-                merchant_bucket_size,
+                observations,
                 merchant_srv3_input_config.clone(),
                 default_srv3_input_config.clone(),
                 pmt_str.to_string(),
@@ -793,11 +851,16 @@ pub async fn get_cached_scores_based_on_srv3(
         (_, true) => {
             let mut final_score_map_after_distribution = GatewayScoreMap::new();
             for gw in functional_gateways {
-                let final_score_map_distribution = sample_from_beta_distribution(
-                    final_score_map.clone(),
-                    merchant_bucket_size,
-                    gw.clone(),
-                );
+                // Prior-scored gateways sample their actual posterior; the bucket-sized
+                // approximation below treats synthetic seed entries as evidence.
+                let final_score_map_distribution = match cold_start_posteriors.get(&gw) {
+                    Some(posterior) => sample_from_cold_start_posterior(posterior),
+                    None => sample_from_beta_distribution(
+                        final_score_map.clone(),
+                        merchant_bucket_size,
+                        gw.clone(),
+                    ),
+                };
                 final_score_map_after_distribution.insert(gw, final_score_map_distribution);
             }
             logger::debug!(
@@ -880,6 +943,30 @@ pub fn add_extra_score(
     gw: String,
     sr_routing_dimensions: SrRoutingDimensions,
 ) -> f64 {
+    add_extra_score_with_observations(
+        updated_score_map_after_reset,
+        f64::from(merchant_bucket_size),
+        merchant_sr_v3_input_config,
+        default_sr_v3_input_config,
+        pmt,
+        pm,
+        gw,
+        sr_routing_dimensions,
+    )
+}
+
+/// [`add_extra_score`] with the number of observations behind the score given explicitly: the
+/// bucket size for a legacy score, `m + n` for a cold-start posterior.
+pub fn add_extra_score_with_observations(
+    updated_score_map_after_reset: GatewayScoreMap,
+    observations: f64,
+    merchant_sr_v3_input_config: Option<SrV3InputConfig>,
+    default_sr_v3_input_config: Option<SrV3InputConfig>,
+    pmt: String,
+    pm: String,
+    gw: String,
+    sr_routing_dimensions: SrRoutingDimensions,
+) -> f64 {
     let gateway_sigma_factor = Utils::get_sr_v3_gateway_sigma_factor(
         merchant_sr_v3_input_config,
         &pmt,
@@ -905,8 +992,7 @@ pub fn add_extra_score(
         gateway_sigma_factor
     );
     let score = updated_score_map_after_reset.get(&gw).unwrap_or(&1.0);
-    let float_bucket_size = merchant_bucket_size as f64;
-    let var = (score * (1.0 - score)) / float_bucket_size;
+    let var = (score * (1.0 - score)) / observations;
     let sigma = var.sqrt();
     let extra_score = sigma * gateway_sigma_factor;
     (score + extra_score).clamp(0.0, 1.0)
@@ -918,7 +1004,7 @@ pub async fn reset_sr_v3_score(
     sr_gateway_redis_key_map: GatewayRedisKeyMap,
     upper_reset_factor: f64,
     lower_reset_factor: f64,
-) -> (GatewayScoreMap, bool) {
+) -> (GatewayScoreMap, Vec<String>) {
     let max_score = Utils::get_max_score_gateway(&score_map)
         .map(|(_, score)| score)
         .unwrap_or(1.0);
@@ -930,14 +1016,16 @@ pub async fn reset_sr_v3_score(
         .floor() as i32)
         .clamp(2, bucket_size);
     let interval_between_zeros = (float_bucket_size - 1.0) / (number_of_zeros as f64 - 1.0);
+    // The reset window is synthetic: written with the synthetic markers, which the legacy reader
+    // parses exactly like "0"/"1" but the cold-start prior does not count as real outcomes.
     let mut score_list = (1..=bucket_size)
         .rev()
         .fold((0, Vec::new()), |(zc, mut acc), i| {
             if float_bucket_size - i as f64 >= zc as f64 * interval_between_zeros {
-                acc.push("0".to_string());
+                acc.push(sr_prior::SYNTHETIC_FAILURE.to_string());
                 (zc + 1, acc)
             } else {
-                acc.push("1".to_string());
+                acc.push(sr_prior::SYNTHETIC_SUCCESS.to_string());
                 (zc, acc)
             }
         })
@@ -970,10 +1058,18 @@ pub async fn reset_sr_v3_score(
             )
         })
         .collect();
+    // Gateways whose window is rewritten below (same predicate as `keys_for_reset`).
+    let reset_gateways: Vec<String> = score_map
+        .iter()
+        .filter(|(gw, score)| {
+            **score < score_reset_threshold && sr_gateway_redis_key_map.contains_key(gw.as_str())
+        })
+        .map(|(gw, _)| gw.clone())
+        .collect();
     for key in keys_for_reset.clone() {
         reset_gateway_for_sr_v3(score_reset_value, &score_list, key.clone()).await;
     }
-    (updated_score_map, !keys_for_reset.is_empty())
+    (updated_score_map, reset_gateways)
 }
 
 pub async fn reset_gateway_for_sr_v3(
@@ -994,40 +1090,40 @@ pub async fn reset_gateway_for_sr_v3(
 }
 
 pub async fn get_score_from_redis(bucket_size: i32, redis_key: &RedisKey) -> f64 {
+    let app_state = get_tenant_app_state().await;
+    read_legacy_score(&app_state.redis_conn, bucket_size, redis_key).await
+}
+
+/// The legacy SR v3 score of a window on the given connection (see `get_score_from_redis`).
+pub(crate) async fn read_legacy_score(
+    redis: &RedisConnectionWrapper,
+    bucket_size: i32,
+    redis_key: &RedisKey,
+) -> f64 {
     let queue_key = format!("{}{}", redis_key, "_}queue");
     let score_key = format!("{}{}", redis_key, "_}score");
-    let app_state = get_tenant_app_state().await;
     let bucket_size = bucket_size.max(1);
-    let queue_window = app_state
-        .redis_conn
+    let queue_window = redis
         .get_list_range(&queue_key, 0, i64::from(bucket_size - 1))
         .await
         .ok()
         .filter(|values| !values.is_empty());
 
     if let Some(values) = queue_window {
-        let parsed_scores: Vec<f64> = values
-            .iter()
-            .filter_map(|value| value.parse::<f64>().ok())
-            .collect();
-
-        if !parsed_scores.is_empty() {
-            let success_count: f64 = parsed_scores.iter().sum();
-            let score = (success_count / parsed_scores.len() as f64).clamp(0.0, 1.0);
+        if let Some(score) = sr_prior::legacy_window_score(&values) {
             logger::info!(
                 tag = "get_score_from_redis",
                 action = "get_score_from_redis",
-                "Derived sr_v3 score {:?} from queue {:?} using {:?} samples",
+                "Derived sr_v3 score {:?} from queue {:?} using {:?} entries",
                 score,
                 queue_key,
-                parsed_scores.len()
+                values.len()
             );
             return score;
         }
     }
 
-    let success_count = app_state
-        .redis_conn
+    let success_count = redis
         .get_key::<i32>(&score_key, "sr_v3_score_key")
         .await
         .unwrap_or(bucket_size);
@@ -1063,6 +1159,180 @@ async fn get_cached_score_from_redis(bucket_size: i32, redis_key: &RedisKey) -> 
     let score = get_score_from_redis(bucket_size, redis_key).await;
     crate::redis::mem_cache::SR_SCORE_CACHE.store(cache_key, score);
     score
+}
+
+// Real / synthetic counts of SR v3 windows, read on the hot path when the cold-start prior is on.
+// Same TTL and bound as `SR_SCORE_CACHE`; keyed by `{redis_key}:{bucket_size}` like it.
+static SR_WINDOW_STATS_CACHE: Lazy<TypedCache<WindowStats>> =
+    Lazy::new(|| TypedCache::new(mem_cache_config().sr_score_ttl_ms, 50_000));
+
+/// The window's real and synthetic counts. Same single LRANGE as `get_score_from_redis`; an
+/// absent or unreadable window has no real outcomes (the posterior is then the prior mean), so the
+/// legacy `}score` fallback key — no longer maintained by the feedback path — is not read.
+async fn get_window_stats_from_redis(bucket_size: i32, redis_key: &RedisKey) -> WindowStats {
+    let app_state = get_tenant_app_state().await;
+    read_window_stats(&app_state.redis_conn, bucket_size, redis_key).await
+}
+
+/// The window's real and synthetic counts on the given connection.
+pub(crate) async fn read_window_stats(
+    redis: &RedisConnectionWrapper,
+    bucket_size: i32,
+    redis_key: &RedisKey,
+) -> WindowStats {
+    let queue_key = format!("{}{}", redis_key, "_}queue");
+    let bucket_size = bucket_size.max(1);
+    redis
+        .get_list_range(&queue_key, 0, i64::from(bucket_size - 1))
+        .await
+        .map(|values| WindowStats::from_entries(&values))
+        .unwrap_or_default()
+}
+
+async fn get_cached_window_stats_from_redis(bucket_size: i32, redis_key: &RedisKey) -> WindowStats {
+    let cache_key = format!("{}:{}", redis_key, bucket_size);
+    if let Some(cached) = SR_WINDOW_STATS_CACHE.get(&cache_key) {
+        return cached;
+    }
+    let stats = get_window_stats_from_redis(bucket_size, redis_key).await;
+    SR_WINDOW_STATS_CACHE.store(cache_key, stats);
+    stats
+}
+
+/// Decoded `SR_V3_PRIOR_*` snapshots by merchant (`None` = no snapshot). `findByNameFromRedis`
+/// caches the raw JSON and decodes it on every call, and a merchant-wide snapshot can be tens of
+/// KB (≈ 40 µs to decode at 25 payment methods × 8 gateways, see the evaluation harness). The
+/// snapshot changes once per autopilot interval (15 min by default), so a few seconds of extra
+/// staleness are immaterial; feature flags are still read on every decision.
+const PRIOR_SNAPSHOT_CACHE_TTL_MS: u64 = 5_000;
+static SR_PRIOR_SNAPSHOT_CACHE: Lazy<TypedCache<Option<Arc<sr_prior::SrPriorSnapshot>>>> =
+    Lazy::new(|| TypedCache::new(PRIOR_SNAPSHOT_CACHE_TTL_MS, 10_000));
+
+async fn load_prior_snapshot(merchant_id: &str) -> Option<Arc<sr_prior::SrPriorSnapshot>> {
+    if let Some(cached) = SR_PRIOR_SNAPSHOT_CACHE.get(merchant_id) {
+        return cached;
+    }
+    let snapshot = findByNameFromRedis::<sr_prior::SrPriorSnapshot>(
+        sr_prior::prior_snapshot_config_name(merchant_id),
+    )
+    .await
+    .map(Arc::new);
+    SR_PRIOR_SNAPSHOT_CACHE.store(merchant_id.to_string(), snapshot.clone());
+    snapshot
+}
+
+/// A gateway scored by the cold-start prior: the prior and the window it was applied to.
+#[derive(Debug, Clone, Copy)]
+struct ColdStartPosterior {
+    prior: SrPrior,
+    window: WindowStats,
+}
+
+/// Resolve the cold-start prior of each gateway (empty unless `ENABLE_SR_V3_COLD_START_PRIOR` is
+/// on for the merchant). Reads only cached configs: the two feature flags (config cache), the
+/// merchant's `SR_V3_PRIOR_*` snapshot (decoded-snapshot cache over the config cache) and the
+/// already loaded SR v3 input configs.
+async fn load_cold_start_priors(
+    merchant_id: &str,
+    payment_method_type: &str,
+    payment_method: &str,
+    gateways: &[String],
+    merchant_srv3_input_config: Option<&SrV3InputConfig>,
+    default_srv3_input_config: Option<&SrV3InputConfig>,
+) -> MP<String, SrPrior> {
+    let prior_enabled = M::is_feature_enabled(
+        C::ENABLE_SR_V3_COLD_START_PRIOR.get_key(),
+        merchant_id.to_string(),
+        "kv_redis".to_string(),
+    )
+    .await;
+    if !prior_enabled {
+        return MP::new();
+    }
+    let flags = sr_prior::ColdStartFlags {
+        prior_enabled,
+        learned_strength_enabled: M::is_feature_enabled(
+            C::ENABLE_SR_V3_LEARNED_PRIOR_STRENGTH.get_key(),
+            merchant_id.to_string(),
+            "kv_redis".to_string(),
+        )
+        .await,
+    };
+    let snapshot = load_prior_snapshot(merchant_id).await;
+    let priors = select_cold_start_priors(
+        flags,
+        snapshot.as_deref(),
+        merchant_id,
+        crate::analytics::now_ms(),
+        payment_method_type,
+        payment_method,
+        gateways,
+        configured_prior_strength(merchant_srv3_input_config, default_srv3_input_config),
+    );
+    logger::debug!(
+        tag = "sr_v3_cold_start_prior",
+        action = "sr_v3_cold_start_prior",
+        "Cold-start priors for merchant {:?} ({}/{}): {:?}; snapshot present: {}",
+        merchant_id,
+        payment_method_type,
+        payment_method,
+        priors,
+        snapshot.is_some()
+    );
+    priors
+}
+
+/// `defaultPriorStrength` of the merchant's SR v3 config when valid, else of the default config.
+fn configured_prior_strength(
+    merchant_srv3_input_config: Option<&SrV3InputConfig>,
+    default_srv3_input_config: Option<&SrV3InputConfig>,
+) -> Option<f64> {
+    merchant_srv3_input_config
+        .and_then(|c| c.defaultPriorStrength)
+        .filter(|m| sr_prior::is_valid_prior_strength(*m))
+        .or_else(|| default_srv3_input_config.and_then(|c| c.defaultPriorStrength))
+}
+
+/// The prior of each gateway that has one, given the already fetched flags, snapshot and
+/// configured strength. Gateways absent from the map keep the legacy score.
+fn select_cold_start_priors(
+    flags: sr_prior::ColdStartFlags,
+    snapshot: Option<&sr_prior::SrPriorSnapshot>,
+    merchant_id: &str,
+    now_ms: i64,
+    payment_method_type: &str,
+    payment_method: &str,
+    gateways: &[String],
+    configured_strength: Option<f64>,
+) -> MP<String, SrPrior> {
+    gateways
+        .iter()
+        .filter_map(|gw| {
+            sr_prior::resolve_prior(
+                flags,
+                snapshot,
+                merchant_id,
+                now_ms,
+                payment_method_type,
+                payment_method,
+                gw,
+                configured_strength,
+            )
+            .map(|prior| (gw.clone(), prior))
+        })
+        .collect()
+}
+
+/// Draw a score from the cold-start Beta posterior `Beta(m·p + s, m·(1−p) + f)`, built from the
+/// window's real outcomes (synthetic seed entries carry no evidence). Falls back to the posterior
+/// mean if the sampler rejects the parameters, which the floors in `posterior_beta_params` rule
+/// out.
+fn sample_from_cold_start_posterior(posterior: &ColdStartPosterior) -> f64 {
+    let (alpha, beta_param) = posterior.prior.posterior_beta_params(&posterior.window);
+    match Beta::new(alpha, beta_param) {
+        Ok(beta) => beta.sample(&mut rand::thread_rng()),
+        Err(_) => posterior.prior.posterior_mean(&posterior.window),
+    }
 }
 
 pub fn create_score_map(gateways: Vec<String>) -> GatewayScoreMap {
@@ -3893,6 +4163,7 @@ mod gw_scoring_pure_fn_tests {
                 gatewaySigmaFactor: sigma,
             }]),
             subLevelInputConfig: None,
+            defaultPriorStrength: None,
         }
     }
 
@@ -4225,5 +4496,431 @@ mod gw_scoring_pure_fn_tests {
             (mean - 0.8).abs() < 0.05,
             "sampled mean {mean} drifted too far from the 0.8 success rate"
         );
+    }
+
+    // ── SR v3 cold-start prior ──
+
+    fn cold_start(p: f64, m: f64, real: &[&str], synthetic: usize) -> ColdStartPosterior {
+        let mut entries: Vec<String> = real.iter().map(|v| v.to_string()).collect();
+        entries.extend(std::iter::repeat_n(
+            sr_prior::SYNTHETIC_SUCCESS.to_string(),
+            synthetic,
+        ));
+        ColdStartPosterior {
+            prior: SrPrior::new(p, m, sr_prior::PriorStrengthSource::Configured).unwrap(),
+            window: WindowStats::from_entries(&entries),
+        }
+    }
+
+    #[test]
+    fn extra_score_with_bucket_observations_matches_the_legacy_bonus() {
+        let config = config_with_sigma_factor("stripe", 2.0);
+        let map = score_map(&[("stripe", 0.7)]);
+        let legacy = extra_score_with_config(&map, 125, "stripe", config.clone());
+        let explicit = add_extra_score_with_observations(
+            map,
+            125.0,
+            Some(config),
+            None,
+            CARD.to_string(),
+            "CREDIT".to_string(),
+            "stripe".to_string(),
+            no_dimensions(),
+        );
+        assert_eq!(legacy, explicit);
+    }
+
+    #[test]
+    fn a_posterior_worth_fewer_observations_gets_a_larger_exploration_bonus() {
+        let config = config_with_sigma_factor("stripe", 1.0);
+        let map = score_map(&[("stripe", 0.7)]);
+        let bonus = |observations: f64| {
+            add_extra_score_with_observations(
+                map.clone(),
+                observations,
+                Some(config.clone()),
+                None,
+                CARD.to_string(),
+                "CREDIT".to_string(),
+                "stripe".to_string(),
+                no_dimensions(),
+            ) - 0.7
+        };
+        assert!(bonus(23.0) > bonus(125.0));
+        assert!(bonus(23.0) > 0.0);
+    }
+
+    #[test]
+    fn cold_start_sampling_ignores_the_synthetic_seed() {
+        // A fresh window: 125 synthetic successes, no real outcomes. The legacy sampler treats
+        // the seed as 125 successes and draws ~1.0; the posterior draws around the parent rate.
+        let posterior = cold_start(0.6, 20.0, &[], 125);
+        let draws: Vec<f64> = (0..4_000)
+            .map(|_| sample_from_cold_start_posterior(&posterior))
+            .collect();
+        let mean = draws.iter().sum::<f64>() / draws.len() as f64;
+        assert!((mean - 0.6).abs() < 0.02, "mean {mean}");
+        assert!(draws.iter().all(|d| (0.0..=1.0).contains(d)));
+        let legacy = beta_samples(&score_map(&[("stripe", 1.0)]), 125, "stripe");
+        assert!(legacy > 0.95, "legacy mean {legacy}");
+    }
+
+    #[test]
+    fn cold_start_sampling_is_spread_while_data_is_thin_and_tightens_with_evidence() {
+        let spread = |posterior: &ColdStartPosterior| {
+            let draws: Vec<f64> = (0..4_000)
+                .map(|_| sample_from_cold_start_posterior(posterior))
+                .collect();
+            let mean = draws.iter().sum::<f64>() / draws.len() as f64;
+            (draws.iter().map(|d| (d - mean).powi(2)).sum::<f64>() / draws.len() as f64).sqrt()
+        };
+        let thin = cold_start(0.8, 5.0, &["1", "0"], 123);
+        let real: Vec<&str> = std::iter::repeat_n("1", 100)
+            .chain(std::iter::repeat_n("0", 25))
+            .collect();
+        let rich = cold_start(0.8, 5.0, &real, 0);
+        assert!(spread(&thin) > 2.0 * spread(&rich));
+    }
+
+    #[test]
+    fn cold_start_sampling_survives_extreme_priors() {
+        for (p, m) in [(0.0, 1.0), (1.0, 1.0), (0.0, 1000.0), (1.0, 1000.0)] {
+            let posterior = cold_start(p, m, &[], 0);
+            let draw = sample_from_cold_start_posterior(&posterior);
+            assert!(
+                draw.is_finite() && (0.0..=1.0).contains(&draw),
+                "p={p} m={m} draw={draw}"
+            );
+        }
+    }
+}
+
+/// SR v3 cold-start wiring against a real Redis, in the style of the other Redis-backed tests
+/// (`#[ignore]`, `127.0.0.1:6379`). Windows are written in the exact formats the feedback path
+/// produces (legacy `"1"` seed, synthetic `"1.0"` seed, `LPUSH` + `LTRIM` outcomes) and read with
+/// the scoring path's own readers. Config values are the JSON stored in `service_configuration`,
+/// decoded with the decider's decoder (`extractValue`) and flag check (`check_merchant_enabled`).
+/// Not covered: the in-process / Redis config cache tiers of `findByNameFromRedis` and
+/// `get_tenant_app_state` plumbing, which need a running application.
+#[cfg(test)]
+mod cold_start_redis_tests {
+    use fred::interfaces::{KeysInterface, ListInterface};
+
+    use super::*;
+    use crate::decider::gatewaydecider::sr_prior::{
+        build_prior_entries, ColdStartFlags, GatewaySegmentOutcome, PriorBuildConfig,
+        SegmentOutcome, SrPriorSnapshot, PRIOR_SNAPSHOT_VERSION, SYNTHETIC_SUCCESS,
+    };
+    use crate::redis::cache::extractValue;
+    use crate::redis::feature::check_merchant_enabled;
+    use crate::redis::types::FeatureConf;
+
+    const BUCKET: i32 = 125;
+    const MERCHANT: &str = "cold_start_merchant";
+
+    async fn connect() -> Result<RedisConnectionWrapper, String> {
+        let settings = redis_interface::RedisSettings {
+            host: "127.0.0.1".to_string(),
+            port: 6379,
+            ..Default::default()
+        };
+        let conn = redis_interface::RedisConnectionPool::new(&settings)
+            .await
+            .map_err(|error| error.to_string())?;
+        Ok(RedisConnectionWrapper {
+            conn,
+            compression_file_path: None,
+        })
+    }
+
+    /// Writes a window the way the feedback path does: seed on creation, then `LPUSH` each
+    /// outcome and `LTRIM` to the bucket.
+    async fn write_window(
+        redis: &RedisConnectionWrapper,
+        key: &str,
+        seed: &str,
+        outcomes: &[&str],
+    ) -> Result<(), String> {
+        let queue = format!("{key}_}}queue");
+        let seed_list = vec![seed.to_string(); BUCKET as usize];
+        redis
+            .conn
+            .pool
+            .lpush::<(), _, _>(queue.as_str(), seed_list)
+            .await
+            .map_err(|e| e.to_string())?;
+        for outcome in outcomes {
+            redis
+                .conn
+                .pool
+                .lpush::<(), _, _>(queue.as_str(), vec![outcome.to_string()])
+                .await
+                .map_err(|e| e.to_string())?;
+            redis
+                .conn
+                .pool
+                .ltrim::<(), _>(queue.as_str(), 0, i64::from(BUCKET - 1))
+                .await
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    fn snapshot_json(merchant: &str, with_pooled: bool, now_ms: i64) -> String {
+        let row = |gw: &str, s: u64, n: u64| GatewaySegmentOutcome {
+            payment_method_type: "CARD".into(),
+            payment_method: "VISA".into(),
+            gateway: gw.into(),
+            outcome: SegmentOutcome {
+                successes: s,
+                observations: n,
+            },
+        };
+        let rows = vec![
+            row("gw_legacy", 70, 100),
+            row("gw_seeded", 60, 100),
+            row("gw_absent", 80, 100),
+        ];
+        let built = build_prior_entries(&rows, &rows, &PriorBuildConfig::default());
+        let snapshot = SrPriorSnapshot {
+            version: PRIOR_SNAPSHOT_VERSION,
+            merchant_id: merchant.to_string(),
+            computed_at_ms: now_ms - 1_000,
+            valid_until_ms: now_ms + 3_600_000,
+            lookback_secs: 3_600,
+            fit_lookback_secs: None,
+            entries: built.entries,
+            pooled_entries: if with_pooled {
+                built.pooled_entries
+            } else {
+                Vec::new()
+            },
+        };
+        serde_json::to_string(&snapshot).unwrap_or_default()
+    }
+
+    /// Scores every gateway as `get_cached_scores_based_on_srv3` composes it (without the caches).
+    async fn score_all(
+        redis: &RedisConnectionWrapper,
+        prefix: &str,
+        prior_flag: Option<&str>,
+        learned_flag: Option<&str>,
+        snapshot: Option<&str>,
+        sr_config: &str,
+        now_ms: i64,
+    ) -> MP<String, (f64, bool)> {
+        let flag = |json: Option<&str>, key: &str| {
+            let conf = json.and_then(|j| extractValue::<FeatureConf>(j.to_string()));
+            check_merchant_enabled(conf, MERCHANT.to_string(), key.to_string())
+        };
+        let flags = ColdStartFlags {
+            prior_enabled: flag(prior_flag, "ENABLE_SR_V3_COLD_START_PRIOR"),
+            learned_strength_enabled: flag(learned_flag, "ENABLE_SR_V3_LEARNED_PRIOR_STRENGTH"),
+        };
+        let snapshot = snapshot.and_then(|j| extractValue::<SrPriorSnapshot>(j.to_string()));
+        let config = extractValue::<SrV3InputConfig>(sr_config.to_string());
+        let gateways: Vec<String> = ["gw_legacy", "gw_seeded", "gw_absent", "gw_other"]
+            .iter()
+            .map(|g| g.to_string())
+            .collect();
+        let priors = if flags.prior_enabled {
+            select_cold_start_priors(
+                flags,
+                snapshot.as_ref(),
+                MERCHANT,
+                now_ms,
+                "CARD",
+                "VISA",
+                &gateways,
+                configured_prior_strength(config.as_ref(), None),
+            )
+        } else {
+            MP::new()
+        };
+        let mut scores = MP::new();
+        for gw in &gateways {
+            let key = format!("{prefix}{gw}");
+            let scored = match priors.get(gw) {
+                Some(prior) => {
+                    let window = read_window_stats(redis, BUCKET, &key).await;
+                    (prior.posterior_mean(&window), true)
+                }
+                None => (read_legacy_score(redis, BUCKET, &key).await, false),
+            };
+            scores.insert(gw.clone(), scored);
+        }
+        scores
+    }
+
+    #[tokio::test]
+    #[ignore = "requires Redis at 127.0.0.1:6379"]
+    async fn cold_start_scoring_wiring_against_redis() {
+        let redis = connect().await.expect("Redis at 127.0.0.1:6379");
+        let prefix = format!("{{gw_sr_v3_score__cold_start_{}__", uuid::Uuid::new_v4());
+        let key = |gw: &str| format!("{prefix}{gw}");
+        // A window written before this change: legacy "1" seed, 5 failures since.
+        write_window(&redis, &key("gw_legacy"), "1", &["0"; 5])
+            .await
+            .expect("write window");
+        // A window written after it: synthetic seed, then a failure and a success.
+        write_window(&redis, &key("gw_seeded"), SYNTHETIC_SUCCESS, &["0", "1"])
+            .await
+            .expect("write window");
+        // The same outcomes on a legacy seed, to check the legacy reader cannot tell them apart.
+        write_window(&redis, &key("gw_seeded_legacy_twin"), "1", &["0", "1"])
+            .await
+            .expect("write window");
+        // gw_other has a legacy-format window but no prior entry; gw_absent has no window at all.
+        write_window(&redis, &key("gw_other"), "1", &["0", "0"])
+            .await
+            .expect("write window");
+
+        let now_ms = crate::analytics::now_ms();
+        let enabled = format!(
+            r#"{{"enableAll":false,"enableAllRollout":null,"disableAny":null,"merchants":[{{"merchantId":"{MERCHANT}","rollout":100}}]}}"#
+        );
+        let sr_config = r#"{"defaultBucketSize":125,"defaultLatencyThreshold":null,"defaultHedgingPercent":5.0,"defaultLowerResetFactor":null,"defaultUpperResetFactor":null,"defaultGatewayExtraScore":null,"subLevelInputConfig":null,"defaultPriorStrength":30.0}"#;
+        let snapshot = snapshot_json(MERCHANT, false, now_ms);
+
+        // 1. Both flags off: every gateway gets the legacy score, synthetic seed or not.
+        let off = score_all(
+            &redis,
+            &prefix,
+            None,
+            None,
+            Some(&snapshot),
+            sr_config,
+            now_ms,
+        )
+        .await;
+        let twin = read_legacy_score(&redis, BUCKET, &key("gw_seeded_legacy_twin")).await;
+        let legacy_scores = [
+            ("gw_legacy", 120.0 / 125.0),
+            ("gw_seeded", 124.0 / 125.0),
+            ("gw_absent", 1.0),
+            ("gw_other", 123.0 / 125.0),
+        ];
+        for (gw, expected) in legacy_scores {
+            let (score, prior_used) = off[gw];
+            assert!(!prior_used, "{gw} used a prior with the flags off");
+            assert!(
+                (score - expected).abs() < 1e-12,
+                "{gw}: {score} vs {expected}"
+            );
+        }
+        assert_eq!(off["gw_seeded"].0, twin);
+
+        // 2. Learned-strength flag alone: still legacy.
+        let learned_only = score_all(
+            &redis,
+            &prefix,
+            None,
+            Some(&enabled),
+            Some(&snapshot),
+            sr_config,
+            now_ms,
+        )
+        .await;
+        assert_eq!(learned_only, off);
+
+        // 3. Cold-start flag on: posterior over real outcomes only, configured m = 30.
+        let on = score_all(
+            &redis,
+            &prefix,
+            Some(&enabled),
+            None,
+            Some(&snapshot),
+            sr_config,
+            now_ms,
+        )
+        .await;
+        let posterior = |p: f64, s: f64, n: f64| (30.0 * p + s) / (30.0 + n);
+        let (legacy_p, seeded_p, absent_p) = (71.0 / 102.0, 61.0 / 102.0, 81.0 / 102.0);
+        // The pre-change window cannot be told apart: all 125 entries count as real.
+        assert!((on["gw_legacy"].0 - posterior(legacy_p, 120.0, 125.0)).abs() < 1e-12);
+        // The synthetic seed carries no evidence: 1 success out of 2 real outcomes.
+        assert!((on["gw_seeded"].0 - posterior(seeded_p, 1.0, 2.0)).abs() < 1e-12);
+        // No window: the prior mean.
+        assert!((on["gw_absent"].0 - absent_p).abs() < 1e-12);
+        // No entry and no pooled entry: the legacy score.
+        assert_eq!(on["gw_other"], off["gw_other"]);
+
+        // 4. With pooled entries, the gateway without its own entry shrinks toward the pooled rate.
+        let pooled_snapshot = snapshot_json(MERCHANT, true, now_ms);
+        let pooled = score_all(
+            &redis,
+            &prefix,
+            Some(&enabled),
+            None,
+            Some(&pooled_snapshot),
+            sr_config,
+            now_ms,
+        )
+        .await;
+        let pooled_p = 211.0 / 302.0;
+        assert!(pooled["gw_other"].1);
+        assert!((pooled["gw_other"].0 - posterior(pooled_p, 123.0, 125.0)).abs() < 1e-12);
+
+        // 5. Missing, foreign-merchant or stale snapshots: legacy scores for every gateway.
+        let missing = score_all(
+            &redis,
+            &prefix,
+            Some(&enabled),
+            None,
+            None,
+            sr_config,
+            now_ms,
+        )
+        .await;
+        assert_eq!(missing, off);
+        let foreign = snapshot_json("another_merchant", true, now_ms);
+        let foreign_scores = score_all(
+            &redis,
+            &prefix,
+            Some(&enabled),
+            None,
+            Some(&foreign),
+            sr_config,
+            now_ms,
+        )
+        .await;
+        assert_eq!(foreign_scores, off);
+        let stale = score_all(
+            &redis,
+            &prefix,
+            Some(&enabled),
+            None,
+            Some(&snapshot),
+            sr_config,
+            now_ms + 3_600_000,
+        )
+        .await;
+        assert_eq!(stale, off);
+        // A malformed snapshot value decodes to nothing: legacy scores.
+        let malformed = score_all(
+            &redis,
+            &prefix,
+            Some(&enabled),
+            None,
+            Some("{not json"),
+            sr_config,
+            now_ms,
+        )
+        .await;
+        assert_eq!(malformed, off);
+
+        for gw in [
+            "gw_legacy",
+            "gw_seeded",
+            "gw_seeded_legacy_twin",
+            "gw_other",
+        ] {
+            redis
+                .conn
+                .pool
+                .del::<(), _>(format!("{}_}}queue", key(gw)))
+                .await
+                .expect("delete test key");
+        }
     }
 }

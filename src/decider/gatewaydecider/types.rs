@@ -1368,6 +1368,9 @@ pub struct SrV3InputConfig {
     pub defaultUpperResetFactor: Option<f64>,
     pub defaultGatewayExtraScore: Option<Vec<GatewayWiseExtraScore>>,
     pub subLevelInputConfig: Option<Vec<SrV3SubLevelInputConfig>>,
+    /// Manual SR v3 cold-start prior strength (`SuccessRateData.default_prior_strength`).
+    #[serde(default)]
+    pub defaultPriorStrength: Option<f64>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

@@ -122,6 +122,27 @@ pub struct SrAutoCalibrationConfig {
     /// 100. Lower it (e.g. 20) for demos, especially when splitting by dimension.
     #[serde(default)]
     pub min_volume: Option<i64>,
+    /// SR v3 cold-start prior (merchants with `ENABLE_SR_V3_COLD_START_PRIOR`): trailing window
+    /// (seconds) the parent success rates are computed over. Keep it short — a stale parent holds
+    /// sparse segments on a degraded gateway. Default 3600.
+    #[serde(default)]
+    pub prior_parent_lookback_secs: Option<u64>,
+    /// Trailing window (seconds) the prior strength is learned over. Default 86400.
+    #[serde(default)]
+    pub prior_fit_lookback_secs: Option<u64>,
+    /// How long (seconds) a written prior snapshot stays valid; the decider ignores older ones and
+    /// falls back to legacy scoring. Default 21600 (6 h).
+    #[serde(default)]
+    pub prior_max_age_secs: Option<u64>,
+    /// Minimum outcomes for a gateway before it gets a parent success rate. Default 30.
+    #[serde(default)]
+    pub prior_min_parent_observations: Option<u64>,
+    /// Minimum qualifying segments before the prior strength is learned. Default 10.
+    #[serde(default)]
+    pub prior_min_segments: Option<usize>,
+    /// Minimum outcomes for a segment to enter the prior-strength fit. Default 5.
+    #[serde(default)]
+    pub prior_min_segment_observations: Option<u64>,
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]

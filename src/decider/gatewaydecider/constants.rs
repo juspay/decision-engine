@@ -676,6 +676,26 @@ impl SC::ServiceConfigKey for EnableBetaDistributionOnSrV3 {
 pub const ENABLE_BETA_DISTRIBUTION_ON_SR_V3: EnableBetaDistributionOnSrV3 =
     EnableBetaDistributionOnSrV3;
 
+/// Shrink SR v3 scores toward the gateway's parent success rate (see `sr_prior`).
+pub struct EnableSrV3ColdStartPrior;
+impl SC::ServiceConfigKey for EnableSrV3ColdStartPrior {
+    fn get_key(&self) -> String {
+        "ENABLE_SR_V3_COLD_START_PRIOR".to_string()
+    }
+}
+pub const ENABLE_SR_V3_COLD_START_PRIOR: EnableSrV3ColdStartPrior = EnableSrV3ColdStartPrior;
+
+/// Learn the cold-start prior strength by empirical Bayes; only effective together with
+/// `ENABLE_SR_V3_COLD_START_PRIOR`.
+pub struct EnableSrV3LearnedPriorStrength;
+impl SC::ServiceConfigKey for EnableSrV3LearnedPriorStrength {
+    fn get_key(&self) -> String {
+        "ENABLE_SR_V3_LEARNED_PRIOR_STRENGTH".to_string()
+    }
+}
+pub const ENABLE_SR_V3_LEARNED_PRIOR_STRENGTH: EnableSrV3LearnedPriorStrength =
+    EnableSrV3LearnedPriorStrength;
+
 pub struct EnableGatewaySelectionBasedOnSrV3Input(pub String);
 impl SC::ServiceConfigKey for EnableGatewaySelectionBasedOnSrV3Input {
     fn get_key(&self) -> String {

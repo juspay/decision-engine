@@ -130,7 +130,7 @@ fn decided_payments_filter(
 }
 
 /// The `IN (…)` list for a set of transaction statuses, as they are stored on the event.
-fn status_in_sql(statuses: &[TxnStatus]) -> String {
+pub(crate) fn status_in_sql(statuses: &[TxnStatus]) -> String {
     format!(
         "({})",
         statuses

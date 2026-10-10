@@ -39,6 +39,13 @@ pub struct SuccessRateData {
     pub default_upper_reset_factor: Option<f64>,
     pub default_gateway_extra_score: Option<Vec<GatewayWiseExtraScore>>,
     pub sub_level_input_config: Option<Vec<SRSubLevelInputConfig>>,
+    /// Strength (pseudo-observations) of the SR v3 cold-start prior, used when
+    /// `ENABLE_SR_V3_COLD_START_PRIOR` is on and no learned strength applies. Clamped to
+    /// `[1, 1000]`; invalid or absent values fall back to
+    /// [`crate::decider::gatewaydecider::sr_prior::DEFAULT_PRIOR_STRENGTH`]. Manual only: the
+    /// autopilot never writes it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_prior_strength: Option<f64>,
     /// Merchant margin (fraction of ticket, e.g. 0.20). Used in the multi-objective
     /// expected-value ranking `EV = auth·(margin − cost/10_000)`; there is no auth
     /// band or admission gate. Defaults to [`crate::decider::gatewaydecider::
@@ -103,4 +110,40 @@ pub struct DebitRoutingData {
 pub struct TransactionLatencyThreshold {
     /// To have a hard threshold for latency in millis, which is used to filter out gateways that exceed this threshold.
     pub gatewayLatency: Option<f64>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::decider::gatewaydecider::types::SrV3InputConfig;
+
+    #[test]
+    fn stored_sr_configs_without_a_prior_strength_still_parse() {
+        let stored = r#"{"defaultBucketSize":125,"defaultLatencyThreshold":null,
+            "defaultHedgingPercent":5.0,"defaultLowerResetFactor":null,
+            "defaultUpperResetFactor":null,"defaultGatewayExtraScore":null,
+            "subLevelInputConfig":null}"#;
+        let api: SuccessRateData = serde_json::from_str(stored).expect("api type");
+        assert_eq!(api.default_prior_strength, None);
+        let decider: SrV3InputConfig = serde_json::from_str(stored).expect("decider type");
+        assert_eq!(decider.defaultPriorStrength, None);
+        // An unset strength is not written back, so stored configs keep their shape.
+        assert!(!serde_json::to_string(&api)
+            .expect("serialize")
+            .contains("defaultPriorStrength"));
+    }
+
+    #[test]
+    fn prior_strength_round_trips_from_the_api_to_the_decider() {
+        let request = r#"{"defaultBucketSize":125,"defaultLatencyThreshold":null,
+            "defaultHedgingPercent":null,"defaultLowerResetFactor":null,
+            "defaultUpperResetFactor":null,"defaultGatewayExtraScore":null,
+            "subLevelInputConfig":null,"defaultPriorStrength":35.0}"#;
+        let api: SuccessRateData = serde_json::from_str(request).expect("api type");
+        assert_eq!(api.default_prior_strength, Some(35.0));
+        // `/rule/create` stores the API struct; the decider reads it as `SrV3InputConfig`.
+        let stored = serde_json::to_string(&api).expect("serialize");
+        let decider: SrV3InputConfig = serde_json::from_str(&stored).expect("decider type");
+        assert_eq!(decider.defaultPriorStrength, Some(35.0));
+    }
 }

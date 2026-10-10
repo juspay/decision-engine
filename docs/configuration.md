@@ -177,6 +177,69 @@ password = "decision_engine"
 
 Decision outcomes are published to Kafka and consumed into ClickHouse. Both are required for analytics and audit dashboard views. For Docker runs, these are pre-configured and enabled via the Compose profiles.
 
+### SR v3 cold-start prior
+
+A new SR v3 window starts with `bucketSize` synthetic successes, so a new or sparse segment (for
+example one split by country or card network) ranks every gateway at ~100% until real outcomes
+replace the seed. With the cold-start prior, a gateway's score in such a segment is shrunk toward
+the gateway's merchant-wide success rate `p`:
+
+```
+score = (m·p + real successes) / (m + real outcomes)
+```
+
+Synthetic seed and reset entries are written as `1.0` / `0.0` (read exactly like `1` / `0` by the
+existing score path) and are not counted as real outcomes. Windows written before this change
+count as real, which reproduces the existing score for them.
+
+Two per-merchant feature flags (FeatureConf service configs, like the other SR v3 flags), both off
+by default:
+
+| Flag | Effect |
+|---|---|
+| `ENABLE_SR_V3_COLD_START_PRIOR` | Scores gateways with a usable prior by the posterior above (Beta sampling and the sigma bonus use the posterior too). The merchant must be listed explicitly in the flag's `merchants`, with its exact merchant id, so the background job can find it. A `rollout` below 100 applies the prior to that share of decisions, as for other flags. |
+| `ENABLE_SR_V3_LEARNED_PRIOR_STRENGTH` | Learns `m` per gateway by empirical Bayes from ClickHouse outcomes. No effect on routing unless the cold-start flag is also on. |
+
+With both off, scoring is unchanged. With only the cold-start flag, `m` is `defaultPriorStrength`
+from the merchant's success-rate config (`/rule/create`, `/rule/update`), else the default config's,
+else 20. With both on, a learned `m` is used where the fit succeeded and the configured `m`
+elsewhere.
+
+Priors are computed off the request path by the `[sr_auto_calibration]` job (it runs for these
+merchants whether or not `autopilot_enabled` is set) and stored in the job-owned service config
+`SR_V3_PRIOR_<merchant_id>`; the merchant's own `SR_V3_INPUT_CONFIG_*` is never modified. Parent
+rates come from a short recent window (gateway health changes quickly); the prior strength is
+fitted over a long window (segment heterogeneity changes slowly). A gateway with fewer than
+`prior_min_parent_observations` recent outcomes shrinks toward the payment method's pooled rate
+across all of the merchant's gateways. All gateways keep the existing score when the snapshot is
+missing, older than `prior_max_age_secs` (never more than 7 days, also enforced by the decider),
+for another merchant, malformed, or analytics is disabled. The decider keeps the decoded snapshot
+in process for 5 seconds. The prior strength is not
+learned when the merchant's SR key splits by `card_is_in` or UDFs, which decision events do not
+record, or when fewer than `prior_min_segments` segments have `prior_min_segment_observations`
+outcomes; the reason is stored on the entry (`fitError`).
+
+```toml
+[sr_auto_calibration]
+prior_parent_lookback_secs = 3600      # window for parent (and pooled) success rates
+prior_fit_lookback_secs = 86400        # window for the learned prior strength
+prior_max_age_secs = 21600             # snapshot validity; older snapshots are ignored
+prior_min_parent_observations = 30     # recent outcomes before a gateway gets its own prior
+prior_min_segments = 10                # segments needed to learn m
+prior_min_segment_observations = 5     # outcomes before a segment enters the fit
+```
+
+Known limits (see the evaluation): right after a gateway-wide degradation the parent rate lags by
+up to one refresh interval plus the parent window, so sparse segments can stay on the degraded
+gateway longer than with the existing score (a check that weakens the prior when recent outcomes
+contradict it was evaluated and did not close this gap); and when a snapshot expires (the job
+stopped), the existing score's exploration of never-tried windows starts at that point, which
+costs more than it would have at the start. Priors apply again as soon as the job writes a new
+snapshot.
+
+The values shown are the defaults. `examples/sr_v3_cold_start_eval.rs` is an offline evaluation
+on synthetic data (`cargo run --release --example sr_v3_cold_start_eval`).
+
 ### TLS
 
 ```toml
