@@ -35,10 +35,34 @@ pub struct SegmentTraffic {
     pub gateway_count: i64,
 }
 
+/// Reported outcomes of one gateway in one segment, for the SR v3 cold-start prior. The segment is
+/// (payment_method_type, payment_method) plus the merchant's active dimensions; rows of the same
+/// gateway across segments feed the empirical-Bayes fit of the prior strength.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GatewaySegmentOutcomes {
+    pub payment_method_type: String,
+    pub payment_method: String,
+    pub gateway: String,
+    pub successes: u64,
+    pub observations: u64,
+}
+
 #[async_trait]
 pub trait AnalyticsReadStore: Send + Sync {
     async fn overview(&self, query: &AnalyticsQuery)
         -> Result<AnalyticsOverviewResponse, ApiError>;
+
+    /// Per-segment, per-gateway success / total counts since `since_ms`, grouped by (pmt, pm,
+    /// gateway) plus `active_dims` (a subset of card_network/currency/country/auth_type).
+    /// Defaults to empty so stores without analytics produce no priors (legacy scoring).
+    async fn merchant_gateway_segment_outcomes(
+        &self,
+        _merchant_id: &str,
+        _since_ms: i64,
+        _active_dims: &[&str],
+    ) -> Result<Vec<GatewaySegmentOutcomes>, ApiError> {
+        Ok(Vec::new())
+    }
 
     /// Per-cluster decision volume + PSP count for the auto-calibrator, grouped by
     /// (pmt, pm) plus `active_dims` (a subset of card_network/currency/country/auth_type).

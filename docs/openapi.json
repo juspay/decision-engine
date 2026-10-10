@@ -6854,6 +6854,15 @@
               "$ref": "#/components/schemas/SRSubLevelInputConfig"
             }
           },
+          "defaultPriorStrength": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Strength (pseudo-observations) of the SR v3 cold-start prior, used when ENABLE_SR_V3_COLD_START_PRIOR is on and no learned strength applies. Must be > 0; clamped to [1, 1000]. Defaults to 20.",
+            "example": 20
+          },
           "margin": {
             "type": [
               "number",

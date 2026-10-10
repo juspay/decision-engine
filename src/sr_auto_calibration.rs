@@ -6,20 +6,36 @@
 //! the result is written back into the merchant's `SR_V3_INPUT_CONFIG_<merchant>` and applied
 //! by the decider on the next decision. Bucket-size changes are non-destructive thanks to the
 //! resize-in-place window (LPUSH + LTRIM), so re-tuning never wipes accumulated history.
+//!
+//! The same loop refreshes the SR v3 cold-start prior for merchants listed under
+//! `ENABLE_SR_V3_COLD_START_PRIOR` (independently of `autopilot_enabled`): per-gateway parent
+//! success rates and, for merchants also under `ENABLE_SR_V3_LEARNED_PRIOR_STRENGTH`, an
+//! empirical-Bayes prior strength, written to the job-owned `SR_V3_PRIOR_<merchant>` config. The
+//! merchant's `SR_V3_INPUT_CONFIG_*` (including a manual `defaultPriorStrength`) is never touched
+//! by this step. See `decider::gatewaydecider::sr_prior`.
 
 use std::sync::Arc;
 use std::time::Duration;
 
 use futures::FutureExt;
 
+use crate::analytics::clickhouse::endpoints::segment_outcomes;
 use crate::analytics::events::DomainAnalyticsEvent;
 use crate::analytics::flow::{AnalyticsFlowContext, AnalyticsRoute, ApiFlow, FlowType};
 use crate::analytics::runtime::AnalyticsRuntime;
-use crate::analytics::store::{AnalyticsReadStore, SegmentTraffic};
+use crate::analytics::store::{AnalyticsReadStore, GatewaySegmentOutcomes, SegmentTraffic};
 use crate::app::get_tenant_app_state;
 use crate::config::SrAutoCalibrationConfig;
+use crate::decider::gatewaydecider::constants::{
+    ENABLE_SR_V3_COLD_START_PRIOR, ENABLE_SR_V3_LEARNED_PRIOR_STRENGTH,
+};
+use crate::decider::gatewaydecider::sr_prior::{
+    self, GatewaySegmentOutcome, PriorBuildConfig, PriorFitConfig, SegmentOutcome, SrPriorSnapshot,
+};
 use crate::euclid::types::SrDimensionConfig;
 use crate::logger;
+use crate::redis::feature::is_feature_enabled;
+use crate::redis::types::ServiceConfigKey;
 use crate::types::merchant_config::types::FeatureConf;
 use crate::types::service_configuration::{find_config_by_name, insert_config, update_config};
 
@@ -93,6 +109,61 @@ impl CalibrationParams {
     }
 }
 
+// Cold-start prior refresh defaults (see `SrAutoCalibrationConfig::prior_*`).
+const DEFAULT_PRIOR_PARENT_LOOKBACK_SECS: u64 = 3_600;
+const DEFAULT_PRIOR_FIT_LOOKBACK_SECS: u64 = 86_400;
+const DEFAULT_PRIOR_MAX_AGE_SECS: u64 = 21_600;
+
+/// Resolved cold-start prior settings, derived from config (with production defaults).
+#[derive(Debug, Clone, Copy)]
+struct PriorParams {
+    /// Short window for parent rates: gateway health changes quickly.
+    parent_lookback_secs: u64,
+    /// Long window for the prior-strength fit: heterogeneity changes slowly.
+    fit_lookback_secs: u64,
+    max_age_secs: u64,
+    build: PriorBuildConfig,
+}
+
+impl PriorParams {
+    fn from_config(cfg: &SrAutoCalibrationConfig) -> Self {
+        let defaults = PriorBuildConfig::default();
+        Self {
+            parent_lookback_secs: cfg
+                .prior_parent_lookback_secs
+                .filter(|&v| v > 0)
+                .unwrap_or(DEFAULT_PRIOR_PARENT_LOOKBACK_SECS),
+            fit_lookback_secs: cfg
+                .prior_fit_lookback_secs
+                .filter(|&v| v > 0)
+                .unwrap_or(DEFAULT_PRIOR_FIT_LOOKBACK_SECS),
+            // Never longer than the ceiling the decider enforces anyway.
+            max_age_secs: cfg
+                .prior_max_age_secs
+                .filter(|&v| v > 0)
+                .unwrap_or(DEFAULT_PRIOR_MAX_AGE_SECS)
+                .min((sr_prior::MAX_PRIOR_SNAPSHOT_AGE_MS / 1_000) as u64),
+            build: PriorBuildConfig {
+                fit: PriorFitConfig {
+                    min_segments: cfg
+                        .prior_min_segments
+                        .filter(|&v| v > 0)
+                        .unwrap_or(defaults.fit.min_segments),
+                    min_segment_observations: cfg
+                        .prior_min_segment_observations
+                        .filter(|&v| v > 0)
+                        .unwrap_or(defaults.fit.min_segment_observations),
+                },
+                min_parent_observations: cfg
+                    .prior_min_parent_observations
+                    .filter(|&v| v > 0)
+                    .unwrap_or(defaults.min_parent_observations),
+                learn_strength: false,
+            },
+        }
+    }
+}
+
 fn round25(x: f64) -> i32 {
     (((x / 25.0).round()) * 25.0) as i32
 }
@@ -138,6 +209,7 @@ pub fn spawn(runtime: Arc<AnalyticsRuntime>, config: SrAutoCalibrationConfig) {
         .filter(|&v| v > 0)
         .unwrap_or(DEFAULT_INTERVAL_SECS);
     let params = CalibrationParams::from_config(&config);
+    let prior_params = PriorParams::from_config(&config);
 
     tokio::spawn(async move {
         logger::info!(
@@ -156,9 +228,14 @@ pub fn spawn(runtime: Arc<AnalyticsRuntime>, config: SrAutoCalibrationConfig) {
             // Isolate each cycle: a panic inside `run_once` is caught here so the supervisor
             // loop keeps ticking instead of the whole job dying. Per-merchant errors are already
             // handled inside `run_once` (logged, loop continues).
-            let outcome = std::panic::AssertUnwindSafe(run_once(&runtime, params, interval_secs))
-                .catch_unwind()
-                .await;
+            let outcome = std::panic::AssertUnwindSafe(run_once(
+                &runtime,
+                params,
+                prior_params,
+                interval_secs,
+            ))
+            .catch_unwind()
+            .await;
             if let Err(panic) = outcome {
                 let msg = panic
                     .downcast_ref::<&str>()
@@ -176,7 +253,21 @@ pub fn spawn(runtime: Arc<AnalyticsRuntime>, config: SrAutoCalibrationConfig) {
     });
 }
 
-async fn run_once(runtime: &AnalyticsRuntime, params: CalibrationParams, interval_secs: u64) {
+async fn run_once(
+    runtime: &AnalyticsRuntime,
+    params: CalibrationParams,
+    prior_params: PriorParams,
+    interval_secs: u64,
+) {
+    calibrate_enrolled_merchants(runtime, params, interval_secs).await;
+    refresh_cold_start_priors(runtime, prior_params, interval_secs).await;
+}
+
+async fn calibrate_enrolled_merchants(
+    runtime: &AnalyticsRuntime,
+    params: CalibrationParams,
+    interval_secs: u64,
+) {
     let merchants = enrolled_merchants().await;
     if merchants.is_empty() {
         return;
@@ -239,6 +330,209 @@ async fn run_once(runtime: &AnalyticsRuntime, params: CalibrationParams, interva
 
 async fn enrolled_merchants() -> Vec<String> {
     merchants_for_flag(AUTOPILOT_CONF_KEY).await
+}
+
+/// Refresh `SR_V3_PRIOR_<merchant>` for every merchant explicitly listed under
+/// `ENABLE_SR_V3_COLD_START_PRIOR`. Merchants enabled only via `enableAll` cannot be enumerated;
+/// they get no snapshot and keep legacy scoring.
+async fn refresh_cold_start_priors(
+    runtime: &AnalyticsRuntime,
+    params: PriorParams,
+    interval_secs: u64,
+) {
+    let merchants = merchants_for_flag(&ENABLE_SR_V3_COLD_START_PRIOR.get_key()).await;
+    if merchants.is_empty() {
+        return;
+    }
+    let store = runtime.read_store();
+    let now_ms = crate::analytics::now_ms();
+    let interval_bucket = now_ms / 1000 / (interval_secs.max(1) as i64);
+    for merchant_id in merchants {
+        // Same advisory, fail-open, per-interval lock as calibration, under its own key.
+        let lock_key = format!("sr_v3_prior_lock_{}_{}", merchant_id, interval_bucket);
+        let app_state = get_tenant_app_state().await;
+        match app_state
+            .redis_conn
+            .set_key_if_not_exists(&lock_key, "1", interval_secs.saturating_mul(2) as i64)
+            .await
+        {
+            Ok(true) => {}
+            Ok(false) => continue,
+            Err(err) => {
+                logger::warn!(
+                    tag = "sr_v3_prior",
+                    action = "lock_error",
+                    "prior lock for {} failed ({:?}); proceeding without lock",
+                    merchant_id,
+                    err
+                );
+            }
+        }
+        let learn = is_feature_enabled(
+            ENABLE_SR_V3_LEARNED_PRIOR_STRENGTH.get_key(),
+            merchant_id.clone(),
+            "kv_redis".to_string(),
+        )
+        .await;
+        if let Err(reason) =
+            refresh_merchant_prior(store.as_ref(), &merchant_id, now_ms, learn, params).await
+        {
+            logger::warn!(
+                tag = "sr_v3_prior",
+                action = "skip",
+                "cold-start prior refresh for {} skipped: {}",
+                merchant_id,
+                reason
+            );
+        }
+    }
+}
+
+async fn refresh_merchant_prior(
+    store: &dyn AnalyticsReadStore,
+    merchant_id: &str,
+    now_ms: i64,
+    learn: bool,
+    params: PriorParams,
+) -> Result<(), String> {
+    let (dims, granularity_supported) = cold_start_fit_dims(merchant_id).await;
+    // Parent rates only need (pmt, pm, gateway) totals over the short window.
+    let parent_since_ms = now_ms - (params.parent_lookback_secs as i64) * 1000;
+    let parent_rows = store
+        .merchant_gateway_segment_outcomes(merchant_id, parent_since_ms, &[])
+        .await
+        .map_err(|e| format!("clickhouse parent query failed: {e:?}"))?;
+    // The fit needs per-segment rows over the long window; skipped when nothing is learned.
+    let fit_rows = if learn && granularity_supported {
+        let dim_refs: Vec<&str> = dims.iter().map(|s| s.as_str()).collect();
+        let fit_since_ms = now_ms - (params.fit_lookback_secs as i64) * 1000;
+        store
+            .merchant_gateway_segment_outcomes(merchant_id, fit_since_ms, &dim_refs)
+            .await
+            .map_err(|e| format!("clickhouse fit query failed: {e:?}"))?
+    } else {
+        Vec::new()
+    };
+    let snapshot = build_prior_snapshot(
+        merchant_id,
+        &parent_rows,
+        &fit_rows,
+        now_ms,
+        learn,
+        granularity_supported,
+        params,
+    );
+    logger::info!(
+        tag = "sr_v3_prior",
+        action = "refreshed",
+        "cold-start prior for {}: {} gateway entries ({} with learned strength), {} pooled, from {} parent / {} fit rows",
+        merchant_id,
+        snapshot.entries.len(),
+        snapshot
+            .entries
+            .iter()
+            .filter(|e| e.learned_prior_strength.is_some())
+            .count(),
+        snapshot.pooled_entries.len(),
+        parent_rows.len(),
+        fit_rows.len()
+    );
+    let serialized =
+        serde_json::to_string(&snapshot).map_err(|e| format!("serialize failed: {e}"))?;
+    let name = sr_prior::prior_snapshot_config_name(merchant_id);
+    // Written even when empty, so entries of a gateway that stopped receiving traffic expire.
+    let exists = find_config_by_name(name.clone())
+        .await
+        .map_err(|e| format!("config read failed: {e:?}"))?
+        .is_some();
+    if exists {
+        update_config(name, Some(serialized))
+            .await
+            .map_err(|e| format!("config update failed: {e:?}"))?;
+    } else {
+        insert_config(name, Some(serialized))
+            .await
+            .map_err(|e| format!("config insert failed: {e:?}"))?;
+    }
+    Ok(())
+}
+
+/// The merchant's SR key dimensions that decision events carry, and whether those are *all* of
+/// the key's dimensions. BIN (`card_is_in`) and UDFs split the SR key but are not on decision
+/// events, so a fit at the coarser granularity would understate between-segment heterogeneity
+/// and over-shrink; in that case the prior strength is not learned.
+async fn cold_start_fit_dims(merchant_id: &str) -> (Vec<String>, bool) {
+    let info = match find_config_by_name(format!("SR_DIMENSION_CONFIG_{merchant_id}")).await {
+        Ok(Some(cfg)) => cfg
+            .value
+            .and_then(|v| serde_json::from_str::<SrDimensionConfig>(&v).ok())
+            .map(|c| c.paymentInfo)
+            .unwrap_or_default(),
+        _ => Default::default(),
+    };
+    let fields = info.fields.unwrap_or_default();
+    let supported = fields
+        .iter()
+        .all(|f| segment_outcomes::DIMS.contains(&f.as_str()))
+        && info.udfs.is_empty();
+    let dims = fields
+        .into_iter()
+        .filter(|f| segment_outcomes::DIMS.contains(&f.as_str()))
+        .collect();
+    (dims, supported)
+}
+
+fn to_segment_outcomes(rows: &[GatewaySegmentOutcomes]) -> Vec<GatewaySegmentOutcome> {
+    rows.iter()
+        .map(|r| GatewaySegmentOutcome {
+            payment_method_type: r.payment_method_type.clone(),
+            payment_method: r.payment_method.clone(),
+            gateway: r.gateway.clone(),
+            outcome: SegmentOutcome {
+                successes: r.successes,
+                observations: r.observations,
+            },
+        })
+        .collect()
+}
+
+/// Pure: the snapshot to write for a merchant. Rows are assumed to be the merchant's own (both
+/// queries filter on `merchant_id`); the snapshot is stamped with it.
+fn build_prior_snapshot(
+    merchant_id: &str,
+    parent_rows: &[GatewaySegmentOutcomes],
+    fit_rows: &[GatewaySegmentOutcomes],
+    now_ms: i64,
+    learn: bool,
+    granularity_supported: bool,
+    params: PriorParams,
+) -> SrPriorSnapshot {
+    let learn_strength = learn && granularity_supported;
+    let build = PriorBuildConfig {
+        learn_strength,
+        ..params.build
+    };
+    let mut built = sr_prior::build_prior_entries(
+        &to_segment_outcomes(parent_rows),
+        &to_segment_outcomes(fit_rows),
+        &build,
+    );
+    if learn && !granularity_supported {
+        for entry in &mut built.entries {
+            entry.fit_error =
+                Some("SR key splits by card_is_in / udfs, which analytics cannot reproduce".into());
+        }
+    }
+    SrPriorSnapshot {
+        version: sr_prior::PRIOR_SNAPSHOT_VERSION,
+        merchant_id: merchant_id.to_string(),
+        computed_at_ms: now_ms,
+        valid_until_ms: now_ms.saturating_add((params.max_age_secs as i64).saturating_mul(1000)),
+        lookback_secs: params.parent_lookback_secs,
+        fit_lookback_secs: learn_strength.then_some(params.fit_lookback_secs),
+        entries: built.entries,
+        pooled_entries: built.pooled_entries,
+    }
 }
 
 /// Merchant IDs listed in a feature flag's FeatureConf `merchants` array.
@@ -491,4 +785,163 @@ fn log_segment(
         cur_hedge,
         new_hedge
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn params() -> PriorParams {
+        PriorParams::from_config(&SrAutoCalibrationConfig::default())
+    }
+
+    fn rows(gateway: &str, segments: &[(u64, u64)]) -> Vec<GatewaySegmentOutcomes> {
+        segments
+            .iter()
+            .map(|&(successes, observations)| GatewaySegmentOutcomes {
+                payment_method_type: "CARD".into(),
+                payment_method: "VISA".into(),
+                gateway: gateway.into(),
+                successes,
+                observations,
+            })
+            .collect()
+    }
+
+    fn heterogeneous(gateway: &str) -> Vec<GatewaySegmentOutcomes> {
+        let segs: Vec<(u64, u64)> = (0..30).map(|i| (10 + (i % 10), 20)).collect();
+        rows(gateway, &segs)
+    }
+
+    #[test]
+    fn prior_params_default_to_production_values() {
+        let p = params();
+        assert_eq!(p.parent_lookback_secs, DEFAULT_PRIOR_PARENT_LOOKBACK_SECS);
+        assert_eq!(p.fit_lookback_secs, DEFAULT_PRIOR_FIT_LOOKBACK_SECS);
+        assert_eq!(p.max_age_secs, DEFAULT_PRIOR_MAX_AGE_SECS);
+        assert_eq!(p.build, PriorBuildConfig::default());
+        let cfg = SrAutoCalibrationConfig {
+            prior_parent_lookback_secs: Some(0),
+            prior_min_segments: Some(25),
+            prior_max_age_secs: Some(u64::MAX),
+            ..SrAutoCalibrationConfig::default()
+        };
+        let p = PriorParams::from_config(&cfg);
+        assert_eq!(
+            p.max_age_secs as i64 * 1_000,
+            sr_prior::MAX_PRIOR_SNAPSHOT_AGE_MS
+        );
+        assert_eq!(p.parent_lookback_secs, DEFAULT_PRIOR_PARENT_LOOKBACK_SECS);
+        assert_eq!(p.build.fit.min_segments, 25);
+        assert!(!p.build.learn_strength);
+    }
+
+    #[test]
+    fn snapshot_is_stamped_with_the_merchant_and_validity_window() {
+        let snap = build_prior_snapshot(
+            "m_1",
+            &heterogeneous("adyen"),
+            &[],
+            1_000,
+            false,
+            true,
+            params(),
+        );
+        assert_eq!(snap.merchant_id, "m_1");
+        assert_eq!(snap.version, sr_prior::PRIOR_SNAPSHOT_VERSION);
+        assert_eq!(snap.computed_at_ms, 1_000);
+        assert_eq!(
+            snap.valid_until_ms,
+            1_000 + DEFAULT_PRIOR_MAX_AGE_SECS as i64 * 1000
+        );
+        assert!(snap.usable_for("m_1", 2_000));
+        assert!(!snap.usable_for("m_2", 2_000));
+        assert_eq!(snap.entries.len(), 1);
+        assert_eq!(snap.entries[0].learned_prior_strength, None);
+    }
+
+    #[test]
+    fn strength_is_learned_only_with_the_flag_and_supported_granularity() {
+        let learned = build_prior_snapshot(
+            "m_1",
+            &heterogeneous("adyen"),
+            &heterogeneous("adyen"),
+            0,
+            true,
+            true,
+            params(),
+        );
+        assert!(learned.entries[0].learned_prior_strength.is_some());
+        assert_eq!(learned.entries[0].fit_error, None);
+
+        let unsupported = build_prior_snapshot(
+            "m_1",
+            &heterogeneous("adyen"),
+            &[],
+            0,
+            true,
+            false,
+            params(),
+        );
+        assert_eq!(unsupported.entries[0].learned_prior_strength, None);
+        assert!(unsupported.entries[0]
+            .fit_error
+            .as_deref()
+            .is_some_and(|e| e.contains("card_is_in")));
+        // The parent rate is still published: shrinkage keeps working with the configured strength.
+        assert_eq!(
+            unsupported.entries[0].parent_success_rate,
+            learned.entries[0].parent_success_rate
+        );
+    }
+
+    #[test]
+    fn thin_gateways_get_only_the_pooled_prior_and_windows_are_recorded() {
+        let mut parent = rows("adyen", &[(80, 100)]);
+        parent.extend(rows("stripe", &[(8, 10)]));
+        let snap = build_prior_snapshot("m_1", &parent, &[], 0, true, true, params());
+        assert_eq!(snap.entries.len(), 1);
+        assert_eq!(snap.entries[0].gateway, "adyen");
+        assert_eq!(snap.pooled_entries.len(), 1);
+        assert_eq!(snap.pooled_entries[0].observations, 110);
+        assert_eq!(snap.lookback_secs, DEFAULT_PRIOR_PARENT_LOOKBACK_SECS);
+        assert_eq!(
+            snap.fit_lookback_secs,
+            Some(DEFAULT_PRIOR_FIT_LOOKBACK_SECS)
+        );
+        let flags = sr_prior::ColdStartFlags {
+            prior_enabled: true,
+            learned_strength_enabled: true,
+        };
+        let stripe =
+            sr_prior::resolve_prior(flags, Some(&snap), "m_1", 1, "CARD", "VISA", "stripe", None)
+                .expect("pooled prior");
+        assert_eq!(stripe.scope(), sr_prior::PriorScope::Pooled);
+        assert!((stripe.parent_success_rate() - 89.0 / 112.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn empty_analytics_produce_an_empty_snapshot() {
+        let snap = build_prior_snapshot("m_1", &[], &[], 0, true, true, params());
+        assert!(snap.entries.is_empty());
+    }
+
+    #[test]
+    fn insufficient_training_data_records_the_reason() {
+        let snap = build_prior_snapshot(
+            "m_1",
+            &rows("stripe", &[(40, 50)]),
+            &rows("stripe", &[(40, 50)]),
+            0,
+            true,
+            true,
+            params(),
+        );
+        assert_eq!(snap.entries.len(), 1);
+        assert_eq!(snap.entries[0].learned_prior_strength, None);
+        assert!(snap.entries[0]
+            .fit_error
+            .as_deref()
+            .is_some_and(|e| e.contains("insufficient")));
+    }
 }

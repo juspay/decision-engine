@@ -184,4 +184,13 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
     ) -> Result<Vec<crate::analytics::store::SegmentTraffic>, ApiError> {
         endpoints::segment_traffic::load(&self.client, merchant_id, since_ms, active_dims).await
     }
+
+    async fn merchant_gateway_segment_outcomes(
+        &self,
+        merchant_id: &str,
+        since_ms: i64,
+        active_dims: &[&str],
+    ) -> Result<Vec<crate::analytics::store::GatewaySegmentOutcomes>, ApiError> {
+        endpoints::segment_outcomes::load(&self.client, merchant_id, since_ms, active_dims).await
+    }
 }

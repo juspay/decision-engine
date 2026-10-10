@@ -29,6 +29,7 @@
 // use serde_json as A;
 // use std::vec::Vec as BSL;
 // use feedback::types::{TxnCardInfo, PaymentMethodType, MerchantGatewayAccount};
+use crate::decider::gatewaydecider::sr_prior;
 use crate::decider::gatewaydecider::utils as GU;
 use crate::logger;
 use crate::redis::cache::findByNameFromRedis;
@@ -150,7 +151,10 @@ pub async fn createKeysIfNotExist(
             "Creating keys with bucket size as {}",
             merchant_bucket_size
         );
-        let score_list = vec!["1".to_string(); merchant_bucket_size as usize];
+        // Synthetic seed: parses to 1.0 like the legacy "1" (so the legacy score is unchanged),
+        // but the cold-start prior (`sr_prior`) does not count it as real outcomes.
+        let score_list =
+            vec![sr_prior::SYNTHETIC_SUCCESS.to_string(); merchant_bucket_size as usize];
         let redis = C::kvRedis();
         GU::create_moving_window_and_score(
             redis,

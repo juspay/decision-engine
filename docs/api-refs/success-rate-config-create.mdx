@@ -51,4 +51,6 @@ curl --location "$BASE_URL/rule/create" \
 }
 ```
 
+`defaultPriorStrength` (optional, number > 0) is the strength of the SR v3 cold-start prior, used when the merchant has `ENABLE_SR_V3_COLD_START_PRIOR` on and no learned strength applies; it defaults to `20` and is clamped to `[1, 1000]`. See [Configuration → SR v3 cold-start prior](https://github.com/juspay/decision-engine/blob/main/docs/configuration.md#sr-v3-cold-start-prior). The dashboard's success-rate form does not manage this field (like `margin`): set it through the API, and note that saving the form omits it (the default then applies).
+
 `margin` is the merchant margin as a fraction of ticket (e.g. `0.20` for 20%). It feeds the [multi-objective routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-multi-objective.mdx) economic-value ranking `EV = auth rate × settlement value` (settlement value = txn amount − cost of payment processing) by setting the merchant's share of the ticket, and defaults to `1.0` when unset.
