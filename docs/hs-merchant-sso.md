@@ -91,6 +91,22 @@ returned in a POST body — exactly how `/auth/login` already returns tokens.
 
 ---
 
+## Connector options in the dashboard handoff
+
+The HS dashboard supplies the selected profile's configured payment connectors in the
+`#connectors=` URL fragment. Each entry includes `merchant_connector_id`, `connector_name`,
+`connector_label`, and an optional boolean `disabled`.
+
+Disabled connectors remain selectable in DE routing configuration, matching HS routing.
+Gateway dropdowns list enabled connectors first and mark disabled connectors with
+`(disabled)`. Selecting one retains its connector name and merchant connector account ID;
+the status label is display-only. Older handoffs without `disabled` show no status label.
+
+The connector list is captured when the dashboard opens DE. After enabling or disabling a
+connector in HS, reopen DE from the dashboard to load a fresh list.
+
+---
+
 ## Synthetic identity
 
 The redirect session does **not** create or reference a `users` row.

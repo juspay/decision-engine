@@ -233,6 +233,7 @@ pub async fn decide_gateway(
     let global_request_id = global_request_id_from_headers(&headers);
     let trace_id = trace_id_from_headers(&headers);
     for (name, value) in headers.iter() {
+        let value = masking::Secret::<_>::new(value);
         logger::debug!(tag = "DecideGateway", "Header: {}: {:?}", name, value);
     }
     let body = match crate::routes::body::read_request_body(req.into_body()).await {

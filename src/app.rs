@@ -681,6 +681,10 @@ where
             post(routes::hierarchy::reconcile_hierarchy),
         )
         .route(
+            "/admin/profiles/:profile_id/connectors",
+            post(routes::profile_connectors::replace_profile_connectors),
+        )
+        .route(
             "/admin/hierarchy/sync",
             post(routes::hierarchy::sync_hierarchy),
         )
