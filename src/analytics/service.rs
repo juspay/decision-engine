@@ -52,34 +52,29 @@ pub fn trace_id_from_headers(headers: &HeaderMap) -> Option<String> {
 }
 
 fn enqueue_domain_event(event: DomainAnalyticsEvent) {
-    let event = truncate_domain_event_details(event);
-    ANALYTICS_EVENT_COUNTER
-        .with_label_values(&[event.flow_type.as_str()])
-        .inc();
+    if std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let event = limit_domain_event_details(event);
+        ANALYTICS_EVENT_COUNTER
+            .with_label_values(&[event.flow_type.as_str()])
+            .inc();
 
-    if let Some(global_state) = crate::app::APP_STATE.get() {
-        global_state.analytics_runtime.enqueue_domain_event(event);
+        if let Some(global_state) = crate::app::APP_STATE.get() {
+            global_state.analytics_runtime.enqueue_domain_event(event);
+        }
+    }))
+    .is_err()
+    {
+        crate::logger::warn!("Skipping analytics event after an unexpected capture failure");
     }
 }
 
-fn truncate_domain_event_details(mut event: DomainAnalyticsEvent) -> DomainAnalyticsEvent {
-    let Some(details) = event.details.take() else {
-        return event;
-    };
-
+fn limit_domain_event_details(mut event: DomainAnalyticsEvent) -> DomainAnalyticsEvent {
     let max_bytes = crate::app::APP_STATE
         .get()
         .map(|state| state.analytics_runtime.details_max_bytes())
         .unwrap_or_else(|| crate::config::AnalyticsCaptureConfig::default().details_max_bytes);
 
-    if details.len() <= max_bytes {
-        event.details = Some(details);
-        return event;
-    }
-
-    let mut truncated = details;
-    truncated.truncate(max_bytes);
-    event.details = Some(truncated);
+    event.details = event.details.filter(|details| details.len() <= max_bytes);
     event
 }
 
