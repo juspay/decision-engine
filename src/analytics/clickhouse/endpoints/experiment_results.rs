@@ -64,6 +64,10 @@ pub(crate) struct ExperimentScope<'a> {
 const REPORTED_STATUS: &str = "if(flow_type = 'update_gateway_score_error', \
      JSONExtractString(assumeNotNull(details), 'status'), ifNull(status, ''))";
 
+/// An experiment event that records a real payment's routing decision.
+const ROUTED: &str =
+    "JSONExtractString(assumeNotNull(details), 'routing_source') = 'real_payment_intercept'";
+
 /// Cost and amount on an experiment event; absent keys and nulls extract as 0.
 const CHOSEN_COST_BPS: &str = "JSONExtractFloat(assumeNotNull(details), 'chosen_cost_bps')";
 const COST_SAVED_BPS: &str = "JSONExtractFloat(assumeNotNull(details), 'cost_saved_bps')";
@@ -80,24 +84,45 @@ const AMOUNT: &str = "JSONExtractFloat(assumeNotNull(details), 'amount')";
 /// any routing-time state still being around when the webhook arrives. Outcome events from
 /// before this join (`outcome_source = 'score_update'`) are read too: they carry the cost of
 /// payments routed before the routing event did, and resolve them like a score update.
+///
+/// Which payments are read is decided by their routing events alone, so the window bounds when
+/// a payment was routed, never when an outcome event was recorded.
 pub(crate) fn experiment_payments(scope: &ExperimentScope<'_>) -> SqlFragment {
-    let mut decision_filters = experiment_filters(scope.merchant_id, scope.experiment_id);
+    // The experiment's events from `start_ms` on, routing and legacy outcome alike: an outcome is
+    // recorded after its routing, so a payment routed in the window keeps all of its events.
+    let mut experiment_events = experiment_filters(scope.merchant_id, scope.experiment_id);
     if let Some(endpoint) = scope.endpoint {
-        decision_filters.push(FilterClause::raw(endpoint_filter(endpoint)));
+        experiment_events.push(FilterClause::raw(endpoint_filter(endpoint)));
     }
+    experiment_events.push(FilterClause::raw("payment_id IS NOT NULL"));
     if let Some(start) = scope.start_ms {
-        decision_filters.push(FilterClause::gte("created_at_ms", start));
-        decision_filters.push(partition_lower_bound(start));
+        experiment_events.push(FilterClause::gte("created_at_ms", start));
+        experiment_events.push(partition_lower_bound(start));
     }
+    let events_predicate = join_predicates(&experiment_events);
+    let events_binds = experiment_events
+        .iter()
+        .flat_map(|filter| filter.binds().iter().cloned());
+
+    // A payment counts when it was routed in the window: the first routing event bounds it.
+    let mut routed_having = vec![FilterClause::raw(format!("countIf({ROUTED}) > 0"))];
+    // Payments routed in the window, which the outcome subquery is limited to.
+    let mut routed_events = experiment_events.clone();
+    routed_events.push(FilterClause::raw(ROUTED));
     if let Some(end) = scope.end_ms {
-        decision_filters.push(FilterClause::lte("created_at_ms", end));
-        decision_filters.push(FilterClause::new(
+        routed_having.push(FilterClause::new("routed_at_ms <= ?", vec![end.into()]));
+        routed_events.push(FilterClause::lte("created_at_ms", end));
+        routed_events.push(FilterClause::new(
             "created_at <= fromUnixTimestamp64Milli(toInt64(?))",
             vec![end.into()],
         ));
     }
-    let decision_predicate = join_predicates(&decision_filters);
-    let decision_binds = decision_filters
+    let routed_having_predicate = join_predicates(&routed_having);
+    let routed_having_binds = routed_having
+        .iter()
+        .flat_map(|filter| filter.binds().iter().cloned());
+    let routed_predicate = join_predicates(&routed_events);
+    let routed_binds = routed_events
         .iter()
         .flat_map(|filter| filter.binds().iter().cloned());
 
@@ -153,10 +178,12 @@ pub(crate) fn experiment_payments(scope: &ExperimentScope<'_>) -> SqlFragment {
                 avgIf(average_latency, average_latency > 0) AS latency_ms,
                 argMaxIf({CHOSEN_COST_BPS}, created_at_ms, {CHOSEN_COST_BPS} > 0) AS chosen_cost_bps,
                 argMaxIf({COST_SAVED_BPS}, created_at_ms, {CHOSEN_COST_BPS} > 0) AS cost_saved_bps,
-                argMaxIf({AMOUNT}, created_at_ms, {AMOUNT} > 0) AS amount
+                argMaxIf({AMOUNT}, created_at_ms, {AMOUNT} > 0) AS amount,
+                minIf(created_at_ms, {ROUTED}) AS routed_at_ms
             FROM {DOMAIN_TABLE}
-            WHERE {decision_predicate} AND payment_id IS NOT NULL
+            WHERE {events_predicate}
             GROUP BY payment_id, arm
+            HAVING {routed_having_predicate}
          ) AS d
          LEFT JOIN (
             SELECT
@@ -169,17 +196,17 @@ pub(crate) fn experiment_payments(scope: &ExperimentScope<'_>) -> SqlFragment {
             WHERE {outcome_predicate}
               AND ((flow_type IN {score_update_flows} AND {REPORTED_STATUS} IN {terminal})
                    OR (flow_type = '{ab_flow}' AND {legacy_outcome}))
-              AND payment_id IN (SELECT payment_id FROM {DOMAIN_TABLE} WHERE {decision_predicate})
+              AND payment_id IN (SELECT payment_id FROM {DOMAIN_TABLE} WHERE {routed_predicate})
             GROUP BY payment_id
          ) AS o ON o.payment_id = d.payment_id) AS payments"
     );
 
-    // Binds in the order their placeholders appear: decisions, outcomes, then the outcome
-    // subquery's decision filter.
-    let binds = decision_binds
-        .clone()
+    // Binds in the order their placeholders appear: the decision subquery's WHERE and HAVING,
+    // the outcome subquery, then the routed payments it is limited to.
+    let binds = events_binds
+        .chain(routed_having_binds)
         .chain(outcome_binds)
-        .chain(decision_binds)
+        .chain(routed_binds)
         .collect();
     SqlFragment::with_binds(sql, binds)
 }
@@ -294,10 +321,10 @@ fn experiment_filters(merchant_id: &str, experiment_id: &str) -> Vec<FilterClaus
         "flow_type = '{}'",
         FlowType::RoutingEvaluateAbTest.as_str()
     )));
-    filters.push(FilterClause::raw(format!(
-        "JSONExtractString(assumeNotNull(details), 'experiment_id') = '{}'",
-        experiment_id.replace('\'', "\\'")
-    )));
+    filters.push(FilterClause::new(
+        "JSONExtractString(assumeNotNull(details), 'experiment_id') = ?",
+        vec![experiment_id.into()],
+    ));
     filters.push(FilterClause::raw(
         "JSONExtractString(assumeNotNull(details), 'variant_arm') IN ('control', 'variant')"
             .to_string(),
@@ -305,11 +332,9 @@ fn experiment_filters(merchant_id: &str, experiment_id: &str) -> Vec<FilterClaus
     // Real payments only: a routing decision (`routing_source`) or an outcome after a score update
     // (`outcome_source`). A `/routing/evaluate` preview, such as a Decision Explorer run, carries
     // neither.
-    filters.push(FilterClause::raw(
-        "(JSONExtractString(assumeNotNull(details), 'routing_source') = 'real_payment_intercept' \
-          OR JSONExtractString(assumeNotNull(details), 'outcome_source') = 'score_update')"
-            .to_string(),
-    ));
+    filters.push(FilterClause::raw(format!(
+        "({ROUTED} OR JSONExtractString(assumeNotNull(details), 'outcome_source') = 'score_update')"
+    )));
     filters
 }
 
@@ -514,4 +539,59 @@ fn erfc_approx(x: f64) -> f64 {
         * (0.254829592
             + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
     poly * (-x * x).exp()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{experiment_payments, ExperimentScope};
+    use crate::analytics::clickhouse::query::BindArg;
+    use crate::euclid::types::ExperimentEndpoint;
+
+    fn scope(start_ms: Option<i64>, end_ms: Option<i64>) -> ExperimentScope<'static> {
+        ExperimentScope {
+            merchant_id: "m_1",
+            experiment_id: "exp_1' OR 1=1 --\\",
+            endpoint: Some(ExperimentEndpoint::Evaluate),
+            start_ms,
+            end_ms,
+        }
+    }
+
+    #[test]
+    fn every_placeholder_has_a_bind() {
+        for (start, end) in [
+            (None, None),
+            (Some(1), None),
+            (None, Some(2)),
+            (Some(1), Some(2)),
+        ] {
+            let fragment = experiment_payments(&scope(start, end));
+            assert_eq!(
+                fragment.sql().matches('?').count(),
+                fragment.binds().len(),
+                "start={start:?} end={end:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn experiment_id_is_bound_not_inlined() {
+        let fragment = experiment_payments(&scope(None, None));
+        assert!(!fragment.sql().contains("exp_1"));
+        assert!(fragment
+            .binds()
+            .contains(&BindArg::String("exp_1' OR 1=1 --\\".to_string())));
+    }
+
+    #[test]
+    fn window_end_bounds_routing_not_outcomes() {
+        let sql = experiment_payments(&scope(Some(1), Some(2)))
+            .sql()
+            .to_string();
+        // The end bound applies to the routing time and the routed-payment set only; the outcome
+        // subquery itself has no upper bound, so late webhooks still count.
+        assert!(sql.contains("HAVING countIf("));
+        assert!(sql.contains("routed_at_ms <= ?"));
+        assert_eq!(sql.matches("created_at_ms <= ?").count(), 1);
+    }
 }
