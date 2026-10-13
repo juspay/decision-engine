@@ -58,8 +58,9 @@ Payment attributes come from the payment's routing decision. On `/routing/hybrid
 rule parameters Hyperswitch sends, so they follow Hyperswitch's meaning: `payment_method` is
 `card`, `wallet`, `upi`… and `payment_method_type` is `credit`, `debit`, `google_pay`…. On
 `/decide-gateway` they are the decider request's `paymentMethodType` (e.g. `CARD`) and
-`paymentMethod` (e.g. `VISA`). Values match case-insensitively, and the amount bounds are
-inclusive.
+`paymentMethod` (e.g. `VISA`). Each takes several values (comma-separated in the API, e.g.
+`currency=USD,EUR`) and matches a payment with any of them. Values match case-insensitively, and
+the amount bounds are inclusive.
 
 They select whole payments: a matching payment keeps all its events, including the score
 updates that carry no attributes, so its outcome still reads correctly. These filters read the

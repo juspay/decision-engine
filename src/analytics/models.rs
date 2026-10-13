@@ -536,45 +536,47 @@ impl PaymentAuditOutcome {
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PaymentAuditPaymentFilters {
     pub outcome: Option<PaymentAuditOutcome>,
-    pub currency: Option<String>,
-    pub payment_method: Option<String>,
-    pub payment_method_type: Option<String>,
-    pub card_network: Option<String>,
-    pub auth_type: Option<String>,
+    /// Each attribute matches a payment carrying any of its values; empty means unfiltered.
+    pub currency: Vec<String>,
+    pub payment_method: Vec<String>,
+    pub payment_method_type: Vec<String>,
+    pub card_network: Vec<String>,
+    pub auth_type: Vec<String>,
     pub min_amount: Option<f64>,
     pub max_amount: Option<f64>,
 }
 
 impl PaymentAuditPaymentFilters {
+    /// The values of a comma-separated query param (`currency=USD,EUR`), blanks dropped.
+    pub fn values(param: Option<&str>) -> Vec<String> {
+        param
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
     /// Whether any filter reads a payment attribute the pre-aggregated summaries don't carry.
     pub fn reads_payment_attributes(&self) -> bool {
-        self.currency.is_some()
-            || self.payment_method.is_some()
-            || self.payment_method_type.is_some()
-            || self.card_network.is_some()
-            || self.auth_type.is_some()
+        !self.currency.is_empty()
+            || !self.payment_method.is_empty()
+            || !self.payment_method_type.is_empty()
+            || !self.card_network.is_empty()
+            || !self.auth_type.is_empty()
             || self.min_amount.is_some()
             || self.max_amount.is_some()
     }
 }
 
 impl PaymentAuditQuery {
-    /// Sets the payment-attribute filters, dropping blank values.
+    /// Sets the payment-attribute filters, dropping non-finite amount bounds.
     pub fn with_payment_filters(mut self, filters: PaymentAuditPaymentFilters) -> Self {
-        let non_blank = |value: Option<String>| {
-            value
-                .map(|v| v.trim().to_string())
-                .filter(|v| !v.is_empty())
-        };
         self.payment_filters = PaymentAuditPaymentFilters {
-            outcome: filters.outcome,
-            currency: non_blank(filters.currency),
-            payment_method: non_blank(filters.payment_method),
-            payment_method_type: non_blank(filters.payment_method_type),
-            card_network: non_blank(filters.card_network),
-            auth_type: non_blank(filters.auth_type),
             min_amount: filters.min_amount.filter(|v| v.is_finite()),
             max_amount: filters.max_amount.filter(|v| v.is_finite()),
+            ..filters
         };
         self
     }

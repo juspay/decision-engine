@@ -14,6 +14,10 @@ interface SearchableMultiSelectProps {
   options: Option[]
   placeholder?: string
   className?: string
+  /** Replaces the trigger's default box styling, e.g. to match a page's native selects. */
+  triggerClassName?: string
+  /** One-line summary ("Card +1") instead of a chip per value, so the trigger keeps its height. */
+  compact?: boolean
 }
 
 export function SearchableMultiSelect({
@@ -22,6 +26,8 @@ export function SearchableMultiSelect({
   options,
   placeholder = 'Select…',
   className = '',
+  triggerClassName,
+  compact = false,
 }: SearchableMultiSelectProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -97,12 +103,22 @@ export function SearchableMultiSelect({
       <div
         ref={triggerRef}
         onClick={() => (open ? close() : openDropdown())}
-        className="flex w-full min-w-0 cursor-pointer flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm dark:border-[#222226]"
+        className={
+          triggerClassName
+            ? `flex min-w-0 cursor-pointer items-center gap-1 ${triggerClassName}`
+            : 'flex w-full min-w-0 cursor-pointer flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm dark:border-[#222226]'
+        }
       >
         {values.length === 0 && (
-          <span className="text-slate-500">{placeholder}</span>
+          <span className={compact ? 'truncate' : 'text-slate-500'}>{placeholder}</span>
         )}
-        {values.map(v => {
+        {compact && values.length > 0 && (
+          <span className="truncate" title={values.map(v => options.find(o => o.value === v)?.label ?? v).join(', ')}>
+            {options.find(o => o.value === values[0])?.label ?? values[0]}
+            {values.length > 1 ? ` +${values.length - 1}` : ''}
+          </span>
+        )}
+        {!compact && values.map(v => {
           const label = options.find(o => o.value === v)?.label ?? v
           return (
             <span
@@ -120,10 +136,13 @@ export function SearchableMultiSelect({
             </span>
           )
         })}
-        <ChevronDown
-          size={11}
-          className={`ml-auto shrink-0 text-slate-500 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
-        />
+        {/* A caller styling the trigger brings its own arrow (e.g. a native select's). */}
+        {!triggerClassName && (
+          <ChevronDown
+            size={11}
+            className={`ml-auto shrink-0 text-slate-500 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+          />
+        )}
       </div>
 
       {open && createPortal(

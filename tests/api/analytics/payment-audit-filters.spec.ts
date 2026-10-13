@@ -184,6 +184,16 @@ test.describe('Payment audit outcome and payment filters (API)', () => {
     expect(await matching({ payment_method: 'wallet' })).toEqual(['usd_wallet_retried'])
     expect(await matching({ payment_method_type: 'DEBIT' })).toEqual(['usd_debit_declined'])
     expect(await matching({ card_network: 'visa' })).toEqual(['eur_credit_charged'])
+
+    // Several values for one attribute match a payment carrying any of them.
+    expect(await matching({ payment_method_type: 'debit,GOOGLE_PAY' })).toEqual([
+      'usd_debit_declined',
+      'usd_wallet_retried',
+    ])
+    expect(await matching({ currency: 'USD,EUR' })).toHaveLength(PAYMENTS.length)
+    expect(
+      await matching({ currency: 'EUR', payment_method: 'card,wallet', outcome: 'pending' }),
+    ).toEqual(['eur_credit_unanswered'])
     expect(await matching({ min_amount: 60, max_amount: 200 })).toEqual([
       'eur_credit_charged',
       'usd_debit_declined',

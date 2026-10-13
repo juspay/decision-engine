@@ -1101,7 +1101,7 @@
             "name": "min_amount",
             "in": "query",
             "required": false,
-            "description": "Payment audit only: payments whose routed amount is at least this. Like `currency`, `payment_method`, `payment_method_type`, `card_network` and `auth_type`, it matches the whole payment by its routing decision.",
+            "description": "Payment audit only: payments whose routed amount is at least this. Like `currency`, `payment_method`, `payment_method_type`, `card_network` and `auth_type` (which on the payment audit take comma-separated values and match any of them, case-insensitively), it matches the whole payment by its routing decision.",
             "schema": {
               "type": "number"
             }

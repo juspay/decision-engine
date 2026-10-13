@@ -14,6 +14,7 @@ import {
 } from '../../types/api'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
+import { SearchableMultiSelect } from '../ui/SearchableMultiSelect'
 import { Spinner } from '../ui/Spinner'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Card as GlassCard, InsetPanel } from '../ui/Card'
@@ -1199,26 +1200,26 @@ export function PaymentAuditPage() {
         {showAdvancedFilters ? (
           <div className="grid w-full basis-full grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
             {PAYMENT_ATTRIBUTE_FILTERS.map(({ field, anyLabel, options }) => {
-              const value = filters[field]
-              const listedOption = options.find((option) => option.value.toLowerCase() === value.toLowerCase())
-              // A value from a link that isn't listed stays selectable.
-              const listed = Boolean(listedOption)
+              // Selected values, canonicalised to the listed option ignoring case. A value from a
+              // link that isn't listed stays selectable.
+              const selected = filters[field]
+                .split(',')
+                .map((value) => value.trim())
+                .filter(Boolean)
+                .map((value) => options.find((o) => o.value.toLowerCase() === value.toLowerCase())?.value ?? value)
+              const unlisted = selected
+                .filter((value) => !options.some((o) => o.value === value))
+                .map((value) => ({ value, label: value }))
               return (
-                <select
+                <SearchableMultiSelect
                   key={field}
-                  className={fieldSelectClassName()}
-                  value={listedOption?.value ?? value}
-                  onChange={(event) => applyDropdownFilter(field, event.target.value)}
-                  aria-label={anyLabel.replace(/^Any /, '')}
-                >
-                  <option value="">{anyLabel}</option>
-                  {!listed && value ? <option value={value}>{value}</option> : null}
-                  {options.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
+                  values={selected}
+                  options={[...unlisted, ...options]}
+                  onChange={(values) => applyDropdownFilter(field, values.join(','))}
+                  placeholder={anyLabel}
+                  triggerClassName={fieldSelectClassName()}
+                  compact
+                />
               )
             })}
             <input

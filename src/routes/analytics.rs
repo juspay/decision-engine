@@ -1,3 +1,4 @@
+use crate::analytics::models::{PaymentAuditOutcome, PaymentAuditPaymentFilters};
 use crate::analytics::{
     cost_savings as fetch_cost_savings, decisions as fetch_decisions,
     experiment_results as fetch_experiment_results,
@@ -93,15 +94,15 @@ fn payment_audit_query_from_params(
         params.scope.clone(),
         params.routing_kind.clone(),
     )
-    .with_payment_filters(crate::analytics::models::PaymentAuditPaymentFilters {
-        outcome: crate::analytics::models::PaymentAuditOutcome::from_query(
-            params.outcome.as_deref(),
+    .with_payment_filters(PaymentAuditPaymentFilters {
+        outcome: PaymentAuditOutcome::from_query(params.outcome.as_deref()),
+        currency: PaymentAuditPaymentFilters::values(params.currency.as_deref()),
+        payment_method: PaymentAuditPaymentFilters::values(params.payment_method.as_deref()),
+        payment_method_type: PaymentAuditPaymentFilters::values(
+            params.payment_method_type.as_deref(),
         ),
-        currency: params.currency.clone(),
-        payment_method: params.payment_method.clone(),
-        payment_method_type: params.payment_method_type.clone(),
-        card_network: params.card_network.clone(),
-        auth_type: params.auth_type.clone(),
+        card_network: PaymentAuditPaymentFilters::values(params.card_network.as_deref()),
+        auth_type: PaymentAuditPaymentFilters::values(params.auth_type.as_deref()),
         min_amount: params.min_amount,
         max_amount: params.max_amount,
     })

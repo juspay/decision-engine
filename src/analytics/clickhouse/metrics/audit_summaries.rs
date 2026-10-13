@@ -304,14 +304,17 @@ fn with_filter_aggregates(query: &PaymentAuditQuery, base: &[Aggregate]) -> Vec<
         (routing_kind_filters, Aggregate::RoutingFamilies),
         (query.error_code.is_some(), Aggregate::ErrorCodes),
         (payment.outcome.is_some(), Aggregate::Statuses),
-        (payment.currency.is_some(), Aggregate::Currencies),
-        (payment.payment_method.is_some(), Aggregate::PaymentMethods),
+        (!payment.currency.is_empty(), Aggregate::Currencies),
         (
-            payment.payment_method_type.is_some(),
+            !payment.payment_method.is_empty(),
+            Aggregate::PaymentMethods,
+        ),
+        (
+            !payment.payment_method_type.is_empty(),
             Aggregate::PaymentMethodTypes,
         ),
-        (payment.card_network.is_some(), Aggregate::CardNetworks),
-        (payment.auth_type.is_some(), Aggregate::AuthTypes),
+        (!payment.card_network.is_empty(), Aggregate::CardNetworks),
+        (!payment.auth_type.is_empty(), Aggregate::AuthTypes),
         (
             payment.min_amount.is_some() || payment.max_amount.is_some(),
             Aggregate::Amount,
@@ -475,18 +478,20 @@ fn outer_summary_filters(query: &PaymentAuditQuery) -> Vec<FilterClause> {
             outcome.as_str()
         )));
     }
-    // Attribute values aggregate lower-cased, so the match ignores case.
-    for (value, aggregate) in [
+    // Attribute values aggregate lower-cased, so the match ignores case. Several values for one
+    // attribute match a payment carrying any of them.
+    for (values, aggregate) in [
         (&payment.currency, "currencies"),
         (&payment.payment_method, "payment_methods"),
         (&payment.payment_method_type, "payment_method_types"),
         (&payment.card_network, "card_networks"),
         (&payment.auth_type, "auth_types"),
     ] {
-        if let Some(value) = value {
+        if !values.is_empty() {
+            let placeholders = vec!["lowerUTF8(?)"; values.len()].join(", ");
             filters.push(FilterClause::new(
-                format!("has({aggregate}, lowerUTF8(?))"),
-                vec![value.clone().into()],
+                format!("hasAny({aggregate}, [{placeholders}])"),
+                values.iter().cloned().map(BindArg::from).collect(),
             ));
         }
     }
@@ -791,7 +796,7 @@ mod tests {
     #[test]
     fn payment_attribute_filters_read_raw_rows_and_match_per_payment() {
         let mut query = payment_audit_query();
-        query.payment_filters.currency = Some("USD".to_string());
+        query.payment_filters.currency = vec!["USD".to_string(), "eur".to_string()];
         query.payment_filters.min_amount = Some(50.0);
         query.payment_filters.max_amount = Some(150.0);
 
@@ -808,7 +813,16 @@ mod tests {
 
         let filters = outer_summary_filters(&query);
         let predicates: Vec<&str> = filters.iter().map(|f| f.predicate()).collect();
-        assert!(predicates.contains(&"has(currencies, lowerUTF8(?))"));
+        let currencies = filters
+            .iter()
+            .find(|f| f.predicate().starts_with("hasAny(currencies"))
+            .expect("currency filter");
+        // Either currency matches; one bind per value.
+        assert_eq!(
+            currencies.predicate(),
+            "hasAny(currencies, [lowerUTF8(?), lowerUTF8(?)])"
+        );
+        assert_eq!(currencies.binds().len(), 2);
         assert!(predicates.contains(&"amount >= ?"));
         assert!(predicates.contains(&"amount <= ?"));
     }
