@@ -59,3 +59,28 @@ export async function existingTables(
       .filter(Boolean),
   )
 }
+
+/**
+ * Insert rows into `table` as JSONEachRow. For specs that need events the API cannot produce on
+ * demand, such as one recorded days ago.
+ */
+export async function clickhouseInsert(
+  request: APIRequestContext,
+  table: string,
+  rows: Record<string, unknown>[],
+): Promise<void> {
+  const url = new URL(HTTP_URL)
+  url.searchParams.set('database', DATABASE)
+  url.searchParams.set('query', `INSERT INTO ${table} FORMAT JSONEachRow`)
+
+  const response = await request.post(url.toString(), {
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${USER}:${PASSWORD}`).toString('base64')}`,
+    },
+    data: rows.map((row) => JSON.stringify(row)).join('\n'),
+  })
+
+  if (!response.ok()) {
+    throw new Error(`ClickHouse insert failed (${response.status()}): ${await response.text()}`)
+  }
+}

@@ -146,9 +146,11 @@ pub(crate) fn experiment_payments(scope: &ExperimentScope<'_>) -> SqlFragment {
                 argMax(ifNull(gateway, ''), created_at_ms) AS gateway,
                 max(created_at_ms) AS decided_at_ms,
                 avgIf(average_latency, average_latency > 0) AS latency_ms,
-                argMax({CHOSEN_COST_BPS}, created_at_ms) AS chosen_cost_bps,
-                argMax({COST_SAVED_BPS}, created_at_ms) AS cost_saved_bps,
-                argMax({AMOUNT}, created_at_ms) AS amount
+                -- A payment routed on several endpoints keeps the cost of its latest decision
+                -- that ran cost routing, not a later one on an endpoint that never does.
+                argMaxIf({CHOSEN_COST_BPS}, created_at_ms, {CHOSEN_COST_BPS} > 0) AS chosen_cost_bps,
+                argMaxIf({COST_SAVED_BPS}, created_at_ms, {CHOSEN_COST_BPS} > 0) AS cost_saved_bps,
+                argMaxIf({AMOUNT}, created_at_ms, {AMOUNT} > 0) AS amount
             FROM {DOMAIN_TABLE}
             WHERE {routed_predicate}
             GROUP BY payment_id, arm
