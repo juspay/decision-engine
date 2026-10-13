@@ -40,6 +40,11 @@ pub struct AnalyticsQueryParams {
     pub error_code: Option<String>,
     pub scope: Option<String>,
     pub routing_kind: Option<String>,
+    /// Payment audit only: `success`, `failure` or `pending`.
+    pub outcome: Option<String>,
+    /// Payment audit only: amount bounds, inclusive.
+    pub min_amount: Option<f64>,
+    pub max_amount: Option<f64>,
 }
 
 fn analytics_query_from_params(
@@ -88,6 +93,18 @@ fn payment_audit_query_from_params(
         params.scope.clone(),
         params.routing_kind.clone(),
     )
+    .with_payment_filters(crate::analytics::models::PaymentAuditPaymentFilters {
+        outcome: crate::analytics::models::PaymentAuditOutcome::from_query(
+            params.outcome.as_deref(),
+        ),
+        currency: params.currency.clone(),
+        payment_method: params.payment_method.clone(),
+        payment_method_type: params.payment_method_type.clone(),
+        card_network: params.card_network.clone(),
+        auth_type: params.auth_type.clone(),
+        min_amount: params.min_amount,
+        max_amount: params.max_amount,
+    })
 }
 
 pub fn serve() -> axum::Router<Arc<crate::tenant::GlobalAppState>> {

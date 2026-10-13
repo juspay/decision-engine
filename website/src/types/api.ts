@@ -618,6 +618,8 @@ export interface PaymentAuditSummary {
   last_seen_ms: number
   event_count: number
   latest_status?: string | null
+  /** The payment's outcome from its reported statuses; `latest_status` is whichever event came last. */
+  outcome: 'success' | 'failure' | 'pending'
   latest_gateway?: string | null
   latest_stage?: string | null
   gateways: string[]

@@ -1082,8 +1082,37 @@
             "name": "status",
             "in": "query",
             "required": false,
+            "description": "Matches payments with an event of exactly this status (e.g. `FAILURE`, `CHARGED`; `success` / `failure` also match routing calls). To filter by what happened to the payment, use `outcome`.",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "required": false,
+            "description": "The payment's outcome from its reported statuses: `success` (any attempt succeeded), `failure` (failed terminally, never succeeded) or `pending` (no terminal status yet).",
+            "schema": {
+              "type": "string",
+              "enum": ["success", "failure", "pending"]
+            }
+          },
+          {
+            "name": "min_amount",
+            "in": "query",
+            "required": false,
+            "description": "Payment audit only: payments whose routed amount is at least this. Like `currency`, `payment_method`, `payment_method_type`, `card_network` and `auth_type`, it matches the whole payment by its routing decision.",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "max_amount",
+            "in": "query",
+            "required": false,
+            "description": "Payment audit only: payments whose routed amount is at most this.",
+            "schema": {
+              "type": "number"
             }
           },
           {
@@ -7758,6 +7787,11 @@
               "null"
             ],
             "example": "success"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": ["success", "failure", "pending"],
+            "description": "The payment's outcome from its reported statuses. Unlike `latest_status`, a routing call's own `success` does not count."
           },
           "latest_gateway": {
             "type": [

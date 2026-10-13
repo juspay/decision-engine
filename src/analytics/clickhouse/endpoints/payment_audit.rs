@@ -1,5 +1,7 @@
 use crate::analytics::flow::AnalyticsRoute;
-use crate::analytics::models::{PaymentAuditQuery, PaymentAuditResponse, PaymentAuditScope};
+use crate::analytics::models::{
+    PaymentAuditOutcome, PaymentAuditQuery, PaymentAuditResponse, PaymentAuditScope,
+};
 use crate::error::ApiError;
 
 use super::super::metrics;
@@ -14,16 +16,6 @@ pub async fn load(
         query.payment_id.as_deref(),
         query.request_id.as_deref(),
     );
-    fn is_success(status: Option<&str>) -> bool {
-        matches!(
-            status.map(|s| s.to_uppercase()).as_deref(),
-            Some("SUCCESS" | "CHARGED" | "AUTHORIZED")
-        )
-    }
-    fn is_failure(status: Option<&str>) -> bool {
-        let upper = status.map(|s| s.to_uppercase());
-        matches!(upper.as_deref(), Some(s) if s == "FAILURE" || s.contains("FAILED") || s.contains("DECLINED"))
-    }
 
     let (total_results, total_success, total_failure, mut results) =
         if let Some(lookup_key) = requested_lookup_key.clone() {
@@ -43,11 +35,11 @@ pub async fn load(
                 })?;
             let success = results
                 .iter()
-                .filter(|r| is_success(r.latest_status.as_deref()))
+                .filter(|r| r.outcome == PaymentAuditOutcome::Success)
                 .count();
             let failure = results
                 .iter()
-                .filter(|r| is_failure(r.latest_status.as_deref()))
+                .filter(|r| r.outcome == PaymentAuditOutcome::Failure)
                 .count();
             (results.len(), success, failure, results)
         } else {

@@ -496,9 +496,89 @@ pub struct PaymentAuditQuery {
     pub error_code: Option<String>,
     pub scope: PaymentAuditScope,
     pub routing_kind: Option<PaymentAuditRoutingKind>,
+    pub payment_filters: PaymentAuditPaymentFilters,
+}
+
+/// A payment's outcome, from the statuses its score updates reported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentAuditOutcome {
+    /// Some attempt succeeded, including a success after failed retries.
+    Success,
+    /// A terminal failure was reported and no attempt succeeded.
+    Failure,
+    /// No terminal status reported yet.
+    Pending,
+}
+
+impl PaymentAuditOutcome {
+    pub fn from_query(value: Option<&str>) -> Option<Self> {
+        match value?.trim().to_ascii_lowercase().as_str() {
+            "success" => Some(Self::Success),
+            "failure" => Some(Self::Failure),
+            "pending" => Some(Self::Pending),
+            _ => None,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::Failure => "failure",
+            Self::Pending => "pending",
+        }
+    }
+}
+
+/// Payment attributes the audit list filters on. Each is matched per payment rather than per
+/// event: a payment matches when any of its events carries the value, so its other events (score
+/// updates, rule evaluations) stay in its summary.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PaymentAuditPaymentFilters {
+    pub outcome: Option<PaymentAuditOutcome>,
+    pub currency: Option<String>,
+    pub payment_method: Option<String>,
+    pub payment_method_type: Option<String>,
+    pub card_network: Option<String>,
+    pub auth_type: Option<String>,
+    pub min_amount: Option<f64>,
+    pub max_amount: Option<f64>,
+}
+
+impl PaymentAuditPaymentFilters {
+    /// Whether any filter reads a payment attribute the pre-aggregated summaries don't carry.
+    pub fn reads_payment_attributes(&self) -> bool {
+        self.currency.is_some()
+            || self.payment_method.is_some()
+            || self.payment_method_type.is_some()
+            || self.card_network.is_some()
+            || self.auth_type.is_some()
+            || self.min_amount.is_some()
+            || self.max_amount.is_some()
+    }
 }
 
 impl PaymentAuditQuery {
+    /// Sets the payment-attribute filters, dropping blank values.
+    pub fn with_payment_filters(mut self, filters: PaymentAuditPaymentFilters) -> Self {
+        let non_blank = |value: Option<String>| {
+            value
+                .map(|v| v.trim().to_string())
+                .filter(|v| !v.is_empty())
+        };
+        self.payment_filters = PaymentAuditPaymentFilters {
+            outcome: filters.outcome,
+            currency: non_blank(filters.currency),
+            payment_method: non_blank(filters.payment_method),
+            payment_method_type: non_blank(filters.payment_method_type),
+            card_network: non_blank(filters.card_network),
+            auth_type: non_blank(filters.auth_type),
+            min_amount: filters.min_amount.filter(|v| v.is_finite()),
+            max_amount: filters.max_amount.filter(|v| v.is_finite()),
+        };
+        self
+    }
+
     fn normalise_route_filter(route: Option<String>) -> Option<String> {
         route.and_then(|value| {
             let trimmed = value.trim();
@@ -571,6 +651,7 @@ impl PaymentAuditQuery {
             error_code,
             scope: PaymentAuditScope::from_query(scope.as_deref()),
             routing_kind: PaymentAuditRoutingKind::from_query(routing_kind.as_deref()),
+            payment_filters: PaymentAuditPaymentFilters::default(),
         }
     }
 }
@@ -585,6 +666,9 @@ pub struct PaymentAuditSummary {
     pub last_seen_ms: i64,
     pub event_count: usize,
     pub latest_status: Option<String>,
+    /// The payment's outcome from the statuses its score updates reported, unlike
+    /// `latest_status`, which is whichever event came last (a routing call's `success` included).
+    pub outcome: PaymentAuditOutcome,
     pub latest_gateway: Option<String>,
     pub latest_stage: Option<String>,
     pub gateways: Vec<String>,

@@ -42,11 +42,22 @@ import {
 function eventPhase(event: PaymentAuditEvent) {
   return auditEventPhase(event, 'Rule Decision')
 }
+/** The payment's outcome from its reported statuses, not any one event's status. */
 const STATUS_OPTIONS = [
-  { value: '', label: 'Any status' },
+  { value: '', label: 'Any outcome' },
   { value: 'success', label: 'Success' },
   { value: 'failure', label: 'Failure' },
+  { value: 'pending', label: 'Pending' },
 ]
+
+/** Hyperswitch values for the payment attribute filters; any other value can be typed. */
+const PAYMENT_ATTRIBUTE_SUGGESTIONS = {
+  paymentMethod: ['card', 'wallet', 'upi', 'bank_redirect', 'bank_transfer', 'bank_debit', 'pay_later', 'crypto'],
+  paymentMethodType: ['credit', 'debit', 'apple_pay', 'google_pay', 'paypal', 'upi_collect', 'upi_intent'],
+  cardNetwork: ['visa', 'mastercard', 'amex', 'discover', 'rupay', 'maestro'],
+  authType: ['three_ds', 'no_three_ds'],
+  currency: ['USD', 'EUR', 'GBP', 'INR', 'AED', 'SGD'],
+}
 const ROUTE_OPTIONS = [
   { value: '', label: 'Any route' },
   { value: 'decide_gateway', label: 'Decide Gateway' },
@@ -85,6 +96,13 @@ type AuditFilters = {
   flowType: string
   errorCode: string
   routingKind: string
+  currency: string
+  paymentMethod: string
+  paymentMethodType: string
+  cardNetwork: string
+  authType: string
+  minAmount: string
+  maxAmount: string
 }
 
 type InspectorTab = (typeof INSPECTOR_TABS)[number]
@@ -98,6 +116,13 @@ const EMPTY_FILTERS: AuditFilters = {
   flowType: '',
   errorCode: '',
   routingKind: '',
+  currency: '',
+  paymentMethod: '',
+  paymentMethodType: '',
+  cardNetwork: '',
+  authType: '',
+  minAmount: '',
+  maxAmount: '',
 }
 
 function normalizeAuditFilters(filters: AuditFilters): AuditFilters {
@@ -113,6 +138,30 @@ function normalizeAuditFilters(filters: AuditFilters): AuditFilters {
     flowType: filters.flowType.trim(),
     errorCode: filters.errorCode.trim(),
     routingKind: filters.routingKind,
+    currency: filters.currency.trim(),
+    paymentMethod: filters.paymentMethod.trim(),
+    paymentMethodType: filters.paymentMethodType.trim(),
+    cardNetwork: filters.cardNetwork.trim(),
+    authType: filters.authType.trim(),
+    minAmount: filters.minAmount.trim(),
+    maxAmount: filters.maxAmount.trim(),
+  }
+}
+
+/**
+ * The payment filters as query params, for both the API and the page URL. The status dropdown is
+ * the payment's outcome (`outcome`), not an event's raw status.
+ */
+function paymentFilterParams(filters: AuditFilters): Record<string, string | undefined> {
+  return {
+    outcome: filters.status || undefined,
+    currency: filters.currency || undefined,
+    payment_method: filters.paymentMethod || undefined,
+    payment_method_type: filters.paymentMethodType || undefined,
+    card_network: filters.cardNetwork || undefined,
+    auth_type: filters.authType || undefined,
+    min_amount: filters.minAmount || undefined,
+    max_amount: filters.maxAmount || undefined,
   }
 }
 
@@ -151,7 +200,7 @@ function buildAuditUrl(
     request_id: normalizedFilters.requestId || undefined,
     gateway: normalizedFilters.gateway || undefined,
     route: normalizedFilters.route || undefined,
-    status: normalizedFilters.status || undefined,
+    ...paymentFilterParams(normalizedFilters),
     flow_type: normalizedFilters.flowType || undefined,
     routing_kind: normalizedFilters.routingKind || undefined,
     error_code: normalizedFilters.errorCode || undefined,
@@ -170,16 +219,29 @@ function parseRoutingKind(searchParams: URLSearchParams): string {
   return ''
 }
 
+/** The outcome filter; a `status=success|failure` link from before outcomes reads as one. */
+function parseOutcome(searchParams: URLSearchParams): string {
+  const value = (searchParams.get('outcome') || searchParams.get('status') || '').toLowerCase()
+  return STATUS_OPTIONS.some((option) => option.value && option.value === value) ? value : ''
+}
+
 function parseFilters(searchParams: URLSearchParams): AuditFilters {
   return normalizeAuditFilters({
     paymentId: searchParams.get('payment_id') || searchParams.get('request_id') || '',
     requestId: '',
     gateway: searchParams.get('gateway') || '',
     route: searchParams.get('route') || '',
-    status: searchParams.get('status') || '',
+    status: parseOutcome(searchParams),
     flowType: searchParams.get('flow_type') || searchParams.get('event_type') || '',
     errorCode: searchParams.get('error_code') || '',
     routingKind: parseRoutingKind(searchParams),
+    currency: searchParams.get('currency') || '',
+    paymentMethod: searchParams.get('payment_method') || '',
+    paymentMethodType: searchParams.get('payment_method_type') || '',
+    cardNetwork: searchParams.get('card_network') || '',
+    authType: searchParams.get('auth_type') || '',
+    minAmount: searchParams.get('min_amount') || '',
+    maxAmount: searchParams.get('max_amount') || '',
   })
 }
 
@@ -716,17 +778,8 @@ export function PaymentAuditPage() {
   const detailFilters = useMemo<AuditFilters | null>(() => {
     if (!selectedSummary) return null
     const lookupValue = selectedSummary.payment_id || selectedSummary.request_id || ''
-    return {
-      paymentId: lookupValue,
-      requestId: '',
-      gateway: '',
-      route: '',
-      status: '',
-      flowType: '',
-      errorCode: '',
-      // The trail of a selected payment always shows all of its events, whatever the list filter.
-      routingKind: '',
-    }
+    // The trail of a selected payment always shows all of its events, whatever the list filter.
+    return { ...EMPTY_FILTERS, paymentId: lookupValue }
   }, [selectedSummary])
 
   const detailUrl = detailFilters
@@ -766,8 +819,10 @@ export function PaymentAuditPage() {
   const firstRowNumber = (page - 1) * pageSize + 1
   const lastRowNumber = (page - 1) * pageSize + resultRows.length
   const totalEvents = timeline.length
-  const successCount = auditSearch.data?.total_success ?? resultRows.filter((row) => summaryBadgeVariant(row.latest_status) === 'green').length
-  const failureCount = auditSearch.data?.total_failure ?? resultRows.filter((row) => summaryBadgeVariant(row.latest_status) === 'red').length
+  const successCount = auditSearch.data?.total_success ?? resultRows.filter((row) => row.outcome === 'success').length
+  const failureCount = auditSearch.data?.total_failure ?? resultRows.filter((row) => row.outcome === 'failure').length
+  // Payment outcomes: success and failure are terminal; the rest have no outcome reported yet.
+  const pendingCount = Math.max(0, totalMatches - successCount - failureCount)
   const activeGatewayList = Array.from(
     new Set(
       resultRows.flatMap((row) => {
@@ -822,7 +877,7 @@ export function PaymentAuditPage() {
       request_id: normalizedFilters.requestId || undefined,
       gateway: normalizedFilters.gateway || undefined,
       route: normalizedFilters.route || undefined,
-      status: normalizedFilters.status || undefined,
+      ...paymentFilterParams(normalizedFilters),
       flow_type: normalizedFilters.flowType || undefined,
       routing_kind: normalizedFilters.routingKind || undefined,
       error_code: normalizedFilters.errorCode || undefined,
@@ -1086,6 +1141,58 @@ export function PaymentAuditPage() {
           <SlidersHorizontal className="h-4 w-4" />
         </Button>
         </div>
+        {showAdvancedFilters ? (
+          <div className="grid w-full basis-full grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
+            {(
+              [
+                ['paymentMethod', 'Payment method'],
+                ['paymentMethodType', 'Payment method type'],
+                ['cardNetwork', 'Card network'],
+                ['authType', 'Auth type'],
+                ['currency', 'Currency'],
+              ] as const
+            ).map(([field, label]) => (
+              <div key={field}>
+                <input
+                  className={fieldClassName()}
+                  value={filters[field]}
+                  onChange={(event) => updateFilter(field, event.target.value)}
+                  placeholder={label}
+                  aria-label={label}
+                  list={`audit-${field}-options`}
+                />
+                <datalist id={`audit-${field}-options`}>
+                  {PAYMENT_ATTRIBUTE_SUGGESTIONS[field].map((value) => (
+                    <option key={value} value={value} />
+                  ))}
+                </datalist>
+              </div>
+            ))}
+            <input
+              className={fieldClassName()}
+              type="number"
+              min={0}
+              step="any"
+              value={filters.minAmount}
+              onChange={(event) => updateFilter('minAmount', event.target.value)}
+              placeholder="Min amount"
+              aria-label="Min amount"
+            />
+            <input
+              className={fieldClassName()}
+              type="number"
+              min={0}
+              step="any"
+              value={filters.maxAmount}
+              onChange={(event) => updateFilter('maxAmount', event.target.value)}
+              placeholder="Max amount"
+              aria-label="Max amount"
+            />
+            <Button type="submit" variant="secondary" className="h-11">
+              Apply
+            </Button>
+          </div>
+        ) : null}
         {/* The redesigned bar has no Search button; this keeps Enter submitting the text fields. */}
         <button type="submit" className="sr-only">Search</button>
       </form>
@@ -1106,8 +1213,9 @@ export function PaymentAuditPage() {
         {auditSearch.data ? (
           <>
             <span className="h-4 w-px bg-slate-200 dark:bg-[#2a303a]" />
-            <SummaryStat tone="bg-emerald-500" label={`${successCount.toLocaleString()} successful ${successCount === 1 ? 'selection' : 'selections'}`} />
-            <SummaryStat tone="bg-red-500" label={`${failureCount.toLocaleString()} ${failureCount === 1 ? 'failure' : 'failures'}`} />
+            <SummaryStat tone="bg-emerald-500" label={`${successCount.toLocaleString()} successful`} />
+            <SummaryStat tone="bg-red-500" label={`${failureCount.toLocaleString()} failed`} />
+            <SummaryStat tone="bg-slate-400" label={`${pendingCount.toLocaleString()} pending`} />
             <SummaryStat
               tone="bg-brand-500"
               label={`${activeGateways} ${activeGateways === 1 ? 'connector' : 'connectors'}`}
@@ -1185,8 +1293,8 @@ export function PaymentAuditPage() {
                   <div className="mt-2 flex items-center justify-between gap-3">
                     <div className="flex min-w-0 flex-1 items-center gap-2">
                       <span
-                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(row.latest_status)}`}
-                        title={humanizeAuditValue(row.latest_status) || 'Unknown'}
+                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(row.outcome)}`}
+                        title={`${humanizeAuditValue(row.outcome)} · last status ${humanizeAuditValue(row.latest_status) || 'unknown'}`}
                       />
                       {row.latest_gateway ? (
                         <span

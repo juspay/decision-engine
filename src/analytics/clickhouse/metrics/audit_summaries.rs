@@ -4,8 +4,12 @@ use std::collections::HashMap;
 use clickhouse::Row;
 use serde::Deserialize;
 
-use crate::analytics::models::{PaymentAuditQuery, PaymentAuditScope, PaymentAuditSummary};
+use crate::analytics::models::{
+    PaymentAuditOutcome, PaymentAuditQuery, PaymentAuditScope, PaymentAuditSummary,
+};
 use crate::error::ApiError;
+use crate::feedback::gateway_scoring_service::{txn_failure_states, txn_success_states};
+use crate::types::txn_details::types::TxnStatus;
 
 use super::super::common::{
     fetch_all, fetch_one, payment_audit_route_label, payment_audit_stage_label, DOMAIN_TABLE,
@@ -35,6 +39,7 @@ struct AuditSummaryRow {
     latest_stage: Option<String>,
     gateways: Vec<String>,
     routes: Vec<String>,
+    outcome: String,
 }
 
 #[derive(Debug, Clone, Deserialize, Row)]
@@ -71,6 +76,49 @@ enum Aggregate {
     /// The event families as a bitmask, which is all a routing-kind filter reads.
     RoutingFamilies,
     ErrorCodes,
+    // Payment attributes, carried by routing decisions. The summary buckets don't hold them, so a
+    // query filtering on one reads raw rows (`payment_audit_needs_raw_rows`).
+    Currencies,
+    PaymentMethods,
+    PaymentMethodTypes,
+    CardNetworks,
+    AuthTypes,
+    Amount,
+}
+
+/// A routing decision's payment amount: the decider request's on `/decide-gateway`, either half's
+/// on `/routing/hybrid`. 0 on events that carry none.
+const EVENT_AMOUNT_SQL: &str = "greatest(\
+    JSONExtractFloat(assumeNotNull(details), 'request', 'paymentInfo', 'amount'), \
+    JSONExtractFloat(assumeNotNull(details), 'request', 'dynamic_routing_request', 'paymentInfo', 'amount'), \
+    JSONExtractFloat(assumeNotNull(details), 'request', 'static_routing_request', 'parameters', 'amount', 'value'))";
+
+/// The `[...]` literal for a set of transaction statuses, as score updates store them.
+fn status_array_sql(statuses: &[TxnStatus]) -> String {
+    format!(
+        "[{}]",
+        statuses
+            .iter()
+            .map(|status| format!("'{}'", status.to_text()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+/// A payment's outcome from its aggregated `statuses`: success if any attempt succeeded, failure
+/// if one failed terminally and none succeeded, pending otherwise. Routing events' own
+/// `success`/`failure` statuses (the API call's result) are not payment statuses and never match.
+pub(crate) fn outcome_sql() -> String {
+    outcome_of("statuses")
+}
+
+/// [`outcome_sql`] over any expression yielding the payment's statuses array.
+fn outcome_of(statuses: &str) -> String {
+    format!(
+        "multiIf(hasAny({statuses}, {}), 'success', hasAny({statuses}, {}), 'failure', 'pending')",
+        status_array_sql(&txn_success_states()),
+        status_array_sql(&txn_failure_states()),
+    )
 }
 
 /// What a returned summary row carries.
@@ -86,13 +134,14 @@ const ROW_AGGREGATES: &[Aggregate] = &[
     Aggregate::LatestStage,
     Aggregate::Gateways,
     Aggregate::Routes,
+    Aggregate::Statuses,
 ];
 
-/// What the count reads: the window overlap and the latest status it splits totals by.
+/// What the count reads: the window overlap and the statuses it splits totals by outcome.
 const COUNT_AGGREGATES: &[Aggregate] = &[
     Aggregate::FirstSeen,
     Aggregate::LastSeen,
-    Aggregate::LatestStatus,
+    Aggregate::Statuses,
 ];
 
 /// What choosing a page reads: the window overlap and the page's sort keys.
@@ -121,6 +170,13 @@ impl Aggregate {
             Self::FlowTypes => "flow_types_state",
             Self::RoutingFamilies => "summary_kind",
             Self::ErrorCodes => "error_codes_state",
+            // Not in the buckets; a query reading these takes the raw path (see the variants).
+            Self::Currencies
+            | Self::PaymentMethods
+            | Self::PaymentMethodTypes
+            | Self::CardNetworks
+            | Self::AuthTypes
+            | Self::Amount => "lookup_key",
         }
     }
 
@@ -151,6 +207,14 @@ impl Aggregate {
             Self::ErrorCodes => {
                 "arrayFilter(value -> value != '', groupUniqArrayMerge(error_codes_state)) AS error_codes"
             }
+            // Never merged: a query reading payment attributes takes the raw path. Empty values
+            // keep the SQL valid if that ever changes.
+            Self::Currencies => "CAST([] AS Array(String)) AS currencies",
+            Self::PaymentMethods => "CAST([] AS Array(String)) AS payment_methods",
+            Self::PaymentMethodTypes => "CAST([] AS Array(String)) AS payment_method_types",
+            Self::CardNetworks => "CAST([] AS Array(String)) AS card_networks",
+            Self::AuthTypes => "CAST([] AS Array(String)) AS auth_types",
+            Self::Amount => "toFloat64(0) AS amount",
         })
     }
 
@@ -168,6 +232,12 @@ impl Aggregate {
             Self::Routes => Some("route"),
             Self::FlowTypes | Self::RoutingFamilies => Some("flow_type"),
             Self::ErrorCodes => Some("error_code"),
+            Self::Currencies => Some("currency"),
+            Self::PaymentMethods => Some("payment_method"),
+            Self::PaymentMethodTypes => Some("payment_method_type"),
+            Self::CardNetworks => Some("card_network"),
+            Self::AuthTypes => Some("auth_type"),
+            Self::Amount => Some("details"),
         }
     }
 
@@ -198,6 +268,24 @@ impl Aggregate {
             Self::ErrorCodes => {
                 "arrayFilter(value -> value != '', groupUniqArray(ifNull(error_code, ''))) AS error_codes"
             }
+            // Lower-cased so filters ignore case. A hybrid request without a payment method type
+            // records the string `null`, which is no value.
+            Self::Currencies => {
+                "arrayFilter(value -> value NOT IN ('', 'null'), groupUniqArray(lowerUTF8(ifNull(currency, '')))) AS currencies"
+            }
+            Self::PaymentMethods => {
+                "arrayFilter(value -> value NOT IN ('', 'null'), groupUniqArray(lowerUTF8(ifNull(payment_method, '')))) AS payment_methods"
+            }
+            Self::PaymentMethodTypes => {
+                "arrayFilter(value -> value NOT IN ('', 'null'), groupUniqArray(lowerUTF8(ifNull(payment_method_type, '')))) AS payment_method_types"
+            }
+            Self::CardNetworks => {
+                "arrayFilter(value -> value NOT IN ('', 'null'), groupUniqArray(lowerUTF8(ifNull(card_network, '')))) AS card_networks"
+            }
+            Self::AuthTypes => {
+                "arrayFilter(value -> value NOT IN ('', 'null'), groupUniqArray(lowerUTF8(ifNull(auth_type, '')))) AS auth_types"
+            }
+            Self::Amount => return Cow::Owned(format!("max({EVENT_AMOUNT_SQL}) AS amount")),
         })
     }
 }
@@ -207,6 +295,7 @@ fn with_filter_aggregates(query: &PaymentAuditQuery, base: &[Aggregate]) -> Vec<
     let routing_kind_filters = query
         .routing_kind
         .is_some_and(|kind| !payment_audit_routing_kind_filters(kind).is_empty());
+    let payment = &query.payment_filters;
     let filtered = [
         (query.gateway.is_some(), Aggregate::Gateways),
         (query.route.is_some(), Aggregate::Routes),
@@ -214,6 +303,19 @@ fn with_filter_aggregates(query: &PaymentAuditQuery, base: &[Aggregate]) -> Vec<
         (query.flow_type.is_some(), Aggregate::FlowTypes),
         (routing_kind_filters, Aggregate::RoutingFamilies),
         (query.error_code.is_some(), Aggregate::ErrorCodes),
+        (payment.outcome.is_some(), Aggregate::Statuses),
+        (payment.currency.is_some(), Aggregate::Currencies),
+        (payment.payment_method.is_some(), Aggregate::PaymentMethods),
+        (
+            payment.payment_method_type.is_some(),
+            Aggregate::PaymentMethodTypes,
+        ),
+        (payment.card_network.is_some(), Aggregate::CardNetworks),
+        (payment.auth_type.is_some(), Aggregate::AuthTypes),
+        (
+            payment.min_amount.is_some() || payment.max_amount.is_some(),
+            Aggregate::Amount,
+        ),
     ];
 
     let mut aggregates = base.to_vec();
@@ -365,6 +467,36 @@ fn outer_summary_filters(query: &PaymentAuditQuery) -> Vec<FilterClause> {
         ));
     }
 
+    let payment = &query.payment_filters;
+    if let Some(outcome) = payment.outcome {
+        filters.push(FilterClause::raw(format!(
+            "{} = '{}'",
+            outcome_sql(),
+            outcome.as_str()
+        )));
+    }
+    // Attribute values aggregate lower-cased, so the match ignores case.
+    for (value, aggregate) in [
+        (&payment.currency, "currencies"),
+        (&payment.payment_method, "payment_methods"),
+        (&payment.payment_method_type, "payment_method_types"),
+        (&payment.card_network, "card_networks"),
+        (&payment.auth_type, "auth_types"),
+    ] {
+        if let Some(value) = value {
+            filters.push(FilterClause::new(
+                format!("has({aggregate}, lowerUTF8(?))"),
+                vec![value.clone().into()],
+            ));
+        }
+    }
+    if let Some(min_amount) = payment.min_amount {
+        filters.push(FilterClause::new("amount >= ?", vec![min_amount.into()]));
+    }
+    if let Some(max_amount) = payment.max_amount {
+        filters.push(FilterClause::new("amount <= ?", vec![max_amount.into()]));
+    }
+
     filters
 }
 
@@ -384,6 +516,8 @@ fn map_rows(rows: Vec<AuditSummaryRow>) -> Vec<PaymentAuditSummary> {
                 last_seen_ms: row.last_seen_ms,
                 event_count: row.event_count as usize,
                 latest_status: row.latest_status,
+                outcome: PaymentAuditOutcome::from_query(Some(&row.outcome))
+                    .unwrap_or(PaymentAuditOutcome::Pending),
                 latest_gateway: row.latest_gateway,
                 latest_stage: row.latest_stage.map(payment_audit_stage_label),
                 gateways: row.gateways,
@@ -407,12 +541,14 @@ pub async fn count(
     let aggregates = with_filter_aggregates(query, COUNT_AGGREGATES);
     let mut builder = subquery(summary_fragment(query, scope, &aggregates, None));
     builder.add_select("count() AS total_results");
-    builder.add_select(
-        "countIf(upper(latest_status) IN ('SUCCESS', 'CHARGED', 'AUTHORIZED')) AS total_success",
-    );
-    builder.add_select(
-        "countIf(upper(latest_status) = 'FAILURE' OR upper(latest_status) LIKE '%FAILED%' OR upper(latest_status) LIKE '%DECLINED%') AS total_failure",
-    );
+    builder.add_select(format!(
+        "countIf({} = 'success') AS total_success",
+        outcome_sql()
+    ));
+    builder.add_select(format!(
+        "countIf({} = 'failure') AS total_failure",
+        outcome_sql()
+    ));
     builder.extend_filters(outer_summary_filters(query));
     let row = fetch_one::<CountRow>(builder.build(client)).await?;
     Ok((
@@ -469,6 +605,7 @@ pub async fn load_page(
         "gateways",
         "routes",
     ]);
+    builder.add_select(format!("{} AS outcome", outcome_sql()));
     let mut rows = fetch_all::<AuditSummaryRow>(builder.build(client)).await?;
 
     let position: HashMap<&str, usize> = keys
@@ -528,6 +665,11 @@ pub async fn load_exact(
             .to_string(),
         "arrayFilter(value -> value != '', groupUniqArray(ifNull(route, ''))) AS routes"
             .to_string(),
+        // Computed in place: an extra `statuses` column would misalign the row.
+        format!(
+            "{} AS outcome",
+            outcome_of("groupUniqArray(ifNull(status, ''))")
+        ),
     ]);
     let rows = fetch_all::<AuditSummaryRow>(builder.build(client)).await?;
     Ok(map_rows(rows))
@@ -564,6 +706,7 @@ mod tests {
             error_code: None,
             scope: PaymentAuditScope::All,
             routing_kind: None,
+            payment_filters: Default::default(),
         }
     }
 
@@ -603,7 +746,9 @@ mod tests {
     fn summary_queries_select_only_the_aggregates_they_use() {
         let query = payment_audit_query();
         let count = merged_summary_fragment(&query, PaymentAuditScope::All, COUNT_AGGREGATES, None);
-        assert!(count.sql().contains("latest_status_state"));
+        // Totals split by outcome, which reads every reported status, not just the latest.
+        assert!(count.sql().contains("statuses_state"));
+        assert!(!count.sql().contains("latest_status_state"));
         assert!(!count.sql().contains("gateways_state"));
         assert!(!count.sql().contains("payment_id_state"));
 
@@ -611,7 +756,61 @@ mod tests {
         assert!(raw
             .sql()
             .contains("SELECT lookup_key, created_at_ms, status FROM"));
-        assert!(!raw.sql().contains("groupUniqArray"));
+        assert!(!raw.sql().contains("ifNull(gateway"));
+    }
+
+    #[test]
+    fn outcome_reads_payment_statuses_not_the_routing_result() {
+        use crate::feedback::gateway_scoring_service::{txn_failure_states, txn_success_states};
+
+        let success = super::status_array_sql(&txn_success_states());
+        let failure = super::status_array_sql(&txn_failure_states());
+        assert!(success.contains("'CHARGED'"));
+        assert!(failure.contains("'AUTHORIZATION_FAILED'"));
+        // A routing event's `success` / `failure` is the API call's result, not the payment's,
+        // and statuses match case-sensitively.
+        assert!(!success.contains("'success'"));
+        assert!(!failure.contains("'failure'"));
+        assert!(super::outcome_sql().contains(&success));
+    }
+
+    #[test]
+    fn outcome_filter_keeps_the_pre_aggregated_path() {
+        let mut query = payment_audit_query();
+        query.payment_filters.outcome =
+            Some(crate::analytics::models::PaymentAuditOutcome::Failure);
+        assert!(with_filter_aggregates(&query, &[]).contains(&Aggregate::Statuses));
+        assert!(summary_fragment(&query, PaymentAuditScope::All, &[], None)
+            .sql()
+            .contains(PAYMENT_AUDIT_SUMMARY_BUCKET_TABLE));
+        assert!(outer_summary_filters(&query)
+            .iter()
+            .any(|f| f.predicate().ends_with("= 'failure'")));
+    }
+
+    #[test]
+    fn payment_attribute_filters_read_raw_rows_and_match_per_payment() {
+        let mut query = payment_audit_query();
+        query.payment_filters.currency = Some("USD".to_string());
+        query.payment_filters.min_amount = Some(50.0);
+        query.payment_filters.max_amount = Some(150.0);
+
+        let aggregates = with_filter_aggregates(&query, COUNT_AGGREGATES);
+        assert!(aggregates.contains(&Aggregate::Currencies));
+        assert!(aggregates.contains(&Aggregate::Amount));
+
+        let fragment = summary_fragment(&query, PaymentAuditScope::All, &aggregates, None);
+        assert!(fragment.sql().contains(DOMAIN_TABLE));
+        assert!(fragment.sql().contains("AS currencies"));
+        assert!(fragment.sql().contains("max(greatest("));
+        // Matched on the aggregate, not on each event: the payment's other events stay.
+        assert!(!fragment.sql().contains("currency = ?"));
+
+        let filters = outer_summary_filters(&query);
+        let predicates: Vec<&str> = filters.iter().map(|f| f.predicate()).collect();
+        assert!(predicates.contains(&"has(currencies, lowerUTF8(?))"));
+        assert!(predicates.contains(&"amount >= ?"));
+        assert!(predicates.contains(&"amount <= ?"));
     }
 
     #[test]
