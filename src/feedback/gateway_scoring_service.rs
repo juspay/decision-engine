@@ -762,50 +762,41 @@ pub async fn update_gateway_score(
     };
 
     //let is_pm_and_pmt_present = Fbu::isTrueString(txn_card_info.paymentMethod) && txn_card_info.paymentMethodType.is_some();
-    let should_update_srv3_gateway_score = gateway_scoring_type.clone() != GST::Penalise;
-
-    let should_isolate_srv3_producer = if Cutover::is_feature_enabled(
+    let srv3_producer_isolation_enabled = Cutover::is_feature_enabled(
         C::SrV3ProducerIsolation.get_key(),
         MID::merchant_id_to_text(txn_detail.clone().merchantId),
         C::kvRedis(),
     )
-    .await
-    {
-        is_routing_approach_in_srv3(routing_approach.clone())
-    } else {
-        true
-    };
+    .await;
 
-    let should_update_explore_txn = if Cutover::is_feature_enabled(
+    let explore_exploit_enabled = Cutover::is_feature_enabled(
         DC::EnableExploreAndExploitOnSrv3(txn_card_info.clone().paymentMethodType.to_string())
             .get_key(),
         MID::merchant_id_to_text(txn_detail.clone().merchantId),
         C::kvRedis(),
     )
-    .await
-    {
-        is_routing_approach_in_explore(routing_approach.clone())
-    } else {
-        true
-    };
+    .await;
+
+    let should_update_srv3_score = should_route_score_to_srv3(
+        &gateway_scoring_type,
+        routing_approach.clone(),
+        srv3_producer_isolation_enabled,
+        explore_exploit_enabled,
+    );
 
     let redis_key = format!("{}{}", C::GATEWAY_SCORING_DATA, txn_detail.clone().txnUuid);
     let app_state = get_tenant_app_state().await;
 
-    let redis_gateway_score_data_initial: Option<GatewayScoringData> =
-        if should_update_srv3_gateway_score
-            && should_isolate_srv3_producer
-            && should_update_explore_txn
-        {
-            let mb_gateway_scoring_data: Option<GatewayScoringData> = app_state
-                .redis_conn
-                .get_key(&redis_key, "GatewayScoringData")
-                .await
-                .ok();
-            mb_gateway_scoring_data
-        } else {
-            None
-        };
+    let redis_gateway_score_data_initial: Option<GatewayScoringData> = if should_update_srv3_score {
+        let mb_gateway_scoring_data: Option<GatewayScoringData> = app_state
+            .redis_conn
+            .get_key(&redis_key, "GatewayScoringData")
+            .await
+            .ok();
+        mb_gateway_scoring_data
+    } else {
+        None
+    };
 
     let mb_gateway_scoring_data: Option<GatewayScoringData> = if should_update_gateway_score {
         match redis_gateway_score_data_initial {
@@ -876,10 +867,7 @@ pub async fn update_gateway_score(
     )
     .await;
 
-    let should_record_srv3_post_update = should_update_srv3_gateway_score
-        && should_isolate_srv3_producer
-        && should_update_explore_txn
-        && is_update_within_window;
+    let should_record_srv3_post_update = should_update_srv3_score && is_update_within_window;
     if !should_record_srv3_post_update {
         if let Some(metric_entry) = m_metric_entry.clone() {
             crate::analytics::DomainAnalyticsEvent::record_score_snapshot(
@@ -1181,9 +1169,16 @@ pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
             | T::GatewayDeciderApproach::PreferredConnectorAllDowntimeRouting
             | T::GatewayDeciderApproach::PreferredConnectorDowntimeRouting
             | T::GatewayDeciderApproach::PreferredConnectorGlobalDowntimeRouting
-            // Rule-based decisions are independent of SRv3 ranking, but their outcomes
-            // are still valid observations for the selected gateway's health scores.
+            // These selectors are independent of SRv3 ranking, but their outcomes are
+            // still valid observations for the selected gateway's health scores.
             | T::GatewayDeciderApproach::PriorityLogic
+            | T::GatewayDeciderApproach::NtwBasedRouting
+            | T::GatewayDeciderApproach::MerchantPreference
+            | T::GatewayDeciderApproach::Default
+            | T::GatewayDeciderApproach::PlAllDowntimeRouting
+            | T::GatewayDeciderApproach::PlDowntimeRouting
+            | T::GatewayDeciderApproach::PlGlobalDowntimeRouting
+            | T::GatewayDeciderApproach::AbTestStaticAlgorithm
     )
 }
 
@@ -1215,10 +1210,28 @@ pub fn is_routing_approach_in_explore(maybe_text: Option<String>) -> bool {
             | T::GatewayDeciderApproach::PreferredConnectorAllDowntimeRouting
             | T::GatewayDeciderApproach::PreferredConnectorDowntimeRouting
             | T::GatewayDeciderApproach::PreferredConnectorGlobalDowntimeRouting
-            // Treat rule-based outcomes as off-policy feedback when explore/exploit
-            // isolation is enabled: the rule selector is independent of the SRv3 rank.
+            // External selectors are off-policy relative to SRv3 ranking, so include
+            // their outcomes when explore/exploit isolation is enabled.
             | T::GatewayDeciderApproach::PriorityLogic
+            | T::GatewayDeciderApproach::NtwBasedRouting
+            | T::GatewayDeciderApproach::MerchantPreference
+            | T::GatewayDeciderApproach::Default
+            | T::GatewayDeciderApproach::PlAllDowntimeRouting
+            | T::GatewayDeciderApproach::PlDowntimeRouting
+            | T::GatewayDeciderApproach::PlGlobalDowntimeRouting
+            | T::GatewayDeciderApproach::AbTestStaticAlgorithm
     )
+}
+
+fn should_route_score_to_srv3(
+    scoring_type: &GST,
+    routing_approach: Option<String>,
+    producer_isolation_enabled: bool,
+    explore_exploit_enabled: bool,
+) -> bool {
+    scoring_type != &GST::Penalise
+        && (!producer_isolation_enabled || is_routing_approach_in_srv3(routing_approach.clone()))
+        && (!explore_exploit_enabled || is_routing_approach_in_explore(routing_approach))
 }
 
 fn parse_routing_approach(maybe_text: Option<String>) -> Option<T::GatewayDeciderApproach> {
@@ -1556,17 +1569,25 @@ mod tests {
         assert!(!is_routing_approach_in_srv3(Some(
             "SR_SELECTION_V2_ROUTING".into()
         )));
-        assert!(!is_routing_approach_in_srv3(Some(
-            "MERCHANT_PREFERENCE".into()
-        )));
         assert!(!is_routing_approach_in_srv3(None));
     }
 
     #[test]
-    fn rule_based_feedback_reaches_srv3_producer_and_explore_gate() {
-        let approach = Some("PRIORITY_LOGIC".into());
-        assert!(is_routing_approach_in_srv3(approach.clone()));
-        assert!(is_routing_approach_in_explore(approach));
+    fn non_srv_selectors_reach_score_producers() {
+        for approach in [
+            "PRIORITY_LOGIC",
+            "NTW_BASED_ROUTING",
+            "MERCHANT_PREFERENCE",
+            "DEFAULT",
+            "PL_ALL_DOWNTIME_ROUTING",
+            "PL_DOWNTIME_ROUTING",
+            "PL_GLOBAL_DOWNTIME_ROUTING",
+            "AB_TEST_STATIC_ALGORITHM",
+        ] {
+            let approach = Some(approach.to_string());
+            assert!(is_routing_approach_in_srv3(approach.clone()));
+            assert!(is_routing_approach_in_explore(approach));
+        }
     }
 
     #[test]
@@ -1574,6 +1595,53 @@ mod tests {
         let unknown = Some("FUTURE_ROUTING_APPROACH_V3".into());
         assert!(!is_routing_approach_in_srv3(unknown.clone()));
         assert!(!is_routing_approach_in_explore(unknown));
+    }
+
+    #[test]
+    fn success_and_terminal_failure_feedback_reach_srv3_for_rule_based_routing() {
+        use super::should_route_score_to_srv3;
+        use crate::feedback::utils::GatewayScoringType as GST;
+
+        let approach = Some("PRIORITY_LOGIC".to_string());
+        for scoring_type in [GST::Reward, GST::PenaliseSrv3] {
+            assert!(should_route_score_to_srv3(
+                &scoring_type,
+                approach.clone(),
+                true,
+                true,
+            ));
+        }
+    }
+
+    #[test]
+    fn existing_srv3_explore_and_penalty_gates_remain_unchanged() {
+        use super::should_route_score_to_srv3;
+        use crate::feedback::utils::GatewayScoringType as GST;
+
+        assert!(should_route_score_to_srv3(
+            &GST::Reward,
+            Some("SR_SELECTION_V3_ROUTING".into()),
+            true,
+            false,
+        ));
+        assert!(!should_route_score_to_srv3(
+            &GST::Reward,
+            Some("SR_SELECTION_V3_ROUTING".into()),
+            true,
+            true,
+        ));
+        assert!(should_route_score_to_srv3(
+            &GST::PenaliseSrv3,
+            Some("SR_V3_HEDGING".into()),
+            true,
+            true,
+        ));
+        assert!(!should_route_score_to_srv3(
+            &GST::Penalise,
+            Some("SR_V3_HEDGING".into()),
+            true,
+            true,
+        ));
     }
 
     #[test]
