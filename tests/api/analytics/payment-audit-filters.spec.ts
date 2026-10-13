@@ -239,6 +239,10 @@ test.describe('Payment audit outcome and payment filters (API)', () => {
     expect(allGateways.body.total_results).toBe(PAYMENTS.length)
     const routes = await search(api, { route: 'routing_hybrid,decide_gateway' })
     expect(routes.body.total_results).toBe(PAYMENTS.length)
+
+    // The page can list up to 100 payments; larger requests are capped there.
+    expect((await search(api, { page_size: 100 })).body.page_size).toBe(100)
+    expect((await search(api, { page_size: 500 })).body.page_size).toBe(100)
   })
 
   test('filter options are scoped to the merchant', async ({ api, merchant }) => {

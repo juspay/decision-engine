@@ -10,6 +10,8 @@ pub const MIN_ANALYTICS_PAGE_SIZE: usize = 1;
 pub const MAX_ANALYTICS_PAGE_SIZE: usize = 50;
 pub const DEFAULT_ANALYTICS_PAGE_SIZE: usize = 10;
 pub const DEFAULT_PAYMENT_AUDIT_PAGE_SIZE: usize = 12;
+/// The payment audit pages up to 100 payments; each page is one keyed lookup, not a scan.
+pub const MAX_PAYMENT_AUDIT_PAGE_SIZE: usize = 100;
 
 pub fn normalise_page(page: Option<u32>) -> usize {
     page.unwrap_or(MIN_ANALYTICS_PAGE as u32)
@@ -17,10 +19,14 @@ pub fn normalise_page(page: Option<u32>) -> usize {
 }
 
 pub fn normalise_page_size(page_size: Option<u32>, default: usize) -> usize {
-    page_size.unwrap_or(default as u32).clamp(
-        MIN_ANALYTICS_PAGE_SIZE as u32,
-        MAX_ANALYTICS_PAGE_SIZE as u32,
-    ) as usize
+    normalise_page_size_up_to(page_size, default, MAX_ANALYTICS_PAGE_SIZE)
+}
+
+/// Like [`normalise_page_size`], with its own upper bound.
+pub fn normalise_page_size_up_to(page_size: Option<u32>, default: usize, max: usize) -> usize {
+    page_size
+        .unwrap_or(default as u32)
+        .clamp(MIN_ANALYTICS_PAGE_SIZE as u32, max as u32) as usize
 }
 
 fn normalise_gateways(raw: Option<String>) -> Vec<String> {
@@ -640,7 +646,11 @@ impl PaymentAuditQuery {
             start_ms,
             end_ms,
             page: normalise_page(page),
-            page_size: normalise_page_size(page_size, DEFAULT_PAYMENT_AUDIT_PAGE_SIZE),
+            page_size: normalise_page_size_up_to(
+                page_size,
+                DEFAULT_PAYMENT_AUDIT_PAGE_SIZE,
+                MAX_PAYMENT_AUDIT_PAGE_SIZE,
+            ),
             payment_id,
             request_id,
             gateway: PaymentAuditPaymentFilters::values(gateway.as_deref()),
@@ -1079,8 +1089,9 @@ impl RoutingEventsQuery {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalise_page, normalise_page_size, DEFAULT_ANALYTICS_PAGE_SIZE,
-        DEFAULT_PAYMENT_AUDIT_PAGE_SIZE, MAX_ANALYTICS_PAGE_SIZE, MIN_ANALYTICS_PAGE,
+        normalise_page, normalise_page_size, PaymentAuditQuery, DEFAULT_ANALYTICS_PAGE_SIZE,
+        DEFAULT_PAYMENT_AUDIT_PAGE_SIZE, MAX_ANALYTICS_PAGE_SIZE, MAX_PAYMENT_AUDIT_PAGE_SIZE,
+        MIN_ANALYTICS_PAGE,
     };
 
     #[test]
@@ -1102,6 +1113,38 @@ mod tests {
         );
         assert_eq!(
             normalise_page_size(Some(500), DEFAULT_ANALYTICS_PAGE_SIZE),
+            MAX_ANALYTICS_PAGE_SIZE
+        );
+    }
+
+    #[test]
+    fn payment_audit_pages_up_to_100_while_other_analytics_stay_at_50() {
+        let audit = |page_size| {
+            PaymentAuditQuery::from_request(
+                "m_1".to_string(),
+                None,
+                None,
+                None,
+                None,
+                Some(page_size),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .page_size
+        };
+        assert_eq!(audit(100), 100);
+        assert_eq!(audit(500), MAX_PAYMENT_AUDIT_PAGE_SIZE);
+        assert_eq!(
+            normalise_page_size(Some(100), DEFAULT_ANALYTICS_PAGE_SIZE),
             MAX_ANALYTICS_PAGE_SIZE
         );
     }

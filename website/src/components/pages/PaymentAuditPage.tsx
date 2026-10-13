@@ -5,7 +5,6 @@ import { ArrowLeft, RefreshCw, Search as SearchIcon, SlidersHorizontal } from 'l
 import { fetcher } from '../../lib/api'
 import { shellHeightClass } from '../../lib/embedMode'
 import {
-  AnalyticsGatewayScoresResponse,
   AnalyticsRangeValue,
   PaymentAuditEvent,
   PaymentAuditFilterOptions,
@@ -115,6 +114,14 @@ const INSPECTOR_TAB_LABELS: Record<(typeof INSPECTOR_TABS)[number], string> = {
 }
 const DEBIT_ROUTING_APPROACH = 'NTW_BASED_ROUTING'
 const AUDIT_PATH = '/analytics/payment-audit'
+/** Payments per page; the API serves up to 100. */
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const
+const DEFAULT_PAGE_SIZE = 20
+
+function parsePageSize(searchParams: URLSearchParams): number {
+  const value = Number(searchParams.get('page_size'))
+  return (PAGE_SIZE_OPTIONS as readonly number[]).includes(value) ? value : DEFAULT_PAGE_SIZE
+}
 /**
  * The routing-type filter. These were the page's tabs; each value lists the payments whose
  * trail holds that kind of event, while every payment's trail itself always shows all of its
@@ -742,7 +749,7 @@ export function PaymentAuditPage() {
   const [customEnd, setCustomEnd] = useState(() =>
     toDateTimeInputValue(initialCustomWindow.end_ms),
   )
-  const pageSize = 12
+  const [pageSize, setPageSize] = useState(() => parsePageSize(searchParams))
 
   useEffect(() => {
     if (navigationType !== 'POP') return
@@ -762,6 +769,7 @@ export function PaymentAuditPage() {
     setFilters(nextFilters)
     setAppliedFilters(nextFilters)
     setPage(Math.max(1, Number(searchParams.get('page') || '1')))
+    setPageSize(parsePageSize(searchParams))
     setSelectedKey(nextSelectedKey)
     setTrailFocused(Boolean(nextSelectedKey))
     setSelectedEventId(null)
@@ -786,26 +794,9 @@ export function PaymentAuditPage() {
     dedupingInterval: 5000,
   })
 
-  // The audit results only name the connectors on the visible page, which would make the Gateway
-  // dropdown unable to reach a connector that happens to fall on page 2. Gateway scores are
-  // merchant-wide, so they name every connector with traffic — read over the same window the page
-  // is auditing, so the options can neither omit a connector that was only active back then nor
-  // offer one that saw no traffic in it.
-  const gatewayCatalogUrl =
-    range !== 'custom' || customWindow
-      ? `/analytics/gateway-scores?${queryString({
-          range: range === 'custom' ? '1h' : range,
-          start_ms: customWindow?.start_ms,
-          end_ms: customWindow?.end_ms,
-        })}`
-      : null
-
-  const gatewayCatalog = useSWR<AnalyticsGatewayScoresResponse>(gatewayCatalogUrl, fetcher, {
-    revalidateOnFocus: false,
-    dedupingInterval: 60_000,
-  })
-
-  // The dropdowns' values: what this merchant's payments in the window actually carried.
+  // The dropdowns' values: what this merchant's payments in the window actually carried. One cheap
+  // query per window (cached a minute), which also names every gateway, including those that fall
+  // on later pages of the results.
   const filterOptionsUrl =
     range !== 'custom' || customWindow
       ? `${AUDIT_PATH}/filter-options?${queryString({
@@ -896,7 +887,6 @@ export function PaymentAuditPage() {
   const gatewayOptions = Array.from(
     new Set(
       [
-        ...(gatewayCatalog.data?.snapshots || []).map((snapshot) => snapshot.gateway),
         ...(filterOptions.data?.gateways || []),
         ...activeGatewayList,
         // A gateway supplied by URL stays selectable even if it has gone quiet since.
@@ -927,11 +917,13 @@ export function PaymentAuditPage() {
     nextFilters: AuditFilters,
     nextSelectedKey?: string,
     nextCustomWindow?: TimeWindow,
+    nextPageSize: number = pageSize,
   ) {
     const normalizedFilters = normalizeAuditFilters(nextFilters)
     const nextQuery = queryString({
       range: nextRange,
       page: nextPage > 1 ? nextPage : undefined,
+      page_size: nextPageSize !== DEFAULT_PAGE_SIZE ? nextPageSize : undefined,
       start_ms: nextRange === 'custom' ? nextCustomWindow?.start_ms : undefined,
       end_ms: nextRange === 'custom' ? nextCustomWindow?.end_ms : undefined,
       payment_id: normalizedFilters.paymentId || undefined,
@@ -962,9 +954,19 @@ export function PaymentAuditPage() {
     syncSearch(range, nextPage, normalizedFilters, undefined, customWindow)
   }
 
+  /**
+   * Multi-select dropdowns: a tick only updates the pending selection; closing the list searches
+   * once, and only if the selection changed. Five ticks cost one search, not five.
+   */
+  function applyIfChanged() {
+    const normalizedFilters = normalizeAuditFilters(filters)
+    if (JSON.stringify(normalizedFilters) === JSON.stringify(appliedFilters)) return
+    applyFilters()
+  }
+
   /** Dropdown filters apply on change — the redesigned bar has no Search button to press. */
   function applyDropdownFilter(
-    field: 'gateway' | 'status' | 'route' | 'routingKind' | PaymentAttributeField,
+    field: keyof AuditFilters,
     value: string,
   ) {
     const nextPage = 1
@@ -1126,7 +1128,8 @@ export function PaymentAuditPage() {
             <SearchableMultiSelect
               values={filters.route.split(',').filter(Boolean)}
               options={ROUTE_OPTIONS}
-              onChange={(values) => applyDropdownFilter('route', values.join(','))}
+              onChange={(values) => updateFilter('route', values.join(','))}
+              onClose={applyIfChanged}
               placeholder="Any route"
               triggerClassName={fieldSelectClassName()}
               compact
@@ -1163,7 +1166,8 @@ export function PaymentAuditPage() {
           <SearchableMultiSelect
             values={filters.gateway.split(',').filter(Boolean)}
             options={gatewayOptions.map((gateway) => ({ value: gateway, label: gateway }))}
-            onChange={(values) => applyDropdownFilter('gateway', values.join(','))}
+            onChange={(values) => updateFilter('gateway', values.join(','))}
+            onClose={applyIfChanged}
             placeholder="Any gateway"
             triggerClassName={fieldSelectClassName()}
             compact
@@ -1174,7 +1178,8 @@ export function PaymentAuditPage() {
           <SearchableMultiSelect
             values={filters.status.split(',').filter(Boolean)}
             options={OUTCOME_OPTIONS}
-            onChange={(values) => applyDropdownFilter('status', values.join(','))}
+            onChange={(values) => updateFilter('status', values.join(','))}
+            onClose={applyIfChanged}
             placeholder="Any outcome"
             triggerClassName={fieldSelectClassName()}
             compact
@@ -1213,7 +1218,8 @@ export function PaymentAuditPage() {
                   key={field}
                   values={selected}
                   options={[...unlisted, ...options]}
-                  onChange={(next) => applyDropdownFilter(field, next.join(','))}
+                  onChange={(next) => updateFilter(field, next.join(','))}
+                  onClose={applyIfChanged}
                   placeholder={anyLabel}
                   triggerClassName={fieldSelectClassName()}
                   compact
@@ -1408,6 +1414,24 @@ export function PaymentAuditPage() {
                 Next
               </Button>
               <span className="ml-auto text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">Page {page}</span>
+              <select
+                className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-[13px] text-slate-700 outline-none focus:border-brand-500 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7]"
+                value={pageSize}
+                onChange={(event) => {
+                  const nextPageSize = Number(event.target.value)
+                  setPageSize(nextPageSize)
+                  setPage(1)
+                  setTrailFocused(false)
+                  syncSearch(range, 1, appliedFilters, undefined, customWindow, nextPageSize)
+                }}
+                aria-label="Payments per page"
+              >
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {size} / page
+                  </option>
+                ))}
+              </select>
             </div>
             </>
           ) : (

@@ -18,6 +18,8 @@ interface SearchableMultiSelectProps {
   triggerClassName?: string
   /** One-line summary ("Card +1") instead of a chip per value, so the trigger keeps its height. */
   compact?: boolean
+  /** Called when the list closes, e.g. to act on a whole selection at once rather than on every toggle. */
+  onClose?: () => void
 }
 
 export function SearchableMultiSelect({
@@ -28,6 +30,7 @@ export function SearchableMultiSelect({
   className = '',
   triggerClassName,
   compact = false,
+  onClose,
 }: SearchableMultiSelectProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
@@ -84,9 +87,15 @@ export function SearchableMultiSelect({
 
   useCloseOnFrameBlur(open, close)
 
+  // Read through a ref: the outside-click and Escape listeners are bound when the list opens and
+  // would otherwise call the onClose of that render, before any toggles.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   function close() {
     setOpen(false)
     setQuery('')
+    onCloseRef.current?.()
   }
 
   function toggle(val: string) {
