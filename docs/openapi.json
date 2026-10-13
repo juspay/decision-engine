@@ -5621,7 +5621,45 @@
               "object",
               "null"
             ],
-            "description": "Gateway error details for the GSM-based scoring filter. When present and the merchant flag is on, user/issuer-originated failures are skipped so the gateway is not penalised."
+            "properties": {
+              "connector": {
+                "type": "string",
+                "description": "Optional; the endpoint uses the top-level gateway as the connector."
+              },
+              "flow": {
+                "type": "string",
+                "default": ""
+              },
+              "subFlow": {
+                "type": "string",
+                "default": ""
+              },
+              "errorCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "errorMessage": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "issuerErrorCode": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              },
+              "cardNetwork": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "description": "Optional gateway error details used to look up a GSM rule. When the merchant flag is on, recognized client, issuer, or merchant errors do not penalize the gateway."
           },
           "isSmartRetry": {
             "type": [
