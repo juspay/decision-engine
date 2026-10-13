@@ -9,6 +9,7 @@ openapi: "openapi.json POST /update-gateway-score"
 ## Use case
 
 Records the observed transaction outcome for a previously selected gateway so auth-rate analytics can learn from real payment results.
+Feedback is applied to gateway health scores regardless of whether the gateway was selected by SR-based routing or rule-based (`PRIORITY_LOGIC`) routing.
 
 ## Authentication
 

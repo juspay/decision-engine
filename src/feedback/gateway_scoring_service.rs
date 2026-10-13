@@ -1156,19 +1156,35 @@ pub fn isRoutingApproachInSRV2(maybe_text: Option<String>) -> bool {
 //
 // Multi-objective (cost) routing is layered *on top of* SRv3: it only re-picks
 // among PSPs the SRv3 scorer already deemed SR-equivalent, so a cost-won decision
-// is still an SRv3 decision and must feed the SRv3 producer. Its approach string
-// (`SR_SELECTION_MULTI_OBJECTIVE`) carries no "V3" token, so match it explicitly —
+// is still an SRv3 decision and must feed the SRv3 producer. Its enum variant is
+// not an SRv3 variant, so admit it explicitly —
 // otherwise producer isolation silently drops every cost-routed outcome and the
 // chosen gateway's score never moves on success or failure.
 pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
-    match maybe_text {
-        Some(text) => {
-            text.contains("V3")
-                || text.contains("MULTI_OBJECTIVE")
-                || text.contains("PREFERRED_CONNECTOR")
-        }
-        None => false,
-    }
+    let Some(approach) = parse_routing_approach(maybe_text) else {
+        return false;
+    };
+
+    matches!(
+        approach,
+        T::GatewayDeciderApproach::SrSelectionV3Routing
+            | T::GatewayDeciderApproach::SrV3AllDowntimeRouting
+            | T::GatewayDeciderApproach::SrV3DowntimeRouting
+            | T::GatewayDeciderApproach::SrV3GlobalDowntimeRouting
+            | T::GatewayDeciderApproach::SrV3Hedging
+            | T::GatewayDeciderApproach::SrV3AllDowntimeHedging
+            | T::GatewayDeciderApproach::SrV3DowntimeHedging
+            | T::GatewayDeciderApproach::SrV3GlobalDowntimeHedging
+            | T::GatewayDeciderApproach::SrSelectionMultiObjective
+            | T::GatewayDeciderApproach::SrSelectionVolumeCommitment
+            | T::GatewayDeciderApproach::PreferredConnectorRouting
+            | T::GatewayDeciderApproach::PreferredConnectorAllDowntimeRouting
+            | T::GatewayDeciderApproach::PreferredConnectorDowntimeRouting
+            | T::GatewayDeciderApproach::PreferredConnectorGlobalDowntimeRouting
+            // Rule-based decisions are independent of SRv3 ranking, but their outcomes
+            // are still valid observations for the selected gateway's health scores.
+            | T::GatewayDeciderApproach::PriorityLogic
+    )
 }
 
 // Original Haskell function: isRoutingApproachInExplore
@@ -1179,14 +1195,34 @@ pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
 // (cheaper) PSP, which is exploration of that PSP. Treat it as explore too, otherwise
 // cost-routed outcomes are excluded from scoring whenever explore/exploit is enabled.
 pub fn is_routing_approach_in_explore(maybe_text: Option<String>) -> bool {
-    match maybe_text {
-        Some(text) => {
-            text.contains("HEDGING")
-                || text.contains("MULTI_OBJECTIVE")
-                || text.contains("PREFERRED_CONNECTOR")
-        }
-        None => false,
-    }
+    let Some(approach) = parse_routing_approach(maybe_text) else {
+        return false;
+    };
+
+    matches!(
+        approach,
+        T::GatewayDeciderApproach::SrV2Hedging
+            | T::GatewayDeciderApproach::SrV2AllDowntimeHedging
+            | T::GatewayDeciderApproach::SrV2DowntimeHedging
+            | T::GatewayDeciderApproach::SrV2GlobalDowntimeHedging
+            | T::GatewayDeciderApproach::SrV3Hedging
+            | T::GatewayDeciderApproach::SrV3AllDowntimeHedging
+            | T::GatewayDeciderApproach::SrV3DowntimeHedging
+            | T::GatewayDeciderApproach::SrV3GlobalDowntimeHedging
+            | T::GatewayDeciderApproach::SrSelectionMultiObjective
+            | T::GatewayDeciderApproach::SrSelectionVolumeCommitment
+            | T::GatewayDeciderApproach::PreferredConnectorRouting
+            | T::GatewayDeciderApproach::PreferredConnectorAllDowntimeRouting
+            | T::GatewayDeciderApproach::PreferredConnectorDowntimeRouting
+            | T::GatewayDeciderApproach::PreferredConnectorGlobalDowntimeRouting
+            // Treat rule-based outcomes as off-policy feedback when explore/exploit
+            // isolation is enabled: the rule selector is independent of the SRv3 rank.
+            | T::GatewayDeciderApproach::PriorityLogic
+    )
+}
+
+fn parse_routing_approach(maybe_text: Option<String>) -> Option<T::GatewayDeciderApproach> {
+    maybe_text.and_then(|text| serde_json::from_value(serde_json::Value::String(text)).ok())
 }
 
 // Original Haskell function: isUpdateWithinLatencyWindow
@@ -1524,6 +1560,20 @@ mod tests {
             "MERCHANT_PREFERENCE".into()
         )));
         assert!(!is_routing_approach_in_srv3(None));
+    }
+
+    #[test]
+    fn rule_based_feedback_reaches_srv3_producer_and_explore_gate() {
+        let approach = Some("PRIORITY_LOGIC".into());
+        assert!(is_routing_approach_in_srv3(approach.clone()));
+        assert!(is_routing_approach_in_explore(approach));
+    }
+
+    #[test]
+    fn routing_gates_reject_unknown_approaches() {
+        let unknown = Some("FUTURE_ROUTING_APPROACH_V3".into());
+        assert!(!is_routing_approach_in_srv3(unknown.clone()));
+        assert!(!is_routing_approach_in_explore(unknown));
     }
 
     #[test]
