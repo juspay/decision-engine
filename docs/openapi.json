@@ -1147,7 +1147,8 @@
             "required": false,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Payment audit: comma-separated to match payments that hit any of these error codes."
           },
           {
             "name": "scope",
@@ -9657,7 +9658,8 @@
           "payment_method_types",
           "card_networks",
           "auth_types",
-          "currencies"
+          "currencies",
+          "error_codes"
         ],
         "properties": {
           "gateways": {
@@ -9695,6 +9697,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "error_codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Error codes as recorded (matched exactly)."
           }
         }
       }

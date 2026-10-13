@@ -35,6 +35,7 @@ The page supports these filters:
 - `status` — an event's exact status (e.g. `FAILURE`); for what happened to the payment, use
   `outcome`
 - `flow_type`
+- `error_code` — one or several (under **More filters**)
 - payment attributes (under **More filters**): `payment_method`, `payment_method_type`,
   `card_network`, `auth_type`, `currency`, `min_amount`, `max_amount`
 - time window: `15m`, `1h`, `12h`, `1d`, `1w`
@@ -65,8 +66,8 @@ the amount bounds are inclusive.
 
 The dropdowns list what the merchant's own payments carried in the selected window, read from
 `GET /analytics/payment-audit/filter-options` (same `range` / `start_ms` / `end_ms`), so each
-merchant sees its own gateways, methods, networks and currencies rather than a fixed list. Gateway,
-route, outcome and the attributes all take several values.
+merchant sees its own gateways, methods, networks, currencies and error codes rather than a fixed
+list. Gateway, route, outcome, error code and the attributes all take several values.
 
 They select whole payments: a matching payment keeps all its events, including the score
 updates that carry no attributes, so its outcome still reads correctly. These filters read the
@@ -81,6 +82,13 @@ payment three (summary, timeline, A/B assignments), and the dropdown values one 
 cached for a minute. Multi-select dropdowns search once when their list closes, not on every
 tick. Every read is merchant-scoped and goes through the analytics query guard (a few concurrent
 reads per pod, a time limit and memory-bounded settings).
+
+### Remembered search
+
+The page saves the last search per merchant in the browser (filters, time range and page size,
+not the page number or selected payment). Opening Decision Audit without a search in the URL,
+e.g. from the sidebar, resumes it; a link with its own filters always wins. If the browser blocks
+storage, the page simply starts unfiltered.
 
 Use an exact `payment_id` when you have it. If you only have a request trace, use `request_id`.
 Payment Audit is always merchant-scoped by the authenticated JWT or API key. The route does not
