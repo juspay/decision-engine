@@ -170,15 +170,20 @@ function transactions(api: ApiClient, experimentId: string, qs: Record<string, u
   })
 }
 
-/** Per-arm counts the results should report for payments that ran `scripts`. */
+/**
+ * Per-arm results expected for payments that ran `scripts`. Rates are over resolved payments: one
+ * still awaiting a terminal status counts in `transaction_count` but in no rate.
+ */
 function expectedArm(scripts: typeof OUTCOME_SCRIPTS) {
   const resolved = scripts.filter((s) => s.resolved).length
   const success = scripts.filter((s) => s.succeeded).length
+  const rate = (count: number) => (resolved > 0 ? count / resolved : 0)
   return {
     transaction_count: scripts.length,
     success_count: success,
     failure_count: resolved - success,
-    first_attempt_auth_rate: scripts.filter((s) => s.firstSucceeded).length / scripts.length,
+    auth_rate: rate(success),
+    first_attempt_auth_rate: rate(scripts.filter((s) => s.firstSucceeded).length),
   }
 }
 
@@ -235,10 +240,8 @@ test.describe('A/B experiment outcomes (API)', () => {
       expect(metrics.transaction_count, arm).toBe(expected.transaction_count)
       expect(metrics.success_count, arm).toBe(expected.success_count)
       expect(metrics.failure_count, arm).toBe(expected.failure_count)
-      expect(metrics.auth_rate, arm).toBeCloseTo(
-        expected.success_count / expected.transaction_count,
-        9,
-      )
+      // The payment with no webhook yet is in transaction_count but lowers no rate.
+      expect(metrics.auth_rate, arm).toBeCloseTo(expected.auth_rate, 9)
       expect(metrics.first_attempt_auth_rate, arm).toBeCloseTo(expected.first_attempt_auth_rate, 9)
     }
 
@@ -302,12 +305,11 @@ test.describe('A/B experiment outcomes (API)', () => {
     for (const arm of ['control', 'variant'] as Arm[]) {
       expect(settled.body[arm].transaction_count, arm).toBe(expected[arm].transaction_count)
       expect(settled.body[arm].failure_count, arm).toBe(expected[arm].failure_count)
-      if (expected[arm].transaction_count > 0) {
-        expect(settled.body[arm].first_attempt_auth_rate, arm).toBeCloseTo(
-          expected[arm].first_attempt_auth_rate,
-          9,
-        )
-      }
+      expect(settled.body[arm].auth_rate, arm).toBeCloseTo(expected[arm].auth_rate, 9)
+      expect(settled.body[arm].first_attempt_auth_rate, arm).toBeCloseTo(
+        expected[arm].first_attempt_auth_rate,
+        9,
+      )
     }
 
     const txns = await transactions(api, experimentId, { endpoint: 'evaluate' })

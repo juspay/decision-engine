@@ -240,7 +240,8 @@ pub async fn load(
 
     let control = arm_metrics("control", control_row, query.evaluation_margin);
     let variant = arm_metrics("variant", variant_row, query.evaluation_margin);
-    let total = control.transaction_count + variant.transaction_count;
+    // The minimum sample counts payments with an outcome: unresolved ones carry no evidence yet.
+    let total = resolved(&control) + resolved(&variant);
 
     let delta_pp = (variant.auth_rate - control.auth_rate) * 100.0;
 
@@ -359,16 +360,19 @@ fn arm_metrics(arm: &str, row: Option<&ArmRow>, evaluation_margin: f64) -> Exper
             net_ev_bps: None,
         },
         Some(r) => {
-            let auth_rate = if r.total > 0 {
-                r.success_count as f64 / r.total as f64
-            } else {
-                0.0
+            // Rates are over resolved payments, as the merchant's own auth rate is. A payment with
+            // no terminal status yet has no outcome to count: counting it as a failure would
+            // understate every rate, and more so for whichever arm's gateways report later.
+            let resolved = r.resolved_count;
+            let rate = |count: u64| {
+                if resolved > 0 {
+                    count as f64 / resolved as f64
+                } else {
+                    0.0
+                }
             };
-            let first_attempt_auth_rate = if r.total > 0 {
-                r.first_attempt_success_count as f64 / r.total as f64
-            } else {
-                0.0
-            };
+            let auth_rate = rate(r.success_count);
+            let first_attempt_auth_rate = rate(r.first_attempt_success_count);
             // Cost data present only when at least one outcome event carried a chosen cost.
             // avgIf over an empty set is `nan`, so guard on both the count and finiteness.
             let has_cost = r.cost_event_count > 0;
@@ -378,14 +382,14 @@ fn arm_metrics(arm: &str, row: Option<&ArmRow>, evaluation_margin: f64) -> Exper
                 Some(r.avg_cost_saved_bps).filter(|v| has_cost && v.is_finite());
             // Economic value per transaction (bps of ticket) at the common margin M: the mean of
             //   v = success · (M·10_000 + saved_bps)
-            // over every transaction in the arm — a success earns the margin plus whatever fee
-            // it saved versus the SR head (the gateway a cost-blind arm would have used on that
+            // over every resolved transaction in the arm — a success earns the margin plus whatever
+            // fee it saved versus the SR head (the gateway a cost-blind arm would have used on that
             // same transaction); a failure earns 0. Arms that never ran cost routing record no
             // cost_saved_bps (extracted as 0), so their EV is auth_rate · M — a true statement
             // ("saved nothing"), not an approximation of an unmeasured absolute fee.
-            let net_ev_bps = (r.total > 0).then(|| {
+            let net_ev_bps = (resolved > 0).then(|| {
                 (evaluation_margin * 10_000.0 * r.success_count as f64 + r.saved_success_sum)
-                    / r.total as f64
+                    / resolved as f64
             });
             ExperimentArmMetrics {
                 arm: arm.to_string(),
@@ -406,9 +410,14 @@ fn arm_metrics(arm: &str, row: Option<&ArmRow>, evaluation_margin: f64) -> Exper
     }
 }
 
-/// Per-arm moments of the per-transaction value `v = success · (margin·10⁴ + saved_bps)` —
-/// the distribution the EV z-test runs on. `None` when the arm has fewer than 2 transactions
-/// (variance undefined).
+/// Payments in the arm with a terminal outcome — the sample every rate and test runs on.
+fn resolved(arm: &ExperimentArmMetrics) -> i64 {
+    arm.success_count + arm.failure_count
+}
+
+/// Per-arm moments of the per-transaction value `v = success · (margin·10⁴ + saved_bps)` over
+/// resolved transactions — the distribution the EV z-test runs on. `None` when the arm has fewer
+/// than 2 resolved transactions (variance undefined).
 struct ArmEvStats {
     n: f64,
     mean: f64,
@@ -417,10 +426,10 @@ struct ArmEvStats {
 
 fn ev_stats(row: Option<&ArmRow>, evaluation_margin: f64) -> Option<ArmEvStats> {
     let r = row?;
-    if r.total < 2 {
+    if r.resolved_count < 2 {
         return None;
     }
-    let n = r.total as f64;
+    let n = r.resolved_count as f64;
     let m4 = evaluation_margin * 10_000.0;
     let k = r.success_count as f64;
     let mean = (m4 * k + r.saved_success_sum) / n;
@@ -442,8 +451,8 @@ fn compute_significance(
     is_cost_experiment: bool,
     evaluation_margin: f64,
 ) -> (Option<f64>, Option<(f64, f64)>, ExperimentVerdict) {
-    let n_c = control.transaction_count as f64;
-    let n_v = variant.transaction_count as f64;
+    let n_c = resolved(control) as f64;
+    let n_v = resolved(variant) as f64;
 
     if total < min_sample_size as i64 || n_c == 0.0 || n_v == 0.0 {
         return (None, None, ExperimentVerdict::CollectingData);
@@ -513,7 +522,7 @@ fn erfc_approx(x: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{experiment_payments, ExperimentScope};
+    use super::{arm_metrics, ev_stats, experiment_payments, ArmRow, ExperimentScope};
     use crate::analytics::clickhouse::query::BindArg;
     use crate::euclid::types::ExperimentEndpoint;
 
@@ -571,5 +580,50 @@ mod tests {
     fn reads_routing_events_only() {
         let sql = experiment_payments(&scope(None, None)).sql().to_string();
         assert!(!sql.contains("outcome_source"));
+    }
+
+    /// An arm with `total` routed payments, `success` and `failure` of them resolved.
+    fn arm_row(total: u64, success: u64, failure: u64, first_success: u64) -> ArmRow {
+        ArmRow {
+            arm: "control".to_string(),
+            total,
+            success_count: success,
+            resolved_count: success + failure,
+            avg_latency_ms: None,
+            avg_chosen_cost_bps: f64::NAN,
+            avg_cost_saved_bps: f64::NAN,
+            cost_event_count: 0,
+            saved_success_sum: 0.0,
+            saved_success_sq_sum: 0.0,
+            first_attempt_success_count: first_success,
+            total_cost_saved: 0.0,
+        }
+    }
+
+    #[test]
+    fn rates_leave_out_payments_still_awaiting_an_outcome() {
+        // 10 routed; 4 resolved (3 succeeded, 2 of them first time); 6 still awaiting a status.
+        let metrics = arm_metrics("control", Some(&arm_row(10, 3, 1, 2)), 1.0);
+        assert_eq!(metrics.transaction_count, 10);
+        assert_eq!(metrics.failure_count, 1);
+        assert!((metrics.auth_rate - 0.75).abs() < 1e-12);
+        assert!((metrics.first_attempt_auth_rate - 0.5).abs() < 1e-12);
+        assert!((metrics.net_ev_bps.unwrap() - 7_500.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_arm_with_nothing_resolved_has_no_rates_or_value() {
+        let metrics = arm_metrics("variant", Some(&arm_row(5, 0, 0, 0)), 1.0);
+        assert_eq!(metrics.transaction_count, 5);
+        assert_eq!(metrics.auth_rate, 0.0);
+        assert_eq!(metrics.net_ev_bps, None);
+        assert!(ev_stats(Some(&arm_row(5, 1, 0, 1)), 1.0).is_none());
+    }
+
+    #[test]
+    fn the_test_samples_resolved_payments_only() {
+        let stats = ev_stats(Some(&arm_row(100, 3, 1, 3)), 1.0).unwrap();
+        assert_eq!(stats.n, 4.0);
+        assert!((stats.mean - 7_500.0).abs() < 1e-9);
     }
 }
