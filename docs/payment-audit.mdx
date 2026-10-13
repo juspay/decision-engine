@@ -59,6 +59,17 @@ The raw flow type remains visible as well, for example `decide_gateway_decision`
 `decide_gateway_rule_hit`, `update_gateway_score_update`, `routing_evaluate_advanced`, or
 `routing_hybrid_decision`.
 
+## A/B Experiments
+
+A payment routed under an A/B experiment carries an **A/B · control** or **A/B · variant** badge
+next to its status, with the endpoint that split it (`hybrid routing`, `decide gateway` or
+`rule evaluate`); the badge links to the experiment. A payment with **Not in an A/B experiment**
+was routed outside any experiment — including payments Hyperswitch routed itself, such as
+straight-through, which never reach the Decision Engine.
+
+The response's `experiments` field carries the same assignments. They come from the experiment's
+own routing events, which stay out of the timeline so they don't change its event counts.
+
 ## Data Sources
 
 Payment Audit reads from the same ClickHouse analytics store used by the analytics surface.

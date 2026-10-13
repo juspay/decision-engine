@@ -710,6 +710,15 @@ export interface RoutingEventsResponse {
   generated_at_ms: number
 }
 
+/** A payment's assignment to an A/B experiment on one routing endpoint. */
+export interface PaymentAuditExperiment {
+  experiment_id: string
+  /** `control` or `variant`. */
+  arm: string
+  endpoint: string
+  routed_at_ms: number
+}
+
 export interface PaymentAuditResponse {
   merchant_id: string
   range: AnalyticsRangeValue | 'all'
@@ -730,6 +739,11 @@ export interface PaymentAuditResponse {
   total_failure: number
   results: PaymentAuditSummary[]
   timeline: PaymentAuditEvent[]
+  /**
+   * A/B experiments that routed the timeline's payment, with its arm; empty when it wasn't in one.
+   * Absent when no timeline was loaded or the lookup failed.
+   */
+  experiments?: PaymentAuditExperiment[]
 }
 
 /** One PSP's pacing state against its volume commitment. */

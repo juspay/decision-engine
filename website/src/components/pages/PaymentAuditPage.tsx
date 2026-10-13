@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
-import { useNavigationType, useSearchParams } from 'react-router-dom'
+import { Link, useNavigationType, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, RefreshCw, Search as SearchIcon, SlidersHorizontal } from 'lucide-react'
 import { fetcher } from '../../lib/api'
 import { shellHeightClass } from '../../lib/embedMode'
@@ -8,6 +8,7 @@ import {
   AnalyticsGatewayScoresResponse,
   AnalyticsRangeValue,
   PaymentAuditEvent,
+  PaymentAuditExperiment,
   PaymentAuditResponse,
   PaymentAuditSummary,
 } from '../../types/api'
@@ -268,6 +269,40 @@ function HeadlineFact({ label, value }: { label: string; value: string }) {
       <span className="shrink-0 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">{label}:</span>
       <span className="truncate text-[13px] font-semibold text-slate-900 dark:text-white leading-[18px]">{value}</span>
     </div>
+  )
+}
+
+const EXPERIMENT_ENDPOINT_LABELS: Record<string, string> = {
+  hybrid_routing: 'hybrid routing',
+  decide_gateway: 'decide gateway',
+  evaluate: 'rule evaluate',
+}
+
+/**
+ * Which A/B arm routed the payment, linking to its experiment; or that it wasn't routed under one.
+ * Experiment events stay out of the timeline itself, so this is the audit's only A/B signal.
+ */
+function ExperimentAssignment({ experiments }: { experiments: PaymentAuditExperiment[] }) {
+  if (experiments.length === 0) {
+    return <Badge variant="gray">Not in an A/B experiment</Badge>
+  }
+  return (
+    <>
+      {experiments.map((assignment) => {
+        const endpoint = EXPERIMENT_ENDPOINT_LABELS[assignment.endpoint] ?? assignment.endpoint
+        return (
+          <Link
+            key={`${assignment.experiment_id}:${assignment.arm}:${assignment.endpoint}`}
+            to={`/routing/ab-testing?experiment=${encodeURIComponent(assignment.experiment_id)}`}
+            title={`Experiment ${assignment.experiment_id} · routed on ${endpoint} at ${formatDateTime(assignment.routed_at_ms)}`}
+          >
+            <Badge variant={assignment.arm === 'variant' ? 'purple' : 'blue'}>
+              A/B · {assignment.arm} · {endpoint}
+            </Badge>
+          </Link>
+        )
+      })}
+    </>
   )
 }
 
@@ -1082,6 +1117,9 @@ export function PaymentAuditPage() {
                 </h2>
                 <div className="flex shrink-0 items-center gap-2">
                   <span className="text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">{totalEvents} event{totalEvents === 1 ? '' : 's'}</span>
+                  {auditDetail.data?.experiments ? (
+                    <ExperimentAssignment experiments={auditDetail.data.experiments} />
+                  ) : null}
                   {selectedSummary?.latest_status ? (
                     <Badge variant={summaryBadgeVariant(selectedSummary.latest_status)}>
                       {humanizeAuditValue(selectedSummary.latest_status)}

@@ -1,3 +1,4 @@
+pub mod audit_experiments;
 pub mod audit_summaries;
 pub mod audit_timeline;
 pub mod auth_rate;

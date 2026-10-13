@@ -7946,6 +7946,37 @@
           }
         }
       },
+      "PaymentAuditExperiment": {
+        "type": "object",
+        "description": "A payment's assignment to an A/B experiment on one routing endpoint.",
+        "required": [
+          "experiment_id",
+          "arm",
+          "endpoint",
+          "routed_at_ms"
+        ],
+        "properties": {
+          "experiment_id": {
+            "type": "string",
+            "example": "routing_dd6ec3ad-aac4-4c8c-b6f7-03c732163f90"
+          },
+          "arm": {
+            "type": "string",
+            "description": "control | variant",
+            "example": "variant"
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "hybrid_routing | decide_gateway | evaluate",
+            "example": "hybrid_routing"
+          },
+          "routed_at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When the payment was first routed under this assignment."
+          }
+        }
+      },
       "PaymentAuditResponse": {
         "type": "object",
         "properties": {
@@ -8035,6 +8066,13 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/PaymentAuditEvent"
+            }
+          },
+          "experiments": {
+            "type": "array",
+            "description": "A/B experiments that routed the timeline's payment, with the arm it was assigned; empty when it was not routed under one. Omitted when no timeline was loaded or the lookup failed.",
+            "items": {
+              "$ref": "#/components/schemas/PaymentAuditExperiment"
             }
           },
           "scope": {

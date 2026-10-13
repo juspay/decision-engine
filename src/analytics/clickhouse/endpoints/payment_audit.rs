@@ -95,8 +95,8 @@ pub async fn load(
     } else {
         None
     };
-    let timeline = if let Some(lookup_key) = timeline_lookup_key {
-        metrics::audit_timeline::load(client, query, scope, &lookup_key)
+    let timeline = if let Some(lookup_key) = timeline_lookup_key.as_deref() {
+        metrics::audit_timeline::load(client, query, scope, lookup_key)
             .await
             .map_err(|error| {
                 crate::logger::error!(
@@ -112,6 +112,24 @@ pub async fn load(
             })?
     } else {
         Vec::new()
+    };
+    // Supplementary to the timeline: a failure here leaves the audit itself intact.
+    let experiments = match timeline_lookup_key.as_deref() {
+        Some(lookup_key) => {
+            match metrics::audit_experiments::load(client, &query.merchant_id, lookup_key).await {
+                Ok(experiments) => Some(experiments),
+                Err(error) => {
+                    crate::logger::warn!(
+                        ?error,
+                        lookup_key,
+                        merchant_id = %query.merchant_id,
+                        "payment audit experiment assignments load failed"
+                    );
+                    None
+                }
+            }
+        }
+        None => None,
     };
 
     Ok(PaymentAuditResponse {
@@ -150,5 +168,6 @@ pub async fn load(
         total_failure,
         results,
         timeline,
+        experiments,
     })
 }
