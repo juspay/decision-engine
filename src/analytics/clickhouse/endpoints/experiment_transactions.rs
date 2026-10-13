@@ -47,8 +47,7 @@ pub async fn load(
         .map(|r| r.total)
         .unwrap_or(0);
 
-    // The latest arm and gateway win, as they did when the outcome event overrode the routing
-    // event.
+    // A payment routed more than once shows its latest arm and gateway.
     let mut builder = BoundQueryBuilder::from_fragment(experiment_payments(&scope(query)));
     builder.extend_selects([
         "payment_id",
