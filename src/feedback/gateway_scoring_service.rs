@@ -404,29 +404,79 @@ pub fn update_gateway_score_lock(
     }
 }
 
-/// Returns true when the GSM rule indicates the failure is user/issuer-originated
-/// and the gateway itself is healthy, meaning the gateway should not be penalized.
-///
-/// Matching is done on `unified_message` (the UE-code family):
-///
-///   "Issue with Payment Method details" (UE_1000) – card/user error: expired card,
-///     wrong CVV, insufficient funds, blocked card, FRM decline on card data.
-///     The gateway processed the request correctly — penalising it would be wrong.
-///
-///   All other unified_messages (UE_2000 Issue with Configurations, UE_3000 Technical
-///   issue with PSP, UE_4000 Issue with Integration, "Something went wrong") indicate
-///   a gateway, config, or integration fault and receive full penalty.
-///
-/// step_up_possible == true overrides everything: the gateway is functional but the
-/// transaction needs a 3-D Secure step-up.
-fn is_gateway_healthy_failure(gsm_info: &crate::gsm::GsmInfo) -> bool {
-    if gsm_info.step_up_possible {
-        return true;
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum GsmScoringCategory {
+    PspFault,
+    IssuerDecline,
+    ClientError,
+    MerchantError,
+    Unknown,
+}
+
+impl GsmScoringCategory {
+    fn as_metric_label(self) -> &'static str {
+        match self {
+            Self::PspFault => "psp_fault",
+            Self::IssuerDecline => "issuer_decline",
+            Self::ClientError => "client_error",
+            Self::MerchantError => "merchant_error",
+            Self::Unknown => "unknown",
+        }
     }
-    matches!(
+
+    fn should_skip_penalty(self) -> bool {
+        matches!(
+            self,
+            Self::IssuerDecline | Self::ClientError | Self::MerchantError
+        )
+    }
+}
+
+/// Convert GSM's source taxonomy to a small, stable set of scoring categories.
+/// Unknown categories deliberately retain the existing penalty behavior.
+fn gsm_scoring_category(gsm_info: &crate::gsm::GsmInfo) -> GsmScoringCategory {
+    if gsm_info.step_up_possible {
+        return GsmScoringCategory::ClientError;
+    }
+
+    if let Some(category) = gsm_info.error_category.as_deref() {
+        return match category.to_ascii_lowercase().as_str() {
+            "psp_fault" | "processor_downtime" => GsmScoringCategory::PspFault,
+            "issuer_decline"
+            | "processor_decline_unauthorized"
+            | "processor_decline_incorrect_data"
+            | "frm_decline" => GsmScoringCategory::IssuerDecline,
+            "client_error" | "issue_with_payment_method" => GsmScoringCategory::ClientError,
+            "merchant_error" | "issue_with_integration" => GsmScoringCategory::MerchantError,
+            _ => GsmScoringCategory::Unknown,
+        };
+    }
+
+    // Backward-compatible fallback for existing GSM rows that do not populate
+    // error_category. UE_1000 identifies payment-method/user-originated errors.
+    if matches!(
         gsm_info.unified_message.as_deref(),
         Some("Issue with Payment Method details")
-    )
+    ) {
+        GsmScoringCategory::ClientError
+    } else {
+        GsmScoringCategory::Unknown
+    }
+}
+
+/// Returns true when GSM says the failure is not evidence of a PSP fault.
+fn is_gateway_healthy_failure(gsm_info: &crate::gsm::GsmInfo) -> bool {
+    gsm_scoring_category(gsm_info).should_skip_penalty()
+}
+
+fn should_filter_gateway_penalty(
+    status: &TxnStatus,
+    filter_enabled: bool,
+    gsm_info: Option<&crate::gsm::GsmInfo>,
+) -> bool {
+    is_transaction_failure(status.clone())
+        && filter_enabled
+        && gsm_info.is_some_and(is_gateway_healthy_failure)
 }
 
 pub fn invalid_request_error(detail: &str, e: &impl std::fmt::Display) -> T::ErrorResponse {
@@ -468,69 +518,55 @@ pub async fn check_and_update_gateway_score_(
     )
     .await;
 
-    // GSM-based scoring filter: skip penalization for failures where the gateway
-    // is healthy (user/issuer-originated errors). Gated per merchant so it can be
-    // rolled back instantly without a deploy.
-    if let Some(error_info) = api_payload.error_info.as_ref() {
-        let gsm_filter_enabled = is_feature_enabled(
-            GsmBasedScoringFilterEnabledMerchant.get_key(),
-            api_payload.merchant_id.clone(),
-            C::kvRedis(),
-        )
-        .await;
-        logger::debug!(
-            action = "GSM_SCORING_FILTER_CHECK",
-            tag = "GSM_SCORING_FILTER_CHECK",
-            "GSM scoring filter: enabled={} merchant={} gateway={} flow={} sub_flow={} \
-             error_code={:?} error_message={:?}",
-            gsm_filter_enabled,
-            api_payload.merchant_id,
-            api_payload.gateway,
-            error_info.flow,
-            error_info.sub_flow,
-            error_info.error_code,
-            error_info.error_message,
-        );
-        if gsm_filter_enabled {
+    // GSM filtering applies only to failed transactions. In particular, a
+    // success can carry errorInfo from a prior step-up attempt and must still
+    // contribute its reward.
+    if is_transaction_failure(api_payload.status.clone()) {
+        let gsm_filter_enabled = if api_payload.error_info.is_some() {
+            is_feature_enabled(
+                GsmBasedScoringFilterEnabledMerchant.get_key(),
+                api_payload.merchant_id.clone(),
+                C::kvRedis(),
+            )
+            .await
+        } else {
+            false
+        };
+        let gsm_lookup_result = api_payload.error_info.as_ref().and_then(|error_info| {
             // Connector must be the gateway that processed the payment.
-            let effective_error_info = crate::gsm::GsmErrorInfo {
+            crate::gsm::lookup(&crate::gsm::GsmErrorInfo {
                 connector: api_payload.gateway.clone(),
                 ..error_info.clone()
-            };
-            let gsm_lookup_result = crate::gsm::lookup(&effective_error_info);
-            logger::debug!(
-                action = "GSM_SCORING_FILTER_LOOKUP",
-                tag = "GSM_SCORING_FILTER_LOOKUP",
-                "GSM lookup: connector={} -> {:?}",
-                api_payload.gateway,
-                gsm_lookup_result
-                    .as_ref()
-                    .map(|g| (&g.unified_message, &g.decision)),
-            );
-            if let Some(gsm_info) = gsm_lookup_result {
-                if is_gateway_healthy_failure(&gsm_info) {
-                    logger::info!(
-                        action = "GSM_SCORING_FILTER_SKIP",
-                        tag = "GSM_SCORING_FILTER_SKIP",
-                        "Skipping gateway penalization for merchant={} gateway={} \
-                         unified_message={:?} step_up_possible={}: user-originated failure",
-                        api_payload.merchant_id,
-                        api_payload.gateway,
-                        gsm_info.unified_message,
-                        gsm_info.step_up_possible,
-                    );
-                    return Ok("Success".to_string());
-                }
-            }
-        }
-    } else {
-        logger::debug!(
-            action = "GSM_SCORING_FILTER_NO_ERROR_INFO",
-            tag = "GSM_SCORING_FILTER_NO_ERROR_INFO",
-            "GSM scoring filter skipped: no error_info in payload for merchant={} gateway={}",
-            api_payload.merchant_id,
-            api_payload.gateway,
+            })
+        });
+        let category = gsm_lookup_result
+            .as_ref()
+            .map(gsm_scoring_category)
+            .unwrap_or(GsmScoringCategory::Unknown);
+        let should_filter = should_filter_gateway_penalty(
+            &api_payload.status,
+            gsm_filter_enabled,
+            gsm_lookup_result.as_ref(),
         );
+
+        crate::metrics::GATEWAY_SCORE_FEEDBACK_COUNTER
+            .with_label_values(&[
+                category.as_metric_label(),
+                if should_filter { "filtered" } else { "applied" },
+            ])
+            .inc();
+
+        if should_filter {
+            logger::info!(
+                action = "GSM_SCORING_FILTER_SKIP",
+                tag = "GSM_SCORING_FILTER_SKIP",
+                "Skipping gateway penalization for merchant={} gateway={} category={}",
+                api_payload.merchant_id,
+                api_payload.gateway,
+                category.as_metric_label(),
+            );
+            return Ok("Success".to_string());
+        }
     }
 
     let redis_key = format!(
@@ -1384,10 +1420,22 @@ pub fn get_gateway_wise_latency(
 
 #[cfg(test)]
 mod tests {
-    use super::is_gateway_healthy_failure;
+    use super::{
+        gsm_scoring_category, is_gateway_healthy_failure, should_filter_gateway_penalty,
+        GsmScoringCategory,
+    };
     use crate::gsm::GsmInfo;
+    use crate::types::txn_details::types::TxnStatus;
 
     fn gsm_info(unified_message: Option<&str>, step_up_possible: bool) -> GsmInfo {
+        gsm_info_with_category(unified_message, step_up_possible, None)
+    }
+
+    fn gsm_info_with_category(
+        unified_message: Option<&str>,
+        step_up_possible: bool,
+        error_category: Option<&str>,
+    ) -> GsmInfo {
         GsmInfo {
             decision: "do_default".to_string(),
             step_up_possible,
@@ -1395,7 +1443,7 @@ mod tests {
             alternate_network_possible: false,
             unified_code: None,
             unified_message: unified_message.map(str::to_string),
-            error_category: None,
+            error_category: error_category.map(str::to_string),
             standardised_code: None,
             description: None,
             user_guidance_message: None,
@@ -1497,6 +1545,71 @@ mod tests {
             Some("some_future_message"),
             false
         )));
+    }
+
+    #[test]
+    fn explicit_issuer_category_skips_penalty_even_when_unified_text_is_technical() {
+        let info = gsm_info_with_category(
+            Some("Technical issue with PSP"),
+            false,
+            Some("processor_decline_unauthorized"),
+        );
+        assert_eq!(gsm_scoring_category(&info), GsmScoringCategory::IssuerDecline);
+        assert!(is_gateway_healthy_failure(&info));
+    }
+
+    #[test]
+    fn explicit_client_and_merchant_categories_skip_penalty() {
+        for category in ["client_error", "issue_with_payment_method", "merchant_error"] {
+            assert!(is_gateway_healthy_failure(&gsm_info_with_category(
+                Some("Technical issue with PSP"),
+                false,
+                Some(category),
+            )));
+        }
+    }
+
+    #[test]
+    fn explicit_psp_fault_keeps_penalty_even_with_payment_method_unified_text() {
+        let info = gsm_info_with_category(
+            Some("Issue with Payment Method details"),
+            false,
+            Some("processor_downtime"),
+        );
+        assert_eq!(gsm_scoring_category(&info), GsmScoringCategory::PspFault);
+        assert!(!is_gateway_healthy_failure(&info));
+    }
+
+    #[test]
+    fn unknown_explicit_category_uses_safe_penalty_default() {
+        let info = gsm_info_with_category(None, false, Some("future_category"));
+        assert_eq!(gsm_scoring_category(&info), GsmScoringCategory::Unknown);
+        assert!(!is_gateway_healthy_failure(&info));
+    }
+
+    #[test]
+    fn healthy_gateway_error_is_filtered_only_when_flag_is_enabled_for_failure() {
+        let info = gsm_info_with_category(None, false, Some("issuer_decline"));
+        assert!(should_filter_gateway_penalty(
+            &TxnStatus::AuthorizationFailed,
+            true,
+            Some(&info),
+        ));
+        assert!(!should_filter_gateway_penalty(
+            &TxnStatus::AuthorizationFailed,
+            false,
+            Some(&info),
+        ));
+    }
+
+    #[test]
+    fn successful_step_up_callback_still_applies_reward() {
+        let info = gsm_info(None, true);
+        assert!(!should_filter_gateway_penalty(
+            &TxnStatus::Charged,
+            true,
+            Some(&info),
+        ));
     }
 
     // ── Routing-approach producer/explore gates ─────────────────────────────
