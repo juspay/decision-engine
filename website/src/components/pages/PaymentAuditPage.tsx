@@ -43,9 +43,8 @@ import {
 function eventPhase(event: PaymentAuditEvent) {
   return auditEventPhase(event, 'Rule Decision')
 }
-/** The payment's outcome from its reported statuses, not any one event's status. */
-const STATUS_OPTIONS = [
-  { value: '', label: 'Any outcome' },
+/** The payment's outcome from its reported statuses, not any one event's status. Pick any number. */
+const OUTCOME_OPTIONS = [
   { value: 'success', label: 'Success' },
   { value: 'failure', label: 'Failure' },
   { value: 'pending', label: 'Pending' },
@@ -273,9 +272,14 @@ function parseRoutingKind(searchParams: URLSearchParams): string {
 }
 
 /** The outcome filter; a `status=success|failure` link from before outcomes reads as one. */
+/** The outcome filter (a comma-separated list); a `status=success|failure` link from before outcomes reads as one. */
 function parseOutcome(searchParams: URLSearchParams): string {
-  const value = (searchParams.get('outcome') || searchParams.get('status') || '').toLowerCase()
-  return STATUS_OPTIONS.some((option) => option.value && option.value === value) ? value : ''
+  const raw = (searchParams.get('outcome') || searchParams.get('status') || '').toLowerCase()
+  return raw
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value) => OUTCOME_OPTIONS.some((option) => option.value === value))
+    .join(',')
 }
 
 function parseFilters(searchParams: URLSearchParams): AuditFilters {
@@ -1172,18 +1176,14 @@ export function PaymentAuditPage() {
         </div>
 
         <div className="flex-1">
-          <select
-            className={fieldSelectClassName()}
-            value={filters.status}
-            onChange={(event) => applyDropdownFilter('status', event.target.value)}
-            aria-label="Status"
-          >
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value || 'all'} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <SearchableMultiSelect
+            values={filters.status.split(',').filter(Boolean)}
+            options={OUTCOME_OPTIONS}
+            onChange={(values) => applyDropdownFilter('status', values.join(','))}
+            placeholder="Any outcome"
+            triggerClassName={fieldSelectClassName()}
+            compact
+          />
         </div>
 
         <Button

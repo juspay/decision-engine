@@ -535,7 +535,8 @@ impl PaymentAuditOutcome {
 /// updates, rule evaluations) stay in its summary.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PaymentAuditPaymentFilters {
-    pub outcome: Option<PaymentAuditOutcome>,
+    /// Payments with any of these outcomes; empty means unfiltered.
+    pub outcome: Vec<PaymentAuditOutcome>,
     /// Each attribute matches a payment carrying any of its values; empty means unfiltered.
     pub currency: Vec<String>,
     pub payment_method: Vec<String>,

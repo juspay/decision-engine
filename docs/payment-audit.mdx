@@ -31,7 +31,7 @@ The page supports these filters:
 - `routing_kind`
 - `gateway`
 - `route`
-- `outcome` — the payment's outcome (the page's status dropdown), see below
+- `outcome` — the payment's outcome (the page's outcome dropdown), one or several, see below
 - `status` — an event's exact status (e.g. `FAILURE`); for what happened to the payment, use
   `outcome`
 - `flow_type`
@@ -50,7 +50,8 @@ A payment's outcome comes from the statuses reported for it on `/update-gateway-
 | `pending` | No terminal status reported yet (only routing events, or e.g. `PENDING_VBV`). |
 
 A routing call's own `success` status is the API call's result, not the payment's, and never
-counts. The success / failure totals above the results use the same outcome.
+counts. The success / failure totals above the results use the same outcome. Pick several outcomes
+(`outcome=failure,pending`) to see payments with any of them.
 
 ### Payment attributes
 

@@ -303,7 +303,7 @@ fn with_filter_aggregates(query: &PaymentAuditQuery, base: &[Aggregate]) -> Vec<
         (query.flow_type.is_some(), Aggregate::FlowTypes),
         (routing_kind_filters, Aggregate::RoutingFamilies),
         (query.error_code.is_some(), Aggregate::ErrorCodes),
-        (payment.outcome.is_some(), Aggregate::Statuses),
+        (!payment.outcome.is_empty(), Aggregate::Statuses),
         (!payment.currency.is_empty(), Aggregate::Currencies),
         (
             !payment.payment_method.is_empty(),
@@ -471,11 +471,17 @@ fn outer_summary_filters(query: &PaymentAuditQuery) -> Vec<FilterClause> {
     }
 
     let payment = &query.payment_filters;
-    if let Some(outcome) = payment.outcome {
+    if !payment.outcome.is_empty() {
+        // Enum labels, not user input, so they are safe to inline.
+        let outcomes = payment
+            .outcome
+            .iter()
+            .map(|outcome| format!("'{}'", outcome.as_str()))
+            .collect::<Vec<_>>()
+            .join(", ");
         filters.push(FilterClause::raw(format!(
-            "{} = '{}'",
-            outcome_sql(),
-            outcome.as_str()
+            "{} IN ({outcomes})",
+            outcome_sql()
         )));
     }
     // Attribute values aggregate lower-cased, so the match ignores case. Several values for one
@@ -782,15 +788,17 @@ mod tests {
     #[test]
     fn outcome_filter_keeps_the_pre_aggregated_path() {
         let mut query = payment_audit_query();
-        query.payment_filters.outcome =
-            Some(crate::analytics::models::PaymentAuditOutcome::Failure);
+        query.payment_filters.outcome = vec![
+            crate::analytics::models::PaymentAuditOutcome::Failure,
+            crate::analytics::models::PaymentAuditOutcome::Pending,
+        ];
         assert!(with_filter_aggregates(&query, &[]).contains(&Aggregate::Statuses));
         assert!(summary_fragment(&query, PaymentAuditScope::All, &[], None)
             .sql()
             .contains(PAYMENT_AUDIT_SUMMARY_BUCKET_TABLE));
         assert!(outer_summary_filters(&query)
             .iter()
-            .any(|f| f.predicate().ends_with("= 'failure'")));
+            .any(|f| f.predicate().ends_with("IN ('failure', 'pending')")));
     }
 
     #[test]

@@ -176,6 +176,16 @@ test.describe('Payment audit outcome and payment filters (API)', () => {
       'eur_credit_unanswered',
       'usd_credit_vbv',
     ])
+    // Several outcomes match a payment with any of them, and the totals follow.
+    expect(await matching({ outcome: 'failure,pending' })).toEqual([
+      'eur_credit_unanswered',
+      'usd_credit_vbv',
+      'usd_debit_declined',
+    ])
+    const unresolvedOrFailed = await search(api, { outcome: 'failure,pending' })
+    expect(unresolvedOrFailed.body.total_results).toBe(3)
+    expect(unresolvedOrFailed.body.total_failure).toBe(1)
+    expect(unresolvedOrFailed.body.total_success).toBe(0)
 
     expect(await matching({ currency: 'eur' })).toEqual([
       'eur_credit_charged',

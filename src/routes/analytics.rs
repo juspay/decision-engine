@@ -95,7 +95,10 @@ fn payment_audit_query_from_params(
         params.routing_kind.clone(),
     )
     .with_payment_filters(PaymentAuditPaymentFilters {
-        outcome: PaymentAuditOutcome::from_query(params.outcome.as_deref()),
+        outcome: PaymentAuditPaymentFilters::values(params.outcome.as_deref())
+            .iter()
+            .filter_map(|value| PaymentAuditOutcome::from_query(Some(value)))
+            .collect(),
         currency: PaymentAuditPaymentFilters::values(params.currency.as_deref()),
         payment_method: PaymentAuditPaymentFilters::values(params.payment_method.as_deref()),
         payment_method_type: PaymentAuditPaymentFilters::values(

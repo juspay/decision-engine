@@ -1091,10 +1091,10 @@
             "name": "outcome",
             "in": "query",
             "required": false,
-            "description": "The payment's outcome from its reported statuses: `success` (any attempt succeeded), `failure` (failed terminally, never succeeded) or `pending` (no terminal status yet).",
+            "description": "The payment's outcome from its reported statuses: `success` (any attempt succeeded), `failure` (failed terminally, never succeeded) or `pending` (no terminal status yet). Comma-separated to match any of several, e.g. `failure,pending`.",
             "schema": {
               "type": "string",
-              "enum": ["success", "failure", "pending"]
+              "example": "failure,pending"
             }
           },
           {
