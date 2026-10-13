@@ -50,14 +50,66 @@ const STATUS_OPTIONS = [
   { value: 'pending', label: 'Pending' },
 ]
 
-/** Hyperswitch values for the payment attribute filters; any other value can be typed. */
-const PAYMENT_ATTRIBUTE_SUGGESTIONS = {
-  paymentMethod: ['card', 'wallet', 'upi', 'bank_redirect', 'bank_transfer', 'bank_debit', 'pay_later', 'crypto'],
-  paymentMethodType: ['credit', 'debit', 'apple_pay', 'google_pay', 'paypal', 'upi_collect', 'upi_intent'],
-  cardNetwork: ['visa', 'mastercard', 'amex', 'discover', 'rupay', 'maestro'],
-  authType: ['three_ds', 'no_three_ds'],
-  currency: ['USD', 'EUR', 'GBP', 'INR', 'AED', 'SGD'],
-}
+type PaymentAttributeField = 'paymentMethod' | 'paymentMethodType' | 'cardNetwork' | 'authType' | 'currency'
+
+/**
+ * The payment attribute dropdowns, in Hyperswitch's terms (as `/routing/hybrid` records them).
+ * Values match case-insensitively.
+ */
+const PAYMENT_ATTRIBUTE_FILTERS: { field: PaymentAttributeField; anyLabel: string; options: { value: string; label: string }[] }[] = [
+  {
+    field: 'paymentMethod',
+    anyLabel: 'Any payment method',
+    options: [
+      { value: 'card', label: 'Card' },
+      { value: 'wallet', label: 'Wallet' },
+      { value: 'upi', label: 'UPI' },
+      { value: 'bank_redirect', label: 'Bank redirect' },
+      { value: 'bank_transfer', label: 'Bank transfer' },
+      { value: 'bank_debit', label: 'Bank debit' },
+      { value: 'pay_later', label: 'Pay later' },
+      { value: 'crypto', label: 'Crypto' },
+    ],
+  },
+  {
+    field: 'paymentMethodType',
+    anyLabel: 'Any method type',
+    options: [
+      { value: 'credit', label: 'Credit' },
+      { value: 'debit', label: 'Debit' },
+      { value: 'apple_pay', label: 'Apple Pay' },
+      { value: 'google_pay', label: 'Google Pay' },
+      { value: 'paypal', label: 'PayPal' },
+      { value: 'upi_collect', label: 'UPI collect' },
+      { value: 'upi_intent', label: 'UPI intent' },
+    ],
+  },
+  {
+    field: 'cardNetwork',
+    anyLabel: 'Any card network',
+    options: [
+      { value: 'visa', label: 'Visa' },
+      { value: 'mastercard', label: 'Mastercard' },
+      { value: 'amex', label: 'American Express' },
+      { value: 'discover', label: 'Discover' },
+      { value: 'rupay', label: 'RuPay' },
+      { value: 'maestro', label: 'Maestro' },
+    ],
+  },
+  {
+    field: 'authType',
+    anyLabel: 'Any auth type',
+    options: [
+      { value: 'three_ds', label: '3DS' },
+      { value: 'no_three_ds', label: 'No 3DS' },
+    ],
+  },
+  {
+    field: 'currency',
+    anyLabel: 'Any currency',
+    options: ['USD', 'EUR', 'GBP', 'INR', 'AED', 'SGD'].map((code) => ({ value: code, label: code })),
+  },
+]
 const ROUTE_OPTIONS = [
   { value: '', label: 'Any route' },
   { value: 'decide_gateway', label: 'Decide Gateway' },
@@ -902,7 +954,10 @@ export function PaymentAuditPage() {
   }
 
   /** Dropdown filters apply on change — the redesigned bar has no Search button to press. */
-  function applyDropdownFilter(field: 'gateway' | 'status' | 'route' | 'routingKind', value: string) {
+  function applyDropdownFilter(
+    field: 'gateway' | 'status' | 'route' | 'routingKind' | PaymentAttributeField,
+    value: string,
+  ) {
     const nextPage = 1
     const normalizedFilters = normalizeAuditFilters({ ...filters, [field]: value })
     setPage(nextPage)
@@ -1143,31 +1198,29 @@ export function PaymentAuditPage() {
         </div>
         {showAdvancedFilters ? (
           <div className="grid w-full basis-full grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
-            {(
-              [
-                ['paymentMethod', 'Payment method'],
-                ['paymentMethodType', 'Payment method type'],
-                ['cardNetwork', 'Card network'],
-                ['authType', 'Auth type'],
-                ['currency', 'Currency'],
-              ] as const
-            ).map(([field, label]) => (
-              <div key={field}>
-                <input
-                  className={fieldClassName()}
-                  value={filters[field]}
-                  onChange={(event) => updateFilter(field, event.target.value)}
-                  placeholder={label}
-                  aria-label={label}
-                  list={`audit-${field}-options`}
-                />
-                <datalist id={`audit-${field}-options`}>
-                  {PAYMENT_ATTRIBUTE_SUGGESTIONS[field].map((value) => (
-                    <option key={value} value={value} />
+            {PAYMENT_ATTRIBUTE_FILTERS.map(({ field, anyLabel, options }) => {
+              const value = filters[field]
+              const listedOption = options.find((option) => option.value.toLowerCase() === value.toLowerCase())
+              // A value from a link that isn't listed stays selectable.
+              const listed = Boolean(listedOption)
+              return (
+                <select
+                  key={field}
+                  className={fieldSelectClassName()}
+                  value={listedOption?.value ?? value}
+                  onChange={(event) => applyDropdownFilter(field, event.target.value)}
+                  aria-label={anyLabel.replace(/^Any /, '')}
+                >
+                  <option value="">{anyLabel}</option>
+                  {!listed && value ? <option value={value}>{value}</option> : null}
+                  {options.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
                   ))}
-                </datalist>
-              </div>
-            ))}
+                </select>
+              )
+            })}
             <input
               className={fieldClassName()}
               type="number"
