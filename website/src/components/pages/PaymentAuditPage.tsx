@@ -306,6 +306,20 @@ function ExperimentAssignment({ experiments }: { experiments: PaymentAuditExperi
   )
 }
 
+/** The A/B arm(s) of a result row; nothing for a payment outside any experiment, to keep the list quiet. */
+function ExperimentArmTag({ experiments }: { experiments?: PaymentAuditExperiment[] }) {
+  if (!experiments?.length) return null
+  const arms = [...new Set(experiments.map((assignment) => assignment.arm))]
+  const title = experiments
+    .map((a) => `${a.arm} · ${EXPERIMENT_ENDPOINT_LABELS[a.endpoint] ?? a.endpoint} · ${a.experiment_id}`)
+    .join('\n')
+  return (
+    <span className="shrink-0" title={title}>
+      <Badge variant={arms.length === 1 && arms[0] === 'variant' ? 'purple' : 'blue'}>A/B · {arms.join(' / ')}</Badge>
+    </span>
+  )
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -1117,8 +1131,8 @@ export function PaymentAuditPage() {
                 </h2>
                 <div className="flex shrink-0 items-center gap-2">
                   <span className="text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">{totalEvents} event{totalEvents === 1 ? '' : 's'}</span>
-                  {auditDetail.data?.experiments ? (
-                    <ExperimentAssignment experiments={auditDetail.data.experiments} />
+                  {selectedSummary?.experiments ? (
+                    <ExperimentAssignment experiments={selectedSummary.experiments} />
                   ) : null}
                   {selectedSummary?.latest_status ? (
                     <Badge variant={summaryBadgeVariant(selectedSummary.latest_status)}>
@@ -1185,6 +1199,7 @@ export function PaymentAuditPage() {
                       <span className="shrink-0 whitespace-nowrap text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
                         · {row.event_count} event{row.event_count === 1 ? '' : 's'}
                       </span>
+                      <ExperimentArmTag experiments={row.experiments} />
                     </div>
                     {gatewayPath ? (
                       <span

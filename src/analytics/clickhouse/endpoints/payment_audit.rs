@@ -25,7 +25,7 @@ pub async fn load(
         matches!(upper.as_deref(), Some(s) if s == "FAILURE" || s.contains("FAILED") || s.contains("DECLINED"))
     }
 
-    let (total_results, total_success, total_failure, results) =
+    let (total_results, total_success, total_failure, mut results) =
         if let Some(lookup_key) = requested_lookup_key.clone() {
             let results = metrics::audit_summaries::load_exact(client, query, scope, &lookup_key)
                 .await
@@ -113,24 +113,31 @@ pub async fn load(
     } else {
         Vec::new()
     };
-    // Supplementary to the timeline: a failure here leaves the audit itself intact.
-    let experiments = match timeline_lookup_key.as_deref() {
-        Some(lookup_key) => {
-            match metrics::audit_experiments::load(client, &query.merchant_id, lookup_key).await {
-                Ok(experiments) => Some(experiments),
-                Err(error) => {
-                    crate::logger::warn!(
-                        ?error,
-                        lookup_key,
-                        merchant_id = %query.merchant_id,
-                        "payment audit experiment assignments load failed"
-                    );
-                    None
-                }
-            }
+    // Each result's A/B assignment, in one lookup for the page. A failure leaves `experiments`
+    // unset rather than claiming "not in an experiment".
+    let experiment_keys: Vec<String> = results.iter().map(|row| row.lookup_key.clone()).collect();
+    let assignments = match metrics::audit_experiments::load(
+        client,
+        &query.merchant_id,
+        &experiment_keys,
+    )
+    .await
+    {
+        Ok(assignments) => Some(assignments),
+        Err(error) => {
+            crate::logger::warn!(
+                ?error,
+                merchant_id = %query.merchant_id,
+                "payment audit experiment assignments load failed"
+            );
+            None
         }
-        None => None,
     };
+    for row in &mut results {
+        row.experiments = assignments
+            .as_ref()
+            .map(|by_key| by_key.get(&row.lookup_key).cloned().unwrap_or_default());
+    }
 
     Ok(PaymentAuditResponse {
         merchant_id: query.merchant_id.clone(),
@@ -168,6 +175,5 @@ pub async fn load(
         total_failure,
         results,
         timeline,
-        experiments,
     })
 }

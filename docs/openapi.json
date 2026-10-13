@@ -7784,6 +7784,13 @@
             "items": {
               "type": "string"
             }
+          },
+          "experiments": {
+            "type": "array",
+            "description": "A/B experiments that routed this payment, with the arm it was assigned; empty when it was not routed under one. Omitted when the lookup failed.",
+            "items": {
+              "$ref": "#/components/schemas/PaymentAuditExperiment"
+            }
           }
         }
       },
@@ -8066,13 +8073,6 @@
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/PaymentAuditEvent"
-            }
-          },
-          "experiments": {
-            "type": "array",
-            "description": "A/B experiments that routed the timeline's payment, with the arm it was assigned; empty when it was not routed under one. Omitted when no timeline was loaded or the lookup failed.",
-            "items": {
-              "$ref": "#/components/schemas/PaymentAuditExperiment"
             }
           },
           "scope": {

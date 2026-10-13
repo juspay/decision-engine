@@ -392,6 +392,8 @@ fn map_rows(rows: Vec<AuditSummaryRow>) -> Vec<PaymentAuditSummary> {
                     .into_iter()
                     .map(payment_audit_route_label)
                     .collect(),
+                // Filled in by the payment audit endpoint, which looks them up per page.
+                experiments: None,
             })
         })
         .collect()

@@ -622,6 +622,8 @@ export interface PaymentAuditSummary {
   latest_stage?: string | null
   gateways: string[]
   routes: string[]
+  /** A/B experiments that routed this payment; empty when it wasn't in one, absent if the lookup failed. */
+  experiments?: PaymentAuditExperiment[]
 }
 
 export interface PaymentAuditEvent {
@@ -739,11 +741,6 @@ export interface PaymentAuditResponse {
   total_failure: number
   results: PaymentAuditSummary[]
   timeline: PaymentAuditEvent[]
-  /**
-   * A/B experiments that routed the timeline's payment, with its arm; empty when it wasn't in one.
-   * Absent when no timeline was loaded or the lookup failed.
-   */
-  experiments?: PaymentAuditExperiment[]
 }
 
 /** One PSP's pacing state against its volume commitment. */

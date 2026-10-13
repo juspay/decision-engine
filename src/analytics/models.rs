@@ -589,6 +589,10 @@ pub struct PaymentAuditSummary {
     pub latest_stage: Option<String>,
     pub gateways: Vec<String>,
     pub routes: Vec<String>,
+    /// A/B experiments that routed this payment, with the arm it was assigned; empty when it was
+    /// not routed under one. Absent when the lookup failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experiments: Option<Vec<PaymentAuditExperiment>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -641,11 +645,6 @@ pub struct PaymentAuditResponse {
     pub total_failure: usize,
     pub results: Vec<PaymentAuditSummary>,
     pub timeline: Vec<PaymentAuditEvent>,
-    /// A/B experiments that routed the timeline's payment, with the arm it was assigned; empty when
-    /// it was not routed under one. Absent when no timeline was loaded or the lookup failed, so
-    /// "not in an experiment" is never claimed without having checked.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub experiments: Option<Vec<PaymentAuditExperiment>>,
 }
 
 /// A payment's assignment to an A/B experiment on one routing endpoint.

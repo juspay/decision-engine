@@ -74,6 +74,11 @@ function audit(api: ApiClient, paymentId: string) {
   return api.raw('GET', '/analytics/payment-audit', { qs: { range: '1d', payment_id: paymentId } })
 }
 
+/** The audit's search results for the merchant, as the list page reads them. */
+function searchList(api: ApiClient) {
+  return api.raw('GET', '/analytics/payment-audit', { qs: { range: '1d', page: 1, page_size: 50 } })
+}
+
 test.describe('Payment audit A/B experiment assignment (API)', () => {
   test.setTimeout(90_000)
 
@@ -126,7 +131,7 @@ test.describe('Payment audit A/B experiment assignment (API)', () => {
 
     for (const paymentId of paymentIds) {
       const r = await audit(api, paymentId)
-      expect(r.body.experiments, paymentId).toEqual([
+      expect(r.body.results[0]?.experiments, paymentId).toEqual([
         expect.objectContaining({
           experiment_id: experimentId,
           arm: armOf.get(paymentId),
@@ -135,6 +140,20 @@ test.describe('Payment audit A/B experiment assignment (API)', () => {
       ])
       // The assignment rides alongside the timeline; it doesn't add a timeline event.
       expect(r.body.timeline.map((e: any) => e.flow_type)).not.toContain('routing_evaluate_ab_test')
+    }
+
+    // The search results carry each payment's arm too, so the list can tag it.
+    const list = await poll(
+      () => searchList(api),
+      (res) =>
+        paymentIds.every((id) => res.body.results?.some((row: any) => row.payment_id === id)),
+      { message: 'payments did not reach the audit search', timeout: INGEST_TIMEOUT },
+    )
+    for (const paymentId of paymentIds) {
+      const row = list.body.results.find((r: any) => r.payment_id === paymentId)
+      expect(row.experiments, paymentId).toEqual([
+        expect.objectContaining({ experiment_id: experimentId, arm: armOf.get(paymentId) }),
+      ])
     }
   })
 
@@ -150,6 +169,15 @@ test.describe('Payment audit A/B experiment assignment (API)', () => {
       (res) => res.body.timeline?.length > 0,
       { message: 'payment did not reach the audit', timeout: INGEST_TIMEOUT },
     )
-    expect(r.body.experiments).toEqual([])
+    expect(r.body.results[0]?.experiments).toEqual([])
+
+    const list = await poll(
+      () => searchList(api),
+      (res) => res.body.results?.some((row: any) => row.payment_id === paymentId),
+      { message: 'payment did not reach the audit search', timeout: INGEST_TIMEOUT },
+    )
+    expect(list.body.results.find((row: any) => row.payment_id === paymentId).experiments).toEqual(
+      [],
+    )
   })
 })
