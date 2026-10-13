@@ -487,8 +487,9 @@ pub struct PaymentAuditQuery {
     pub page_size: usize,
     pub payment_id: Option<String>,
     pub request_id: Option<String>,
-    pub gateway: Option<String>,
-    pub route: Option<String>,
+    /// Gateways and routes: a payment matches when it went through any of them.
+    pub gateway: Vec<String>,
+    pub route: Vec<String>,
     pub status: Option<String>,
     pub flow_type: Option<String>,
     pub routing_approach: Option<String>,
@@ -581,16 +582,13 @@ impl PaymentAuditQuery {
         };
         self
     }
-
-    fn normalise_route_filter(route: Option<String>) -> Option<String> {
-        route.and_then(|value| {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                return None;
-            }
-
-            AnalyticsRoute::from_filter_value(trimmed).map(|route| route.as_str().to_string())
-        })
+    /// The comma-separated routes, as their analytics route names. Unknown routes are dropped.
+    fn normalise_route_filter(route: Option<String>) -> Vec<String> {
+        PaymentAuditPaymentFilters::values(route.as_deref())
+            .iter()
+            .filter_map(|value| AnalyticsRoute::from_filter_value(value))
+            .map(|route| route.as_str().to_string())
+            .collect()
     }
 
     fn normalise_status_filter(status: Option<String>) -> Option<String> {
@@ -645,7 +643,7 @@ impl PaymentAuditQuery {
             page_size: normalise_page_size(page_size, DEFAULT_PAYMENT_AUDIT_PAGE_SIZE),
             payment_id,
             request_id,
-            gateway,
+            gateway: PaymentAuditPaymentFilters::values(gateway.as_deref()),
             route: Self::normalise_route_filter(route),
             status: Self::normalise_status_filter(status),
             flow_type,
@@ -732,6 +730,18 @@ pub struct PaymentAuditResponse {
     pub total_failure: usize,
     pub results: Vec<PaymentAuditSummary>,
     pub timeline: Vec<PaymentAuditEvent>,
+}
+
+/// The values the payment audit's dropdown filters can take for a merchant: what its own
+/// payments in the window carried, lower-cased as the filters match them (gateways as recorded).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PaymentAuditFilterOptions {
+    pub gateways: Vec<String>,
+    pub payment_methods: Vec<String>,
+    pub payment_method_types: Vec<String>,
+    pub card_networks: Vec<String>,
+    pub auth_types: Vec<String>,
+    pub currencies: Vec<String>,
 }
 
 /// A payment's assignment to an A/B experiment on one routing endpoint.

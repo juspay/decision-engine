@@ -5,6 +5,7 @@ use crate::analytics::{
     experiment_transactions as fetch_experiment_transactions,
     gateway_scores as fetch_gateway_scores, log_summaries as fetch_log_summaries,
     overview as fetch_overview, payment_audit as fetch_payment_audit,
+    payment_audit_filter_options as fetch_payment_audit_filter_options,
     preview_trace as fetch_preview_trace, routing_events as fetch_routing_events,
     routing_stats as fetch_routing_stats, AnalyticsQuery, AuthBandSpec, ExperimentResultsQuery,
     ExperimentTransactionsQuery, PaymentAuditQuery, RoutingEventsQuery,
@@ -122,6 +123,10 @@ pub fn serve() -> axum::Router<Arc<crate::tenant::GlobalAppState>> {
         .route("/routing-events", axum::routing::get(routing_events))
         .route("/log-summaries", axum::routing::get(log_summaries))
         .route("/payment-audit", axum::routing::get(payment_audit))
+        .route(
+            "/payment-audit/filter-options",
+            axum::routing::get(payment_audit_filter_options),
+        )
         .route("/preview-trace", axum::routing::get(preview_trace))
         .route(
             "/experiment/:experiment_id/results",
@@ -209,6 +214,20 @@ pub async fn payment_audit(
 ) -> Result<Json<crate::analytics::PaymentAuditResponse>, error::ContainerError<error::ApiError>> {
     let query = payment_audit_query_from_params(auth_context.merchant_id.clone(), &params);
     Ok(Json(fetch_payment_audit(&state, &query).await?))
+}
+
+/// The values the payment audit's dropdown filters can take: what the merchant's payments in the
+/// window (`range` or `start_ms`/`end_ms`) carried.
+pub async fn payment_audit_filter_options(
+    TenantStateResolver(state): TenantStateResolver,
+    AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
+    Query(params): Query<AnalyticsQueryParams>,
+) -> Result<Json<crate::analytics::PaymentAuditFilterOptions>, error::ContainerError<error::ApiError>>
+{
+    let query = payment_audit_query_from_params(auth_context.merchant_id.clone(), &params);
+    Ok(Json(
+        fetch_payment_audit_filter_options(&state, &query).await?,
+    ))
 }
 
 pub async fn preview_trace(

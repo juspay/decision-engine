@@ -89,7 +89,7 @@ pub fn score_filters(query: &AnalyticsQuery, start_ms: i64, end_ms: i64) -> Vec<
 
 /// The flow-type category of a scope. The preview trail is pinned to the `routing_evaluate`
 /// route, the dynamic trail is its flow-type list, and `All` is the union of both with no pin.
-fn scope_flow_type_filters(scope: PaymentAuditScope) -> Vec<FilterClause> {
+pub(crate) fn scope_flow_type_filters(scope: PaymentAuditScope) -> Vec<FilterClause> {
     let mut filters = Vec::new();
     if scope == PaymentAuditScope::Preview {
         filters.push(FilterClause::raw(format!(
@@ -124,14 +124,10 @@ pub fn payment_audit_raw_filters(
     filters.extend(merchant_filter(&query.merchant_id));
     filters.extend(scope_flow_type_filters(scope));
     if scope != PaymentAuditScope::Preview {
-        if let Some(route) = &query.route {
-            filters.push(FilterClause::eq("route", route.clone()));
-        }
+        filters.extend(FilterClause::in_list("route", &query.route));
     }
 
-    if let Some(gateway) = &query.gateway {
-        filters.push(FilterClause::eq("gateway", gateway.clone()));
-    }
+    filters.extend(FilterClause::in_list("gateway", &query.gateway));
     if let Some(status) = &query.status {
         filters.push(FilterClause::eq("status", status.clone()));
     }
@@ -388,8 +384,8 @@ mod tests {
             page_size: 20,
             payment_id: None,
             request_id: Some("req_1".to_string()),
-            gateway: None,
-            route: None,
+            gateway: Vec::new(),
+            route: Vec::new(),
             status: None,
             flow_type: None,
             routing_approach: None,
@@ -504,7 +500,7 @@ mod tests {
         let mut query = payment_audit_query();
         query.status = Some("FAILURE".to_string());
         query.exclude_routing_approach = Some("NTW_BASED_ROUTING".to_string());
-        query.gateway = Some("adyen".to_string());
+        query.gateway = vec!["adyen".to_string()];
         query.error_code = Some("DECLINED".to_string());
 
         let predicates = payment_audit_timeline_filters(&query, PaymentAuditScope::Dynamic)

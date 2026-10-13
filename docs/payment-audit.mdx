@@ -63,6 +63,11 @@ rule parameters Hyperswitch sends, so they follow Hyperswitch's meaning: `paymen
 `currency=USD,EUR`) and matches a payment with any of them. Values match case-insensitively, and
 the amount bounds are inclusive.
 
+The dropdowns list what the merchant's own payments carried in the selected window, read from
+`GET /analytics/payment-audit/filter-options` (same `range` / `start_ms` / `end_ms`), so each
+merchant sees its own gateways, methods, networks and currencies rather than a fixed list. Gateway,
+route, outcome and the attributes all take several values.
+
 They select whole payments: a matching payment keeps all its events, including the score
 updates that carry no attributes, so its outcome still reads correctly. These filters read the
 raw event table rather than the pre-aggregated summaries, so keep the time window narrow on busy

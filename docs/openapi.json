@@ -1052,7 +1052,8 @@
             "required": false,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Payment audit: comma-separated to match payments that went through any of them."
           },
           {
             "name": "payment_id",
@@ -1076,7 +1077,8 @@
             "required": false,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Payment audit: comma-separated to match payments that went through any of them."
           },
           {
             "name": "status",
@@ -5096,6 +5098,73 @@
           }
         }
       }
+    },
+    "/analytics/payment-audit/filter-options": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Payment audit filter options",
+        "description": "The values the payment audit dropdown filters can take for the merchant: the distinct gateways, payment methods, method types, card networks, auth types and currencies its payments carried in the window, in the form the filters match (attributes lower-cased). Up to 200 per field.",
+        "operationId": "analyticsPaymentAuditFilterOptions",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": true,
+            "description": "Tenant to resolve. The shipped config files define only the \"public\" tenant. No fallback — omitting this fails with TE_03.",
+            "schema": {
+              "type": "string",
+              "default": "public"
+            },
+            "example": "public"
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "start_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "end_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Filter options",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentAuditFilterOptions"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5221,8 +5290,13 @@
             "description": "Positional user-defined fields."
           },
           "preferredConnectors": {
-            "type": ["array", "null"],
-            "items": { "type": "string" },
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
             "description": "Ordered connector:mca_id preferences from the customer's profile-scoped history. The first entry is considered; health and eligibility checks still apply."
           },
           "metadata": {
@@ -7790,7 +7864,11 @@
           },
           "outcome": {
             "type": "string",
-            "enum": ["success", "failure", "pending"],
+            "enum": [
+              "success",
+              "failure",
+              "pending"
+            ],
             "description": "The payment's outcome from its reported statuses. Unlike `latest_status`, a routing call's own `success` does not count."
           },
           "latest_gateway": {
@@ -9570,6 +9648,55 @@
           }
         },
         "description": "Generic API error envelope: an error code, a human-readable message, and an optional structured payload."
+      },
+      "PaymentAuditFilterOptions": {
+        "type": "object",
+        "required": [
+          "gateways",
+          "payment_methods",
+          "payment_method_types",
+          "card_networks",
+          "auth_types",
+          "currencies"
+        ],
+        "properties": {
+          "gateways": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "payment_methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "payment_method_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "card_networks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "auth_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "currencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       }
     }
   }

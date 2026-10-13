@@ -8,6 +8,7 @@ import {
   AnalyticsGatewayScoresResponse,
   AnalyticsRangeValue,
   PaymentAuditEvent,
+  PaymentAuditFilterOptions,
   PaymentAuditExperiment,
   PaymentAuditResponse,
   PaymentAuditSummary,
@@ -53,65 +54,53 @@ const OUTCOME_OPTIONS = [
 type PaymentAttributeField = 'paymentMethod' | 'paymentMethodType' | 'cardNetwork' | 'authType' | 'currency'
 
 /**
- * The payment attribute dropdowns, in Hyperswitch's terms (as `/routing/hybrid` records them).
- * Values match case-insensitively.
+ * The payment attribute dropdowns. Their options are what the merchant's own payments carried in
+ * the window (`/payment-audit/filter-options`), so each merchant sees its own methods, networks and
+ * currencies. `labels` only names the common Hyperswitch values; any other value is shown as is.
  */
-const PAYMENT_ATTRIBUTE_FILTERS: { field: PaymentAttributeField; anyLabel: string; options: { value: string; label: string }[] }[] = [
+const PAYMENT_ATTRIBUTE_FILTERS: {
+  field: PaymentAttributeField
+  optionsKey: keyof Omit<PaymentAuditFilterOptions, 'gateways'>
+  anyLabel: string
+  labels: Record<string, string>
+}[] = [
   {
     field: 'paymentMethod',
+    optionsKey: 'payment_methods',
     anyLabel: 'Any payment method',
-    options: [
-      { value: 'card', label: 'Card' },
-      { value: 'wallet', label: 'Wallet' },
-      { value: 'upi', label: 'UPI' },
-      { value: 'bank_redirect', label: 'Bank redirect' },
-      { value: 'bank_transfer', label: 'Bank transfer' },
-      { value: 'bank_debit', label: 'Bank debit' },
-      { value: 'pay_later', label: 'Pay later' },
-      { value: 'crypto', label: 'Crypto' },
-    ],
+    labels: { upi: 'UPI', bank_redirect: 'Bank redirect', bank_transfer: 'Bank transfer', bank_debit: 'Bank debit', pay_later: 'Pay later' },
   },
   {
     field: 'paymentMethodType',
+    optionsKey: 'payment_method_types',
     anyLabel: 'Any method type',
-    options: [
-      { value: 'credit', label: 'Credit' },
-      { value: 'debit', label: 'Debit' },
-      { value: 'apple_pay', label: 'Apple Pay' },
-      { value: 'google_pay', label: 'Google Pay' },
-      { value: 'paypal', label: 'PayPal' },
-      { value: 'upi_collect', label: 'UPI collect' },
-      { value: 'upi_intent', label: 'UPI intent' },
-    ],
+    labels: { apple_pay: 'Apple Pay', google_pay: 'Google Pay', paypal: 'PayPal', upi_collect: 'UPI collect', upi_intent: 'UPI intent' },
   },
   {
     field: 'cardNetwork',
+    optionsKey: 'card_networks',
     anyLabel: 'Any card network',
-    options: [
-      { value: 'visa', label: 'Visa' },
-      { value: 'mastercard', label: 'Mastercard' },
-      { value: 'amex', label: 'American Express' },
-      { value: 'discover', label: 'Discover' },
-      { value: 'rupay', label: 'RuPay' },
-      { value: 'maestro', label: 'Maestro' },
-    ],
+    labels: { amex: 'American Express', americanexpress: 'American Express', rupay: 'RuPay', mastercard: 'Mastercard' },
   },
   {
     field: 'authType',
+    optionsKey: 'auth_types',
     anyLabel: 'Any auth type',
-    options: [
-      { value: 'three_ds', label: '3DS' },
-      { value: 'no_three_ds', label: 'No 3DS' },
-    ],
+    labels: { three_ds: '3DS', no_three_ds: 'No 3DS' },
   },
-  {
-    field: 'currency',
-    anyLabel: 'Any currency',
-    options: ['USD', 'EUR', 'GBP', 'INR', 'AED', 'SGD'].map((code) => ({ value: code, label: code })),
-  },
+  { field: 'currency', optionsKey: 'currencies', anyLabel: 'Any currency', labels: {} },
 ]
+
+/** How an attribute value reads in its dropdown: its known label, else the value tidied up. */
+function attributeLabel(field: PaymentAttributeField, value: string, labels: Record<string, string>) {
+  if (labels[value]) return labels[value]
+  if (field === 'currency') return value.toUpperCase()
+  return value
+    .split('_')
+    .map((word, index) => (index === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word))
+    .join(' ')
+}
 const ROUTE_OPTIONS = [
-  { value: '', label: 'Any route' },
   { value: 'decide_gateway', label: 'Decide Gateway' },
   { value: 'update_gateway_score', label: 'Update Gateway' },
   { value: 'routing_evaluate', label: 'Rule Evaluate' },
@@ -816,6 +805,20 @@ export function PaymentAuditPage() {
     dedupingInterval: 60_000,
   })
 
+  // The dropdowns' values: what this merchant's payments in the window actually carried.
+  const filterOptionsUrl =
+    range !== 'custom' || customWindow
+      ? `${AUDIT_PATH}/filter-options?${queryString({
+          range: range === 'custom' ? '1h' : range,
+          start_ms: customWindow?.start_ms,
+          end_ms: customWindow?.end_ms,
+        })}`
+      : null
+  const filterOptions = useSWR<PaymentAuditFilterOptions>(filterOptionsUrl, fetcher, {
+    revalidateOnFocus: false,
+    dedupingInterval: 60_000,
+  })
+
   const selectedSummary = useMemo(() => {
     const rows = auditSearch.data?.results || []
     return rows.find((row) => row.lookup_key === selectedKey) || rows[0] || null
@@ -894,9 +897,10 @@ export function PaymentAuditPage() {
     new Set(
       [
         ...(gatewayCatalog.data?.snapshots || []).map((snapshot) => snapshot.gateway),
+        ...(filterOptions.data?.gateways || []),
         ...activeGatewayList,
         // A gateway supplied by URL stays selectable even if it has gone quiet since.
-        appliedFilters.gateway,
+        ...appliedFilters.gateway.split(','),
       ].filter(Boolean),
     ),
   ).sort((left, right) => left.localeCompare(right))
@@ -1119,18 +1123,14 @@ export function PaymentAuditPage() {
         <div className="flex min-w-[480px] flex-1 items-center gap-3">
         {showAdvancedFilters ? (
           <div className="flex-1">
-            <select
-              className={fieldSelectClassName()}
-              value={filters.route}
-              onChange={(event) => applyDropdownFilter('route', event.target.value)}
-              aria-label="Route"
-            >
-              {ROUTE_OPTIONS.map((option) => (
-                <option key={option.value || 'all'} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+            <SearchableMultiSelect
+              values={filters.route.split(',').filter(Boolean)}
+              options={ROUTE_OPTIONS}
+              onChange={(values) => applyDropdownFilter('route', values.join(','))}
+              placeholder="Any route"
+              triggerClassName={fieldSelectClassName()}
+              compact
+            />
           </div>
         ) : null}
         {showAdvancedFilters ? (
@@ -1160,19 +1160,14 @@ export function PaymentAuditPage() {
         </div>
 
         <div className="flex-1">
-          <select
-            className={fieldSelectClassName()}
-            value={filters.gateway}
-            onChange={(event) => applyDropdownFilter('gateway', event.target.value)}
-            aria-label="Gateway"
-          >
-            <option value="">Any gateway</option>
-            {gatewayOptions.map((gateway) => (
-              <option key={gateway} value={gateway}>
-                {gateway}
-              </option>
-            ))}
-          </select>
+          <SearchableMultiSelect
+            values={filters.gateway.split(',').filter(Boolean)}
+            options={gatewayOptions.map((gateway) => ({ value: gateway, label: gateway }))}
+            onChange={(values) => applyDropdownFilter('gateway', values.join(','))}
+            placeholder="Any gateway"
+            triggerClassName={fieldSelectClassName()}
+            compact
+          />
         </div>
 
         <div className="flex-1">
@@ -1199,9 +1194,12 @@ export function PaymentAuditPage() {
         </div>
         {showAdvancedFilters ? (
           <div className="grid w-full basis-full grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
-            {PAYMENT_ATTRIBUTE_FILTERS.map(({ field, anyLabel, options }) => {
-              // Selected values, canonicalised to the listed option ignoring case. A value from a
-              // link that isn't listed stays selectable.
+            {PAYMENT_ATTRIBUTE_FILTERS.map(({ field, optionsKey, anyLabel, labels }) => {
+              // The merchant's own values, lower-cased as the filters match them.
+              const values = filterOptions.data?.[optionsKey] ?? []
+              const options = values.map((value) => ({ value, label: attributeLabel(field, value, labels) }))
+              // Selected values, canonicalised to an option ignoring case. A value from a link that
+              // no recent payment carried stays selectable.
               const selected = filters[field]
                 .split(',')
                 .map((value) => value.trim())
@@ -1209,13 +1207,13 @@ export function PaymentAuditPage() {
                 .map((value) => options.find((o) => o.value.toLowerCase() === value.toLowerCase())?.value ?? value)
               const unlisted = selected
                 .filter((value) => !options.some((o) => o.value === value))
-                .map((value) => ({ value, label: value }))
+                .map((value) => ({ value, label: attributeLabel(field, value, labels) }))
               return (
                 <SearchableMultiSelect
                   key={field}
                   values={selected}
                   options={[...unlisted, ...options]}
-                  onChange={(values) => applyDropdownFilter(field, values.join(','))}
+                  onChange={(next) => applyDropdownFilter(field, next.join(','))}
                   placeholder={anyLabel}
                   triggerClassName={fieldSelectClassName()}
                   compact

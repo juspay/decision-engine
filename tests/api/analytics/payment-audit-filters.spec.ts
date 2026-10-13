@@ -217,5 +217,44 @@ test.describe('Payment audit outcome and payment filters (API)', () => {
     ])
     expect(eur.body.results[0].outcome).toBe('success')
     expect(eur.body.total_success).toBe(1)
+    expect(eur.body.total_success).toBe(1)
+
+    // The dropdowns offer exactly what this merchant's payments carried, in the form the filters
+    // match, so every option finds payments.
+    const options = await api.raw('GET', '/analytics/payment-audit/filter-options', {
+      qs: { range: '1d' },
+    })
+    expect(options.status).toBe(200)
+    expect(options.body.payment_methods).toEqual(['card', 'wallet'])
+    expect(options.body.payment_method_types).toEqual(['credit', 'debit', 'google_pay'])
+    expect(options.body.currencies).toEqual(['eur', 'usd'])
+    expect(options.body.card_networks).toEqual(['visa'])
+    expect(options.body.gateways.length).toBeGreaterThan(0)
+    for (const currency of options.body.currencies) {
+      expect((await matching({ currency })).length, currency).toBeGreaterThan(0)
+    }
+
+    // Gateway and route take several values too.
+    const allGateways = await search(api, { gateway: options.body.gateways.join(',') })
+    expect(allGateways.body.total_results).toBe(PAYMENTS.length)
+    const routes = await search(api, { route: 'routing_hybrid,decide_gateway' })
+    expect(routes.body.total_results).toBe(PAYMENTS.length)
+  })
+
+  test('filter options are scoped to the merchant', async ({ api, merchant }) => {
+    // A merchant with no payments has nothing to offer, whatever other merchants routed.
+    const options = await api.raw('GET', '/analytics/payment-audit/filter-options', {
+      qs: { range: '1d' },
+    })
+    expect(options.status).toBe(200)
+    expect(options.body).toEqual({
+      gateways: [],
+      payment_methods: [],
+      payment_method_types: [],
+      card_networks: [],
+      auth_types: [],
+      currencies: [],
+    })
+    expect(merchant.id).toBeTruthy()
   })
 })

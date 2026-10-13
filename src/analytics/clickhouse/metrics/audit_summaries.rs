@@ -297,8 +297,8 @@ fn with_filter_aggregates(query: &PaymentAuditQuery, base: &[Aggregate]) -> Vec<
         .is_some_and(|kind| !payment_audit_routing_kind_filters(kind).is_empty());
     let payment = &query.payment_filters;
     let filtered = [
-        (query.gateway.is_some(), Aggregate::Gateways),
-        (query.route.is_some(), Aggregate::Routes),
+        (!query.gateway.is_empty(), Aggregate::Gateways),
+        (!query.route.is_empty(), Aggregate::Routes),
         (query.status.is_some(), Aggregate::Statuses),
         (query.flow_type.is_some(), Aggregate::FlowTypes),
         (routing_kind_filters, Aggregate::RoutingFamilies),
@@ -434,17 +434,15 @@ fn outer_summary_filters(query: &PaymentAuditQuery) -> Vec<FilterClause> {
     ) {
         filters.push(FilterClause::eq("lookup_key", lookup_key));
     }
-    if let Some(gateway) = &query.gateway {
-        filters.push(FilterClause::new(
-            "has(gateways, ?)",
-            vec![gateway.clone().into()],
-        ));
-    }
-    if let Some(route) = &query.route {
-        filters.push(FilterClause::new(
-            "has(routes, ?)",
-            vec![route.clone().into()],
-        ));
+    // A payment matches when it went through any of the selected gateways / routes.
+    for (values, aggregate) in [(&query.gateway, "gateways"), (&query.route, "routes")] {
+        if !values.is_empty() {
+            let placeholders = vec!["?"; values.len()].join(", ");
+            filters.push(FilterClause::new(
+                format!("hasAny({aggregate}, [{placeholders}])"),
+                values.iter().cloned().map(BindArg::from).collect(),
+            ));
+        }
     }
     if let Some(status) = &query.status {
         filters.push(FilterClause::new(
@@ -708,8 +706,8 @@ mod tests {
             page_size: 10,
             payment_id: None,
             request_id: None,
-            gateway: None,
-            route: None,
+            gateway: Vec::new(),
+            route: Vec::new(),
             status: None,
             flow_type: None,
             routing_approach: None,
@@ -843,7 +841,7 @@ mod tests {
             COUNT_AGGREGATES
         );
 
-        query.gateway = Some("adyen".to_string());
+        query.gateway = vec!["adyen".to_string()];
         query.status = Some("FAILURE".to_string());
         query.routing_kind = Some(PaymentAuditRoutingKind::RuleBased);
         let aggregates = with_filter_aggregates(&query, ROW_AGGREGATES);

@@ -714,6 +714,16 @@ export interface RoutingEventsResponse {
   generated_at_ms: number
 }
 
+/** What a merchant's payments in the window carried, for the payment audit's dropdown filters. */
+export interface PaymentAuditFilterOptions {
+  gateways: string[]
+  payment_methods: string[]
+  payment_method_types: string[]
+  card_networks: string[]
+  auth_types: string[]
+  currencies: string[]
+}
+
 /** A payment's assignment to an A/B experiment on one routing endpoint. */
 export interface PaymentAuditExperiment {
   experiment_id: string

@@ -148,11 +148,12 @@ pub async fn load(
             .request_id
             .clone()
             .or_else(|| results.first().and_then(|row| row.request_id.clone())),
-        gateway: query.gateway.clone(),
+        // Echoed comma-separated, as they were requested.
+        gateway: (!query.gateway.is_empty()).then(|| query.gateway.join(",")),
         route: if scope == PaymentAuditScope::Preview {
             Some(AnalyticsRoute::RoutingEvaluate.as_str().to_string())
         } else {
-            query.route.clone()
+            (!query.route.is_empty()).then(|| query.route.join(","))
         },
         status: query.status.clone(),
         flow_type: query.flow_type.clone(),
