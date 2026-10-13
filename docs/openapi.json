@@ -1843,7 +1843,7 @@
           "Auth"
         ],
         "summary": "Signup",
-        "description": "Create an operator account. Password must meet dashboard password policy. Requires the deployment's admin secret in `x-admin-secret` unless `user_auth.signup_requires_admin_secret` is set to false in config (it defaults to true).",
+        "description": "Create an operator account. Password must meet dashboard password policy. Requires the deployment's admin secret in `x-admin-secret` unless `user_auth.signup_requires_admin_secret` is set to false in config (it defaults to true). Addresses on `user_auth.super_admin_emails` always require the admin secret.",
         "security": [
           {
             "AdminSecret": []
@@ -1920,7 +1920,7 @@
           "Auth"
         ],
         "summary": "Super-admin: enter a merchant",
-        "description": "Platform super-admin only (email on `user_auth.super_admin_emails`). From a standard session, mint a `super_admin_view` token scoped to any existing merchant — regardless of membership — while keeping the caller's own identity. Returns 403 if the caller is not a rostered super-admin, 404 if the merchant does not exist.",
+        "description": "Platform super-admin only (session email exactly matches an entry on `user_auth.super_admin_emails`). From a standard session, mint a `super_admin_view` token scoped to any existing merchant — regardless of membership — while keeping the caller's own identity. Returns 403 if the caller is not a rostered super-admin, 404 if the merchant does not exist.",
         "security": [
           {
             "BearerAuth": []

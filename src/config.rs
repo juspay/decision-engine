@@ -143,7 +143,7 @@ pub struct UserAuthConfig {
     #[serde(default = "default_true")]
     pub signup_requires_admin_secret: bool,
     /// Emails granted platform super-admin: they may enter any merchant's dashboard by pasting its
-    /// ID. Compared case-insensitively against the JWT's `email` claim at the moment of the action,
+    /// ID. Compared exactly against the JWT's `email` claim at the moment of the action,
     /// so config is the single source of truth — a grant/revoke takes effect on redeploy. Kept in
     /// config (not the DB) on purpose: the roster is small, rarely changes, and every change goes
     /// through code review + the deploy pipeline. Relies on `users.email` being immutable — there is
