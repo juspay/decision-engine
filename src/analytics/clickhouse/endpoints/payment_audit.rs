@@ -158,7 +158,7 @@ pub async fn load(
         status: query.status.clone(),
         flow_type: query.flow_type.clone(),
         routing_approach: query.routing_approach.clone(),
-        error_code: query.error_code.clone(),
+        error_code: (!query.error_code.is_empty()).then(|| query.error_code.join(",")),
         scope: scope.as_str().to_string(),
         routing_kind: query.routing_kind.map(|kind| kind.as_str().to_string()),
         page,

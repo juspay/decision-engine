@@ -30,6 +30,7 @@ import {
 } from '../../lib/timeRange'
 
 import { PageHeading } from '../ui/PageHeading'
+import { useMerchantStore } from '../../store/merchantStore'
 import {
   eventPhase as auditEventPhase,
   flowTypeValue,
@@ -117,6 +118,38 @@ const AUDIT_PATH = '/analytics/payment-audit'
 /** Payments per page; the API serves up to 100. */
 const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const
 const DEFAULT_PAGE_SIZE = 20
+
+/**
+ * The last search per merchant, so leaving the page and coming back keeps its filters, range and
+ * page size. Storage can be unavailable (private windows, blocked site data); the page then just
+ * starts unfiltered.
+ */
+function savedSearchKey(merchantId: string) {
+  return `decision-audit:last-search:${merchantId}`
+}
+
+function readSavedSearch(merchantId: string): URLSearchParams | null {
+  if (!merchantId) return null
+  try {
+    const saved = window.localStorage.getItem(savedSearchKey(merchantId))
+    return saved ? new URLSearchParams(saved) : null
+  } catch {
+    return null
+  }
+}
+
+/** Saves what defines the search, not where the user was in it (page, selected payment). */
+function saveSearch(merchantId: string, query: string) {
+  if (!merchantId) return
+  const params = new URLSearchParams(query)
+  params.delete('page')
+  params.delete('selected')
+  try {
+    window.localStorage.setItem(savedSearchKey(merchantId), params.toString())
+  } catch {
+    // Not saved; the URL still carries this search.
+  }
+}
 
 function parsePageSize(searchParams: URLSearchParams): number {
   const value = Number(searchParams.get('page_size'))
@@ -720,15 +753,26 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
 export function PaymentAuditPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigationType = useNavigationType()
+  const merchantId = useMerchantStore((state) => state.merchantId)
 
-  const initialRange = searchParams.get('start_ms') && searchParams.get('end_ms')
+  // Arriving without a search in the URL (e.g. from the sidebar) resumes the merchant's last one.
+  const [startupParams] = useState(() =>
+    searchParams.toString() ? searchParams : readSavedSearch(merchantId) ?? searchParams,
+  )
+  useEffect(() => {
+    if (startupParams !== searchParams) setSearchParams(startupParams, { replace: true })
+    // Once, on arrival: later URL changes come from the page's own searches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const initialRange = startupParams.get('start_ms') && startupParams.get('end_ms')
     ? 'custom'
-    : parseRange(searchParams.get('range'))
-  const initialFilters = parseFilters(searchParams)
-  const initialPage = Math.max(1, Number(searchParams.get('page') || '1'))
-  const initialSelectedKey = searchParams.get('selected') || ''
-  const initialStartMs = Number(searchParams.get('start_ms') || '0')
-  const initialEndMs = Number(searchParams.get('end_ms') || '0')
+    : parseRange(startupParams.get('range'))
+  const initialFilters = parseFilters(startupParams)
+  const initialPage = Math.max(1, Number(startupParams.get('page') || '1'))
+  const initialSelectedKey = startupParams.get('selected') || ''
+  const initialStartMs = Number(startupParams.get('start_ms') || '0')
+  const initialEndMs = Number(startupParams.get('end_ms') || '0')
   const initialCustomWindow =
     initialStartMs > 0 && initialEndMs > initialStartMs
       ? { start_ms: initialStartMs, end_ms: initialEndMs }
@@ -749,7 +793,7 @@ export function PaymentAuditPage() {
   const [customEnd, setCustomEnd] = useState(() =>
     toDateTimeInputValue(initialCustomWindow.end_ms),
   )
-  const [pageSize, setPageSize] = useState(() => parsePageSize(searchParams))
+  const [pageSize, setPageSize] = useState(() => parsePageSize(startupParams))
 
   useEffect(() => {
     if (navigationType !== 'POP') return
@@ -884,6 +928,10 @@ export function PaymentAuditPage() {
   )
   const activeGateways = activeGatewayList.length
   const hasActiveFilters = Object.values(filters).some(Boolean)
+  // Error codes the merchant's payments hit in the window, plus any selected from a link.
+  const errorCodeOptions = Array.from(
+    new Set([...(filterOptions.data?.error_codes || []), ...appliedFilters.errorCode.split(',')].filter(Boolean)),
+  ).sort((left, right) => left.localeCompare(right))
   const gatewayOptions = Array.from(
     new Set(
       [
@@ -937,6 +985,7 @@ export function PaymentAuditPage() {
       selected: nextSelectedKey || undefined,
     })
     setSearchParams(nextQuery)
+    saveSearch(merchantId, nextQuery)
   }
 
   function updateFilter(field: keyof AuditFilters, value: string) {
@@ -1123,30 +1172,6 @@ export function PaymentAuditPage() {
         </div>
 
         <div className="flex min-w-[480px] flex-1 items-center gap-3">
-        {showAdvancedFilters ? (
-          <div className="flex-1">
-            <SearchableMultiSelect
-              values={filters.route.split(',').filter(Boolean)}
-              options={ROUTE_OPTIONS}
-              onChange={(values) => updateFilter('route', values.join(','))}
-              onClose={applyIfChanged}
-              placeholder="Any route"
-              triggerClassName={fieldSelectClassName()}
-              compact
-            />
-          </div>
-        ) : null}
-        {showAdvancedFilters ? (
-          <div className="flex-1">
-            <input
-              className={fieldClassName()}
-              value={filters.errorCode}
-              onChange={(event) => updateFilter('errorCode', event.target.value)}
-              placeholder="Error code"
-              aria-label="Error code"
-            />
-          </div>
-        ) : null}
         <div className="flex-1">
           <select
             className={`${fieldSelectClassName()} min-w-[168px]`}
@@ -1169,7 +1194,7 @@ export function PaymentAuditPage() {
             onChange={(values) => updateFilter('gateway', values.join(','))}
             onClose={applyIfChanged}
             placeholder="Any gateway"
-            triggerClassName={fieldSelectClassName()}
+            triggerClassName={fieldClassName()}
             compact
           />
         </div>
@@ -1181,7 +1206,7 @@ export function PaymentAuditPage() {
             onChange={(values) => updateFilter('status', values.join(','))}
             onClose={applyIfChanged}
             placeholder="Any outcome"
-            triggerClassName={fieldSelectClassName()}
+            triggerClassName={fieldClassName()}
             compact
           />
         </div>
@@ -1198,7 +1223,25 @@ export function PaymentAuditPage() {
         </Button>
         </div>
         {showAdvancedFilters ? (
-          <div className="grid w-full basis-full grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-8">
+          <div className="grid w-full basis-full grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+            <SearchableMultiSelect
+              values={filters.route.split(',').filter(Boolean)}
+              options={ROUTE_OPTIONS}
+              onChange={(values) => updateFilter('route', values.join(','))}
+              onClose={applyIfChanged}
+              placeholder="Any route"
+              triggerClassName={fieldClassName()}
+              compact
+            />
+            <SearchableMultiSelect
+              values={filters.errorCode.split(',').filter(Boolean)}
+              options={errorCodeOptions.map((code) => ({ value: code, label: code }))}
+              onChange={(values) => updateFilter('errorCode', values.join(','))}
+              onClose={applyIfChanged}
+              placeholder="Any error code"
+              triggerClassName={fieldClassName()}
+              compact
+            />
             {PAYMENT_ATTRIBUTE_FILTERS.map(({ field, optionsKey, anyLabel, labels }) => {
               // The merchant's own values, lower-cased as the filters match them.
               const values = filterOptions.data?.[optionsKey] ?? []
@@ -1221,7 +1264,7 @@ export function PaymentAuditPage() {
                   onChange={(next) => updateFilter(field, next.join(','))}
                   onClose={applyIfChanged}
                   placeholder={anyLabel}
-                  triggerClassName={fieldSelectClassName()}
+                  triggerClassName={fieldClassName()}
                   compact
                 />
               )

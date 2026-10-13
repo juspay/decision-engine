@@ -722,6 +722,7 @@ export interface PaymentAuditFilterOptions {
   card_networks: string[]
   auth_types: string[]
   currencies: string[]
+  error_codes: string[]
 }
 
 /** A payment's assignment to an A/B experiment on one routing endpoint. */

@@ -500,7 +500,8 @@ pub struct PaymentAuditQuery {
     pub flow_type: Option<String>,
     pub routing_approach: Option<String>,
     pub exclude_routing_approach: Option<String>,
-    pub error_code: Option<String>,
+    /// Payments that hit any of these error codes.
+    pub error_code: Vec<String>,
     pub scope: PaymentAuditScope,
     pub routing_kind: Option<PaymentAuditRoutingKind>,
     pub payment_filters: PaymentAuditPaymentFilters,
@@ -659,7 +660,7 @@ impl PaymentAuditQuery {
             flow_type,
             routing_approach,
             exclude_routing_approach,
-            error_code,
+            error_code: PaymentAuditPaymentFilters::values(error_code.as_deref()),
             scope: PaymentAuditScope::from_query(scope.as_deref()),
             routing_kind: PaymentAuditRoutingKind::from_query(routing_kind.as_deref()),
             payment_filters: PaymentAuditPaymentFilters::default(),
@@ -752,6 +753,8 @@ pub struct PaymentAuditFilterOptions {
     pub card_networks: Vec<String>,
     pub auth_types: Vec<String>,
     pub currencies: Vec<String>,
+    /// Error codes as recorded (matched exactly).
+    pub error_codes: Vec<String>,
 }
 
 /// A payment's assignment to an A/B experiment on one routing endpoint.

@@ -258,6 +258,7 @@ test.describe('Payment audit outcome and payment filters (API)', () => {
       card_networks: [],
       auth_types: [],
       currencies: [],
+      error_codes: [],
     })
     expect(merchant.id).toBeTruthy()
   })

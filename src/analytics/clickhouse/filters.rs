@@ -140,9 +140,7 @@ pub fn payment_audit_raw_filters(
     if let Some(routing_approach) = &query.exclude_routing_approach {
         filters.push(routing_approach_exclusion_filter(routing_approach));
     }
-    if let Some(error_code) = &query.error_code {
-        filters.push(FilterClause::eq("error_code", error_code.clone()));
-    }
+    filters.extend(FilterClause::in_list("error_code", &query.error_code));
 
     filters
 }
@@ -390,7 +388,7 @@ mod tests {
             flow_type: None,
             routing_approach: None,
             exclude_routing_approach: None,
-            error_code: None,
+            error_code: Vec::new(),
             scope: PaymentAuditScope::All,
             routing_kind: None,
             payment_filters: Default::default(),
@@ -501,7 +499,7 @@ mod tests {
         query.status = Some("FAILURE".to_string());
         query.exclude_routing_approach = Some("NTW_BASED_ROUTING".to_string());
         query.gateway = vec!["adyen".to_string()];
-        query.error_code = Some("DECLINED".to_string());
+        query.error_code = vec!["DECLINED".to_string()];
 
         let predicates = payment_audit_timeline_filters(&query, PaymentAuditScope::Dynamic)
             .iter()

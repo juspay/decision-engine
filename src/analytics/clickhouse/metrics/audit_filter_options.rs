@@ -20,10 +20,11 @@ struct OptionsRow {
     card_networks: Vec<String>,
     auth_types: Vec<String>,
     currencies: Vec<String>,
+    error_codes: Vec<String>,
 }
 
 /// The distinct values the merchant's payments in the window carried, for the audit's dropdown
-/// filters. Read from the same events and normalised the same way as the filters match them
+/// filters (and error codes). Read from the same events and normalised the same way as the filters match them
 /// (`audit_summaries`), so every option finds payments.
 pub async fn load(
     client: &clickhouse::Client,
@@ -37,6 +38,7 @@ pub async fn load(
         card_networks: row.card_networks,
         auth_types: row.auth_types,
         currencies: row.currencies,
+        error_codes: row.error_codes,
     })
 }
 
@@ -61,6 +63,10 @@ fn options_query(query: &PaymentAuditQuery) -> BoundQueryBuilder {
         attribute("card_network", "card_networks"),
         attribute("auth_type", "auth_types"),
         attribute("currency", "currencies"),
+        format!(
+            "arraySort(arrayFilter(value -> value != '', \
+             groupUniqArray({MAX_OPTIONS})(ifNull(error_code, '')))) AS error_codes"
+        ),
     ]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));
     builder.extend_filters(merchant_filter(&query.merchant_id));

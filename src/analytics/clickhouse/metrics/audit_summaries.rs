@@ -302,7 +302,7 @@ fn with_filter_aggregates(query: &PaymentAuditQuery, base: &[Aggregate]) -> Vec<
         (query.status.is_some(), Aggregate::Statuses),
         (query.flow_type.is_some(), Aggregate::FlowTypes),
         (routing_kind_filters, Aggregate::RoutingFamilies),
-        (query.error_code.is_some(), Aggregate::ErrorCodes),
+        (!query.error_code.is_empty(), Aggregate::ErrorCodes),
         (!payment.outcome.is_empty(), Aggregate::Statuses),
         (!payment.currency.is_empty(), Aggregate::Currencies),
         (
@@ -461,10 +461,16 @@ fn outer_summary_filters(query: &PaymentAuditQuery) -> Vec<FilterClause> {
     }
     // The lookup summary table intentionally does not carry routing_approach state.
     // When routing_approach is included or excluded, callers use raw_summary_fragment instead.
-    if let Some(error_code) = &query.error_code {
+    if !query.error_code.is_empty() {
+        let placeholders = vec!["?"; query.error_code.len()].join(", ");
         filters.push(FilterClause::new(
-            "has(error_codes, ?)",
-            vec![error_code.clone().into()],
+            format!("hasAny(error_codes, [{placeholders}])"),
+            query
+                .error_code
+                .iter()
+                .cloned()
+                .map(BindArg::from)
+                .collect(),
         ));
     }
 
@@ -712,7 +718,7 @@ mod tests {
             flow_type: None,
             routing_approach: None,
             exclude_routing_approach: None,
-            error_code: None,
+            error_code: Vec::new(),
             scope: PaymentAuditScope::All,
             routing_kind: None,
             payment_filters: Default::default(),
