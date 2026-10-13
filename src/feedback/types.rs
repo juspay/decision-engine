@@ -261,12 +261,36 @@ pub struct UpdateScorePayload {
     pub is_smart_retry: Option<bool>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum RetryDecision {
+    RetrySameGateway,
+    RetryDifferentGateway,
+    DoNotRetry,
+}
+
+impl RetryDecision {
+    pub fn from_gsm_decision_str(decision: Option<&str>) -> Self {
+        match decision {
+            Some("retry") => Self::RetrySameGateway,
+            Some("requeue") => Self::RetryDifferentGateway,
+            _ => Self::DoNotRetry,
+        }
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UpdateScoreResponse {
     pub message: String,
     pub merchant_id: String,
     pub gateway: String,
     pub payment_id: String,
+    /// The retry decision derived from the GSM lookup.
+    pub retry_decision: RetryDecision,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unified_code: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unified_message: Option<String>,
     /// GSM lookup result. Present only when `errorInfo` was supplied in the request
     /// and a matching rule was found in the GSM store.
     #[serde(skip_serializing_if = "Option::is_none")]
