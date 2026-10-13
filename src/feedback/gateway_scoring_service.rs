@@ -461,6 +461,27 @@ pub async fn check_and_update_gateway_score_(
     //   (a) the GSM scoring filter skips gateway penalisation, or
     //   (b) GatewayScoringData is absent from Redis (expired/not cached).
     let is_success = is_transaction_success(api_payload.status.clone());
+    if is_success || is_transaction_failure(api_payload.status.clone()) {
+        let experiments_to_stop =
+            crate::decider::gatewaydecider::ab_test::guardrail::record_outcome(
+                &api_payload.merchant_id,
+                &api_payload.payment_id,
+                is_success,
+            );
+        for experiment_id in experiments_to_stop {
+            if let Err(error) =
+                crate::euclid::handlers::routing_rules::stop_breached_payment_experiment(
+                    &api_payload.merchant_id,
+                    &experiment_id,
+                )
+                .await
+            {
+                logger::error!(merchant_id = %api_payload.merchant_id,
+                    experiment_id = %experiment_id, error = %error,
+                    "Failed to stop breached A/B experiment; later payment feedback will retry");
+            }
+        }
+    }
     crate::decider::gatewaydecider::ab_test::emit_if_in_flight(
         &api_payload.payment_id,
         &api_payload.merchant_id,

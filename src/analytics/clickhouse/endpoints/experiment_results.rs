@@ -317,16 +317,22 @@ fn compute_significance(
     let n_c = control.transaction_count as f64;
     let n_v = variant.transaction_count as f64;
 
-    if total < min_sample_size as i64 || n_c == 0.0 || n_v == 0.0 {
-        return (None, None, ExperimentVerdict::CollectingData);
+    // Safety uses completed payment outcomes, just like the feedback-triggered stop. It needs
+    // one resolved payment in each arm but does not wait for the significance sample target.
+    let resolved_rate = |arm: &ExperimentArmMetrics| {
+        let resolved = arm.success_count + arm.failure_count;
+        (resolved > 0).then(|| arm.success_count as f64 / resolved as f64)
+    };
+    if let (Some(control_rate), Some(variant_rate)) =
+        (resolved_rate(control), resolved_rate(variant))
+    {
+        if (control_rate - variant_rate) * 100.0 > guardrail_threshold_pp {
+            return (None, None, ExperimentVerdict::GuardrailBreached);
+        }
     }
 
-    // Guardrail check: if variant auth is degraded beyond threshold, flag immediately — cost
-    // savings never justify an auth drop past the safety guardrail. Deliberately a point
-    // estimate with no significance test (safety should trip eagerly); the CollectingData gate
-    // above keeps it from firing on a handful of transactions.
-    if (control.auth_rate - variant.auth_rate) * 100.0 > guardrail_threshold_pp {
-        return (None, None, ExperimentVerdict::GuardrailBreached);
+    if total < min_sample_size as i64 || n_c == 0.0 || n_v == 0.0 {
+        return (None, None, ExperimentVerdict::CollectingData);
     }
 
     // EV z-test: two-sample z on the per-transaction value v = success·(margin·10⁴ + saved_bps).

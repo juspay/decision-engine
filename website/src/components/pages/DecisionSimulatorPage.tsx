@@ -4059,6 +4059,9 @@ export function DecisionSimulatorPage() {
                 spacer had, but without carrying 22px of dead space above the buttons once the cluster
                 wraps onto a line of its own (where the spacer aligned it with nothing). */}
             <div className="flex flex-wrap items-center gap-3 self-end lg:ml-auto">
+                <span className="text-xs text-slate-500 dark:text-slate-400" title="Routing endpoint used for each simulated payment; change it under More">
+                  {SIMULATION_ENDPOINTS.find(e => e.value === simulationConfig.endpoint)?.label}
+                </span>
                 <Button
                   size="sm"
                   variant="ghost"

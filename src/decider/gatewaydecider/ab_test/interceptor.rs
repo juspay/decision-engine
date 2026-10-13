@@ -1,5 +1,6 @@
 use super::arms;
 use super::config::{self, AbTestConfig};
+use super::guardrail;
 use super::outcome::{self, ExperimentAssignment};
 use crate::analytics::{serialize_details, AnalyticsFlowContext, ApiFlow, FlowType};
 use crate::decider::gatewaydecider::types::DomainDeciderRequestForApiCallV2;
@@ -29,6 +30,12 @@ pub fn emit_routing_event(
     projection: &arms::ArmProjection,
     gateway: Option<&str>,
 ) {
+    guardrail::record_decision(
+        merchant_id,
+        &assignment.experiment_id,
+        payment_id,
+        assignment.endpoint,
+    );
     let variant_arm = assignment.side.as_str();
     let arm_label = match (&projection.rule_algorithm_id, &projection.sr) {
         (Some(rule), Some(_)) => format!("{rule}+sr_routing"),
@@ -68,8 +75,17 @@ pub async fn hybrid_arm_has_sr_layer(merchant_id: &str, payment_id: &str) -> Opt
     if !config::is_enabled(merchant_id).await {
         return None;
     }
-    let AbTestConfig { data, .. } = config::load_active_ab_test(merchant_id).await?;
-    let plan = arms::plan(&data, ExperimentEndpoint::HybridRouting, payment_id);
+    let AbTestConfig {
+        experiment_id,
+        data,
+    } = config::load_active_ab_test(merchant_id).await?;
+    let plan = guardrail::plan(
+        merchant_id,
+        &experiment_id,
+        &data,
+        ExperimentEndpoint::HybridRouting,
+        payment_id,
+    );
     // A payment the experiment doesn't cover is routed by the live setup.
     plan.in_experiment.then_some(plan.projection.sr.is_some())
 }
@@ -95,7 +111,13 @@ pub async fn intercept(
     };
 
     let payment_id = dreq.payment_id();
-    let plan = arms::plan(&data, endpoint, payment_id);
+    let plan = guardrail::plan(
+        &dreq.merchant_id,
+        &experiment_id,
+        &data,
+        endpoint,
+        payment_id,
+    );
 
     logger::debug!(
         "ab_test intercept: payment_id={} merchant={} experiment={} endpoint={} arm={} in_experiment={}",
