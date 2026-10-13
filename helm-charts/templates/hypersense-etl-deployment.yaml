@@ -1,0 +1,161 @@
+{{- if .Values.hypersenseEtl.enabled -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "decision-engine.hypersenseEtlName" . }}
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ .Values.hypersenseEtl.metadata.labels.component }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "decision-engine.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: {{ .Values.hypersenseEtl.metadata.labels.component }}
+  template:
+    metadata:
+      labels:
+        {{- include "decision-engine.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: {{ .Values.hypersenseEtl.metadata.labels.component }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "decision-engine.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      {{- if .Values.initContainers.enabled }}
+      initContainers:
+        {{- if .Values.decisionEngine.usePostgreSQL }}
+        - name: wait-for-postgresql
+          image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
+          imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} 5432; do echo waiting for postgresql; sleep 2; done;']
+        {{- end }}
+        {{- if .Values.decisionEngine.useRedis }}
+        - name: wait-for-redis
+          image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
+          imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.redisHost" . }} 6379; do echo waiting for redis; sleep 2; done;']
+        {{- end }}
+      {{- end }}
+      containers:
+        - name: hypersense-etl
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.hypersenseEtl.image.repository }}:{{ .Values.hypersenseEtl.image.tag }}"
+          imagePullPolicy: {{ .Values.hypersenseEtl.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.hypersenseEtl.service.port }}
+              protocol: TCP
+          env:
+            # ── Connection coordinates: from the shared Hypersense ConfigMap ──
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "decision-engine.hypersenseConfigMapName" . }}
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "decision-engine.hypersenseConfigMapName" . }}
+                  key: DB_PORT
+            - name: DB_USER
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "decision-engine.hypersenseConfigMapName" . }}
+                  key: DB_USER
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "decision-engine.hypersenseConfigMapName" . }}
+                  key: DB_NAME
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "decision-engine.hypersenseConfigMapName" . }}
+                  key: REDIS_URL
+            # ── DB password: from the shared Hypersense Secret ──
+            - name: DB_PASSWD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "decision-engine.hypersenseSecretName" . }}
+                  key: DB_PASSWD
+            # ── Application config: direct values ──
+            - name: RUNNING_ENV
+              value: {{ .Values.hypersenseEtl.env.runningEnv | quote }}
+            - name: MODE
+              value: {{ .Values.hypersenseEtl.env.mode | quote }}
+            - name: DB_SCHEMA
+              value: {{ .Values.hypersenseEtl.env.dbSchema | quote }}
+            - name: DB_SCHEMA_RE
+              value: {{ .Values.hypersenseEtl.env.dbSchemaRe | quote }}
+            - name: DB_SCHEMA_AUTH
+              value: {{ .Values.hypersenseEtl.env.dbSchemaAuth | quote }}
+            - name: KAFKA_BOOTSTRAP_SERVERS
+              value: {{ .Values.hypersenseEtl.env.kafkaBootstrapServers | quote }}
+            - name: KAFKA_TOPIC
+              value: {{ .Values.hypersenseEtl.env.kafkaTopic | quote }}
+            - name: KAFKA_GROUP_ID
+              value: {{ .Values.hypersenseEtl.env.kafkaGroupId | quote }}
+            - name: AWS_REGION
+              value: {{ .Values.hypersenseEtl.env.awsRegion | quote }}
+            - name: S3_BUCKET
+              value: {{ .Values.hypersenseEtl.env.s3Bucket | quote }}
+            - name: CH_HOST
+              value: {{ .Values.hypersenseEtl.env.clickhouseHost | default .Values.analytics.clickhouse.host | quote }}
+            - name: CH_PORT
+              value: {{ .Values.hypersenseEtl.env.clickhousePort | quote }}
+            - name: CH_USER
+              value: {{ .Values.hypersenseEtl.env.clickhouseUser | quote }}
+            - name: CH_NAME
+              value: {{ .Values.hypersenseEtl.env.clickhouseName | quote }}
+            - name: AI_BACKEND_HOST
+              value: {{ .Values.hypersenseEtl.env.aiBackendHost | quote }}
+            - name: HYPER_SWITCH_BASE_URL
+              value: {{ .Values.hypersenseEtl.env.hyperSwitchBaseUrl | quote }}
+          {{- if .Values.hypersenseEtl.migration.runOnStartup }}
+            - name: RUN_RDS_MIGRATIONS
+              value: "TRUE"
+          {{- end }}
+          {{- range $name, $value := .Values.hypersenseEtl.extraEnvVars }}
+            - name: {{ $name }}
+            {{- if and (kindIs "map" $value) $value.valueFrom }}
+              valueFrom:
+                {{- toYaml $value.valueFrom | nindent 16 }}
+            {{- else }}
+              value: {{ $value | quote }}
+            {{- end }}
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: {{ .Values.hypersenseEtl.healthcheck.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.hypersenseEtl.healthcheck.initialDelaySeconds }}
+            periodSeconds: {{ .Values.hypersenseEtl.healthcheck.periodSeconds }}
+            timeoutSeconds: {{ .Values.hypersenseEtl.healthcheck.timeoutSeconds }}
+            failureThreshold: {{ .Values.hypersenseEtl.healthcheck.failureThreshold }}
+          readinessProbe:
+            httpGet:
+              path: {{ .Values.hypersenseEtl.healthcheck.path }}
+              port: http
+            initialDelaySeconds: {{ .Values.hypersenseEtl.healthcheck.initialDelaySeconds }}
+            periodSeconds: {{ .Values.hypersenseEtl.healthcheck.periodSeconds }}
+            timeoutSeconds: {{ .Values.hypersenseEtl.healthcheck.timeoutSeconds }}
+          resources:
+            {{- toYaml .Values.hypersenseEtl.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
