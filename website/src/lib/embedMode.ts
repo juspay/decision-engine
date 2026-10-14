@@ -57,10 +57,12 @@ export function overlayInsetClass(clearsSidebar = true): string {
 }
 
 /**
- * Height class for a page that fills the shell. Standalone the scroller also holds the 78px top
- * bar, so the page subtracts that plus main's 56px of vertical padding (and keeps 6px of slack);
- * embedded there is no top bar, so subtracting it too leaves a dead band at the foot of the frame.
+ * Pins a side panel while the page scrolls, one viewport tall. Standalone the 78px top bar is sticky
+ * in the same scroller and slides back in on scroll-up, so the panel sits 16px below it; embedded
+ * there is no top bar, so clearing it too would leave a dead band above the panel.
  */
-export function shellHeightClass(): string {
-  return embedded ? 'xl:h-[calc(100vh-62px)]' : 'xl:h-[calc(100vh-140px)]'
+export function stickyPanelClass(): string {
+  return embedded
+    ? 'xl:sticky xl:top-4 xl:h-[calc(100vh-32px)]'
+    : 'xl:sticky xl:top-[94px] xl:h-[calc(100vh-110px)]'
 }

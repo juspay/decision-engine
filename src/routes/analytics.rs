@@ -1,9 +1,11 @@
+use crate::analytics::models::{PaymentAuditOutcome, PaymentAuditPaymentFilters};
 use crate::analytics::{
     cost_savings as fetch_cost_savings, decisions as fetch_decisions,
     experiment_results as fetch_experiment_results,
     experiment_transactions as fetch_experiment_transactions,
     gateway_scores as fetch_gateway_scores, log_summaries as fetch_log_summaries,
     overview as fetch_overview, payment_audit as fetch_payment_audit,
+    payment_audit_filter_options as fetch_payment_audit_filter_options,
     preview_trace as fetch_preview_trace, routing_events as fetch_routing_events,
     routing_stats as fetch_routing_stats, AnalyticsQuery, AuthBandSpec, ExperimentResultsQuery,
     ExperimentTransactionsQuery, PaymentAuditQuery, RoutingEventsQuery,
@@ -40,6 +42,11 @@ pub struct AnalyticsQueryParams {
     pub error_code: Option<String>,
     pub scope: Option<String>,
     pub routing_kind: Option<String>,
+    /// Payment audit only: `success`, `failure` or `pending`.
+    pub outcome: Option<String>,
+    /// Payment audit only: amount bounds, inclusive.
+    pub min_amount: Option<f64>,
+    pub max_amount: Option<f64>,
 }
 
 fn analytics_query_from_params(
@@ -88,6 +95,21 @@ fn payment_audit_query_from_params(
         params.scope.clone(),
         params.routing_kind.clone(),
     )
+    .with_payment_filters(PaymentAuditPaymentFilters {
+        outcome: PaymentAuditPaymentFilters::values(params.outcome.as_deref())
+            .iter()
+            .filter_map(|value| PaymentAuditOutcome::from_query(Some(value)))
+            .collect(),
+        currency: PaymentAuditPaymentFilters::values(params.currency.as_deref()),
+        payment_method: PaymentAuditPaymentFilters::values(params.payment_method.as_deref()),
+        payment_method_type: PaymentAuditPaymentFilters::values(
+            params.payment_method_type.as_deref(),
+        ),
+        card_network: PaymentAuditPaymentFilters::values(params.card_network.as_deref()),
+        auth_type: PaymentAuditPaymentFilters::values(params.auth_type.as_deref()),
+        min_amount: params.min_amount,
+        max_amount: params.max_amount,
+    })
 }
 
 pub fn serve() -> axum::Router<Arc<crate::tenant::GlobalAppState>> {
@@ -101,6 +123,10 @@ pub fn serve() -> axum::Router<Arc<crate::tenant::GlobalAppState>> {
         .route("/routing-events", axum::routing::get(routing_events))
         .route("/log-summaries", axum::routing::get(log_summaries))
         .route("/payment-audit", axum::routing::get(payment_audit))
+        .route(
+            "/payment-audit/filter-options",
+            axum::routing::get(payment_audit_filter_options),
+        )
         .route("/preview-trace", axum::routing::get(preview_trace))
         .route(
             "/experiment/:experiment_id/results",
@@ -188,6 +214,20 @@ pub async fn payment_audit(
 ) -> Result<Json<crate::analytics::PaymentAuditResponse>, error::ContainerError<error::ApiError>> {
     let query = payment_audit_query_from_params(auth_context.merchant_id.clone(), &params);
     Ok(Json(fetch_payment_audit(&state, &query).await?))
+}
+
+/// The values the payment audit's dropdown filters can take: what the merchant's payments in the
+/// window (`range` or `start_ms`/`end_ms`) carried.
+pub async fn payment_audit_filter_options(
+    TenantStateResolver(state): TenantStateResolver,
+    AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
+    Query(params): Query<AnalyticsQueryParams>,
+) -> Result<Json<crate::analytics::PaymentAuditFilterOptions>, error::ContainerError<error::ApiError>>
+{
+    let query = payment_audit_query_from_params(auth_context.merchant_id.clone(), &params);
+    Ok(Json(
+        fetch_payment_audit_filter_options(&state, &query).await?,
+    ))
 }
 
 pub async fn preview_trace(
