@@ -1,18 +1,20 @@
 import { useEffect, useMemo, useState } from 'react'
 import useSWR from 'swr'
-import { useNavigationType, useSearchParams } from 'react-router-dom'
+import { Link, useNavigationType, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, RefreshCw, Search as SearchIcon, SlidersHorizontal } from 'lucide-react'
 import { fetcher } from '../../lib/api'
-import { shellHeightClass } from '../../lib/embedMode'
+import { stickyPanelClass } from '../../lib/embedMode'
 import {
-  AnalyticsGatewayScoresResponse,
   AnalyticsRangeValue,
   PaymentAuditEvent,
+  PaymentAuditFilterOptions,
+  PaymentAuditExperiment,
   PaymentAuditResponse,
   PaymentAuditSummary,
 } from '../../types/api'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
+import { SearchableMultiSelect } from '../ui/SearchableMultiSelect'
 import { Spinner } from '../ui/Spinner'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Card as GlassCard, InsetPanel } from '../ui/Card'
@@ -28,6 +30,7 @@ import {
 } from '../../lib/timeRange'
 
 import { PageHeading } from '../ui/PageHeading'
+import { useMerchantStore } from '../../store/merchantStore'
 import {
   eventPhase as auditEventPhase,
   flowTypeValue,
@@ -41,13 +44,63 @@ import {
 function eventPhase(event: PaymentAuditEvent) {
   return auditEventPhase(event, 'Rule Decision')
 }
-const STATUS_OPTIONS = [
-  { value: '', label: 'Any status' },
+/** The payment's outcome from its reported statuses, not any one event's status. Pick any number. */
+const OUTCOME_OPTIONS = [
   { value: 'success', label: 'Success' },
   { value: 'failure', label: 'Failure' },
+  { value: 'pending', label: 'Pending' },
 ]
+
+type PaymentAttributeField = 'paymentMethod' | 'paymentMethodType' | 'cardNetwork' | 'authType' | 'currency'
+
+/**
+ * The payment attribute dropdowns. Their options are what the merchant's own payments carried in
+ * the window (`/payment-audit/filter-options`), so each merchant sees its own methods, networks and
+ * currencies. `labels` only names the common Hyperswitch values; any other value is shown as is.
+ */
+const PAYMENT_ATTRIBUTE_FILTERS: {
+  field: PaymentAttributeField
+  optionsKey: keyof Omit<PaymentAuditFilterOptions, 'gateways'>
+  anyLabel: string
+  labels: Record<string, string>
+}[] = [
+  {
+    field: 'paymentMethod',
+    optionsKey: 'payment_methods',
+    anyLabel: 'Any payment method',
+    labels: { upi: 'UPI', bank_redirect: 'Bank redirect', bank_transfer: 'Bank transfer', bank_debit: 'Bank debit', pay_later: 'Pay later' },
+  },
+  {
+    field: 'paymentMethodType',
+    optionsKey: 'payment_method_types',
+    anyLabel: 'Any method type',
+    labels: { apple_pay: 'Apple Pay', google_pay: 'Google Pay', paypal: 'PayPal', upi_collect: 'UPI collect', upi_intent: 'UPI intent' },
+  },
+  {
+    field: 'cardNetwork',
+    optionsKey: 'card_networks',
+    anyLabel: 'Any card network',
+    labels: { amex: 'American Express', americanexpress: 'American Express', rupay: 'RuPay', mastercard: 'Mastercard' },
+  },
+  {
+    field: 'authType',
+    optionsKey: 'auth_types',
+    anyLabel: 'Any auth type',
+    labels: { three_ds: '3DS', no_three_ds: 'No 3DS' },
+  },
+  { field: 'currency', optionsKey: 'currencies', anyLabel: 'Any currency', labels: {} },
+]
+
+/** How an attribute value reads in its dropdown: its known label, else the value tidied up. */
+function attributeLabel(field: PaymentAttributeField, value: string, labels: Record<string, string>) {
+  if (labels[value]) return labels[value]
+  if (field === 'currency') return value.toUpperCase()
+  return value
+    .split('_')
+    .map((word, index) => (index === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word))
+    .join(' ')
+}
 const ROUTE_OPTIONS = [
-  { value: '', label: 'Any route' },
   { value: 'decide_gateway', label: 'Decide Gateway' },
   { value: 'update_gateway_score', label: 'Update Gateway' },
   { value: 'routing_evaluate', label: 'Rule Evaluate' },
@@ -62,6 +115,46 @@ const INSPECTOR_TAB_LABELS: Record<(typeof INSPECTOR_TABS)[number], string> = {
 }
 const DEBIT_ROUTING_APPROACH = 'NTW_BASED_ROUTING'
 const AUDIT_PATH = '/analytics/payment-audit'
+/** Payments per page; the API serves up to 100. */
+const PAGE_SIZE_OPTIONS = [10, 20, 50, 100] as const
+const DEFAULT_PAGE_SIZE = 20
+
+/**
+ * The last search per merchant, so leaving the page and coming back keeps its filters, range and
+ * page size. Storage can be unavailable (private windows, blocked site data); the page then just
+ * starts unfiltered.
+ */
+function savedSearchKey(merchantId: string) {
+  return `decision-audit:last-search:${merchantId}`
+}
+
+function readSavedSearch(merchantId: string): URLSearchParams | null {
+  if (!merchantId) return null
+  try {
+    const saved = window.localStorage.getItem(savedSearchKey(merchantId))
+    return saved ? new URLSearchParams(saved) : null
+  } catch {
+    return null
+  }
+}
+
+/** Saves what defines the search, not where the user was in it (page, selected payment). */
+function saveSearch(merchantId: string, query: string) {
+  if (!merchantId) return
+  const params = new URLSearchParams(query)
+  params.delete('page')
+  params.delete('selected')
+  try {
+    window.localStorage.setItem(savedSearchKey(merchantId), params.toString())
+  } catch {
+    // Not saved; the URL still carries this search.
+  }
+}
+
+function parsePageSize(searchParams: URLSearchParams): number {
+  const value = Number(searchParams.get('page_size'))
+  return (PAGE_SIZE_OPTIONS as readonly number[]).includes(value) ? value : DEFAULT_PAGE_SIZE
+}
 /**
  * The routing-type filter. These were the page's tabs; each value lists the payments whose
  * trail holds that kind of event, while every payment's trail itself always shows all of its
@@ -84,6 +177,13 @@ type AuditFilters = {
   flowType: string
   errorCode: string
   routingKind: string
+  currency: string
+  paymentMethod: string
+  paymentMethodType: string
+  cardNetwork: string
+  authType: string
+  minAmount: string
+  maxAmount: string
 }
 
 type InspectorTab = (typeof INSPECTOR_TABS)[number]
@@ -97,6 +197,13 @@ const EMPTY_FILTERS: AuditFilters = {
   flowType: '',
   errorCode: '',
   routingKind: '',
+  currency: '',
+  paymentMethod: '',
+  paymentMethodType: '',
+  cardNetwork: '',
+  authType: '',
+  minAmount: '',
+  maxAmount: '',
 }
 
 function normalizeAuditFilters(filters: AuditFilters): AuditFilters {
@@ -112,6 +219,30 @@ function normalizeAuditFilters(filters: AuditFilters): AuditFilters {
     flowType: filters.flowType.trim(),
     errorCode: filters.errorCode.trim(),
     routingKind: filters.routingKind,
+    currency: filters.currency.trim(),
+    paymentMethod: filters.paymentMethod.trim(),
+    paymentMethodType: filters.paymentMethodType.trim(),
+    cardNetwork: filters.cardNetwork.trim(),
+    authType: filters.authType.trim(),
+    minAmount: filters.minAmount.trim(),
+    maxAmount: filters.maxAmount.trim(),
+  }
+}
+
+/**
+ * The payment filters as query params, for both the API and the page URL. The status dropdown is
+ * the payment's outcome (`outcome`), not an event's raw status.
+ */
+function paymentFilterParams(filters: AuditFilters): Record<string, string | undefined> {
+  return {
+    outcome: filters.status || undefined,
+    currency: filters.currency || undefined,
+    payment_method: filters.paymentMethod || undefined,
+    payment_method_type: filters.paymentMethodType || undefined,
+    card_network: filters.cardNetwork || undefined,
+    auth_type: filters.authType || undefined,
+    min_amount: filters.minAmount || undefined,
+    max_amount: filters.maxAmount || undefined,
   }
 }
 
@@ -150,7 +281,7 @@ function buildAuditUrl(
     request_id: normalizedFilters.requestId || undefined,
     gateway: normalizedFilters.gateway || undefined,
     route: normalizedFilters.route || undefined,
-    status: normalizedFilters.status || undefined,
+    ...paymentFilterParams(normalizedFilters),
     flow_type: normalizedFilters.flowType || undefined,
     routing_kind: normalizedFilters.routingKind || undefined,
     error_code: normalizedFilters.errorCode || undefined,
@@ -169,16 +300,34 @@ function parseRoutingKind(searchParams: URLSearchParams): string {
   return ''
 }
 
+/** The outcome filter; a `status=success|failure` link from before outcomes reads as one. */
+/** The outcome filter (a comma-separated list); a `status=success|failure` link from before outcomes reads as one. */
+function parseOutcome(searchParams: URLSearchParams): string {
+  const raw = (searchParams.get('outcome') || searchParams.get('status') || '').toLowerCase()
+  return raw
+    .split(',')
+    .map((value) => value.trim())
+    .filter((value) => OUTCOME_OPTIONS.some((option) => option.value === value))
+    .join(',')
+}
+
 function parseFilters(searchParams: URLSearchParams): AuditFilters {
   return normalizeAuditFilters({
     paymentId: searchParams.get('payment_id') || searchParams.get('request_id') || '',
     requestId: '',
     gateway: searchParams.get('gateway') || '',
     route: searchParams.get('route') || '',
-    status: searchParams.get('status') || '',
+    status: parseOutcome(searchParams),
     flowType: searchParams.get('flow_type') || searchParams.get('event_type') || '',
     errorCode: searchParams.get('error_code') || '',
     routingKind: parseRoutingKind(searchParams),
+    currency: searchParams.get('currency') || '',
+    paymentMethod: searchParams.get('payment_method') || '',
+    paymentMethodType: searchParams.get('payment_method_type') || '',
+    cardNetwork: searchParams.get('card_network') || '',
+    authType: searchParams.get('auth_type') || '',
+    minAmount: searchParams.get('min_amount') || '',
+    maxAmount: searchParams.get('max_amount') || '',
   })
 }
 
@@ -271,6 +420,54 @@ function HeadlineFact({ label, value }: { label: string; value: string }) {
   )
 }
 
+const EXPERIMENT_ENDPOINT_LABELS: Record<PaymentAuditExperiment['endpoint'], string> = {
+  hybrid_routing: 'hybrid routing',
+  decide_gateway: 'decide gateway',
+  evaluate: 'rule evaluate',
+}
+
+/**
+ * Which A/B arm routed the payment, linking to its experiment; or that it wasn't routed under one.
+ * Experiment events stay out of the timeline itself, so this is the audit's only A/B signal.
+ */
+function ExperimentAssignment({ experiments }: { experiments: PaymentAuditExperiment[] }) {
+  if (experiments.length === 0) {
+    return <Badge variant="gray">Not in an A/B experiment</Badge>
+  }
+  return (
+    <>
+      {experiments.map((assignment) => {
+        const endpoint = EXPERIMENT_ENDPOINT_LABELS[assignment.endpoint] ?? assignment.endpoint
+        return (
+          <Link
+            key={`${assignment.experiment_id}:${assignment.arm}:${assignment.endpoint}`}
+            to={`/routing/ab-testing?experiment=${encodeURIComponent(assignment.experiment_id)}`}
+            title={`Experiment ${assignment.experiment_id} · routed on ${endpoint} at ${formatDateTime(assignment.routed_at_ms)}`}
+          >
+            <Badge variant={assignment.arm === 'variant' ? 'purple' : 'blue'}>
+              A/B · {assignment.arm} · {endpoint}
+            </Badge>
+          </Link>
+        )
+      })}
+    </>
+  )
+}
+
+/** The A/B arm(s) of a result row; nothing for a payment outside any experiment, to keep the list quiet. */
+function ExperimentArmTag({ experiments }: { experiments?: PaymentAuditExperiment[] }) {
+  if (!experiments?.length) return null
+  const arms = [...new Set(experiments.map((assignment) => assignment.arm))]
+  const title = experiments
+    .map((a) => `${a.arm} · ${EXPERIMENT_ENDPOINT_LABELS[a.endpoint] ?? a.endpoint} · ${a.experiment_id}`)
+    .join('\n')
+  return (
+    <span className="shrink-0" title={title}>
+      <Badge variant={arms.length === 1 && arms[0] === 'variant' ? 'purple' : 'blue'}>A/B · {arms.join(' / ')}</Badge>
+    </span>
+  )
+}
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
 }
@@ -286,12 +483,16 @@ function stringifyValue(value: unknown) {
   return JSON.stringify(value, null, 2)
 }
 
-function fieldClassName() {
-  return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[13px] text-slate-700 outline-none transition placeholder:text-slate-500 focus:border-brand-500 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7] dark:placeholder:text-[#555f6e]'
+/** `active` tints a filter that narrows the search, so set filters stand out from the "Any …" ones. */
+function fieldClassName(active = false) {
+  const tone = active
+    ? 'border-brand-300 bg-brand-50 font-medium text-brand-700 dark:border-brand-500/50 dark:bg-brand-500/10 dark:text-brand-300'
+    : 'border-slate-200 bg-white text-slate-700 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7]'
+  return `h-11 w-full rounded-2xl border px-4 text-[13px] outline-none transition placeholder:text-slate-500 focus:border-brand-500 dark:placeholder:text-[#555f6e] ${tone}`
 }
 
-function fieldSelectClassName() {
-  return `${fieldClassName()} appearance-none pr-9 bg-[url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")] bg-no-repeat bg-[right_12px_center]`
+function fieldSelectClassName(active = false) {
+  return `${fieldClassName(active)} appearance-none pr-9 bg-[url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")] bg-no-repeat bg-[right_12px_center]`
 }
 
 function EmptyState({ title, body }: { title: string; body: string }) {
@@ -325,10 +526,19 @@ function InspectorKeyValueGrid({ rows }: { rows: Array<{ label: string; value: s
 }
 
 function JsonBlock({ value }: { value: unknown }) {
+  const text = stringifyValue(value)
   return (
-    <pre className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-slate-50/90 px-5 py-3 font-mono text-[13px] leading-[21px] text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_16px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#0b1017] dark:text-[#d8e1ef] dark:shadow-none">
-      {stringifyValue(value)}
-    </pre>
+    <div className="relative">
+      <CopyButton
+        text={text}
+        label="Copy JSON"
+        size={14}
+        className="absolute right-3 top-3 rounded-md bg-slate-50/90 p-1 dark:bg-[#0b1017]"
+      />
+      <pre className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-slate-50/90 py-3 pl-5 pr-12 font-mono text-[13px] leading-[21px] text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_16px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#0b1017] dark:text-[#d8e1ef] dark:shadow-none">
+        {text}
+      </pre>
+    </div>
   )
 }
 
@@ -556,15 +766,26 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
 export function PaymentAuditPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigationType = useNavigationType()
+  const merchantId = useMerchantStore((state) => state.merchantId)
 
-  const initialRange = searchParams.get('start_ms') && searchParams.get('end_ms')
+  // Arriving without a search in the URL (e.g. from the sidebar) resumes the merchant's last one.
+  const [startupParams] = useState(() =>
+    searchParams.toString() ? searchParams : readSavedSearch(merchantId) ?? searchParams,
+  )
+  useEffect(() => {
+    if (startupParams !== searchParams) setSearchParams(startupParams, { replace: true })
+    // Once, on arrival: later URL changes come from the page's own searches.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const initialRange = startupParams.get('start_ms') && startupParams.get('end_ms')
     ? 'custom'
-    : parseRange(searchParams.get('range'))
-  const initialFilters = parseFilters(searchParams)
-  const initialPage = Math.max(1, Number(searchParams.get('page') || '1'))
-  const initialSelectedKey = searchParams.get('selected') || ''
-  const initialStartMs = Number(searchParams.get('start_ms') || '0')
-  const initialEndMs = Number(searchParams.get('end_ms') || '0')
+    : parseRange(startupParams.get('range'))
+  const initialFilters = parseFilters(startupParams)
+  const initialPage = Math.max(1, Number(startupParams.get('page') || '1'))
+  const initialSelectedKey = startupParams.get('selected') || ''
+  const initialStartMs = Number(startupParams.get('start_ms') || '0')
+  const initialEndMs = Number(startupParams.get('end_ms') || '0')
   const initialCustomWindow =
     initialStartMs > 0 && initialEndMs > initialStartMs
       ? { start_ms: initialStartMs, end_ms: initialEndMs }
@@ -585,7 +806,7 @@ export function PaymentAuditPage() {
   const [customEnd, setCustomEnd] = useState(() =>
     toDateTimeInputValue(initialCustomWindow.end_ms),
   )
-  const pageSize = 12
+  const [pageSize, setPageSize] = useState(() => parsePageSize(startupParams))
 
   useEffect(() => {
     if (navigationType !== 'POP') return
@@ -605,6 +826,7 @@ export function PaymentAuditPage() {
     setFilters(nextFilters)
     setAppliedFilters(nextFilters)
     setPage(Math.max(1, Number(searchParams.get('page') || '1')))
+    setPageSize(parsePageSize(searchParams))
     setSelectedKey(nextSelectedKey)
     setTrailFocused(Boolean(nextSelectedKey))
     setSelectedEventId(null)
@@ -629,21 +851,18 @@ export function PaymentAuditPage() {
     dedupingInterval: 5000,
   })
 
-  // The audit results only name the connectors on the visible page, which would make the Gateway
-  // dropdown unable to reach a connector that happens to fall on page 2. Gateway scores are
-  // merchant-wide, so they name every connector with traffic — read over the same window the page
-  // is auditing, so the options can neither omit a connector that was only active back then nor
-  // offer one that saw no traffic in it.
-  const gatewayCatalogUrl =
+  // The dropdowns' values: what this merchant's payments in the window actually carried. One cheap
+  // query per window (cached a minute), which also names every gateway, including those that fall
+  // on later pages of the results.
+  const filterOptionsUrl =
     range !== 'custom' || customWindow
-      ? `/analytics/gateway-scores?${queryString({
+      ? `${AUDIT_PATH}/filter-options?${queryString({
           range: range === 'custom' ? '1h' : range,
           start_ms: customWindow?.start_ms,
           end_ms: customWindow?.end_ms,
         })}`
       : null
-
-  const gatewayCatalog = useSWR<AnalyticsGatewayScoresResponse>(gatewayCatalogUrl, fetcher, {
+  const filterOptions = useSWR<PaymentAuditFilterOptions>(filterOptionsUrl, fetcher, {
     revalidateOnFocus: false,
     dedupingInterval: 60_000,
   })
@@ -667,17 +886,8 @@ export function PaymentAuditPage() {
   const detailFilters = useMemo<AuditFilters | null>(() => {
     if (!selectedSummary) return null
     const lookupValue = selectedSummary.payment_id || selectedSummary.request_id || ''
-    return {
-      paymentId: lookupValue,
-      requestId: '',
-      gateway: '',
-      route: '',
-      status: '',
-      flowType: '',
-      errorCode: '',
-      // The trail of a selected payment always shows all of its events, whatever the list filter.
-      routingKind: '',
-    }
+    // The trail of a selected payment always shows all of its events, whatever the list filter.
+    return { ...EMPTY_FILTERS, paymentId: lookupValue }
   }, [selectedSummary])
 
   const detailUrl = detailFilters
@@ -717,8 +927,10 @@ export function PaymentAuditPage() {
   const firstRowNumber = (page - 1) * pageSize + 1
   const lastRowNumber = (page - 1) * pageSize + resultRows.length
   const totalEvents = timeline.length
-  const successCount = auditSearch.data?.total_success ?? resultRows.filter((row) => summaryBadgeVariant(row.latest_status) === 'green').length
-  const failureCount = auditSearch.data?.total_failure ?? resultRows.filter((row) => summaryBadgeVariant(row.latest_status) === 'red').length
+  const successCount = auditSearch.data?.total_success ?? resultRows.filter((row) => row.outcome === 'success').length
+  const failureCount = auditSearch.data?.total_failure ?? resultRows.filter((row) => row.outcome === 'failure').length
+  // Payment outcomes: success and failure are terminal; the rest have no outcome reported yet.
+  const pendingCount = Math.max(0, totalMatches - successCount - failureCount)
   const activeGatewayList = Array.from(
     new Set(
       resultRows.flatMap((row) => {
@@ -729,13 +941,17 @@ export function PaymentAuditPage() {
   )
   const activeGateways = activeGatewayList.length
   const hasActiveFilters = Object.values(filters).some(Boolean)
+  // Error codes the merchant's payments hit in the window, plus any selected from a link.
+  const errorCodeOptions = Array.from(
+    new Set([...(filterOptions.data?.error_codes || []), ...appliedFilters.errorCode.split(',')].filter(Boolean)),
+  ).sort((left, right) => left.localeCompare(right))
   const gatewayOptions = Array.from(
     new Set(
       [
-        ...(gatewayCatalog.data?.snapshots || []).map((snapshot) => snapshot.gateway),
+        ...(filterOptions.data?.gateways || []),
         ...activeGatewayList,
         // A gateway supplied by URL stays selectable even if it has gone quiet since.
-        appliedFilters.gateway,
+        ...appliedFilters.gateway.split(','),
       ].filter(Boolean),
     ),
   ).sort((left, right) => left.localeCompare(right))
@@ -762,24 +978,27 @@ export function PaymentAuditPage() {
     nextFilters: AuditFilters,
     nextSelectedKey?: string,
     nextCustomWindow?: TimeWindow,
+    nextPageSize: number = pageSize,
   ) {
     const normalizedFilters = normalizeAuditFilters(nextFilters)
     const nextQuery = queryString({
       range: nextRange,
       page: nextPage > 1 ? nextPage : undefined,
+      page_size: nextPageSize !== DEFAULT_PAGE_SIZE ? nextPageSize : undefined,
       start_ms: nextRange === 'custom' ? nextCustomWindow?.start_ms : undefined,
       end_ms: nextRange === 'custom' ? nextCustomWindow?.end_ms : undefined,
       payment_id: normalizedFilters.paymentId || undefined,
       request_id: normalizedFilters.requestId || undefined,
       gateway: normalizedFilters.gateway || undefined,
       route: normalizedFilters.route || undefined,
-      status: normalizedFilters.status || undefined,
+      ...paymentFilterParams(normalizedFilters),
       flow_type: normalizedFilters.flowType || undefined,
       routing_kind: normalizedFilters.routingKind || undefined,
       error_code: normalizedFilters.errorCode || undefined,
       selected: nextSelectedKey || undefined,
     })
     setSearchParams(nextQuery)
+    saveSearch(merchantId, nextQuery)
   }
 
   function updateFilter(field: keyof AuditFilters, value: string) {
@@ -797,8 +1016,21 @@ export function PaymentAuditPage() {
     syncSearch(range, nextPage, normalizedFilters, undefined, customWindow)
   }
 
+  /**
+   * Multi-select dropdowns: a tick only updates the pending selection; closing the list searches
+   * once, and only if the selection changed. Five ticks cost one search, not five.
+   */
+  function applyIfChanged() {
+    const normalizedFilters = normalizeAuditFilters(filters)
+    if (JSON.stringify(normalizedFilters) === JSON.stringify(appliedFilters)) return
+    applyFilters()
+  }
+
   /** Dropdown filters apply on change — the redesigned bar has no Search button to press. */
-  function applyDropdownFilter(field: 'gateway' | 'status' | 'route' | 'routingKind', value: string) {
+  function applyDropdownFilter(
+    field: keyof AuditFilters,
+    value: string,
+  ) {
     const nextPage = 1
     const normalizedFilters = normalizeAuditFilters({ ...filters, [field]: value })
     setPage(nextPage)
@@ -888,11 +1120,10 @@ export function PaymentAuditPage() {
     syncSearch(range, page, appliedFilters, undefined, customWindow)
   }
 
-  // Full-height column so the two panels fill the shell (top bar, which embed mode hides, plus
-  // main's vertical padding — see shellHeightClass)
-  // and scroll internally, as they did before the header moved into the page.
+  // The page scrolls as a whole: the results list runs its full length and the details panel stays
+  // pinned beside it (see stickyPanelClass), so the selected payment never scrolls out of view.
   return (
-    <div className={`flex min-h-[620px] flex-col gap-5 ${shellHeightClass()}`}>
+    <div className="flex flex-col gap-5">
       {/* The mock draws these controls in an app-wide bar; the shell already owns that strip, so the
           time range lives at the top of the page's own content instead. */}
       <div className="grid grid-cols-1 items-center gap-3 xl:grid-cols-[1fr_auto]">
@@ -953,36 +1184,9 @@ export function PaymentAuditPage() {
         </div>
 
         <div className="flex min-w-[480px] flex-1 items-center gap-3">
-        {showAdvancedFilters ? (
-          <div className="flex-1">
-            <select
-              className={fieldSelectClassName()}
-              value={filters.route}
-              onChange={(event) => applyDropdownFilter('route', event.target.value)}
-              aria-label="Route"
-            >
-              {ROUTE_OPTIONS.map((option) => (
-                <option key={option.value || 'all'} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </div>
-        ) : null}
-        {showAdvancedFilters ? (
-          <div className="flex-1">
-            <input
-              className={fieldClassName()}
-              value={filters.errorCode}
-              onChange={(event) => updateFilter('errorCode', event.target.value)}
-              placeholder="Error code"
-              aria-label="Error code"
-            />
-          </div>
-        ) : null}
         <div className="flex-1">
           <select
-            className={`${fieldSelectClassName()} min-w-[168px]`}
+            className={`${fieldSelectClassName(!!filters.routingKind)} min-w-[168px]`}
             value={filters.routingKind}
             onChange={(event) => applyDropdownFilter('routingKind', event.target.value)}
             aria-label="Routing type"
@@ -996,34 +1200,27 @@ export function PaymentAuditPage() {
         </div>
 
         <div className="flex-1">
-          <select
-            className={fieldSelectClassName()}
-            value={filters.gateway}
-            onChange={(event) => applyDropdownFilter('gateway', event.target.value)}
-            aria-label="Gateway"
-          >
-            <option value="">Any gateway</option>
-            {gatewayOptions.map((gateway) => (
-              <option key={gateway} value={gateway}>
-                {gateway}
-              </option>
-            ))}
-          </select>
+          <SearchableMultiSelect
+            values={filters.gateway.split(',').filter(Boolean)}
+            options={gatewayOptions.map((gateway) => ({ value: gateway, label: gateway }))}
+            onChange={(values) => updateFilter('gateway', values.join(','))}
+            onClose={applyIfChanged}
+            placeholder="Any gateway"
+            triggerClassName={fieldClassName(!!filters.gateway)}
+            compact
+          />
         </div>
 
         <div className="flex-1">
-          <select
-            className={fieldSelectClassName()}
-            value={filters.status}
-            onChange={(event) => applyDropdownFilter('status', event.target.value)}
-            aria-label="Status"
-          >
-            {STATUS_OPTIONS.map((option) => (
-              <option key={option.value || 'all'} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
+          <SearchableMultiSelect
+            values={filters.status.split(',').filter(Boolean)}
+            options={OUTCOME_OPTIONS}
+            onChange={(values) => updateFilter('status', values.join(','))}
+            onClose={applyIfChanged}
+            placeholder="Any outcome"
+            triggerClassName={fieldClassName(!!filters.status)}
+            compact
+          />
         </div>
 
         <Button
@@ -1037,6 +1234,77 @@ export function PaymentAuditPage() {
           <SlidersHorizontal className="h-4 w-4" />
         </Button>
         </div>
+        {showAdvancedFilters ? (
+          <div className="grid w-full basis-full grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
+            <SearchableMultiSelect
+              values={filters.route.split(',').filter(Boolean)}
+              options={ROUTE_OPTIONS}
+              onChange={(values) => updateFilter('route', values.join(','))}
+              onClose={applyIfChanged}
+              placeholder="Any route"
+              triggerClassName={fieldClassName(!!filters.route)}
+              compact
+            />
+            <SearchableMultiSelect
+              values={filters.errorCode.split(',').filter(Boolean)}
+              options={errorCodeOptions.map((code) => ({ value: code, label: code }))}
+              onChange={(values) => updateFilter('errorCode', values.join(','))}
+              onClose={applyIfChanged}
+              placeholder="Any error code"
+              triggerClassName={fieldClassName(!!filters.errorCode)}
+              compact
+            />
+            {PAYMENT_ATTRIBUTE_FILTERS.map(({ field, optionsKey, anyLabel, labels }) => {
+              // The merchant's own values, lower-cased as the filters match them.
+              const values = filterOptions.data?.[optionsKey] ?? []
+              const options = values.map((value) => ({ value, label: attributeLabel(field, value, labels) }))
+              // Selected values, canonicalised to an option ignoring case. A value from a link that
+              // no recent payment carried stays selectable.
+              const selected = filters[field]
+                .split(',')
+                .map((value) => value.trim())
+                .filter(Boolean)
+                .map((value) => options.find((o) => o.value.toLowerCase() === value.toLowerCase())?.value ?? value)
+              const unlisted = selected
+                .filter((value) => !options.some((o) => o.value === value))
+                .map((value) => ({ value, label: attributeLabel(field, value, labels) }))
+              return (
+                <SearchableMultiSelect
+                  key={field}
+                  values={selected}
+                  options={[...unlisted, ...options]}
+                  onChange={(next) => updateFilter(field, next.join(','))}
+                  onClose={applyIfChanged}
+                  placeholder={anyLabel}
+                  triggerClassName={fieldClassName(selected.length > 0)}
+                  compact
+                />
+              )
+            })}
+            <input
+              className={fieldClassName(!!filters.minAmount)}
+              type="number"
+              min={0}
+              step="any"
+              value={filters.minAmount}
+              onChange={(event) => updateFilter('minAmount', event.target.value)}
+              onBlur={applyIfChanged}
+              placeholder="Min amount"
+              aria-label="Min amount"
+            />
+            <input
+              className={fieldClassName(!!filters.maxAmount)}
+              type="number"
+              min={0}
+              step="any"
+              value={filters.maxAmount}
+              onChange={(event) => updateFilter('maxAmount', event.target.value)}
+              onBlur={applyIfChanged}
+              placeholder="Max amount"
+              aria-label="Max amount"
+            />
+          </div>
+        ) : null}
         {/* The redesigned bar has no Search button; this keeps Enter submitting the text fields. */}
         <button type="submit" className="sr-only">Search</button>
       </form>
@@ -1057,8 +1325,9 @@ export function PaymentAuditPage() {
         {auditSearch.data ? (
           <>
             <span className="h-4 w-px bg-slate-200 dark:bg-[#2a303a]" />
-            <SummaryStat tone="bg-emerald-500" label={`${successCount.toLocaleString()} successful ${successCount === 1 ? 'selection' : 'selections'}`} />
-            <SummaryStat tone="bg-red-500" label={`${failureCount.toLocaleString()} ${failureCount === 1 ? 'failure' : 'failures'}`} />
+            <SummaryStat tone="bg-emerald-500" label={`${successCount.toLocaleString()} successful`} />
+            <SummaryStat tone="bg-red-500" label={`${failureCount.toLocaleString()} failed`} />
+            <SummaryStat tone="bg-slate-400" label={`${pendingCount.toLocaleString()} pending`} />
             <SummaryStat
               tone="bg-brand-500"
               label={`${activeGateways} ${activeGateways === 1 ? 'connector' : 'connectors'}`}
@@ -1068,8 +1337,8 @@ export function PaymentAuditPage() {
         ) : null}
       </div>
 
-      <div className="grid min-h-0 flex-1 gap-5 xl:grid-cols-[minmax(360px,1fr)_minmax(0,1.618fr)]">
-        <GlassCard className="h-full overflow-hidden !rounded-2xl">
+      <div className="grid gap-5 xl:grid-cols-[minmax(360px,1fr)_minmax(0,1.618fr)] xl:items-start">
+        <GlassCard className="overflow-hidden !rounded-2xl">
           {trailFocused ? (
             <div className="shrink-0 border-b border-slate-200 px-5 py-3 dark:border-[#2a303a]">
               <Button size="sm" variant="secondary" onClick={returnToResults} className="mb-3">
@@ -1082,6 +1351,9 @@ export function PaymentAuditPage() {
                 </h2>
                 <div className="flex shrink-0 items-center gap-2">
                   <span className="text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">{totalEvents} event{totalEvents === 1 ? '' : 's'}</span>
+                  {selectedSummary?.experiments ? (
+                    <ExperimentAssignment experiments={selectedSummary.experiments} />
+                  ) : null}
                   {selectedSummary?.latest_status ? (
                     <Badge variant={summaryBadgeVariant(selectedSummary.latest_status)}>
                       {humanizeAuditValue(selectedSummary.latest_status)}
@@ -1133,8 +1405,8 @@ export function PaymentAuditPage() {
                   <div className="mt-2 flex items-center justify-between gap-3">
                     <div className="flex min-w-0 flex-1 items-center gap-2">
                       <span
-                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(row.latest_status)}`}
-                        title={humanizeAuditValue(row.latest_status) || 'Unknown'}
+                        className={`h-1.5 w-1.5 shrink-0 rounded-full ${statusDotClass(row.outcome)}`}
+                        title={`${humanizeAuditValue(row.outcome)} · last status ${humanizeAuditValue(row.latest_status) || 'unknown'}`}
                       />
                       {row.latest_gateway ? (
                         <span
@@ -1147,6 +1419,7 @@ export function PaymentAuditPage() {
                       <span className="shrink-0 whitespace-nowrap text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
                         · {row.event_count} event{row.event_count === 1 ? '' : 's'}
                       </span>
+                      <ExperimentArmTag experiments={row.experiments} />
                     </div>
                     {gatewayPath ? (
                       <span
@@ -1195,6 +1468,24 @@ export function PaymentAuditPage() {
                 Next
               </Button>
               <span className="ml-auto text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">Page {page}</span>
+              <select
+                className="h-8 rounded-lg border border-slate-200 bg-white pl-2.5 pr-8 [background-position:right_0.5rem_center] text-[13px] text-slate-700 outline-none focus:border-brand-500 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7]"
+                value={pageSize}
+                onChange={(event) => {
+                  const nextPageSize = Number(event.target.value)
+                  setPageSize(nextPageSize)
+                  setPage(1)
+                  setTrailFocused(false)
+                  syncSearch(range, 1, appliedFilters, undefined, customWindow, nextPageSize)
+                }}
+                aria-label="Payments per page"
+              >
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {size} / page
+                  </option>
+                ))}
+              </select>
             </div>
             </>
           ) : (
@@ -1266,7 +1557,7 @@ export function PaymentAuditPage() {
           )}
         </GlassCard>
 
-        <GlassCard className="h-full overflow-hidden !rounded-2xl">
+        <GlassCard className={`overflow-hidden !rounded-2xl ${stickyPanelClass()}`}>
           {selectedEvent && inspectorModel ? (
             <>
               <div className="shrink-0 space-y-2 px-5 pb-0 pt-5">

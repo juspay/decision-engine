@@ -517,6 +517,20 @@ pub async fn payment_audit(
         .await
 }
 
+pub async fn payment_audit_filter_options(
+    _state: &crate::app::TenantAppState,
+    query: &PaymentAuditQuery,
+) -> Result<PaymentAuditFilterOptions, error::ApiError> {
+    let global_state = crate::app::APP_STATE
+        .get()
+        .ok_or(error::ApiError::DatabaseError)?;
+    global_state
+        .analytics_runtime
+        .read_store()
+        .payment_audit_filter_options(query)
+        .await
+}
+
 pub async fn preview_trace(
     _state: &crate::app::TenantAppState,
     query: &PaymentAuditQuery,
