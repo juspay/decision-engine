@@ -358,7 +358,6 @@ async function runDockerMode(keepAlive) {
   const composeProfile = 'dashboard-postgres-local'
 
   await stopKnownComposeProjects()
-  await runCommand('dashboard-build', 'bash', ['-lc', 'npm --prefix website run build'])
   await runCommand(
     'docker-up',
     'bash',
