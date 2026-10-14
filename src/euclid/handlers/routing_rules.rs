@@ -1153,16 +1153,16 @@ async fn evaluate_algorithm_data(
     })
 }
 
-/// Attributes a real payment's rule decision to its A/B arm: the routing event the experiment
-/// results count, and the in-flight context the score update turns into an outcome event.
-/// Skipped when real-payment A/B tracking is off, the request carries no payment id, or no
-/// connector was selected.
+/// Attributes a real payment's rule decision to its A/B arm with the routing event the
+/// experiment results count; the payment's score updates supply its outcome. Skipped when
+/// real-payment A/B tracking is off, the request carries no payment id, or no connector was
+/// selected.
 async fn track_ab_rule_decision(
     payload: &RoutingRequest,
     response: &RoutingEvaluateResponse,
     ab: &AbEvaluation,
 ) {
-    use crate::decider::gatewaydecider::ab_test::{config, interceptor, outcome};
+    use crate::decider::gatewaydecider::ab_test::{config, interceptor, CostOutcome};
 
     let Some(payment_id) = payload.payment_id.as_deref().filter(|id| !id.is_empty()) else {
         return;
@@ -1183,15 +1183,9 @@ async fn track_ab_rule_decision(
         &ab.assignment,
         &ab.projection,
         Some(gateway.as_str()),
-    );
-    outcome::store_inflight(
-        payment_id,
-        &ab.assignment,
-        Some(gateway.as_str()),
-        true,
+        &CostOutcome::default(),
         amount,
-    )
-    .await;
+    );
 }
 
 pub async fn routing_evaluate(
