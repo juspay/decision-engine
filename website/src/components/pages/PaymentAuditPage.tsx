@@ -3,7 +3,7 @@ import useSWR from 'swr'
 import { Link, useNavigationType, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, RefreshCw, Search as SearchIcon, SlidersHorizontal } from 'lucide-react'
 import { fetcher } from '../../lib/api'
-import { shellHeightClass } from '../../lib/embedMode'
+import { stickyPanelClass } from '../../lib/embedMode'
 import {
   AnalyticsRangeValue,
   PaymentAuditEvent,
@@ -1107,11 +1107,10 @@ export function PaymentAuditPage() {
     syncSearch(range, page, appliedFilters, undefined, customWindow)
   }
 
-  // Full-height column so the two panels fill the shell (top bar, which embed mode hides, plus
-  // main's vertical padding — see shellHeightClass)
-  // and scroll internally, as they did before the header moved into the page.
+  // The page scrolls as a whole: the results list runs its full length and the details panel stays
+  // pinned beside it (see stickyPanelClass), so the selected payment never scrolls out of view.
   return (
-    <div className={`flex min-h-[620px] flex-col gap-5 ${shellHeightClass()}`}>
+    <div className="flex flex-col gap-5">
       {/* The mock draws these controls in an app-wide bar; the shell already owns that strip, so the
           time range lives at the top of the page's own content instead. */}
       <div className="grid grid-cols-1 items-center gap-3 xl:grid-cols-[1fr_auto]">
@@ -1326,8 +1325,8 @@ export function PaymentAuditPage() {
         ) : null}
       </div>
 
-      <div className="grid min-h-0 flex-1 gap-5 xl:grid-cols-[minmax(360px,1fr)_minmax(0,1.618fr)]">
-        <GlassCard className="h-full overflow-hidden !rounded-2xl">
+      <div className="grid gap-5 xl:grid-cols-[minmax(360px,1fr)_minmax(0,1.618fr)] xl:items-start">
+        <GlassCard className="overflow-hidden !rounded-2xl">
           {trailFocused ? (
             <div className="shrink-0 border-b border-slate-200 px-5 py-3 dark:border-[#2a303a]">
               <Button size="sm" variant="secondary" onClick={returnToResults} className="mb-3">
@@ -1546,7 +1545,7 @@ export function PaymentAuditPage() {
           )}
         </GlassCard>
 
-        <GlassCard className="h-full overflow-hidden !rounded-2xl">
+        <GlassCard className={`overflow-hidden !rounded-2xl ${stickyPanelClass()}`}>
           {selectedEvent && inspectorModel ? (
             <>
               <div className="shrink-0 space-y-2 px-5 pb-0 pt-5">
