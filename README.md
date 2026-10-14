@@ -72,8 +72,10 @@ API is ready at `http://localhost:8080`. That's it.
 For API + dashboard + docs together:
 
 ```bash
-docker compose --profile dashboard-postgres-ghcr up -d
+docker compose --profile dashboard-postgres-ghcr up -d --build
 ```
+
+Dashboard profiles build the frontend from source inside Docker. Rerun with `--build` after frontend changes; no host Node.js installation or prebuilt `website/dist` is required.
 
 Open:
 
