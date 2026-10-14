@@ -992,7 +992,10 @@ function ExperimentDetailPanel({
     return pages
   }
 
-  const totalTxns = results ? results.control.transaction_count + results.variant.transaction_count : 0
+  // The sample target counts payments with an outcome, as the verdict does: unresolved ones carry
+  // no evidence yet.
+  const resolvedTxns = (arm: { success_count: number; failure_count: number }) => arm.success_count + arm.failure_count
+  const totalTxns = results ? resolvedTxns(results.control) + resolvedTxns(results.variant) : 0
   const minSample = abData?.min_sample_size ?? 1000
   const collectedShare = minSample > 0 ? Math.min(1, totalTxns / minSample) : 0
   const progress = Math.round(collectedShare * 100)
@@ -1131,7 +1134,7 @@ function ExperimentDetailPanel({
         {results && (
           <div className="mt-5 space-y-2 border-t border-slate-100 pt-4 dark:border-[#1a1a22]">
             <div className="flex items-end justify-between">
-              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500 dark:text-[#8d96aa] leading-4">Transactions collected</p>
+              <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500 dark:text-[#8d96aa] leading-4">Resolved transactions</p>
               <p className="text-[15px] font-semibold text-slate-800 dark:text-slate-100 [font-variant-numeric:tabular-nums] leading-[22px]">
                 {totalTxns.toLocaleString()} <span className="text-slate-500">/ {minSample.toLocaleString()}</span>
               </p>

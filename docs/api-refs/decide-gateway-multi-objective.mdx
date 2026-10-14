@@ -20,11 +20,12 @@ If a cheaper PSP has a strictly higher expected value than the SR head, it is pr
 
 | Switch | Scope | Behaviour |
 | --- | --- | --- |
-| `multi_objective_routing_enabled` feature flag | Merchant | Primary rollout switch. Used whenever the request omits `enableMultiObjective`. |
+| `cost_savings_enabled` feature flag | Merchant | Primary rollout switch. Used whenever the request omits `enableMultiObjective`. |
 | `enableMultiObjective` request field | Per request | Optional boolean override. `true` forces the post-step on, `false` forces it off, omitted falls back to the merchant flag. |
 
 Notes:
 
+- Only `cost_savings_enabled` is read for merchant enablement; the legacy `multi_objective_routing_enabled` flag is no longer supported.
 - The post-step only runs on SR-scored decisions and is skipped while hedging (exploration) is active for the transaction.
 - `margin` (fraction of ticket, e.g. `0.20`) comes from the merchant's success-rate config — see [Create success-rate config](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/success-rate-config-create.mdx). It defaults to `1.0` when unset.
 - This post-step re-ranks the SR scores it is handed; it does not tune them. [Autopilot](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/merchant-features.mdx) is the separate self-tuning job that calibrates SR hedging and bucket size, and can run alongside this post-step (they are independent dials — `enableMultiObjective` and `use_autopilot`).
