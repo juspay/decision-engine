@@ -134,8 +134,13 @@ docker compose --profile postgres-ghcr up -d
 ### API + Dashboard + Docs
 
 ```bash
-docker compose --profile dashboard-postgres-ghcr up -d
+docker compose --profile dashboard-postgres-ghcr up -d --build
 ```
+
+All `dashboard-*` profiles build the frontend from the current `website` source inside Docker,
+including profiles that pull the API image from GHCR. No host Node.js installation or prebuilt
+`website/dist` is required. After changing frontend source, rerun the command with `--build`;
+restarting containers alone does not rebuild the dashboard.
 
 ### With Monitoring
 
