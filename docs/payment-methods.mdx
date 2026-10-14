@@ -1,0 +1,68 @@
+---
+title: "Payment Methods"
+description: "How Decision Engine names a payment's method, and what changed when it adopted Hyperswitch's meaning"
+---
+
+## One meaning everywhere
+
+Decision Engine names a payment's method the way Hyperswitch does:
+
+| Field | Meaning | Examples |
+| --- | --- | --- |
+| `paymentMethod` (`payment_method`) | The category | `card`, `wallet`, `upi`, `bank_redirect` |
+| `paymentMethodType` (`payment_method_type`) | The specific method within it | `credit`, `debit`, `google_pay`, `upi_collect` |
+
+The same meaning applies to the `/decide-gateway` request, the `/routing/hybrid` rule parameters, success-rate config rows, analytics columns and the dashboard. Every request is parsed into one internal form when it arrives, and routing reads only that. A card payment is routed as a card whichever endpoint it comes through.
+
+## The vocabulary
+
+The valid values are Hyperswitch's own: 16 payment methods and their payment method types. Each type belongs to one method, or to a few where Hyperswitch's rules allow it (ACH as a bank debit or a bank transfer, for instance). They are defined in code (`src/types/payment_instrument.rs`) and served as routing keys by `GET /config/routing-keys`:
+
+- `payment_method`: the methods.
+- `payment_method_type`: every type.
+- One key per method listing its types, such as `card` → `card, credit, debit`.
+
+The rule builder and the dashboard read these keys, so they always match what requests are checked against. Configuration files no longer declare them.
+
+## What is checked
+
+- **`/decide-gateway`** rejects a request whose `paymentMethod` is not a payment method, whose `paymentMethodType` is not a payment method type, or whose type does not belong to its method. The response is a 400 with `error_info.code` `INVALID_PAYMENT_METHOD`. When the two fields look swapped, the message says so. Case is ignored: `card` and `CARD` are the same.
+- **Success-rate config rows** (`subLevelInputConfig`) are checked the same way when created or updated. `paymentMethod` is required; `paymentMethodType` is optional and narrows the row. Rows are stored and returned as upper-case codes (`CARD`, `CREDIT`).
+- **`/routing/hybrid`** is not rejected on these fields. Its rule parameters come from Hyperswitch, which has already validated them; a type newer than this build is kept as is.
+
+```json
+{
+  "status": "400",
+  "error_code": "400",
+  "error_message": "Invalid payment method",
+  "error_info": {
+    "code": "INVALID_PAYMENT_METHOD",
+    "user_message": "paymentMethod or paymentMethodType is not a Hyperswitch value.",
+    "developer_message": "paymentMethod `CREDIT` is not a payment method (card, wallet, upi...). paymentMethod and paymentMethodType follow Hyperswitch's meaning: send the category (card) as paymentMethod and the specific method (credit) as paymentMethodType; this request looks swapped."
+  }
+}
+```
+
+## Legacy Euler-format APIs
+
+The legacy endpoints that take Euler's transaction format (`/decision_gateway` and `/update-score`) keep Euler's meaning: `paymentMethodType` is the category and `paymentMethod` the specific method (for a card, its brand). They are translated into the same internal form when they arrive, and their score keys keep Euler's order (`CARD_VISA`), so their routing and learned scores carry over. Two category codes are normalised on the way in: `PAYLATER` becomes `PAY_LATER`, and a category Decision Engine does not know becomes `UNKNOWN`; scores for those payments start again under the new keys.
+
+## Upgrading
+
+This is a breaking change for `/decide-gateway` callers and for stored success-rate configs.
+
+1. **`/decide-gateway` requests:** send the category as `paymentMethod` and the specific method as `paymentMethodType`.
+
+   ```json
+   // Before
+   { "paymentMethodType": "CARD", "paymentMethod": "CREDIT" }
+   // After
+   { "paymentMethod": "CARD", "paymentMethodType": "CREDIT" }
+   ```
+
+2. **Success-rate config rows** saved the old way (`"paymentMethodType": "CARD"`) no longer match. Read the config with `/rule/get`, move the category into `paymentMethod` and the specific method (if any) into `paymentMethodType`, and save it with `/rule/update`.
+3. **Routing of Hyperswitch traffic.** Card and UPI logic now applies to `/routing/hybrid` payments, which were previously routed as if they had no category:
+   - A card payment's routing dimension becomes card-level, for example `UNKNOWN, CREDIT, CARD, CREDIT` at `CARD_LEVEL` instead of `UNKNOWN, CREDIT, CARD` at `PM_LEVEL`.
+   - Per-category settings apply: the `explore-exploit-srv3` feature (keyed on `CARD`), the SR-enabled payment method types, and success-rate config rows for the category.
+4. **Score keys.** Success-rate scores keep their keys for every payment that names a type. A payment without a type is keyed `UNKNOWN` instead of `NULL` in that position. Elimination and outage scores for card payments move to keys that include the card type; these scores expire within 2.5 hours (30 minutes for global keys), so they rebuild without a migration.
+5. **Auth type.** A card payment's auth type is kept as sent (`NO_THREE_DS`), so success-rate config rows that constrain `authType` match on its score update as well as its decision. The auth-level dimension still groups auth types into `THREE_DS`, `OTP` and `UNKNOWN`.

@@ -6698,19 +6698,21 @@
       },
       "SRSubLevelInputConfig": {
         "type": "object",
+        "required": [
+          "paymentMethod"
+        ],
         "properties": {
+          "paymentMethod": {
+            "type": "string",
+            "description": "The payment method category, in Hyperswitch's meaning (`card`, `wallet`, `upi`). Stored and returned as an upper-case code.",
+            "example": "CARD"
+          },
           "paymentMethodType": {
             "type": [
               "string",
               "null"
             ],
-            "example": "CARD"
-          },
-          "paymentMethod": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "description": "The specific method within `paymentMethod` (`credit`, `google_pay`); omit it to cover the whole method. Must belong to `paymentMethod`. Stored and returned as an upper-case code.",
             "example": "CREDIT"
           },
           "cardNetwork": {

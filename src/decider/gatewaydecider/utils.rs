@@ -2666,12 +2666,14 @@ async fn get_legacy_unified_sr_key(
     } else {
         C::GATEWAY_SELECTION_ORDER_TYPE_KEY_PREFIX.to_string()
     };
+    // Euler's key order: the category, then the specific method (`CARD_VISA`), so legacy scores
+    // keep their keys.
     let base_key = vec![
         key_prefix.clone(),
         merchant_id.clone(),
         order_type.clone(),
-        payment_method_type.clone(),
         payment_method.clone(),
+        payment_method_type.clone(),
     ];
 
     if enforce1d && payment_method == CARD {
@@ -3309,6 +3311,7 @@ mod card_auth_level_tests {
 }
 
 #[cfg(test)]
+#[allow(clippy::panic_in_result_fn)]
 mod sr_key_tests {
     use super::sr_key;
     use crate::decider::gatewaydecider::types::GatewayScoringData;
@@ -3374,6 +3377,17 @@ mod sr_key_tests {
         assert_eq!(
             sr_key(&data, true, &[], None),
             "{gw_sr_v3_score_merchant_1_UNKNOWN_UNKNOWN_WALLET"
+        );
+        Ok(())
+    }
+
+    /// A legacy Euler card payment keeps Euler's key order: category, brand, then card type.
+    #[tokio::test]
+    async fn a_legacy_card_keys_as_before() -> Result<(), serde_json::Error> {
+        let data = scoring_data(PaymentInstrument::from_euler("CARD", "VISA"))?;
+        assert_eq!(
+            super::get_legacy_unified_sr_key(&data, true, true).await,
+            "{gw_sr_v3_score_merchant_1_UNKNOWN_CARD_VISA_UNKNOWN"
         );
         Ok(())
     }
