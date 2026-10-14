@@ -239,11 +239,11 @@ pub fn make_payment_info(
                 .card_type
                 .as_ref()
                 .map(card_type_to_text)
-                .or(Some(txnCardInfo.paymentMethodType)),
+                .or(Some(txnCardInfo.instrument.method_code().to_string())),
             paymentMethod: txnCardInfo
                 .cardIssuerBankName
                 .clone()
-                .or(Some(txnCardInfo.paymentMethod)),
+                .or(Some(txnCardInfo.instrument.method_type_code().into_owned())),
             paymentSource: txnCardInfo.paymentSource,
             cardIssuer: txnCardInfo.cardIssuerBankName,
             cardType: txnCardInfo.card_type.map(|c| card_type_to_text(&c)),

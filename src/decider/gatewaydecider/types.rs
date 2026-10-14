@@ -6,6 +6,7 @@ use crate::types::country::country_iso::CountryISO2;
 use crate::types::currency::Currency;
 use crate::types::money::internal as ETMo;
 use crate::types::order::udfs::UDFs;
+use crate::types::payment_instrument::{InstrumentError, PaymentInstrument};
 use crate::types::transaction::id as ETId;
 use crate::types::txn_details::types::TxnObjectType;
 use masking::{PeekInterface, Secret};
@@ -528,8 +529,10 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
         volume_steer_info: None,
         gateway_scoring_data: GatewayScoringData {
             merchantId: String::new(),
-            paymentMethodType: String::new(),
-            paymentMethod: String::new(),
+            instrument:
+                crate::types::payment_instrument::PaymentInstrument::from_hyperswitch_lenient(
+                    None, None,
+                ),
             orderType: String::new(),
             cardType: None,
             bankCode: None,
@@ -559,8 +562,9 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct GatewayScoringData {
     pub merchantId: String,
-    pub paymentMethodType: String,
-    pub paymentMethod: String,
+    /// Stored as `paymentMethod` and `paymentMethodType`, in Hyperswitch's meaning.
+    #[serde(flatten)]
+    pub instrument: crate::types::payment_instrument::PaymentInstrument,
     pub orderType: String,
     pub cardType: Option<String>,
     pub bankCode: Option<String>,
@@ -1140,6 +1144,25 @@ impl DomainDeciderRequestForApiCallV2 {
         &self.payment_info.payment_id
     }
 
+    /// The payment's instrument, checked: `paymentMethod` is one of Hyperswitch's payment methods
+    /// and `paymentMethodType` one of its types for that method. `/decide-gateway` rejects a
+    /// request that fails this.
+    pub fn check_payment_method(&self) -> Result<PaymentInstrument, InstrumentError> {
+        PaymentInstrument::from_hyperswitch(
+            &self.payment_info.payment_method,
+            &self.payment_info.payment_method_type,
+        )
+    }
+
+    /// The payment's instrument, unchecked: what the engine routes on once the request is in.
+    /// `/routing/hybrid` builds its request from rule parameters Hyperswitch already validated.
+    pub fn instrument(&self) -> PaymentInstrument {
+        PaymentInstrument::from_hyperswitch_lenient(
+            Some(&self.payment_info.payment_method),
+            Some(&self.payment_info.payment_method_type),
+        )
+    }
+
     pub fn payment_method_type(&self) -> &str {
         &self.payment_info.payment_method_type
     }
@@ -1234,7 +1257,8 @@ impl DomainDeciderRequestForApiCallV2 {
                 merchantGatewayAccountId: None,
                 txnAmount: Some(ETMo::Money::from_double(self.payment_info.amount)),
                 txnObjectType: Some(self.payment_info.payment_type.clone()),
-                sourceObject: Some(self.payment_info.payment_method.clone()),
+                // The engine reads the specific method from the source object, as Euler did.
+                sourceObject: Some(self.instrument().method_type_code().into_owned()),
                 sourceObjectId: None,
                 currency: self.payment_info.currency.clone(),
                 country: self.payment_info.country,
@@ -1260,8 +1284,7 @@ impl DomainDeciderRequestForApiCallV2 {
                 channel: self.payment_info.channel.clone(),
                 nameOnCard: None,
                 dateCreated: OffsetDateTime::now_utc(),
-                paymentMethodType: self.payment_info.payment_method_type.to_string(),
-                paymentMethod: self.payment_info.payment_method.clone(),
+                instrument: self.instrument(),
                 paymentSource: self.payment_info.payment_source.clone().map(Secret::new),
                 authType: self.payment_info.auth_type.clone(),
                 partitionKey: None,

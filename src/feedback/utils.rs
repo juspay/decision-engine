@@ -184,7 +184,12 @@ pub fn get_txn_detail_from_api_payload(
             ETTD::TxnObjectType::from_text(gateway_scoring_data.orderType.clone())
                 .unwrap_or(ETTD::TxnObjectType::OrderPayment),
         ),
-        sourceObject: Some(gateway_scoring_data.paymentMethod.clone()),
+        sourceObject: Some(
+            gateway_scoring_data
+                .instrument
+                .method_type_code()
+                .into_owned(),
+        ),
         sourceObjectId: None,
         currency: gateway_scoring_data
             .currency
@@ -226,8 +231,7 @@ pub fn get_txn_card_info_from_api_payload(
         channel: None,
         nameOnCard: None,
         dateCreated: gateway_scoring_data.dateCreated,
-        paymentMethodType: gateway_scoring_data.paymentMethodType.clone(),
-        paymentMethod: gateway_scoring_data.paymentMethod.clone(),
+        instrument: gateway_scoring_data.instrument.clone(),
         paymentSource: gateway_scoring_data.paymentSource.clone(),
         authType: gateway_scoring_data
             .authType

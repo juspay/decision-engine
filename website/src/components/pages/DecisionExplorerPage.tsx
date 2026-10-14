@@ -72,14 +72,14 @@ const CARD_PROGRAM_OPTIONS = ['STANDARD', 'PREMIUM'] as const
 const MULTI_OBJECTIVE_CARD_BRANDS = ['VISA', 'MASTERCARD'] as const
 
 const MULTI_OBJECTIVE_CLUSTER_VARIANTS: Array<{
-  paymentMethod: 'CREDIT'
+  paymentMethodType: 'CREDIT'
   cardSwitchProvider: 'VISA' | 'MASTERCARD'
   cardProgram: 'STANDARD' | 'PREMIUM'
 }> = [
-  { paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD' },
-  { paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'PREMIUM'  },
-  { paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD' },
-  { paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'PREMIUM'  },
+  { paymentMethodType: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD' },
+  { paymentMethodType: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'PREMIUM'  },
+  { paymentMethodType: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD' },
+  { paymentMethodType: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'PREMIUM'  },
 ]
 
 interface DebitRoutingFormState {
@@ -1410,8 +1410,8 @@ export function DecisionExplorerPage() {
           amount: parseFloat(form.amount) || 1000,
           currency: form.currency,
           paymentType: 'ORDER_PAYMENT',
-          paymentMethodType: form.payment_method_type,
-          paymentMethod: form.payment_method,
+          paymentMethod: form.payment_method_type,
+          paymentMethodType: form.payment_method,
           authType: form.auth_type,
           cardBrand: form.card_brand,
           cardSwitchProvider: form.card_brand,
@@ -1504,8 +1504,8 @@ export function DecisionExplorerPage() {
           amount: parseFloat(debitForm.amount) || 1000,
           currency: debitForm.currency,
           paymentType: 'ORDER_PAYMENT',
-          paymentMethodType: 'CARD',
-          paymentMethod: 'DEBIT',
+          paymentMethod: 'CARD',
+          paymentMethodType: 'DEBIT',
           authType: debitForm.auth_type,
           metadata: buildDebitRoutingMetadata(),
         },
@@ -1556,8 +1556,9 @@ export function DecisionExplorerPage() {
         // multi-objective leg has meaningful choices to make. Form values still
         // seed everything else (currency, eligible_gateways, etc).
         const variant = isMultiObjective ? MULTI_OBJECTIVE_CLUSTER_VARIANTS[i % MULTI_OBJECTIVE_CLUSTER_VARIANTS.length] : null
-        const paymentMethodType = isMultiObjective ? 'CARD' : form.payment_method_type
-        const paymentMethod = variant ? variant.paymentMethod : form.payment_method
+        // Hyperswitch's meaning: the method is the category (CARD), its type the specific method (CREDIT).
+        const paymentMethod = isMultiObjective ? 'CARD' : form.payment_method_type
+        const paymentMethodType = variant ? variant.paymentMethodType : form.payment_method
         const cardBrand = variant ? variant.cardSwitchProvider : form.card_brand
         const cardProgram = variant ? variant.cardProgram : form.card_program
         const amount = isMultiObjective
@@ -1577,7 +1578,7 @@ export function DecisionExplorerPage() {
               authType: form.auth_type,
               cardBrand,
               cardSwitchProvider: cardBrand,
-              cardType: paymentMethod,
+              cardType: paymentMethodType,
               cardProgram,
             },
             eligibleGatewayList: gateways,
@@ -3628,8 +3629,8 @@ export function DecisionExplorerPage() {
                     decideParams={{
                       amount: form.amount,
                       currency: form.currency,
-                      paymentMethodType: form.payment_method_type,
-                      paymentMethod: form.payment_method,
+                      paymentMethod: form.payment_method_type,
+                      paymentMethodType: form.payment_method,
                       authType: form.auth_type,
                       cardBrand: form.card_brand,
                       rankingAlgorithm: 'SR_BASED_ROUTING',

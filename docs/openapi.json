@@ -2124,8 +2124,8 @@
                       "country": "US",
                       "customerId": "cust_123",
                       "paymentType": "ORDER_PAYMENT",
-                      "paymentMethodType": "CARD",
-                      "paymentMethod": "CREDIT",
+                      "paymentMethod": "CARD",
+                      "paymentMethodType": "CREDIT",
                       "authType": "THREE_DS",
                       "cardIsin": "411111"
                     },
@@ -2147,8 +2147,8 @@
                       "amount": 1000,
                       "currency": "USD",
                       "paymentType": "ORDER_PAYMENT",
-                      "paymentMethodType": "CARD",
-                      "paymentMethod": "DEBIT",
+                      "paymentMethod": "CARD",
+                      "paymentMethodType": "DEBIT",
                       "authType": "THREE_DS",
                       "metadata": "{\"merchant_category_code\":\"merchant_category_code_0001\",\"acquirer_country\":\"US\",\"co_badged_card_data\":{\"co_badged_card_networks\":[\"VISA\",\"NYCE\",\"PULSE\",\"STAR\"],\"issuer_country\":\"US\",\"is_regulated\":false,\"regulated_name\":null,\"card_type\":\"debit\"}}"
                     },
@@ -2169,8 +2169,8 @@
                       "amount": 750,
                       "currency": "USD",
                       "paymentType": "ORDER_PAYMENT",
-                      "paymentMethodType": "CARD",
-                      "paymentMethod": "DEBIT"
+                      "paymentMethod": "CARD",
+                      "paymentMethodType": "DEBIT"
                     },
                     "eligibleGatewayList": [
                       "stripe",
@@ -2191,8 +2191,8 @@
                       "currency": "USD",
                       "country": "US",
                       "paymentType": "ORDER_PAYMENT",
-                      "paymentMethodType": "CARD",
-                      "paymentMethod": "CREDIT",
+                      "paymentMethod": "CARD",
+                      "paymentMethodType": "CREDIT",
                       "authType": "THREE_DS",
                       "cardIsin": "424242"
                     },
@@ -5158,11 +5158,13 @@
           },
           "paymentMethodType": {
             "type": "string",
-            "example": "CARD"
+            "description": "The specific method within `paymentMethod`, in Hyperswitch's meaning (its `payment_method_type`): `CREDIT` or `DEBIT` for cards, `UPI_COLLECT`, `GOOGLE_PAY` and so on.",
+            "example": "CREDIT"
           },
           "paymentMethod": {
             "type": "string",
-            "example": "CREDIT"
+            "description": "The payment method category, in Hyperswitch's meaning (its `payment_method`): `CARD`, `UPI`, `WALLET` and so on. Before this release `/decide-gateway` read the two fields the other way round.",
+            "example": "CARD"
           },
           "country": {
             "type": [
