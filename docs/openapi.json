@@ -8082,12 +8082,19 @@
           },
           "arm": {
             "type": "string",
-            "description": "control | variant",
+            "enum": [
+              "control",
+              "variant"
+            ],
             "example": "variant"
           },
           "endpoint": {
             "type": "string",
-            "description": "hybrid_routing | decide_gateway | evaluate",
+            "enum": [
+              "hybrid_routing",
+              "decide_gateway",
+              "evaluate"
+            ],
             "example": "hybrid_routing"
           },
           "routed_at_ms": {

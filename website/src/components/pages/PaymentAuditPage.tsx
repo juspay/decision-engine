@@ -420,7 +420,7 @@ function HeadlineFact({ label, value }: { label: string; value: string }) {
   )
 }
 
-const EXPERIMENT_ENDPOINT_LABELS: Record<string, string> = {
+const EXPERIMENT_ENDPOINT_LABELS: Record<PaymentAuditExperiment['endpoint'], string> = {
   hybrid_routing: 'hybrid routing',
   decide_gateway: 'decide gateway',
   evaluate: 'rule evaluate',

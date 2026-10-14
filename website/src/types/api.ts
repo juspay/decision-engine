@@ -728,9 +728,8 @@ export interface PaymentAuditFilterOptions {
 /** A payment's assignment to an A/B experiment on one routing endpoint. */
 export interface PaymentAuditExperiment {
   experiment_id: string
-  /** `control` or `variant`. */
-  arm: string
-  endpoint: string
+  arm: 'control' | 'variant'
+  endpoint: 'hybrid_routing' | 'decide_gateway' | 'evaluate'
   routed_at_ms: number
 }
 
