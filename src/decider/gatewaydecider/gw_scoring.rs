@@ -2659,7 +2659,7 @@ pub async fn update_gateway_score_based_on_success_rate(
         );
 
         let payment_method_type = if Utils::is_card_transaction(&txn_card_info) {
-            CARD
+            std::borrow::Cow::Borrowed(CARD)
         } else {
             txn_card_info.instrument.method_code()
         };

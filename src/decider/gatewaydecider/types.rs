@@ -529,10 +529,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
         volume_steer_info: None,
         gateway_scoring_data: GatewayScoringData {
             merchantId: String::new(),
-            instrument:
-                crate::types::payment_instrument::PaymentInstrument::from_hyperswitch_lenient(
-                    None, None,
-                ),
+            instrument: PaymentInstrument::default(),
             orderType: String::new(),
             cardType: None,
             bankCode: None,
@@ -1144,13 +1141,12 @@ impl DomainDeciderRequestForApiCallV2 {
         &self.payment_info.payment_id
     }
 
-    /// The payment's instrument, checked: `paymentMethod` is one of Hyperswitch's payment methods
-    /// and `paymentMethodType` one of its types for that method. `/decide-gateway` rejects a
-    /// request that fails this.
+    /// The payment's instrument, checked as [`PaymentInstrument::from_hyperswitch`] does.
+    /// `/decide-gateway` rejects a request that fails this.
     pub fn check_payment_method(&self) -> Result<PaymentInstrument, InstrumentError> {
         PaymentInstrument::from_hyperswitch(
             &self.payment_info.payment_method,
-            &self.payment_info.payment_method_type,
+            Some(&self.payment_info.payment_method_type),
         )
     }
 

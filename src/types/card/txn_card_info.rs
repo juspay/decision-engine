@@ -47,6 +47,24 @@ impl std::fmt::Display for AuthType {
     }
 }
 
+impl AuthType {
+    /// The auth-level SR dimension's grouping: `THREE_DS`, `OTP` or `UNKNOWN`.
+    pub fn sr_auth_level(&self) -> &'static str {
+        match self {
+            Self::ThreeDs | Self::ThreeDs2 => "THREE_DS",
+            Self::Otp => "OTP",
+            Self::Atmpin
+            | Self::OboOtp
+            | Self::Vies
+            | Self::NoThreeDs
+            | Self::NetworkToken
+            | Self::Moto
+            | Self::Fido
+            | Self::Ctp => "UNKNOWN",
+        }
+    }
+}
+
 pub fn text_to_auth_type(ctx: &str) -> Result<AuthType, ApiError> {
     match ctx {
         "ATMPIN" => Ok(AuthType::Atmpin),

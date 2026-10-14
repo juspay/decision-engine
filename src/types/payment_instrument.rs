@@ -5,11 +5,15 @@
 //! `google_pay`, `upi_collect`). Every entry point parses its payload into a
 //! [`PaymentInstrument`] once, and the engine works only on that:
 //!
-//! - Hyperswitch's format, with [`PaymentInstrument::from_hyperswitch`] (strict, for requests
+//! - Hyperswitch's format, with [`PaymentInstrument::from_hyperswitch`] (for requests
 //!   Decision Engine validates) or [`PaymentInstrument::from_hyperswitch_lenient`] (for values
 //!   Hyperswitch already validated, such as routing rule parameters, and for stored data).
 //! - Euler's legacy format, which carries the category in `paymentMethodType` and the specific
 //!   method in `paymentMethod`, with [`PaymentInstrument::from_euler`].
+//!
+//! Values this build does not know are kept by name rather than rejected, so a method or type
+//! newer than this build routes (generically) without a release. The enums below are the
+//! vocabulary the dashboard offers and the categories the engine has rules for.
 //!
 //! Nothing downstream has to know which format a payment arrived in.
 
@@ -65,7 +69,7 @@ pub enum PaymentMethod {
     Rtp,
     CardQr,
     Pan,
-    /// The request named no payment method.
+    /// No payment method, or one the engine has no rules for (kept by name in [`PaymentInstrument`]).
     Unknown,
 }
 
@@ -448,6 +452,42 @@ pub fn payment_method_routing_keys() -> Vec<(String, Vec<String>)> {
     keys
 }
 
+/// The category as the payment named it: one the engine knows, or a value it does not (an Euler
+/// category this build has no variant for, or a Hyperswitch method newer than this build).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+enum Category {
+    Known(PaymentMethod),
+    Other(String),
+}
+
+impl Category {
+    /// Parses anything: the engine's categories by name, anything else kept upper-cased. Empty
+    /// and `null` are [`PaymentMethod::Unknown`].
+    fn parse(value: &str) -> Self {
+        let value = value.trim();
+        if value.is_empty() || value.eq_ignore_ascii_case("null") {
+            return Self::Known(PaymentMethod::Unknown);
+        }
+        PaymentMethod::from_str(value)
+            .map(Self::Known)
+            .unwrap_or_else(|_| Self::Other(value.to_ascii_uppercase()))
+    }
+
+    fn method(&self) -> PaymentMethod {
+        match self {
+            Self::Known(method) => *method,
+            Self::Other(_) => PaymentMethod::Unknown,
+        }
+    }
+
+    fn code(&self) -> Cow<'static, str> {
+        match self {
+            Self::Known(method) => Cow::Borrowed(method.code()),
+            Self::Other(code) => Cow::Owned(code.clone()),
+        }
+    }
+}
+
 /// The specific method within a category: one of Hyperswitch's types, or a value it does not
 /// define (an Euler method such as `UPI_PAY`, or a type newer than this build).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -471,6 +511,15 @@ impl MethodType {
         )
     }
 
+    /// An Euler specific method: Euler's spellings of Hyperswitch's types are mapped to them
+    /// (`GOOGLEPAY` is `google_pay`), anything else is parsed as [`Self::parse_lenient`] does.
+    fn from_euler(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_uppercase().as_str() {
+            "GOOGLEPAY" => Some(Self::Hyperswitch(PaymentMethodType::GooglePay)),
+            _ => Self::parse_lenient(value),
+        }
+    }
+
     /// The upper-case code the engine keys and compares on: `CREDIT`, `GOOGLE_PAY`, `UPI_PAY`.
     pub fn code(&self) -> Cow<'static, str> {
         match self {
@@ -482,14 +531,16 @@ impl MethodType {
     }
 }
 
-/// Why a request's payment method and type were not accepted.
+/// Why a request's payment method and type were not accepted. Values this build does not know
+/// are accepted; only these mistakes are not.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InstrumentError {
-    /// `paymentMethod` is not one of Hyperswitch's payment methods.
-    UnknownMethod { method: String, swapped: bool },
-    /// `paymentMethodType` is not one of Hyperswitch's payment method types.
-    UnknownType { method_type: String, swapped: bool },
-    /// The type does not belong under the method (`card` with `google_pay`).
+    /// The request names no `paymentMethod`.
+    MissingMethod,
+    /// The two fields are the wrong way round: `paymentMethod` names a payment method type, or
+    /// `paymentMethodType` names a payment method (`CREDIT` and `CARD`).
+    Swapped { method: String, method_type: String },
+    /// A known type under a known method it does not belong to (`card` with `google_pay`).
     TypeNotInMethod {
         method: PaymentMethod,
         method_type: PaymentMethodType,
@@ -498,23 +549,19 @@ pub enum InstrumentError {
 
 impl fmt::Display for InstrumentError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        const SWAP_HINT: &str = " paymentMethod and paymentMethodType follow Hyperswitch's \
-            meaning: send the category (card) as paymentMethod and the specific method (credit) \
-            as paymentMethodType; this request looks swapped.";
         match self {
-            Self::UnknownMethod { method, swapped } => write!(
-                f,
-                "paymentMethod `{method}` is not a payment method (card, wallet, upi...).{}",
-                if *swapped { SWAP_HINT } else { "" }
+            Self::MissingMethod => f.write_str(
+                "paymentMethod is required: the payment method category (card, wallet, upi...).",
             ),
-            Self::UnknownType {
+            Self::Swapped {
+                method,
                 method_type,
-                swapped,
             } => write!(
                 f,
-                "paymentMethodType `{method_type}` is not a payment method type (credit, debit, \
-                 google_pay...).{}",
-                if *swapped { SWAP_HINT } else { "" }
+                "paymentMethod `{method}` and paymentMethodType `{method_type}` look swapped. \
+                 paymentMethod and paymentMethodType follow Hyperswitch's meaning: send the \
+                 category (card) as paymentMethod and the specific method (credit) as \
+                 paymentMethodType."
             ),
             Self::TypeNotInMethod {
                 method,
@@ -530,57 +577,75 @@ impl fmt::Display for InstrumentError {
 }
 
 /// A payment's instrument: its category and, when known, the specific method within it. Built
-/// only by the parsers, so a method and type that do not belong together never reach the engine.
+/// only by the parsers, so a known method and type that do not belong together never reach the
+/// engine.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(from = "InstrumentWire", into = "InstrumentWire")]
 pub struct PaymentInstrument {
-    method: PaymentMethod,
+    method: Category,
     method_type: Option<MethodType>,
 }
 
+/// A payment that names no method.
+impl Default for PaymentInstrument {
+    fn default() -> Self {
+        Self {
+            method: Category::Known(PaymentMethod::Unknown),
+            method_type: None,
+        }
+    }
+}
+
 impl PaymentInstrument {
-    /// Hyperswitch's format, checked: `method` is one of its payment methods and `method_type`
-    /// one of its types, belonging to that method. Case is ignored.
-    pub fn from_hyperswitch(method: &str, method_type: &str) -> Result<Self, InstrumentError> {
-        let swapped = PaymentMethod::from_hyperswitch(method_type).is_some()
-            && PaymentMethod::from_hyperswitch(method).is_none();
-        let payment_method =
-            PaymentMethod::from_hyperswitch(method).ok_or(InstrumentError::UnknownMethod {
+    /// Hyperswitch's format, as Decision Engine accepts it from its own callers. Case is ignored
+    /// and values this build does not know are kept, so a method or type newer than this build
+    /// routes without a release. Only clear mistakes are rejected: no method, the two fields
+    /// swapped, or a known type under a known method it does not belong to.
+    pub fn from_hyperswitch(
+        method: &str,
+        method_type: Option<&str>,
+    ) -> Result<Self, InstrumentError> {
+        let names_a_method = |value: &str| PaymentMethod::from_str(value.trim()).is_ok();
+        let names_a_type = |value: &str| PaymentMethodType::from_str(value.trim()).is_ok();
+        // Swapped: the method field names only a type (`credit`), or the type field names a
+        // category while the method field does not (`visa` with `card`).
+        let swapped = (names_a_type(method) && !names_a_method(method))
+            || method_type
+                .is_some_and(|method_type| names_a_method(method_type) && !names_a_method(method));
+        let instrument = Self::from_hyperswitch_lenient(Some(method), method_type);
+        if instrument.method == Category::Known(PaymentMethod::Unknown) {
+            return Err(InstrumentError::MissingMethod);
+        }
+        if swapped {
+            return Err(InstrumentError::Swapped {
                 method: method.to_string(),
-                swapped,
-            })?;
-        let payment_method_type =
-            PaymentMethodType::from_str(method_type.trim()).map_err(|_| {
-                InstrumentError::UnknownType {
-                    method_type: method_type.to_string(),
-                    swapped,
-                }
-            })?;
-        if !payment_method_type
-            .payment_methods()
-            .contains(&payment_method)
-        {
-            return Err(InstrumentError::TypeNotInMethod {
-                method: payment_method,
-                method_type: payment_method_type,
+                method_type: method_type.unwrap_or_default().to_string(),
             });
         }
-        Ok(Self {
-            method: payment_method,
-            method_type: Some(MethodType::Hyperswitch(payment_method_type)),
-        })
+        if let (
+            Category::Known(payment_method),
+            Some(MethodType::Hyperswitch(payment_method_type)),
+        ) = (&instrument.method, &instrument.method_type)
+        {
+            if payment_method.is_hyperswitch()
+                && !payment_method_type
+                    .payment_methods()
+                    .contains(payment_method)
+            {
+                return Err(InstrumentError::TypeNotInMethod {
+                    method: *payment_method,
+                    method_type: *payment_method_type,
+                });
+            }
+        }
+        Ok(instrument)
     }
 
     /// Hyperswitch's format, unchecked, for values Hyperswitch already validated and for stored
-    /// data: an unknown method is [`PaymentMethod::Unknown`] and an unknown type is kept as is.
+    /// data: whatever the payment names is kept.
     pub fn from_hyperswitch_lenient(method: Option<&str>, method_type: Option<&str>) -> Self {
         Self {
-            method: method
-                .and_then(|method| {
-                    PaymentMethod::from_hyperswitch(method)
-                        .or_else(|| PaymentMethod::from_str(method.trim()).ok())
-                })
-                .unwrap_or(PaymentMethod::Unknown),
+            method: Category::parse(method.unwrap_or_default()),
             method_type: method_type.and_then(MethodType::parse_lenient),
         }
     }
@@ -588,22 +653,29 @@ impl PaymentInstrument {
     /// Euler's legacy format: the category in `paymentMethodType`, the specific method in
     /// `paymentMethod`.
     pub fn from_euler(payment_method_type: &str, payment_method: &str) -> Self {
+        let method = match PaymentMethod::from_euler(payment_method_type) {
+            PaymentMethod::Unknown => Category::parse(payment_method_type),
+            method => Category::Known(method),
+        };
         Self {
-            method: PaymentMethod::from_euler(payment_method_type),
-            method_type: MethodType::parse_lenient(payment_method),
+            method,
+            method_type: MethodType::from_euler(payment_method),
         }
     }
 
+    /// The category the engine routes on; [`PaymentMethod::Unknown`] for one it has no rules
+    /// for.
     pub fn method(&self) -> PaymentMethod {
-        self.method
+        self.method.method()
     }
 
     pub fn method_type(&self) -> Option<&MethodType> {
         self.method_type.as_ref()
     }
 
-    /// The category's code, as the engine keys on it: `CARD`.
-    pub fn method_code(&self) -> &'static str {
+    /// The category's code, as the engine keys on it: `CARD`, or the value as named for a
+    /// category this build does not know.
+    pub fn method_code(&self) -> Cow<'static, str> {
         self.method.code()
     }
 
@@ -616,7 +688,11 @@ impl PaymentInstrument {
     }
 
     pub fn is(&self, method: PaymentMethod) -> bool {
-        self.method == method
+        self.method == Category::Known(method)
+    }
+
+    pub fn is_type(&self, method_type: PaymentMethodType) -> bool {
+        self.method_type == Some(MethodType::Hyperswitch(method_type))
     }
 
     /// The analytics columns `(payment_method, payment_method_type)`: the codes, or `None` where
@@ -624,7 +700,8 @@ impl PaymentInstrument {
     pub fn analytics_columns(&self) -> (Option<String>, Option<String>) {
         let method_type = self.method_type_code();
         (
-            (self.method != PaymentMethod::Unknown).then(|| self.method_code().to_string()),
+            (self.method != Category::Known(PaymentMethod::Unknown))
+                .then(|| self.method_code().into_owned()),
             (!method_type.is_empty()).then(|| method_type.into_owned()),
         )
     }
@@ -663,7 +740,7 @@ mod tests {
 
     #[test]
     fn hyperswitch_pairs_parse_in_any_case() {
-        let card = PaymentInstrument::from_hyperswitch("card", "CREDIT");
+        let card = PaymentInstrument::from_hyperswitch("card", Some("CREDIT"));
         assert_eq!(
             card.as_ref().map(PaymentInstrument::method),
             Ok(PaymentMethod::Card)
@@ -672,42 +749,80 @@ mod tests {
             card.as_ref().map(|i| i.method_type_code().into_owned()),
             Ok("CREDIT".to_string())
         );
-        assert!(PaymentInstrument::from_hyperswitch("WALLET", "google_pay").is_ok());
-        assert!(PaymentInstrument::from_hyperswitch("upi", "upi_collect").is_ok());
+        assert!(PaymentInstrument::from_hyperswitch("WALLET", Some("google_pay")).is_ok());
+        assert!(PaymentInstrument::from_hyperswitch("upi", Some("upi_collect")).is_ok());
+        assert!(PaymentInstrument::from_hyperswitch("wallet", None).is_ok());
         // A type Hyperswitch's rules accept under two methods is valid under either.
-        assert!(PaymentInstrument::from_hyperswitch("bank_debit", "ach").is_ok());
-        assert!(PaymentInstrument::from_hyperswitch("bank_transfer", "ach").is_ok());
-        assert!(PaymentInstrument::from_hyperswitch("reward", "classic").is_ok());
+        assert!(PaymentInstrument::from_hyperswitch("bank_debit", Some("ach")).is_ok());
+        assert!(PaymentInstrument::from_hyperswitch("bank_transfer", Some("ach")).is_ok());
+        assert!(PaymentInstrument::from_hyperswitch("reward", Some("classic")).is_ok());
+    }
+
+    /// A method or type newer than this build is routed by name, not rejected.
+    #[test]
+    fn unknown_values_are_kept() {
+        let instrument = PaymentInstrument::from_hyperswitch("new_method", Some("new_type"));
+        assert_eq!(
+            instrument.as_ref().map(PaymentInstrument::method),
+            Ok(PaymentMethod::Unknown)
+        );
+        assert_eq!(
+            instrument.as_ref().map(|i| i.method_code().into_owned()),
+            Ok("NEW_METHOD".to_string())
+        );
+        assert_eq!(
+            instrument
+                .as_ref()
+                .map(|i| i.method_type_code().into_owned()),
+            Ok("NEW_TYPE".to_string())
+        );
+        let card = PaymentInstrument::from_hyperswitch("card", Some("new_card_type"));
+        assert_eq!(
+            card.as_ref().map(PaymentInstrument::method),
+            Ok(PaymentMethod::Card)
+        );
     }
 
     #[test]
     fn the_legacy_order_is_named_as_swapped() {
-        let error = PaymentInstrument::from_hyperswitch("CREDIT", "CARD")
-            .err()
-            .map(|error| error.to_string())
-            .unwrap_or_default();
-        assert!(
-            error.contains("paymentMethod `CREDIT` is not a payment method"),
-            "{error}"
-        );
-        assert!(error.contains("looks swapped"), "{error}");
+        for (method, method_type) in [
+            ("CREDIT", Some("CARD")),
+            ("credit", None),
+            ("VISA", Some("card")),
+        ] {
+            let error = PaymentInstrument::from_hyperswitch(method, method_type)
+                .err()
+                .map(|error| error.to_string())
+                .unwrap_or_default();
+            assert!(error.contains("look swapped"), "{method}: {error}");
+        }
     }
 
     #[test]
-    fn a_type_must_belong_to_its_method() {
+    fn a_method_is_required() {
         assert_eq!(
-            PaymentInstrument::from_hyperswitch("card", "google_pay"),
+            PaymentInstrument::from_hyperswitch(" ", Some("credit")),
+            Err(InstrumentError::MissingMethod)
+        );
+    }
+
+    #[test]
+    fn a_known_type_must_belong_to_its_known_method() {
+        assert_eq!(
+            PaymentInstrument::from_hyperswitch("card", Some("google_pay")),
             Err(InstrumentError::TypeNotInMethod {
                 method: PaymentMethod::Card,
                 method_type: PaymentMethodType::GooglePay,
             })
         );
-        let error = PaymentInstrument::from_hyperswitch("card", "visa")
+        let error = PaymentInstrument::from_hyperswitch("card", Some("google_pay"))
             .err()
             .map(|error| error.to_string())
             .unwrap_or_default();
-        assert!(error.contains("paymentMethodType `visa`"), "{error}");
-        assert!(!error.contains("looks swapped"), "{error}");
+        assert!(
+            error.contains("is not a card payment method type"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -727,6 +842,13 @@ mod tests {
             PaymentInstrument::from_euler("UPI", "UPI_PAY").method_type_code(),
             "UPI_PAY"
         );
+        // Euler's spelling of a Hyperswitch type is mapped to it.
+        assert!(PaymentInstrument::from_euler("WALLET", "GOOGLEPAY")
+            .is_type(PaymentMethodType::GooglePay));
+        // A category this build has no variant for keeps its name.
+        let other = PaymentInstrument::from_euler("EMI", "HDFC");
+        assert_eq!(other.method(), PaymentMethod::Unknown);
+        assert_eq!(other.method_code(), "EMI");
     }
 
     #[test]
@@ -735,8 +857,19 @@ mod tests {
         assert_eq!(instrument.method(), PaymentMethod::Card);
         assert_eq!(instrument.method_type(), None);
         let instrument = PaymentInstrument::from_hyperswitch_lenient(None, Some("new_wallet"));
-        assert_eq!(instrument.method(), PaymentMethod::Unknown);
+        assert_eq!(
+            instrument,
+            PaymentInstrument {
+                method_type: MethodType::parse_lenient("new_wallet"),
+                ..PaymentInstrument::default()
+            }
+        );
+        assert_eq!(instrument.method_code(), "UNKNOWN");
         assert_eq!(instrument.method_type_code(), "NEW_WALLET");
+        assert_eq!(
+            instrument.analytics_columns(),
+            (None, Some("NEW_WALLET".to_string()))
+        );
     }
 
     #[test]

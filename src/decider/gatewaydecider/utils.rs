@@ -198,8 +198,15 @@ pub fn is_emandate_supported_payment_method(
     txn_card_info: &ETCa::txn_card_info::TxnCardInfo,
 ) -> bool {
     matches!(
-        txn_card_info.instrument.method_code(),
-        CARD | NB | WALLET | UPI | AADHAAR | PAPERNACH | PAN | RTP
+        txn_card_info.instrument.method(),
+        PaymentMethod::Card
+            | PaymentMethod::NetBanking
+            | PaymentMethod::Wallet
+            | PaymentMethod::Upi
+            | PaymentMethod::Aadhaar
+            | PaymentMethod::PaperNach
+            | PaymentMethod::Pan
+            | PaymentMethod::Rtp
     )
 }
 
@@ -597,8 +604,11 @@ pub fn is_emandate_amount_filter_needed(
 ) -> bool {
     is_emandate_register_transaction(txn_detail)
         && matches!(
-            txn_card_info.instrument.method_code(),
-            CARD | NB | AADHAAR | PAN
+            txn_card_info.instrument.method(),
+            PaymentMethod::Card
+                | PaymentMethod::NetBanking
+                | PaymentMethod::Aadhaar
+                | PaymentMethod::Pan
         )
 }
 
@@ -1846,11 +1856,11 @@ pub fn filter_upto_pmt(
 /// The scoring data keeps the auth type as sent, which SR config matching and the payment's score
 /// update read back.
 fn card_auth_level(auth_type: Option<&str>) -> &'static str {
-    match auth_type.map(str::to_uppercase).as_deref() {
-        Some("THREE_DS" | "THREE_DS_2") => "THREE_DS",
-        Some("OTP") => "OTP",
-        _ => "UNKNOWN",
-    }
+    auth_type
+        .and_then(|auth_type| {
+            ETCa::txn_card_info::text_to_auth_type(&auth_type.to_uppercase()).ok()
+        })
+        .map_or("UNKNOWN", |auth_type| auth_type.sr_auth_level())
 }
 
 pub fn get_payment_method(
@@ -2239,26 +2249,27 @@ pub async fn get_unified_key(
     let gateway_redis_key_map = match score_key_type {
         ScoreKeyType::EliminationGlobalKey => {
             let key_prefix = C::ELIMINATION_BASED_ROUTING_GLOBAL_KEY_PREFIX;
-            let (prefix_key, suffix_key) = if payment_method == CARD {
-                (
-                    vec![key_prefix, &order_type.as_str()],
-                    vec![
-                        payment_method_type.to_string(),
-                        payment_method.to_string(),
-                        gateway_scoring_data
-                            .cardType
-                            .clone()
-                            .as_deref()
-                            .unwrap_or("")
-                            .to_string(),
-                    ],
-                )
-            } else {
-                (
-                    vec![key_prefix, &order_type.as_str()],
-                    vec![payment_method_type, payment_method],
-                )
-            };
+            let (prefix_key, suffix_key) =
+                if gateway_scoring_data.instrument.is(PaymentMethod::Card) {
+                    (
+                        vec![key_prefix, &order_type.as_str()],
+                        vec![
+                            payment_method_type.to_string(),
+                            payment_method.to_string(),
+                            gateway_scoring_data
+                                .cardType
+                                .clone()
+                                .as_deref()
+                                .unwrap_or("")
+                                .to_string(),
+                        ],
+                    )
+                } else {
+                    (
+                        vec![key_prefix, &order_type.as_str()],
+                        vec![payment_method_type, payment_method],
+                    )
+                };
 
             let result_keys =
                 gateway_ref_id_map
@@ -2287,26 +2298,27 @@ pub async fn get_unified_key(
         ScoreKeyType::EliminationMerchantKey => {
             let isgri_enabled = gateway_scoring_data.isGriEnabledForElimination;
             let key_prefix = C::ELIMINATION_BASED_ROUTING_KEY_PREFIX;
-            let (prefix_key, suffix_key) = if payment_method == CARD {
-                (
-                    vec![key_prefix, &merchant_id, &order_type.as_str()],
-                    vec![
-                        payment_method_type,
-                        payment_method,
-                        gateway_scoring_data
-                            .cardType
-                            .clone()
-                            .as_deref()
-                            .unwrap_or("")
-                            .to_string(),
-                    ],
-                )
-            } else {
-                (
-                    vec![key_prefix, &merchant_id, &order_type.as_str()],
-                    vec![payment_method_type, payment_method],
-                )
-            };
+            let (prefix_key, suffix_key) =
+                if gateway_scoring_data.instrument.is(PaymentMethod::Card) {
+                    (
+                        vec![key_prefix, &merchant_id, &order_type.as_str()],
+                        vec![
+                            payment_method_type,
+                            payment_method,
+                            gateway_scoring_data
+                                .cardType
+                                .clone()
+                                .as_deref()
+                                .unwrap_or("")
+                                .to_string(),
+                        ],
+                    )
+                } else {
+                    (
+                        vec![key_prefix, &merchant_id, &order_type.as_str()],
+                        vec![payment_method_type, payment_method],
+                    )
+                };
 
             let result_keys = gateway_ref_id_map.iter().fold(
                 GatewayRedisKeyMap::new(),
@@ -2411,7 +2423,7 @@ pub async fn get_unified_key(
         }
         ScoreKeyType::OutageGlobalKey => {
             let key_prefix = C::GLOBAL_LEVEL_OUTAGE_KEY_PREFIX;
-            let base_key = if payment_method == CARD {
+            let base_key = if gateway_scoring_data.instrument.is(PaymentMethod::Card) {
                 vec![
                     key_prefix.to_string(),
                     payment_method_type.to_string(),
@@ -2427,7 +2439,7 @@ pub async fn get_unified_key(
                         .unwrap_or("")
                         .to_string(),
                 ]
-            } else if payment_method == UPI {
+            } else if gateway_scoring_data.instrument.is(PaymentMethod::Upi) {
                 let peek = gateway_scoring_data.get_payment_source();
 
                 vec![
@@ -2459,7 +2471,7 @@ pub async fn get_unified_key(
         }
         ScoreKeyType::OutageMerchantKey => {
             let key_prefix = C::MERCHANT_LEVEL_OUTAGE_KEY_PREFIX;
-            let base_key: Vec<String> = if payment_method == CARD {
+            let base_key: Vec<String> = if gateway_scoring_data.instrument.is(PaymentMethod::Card) {
                 vec![
                     key_prefix.to_string(),
                     merchant_id.clone(),
@@ -2476,7 +2488,7 @@ pub async fn get_unified_key(
                         .unwrap_or("")
                         .to_string(),
                 ]
-            } else if payment_method == UPI {
+            } else if gateway_scoring_data.instrument.is(PaymentMethod::Upi) {
                 let peek = gateway_scoring_data.get_payment_source();
 
                 vec![
@@ -2676,7 +2688,7 @@ async fn get_legacy_unified_sr_key(
         payment_method_type.clone(),
     ];
 
-    if enforce1d && payment_method == CARD {
+    if enforce1d && gateway_scoring_data.instrument.is(PaymentMethod::Card) {
         let res = &[
             base_key.clone(),
             vec![gateway_scoring_data.cardType.clone().unwrap_or_default()],
@@ -2685,7 +2697,7 @@ async fn get_legacy_unified_sr_key(
         intercalate_without_empty_string("_", res)
     } else if enforce1d {
         intercalate_without_empty_string("_", &base_key)
-    } else if payment_method == UPI {
+    } else if gateway_scoring_data.instrument.is(PaymentMethod::Upi) {
         if gateway_scoring_data.isPaymentSourceEnabledForSrRouting {
             match payment_method_type.as_str() {
                 "UPI_COLLECT" | "COLLECT" => {
@@ -2719,7 +2731,7 @@ async fn get_legacy_unified_sr_key(
         } else {
             intercalate_without_empty_string("_", &base_key)
         }
-    } else if payment_method == CARD {
+    } else if gateway_scoring_data.instrument.is(PaymentMethod::Card) {
         let v = &[
             base_key.clone(),
             vec![

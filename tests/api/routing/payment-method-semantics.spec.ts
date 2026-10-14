@@ -32,15 +32,27 @@ test.describe('Payment method meaning (API)', () => {
     )
     expect(legacy.status).toBe(400)
     expect(legacy.body.error_info.code).toBe('INVALID_PAYMENT_METHOD')
-    expect(legacy.body.error_info.developer_message).toContain('looks swapped')
+    expect(legacy.body.error_info.developer_message).toContain('look swapped')
 
-    // A card network is not a payment method type.
-    const network = await api.decideGateway(
-      { merchantId: merchant.id, paymentInfo: { paymentMethod: 'CARD', paymentMethodType: 'VISA' } },
+    // A known type under a known method it does not belong to.
+    const mismatched = await api.decideGateway(
+      { merchantId: merchant.id, paymentInfo: { paymentMethod: 'card', paymentMethodType: 'google_pay' } },
       { failOnStatusCode: false },
     )
-    expect(network.status).toBe(400)
-    expect(network.body.error_info.developer_message).toContain('paymentMethodType `VISA`')
+    expect(mismatched.status).toBe(400)
+    expect(mismatched.body.error_info.developer_message).toContain('is not a card payment method type')
+  })
+
+  test('decide-gateway routes a method or type newer than this build', async ({ api, merchant }) => {
+    await api.createSuccessRateConfig(merchant.id)
+
+    const decided = await api.decideGateway({
+      merchantId: merchant.id,
+      eliminationEnabled: false,
+      paymentInfo: { paymentMethod: 'new_method', paymentMethodType: 'new_type' },
+    })
+    expect(decided.status).toBe(200)
+    expect(decided.body.decided_gateway).toBeTruthy()
   })
 
   test('a card routes as a card through decide-gateway and hybrid alike', async ({ api, merchant }) => {
@@ -111,7 +123,7 @@ test.describe('Payment method meaning (API)', () => {
       { failOnStatusCode: false },
     )
     expect(legacy.status).toBe(400)
-    expect(JSON.stringify(legacy.body)).toContain('looks swapped')
+    expect(JSON.stringify(legacy.body)).toContain('look swapped')
 
     const created = await api.createSuccessRateConfig(merchant.id, {
       subLevelInputConfig: [row('card', 'credit'), row('wallet', null)],

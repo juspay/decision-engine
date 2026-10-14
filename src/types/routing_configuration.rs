@@ -47,38 +47,20 @@ pub struct SuccessRateData {
 }
 
 impl SuccessRateData {
-    /// Checks each sub-level row's payment method in Hyperswitch's meaning and stores it as the
-    /// engine's codes: `paymentMethod` is the category (`card` → `CARD`), required, and
-    /// `paymentMethodType` the specific method within it (`credit` → `CREDIT`), optional.
+    /// Checks each sub-level row's payment method as `/decide-gateway` checks a request's, and
+    /// stores it as the engine's codes: `paymentMethod` is the category (`card` → `CARD`),
+    /// required, and `paymentMethodType` the specific method within it (`credit` → `CREDIT`),
+    /// optional.
     pub fn normalised(mut self) -> Result<Self, String> {
         for row in self.sub_level_input_config.iter_mut().flatten() {
-            let method = row.payment_method.as_deref().ok_or_else(|| {
-                "each subLevelInputConfig row names its paymentMethod (card, wallet, upi...)"
-                    .to_string()
-            })?;
-            match row.payment_method_type.as_deref() {
-                Some(method_type) => {
-                    let instrument =
-                        crate::types::payment_instrument::PaymentInstrument::from_hyperswitch(
-                            method,
-                            method_type,
-                        )
-                        .map_err(|error| error.to_string())?;
-                    row.payment_method = Some(instrument.method_code().to_string());
-                    row.payment_method_type = Some(instrument.method_type_code().into_owned());
-                }
-                None => {
-                    let category =
-                        crate::types::payment_instrument::PaymentMethod::from_hyperswitch(method)
-                            .ok_or_else(|| {
-                            format!(
-                                "paymentMethod `{method}` is not a payment method (card, \
-                                     wallet, upi...)"
-                            )
-                        })?;
-                    row.payment_method = Some(category.code().to_string());
-                }
-            }
+            let instrument = crate::types::payment_instrument::PaymentInstrument::from_hyperswitch(
+                row.payment_method.as_deref().unwrap_or_default(),
+                row.payment_method_type.as_deref(),
+            )
+            .map_err(|error| error.to_string())?;
+            let method_type = instrument.method_type_code();
+            row.payment_method = Some(instrument.method_code().into_owned());
+            row.payment_method_type = (!method_type.is_empty()).then(|| method_type.into_owned());
         }
         Ok(self)
     }
@@ -192,7 +174,7 @@ mod success_rate_normalisation_tests {
             .normalised()
             .err()
             .unwrap_or_default();
-        assert!(error.contains("looks swapped"), "{error}");
+        assert!(error.contains("look swapped"), "{error}");
         let error = config(json!([row("card", Some("google_pay"))]))?
             .normalised()
             .err()

@@ -1206,7 +1206,7 @@ pub async fn is_update_within_latency_window(
                         .unwrap_or(C::defaultGatewayScoreLatencyCheckInMins());
                 let gw_wise_latency_threshold = get_gateway_wise_latency(
                     &default_gw_latency_check_in_mins(),
-                    txn_card_info.instrument.method_code(),
+                    &txn_card_info.instrument.method_code(),
                     &GU::get_payment_method(
                         txn_card_info.instrument.method_code().to_string(),
                         txn_card_info.instrument.method_type_code().into_owned(),
