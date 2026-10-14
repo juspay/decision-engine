@@ -77,6 +77,60 @@ pub async fn update_config(
     Ok(())
 }
 
+/// Sets `name`'s value only if it still holds `expected`: a compare-and-swap for read-modify-write
+/// updates. Returns `false`, writing nothing, when another writer changed the value since it was
+/// read; the caller re-reads and tries again.
+pub async fn compare_and_update_config(
+    name: String,
+    expected: Option<String>,
+    value: Option<String>,
+) -> error_stack::Result<bool, crate::generics::MeshError> {
+    let app_state = get_tenant_app_state().await;
+    let values = ServiceConfigurationUpdate {
+        value: value.clone(),
+    };
+    let conn = &app_state
+        .db
+        .get_conn()
+        .await
+        .map_err(|_| crate::generics::MeshError::DatabaseConnectionError)?;
+    let updated = match expected {
+        Some(expected) => {
+            crate::generics::generic_update_if_present::<
+                <ServiceConfiguration as HasTable>::Table,
+                ServiceConfigurationUpdate,
+                _,
+            >(
+                conn,
+                dsl::name.eq(name.clone()).and(dsl::value.eq(expected)),
+                values,
+            )
+            .await?
+        }
+        None => {
+            crate::generics::generic_update_if_present::<
+                <ServiceConfiguration as HasTable>::Table,
+                ServiceConfigurationUpdate,
+                _,
+            >(
+                conn,
+                dsl::name.eq(name.clone()).and(dsl::value.is_null()),
+                values,
+            )
+            .await?
+        }
+    };
+    if updated == 0 {
+        return Ok(false);
+    }
+
+    match value {
+        Some(v) => write_through_service_config(name, &v).await,
+        None => evict_service_config(name).await,
+    }
+    Ok(true)
+}
+
 pub async fn delete_config(name: String) -> Result<(), crate::generics::MeshError> {
     let app_state = get_tenant_app_state().await;
 
