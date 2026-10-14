@@ -702,8 +702,7 @@ pub async fn run_decider_flow(
             //     letting the "Turn cost on" experiment run cost off on control and on in variant,
             //   - else if the request explicitly sets `enableMultiObjective`, honor it (per-request
             //     override), otherwise
-            //   - fall back to the merchant's cost-savings feature flag (which still reads
-            //     the pre-rename key for merchants that have not drained across yet).
+            //   - fall back to the merchant's `cost_savings_enabled` feature flag.
             // The feature flag is the primary rollout switch, so a caller that omits the field
             // must not silently lose multi-objective routing.
             let multi_obj_on = match decider_flow
@@ -716,7 +715,12 @@ pub async fn run_decider_flow(
                 None => match enable_multi_objective_override {
                     Some(b) => b,
                     None => {
-                        multi_objective::algorithm::is_cost_savings_enabled(&merchant_id_text).await
+                        is_feature_enabled(
+                            multi_objective::COST_SAVINGS_FEATURE_FLAG.to_string(),
+                            merchant_id_text.clone(),
+                            kvRedis(),
+                        )
+                        .await
                     }
                 },
             };
