@@ -483,12 +483,16 @@ function stringifyValue(value: unknown) {
   return JSON.stringify(value, null, 2)
 }
 
-function fieldClassName() {
-  return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[13px] text-slate-700 outline-none transition placeholder:text-slate-500 focus:border-brand-500 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7] dark:placeholder:text-[#555f6e]'
+/** `active` tints a filter that narrows the search, so set filters stand out from the "Any …" ones. */
+function fieldClassName(active = false) {
+  const tone = active
+    ? 'border-brand-300 bg-brand-50 font-medium text-brand-700 dark:border-brand-500/50 dark:bg-brand-500/10 dark:text-brand-300'
+    : 'border-slate-200 bg-white text-slate-700 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7]'
+  return `h-11 w-full rounded-2xl border px-4 text-[13px] outline-none transition placeholder:text-slate-500 focus:border-brand-500 dark:placeholder:text-[#555f6e] ${tone}`
 }
 
-function fieldSelectClassName() {
-  return `${fieldClassName()} appearance-none pr-9 bg-[url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")] bg-no-repeat bg-[right_12px_center]`
+function fieldSelectClassName(active = false) {
+  return `${fieldClassName(active)} appearance-none pr-9 bg-[url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E")] bg-no-repeat bg-[right_12px_center]`
 }
 
 function EmptyState({ title, body }: { title: string; body: string }) {
@@ -1173,7 +1177,7 @@ export function PaymentAuditPage() {
         <div className="flex min-w-[480px] flex-1 items-center gap-3">
         <div className="flex-1">
           <select
-            className={`${fieldSelectClassName()} min-w-[168px]`}
+            className={`${fieldSelectClassName(!!filters.routingKind)} min-w-[168px]`}
             value={filters.routingKind}
             onChange={(event) => applyDropdownFilter('routingKind', event.target.value)}
             aria-label="Routing type"
@@ -1193,7 +1197,7 @@ export function PaymentAuditPage() {
             onChange={(values) => updateFilter('gateway', values.join(','))}
             onClose={applyIfChanged}
             placeholder="Any gateway"
-            triggerClassName={fieldClassName()}
+            triggerClassName={fieldClassName(!!filters.gateway)}
             compact
           />
         </div>
@@ -1205,7 +1209,7 @@ export function PaymentAuditPage() {
             onChange={(values) => updateFilter('status', values.join(','))}
             onClose={applyIfChanged}
             placeholder="Any outcome"
-            triggerClassName={fieldClassName()}
+            triggerClassName={fieldClassName(!!filters.status)}
             compact
           />
         </div>
@@ -1229,7 +1233,7 @@ export function PaymentAuditPage() {
               onChange={(values) => updateFilter('route', values.join(','))}
               onClose={applyIfChanged}
               placeholder="Any route"
-              triggerClassName={fieldClassName()}
+              triggerClassName={fieldClassName(!!filters.route)}
               compact
             />
             <SearchableMultiSelect
@@ -1238,7 +1242,7 @@ export function PaymentAuditPage() {
               onChange={(values) => updateFilter('errorCode', values.join(','))}
               onClose={applyIfChanged}
               placeholder="Any error code"
-              triggerClassName={fieldClassName()}
+              triggerClassName={fieldClassName(!!filters.errorCode)}
               compact
             />
             {PAYMENT_ATTRIBUTE_FILTERS.map(({ field, optionsKey, anyLabel, labels }) => {
@@ -1263,34 +1267,33 @@ export function PaymentAuditPage() {
                   onChange={(next) => updateFilter(field, next.join(','))}
                   onClose={applyIfChanged}
                   placeholder={anyLabel}
-                  triggerClassName={fieldClassName()}
+                  triggerClassName={fieldClassName(selected.length > 0)}
                   compact
                 />
               )
             })}
             <input
-              className={fieldClassName()}
+              className={fieldClassName(!!filters.minAmount)}
               type="number"
               min={0}
               step="any"
               value={filters.minAmount}
               onChange={(event) => updateFilter('minAmount', event.target.value)}
+              onBlur={applyIfChanged}
               placeholder="Min amount"
               aria-label="Min amount"
             />
             <input
-              className={fieldClassName()}
+              className={fieldClassName(!!filters.maxAmount)}
               type="number"
               min={0}
               step="any"
               value={filters.maxAmount}
               onChange={(event) => updateFilter('maxAmount', event.target.value)}
+              onBlur={applyIfChanged}
               placeholder="Max amount"
               aria-label="Max amount"
             />
-            <Button type="submit" variant="secondary" className="h-11">
-              Apply
-            </Button>
           </div>
         ) : null}
         {/* The redesigned bar has no Search button; this keeps Enter submitting the text fields. */}
