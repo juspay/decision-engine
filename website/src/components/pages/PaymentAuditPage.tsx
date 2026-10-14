@@ -1458,7 +1458,7 @@ export function PaymentAuditPage() {
               </Button>
               <span className="ml-auto text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">Page {page}</span>
               <select
-                className="h-8 rounded-lg border border-slate-200 bg-white px-2 text-[13px] text-slate-700 outline-none focus:border-brand-500 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7]"
+                className="h-8 rounded-lg border border-slate-200 bg-white pl-2.5 pr-8 [background-position:right_0.5rem_center] text-[13px] text-slate-700 outline-none focus:border-brand-500 dark:border-[#2a303a] dark:bg-[#161b24] dark:text-[#e5ecf7]"
                 value={pageSize}
                 onChange={(event) => {
                   const nextPageSize = Number(event.target.value)
