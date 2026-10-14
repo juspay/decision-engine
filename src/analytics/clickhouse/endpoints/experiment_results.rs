@@ -1,14 +1,19 @@
 use clickhouse::Row;
 use serde::Deserialize;
 
-use crate::analytics::clickhouse::common::{fetch_all, DOMAIN_TABLE};
+use crate::analytics::clickhouse::common::{fetch_all, static_flow_type_in_sql, DOMAIN_TABLE};
 use crate::analytics::clickhouse::filters::{merchant_filter, partition_lower_bound};
-use crate::analytics::clickhouse::query::{BoundQueryBuilder, FilterClause, OrderClause};
+use crate::analytics::clickhouse::metrics::auth_rate::status_in_sql;
+use crate::analytics::clickhouse::query::{
+    BoundQueryBuilder, FilterClause, OrderClause, SqlFragment,
+};
 use crate::analytics::flow::FlowType;
 use crate::analytics::models::{
     ExperimentArmMetrics, ExperimentResultsQuery, ExperimentResultsResponse, ExperimentVerdict,
 };
 use crate::error::ApiError;
+use crate::euclid::types::ExperimentEndpoint;
+use crate::feedback::gateway_scoring_service::{txn_failure_states, txn_success_states};
 
 /// Default business margin (fraction of ticket) used to value EV when the caller does not
 /// pass one. Matches the routing-time `DEFAULT_MARGIN`; for an accurate verdict the UI should
@@ -23,9 +28,9 @@ struct ArmRow {
     /// Payments with at least one terminal outcome (success or failure).
     resolved_count: u64,
     avg_latency_ms: Option<f64>,
-    /// Averages over the outcome events that carried multi-objective cost data. These come from
-    /// `avgIf(JSONExtractFloat(...))`, which is a NON-nullable `Float64` (returns `nan` for an
-    /// empty set) — so they must be `f64`, not `Option<f64>`, or RowBinary deserialization fails.
+    /// Averages over the payments that carried multi-objective cost data. These come from
+    /// `avgIf` over a NON-nullable `Float64` column, which returns `nan` for an empty set — so
+    /// they must be `f64`, not `Option<f64>`, or RowBinary deserialization fails.
     /// `cost_event_count == 0` (or a non-finite average) means "no cost data" — handled below.
     avg_chosen_cost_bps: f64,
     avg_cost_saved_bps: f64,
@@ -44,64 +49,187 @@ struct ArmRow {
     total_cost_saved: f64,
 }
 
-pub async fn load(
-    client: &clickhouse::Client,
-    query: &ExperimentResultsQuery,
-) -> Result<ExperimentResultsResponse, ApiError> {
-    let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
+/// Which experiment payments a results or transactions query reads, bounded by when they were
+/// routed. Outcomes are not bounded by the window: a payment routed inside it counts its
+/// outcome however late the score update arrived.
+pub(crate) struct ExperimentScope<'a> {
+    pub merchant_id: &'a str,
+    pub experiment_id: &'a str,
+    pub endpoint: Option<ExperimentEndpoint>,
+    pub start_ms: Option<i64>,
+    pub end_ms: Option<i64>,
+}
 
-    builder.extend_selects([
-        "JSONExtractString(assumeNotNull(details), 'variant_arm') AS arm".to_string(),
-        // Each payment emits two events: a routing event (status = 'ab_test_decision')
-        // and an outcome event (status = 'success'/'failure'). count() would double-count
-        // every resolved payment. Use uniqExact(payment_id) to count each payment once.
-        "uniqExact(payment_id) AS total".to_string(),
-        // NAR numerator: a payment counts as success if ANY attempt succeeded (retries emit
-        // follow-up outcome events). resolved = payments with at least one terminal outcome;
-        // eventual failures = resolved − successes (computed in Rust), so a payment that failed
-        // then succeeded on retry is not double-counted as a failure.
-        "uniqExactIf(payment_id, lowerUTF8(status) = 'success') AS success_count".to_string(),
-        "uniqExactIf(payment_id, lowerUTF8(status) IN ('success', 'failure')) AS resolved_count".to_string(),
-        "avgIf(average_latency, average_latency > 0) AS avg_latency_ms".to_string(),
-        // Cost is carried only on the outcome event (JSON `details`), and only multi-objective
-        // arms have a positive chosen_cost_bps (auth-only arms emit null → 0). Average chosen cost
-        // over those rows; average cost_saved over the same rows (AuthWon rows contribute 0 saved),
-        // and count them so we can tell whether any cost data exists for the arm.
-        "avgIf(JSONExtractFloat(assumeNotNull(details), 'chosen_cost_bps'), JSONExtractFloat(assumeNotNull(details), 'chosen_cost_bps') > 0) AS avg_chosen_cost_bps".to_string(),
-        "avgIf(JSONExtractFloat(assumeNotNull(details), 'cost_saved_bps'), JSONExtractFloat(assumeNotNull(details), 'chosen_cost_bps') > 0) AS avg_cost_saved_bps".to_string(),
-        "countIf(JSONExtractFloat(assumeNotNull(details), 'chosen_cost_bps') > 0) AS cost_event_count".to_string(),
-        // Savings moments over successful outcomes — a fee is only actually saved when the
-        // payment succeeds. Together with success_count these give mean and variance of the
-        // per-transaction value for the EV z-test. Arms that never ran cost routing carry no
-        // cost_saved_bps, which extracts as 0 — correctly, since they saved nothing.
-        "sumIf(JSONExtractFloat(assumeNotNull(details), 'cost_saved_bps'), lowerUTF8(status) = 'success') AS saved_success_sum".to_string(),
-        "sumIf(pow(JSONExtractFloat(assumeNotNull(details), 'cost_saved_bps'), 2), lowerUTF8(status) = 'success') AS saved_success_sq_sum".to_string(),
-        // FAAR numerator: success on the FIRST attempt. Events emitted before first-attempt
-        // tracking existed lack the key — those were only ever emitted for the first attempt,
-        // so a missing key counts as first attempt.
-        "uniqExactIf(payment_id, lowerUTF8(status) = 'success' AND (JSONExtractBool(assumeNotNull(details), 'first_attempt') OR NOT JSONHas(assumeNotNull(details), 'first_attempt'))) AS first_attempt_success_count".to_string(),
-        // TCS: fees saved in money, realized on successful payments. Events without an amount
-        // (pre-tracking) contribute 0.
-        "sumIf((JSONExtractFloat(assumeNotNull(details), 'cost_saved_bps') / 10000.0) * JSONExtractFloat(assumeNotNull(details), 'amount'), lowerUTF8(status) = 'success') AS total_cost_saved".to_string(),
-    ]);
+/// The reported status of a score-update event. A failed score update keeps it in `details`.
+const REPORTED_STATUS: &str = "if(flow_type = 'update_gateway_score_error', \
+     JSONExtractString(assumeNotNull(details), 'status'), ifNull(status, ''))";
 
-    add_experiment_filters(&mut builder, &query.merchant_id, &query.experiment_id);
-    if let Some(endpoint) = query.endpoint {
-        builder.add_filter(FilterClause::raw(endpoint_filter(endpoint)));
+/// Cost and amount on a routing event; absent keys and nulls extract as 0.
+const CHOSEN_COST_BPS: &str = "JSONExtractFloat(assumeNotNull(details), 'chosen_cost_bps')";
+const COST_SAVED_BPS: &str = "JSONExtractFloat(assumeNotNull(details), 'cost_saved_bps')";
+const AMOUNT: &str = "JSONExtractFloat(assumeNotNull(details), 'amount')";
+
+/// One row per payment and arm routed under the experiment, with the payment's outcome joined
+/// from the score updates the merchant reported for it:
+///
+/// - `resolved`: at least one terminal (success or failure) status was reported.
+/// - `succeeded`: any reported attempt succeeded (NAR).
+/// - `first_succeeded`: the first terminal status reported succeeded (FAAR).
+///
+/// Outcomes come from the score-update events every webhook records, so they don't depend on
+/// any routing-time state still being around when the webhook arrives. The window bounds the
+/// routing events only.
+pub(crate) fn experiment_payments(scope: &ExperimentScope<'_>) -> SqlFragment {
+    let mut routed = experiment_filters(scope.merchant_id, scope.experiment_id);
+    if let Some(endpoint) = scope.endpoint {
+        routed.push(FilterClause::raw(endpoint_filter(endpoint)));
     }
-
-    if let Some(start) = query.start_ms {
-        builder.add_filter(FilterClause::gte("created_at_ms", start));
-        builder.add_filter(partition_lower_bound(start));
+    routed.push(FilterClause::raw("payment_id IS NOT NULL"));
+    if let Some(start) = scope.start_ms {
+        routed.push(FilterClause::gte("created_at_ms", start));
+        routed.push(partition_lower_bound(start));
     }
-    if let Some(end) = query.end_ms {
-        builder.add_filter(FilterClause::lte("created_at_ms", end));
-        builder.add_filter(FilterClause::new(
+    if let Some(end) = scope.end_ms {
+        routed.push(FilterClause::lte("created_at_ms", end));
+        routed.push(FilterClause::new(
             "created_at <= fromUnixTimestamp64Milli(toInt64(?))",
             vec![end.into()],
         ));
     }
+    let routed_predicate = join_predicates(&routed);
+    let routed_binds = routed
+        .iter()
+        .flat_map(|filter| filter.binds().iter().cloned());
 
+    // Score updates are never bounded by the window's end: a late webhook still counts.
+    let mut outcome_filters = merchant_filter(scope.merchant_id);
+    if let Some(start) = scope.start_ms {
+        outcome_filters.push(FilterClause::gte("created_at_ms", start));
+        outcome_filters.push(partition_lower_bound(start));
+    }
+    let outcome_predicate = join_predicates(&outcome_filters);
+    let outcome_binds = outcome_filters
+        .iter()
+        .flat_map(|filter| filter.binds().iter().cloned());
+
+    let success = status_in_sql(&txn_success_states());
+    let terminal = status_in_sql(
+        &txn_success_states()
+            .into_iter()
+            .chain(txn_failure_states())
+            .collect::<Vec<_>>(),
+    );
+    let is_success = format!("{REPORTED_STATUS} IN {success}");
+    let score_update_flows = static_flow_type_in_sql(&[
+        FlowType::UpdateGatewayScoreUpdate,
+        FlowType::UpdateGatewayScoreSkipped,
+        FlowType::UpdateGatewayScoreError,
+    ]);
+
+    let sql = format!(
+        "(SELECT
+            d.payment_id AS payment_id,
+            d.arm AS arm,
+            d.gateway AS gateway,
+            d.latency_ms AS latency_ms,
+            d.chosen_cost_bps AS chosen_cost_bps,
+            d.cost_saved_bps AS cost_saved_bps,
+            d.amount AS amount,
+            ifNull(o.resolved, 0) AS resolved,
+            ifNull(o.succeeded, 0) AS succeeded,
+            ifNull(o.first_succeeded, 0) AS first_succeeded,
+            greatest(d.decided_at_ms, ifNull(o.resolved_at_ms, 0)) AS last_event_ms
+         FROM (
+            SELECT
+                assumeNotNull(payment_id) AS payment_id,
+                JSONExtractString(assumeNotNull(details), 'variant_arm') AS arm,
+                argMax(ifNull(gateway, ''), created_at_ms) AS gateway,
+                max(created_at_ms) AS decided_at_ms,
+                avgIf(average_latency, average_latency > 0) AS latency_ms,
+                -- A payment routed on several endpoints keeps the cost of its latest decision
+                -- that ran cost routing, not a later one on an endpoint that never does.
+                argMaxIf({CHOSEN_COST_BPS}, created_at_ms, {CHOSEN_COST_BPS} > 0) AS chosen_cost_bps,
+                argMaxIf({COST_SAVED_BPS}, created_at_ms, {CHOSEN_COST_BPS} > 0) AS cost_saved_bps,
+                argMaxIf({AMOUNT}, created_at_ms, {AMOUNT} > 0) AS amount
+            FROM {DOMAIN_TABLE}
+            WHERE {routed_predicate}
+            GROUP BY payment_id, arm
+         ) AS d
+         LEFT JOIN (
+            SELECT
+                assumeNotNull(payment_id) AS payment_id,
+                toUInt8(1) AS resolved,
+                toUInt8(max({is_success})) AS succeeded,
+                toUInt8(argMin({is_success}, created_at_ms)) AS first_succeeded,
+                max(created_at_ms) AS resolved_at_ms
+            FROM {DOMAIN_TABLE}
+            WHERE {outcome_predicate}
+              AND flow_type IN {score_update_flows} AND {REPORTED_STATUS} IN {terminal}
+              AND payment_id IN (SELECT payment_id FROM {DOMAIN_TABLE} WHERE {routed_predicate})
+            GROUP BY payment_id
+         ) AS o ON o.payment_id = d.payment_id) AS payments"
+    );
+
+    // Binds in the order their placeholders appear: routed payments, the outcome subquery, then
+    // the routed payments it is limited to.
+    let binds = routed_binds
+        .clone()
+        .chain(outcome_binds)
+        .chain(routed_binds)
+        .collect();
+    SqlFragment::with_binds(sql, binds)
+}
+
+fn join_predicates(filters: &[FilterClause]) -> String {
+    filters
+        .iter()
+        .map(FilterClause::predicate)
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
+pub async fn load(
+    client: &clickhouse::Client,
+    query: &ExperimentResultsQuery,
+) -> Result<ExperimentResultsResponse, ApiError> {
+    let mut builder = BoundQueryBuilder::from_fragment(experiment_payments(&ExperimentScope {
+        merchant_id: &query.merchant_id,
+        experiment_id: &query.experiment_id,
+        endpoint: query.endpoint,
+        start_ms: query.start_ms,
+        end_ms: query.end_ms,
+    }));
+
+    builder.extend_selects([
+        "arm",
+        // One row per payment and arm, so count() counts each payment once.
+        "count() AS total",
+        // NAR numerator: a payment counts as success if ANY attempt succeeded. resolved =
+        // payments with at least one terminal outcome; eventual failures = resolved − successes
+        // (computed in Rust), so a payment that failed then succeeded on retry is not
+        // double-counted as a failure.
+        "countIf(succeeded = 1) AS success_count",
+        "countIf(resolved = 1) AS resolved_count",
+        "avgIf(latency_ms, latency_ms > 0) AS avg_latency_ms",
+        // Only multi-objective arms have a positive chosen_cost_bps (auth-only arms record null →
+        // 0). Average chosen cost over those payments; average cost_saved over the same payments
+        // (AuthWon payments contribute 0 saved), and count them so we can tell whether any cost
+        // data exists for the arm.
+        "avgIf(chosen_cost_bps, chosen_cost_bps > 0) AS avg_chosen_cost_bps",
+        "avgIf(cost_saved_bps, chosen_cost_bps > 0) AS avg_cost_saved_bps",
+        "countIf(chosen_cost_bps > 0) AS cost_event_count",
+        // Savings moments over successful payments — a fee is only actually saved when the
+        // payment succeeds. Together with success_count these give mean and variance of the
+        // per-transaction value for the EV z-test. Arms that never ran cost routing carry no
+        // cost_saved_bps, which extracts as 0 — correctly, since they saved nothing.
+        "sumIf(cost_saved_bps, succeeded = 1) AS saved_success_sum",
+        "sumIf(pow(cost_saved_bps, 2), succeeded = 1) AS saved_success_sq_sum",
+        // FAAR numerator: the first reported attempt succeeded.
+        "countIf(first_succeeded = 1) AS first_attempt_success_count",
+        // TCS: fees saved in money, realized on successful payments. Payments without an amount
+        // contribute 0.
+        "sumIf((cost_saved_bps / 10000.0) * amount, succeeded = 1) AS total_cost_saved",
+    ]);
     builder.add_group_by("arm");
     builder.add_order_by(OrderClause::asc("arm"));
 
@@ -112,7 +240,8 @@ pub async fn load(
 
     let control = arm_metrics("control", control_row, query.evaluation_margin);
     let variant = arm_metrics("variant", variant_row, query.evaluation_margin);
-    let total = control.transaction_count + variant.transaction_count;
+    // The minimum sample counts payments with an outcome: unresolved ones carry no evidence yet.
+    let total = resolved(&control) + resolved(&variant);
 
     let delta_pp = (variant.auth_rate - control.auth_rate) * 100.0;
 
@@ -155,29 +284,29 @@ pub async fn load(
     })
 }
 
-/// Events an experiment recorded for real payments on its arms, on any endpoint.
-fn add_experiment_filters(builder: &mut BoundQueryBuilder, merchant_id: &str, experiment_id: &str) {
-    builder.extend_filters(merchant_filter(merchant_id));
-    builder.add_filter(FilterClause::raw(format!(
+/// Routing decisions an experiment recorded for real payments on its arms, on any endpoint.
+fn experiment_filters(merchant_id: &str, experiment_id: &str) -> Vec<FilterClause> {
+    let mut filters = merchant_filter(merchant_id);
+    filters.push(FilterClause::raw(format!(
         "flow_type = '{}'",
         FlowType::RoutingEvaluateAbTest.as_str()
     )));
-    builder.add_filter(FilterClause::raw(format!(
-        "JSONExtractString(assumeNotNull(details), 'experiment_id') = '{}'",
-        experiment_id.replace('\'', "\\'")
-    )));
-    builder.add_filter(FilterClause::raw(
+    filters.push(FilterClause::new(
+        "JSONExtractString(assumeNotNull(details), 'experiment_id') = ?",
+        vec![experiment_id.into()],
+    ));
+    filters.push(FilterClause::raw(
         "JSONExtractString(assumeNotNull(details), 'variant_arm') IN ('control', 'variant')"
             .to_string(),
     ));
-    // Real payments only: a routing decision (`routing_source`) or an outcome after a score update
-    // (`outcome_source`). A `/routing/evaluate` preview, such as a Decision Explorer run, carries
-    // neither.
-    builder.add_filter(FilterClause::raw(
-        "(JSONExtractString(assumeNotNull(details), 'routing_source') = 'real_payment_intercept' \
-          OR JSONExtractString(assumeNotNull(details), 'outcome_source') = 'score_update')"
+    // Real payments only. A `/routing/evaluate` preview, such as a Decision Explorer run, has no
+    // `routing_source`. Outcome events written by the old in-flight path are not read: outcomes
+    // come from score updates.
+    filters.push(FilterClause::raw(
+        "JSONExtractString(assumeNotNull(details), 'routing_source') = 'real_payment_intercept'"
             .to_string(),
     ));
+    filters
 }
 
 #[derive(Debug, Clone, Deserialize, Row)]
@@ -194,7 +323,7 @@ pub async fn has_recorded_payments(
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
     // Existence only: the first matching row answers it, so the scan stops there.
     builder.extend_selects(["toUInt64(1) AS recorded".to_string()]);
-    add_experiment_filters(&mut builder, merchant_id, experiment_id);
+    builder.extend_filters(experiment_filters(merchant_id, experiment_id));
     builder.set_limit(Some(1));
     let rows = fetch_all::<RecordedRow>(builder.build(client)).await?;
     Ok(rows.first().is_some_and(|row| row.recorded > 0))
@@ -231,16 +360,19 @@ fn arm_metrics(arm: &str, row: Option<&ArmRow>, evaluation_margin: f64) -> Exper
             net_ev_bps: None,
         },
         Some(r) => {
-            let auth_rate = if r.total > 0 {
-                r.success_count as f64 / r.total as f64
-            } else {
-                0.0
+            // Rates are over resolved payments, as the merchant's own auth rate is. A payment with
+            // no terminal status yet has no outcome to count: counting it as a failure would
+            // understate every rate, and more so for whichever arm's gateways report later.
+            let resolved = r.resolved_count;
+            let rate = |count: u64| {
+                if resolved > 0 {
+                    count as f64 / resolved as f64
+                } else {
+                    0.0
+                }
             };
-            let first_attempt_auth_rate = if r.total > 0 {
-                r.first_attempt_success_count as f64 / r.total as f64
-            } else {
-                0.0
-            };
+            let auth_rate = rate(r.success_count);
+            let first_attempt_auth_rate = rate(r.first_attempt_success_count);
             // Cost data present only when at least one outcome event carried a chosen cost.
             // avgIf over an empty set is `nan`, so guard on both the count and finiteness.
             let has_cost = r.cost_event_count > 0;
@@ -250,14 +382,14 @@ fn arm_metrics(arm: &str, row: Option<&ArmRow>, evaluation_margin: f64) -> Exper
                 Some(r.avg_cost_saved_bps).filter(|v| has_cost && v.is_finite());
             // Economic value per transaction (bps of ticket) at the common margin M: the mean of
             //   v = success · (M·10_000 + saved_bps)
-            // over every transaction in the arm — a success earns the margin plus whatever fee
-            // it saved versus the SR head (the gateway a cost-blind arm would have used on that
+            // over every resolved transaction in the arm — a success earns the margin plus whatever
+            // fee it saved versus the SR head (the gateway a cost-blind arm would have used on that
             // same transaction); a failure earns 0. Arms that never ran cost routing record no
             // cost_saved_bps (extracted as 0), so their EV is auth_rate · M — a true statement
             // ("saved nothing"), not an approximation of an unmeasured absolute fee.
-            let net_ev_bps = (r.total > 0).then(|| {
+            let net_ev_bps = (resolved > 0).then(|| {
                 (evaluation_margin * 10_000.0 * r.success_count as f64 + r.saved_success_sum)
-                    / r.total as f64
+                    / resolved as f64
             });
             ExperimentArmMetrics {
                 arm: arm.to_string(),
@@ -278,9 +410,14 @@ fn arm_metrics(arm: &str, row: Option<&ArmRow>, evaluation_margin: f64) -> Exper
     }
 }
 
-/// Per-arm moments of the per-transaction value `v = success · (margin·10⁴ + saved_bps)` —
-/// the distribution the EV z-test runs on. `None` when the arm has fewer than 2 transactions
-/// (variance undefined).
+/// Payments in the arm with a terminal outcome — the sample every rate and test runs on.
+fn resolved(arm: &ExperimentArmMetrics) -> i64 {
+    arm.success_count + arm.failure_count
+}
+
+/// Per-arm moments of the per-transaction value `v = success · (margin·10⁴ + saved_bps)` over
+/// resolved transactions — the distribution the EV z-test runs on. `None` when the arm has fewer
+/// than 2 resolved transactions (variance undefined).
 struct ArmEvStats {
     n: f64,
     mean: f64,
@@ -289,10 +426,10 @@ struct ArmEvStats {
 
 fn ev_stats(row: Option<&ArmRow>, evaluation_margin: f64) -> Option<ArmEvStats> {
     let r = row?;
-    if r.total < 2 {
+    if r.resolved_count < 2 {
         return None;
     }
-    let n = r.total as f64;
+    let n = r.resolved_count as f64;
     let m4 = evaluation_margin * 10_000.0;
     let k = r.success_count as f64;
     let mean = (m4 * k + r.saved_success_sum) / n;
@@ -314,8 +451,8 @@ fn compute_significance(
     is_cost_experiment: bool,
     evaluation_margin: f64,
 ) -> (Option<f64>, Option<(f64, f64)>, ExperimentVerdict) {
-    let n_c = control.transaction_count as f64;
-    let n_v = variant.transaction_count as f64;
+    let n_c = resolved(control) as f64;
+    let n_v = resolved(variant) as f64;
 
     if total < min_sample_size as i64 || n_c == 0.0 || n_v == 0.0 {
         return (None, None, ExperimentVerdict::CollectingData);
@@ -381,4 +518,112 @@ fn erfc_approx(x: f64) -> f64 {
         * (0.254829592
             + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
     poly * (-x * x).exp()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{arm_metrics, ev_stats, experiment_payments, ArmRow, ExperimentScope};
+    use crate::analytics::clickhouse::query::BindArg;
+    use crate::euclid::types::ExperimentEndpoint;
+
+    fn scope(start_ms: Option<i64>, end_ms: Option<i64>) -> ExperimentScope<'static> {
+        ExperimentScope {
+            merchant_id: "m_1",
+            experiment_id: "exp_1' OR 1=1 --\\",
+            endpoint: Some(ExperimentEndpoint::Evaluate),
+            start_ms,
+            end_ms,
+        }
+    }
+
+    #[test]
+    fn every_placeholder_has_a_bind() {
+        for (start, end) in [
+            (None, None),
+            (Some(1), None),
+            (None, Some(2)),
+            (Some(1), Some(2)),
+        ] {
+            let fragment = experiment_payments(&scope(start, end));
+            assert_eq!(
+                fragment.sql().matches('?').count(),
+                fragment.binds().len(),
+                "start={start:?} end={end:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn experiment_id_is_bound_not_inlined() {
+        let fragment = experiment_payments(&scope(None, None));
+        assert!(!fragment.sql().contains("exp_1"));
+        assert!(fragment
+            .binds()
+            .contains(&BindArg::String("exp_1' OR 1=1 --\\".to_string())));
+    }
+
+    #[test]
+    fn window_end_bounds_routing_not_outcomes() {
+        let sql = experiment_payments(&scope(Some(1), Some(2)))
+            .sql()
+            .to_string();
+        // The end bound applies to routing events only (the decision subquery and the routed set
+        // the outcome subquery is limited to); score updates have no upper bound, so late
+        // webhooks still count.
+        let (_, outcomes) = sql.split_once("LEFT JOIN").expect("outcome subquery");
+        let (score_updates, routed_set) = outcomes.split_once("payment_id IN").expect("routed set");
+        assert!(!score_updates.contains("<= ?"));
+        assert!(routed_set.contains("created_at_ms <= ?"));
+    }
+
+    #[test]
+    fn reads_routing_events_only() {
+        let sql = experiment_payments(&scope(None, None)).sql().to_string();
+        assert!(!sql.contains("outcome_source"));
+    }
+
+    /// An arm with `total` routed payments, `success` and `failure` of them resolved.
+    fn arm_row(total: u64, success: u64, failure: u64, first_success: u64) -> ArmRow {
+        ArmRow {
+            arm: "control".to_string(),
+            total,
+            success_count: success,
+            resolved_count: success + failure,
+            avg_latency_ms: None,
+            avg_chosen_cost_bps: f64::NAN,
+            avg_cost_saved_bps: f64::NAN,
+            cost_event_count: 0,
+            saved_success_sum: 0.0,
+            saved_success_sq_sum: 0.0,
+            first_attempt_success_count: first_success,
+            total_cost_saved: 0.0,
+        }
+    }
+
+    #[test]
+    fn rates_leave_out_payments_still_awaiting_an_outcome() {
+        // 10 routed; 4 resolved (3 succeeded, 2 of them first time); 6 still awaiting a status.
+        let metrics = arm_metrics("control", Some(&arm_row(10, 3, 1, 2)), 1.0);
+        assert_eq!(metrics.transaction_count, 10);
+        assert_eq!(metrics.failure_count, 1);
+        assert!((metrics.auth_rate - 0.75).abs() < 1e-12);
+        assert!((metrics.first_attempt_auth_rate - 0.5).abs() < 1e-12);
+        assert!((metrics.net_ev_bps.unwrap() - 7_500.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_arm_with_nothing_resolved_has_no_rates_or_value() {
+        let metrics = arm_metrics("variant", Some(&arm_row(5, 0, 0, 0)), 1.0);
+        assert_eq!(metrics.transaction_count, 5);
+        assert_eq!(metrics.auth_rate, 0.0);
+        assert_eq!(metrics.net_ev_bps, None);
+        assert!(ev_stats(Some(&arm_row(5, 1, 0, 1)), 1.0).is_none());
+    }
+
+    #[test]
+    fn the_test_samples_resolved_payments_only() {
+        let stats = ev_stats(Some(&arm_row(100, 3, 1, 3)), 1.0).unwrap();
+        assert_eq!(stats.n, 4.0);
+        assert!((stats.mean - 7_500.0).abs() < 1e-9);
+    }
 }

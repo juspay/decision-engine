@@ -646,32 +646,34 @@ pub struct PaymentAuditResponse {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExperimentArmMetrics {
     pub arm: String,
+    /// Payments routed under the arm, including those with no terminal status reported yet.
     pub transaction_count: i64,
     pub success_count: i64,
     /// Payments that resolved without ever succeeding (a fail-then-retry-success payment counts
     /// only as a success).
     pub failure_count: i64,
-    /// NAR — net auth rate: payments that eventually succeeded (any attempt) / all payments.
+    /// NAR — net auth rate: payments that eventually succeeded (any attempt) / resolved payments
+    /// (success + failure). Payments still awaiting a terminal status are left out.
     pub auth_rate: f64,
-    /// FAAR — first-attempt auth rate: payments whose first attempt succeeded / all payments.
+    /// FAAR — first-attempt auth rate: payments whose first attempt succeeded / resolved payments.
     pub first_attempt_auth_rate: f64,
     /// TCS — total cost saved in money on successful payments: Σ (saved_bps/10⁴)·amount.
     /// `None` for arms that never ran cost routing (they save nothing by definition).
     pub total_cost_saved: Option<f64>,
     pub avg_latency_ms: Option<f64>,
-    /// Average chosen-PSP cost (bps) over outcome events that carried cost data. `None` for
+    /// Average chosen-PSP cost (bps) over payments whose decision carried cost data. `None` for
     /// auth-only arms / experiments where multi-objective did not run.
     pub avg_chosen_cost_bps: Option<f64>,
     /// Average cost saved vs the SR head (bps); positive only on CostWon decisions. `None` when
     /// no cost data was recorded.
     pub avg_cost_saved_bps: Option<f64>,
-    /// Economic value per transaction in bps of ticket: the arm's mean of
+    /// Economic value per resolved transaction in bps of ticket: the arm's mean of
     /// `v = success · (M·10_000 + saved_bps)` at the experiment's common business margin `M` —
     /// a success earns the margin plus whatever fee it saved vs the SR head (the gateway a
     /// cost-blind arm would have used on that transaction), a failure earns 0. Arms that never
     /// ran multi-objective record no cost_saved_bps (extracted as 0) — they truly saved
     /// nothing, so their EV is `auth_rate · M·10_000`, a pure auth comparison. `None` only when
-    /// the arm has no transactions.
+    /// the arm has no resolved transactions.
     pub net_ev_bps: Option<f64>,
 }
 
