@@ -618,10 +618,14 @@ export interface PaymentAuditSummary {
   last_seen_ms: number
   event_count: number
   latest_status?: string | null
+  /** The payment's outcome from its reported statuses; `latest_status` is whichever event came last. */
+  outcome: 'success' | 'failure' | 'pending'
   latest_gateway?: string | null
   latest_stage?: string | null
   gateways: string[]
   routes: string[]
+  /** A/B experiments that routed this payment; empty when it wasn't in one, absent if the lookup failed. */
+  experiments?: PaymentAuditExperiment[]
 }
 
 export interface PaymentAuditEvent {
@@ -708,6 +712,25 @@ export interface RoutingEventsResponse {
   range: AnalyticsRangeValue
   events: RoutingEvent[]
   generated_at_ms: number
+}
+
+/** What a merchant's payments in the window carried, for the payment audit's dropdown filters. */
+export interface PaymentAuditFilterOptions {
+  gateways: string[]
+  payment_methods: string[]
+  payment_method_types: string[]
+  card_networks: string[]
+  auth_types: string[]
+  currencies: string[]
+  error_codes: string[]
+}
+
+/** A payment's assignment to an A/B experiment on one routing endpoint. */
+export interface PaymentAuditExperiment {
+  experiment_id: string
+  arm: 'control' | 'variant'
+  endpoint: 'hybrid_routing' | 'decide_gateway' | 'evaluate'
+  routed_at_ms: number
 }
 
 export interface PaymentAuditResponse {
