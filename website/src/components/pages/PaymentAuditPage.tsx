@@ -526,10 +526,19 @@ function InspectorKeyValueGrid({ rows }: { rows: Array<{ label: string; value: s
 }
 
 function JsonBlock({ value }: { value: unknown }) {
+  const text = stringifyValue(value)
   return (
-    <pre className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-slate-50/90 px-5 py-3 font-mono text-[13px] leading-[21px] text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_16px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#0b1017] dark:text-[#d8e1ef] dark:shadow-none">
-      {stringifyValue(value)}
-    </pre>
+    <div className="relative">
+      <CopyButton
+        text={text}
+        label="Copy JSON"
+        size={14}
+        className="absolute right-3 top-3 rounded-md bg-slate-50/90 p-1 dark:bg-[#0b1017]"
+      />
+      <pre className="overflow-x-auto rounded-2xl border border-slate-200/80 bg-slate-50/90 py-3 pl-5 pr-12 font-mono text-[13px] leading-[21px] text-slate-800 shadow-[inset_0_1px_0_rgba(255,255,255,0.75),0_16px_30px_-28px_rgba(15,23,42,0.18)] dark:border-[#2a303a] dark:bg-[#0b1017] dark:text-[#d8e1ef] dark:shadow-none">
+        {text}
+      </pre>
+    </div>
   )
 }
 

@@ -987,7 +987,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
             }
           },
           {
@@ -8169,7 +8172,7 @@
           },
           "page_size": {
             "type": "integer",
-            "example": 12
+            "example": 20
           },
           "total_results": {
             "type": "integer",

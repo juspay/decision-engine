@@ -240,7 +240,10 @@ test.describe('Payment audit outcome and payment filters (API)', () => {
     const routes = await search(api, { route: 'routing_hybrid,decide_gateway' })
     expect(routes.body.total_results).toBe(PAYMENTS.length)
 
-    // The page can list up to 100 payments; larger requests are capped there.
+    // Without page_size the API pages at 20, as the dashboard does; up to 100 payments can be
+    // listed and larger requests are capped there.
+    const unsized = await api.raw('GET', '/analytics/payment-audit', { qs: { range: '1d', page: 1 } })
+    expect(unsized.body.page_size).toBe(20)
     expect((await search(api, { page_size: 100 })).body.page_size).toBe(100)
     expect((await search(api, { page_size: 500 })).body.page_size).toBe(100)
   })

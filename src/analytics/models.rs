@@ -9,7 +9,7 @@ pub const MIN_ANALYTICS_PAGE: usize = 1;
 pub const MIN_ANALYTICS_PAGE_SIZE: usize = 1;
 pub const MAX_ANALYTICS_PAGE_SIZE: usize = 50;
 pub const DEFAULT_ANALYTICS_PAGE_SIZE: usize = 10;
-pub const DEFAULT_PAYMENT_AUDIT_PAGE_SIZE: usize = 12;
+pub const DEFAULT_PAYMENT_AUDIT_PAGE_SIZE: usize = 20;
 /// The payment audit pages up to 100 payments; each page is one keyed lookup, not a scan.
 pub const MAX_PAYMENT_AUDIT_PAGE_SIZE: usize = 100;
 

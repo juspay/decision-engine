@@ -76,7 +76,7 @@ merchants.
 
 ### Page size and query cost
 
-Results page at 10, 20 (default), 50 or 100 payments; the API accepts `page_size` up to 100. A
+Results page at 10, 20 (default), 50 or 100 payments; the API accepts `page_size` up to 100 and defaults to 20. A
 search runs four ClickHouse reads (count, page keys, page rows, A/B assignments), the selected
 payment three (summary, timeline, A/B assignments), and the dropdown values one per time window,
 cached for a minute. Multi-select dropdowns search once when their list closes, not on every
