@@ -1601,15 +1601,15 @@ pub async fn create_moving_window_and_score(
 
 pub fn get_sr_v3_latency_threshold(
     sr_v3_input_config: Option<SrV3InputConfig>,
-    pmt: &str,
-    pm: &str,
+    payment_method: &str,
+    payment_method_type: &str,
     sr_routing_dimensions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
-            pmt,
-            pm,
+            payment_method,
+            payment_method_type,
             sr_routing_dimensions,
             |x| x.latencyThreshold.is_some(),
         )
@@ -1620,8 +1620,8 @@ pub fn get_sr_v3_latency_threshold(
 
 pub fn get_sr_v3_bucket_size(
     sr_v3_input_config: Option<SrV3InputConfig>,
-    pmt: &str,
-    pm: &str,
+    payment_method: &str,
+    payment_method_type: &str,
     sr_routing_dimensions: &SrRoutingDimensions,
     // When false, autopilot-calibrated sub-level entries are skipped so the lookup falls back to
     // the merchant's manual/default bucket size (used by an A/B "manual" arm). Pass true elsewhere
@@ -1631,8 +1631,8 @@ pub fn get_sr_v3_bucket_size(
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
-            pmt,
-            pm,
+            payment_method,
+            payment_method_type,
             sr_routing_dimensions,
             |x| x.bucketSize.is_some() && (use_autopilot || !is_autopilot_sourced(x)),
         )
@@ -1644,8 +1644,8 @@ pub fn get_sr_v3_bucket_size(
 
 pub fn get_sr_v3_hedging_percent(
     sr_v3_input_config: Option<SrV3InputConfig>,
-    pmt: &str,
-    pm: &str,
+    payment_method: &str,
+    payment_method_type: &str,
     sr_routing_dimensions: &SrRoutingDimensions,
     // See `get_sr_v3_bucket_size`: false skips autopilot-sourced entries (manual arm).
     use_autopilot: bool,
@@ -1653,8 +1653,8 @@ pub fn get_sr_v3_hedging_percent(
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
-            pmt,
-            pm,
+            payment_method,
+            payment_method_type,
             sr_routing_dimensions,
             |x| x.hedgingPercent.is_some() && (use_autopilot || !is_autopilot_sourced(x)),
         )
@@ -1671,15 +1671,15 @@ fn is_autopilot_sourced(cfg: &SrV3SubLevelInputConfig) -> bool {
 
 pub fn get_sr_v3_lower_reset_factor(
     sr_v3_input_config: Option<SrV3InputConfig>,
-    pmt: &str,
-    pm: &str,
+    payment_method: &str,
+    payment_method_type: &str,
     sr_routing_dimensions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
-            pmt,
-            pm,
+            payment_method,
+            payment_method_type,
             sr_routing_dimensions,
             |x| x.lowerResetFactor.is_some(),
         )
@@ -1691,15 +1691,15 @@ pub fn get_sr_v3_lower_reset_factor(
 
 pub fn get_sr_v3_upper_reset_factor(
     sr_v3_input_config: Option<SrV3InputConfig>,
-    pmt: &str,
-    pm: &str,
+    payment_method: &str,
+    payment_method_type: &str,
     sr_routing_dimensions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
-            pmt,
-            pm,
+            payment_method,
+            payment_method_type,
             sr_routing_dimensions,
             |x| x.upperResetFactor.is_some(),
         )
@@ -1711,16 +1711,16 @@ pub fn get_sr_v3_upper_reset_factor(
 
 pub fn get_sr_v3_gateway_sigma_factor(
     sr_v3_input_config: Option<SrV3InputConfig>,
-    pmt: &str,
-    pm: &str,
+    payment_method: &str,
+    payment_method_type: &str,
     gw: &String,
     sr_routing_dimensions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
         get_sr_v3_sub_level_input_config(
             &config.subLevelInputConfig,
-            pmt,
-            pm,
+            payment_method,
+            payment_method_type,
             sr_routing_dimensions,
             |x| {
                 x.gatewayExtraScore
@@ -1747,8 +1747,8 @@ fn find_gateway_sigma_factor(
 
 fn get_sr_v3_sub_level_input_config(
     sub_level_input_config: &Option<Vec<SrV3SubLevelInputConfig>>,
-    pmt: &str,
-    pm: &str,
+    payment_method: &str,
+    payment_method_type: &str,
     sr_routing_dimensions: &SrRoutingDimensions,
     is_input_non_null: impl Fn(&SrV3SubLevelInputConfig) -> bool,
 ) -> Option<SrV3SubLevelInputConfig> {
@@ -1758,15 +1758,15 @@ fn get_sr_v3_sub_level_input_config(
             .filter(|config| {
                 is_sr_v3_config_match(
                     config,
-                    Some(pmt.to_string()),
-                    Some(pm.to_string()),
+                    Some(payment_method.to_string()),
+                    Some(payment_method_type.to_string()),
                     sr_routing_dimensions,
                 ) && is_input_non_null(config)
             })
             // Most-specific match wins: rank matching rows by the number of constrained
             // (non-`None`) dimensions so a fully-qualified row (e.g. VISA/USD/THREE_DS) is
             // preferred over a broad all-`Any` row that also matches. This also subsumes the
-            // old pmt-only fallback — a row that constrains `paymentMethod` outranks one that
+            // method-only fallback — a row that constrains `paymentMethodType` outranks one that
             // leaves it `Any`. Fold with a strict `>` (via `>=` keeping the incumbent) so the
             // earliest config wins on equal specificity, preserving deterministic config order.
             .fold(
@@ -1781,11 +1781,11 @@ fn get_sr_v3_sub_level_input_config(
 }
 
 /// Number of dimensions a sub-level config constrains (non-`None`). Higher = more specific.
-/// `paymentMethodType` is excluded because every candidate has already matched on it, so it
-/// does not discriminate between rows.
+/// `paymentMethod` is excluded because every candidate has already matched on it, so it does not
+/// discriminate between rows.
 fn config_specificity(config: &SrV3SubLevelInputConfig) -> usize {
     [
-        config.paymentMethod.is_some(),
+        config.paymentMethodType.is_some(),
         config.cardNetwork.is_some(),
         config.cardIsIn.is_some(),
         config.currency.is_some(),
@@ -1797,14 +1797,18 @@ fn config_specificity(config: &SrV3SubLevelInputConfig) -> usize {
     .count()
 }
 
+/// Whether a sub-level row applies to a payment. The row's `paymentMethod` (the category) must
+/// equal the payment's; every other dimension it sets, starting with `paymentMethodType` (the
+/// specific method), must match too. Rows are stored as the engine's codes (`CARD`, `CREDIT`).
 fn is_sr_v3_config_match(
     config: &SrV3SubLevelInputConfig,
-    pmt: Option<String>,
-    pm: Option<String>,
+    payment_method: Option<String>,
+    payment_method_type: Option<String>,
     sr_routing_dimensions: &SrRoutingDimensions,
 ) -> bool {
-    let pmt_matches = config.paymentMethodType == pmt;
-    let pm_matches = config.paymentMethod.is_none() || config.paymentMethod == pm;
+    let method_matches = config.paymentMethod == payment_method;
+    let type_matches =
+        config.paymentMethodType.is_none() || config.paymentMethodType == payment_method_type;
     let card_network_matches =
         config.cardNetwork.is_none() || config.cardNetwork == sr_routing_dimensions.card_network;
     let card_isin_matches =
@@ -1816,8 +1820,8 @@ fn is_sr_v3_config_match(
     let auth_type_matches =
         config.authType.is_none() || config.authType == sr_routing_dimensions.auth_type;
 
-    pmt_matches
-        && pm_matches
+    method_matches
+        && type_matches
         && card_network_matches
         && card_isin_matches
         && currency_matches
@@ -1825,14 +1829,15 @@ fn is_sr_v3_config_match(
         && country_matches
 }
 
+/// The row for a whole payment method: its `paymentMethod` and nothing narrower.
 pub fn filter_upto_pmt(
     sub_level_input_config: Vec<SrV3SubLevelInputConfig>,
-    pmt: String,
+    payment_method: String,
     is_input_non_null: impl Fn(&SrV3SubLevelInputConfig) -> bool,
 ) -> Option<SrV3SubLevelInputConfig> {
     sub_level_input_config.into_iter().find(|x| {
-        (x.paymentMethodType.as_ref() == Some(&pmt))
-            && x.paymentMethod.is_none()
+        (x.paymentMethod.as_ref() == Some(&payment_method))
+            && x.paymentMethodType.is_none()
             && is_input_non_null(x)
     })
 }
@@ -2578,77 +2583,69 @@ pub async fn get_unified_sr_key(
         return sr_key_with_udfs;
     }
 
-    let order_type = gateway_scoring_data.orderType.clone();
-    let payment_method_type = gateway_scoring_data
-        .instrument
-        .method_type_code()
-        .into_owned();
-    let payment_method = gateway_scoring_data.instrument.method_code().to_string();
-    let card_network = gateway_scoring_data.cardSwitchProvider.clone();
-    let card_isin = gateway_scoring_data.cardIsIn.clone();
-    let currency = gateway_scoring_data
-        .currency
-        .as_ref()
-        .map(|c| c.to_string());
-    let country = gateway_scoring_data.country.as_ref().map(|c| c.to_string());
-    let auth_type = gateway_scoring_data.authType.clone();
-    let key_prefix = if is_sr_v3_metric_enabled {
-        C::GATEWAY_SELECTION_V3_ORDER_TYPE_KEY_PREFIX.to_string()
-    } else {
-        C::GATEWAY_SELECTION_ORDER_TYPE_KEY_PREFIX.to_string()
-    };
-
-    // Base key components that are always present
-    let mut key_components = vec![
-        key_prefix,
-        merchant_id.clone(),
-        order_type,
-        payment_method_type,
-        payment_method,
-    ];
-
-    let fields = service_config
+    let fields: Vec<String> = service_config
         .as_ref()
         .map(|config| config.paymentInfo.fields.clone())
-        .unwrap_or_default();
+        .unwrap_or_default()
+        .into_iter()
+        .flatten()
+        .collect();
+    sr_key(
+        gateway_scoring_data,
+        is_sr_v3_metric_enabled,
+        &fields,
+        udf_values,
+    )
+}
 
-    for field in fields.into_iter().flatten() {
-        match field.as_str() {
-            "card_network" => {
-                if let Some(cn) = card_network.clone() {
-                    key_components.push(cn.peek().to_string());
-                }
-            }
-            "card_is_in" => {
-                if let Some(ci) = card_isin.clone() {
-                    key_components.push(ci);
-                }
-            }
-            "currency" => {
-                if let Some(cu) = currency.clone() {
-                    key_components.push(cu);
-                }
-            }
-            "country" => {
-                if let Some(co) = country.clone() {
-                    key_components.push(co);
-                }
-            }
-            "auth_type" => {
-                if let Some(at) = auth_type.clone() {
-                    key_components.push(at);
-                }
-            }
-            _ => {
-                // Unknown field
-            }
-        }
+/// A payment's SR score key, without the gateway suffix:
+/// `{prefix}_{merchant}_{order type}_{payment method type}_{payment method}`, then the merchant's
+/// configured dimensions (`card_network`, `card_is_in`, `currency`, `country`, `auth_type`) and
+/// UDF values, skipping any the payment lacks. The type and method are the instrument's codes
+/// (`CREDIT`, `CARD`). Scores live under this key, so its format is pinned by tests: changing it
+/// strands every merchant's learned scores.
+pub fn sr_key(
+    gateway_scoring_data: &GatewayScoringData,
+    is_sr_v3_metric_enabled: bool,
+    fields: &[String],
+    udf_values: Option<Vec<String>>,
+) -> String {
+    let key_prefix = if is_sr_v3_metric_enabled {
+        C::GATEWAY_SELECTION_V3_ORDER_TYPE_KEY_PREFIX
+    } else {
+        C::GATEWAY_SELECTION_ORDER_TYPE_KEY_PREFIX
+    };
+    let mut key_components = vec![
+        key_prefix.to_string(),
+        gateway_scoring_data.merchantId.clone(),
+        gateway_scoring_data.orderType.clone(),
+        gateway_scoring_data
+            .instrument
+            .method_type_code()
+            .into_owned(),
+        gateway_scoring_data.instrument.method_code().to_string(),
+    ];
+    for field in fields {
+        let value = match field.as_str() {
+            "card_network" => gateway_scoring_data
+                .cardSwitchProvider
+                .as_ref()
+                .map(|network| network.peek().to_string()),
+            "card_is_in" => gateway_scoring_data.cardIsIn.clone(),
+            "currency" => gateway_scoring_data
+                .currency
+                .as_ref()
+                .map(ToString::to_string),
+            "country" => gateway_scoring_data
+                .country
+                .as_ref()
+                .map(ToString::to_string),
+            "auth_type" => gateway_scoring_data.authType.clone(),
+            _ => None,
+        };
+        key_components.extend(value);
     }
-
-    if let Some(udf_values) = udf_values {
-        key_components.extend(udf_values);
-    }
-
+    key_components.extend(udf_values.into_iter().flatten());
     intercalate_without_empty_string("_", &key_components)
 }
 
@@ -3207,15 +3204,15 @@ mod sr_v3_sub_level_match_tests {
     use crate::decider::gatewaydecider::types::{SrRoutingDimensions, SrV3SubLevelInputConfig};
 
     fn sub_config(
-        pm: Option<&str>,
+        method_type: Option<&str>,
         network: Option<&str>,
         currency: Option<&str>,
         auth: Option<&str>,
         hedging: f64,
     ) -> SrV3SubLevelInputConfig {
         SrV3SubLevelInputConfig {
-            paymentMethodType: Some("CARD".to_string()),
-            paymentMethod: pm.map(String::from),
+            paymentMethodType: method_type.map(String::from),
+            paymentMethod: Some("CARD".to_string()),
             cardNetwork: network.map(String::from),
             cardIsIn: None,
             currency: currency.map(String::from),
@@ -3308,5 +3305,76 @@ mod card_auth_level_tests {
         assert_eq!(card_auth_level(Some("OTP")), "OTP");
         assert_eq!(card_auth_level(Some("NO_THREE_DS")), "UNKNOWN");
         assert_eq!(card_auth_level(None), "UNKNOWN");
+    }
+}
+
+#[cfg(test)]
+mod sr_key_tests {
+    use super::sr_key;
+    use crate::decider::gatewaydecider::types::GatewayScoringData;
+    use crate::types::payment_instrument::PaymentInstrument;
+
+    fn scoring_data(
+        instrument: PaymentInstrument,
+    ) -> Result<GatewayScoringData, serde_json::Error> {
+        let mut data: GatewayScoringData = serde_json::from_value(serde_json::json!({
+            "merchantId": "merchant_1",
+            "paymentMethod": "",
+            "paymentMethodType": "",
+            "orderType": "UNKNOWN",
+            "cardType": null, "bankCode": null, "authType": "NO_THREE_DS", "paymentSource": null,
+            "isPaymentSourceEnabledForSrRouting": false, "isAuthLevelEnabledForSrRouting": false,
+            "isBankLevelEnabledForSrRouting": false, "isGriEnabledForElimination": false,
+            "isGriEnabledForSrRouting": false, "routingApproach": null,
+            "dateCreated": [2026, 287, 0, 0, 0, 0, 0, 0, 0],
+            "eliminationEnabled": false, "cardIsIn": "453091", "cardSwitchProvider": "VISA",
+            "currency": "CAD", "country": null, "is_legacy_decider_flow": false,
+            "gatewayReferenceId": null, "udfs": null, "udfs_consumed_for_routing": null,
+        }))?;
+        data.instrument = instrument;
+        Ok(data)
+    }
+
+    /// The key a Hyperswitch card payment's SR scores live under. Production scores are stored
+    /// under exactly this; a change here needs a key migration.
+    #[test]
+    fn a_hyperswitch_card_keys_as_before() -> Result<(), serde_json::Error> {
+        let data = scoring_data(PaymentInstrument::from_hyperswitch_lenient(
+            Some("card"),
+            Some("credit"),
+        ))?;
+        assert_eq!(
+            sr_key(&data, true, &[], None),
+            "{gw_sr_v3_score_merchant_1_UNKNOWN_CREDIT_CARD"
+        );
+        assert_eq!(
+            sr_key(
+                &data,
+                true,
+                &[
+                    "card_network".to_string(),
+                    "currency".to_string(),
+                    "country".to_string()
+                ],
+                Some(vec!["udf_1".to_string()]),
+            ),
+            "{gw_sr_v3_score_merchant_1_UNKNOWN_CREDIT_CARD_VISA_CAD_udf_1"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_payment_without_a_type_keys_on_its_method() -> Result<(), serde_json::Error> {
+        let data = scoring_data(PaymentInstrument::from_hyperswitch_lenient(
+            Some("wallet"),
+            None,
+        ))?;
+        // A missing type keys as UNKNOWN, as every empty key part does (the order type here is
+        // UNKNOWN too). Before the instrument, a hybrid payment without a type keyed as `NULL`.
+        assert_eq!(
+            sr_key(&data, true, &[], None),
+            "{gw_sr_v3_score_merchant_1_UNKNOWN_UNKNOWN_WALLET"
+        );
+        Ok(())
     }
 }

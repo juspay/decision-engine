@@ -412,6 +412,42 @@ impl PaymentMethodType {
     }
 }
 
+/// The routing keys that name payment methods, generated from the enums so rules, the dashboard
+/// and request checks share one vocabulary: `payment_method` (the methods), `payment_method_type`
+/// (every type) and one key per method listing its types (`card` → `credit, debit, card`).
+pub fn payment_method_routing_keys() -> Vec<(String, Vec<String>)> {
+    use strum::IntoEnumIterator;
+
+    let type_names = |method_types: &mut dyn Iterator<Item = PaymentMethodType>| {
+        method_types
+            .map(|method_type| method_type.hyperswitch_name().to_string())
+            .collect::<Vec<_>>()
+    };
+    let mut keys = vec![
+        (
+            "payment_method".to_string(),
+            PaymentMethod::HYPERSWITCH
+                .iter()
+                .map(|method| method.hyperswitch_name())
+                .collect(),
+        ),
+        (
+            "payment_method_type".to_string(),
+            type_names(&mut PaymentMethodType::iter()),
+        ),
+    ];
+    for method in PaymentMethod::HYPERSWITCH {
+        keys.push((
+            method.hyperswitch_name(),
+            type_names(
+                &mut PaymentMethodType::iter()
+                    .filter(|method_type| method_type.payment_methods().contains(&method)),
+            ),
+        ));
+    }
+    keys
+}
+
 /// The specific method within a category: one of Hyperswitch's types, or a value it does not
 /// define (an Euler method such as `UPI_PAY`, or a type newer than this build).
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -582,6 +618,16 @@ impl PaymentInstrument {
     pub fn is(&self, method: PaymentMethod) -> bool {
         self.method == method
     }
+
+    /// The analytics columns `(payment_method, payment_method_type)`: the codes, or `None` where
+    /// the payment named nothing.
+    pub fn analytics_columns(&self) -> (Option<String>, Option<String>) {
+        let method_type = self.method_type_code();
+        (
+            (self.method != PaymentMethod::Unknown).then(|| self.method_code().to_string()),
+            (!method_type.is_empty()).then(|| method_type.into_owned()),
+        )
+    }
 }
 
 /// The stored form, under the request's field names: `{ "paymentMethod": "CARD",
@@ -706,6 +752,24 @@ mod tests {
             instrument
         );
         Ok(())
+    }
+
+    #[test]
+    fn routing_keys_list_each_method_with_its_types() {
+        let keys: std::collections::HashMap<String, Vec<String>> =
+            payment_method_routing_keys().into_iter().collect();
+        let sorted = |key: &str| {
+            let mut values = keys.get(key).cloned().unwrap_or_default();
+            values.sort();
+            values
+        };
+        assert_eq!(keys.get("payment_method").map(Vec::len), Some(16));
+        assert_eq!(keys.get("payment_method_type").map(Vec::len), Some(127));
+        assert_eq!(sorted("card"), ["card", "credit", "debit"]);
+        assert_eq!(sorted("upi"), ["upi_collect", "upi_intent", "upi_qr"]);
+        assert!(sorted("bank_debit").contains(&"ach".to_string()));
+        assert!(sorted("bank_transfer").contains(&"ach".to_string()));
+        assert_eq!(sorted("reward"), ["classic_reward", "evoucher"]);
     }
 
     /// Pinned to Hyperswitch's own enums (`common_enums::PaymentMethod` and

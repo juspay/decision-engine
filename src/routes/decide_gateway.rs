@@ -156,6 +156,7 @@ pub(crate) async fn run_decider_with_analytics(
     {
         Ok(decided_gateway) => {
             let routing_approach = decided_gateway.routing_approach.to_string();
+            let (payment_method, payment_method_type) = payload.instrument().analytics_columns();
 
             DomainAnalyticsEvent::record_decision(
                 AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayDecision),
@@ -184,8 +185,8 @@ pub(crate) async fn run_decider_with_analytics(
                 global_request_id,
                 trace_id,
                 Some("gateway_decided".to_string()),
-                Some(payload.payment_method_type().to_string()),
-                Some(payload.payment_method().to_string()),
+                payment_method_type,
+                payment_method,
                 auth_type,
                 payload.card_network(),
                 Some(payload.currency()),

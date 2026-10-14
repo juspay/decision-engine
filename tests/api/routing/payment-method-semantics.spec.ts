@@ -95,4 +95,48 @@ test.describe('Payment method meaning (API)', () => {
     )
     expect(scored.status).toBe(200)
   })
+
+  test('SR config rows are checked and stored in the same meaning', async ({ api, merchant }) => {
+    const row = (paymentMethod: string, paymentMethodType: string | null) => ({
+      paymentMethod,
+      paymentMethodType,
+      bucketSize: 50,
+      hedgingPercent: null,
+      latencyThreshold: null,
+    })
+
+    const legacy = await api.createSuccessRateConfig(
+      merchant.id,
+      { subLevelInputConfig: [row('CREDIT', 'CARD')] },
+      { failOnStatusCode: false },
+    )
+    expect(legacy.status).toBe(400)
+    expect(JSON.stringify(legacy.body)).toContain('looks swapped')
+
+    const created = await api.createSuccessRateConfig(merchant.id, {
+      subLevelInputConfig: [row('card', 'credit'), row('wallet', null)],
+    })
+    expect(created.status).toBe(200)
+    const stored = await api.getSuccessRateConfig(merchant.id)
+    expect(
+      stored.body.config.data.subLevelInputConfig.map((r: any) => [r.paymentMethod, r.paymentMethodType]),
+    ).toEqual([
+      ['CARD', 'CREDIT'],
+      ['WALLET', null],
+    ])
+  })
+
+  test('routing keys list payment methods from the code', async ({ api }) => {
+    const r = await api.raw('GET', '/config/routing-keys')
+    expect(r.status).toBe(200)
+    const values = (key: string) =>
+      String(r.body.keys[key]?.values ?? '')
+        .split(',')
+        .map((v) => v.trim())
+        .sort()
+    expect(values('payment_method')).toContain('card')
+    expect(values('payment_method')).toHaveLength(16)
+    expect(values('card')).toEqual(['card', 'credit', 'debit'])
+    expect(values('upi')).toEqual(['upi_collect', 'upi_intent', 'upi_qr'])
+  })
 })

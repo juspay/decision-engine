@@ -1163,14 +1163,6 @@ impl DomainDeciderRequestForApiCallV2 {
         )
     }
 
-    pub fn payment_method_type(&self) -> &str {
-        &self.payment_info.payment_method_type
-    }
-
-    pub fn payment_method(&self) -> &str {
-        &self.payment_info.payment_method
-    }
-
     pub fn auth_type(&self) -> Option<String> {
         self.payment_info
             .auth_type

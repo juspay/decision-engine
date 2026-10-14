@@ -53,8 +53,8 @@ function srConfigData(overrides = {}) {
     defaultHedgingPercent: 5,
     subLevelInputConfig: [
       {
-        paymentMethodType: 'upi',
-        paymentMethod: 'upi_collect',
+        paymentMethod: 'upi',
+        paymentMethodType: 'upi_collect',
         bucketSize: 250,
         hedgingPercent: 1,
         latencyThreshold: null,
