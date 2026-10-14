@@ -1,5 +1,6 @@
 import { test, expect, factory } from '../../fixtures/test'
 import type { ApiClient } from '../../fixtures/api-client'
+import { poll } from '../../helpers/poll'
 
 /**
  * `/decide-gateway` and `/routing/hybrid` read a payment's method the way Hyperswitch does:
@@ -150,5 +151,100 @@ test.describe('Payment method meaning (API)', () => {
     expect(values('payment_method')).toHaveLength(16)
     expect(values('card')).toEqual(['card', 'credit', 'debit'])
     expect(values('upi')).toEqual(['upi_collect', 'upi_intent', 'upi_qr'])
+  })
+
+  test('the payment audit records both endpoints in the same meaning', async ({ api, merchant }) => {
+    test.setTimeout(90_000)
+    const m = merchant.id
+    await setupSrMerchant(api, m)
+
+    const payments = [
+      { pm: 'card', pmt: 'credit', extra: { cardType: 'CREDIT' } },
+      { pm: 'wallet', pmt: 'google_pay', extra: {} },
+      { pm: 'upi', pmt: 'upi_collect', extra: {} },
+    ]
+    const expected = new Map<string, [string, string]>()
+    const routes: Promise<unknown>[] = []
+    for (const p of payments) {
+      // Through /decide-gateway, as a direct integration sends it.
+      const decideId = factory.paymentId(`pm_audit_d_${p.pm}`)
+      expected.set(decideId, [p.pm.toUpperCase(), p.pmt.toUpperCase()])
+      routes.push(
+        api
+          .decideGateway({
+            merchantId: m,
+            eliminationEnabled: false,
+            paymentInfo: { paymentId: decideId, paymentMethod: p.pm, paymentMethodType: p.pmt, ...p.extra },
+          })
+          .then((r) => expect(r.status).toBe(200)),
+      )
+      // Through /routing/hybrid, as Hyperswitch sends it.
+      const hybridId = factory.paymentId(`pm_audit_h_${p.pm}`)
+      expected.set(hybridId, [p.pm.toUpperCase(), p.pmt.toUpperCase()])
+      routes.push(
+        api
+          .raw('POST', '/routing/hybrid', {
+            body: {
+              static_routing_request: {
+                created_by: m,
+                payment_id: hybridId,
+                parameters: {
+                  payment_type: { type: 'enum_variant', value: 'order_payment' },
+                  payment_method: { type: 'enum_variant', value: p.pm },
+                  payment_method_type: { type: 'enum_variant', value: p.pmt },
+                  amount: { type: 'number', value: 100 },
+                },
+                fallback_output: [factory.gatewayConnector('stripe')],
+              },
+              dynamic_routing_request: factory.srDecideGatewayRequest({
+                merchantId: m,
+                eliminationEnabled: false,
+                paymentInfo: { paymentId: hybridId, paymentMethod: p.pm, paymentMethodType: p.pmt, ...p.extra },
+              }),
+            },
+          })
+          .then((r) => expect(r.status).toBe(200)),
+      )
+    }
+    // Both endpoints at once.
+    await Promise.all(routes)
+
+    await poll(
+      () => api.raw('GET', '/analytics/payment-audit', { qs: { range: '1d', page: 1, page_size: 50 } }),
+      (r) => r.body.total_results === expected.size,
+      { message: 'payments did not reach the audit', timeout: 40_000 },
+    )
+
+    // Each payment's events carry its method as the category and its type as the specific method.
+    for (const [paymentId, [method, methodType]] of expected) {
+      const r = await api.raw('GET', '/analytics/payment-audit', {
+        qs: { range: '1d', page: 1, payment_id: paymentId },
+      })
+      const recorded = r.body.timeline
+        .filter((event: any) => event.payment_method || event.payment_method_type)
+        .map((event: any) => [event.payment_method, event.payment_method_type])
+      expect(recorded.length, paymentId).toBeGreaterThan(0)
+      for (const pair of recorded) expect(pair, paymentId).toEqual([method, methodType])
+    }
+
+    // The dropdowns keep categories and specific methods apart, and each filter finds both
+    // endpoints' payments.
+    const options = await api.raw('GET', '/analytics/payment-audit/filter-options', { qs: { range: '1d' } })
+    expect(options.body.payment_methods).toEqual(['card', 'upi', 'wallet'])
+    expect(options.body.payment_method_types).toEqual(['credit', 'google_pay', 'upi_collect'])
+    for (const p of payments) {
+      const byMethod = await api.raw('GET', '/analytics/payment-audit', {
+        qs: { range: '1d', page: 1, payment_method: p.pm },
+      })
+      expect(byMethod.body.total_results, p.pm).toBe(2)
+      expect([...byMethod.body.results.map((row: any) => row.routes.join(','))].sort(), p.pm).toEqual([
+        'Decide Gateway',
+        'Hybrid Routing',
+      ])
+      const byType = await api.raw('GET', '/analytics/payment-audit', {
+        qs: { range: '1d', page: 1, payment_method_type: p.pmt },
+      })
+      expect(byType.body.total_results, p.pmt).toBe(2)
+    }
   })
 })
