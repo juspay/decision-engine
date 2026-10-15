@@ -17,7 +17,7 @@ COMPOSE_PROFILES= docker compose --profile postgres-ghcr up -d
 With dashboard + docs:
 
 ```bash
-COMPOSE_PROFILES= docker compose --profile dashboard-postgres-ghcr up -d
+COMPOSE_PROFILES= docker compose --profile dashboard-postgres-ghcr up -d --build
 ```
 
 ## Docker Compose (Local build track)
