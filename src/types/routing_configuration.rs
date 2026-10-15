@@ -53,7 +53,7 @@ impl SuccessRateData {
     /// optional.
     pub fn normalised(mut self) -> Result<Self, String> {
         for row in self.sub_level_input_config.iter_mut().flatten() {
-            let instrument = crate::types::payment_instrument::PaymentInstrument::from_hyperswitch(
+            let instrument = crate::types::payment_instrument::PaymentInstrument::parse(
                 row.payment_method.as_deref().unwrap_or_default(),
                 row.payment_method_type.as_deref(),
             )
@@ -67,7 +67,7 @@ impl SuccessRateData {
 }
 
 /// One sub-level SR override. `paymentMethod` is the payment method category (`CARD`) and
-/// `paymentMethodType` the specific method within it (`CREDIT`), in Hyperswitch's meaning; the
+/// `paymentMethodType` the specific method within it (`CREDIT`), in the standard meaning; the
 /// row applies to payments matching every dimension it sets.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]

@@ -559,7 +559,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct GatewayScoringData {
     pub merchantId: String,
-    /// Stored as `paymentMethod` and `paymentMethodType`, in Hyperswitch's meaning.
+    /// Stored as `paymentMethod` and `paymentMethodType`, in the standard meaning.
     #[serde(flatten)]
     pub instrument: crate::types::payment_instrument::PaymentInstrument,
     pub orderType: String,
@@ -1141,19 +1141,19 @@ impl DomainDeciderRequestForApiCallV2 {
         &self.payment_info.payment_id
     }
 
-    /// The payment's instrument, checked as [`PaymentInstrument::from_hyperswitch`] does.
+    /// The payment's instrument, checked as [`PaymentInstrument::parse`] does.
     /// `/decide-gateway` rejects a request that fails this.
     pub fn check_payment_method(&self) -> Result<PaymentInstrument, InstrumentError> {
-        PaymentInstrument::from_hyperswitch(
+        PaymentInstrument::parse(
             &self.payment_info.payment_method,
             Some(&self.payment_info.payment_method_type),
         )
     }
 
     /// The payment's instrument, unchecked: what the engine routes on once the request is in.
-    /// `/routing/hybrid` builds its request from rule parameters Hyperswitch already validated.
+    /// `/routing/hybrid` builds its request from rule parameters its caller already validated.
     pub fn instrument(&self) -> PaymentInstrument {
-        PaymentInstrument::from_hyperswitch_lenient(
+        PaymentInstrument::parse_lenient(
             Some(&self.payment_info.payment_method),
             Some(&self.payment_info.payment_method_type),
         )
@@ -1245,7 +1245,7 @@ impl DomainDeciderRequestForApiCallV2 {
                 merchantGatewayAccountId: None,
                 txnAmount: Some(ETMo::Money::from_double(self.payment_info.amount)),
                 txnObjectType: Some(self.payment_info.payment_type.clone()),
-                // The engine reads the specific method from the source object, as Euler did.
+                // The engine reads the specific method from the source object, as legacy routing did.
                 sourceObject: Some(self.instrument().method_type_code().into_owned()),
                 sourceObjectId: None,
                 currency: self.payment_info.currency.clone(),

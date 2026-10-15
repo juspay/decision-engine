@@ -3,7 +3,7 @@ import type { ApiClient } from '../../fixtures/api-client'
 import { poll } from '../../helpers/poll'
 
 /**
- * `/decide-gateway` and `/routing/hybrid` read a payment's method the way Hyperswitch does:
+ * `/decide-gateway` and `/routing/hybrid` read a payment's method the same way:
  * `paymentMethod` is the category (`CARD`) and `paymentMethodType` the specific method
  * (`CREDIT`). A card payment is routed as a card whichever endpoint it comes through.
  */
@@ -60,7 +60,7 @@ test.describe('Payment method meaning (API)', () => {
     const m = merchant.id
     await setupSrMerchant(api, m)
 
-    // Hyperswitch's own casing is accepted.
+    // Lower-case values are accepted too.
     const decided = await api.decideGateway({
       merchantId: m,
       eliminationEnabled: false,
@@ -178,7 +178,7 @@ test.describe('Payment method meaning (API)', () => {
           })
           .then((r) => expect(r.status).toBe(200)),
       )
-      // Through /routing/hybrid, as Hyperswitch sends it.
+      // Through /routing/hybrid, as rule parameters.
       const hybridId = factory.paymentId(`pm_audit_h_${p.pm}`)
       expected.set(hybridId, [p.pm.toUpperCase(), p.pmt.toUpperCase()])
       routes.push(

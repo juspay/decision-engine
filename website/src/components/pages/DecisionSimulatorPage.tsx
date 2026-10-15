@@ -2518,7 +2518,7 @@ export function DecisionSimulatorPage() {
             ? activeVars[i % activeVars.length]
             : (activeVars[scenarioSel] ?? activeVars[0]))
         : null
-      // Hyperswitch's meaning: the method is the category (CARD), its type the specific method (CREDIT).
+      // The method is the category (CARD), its type the specific method (CREDIT).
       const paymentMethod = isMultiObjective ? 'CARD' : form.payment_method_type
       const paymentMethodType = variant ? variant.paymentMethodType : form.payment_method
       const cardBrand = variant ? variant.cardSwitchProvider : form.card_brand

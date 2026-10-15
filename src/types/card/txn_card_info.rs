@@ -147,7 +147,7 @@ where
 }
 
 /// A transaction's card and payment method details. `instrument` is the payment method in
-/// Decision Engine's canonical form. On the wire, the legacy Euler-format APIs send Euler's
+/// Decision Engine's canonical form. On the wire, the legacy APIs send the legacy
 /// fields instead (`paymentMethodType` is the category, `paymentMethod` the specific method); see
 /// [`TxnCardInfoWire`].
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
@@ -174,7 +174,7 @@ pub struct TxnCardInfo {
     pub partitionKey: Option<PrimitiveDateTime>,
 }
 
-/// [`TxnCardInfo`] as the legacy Euler-format APIs send it.
+/// [`TxnCardInfo`] as the legacy APIs send it.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 struct TxnCardInfoWire {
     #[serde(rename = "id")]
@@ -198,10 +198,10 @@ struct TxnCardInfoWire {
     #[serde(with = "time::serde::iso8601")]
     #[serde(rename = "dateCreated")]
     dateCreated: OffsetDateTime,
-    /// Euler's category: `CARD`, `UPI`, `NB`.
+    /// The legacy category: `CARD`, `UPI`, `NB`.
     #[serde(rename = "paymentMethodType")]
     paymentMethodType: String,
-    /// Euler's specific method: `VISA`, `UPI_PAY`.
+    /// The legacy specific method: `VISA`, `UPI_PAY`.
     #[serde(rename = "paymentMethod")]
     paymentMethod: String,
     #[serde(rename = "paymentSource")]
@@ -227,7 +227,10 @@ impl From<TxnCardInfoWire> for TxnCardInfo {
             channel: wire.channel,
             nameOnCard: wire.nameOnCard,
             dateCreated: wire.dateCreated,
-            instrument: PaymentInstrument::from_euler(&wire.paymentMethodType, &wire.paymentMethod),
+            instrument: PaymentInstrument::from_legacy_txn(
+                &wire.paymentMethodType,
+                &wire.paymentMethod,
+            ),
             paymentSource: wire.paymentSource,
             authType: wire.authType,
             partitionKey: wire.partitionKey,
@@ -325,8 +328,8 @@ pub fn convert_safe_to_txn_card_info(
         channel: None,
         nameOnCard: safe_info.nameOnCard,
         dateCreated: safe_info.dateCreated,
-        // The legacy score API sends Euler's fields.
-        instrument: PaymentInstrument::from_euler(
+        // The legacy score API sends the legacy transaction fields.
+        instrument: PaymentInstrument::from_legacy_txn(
             &safe_info.paymentMethodType,
             &safe_info.paymentMethod,
         ),

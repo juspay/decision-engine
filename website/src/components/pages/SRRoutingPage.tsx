@@ -90,7 +90,7 @@ const optionalDim = z.preprocess(
 )
 
 const subLevelSchema = z.object({
-  // Hyperswitch's meaning: the method is the category (card), its type the specific method (credit).
+  // The method is the category (card), its type the specific method (credit).
   paymentMethod: z.string().min(1),
   paymentMethodType: optionalDim,
   cardNetwork: optionalDim,
@@ -210,7 +210,7 @@ export function SRRoutingPage() {
   const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
   const merchantId = selectedMerchantId || authMerchantId
   // Payment methods (`card`) and each method's types (`credit`), from the routing keys the backend
-  // generates from Hyperswitch's vocabulary.
+  // generates from its payment method vocabulary.
   const { getKeyValues } = useDynamicRoutingConfig()
   // When Autopilot is on, its calibration job owns bucket size + hedging % on the Auto-badged
   // sub-level rows and overwrites human edits there on the next cycle — so those two fields are
@@ -303,7 +303,7 @@ export function SRRoutingPage() {
       const d = existing.config.data
       // Normalize so the optional dimension fields are always present (controlled inputs).
       const subLevelRows = (d.subLevelInputConfig ?? []).map((r) => ({
-        // Stored as codes (CARD, CREDIT); the dropdowns use Hyperswitch's spelling.
+        // Stored as codes (CARD, CREDIT); the dropdowns use lower-case names.
         paymentMethod: r.paymentMethod?.toLowerCase() ?? '',
         paymentMethodType: r.paymentMethodType?.toLowerCase() ?? null,
         cardNetwork: r.cardNetwork ?? null,

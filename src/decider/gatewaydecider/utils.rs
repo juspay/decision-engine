@@ -2093,7 +2093,7 @@ pub async fn get_gateway_scoring_data(
         .txnObjectType
         .map(|t| t.to_string())
         .unwrap_or_default();
-    // Euler's legacy requests name a UPI payment just `UPI` and carry the specific flow on the
+    // Legacy requests name a UPI payment just `UPI` and carry the specific flow on the
     // source object.
     let instrument = match (
         txn_card_info.instrument.method(),
@@ -2101,7 +2101,7 @@ pub async fn get_gateway_scoring_data(
         txn_detail.sourceObject.as_deref(),
     ) {
         (PaymentMethod::Upi, "UPI", Some(source_object)) => {
-            PaymentInstrument::from_euler(UPI, source_object)
+            PaymentInstrument::from_legacy_txn(UPI, source_object)
         }
         _ => txn_card_info.instrument.clone(),
     };
@@ -2678,7 +2678,7 @@ async fn get_legacy_unified_sr_key(
     } else {
         C::GATEWAY_SELECTION_ORDER_TYPE_KEY_PREFIX.to_string()
     };
-    // Euler's key order: the category, then the specific method (`CARD_VISA`), so legacy scores
+    // The legacy key order: the category, then the specific method (`CARD_VISA`), so legacy scores
     // keep their keys.
     let base_key = vec![
         key_prefix.clone(),
@@ -3350,11 +3350,11 @@ mod sr_key_tests {
         Ok(data)
     }
 
-    /// The key a Hyperswitch card payment's SR scores live under. Production scores are stored
+    /// The key a card payment's SR scores live under. Production scores are stored
     /// under exactly this; a change here needs a key migration.
     #[test]
-    fn a_hyperswitch_card_keys_as_before() -> Result<(), serde_json::Error> {
-        let data = scoring_data(PaymentInstrument::from_hyperswitch_lenient(
+    fn a_card_keys_as_before() -> Result<(), serde_json::Error> {
+        let data = scoring_data(PaymentInstrument::parse_lenient(
             Some("card"),
             Some("credit"),
         ))?;
@@ -3380,10 +3380,7 @@ mod sr_key_tests {
 
     #[test]
     fn a_payment_without_a_type_keys_on_its_method() -> Result<(), serde_json::Error> {
-        let data = scoring_data(PaymentInstrument::from_hyperswitch_lenient(
-            Some("wallet"),
-            None,
-        ))?;
+        let data = scoring_data(PaymentInstrument::parse_lenient(Some("wallet"), None))?;
         // A missing type keys as UNKNOWN, as every empty key part does (the order type here is
         // UNKNOWN too). Before the instrument, a hybrid payment without a type keyed as `NULL`.
         assert_eq!(
@@ -3393,10 +3390,10 @@ mod sr_key_tests {
         Ok(())
     }
 
-    /// A legacy Euler card payment keeps Euler's key order: category, brand, then card type.
+    /// A legacy card payment keeps the legacy key order: category, brand, then card type.
     #[tokio::test]
     async fn a_legacy_card_keys_as_before() -> Result<(), serde_json::Error> {
-        let data = scoring_data(PaymentInstrument::from_euler("CARD", "VISA"))?;
+        let data = scoring_data(PaymentInstrument::from_legacy_txn("CARD", "VISA"))?;
         assert_eq!(
             super::get_legacy_unified_sr_key(&data, true, true).await,
             "{gw_sr_v3_score_merchant_1_UNKNOWN_CARD_VISA_UNKNOWN"

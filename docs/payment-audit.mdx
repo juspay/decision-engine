@@ -56,11 +56,10 @@ counts. The success / failure totals above the results use the same outcome. Pic
 
 ### Payment attributes
 
-Payment attributes come from the payment's routing decision. On `/routing/hybrid` they are the
-rule parameters Hyperswitch sends, so they follow Hyperswitch's meaning: `payment_method` is
-`card`, `wallet`, `upi`… and `payment_method_type` is `credit`, `debit`, `google_pay`…. On
-`/decide-gateway` they are the decider request's `paymentMethodType` (e.g. `CARD`) and
-`paymentMethod` (e.g. `VISA`). Each takes several values (comma-separated in the API, e.g.
+Payment attributes come from the payment's routing decision. Both `/routing/hybrid` and
+`/decide-gateway` record them in the same meaning (see [Payment Methods](/payment-methods)):
+`payment_method` is the category (`card`, `wallet`, `upi`…) and `payment_method_type` the
+specific method (`credit`, `debit`, `google_pay`…). Each takes several values (comma-separated in the API, e.g.
 `currency=USD,EUR`) and matches a payment with any of them. Values match case-insensitively, and
 the amount bounds are inclusive.
 

@@ -312,7 +312,7 @@ export interface SRConfigData {
   subLevelInputConfig: SubLevelConfig[] | null
 }
 
-/** One sub-level SR override, in Hyperswitch's meaning: `paymentMethod` is the category (`CARD`),
+/** One sub-level SR override: `paymentMethod` is the category (`CARD`),
  *  `paymentMethodType` the specific method within it (`CREDIT`), or null for the whole method. */
 export interface SubLevelConfig {
   paymentMethod: string

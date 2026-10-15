@@ -5260,12 +5260,12 @@
           },
           "paymentMethodType": {
             "type": "string",
-            "description": "The specific method within `paymentMethod`, in Hyperswitch's meaning (its `payment_method_type`): `CREDIT` or `DEBIT` for cards, `UPI_COLLECT`, `GOOGLE_PAY` and so on.",
+            "description": "The specific method within `paymentMethod`: `CREDIT` or `DEBIT` for cards, `UPI_COLLECT`, `GOOGLE_PAY` and so on.",
             "example": "CREDIT"
           },
           "paymentMethod": {
             "type": "string",
-            "description": "The payment method category, in Hyperswitch's meaning (its `payment_method`): `CARD`, `UPI`, `WALLET` and so on. Before this release `/decide-gateway` read the two fields the other way round.",
+            "description": "The payment method category: `CARD`, `UPI`, `WALLET` and so on. Before this release `/decide-gateway` read the two fields the other way round.",
             "example": "CARD"
           },
           "country": {
@@ -6811,7 +6811,7 @@
         "properties": {
           "paymentMethod": {
             "type": "string",
-            "description": "The payment method category, in Hyperswitch's meaning (`card`, `wallet`, `upi`). Stored and returned as an upper-case code.",
+            "description": "The payment method category (`card`, `wallet`, `upi`). Stored and returned as an upper-case code.",
             "example": "CARD"
           },
           "paymentMethodType": {

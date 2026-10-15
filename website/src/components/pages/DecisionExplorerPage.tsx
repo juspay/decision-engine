@@ -1556,7 +1556,7 @@ export function DecisionExplorerPage() {
         // multi-objective leg has meaningful choices to make. Form values still
         // seed everything else (currency, eligible_gateways, etc).
         const variant = isMultiObjective ? MULTI_OBJECTIVE_CLUSTER_VARIANTS[i % MULTI_OBJECTIVE_CLUSTER_VARIANTS.length] : null
-        // Hyperswitch's meaning: the method is the category (CARD), its type the specific method (CREDIT).
+        // The method is the category (CARD), its type the specific method (CREDIT).
         const paymentMethod = isMultiObjective ? 'CARD' : form.payment_method_type
         const paymentMethodType = variant ? variant.paymentMethodType : form.payment_method
         const cardBrand = variant ? variant.cardSwitchProvider : form.card_brand

@@ -8,7 +8,7 @@ import { redisKeys } from '../../helpers/redis'
  * failure here needs a key migration, not a new expectation.
  *
  * Keys read `{gw_sr_v3_score_<merchant>_<order type>_<payment method type>_<payment method>_<gateway>_}score`
- * (and `...}queue`), with the payment method parts in Hyperswitch's meaning.
+ * (and `...}queue`), with the payment method parts in the standard meaning.
  */
 
 type Payment = { label: string; pm: string; pmt?: string; extra?: Record<string, unknown> }
@@ -33,7 +33,7 @@ async function setupSrMerchant(api: ApiClient, merchantId: string) {
   expect((await api.setMerchantFeature(merchantId, 'sr-routing', true)).status).toBe(200)
 }
 
-/** Routes a payment through /routing/hybrid as Hyperswitch does; returns the decided gateway. */
+/** Routes a payment through /routing/hybrid with rule parameters; returns the decided gateway. */
 async function routeHybrid(api: ApiClient, merchantId: string, paymentId: string, payment: Payment) {
   const parameters: Record<string, unknown> = {
     payment_type: { type: 'enum_variant', value: 'order_payment' },
