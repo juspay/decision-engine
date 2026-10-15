@@ -105,8 +105,9 @@ fn invalid_payment_method_response(developer_message: String) -> ErrorResponse {
         filter_wise_gateways: None,
         error_info: UnifiedError {
             code: "INVALID_PAYMENT_METHOD".to_string(),
-            user_message: "paymentMethod and paymentMethodType are missing, swapped or do not fit together."
-                .to_string(),
+            user_message:
+                "paymentMethod and paymentMethodType are missing, swapped or do not fit together."
+                    .to_string(),
             developer_message,
         },
         priority_logic_output: None,
