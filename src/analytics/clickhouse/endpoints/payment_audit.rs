@@ -1,5 +1,7 @@
 use crate::analytics::flow::AnalyticsRoute;
-use crate::analytics::models::{PaymentAuditQuery, PaymentAuditResponse, PaymentAuditScope};
+use crate::analytics::models::{
+    PaymentAuditOutcome, PaymentAuditQuery, PaymentAuditResponse, PaymentAuditScope,
+};
 use crate::error::ApiError;
 
 use super::super::metrics;
@@ -14,18 +16,8 @@ pub async fn load(
         query.payment_id.as_deref(),
         query.request_id.as_deref(),
     );
-    fn is_success(status: Option<&str>) -> bool {
-        matches!(
-            status.map(|s| s.to_uppercase()).as_deref(),
-            Some("SUCCESS" | "CHARGED" | "AUTHORIZED")
-        )
-    }
-    fn is_failure(status: Option<&str>) -> bool {
-        let upper = status.map(|s| s.to_uppercase());
-        matches!(upper.as_deref(), Some(s) if s == "FAILURE" || s.contains("FAILED") || s.contains("DECLINED"))
-    }
 
-    let (total_results, total_success, total_failure, results) =
+    let (total_results, total_success, total_failure, mut results) =
         if let Some(lookup_key) = requested_lookup_key.clone() {
             let results = metrics::audit_summaries::load_exact(client, query, scope, &lookup_key)
                 .await
@@ -43,11 +35,11 @@ pub async fn load(
                 })?;
             let success = results
                 .iter()
-                .filter(|r| is_success(r.latest_status.as_deref()))
+                .filter(|r| r.outcome == PaymentAuditOutcome::Success)
                 .count();
             let failure = results
                 .iter()
-                .filter(|r| is_failure(r.latest_status.as_deref()))
+                .filter(|r| r.outcome == PaymentAuditOutcome::Failure)
                 .count();
             (results.len(), success, failure, results)
         } else {
@@ -95,8 +87,8 @@ pub async fn load(
     } else {
         None
     };
-    let timeline = if let Some(lookup_key) = timeline_lookup_key {
-        metrics::audit_timeline::load(client, query, scope, &lookup_key)
+    let timeline = if let Some(lookup_key) = timeline_lookup_key.as_deref() {
+        metrics::audit_timeline::load(client, query, scope, lookup_key)
             .await
             .map_err(|error| {
                 crate::logger::error!(
@@ -113,6 +105,31 @@ pub async fn load(
     } else {
         Vec::new()
     };
+    // Each result's A/B assignment, in one lookup for the page. A failure leaves `experiments`
+    // unset rather than claiming "not in an experiment".
+    let experiment_keys: Vec<String> = results.iter().map(|row| row.lookup_key.clone()).collect();
+    let assignments = match metrics::audit_experiments::load(
+        client,
+        &query.merchant_id,
+        &experiment_keys,
+    )
+    .await
+    {
+        Ok(assignments) => Some(assignments),
+        Err(error) => {
+            crate::logger::warn!(
+                ?error,
+                merchant_id = %query.merchant_id,
+                "payment audit experiment assignments load failed"
+            );
+            None
+        }
+    };
+    for row in &mut results {
+        row.experiments = assignments
+            .as_ref()
+            .map(|by_key| by_key.get(&row.lookup_key).cloned().unwrap_or_default());
+    }
 
     Ok(PaymentAuditResponse {
         merchant_id: query.merchant_id.clone(),
@@ -131,16 +148,17 @@ pub async fn load(
             .request_id
             .clone()
             .or_else(|| results.first().and_then(|row| row.request_id.clone())),
-        gateway: query.gateway.clone(),
+        // Echoed comma-separated, as they were requested.
+        gateway: (!query.gateway.is_empty()).then(|| query.gateway.join(",")),
         route: if scope == PaymentAuditScope::Preview {
             Some(AnalyticsRoute::RoutingEvaluate.as_str().to_string())
         } else {
-            query.route.clone()
+            (!query.route.is_empty()).then(|| query.route.join(","))
         },
         status: query.status.clone(),
         flow_type: query.flow_type.clone(),
         routing_approach: query.routing_approach.clone(),
-        error_code: query.error_code.clone(),
+        error_code: (!query.error_code.is_empty()).then(|| query.error_code.join(",")),
         scope: scope.as_str().to_string(),
         routing_kind: query.routing_kind.map(|kind| kind.as_str().to_string()),
         page,

@@ -9,7 +9,9 @@ pub const MIN_ANALYTICS_PAGE: usize = 1;
 pub const MIN_ANALYTICS_PAGE_SIZE: usize = 1;
 pub const MAX_ANALYTICS_PAGE_SIZE: usize = 50;
 pub const DEFAULT_ANALYTICS_PAGE_SIZE: usize = 10;
-pub const DEFAULT_PAYMENT_AUDIT_PAGE_SIZE: usize = 12;
+pub const DEFAULT_PAYMENT_AUDIT_PAGE_SIZE: usize = 20;
+/// The payment audit pages up to 100 payments; each page is one keyed lookup, not a scan.
+pub const MAX_PAYMENT_AUDIT_PAGE_SIZE: usize = 100;
 
 pub fn normalise_page(page: Option<u32>) -> usize {
     page.unwrap_or(MIN_ANALYTICS_PAGE as u32)
@@ -17,10 +19,14 @@ pub fn normalise_page(page: Option<u32>) -> usize {
 }
 
 pub fn normalise_page_size(page_size: Option<u32>, default: usize) -> usize {
-    page_size.unwrap_or(default as u32).clamp(
-        MIN_ANALYTICS_PAGE_SIZE as u32,
-        MAX_ANALYTICS_PAGE_SIZE as u32,
-    ) as usize
+    normalise_page_size_up_to(page_size, default, MAX_ANALYTICS_PAGE_SIZE)
+}
+
+/// Like [`normalise_page_size`], with its own upper bound.
+pub fn normalise_page_size_up_to(page_size: Option<u32>, default: usize, max: usize) -> usize {
+    page_size
+        .unwrap_or(default as u32)
+        .clamp(MIN_ANALYTICS_PAGE_SIZE as u32, max as u32) as usize
 }
 
 fn normalise_gateways(raw: Option<String>) -> Vec<String> {
@@ -487,27 +493,109 @@ pub struct PaymentAuditQuery {
     pub page_size: usize,
     pub payment_id: Option<String>,
     pub request_id: Option<String>,
-    pub gateway: Option<String>,
-    pub route: Option<String>,
+    /// Gateways and routes: a payment matches when it went through any of them.
+    pub gateway: Vec<String>,
+    pub route: Vec<String>,
     pub status: Option<String>,
     pub flow_type: Option<String>,
     pub routing_approach: Option<String>,
     pub exclude_routing_approach: Option<String>,
-    pub error_code: Option<String>,
+    /// Payments that hit any of these error codes.
+    pub error_code: Vec<String>,
     pub scope: PaymentAuditScope,
     pub routing_kind: Option<PaymentAuditRoutingKind>,
+    pub payment_filters: PaymentAuditPaymentFilters,
+}
+
+/// A payment's outcome, from the statuses its score updates reported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentAuditOutcome {
+    /// Some attempt succeeded, including a success after failed retries.
+    Success,
+    /// A terminal failure was reported and no attempt succeeded.
+    Failure,
+    /// No terminal status reported yet.
+    Pending,
+}
+
+impl PaymentAuditOutcome {
+    pub fn from_query(value: Option<&str>) -> Option<Self> {
+        match value?.trim().to_ascii_lowercase().as_str() {
+            "success" => Some(Self::Success),
+            "failure" => Some(Self::Failure),
+            "pending" => Some(Self::Pending),
+            _ => None,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::Failure => "failure",
+            Self::Pending => "pending",
+        }
+    }
+}
+
+/// Payment attributes the audit list filters on. Each is matched per payment rather than per
+/// event: a payment matches when any of its events carries the value, so its other events (score
+/// updates, rule evaluations) stay in its summary.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PaymentAuditPaymentFilters {
+    /// Payments with any of these outcomes; empty means unfiltered.
+    pub outcome: Vec<PaymentAuditOutcome>,
+    /// Each attribute matches a payment carrying any of its values; empty means unfiltered.
+    pub currency: Vec<String>,
+    pub payment_method: Vec<String>,
+    pub payment_method_type: Vec<String>,
+    pub card_network: Vec<String>,
+    pub auth_type: Vec<String>,
+    pub min_amount: Option<f64>,
+    pub max_amount: Option<f64>,
+}
+
+impl PaymentAuditPaymentFilters {
+    /// The values of a comma-separated query param (`currency=USD,EUR`), blanks dropped.
+    pub fn values(param: Option<&str>) -> Vec<String> {
+        param
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
+
+    /// Whether any filter reads a payment attribute the pre-aggregated summaries don't carry.
+    pub fn reads_payment_attributes(&self) -> bool {
+        !self.currency.is_empty()
+            || !self.payment_method.is_empty()
+            || !self.payment_method_type.is_empty()
+            || !self.card_network.is_empty()
+            || !self.auth_type.is_empty()
+            || self.min_amount.is_some()
+            || self.max_amount.is_some()
+    }
 }
 
 impl PaymentAuditQuery {
-    fn normalise_route_filter(route: Option<String>) -> Option<String> {
-        route.and_then(|value| {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                return None;
-            }
-
-            AnalyticsRoute::from_filter_value(trimmed).map(|route| route.as_str().to_string())
-        })
+    /// Sets the payment-attribute filters, dropping non-finite amount bounds.
+    pub fn with_payment_filters(mut self, filters: PaymentAuditPaymentFilters) -> Self {
+        self.payment_filters = PaymentAuditPaymentFilters {
+            min_amount: filters.min_amount.filter(|v| v.is_finite()),
+            max_amount: filters.max_amount.filter(|v| v.is_finite()),
+            ..filters
+        };
+        self
+    }
+    /// The comma-separated routes, as their analytics route names. Unknown routes are dropped.
+    fn normalise_route_filter(route: Option<String>) -> Vec<String> {
+        PaymentAuditPaymentFilters::values(route.as_deref())
+            .iter()
+            .filter_map(|value| AnalyticsRoute::from_filter_value(value))
+            .map(|route| route.as_str().to_string())
+            .collect()
     }
 
     fn normalise_status_filter(status: Option<String>) -> Option<String> {
@@ -559,18 +647,23 @@ impl PaymentAuditQuery {
             start_ms,
             end_ms,
             page: normalise_page(page),
-            page_size: normalise_page_size(page_size, DEFAULT_PAYMENT_AUDIT_PAGE_SIZE),
+            page_size: normalise_page_size_up_to(
+                page_size,
+                DEFAULT_PAYMENT_AUDIT_PAGE_SIZE,
+                MAX_PAYMENT_AUDIT_PAGE_SIZE,
+            ),
             payment_id,
             request_id,
-            gateway,
+            gateway: PaymentAuditPaymentFilters::values(gateway.as_deref()),
             route: Self::normalise_route_filter(route),
             status: Self::normalise_status_filter(status),
             flow_type,
             routing_approach,
             exclude_routing_approach,
-            error_code,
+            error_code: PaymentAuditPaymentFilters::values(error_code.as_deref()),
             scope: PaymentAuditScope::from_query(scope.as_deref()),
             routing_kind: PaymentAuditRoutingKind::from_query(routing_kind.as_deref()),
+            payment_filters: PaymentAuditPaymentFilters::default(),
         }
     }
 }
@@ -585,10 +678,17 @@ pub struct PaymentAuditSummary {
     pub last_seen_ms: i64,
     pub event_count: usize,
     pub latest_status: Option<String>,
+    /// The payment's outcome from the statuses its score updates reported, unlike
+    /// `latest_status`, which is whichever event came last (a routing call's `success` included).
+    pub outcome: PaymentAuditOutcome,
     pub latest_gateway: Option<String>,
     pub latest_stage: Option<String>,
     pub gateways: Vec<String>,
     pub routes: Vec<String>,
+    /// A/B experiments that routed this payment, with the arm it was assigned; empty when it was
+    /// not routed under one. Absent when the lookup failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experiments: Option<Vec<PaymentAuditExperiment>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -641,6 +741,33 @@ pub struct PaymentAuditResponse {
     pub total_failure: usize,
     pub results: Vec<PaymentAuditSummary>,
     pub timeline: Vec<PaymentAuditEvent>,
+}
+
+/// The values the payment audit's dropdown filters can take for a merchant: what its own
+/// payments in the window carried, lower-cased as the filters match them (gateways as recorded).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PaymentAuditFilterOptions {
+    pub gateways: Vec<String>,
+    pub payment_methods: Vec<String>,
+    pub payment_method_types: Vec<String>,
+    pub card_networks: Vec<String>,
+    pub auth_types: Vec<String>,
+    pub currencies: Vec<String>,
+    /// Error codes as recorded (matched exactly).
+    pub error_codes: Vec<String>,
+}
+
+/// A payment's assignment to an A/B experiment on one routing endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaymentAuditExperiment {
+    pub experiment_id: String,
+    /// `control` or `variant`.
+    pub arm: String,
+    /// The endpoint that routed it under the experiment: `hybrid_routing`, `decide_gateway` or
+    /// `evaluate`.
+    pub endpoint: String,
+    /// When the payment was first routed under this assignment.
+    pub routed_at_ms: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -967,8 +1094,9 @@ impl RoutingEventsQuery {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalise_page, normalise_page_size, DEFAULT_ANALYTICS_PAGE_SIZE,
-        DEFAULT_PAYMENT_AUDIT_PAGE_SIZE, MAX_ANALYTICS_PAGE_SIZE, MIN_ANALYTICS_PAGE,
+        normalise_page, normalise_page_size, PaymentAuditQuery, DEFAULT_ANALYTICS_PAGE_SIZE,
+        DEFAULT_PAYMENT_AUDIT_PAGE_SIZE, MAX_ANALYTICS_PAGE_SIZE, MAX_PAYMENT_AUDIT_PAGE_SIZE,
+        MIN_ANALYTICS_PAGE,
     };
 
     #[test]
@@ -990,6 +1118,38 @@ mod tests {
         );
         assert_eq!(
             normalise_page_size(Some(500), DEFAULT_ANALYTICS_PAGE_SIZE),
+            MAX_ANALYTICS_PAGE_SIZE
+        );
+    }
+
+    #[test]
+    fn payment_audit_pages_up_to_100_while_other_analytics_stay_at_50() {
+        let audit = |page_size| {
+            PaymentAuditQuery::from_request(
+                "m_1".to_string(),
+                None,
+                None,
+                None,
+                None,
+                Some(page_size),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .page_size
+        };
+        assert_eq!(audit(100), 100);
+        assert_eq!(audit(500), MAX_PAYMENT_AUDIT_PAGE_SIZE);
+        assert_eq!(
+            normalise_page_size(Some(100), DEFAULT_ANALYTICS_PAGE_SIZE),
             MAX_ANALYTICS_PAGE_SIZE
         );
     }
