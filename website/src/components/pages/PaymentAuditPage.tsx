@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import useSWR from 'swr'
 import { Link, useNavigationType, useSearchParams } from 'react-router-dom'
 import { ArrowLeft, RefreshCw, Search as SearchIcon, SlidersHorizontal } from 'lucide-react'
@@ -763,6 +763,17 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
   }
 }
 
+/** The element that scrolls `element`: the app shell's scroller, or the document. */
+function scrollContainerOf(element: HTMLElement): HTMLElement {
+  for (let node = element.parentElement; node; node = node.parentElement) {
+    const { overflowY } = getComputedStyle(node)
+    if ((overflowY === 'auto' || overflowY === 'scroll') && node.scrollHeight > node.clientHeight) {
+      return node
+    }
+  }
+  return (document.scrollingElement as HTMLElement | null) ?? document.documentElement
+}
+
 export function PaymentAuditPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const navigationType = useNavigationType()
@@ -1105,14 +1116,38 @@ export function PaymentAuditPage() {
     )
   }
 
-  function selectSummary(lookupKey: string, eventCount?: number) {
+  function selectSummary(lookupKey: string, eventCount?: number, row?: HTMLElement) {
     setSelectedKey(lookupKey)
     setSelectedEventId(null)
     // Single-event payments have nothing to choose in the trail — keep the results
     // list visible and let the right panel populate directly from the auto-selected event.
-    if (eventCount !== 1) setTrailFocused(true)
+    if (eventCount !== 1) {
+      if (row) {
+        const container = scrollContainerOf(row)
+        resultsScroll.current = { container, top: container.scrollTop }
+      }
+      setTrailFocused(true)
+    }
     syncSearch(range, page, appliedFilters, lookupKey, customWindow)
   }
+
+  // Back from a payment's trail, the list opens where it was left rather than at its top: at the
+  // saved offset, or (after a browser back or a shared link) with the selected payment in view.
+  const resultsList = useRef<HTMLDivElement>(null)
+  const resultsScroll = useRef<{ container: HTMLElement; top: number } | null>(null)
+  useLayoutEffect(() => {
+    if (trailFocused) return
+    const saved = resultsScroll.current
+    resultsScroll.current = null
+    if (saved?.container.isConnected) {
+      saved.container.scrollTop = saved.top
+      return
+    }
+    const selectedRow = resultsList.current?.querySelector<HTMLElement>('[aria-current="true"]')
+    if (selectedRow && selectedRow !== resultsList.current?.firstElementChild) {
+      selectedRow.scrollIntoView({ block: 'center' })
+    }
+  }, [trailFocused])
 
   function returnToResults() {
     setTrailFocused(false)
@@ -1376,7 +1411,7 @@ export function PaymentAuditPage() {
                   : `0 of ${totalMatches.toLocaleString()}`}
               </span>
             </div>
-            <div className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto border-t border-slate-100 dark:divide-[#1b2029] dark:border-[#1b2029]">
+            <div ref={resultsList} className="min-h-0 flex-1 divide-y divide-slate-100 overflow-y-auto border-t border-slate-100 dark:divide-[#1b2029] dark:border-[#1b2029]">
               {resultRows.length > 0 ? resultRows.map((row) => {
                 const isSelected = selectedSummary?.lookup_key === row.lookup_key
                 const gatewayPath = connectorPath(row)
@@ -1384,7 +1419,8 @@ export function PaymentAuditPage() {
                 <button
                   key={row.lookup_key}
                   type="button"
-                  onClick={() => selectSummary(row.lookup_key, row.event_count)}
+                  aria-current={isSelected ? 'true' : undefined}
+                  onClick={(event) => selectSummary(row.lookup_key, row.event_count, event.currentTarget)}
                   className={`relative w-full px-5 py-3 text-left transition-colors ${
                     isSelected
                       ? 'bg-brand-50/70 dark:bg-[#161b24]'
