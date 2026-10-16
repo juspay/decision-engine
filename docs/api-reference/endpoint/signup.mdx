@@ -29,6 +29,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 - Method and path: `POST /auth/signup`
 - Parameters: none.
 - Body: JSON body with `email`, `password`, and merchant identifier/name depending on the dashboard onboarding flow. Passwords must satisfy the dashboard policy.
+- Authentication: send the deployment's `x-admin-secret` unless `signup_requires_admin_secret = false`. Addresses on `super_admin_emails` always require it.
 
 ## Example
 
@@ -37,6 +38,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 ```bash
 curl --location "$BASE_URL/auth/signup" \
   --header "Content-Type: application/json" \
+  --header "x-admin-secret: $ADMIN_SECRET" \
   --data '{
   "email": "operator@example.com",
   "password": "StrongPass#123",
