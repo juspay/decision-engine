@@ -169,6 +169,9 @@ fn eligible_fallback(
     request: &RoutingRequest,
     snapshot: &[ConnectorEligibility],
 ) -> Vec<ConnectorInfo> {
+    if snapshot.is_empty() {
+        return request.fallback_output.clone().unwrap_or_default();
+    }
     let pm = parameter(request, "payment_method").map(|value| value.trim().to_ascii_lowercase());
     let pmt =
         parameter(request, "payment_method_type").map(|value| value.trim().to_ascii_lowercase());
@@ -301,7 +304,29 @@ mod tests {
         );
         assert!(eligible_fallback(&request(Some("wallet")), &snapshot).is_empty());
         assert!(eligible_fallback(&request(Some("unknown")), &snapshot).is_empty());
-        assert!(eligible_fallback(&request(None), &[]).is_empty());
+        assert_eq!(
+            eligible_fallback(&request(None), &[]),
+            request(None).fallback_output.unwrap_or_default()
+        );
+    }
+
+    #[test]
+    fn empty_snapshot_preserves_fallback_order_ids_and_duplicates() {
+        let mut request = request(Some("first"));
+        let first = request.fallback_output.as_ref().unwrap()[0].clone();
+        request.fallback_output.as_mut().unwrap().extend([
+            ConnectorInfo {
+                gateway_name: "other".to_string(),
+                gateway_id: None,
+            },
+            first,
+        ]);
+        assert_eq!(
+            eligible_fallback(&request, &[]),
+            request.fallback_output.clone().unwrap()
+        );
+        request.fallback_output = None;
+        assert!(eligible_fallback(&request, &[]).is_empty());
     }
 
     #[test]
