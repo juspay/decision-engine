@@ -996,6 +996,11 @@ function ExperimentDetailPanel({
   // no evidence yet.
   const resolvedTxns = (arm: { success_count: number; failure_count: number }) => arm.success_count + arm.failure_count
   const totalTxns = results ? resolvedTxns(results.control) + resolvedTxns(results.variant) : 0
+  // Routed payments still waiting for a success or failure: the transactions list counts them, the
+  // sample target does not.
+  const awaitingTxns = results
+    ? Math.max(0, results.control.transaction_count + results.variant.transaction_count - totalTxns)
+    : 0
   const minSample = abData?.min_sample_size ?? 1000
   const collectedShare = minSample > 0 ? Math.min(1, totalTxns / minSample) : 0
   const progress = Math.round(collectedShare * 100)
@@ -1145,8 +1150,10 @@ function ExperimentDetailPanel({
                 style={{ width: `${progressWidth}%` }}
               />
             </div>
-            <p className="text-[12px] text-slate-500 max-w-[57ch] leading-4">
-              {progressLabel} of the {minSample.toLocaleString()}-transaction target{remainingEta ? ` · ${remainingEta}` : ''}
+            <p className="text-[12px] text-slate-500 max-w-[80ch] leading-4">
+              {progressLabel} of the {minSample.toLocaleString()} needed for a verdict
+              {awaitingTxns > 0 ? ` · ${awaitingTxns.toLocaleString()} more awaiting an outcome` : ''}
+              {remainingEta ? ` · ${remainingEta}` : ''}
             </p>
           </div>
         )}
@@ -1241,13 +1248,19 @@ function ExperimentDetailPanel({
           <div>
             <h3 className={type.heading}>Transactions</h3>
             <p className="mt-0.5 text-[12px] text-slate-500 leading-4">
-              {txnData ? `${txnData.total.toLocaleString()} decisions` : 'Loading…'}
+              {txnData
+                ? `${txnData.total.toLocaleString()} routed${
+                    results ? ` · ${totalTxns.toLocaleString()} resolved · ${awaitingTxns.toLocaleString()} awaiting an outcome` : ''
+                  }`
+                : 'Loading…'}
             </p>
           </div>
           {txnsLoading && <Spinner size={14} />}
         </div>
         <div className="overflow-hidden rounded-xl border border-slate-200 dark:border-[#222226]">
-          <div className="max-h-[400px] overflow-auto">
+          {/* A page is 20 rows: the table runs its full height and the page scrolls, rather than
+              nesting a second scroller inside it. */}
+          <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="text-left text-xs text-slate-500">
@@ -1317,7 +1330,7 @@ function ExperimentDetailPanel({
               return (
                 <div className="flex items-center justify-between px-5 py-4 border-t border-slate-100 dark:border-[#1e2330]">
                   <p className="text-sm text-slate-500">
-                    Page {txnPage} of {totalPages} · {txnData.total.toLocaleString()} total
+                    Page {txnPage} of {totalPages} · {txnData.total.toLocaleString()} routed
                   </p>
                   <div className="flex items-center gap-1">
                     <button
