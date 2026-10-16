@@ -60,6 +60,22 @@ pub static IMPLICIT_KEYS: Lazy<rustc_hash::FxHashSet<&str>> = Lazy::new(|| {
     set
 });
 
+/// Fields handled by the formatter rather than copied as custom JSON fields.
+/// Keep separate from IMPLICIT_KEYS so message and schema fields remain recordable.
+static FORMATTER_MANAGED_KEYS: Lazy<rustc_hash::FxHashSet<&'static str>> = Lazy::new(|| {
+    let mut keys = IMPLICIT_KEYS.clone();
+    keys.extend([
+        "message",
+        "timestamp",
+        "@timestamp",
+        "app_framework",
+        "source_commit",
+        "env",
+        "message_number",
+    ]);
+    keys
+});
+
 /// Global counter for auto-incrementing message numbers
 pub static MESSAGE_NUMBER: AtomicU64 = AtomicU64::new(1);
 
@@ -187,6 +203,22 @@ where
     where
         S: Subscriber + for<'a> LookupSpan<'a>,
     {
+        let mut normalized_storage = std::borrow::Cow::Borrowed(storage);
+        if storage.values.get("message").and_then(Value::as_str) == Some("api_response_failed") {
+            for (canonical, source) in [("x-request-id", "request_id"), ("endpoint", "route")] {
+                if storage.values.get(canonical).is_none_or(Value::is_null) {
+                    if let Some(value) = storage.values.get(source).filter(|value| !value.is_null())
+                    {
+                        normalized_storage
+                            .to_mut()
+                            .values
+                            .insert(canonical, value.clone());
+                    }
+                }
+            }
+        }
+        let storage = &normalized_storage;
+
         // Define specific keys for "Incoming_api" and "DOMAIN" categories.
         let incoming_api_keys = [
             "udf_order_id",
@@ -273,13 +305,39 @@ where
         // Initialize the explicit entries set.
         let mut explicit_entries_set: HashSet<&str> = HashSet::default();
 
+        let is_custom_field = |key: &str| !FORMATTER_MANAGED_KEYS.contains(key);
+        for (key, value) in &storage.values {
+            if is_custom_field(key) {
+                map_serializer.serialize_entry(key, value)?;
+                explicit_entries_set.insert(key);
+            }
+        }
+        if category != "INCOMING_API" {
+            map_serializer.serialize_entry("message", &get_normalized_message::<W>(storage))?;
+            explicit_entries_set.insert("message");
+        }
+
+        if let Some(span) = span {
+            let extensions = span.extensions();
+            if let Some(visitor) = extensions.get::<Storage<'_>>() {
+                for (key, value) in &visitor.values {
+                    if is_custom_field(key) && !explicit_entries_set.contains(key) {
+                        map_serializer.serialize_entry(key, value)?;
+                        explicit_entries_set.insert(key);
+                    }
+                }
+            }
+        }
+
         if category == "INCOMING_API" {
             // Serialize keys from the span that match the incoming_api keys array.
             if let Some(span) = span {
                 let extensions = span.extensions();
                 if let Some(visitor) = extensions.get::<Storage<'_>>() {
                     for key in &incoming_api_keys {
-                        if let Some(value) = visitor.values.get(*key) {
+                        if let Some(value) = visitor.values.get(*key).filter(|_| {
+                            is_custom_field(key) && !explicit_entries_set.contains(*key)
+                        }) {
                             map_serializer.serialize_entry(*key, value)?;
                             explicit_entries_set.insert(*key);
                         }
@@ -289,7 +347,7 @@ where
 
             // Serialize keys from storage that are not already in explicit_entries_set.
             for key in &incoming_api_keys {
-                if !explicit_entries_set.contains(*key) {
+                if is_custom_field(key) && !explicit_entries_set.contains(*key) {
                     if let Some(value) = storage.values.get(*key) {
                         map_serializer.serialize_entry(*key, value)?;
                         explicit_entries_set.insert(*key);
@@ -368,7 +426,9 @@ where
                 let extensions = span.extensions();
                 if let Some(visitor) = extensions.get::<Storage<'_>>() {
                     for key in &domain_keys {
-                        if let Some(value) = visitor.values.get(*key) {
+                        if let Some(value) = visitor.values.get(*key).filter(|_| {
+                            is_custom_field(key) && !explicit_entries_set.contains(*key)
+                        }) {
                             map_serializer.serialize_entry(*key, value)?;
                             explicit_entries_set.insert(*key);
                         }
@@ -378,7 +438,7 @@ where
 
             // Serialize keys from storage that are not already in explicit_entries_set.
             for key in &domain_keys {
-                if !explicit_entries_set.contains(*key) {
+                if is_custom_field(key) && !explicit_entries_set.contains(*key) {
                     if let Some(value) = storage.values.get(*key) {
                         if key == &"message" {
                             let normalized_value = get_normalized_message::<W>(storage);
@@ -465,9 +525,6 @@ where
             map_serializer.serialize_entry("env", &env)?;
         }
 
-        if let Ok(source_commit) = std::env::var("SOURCE_COMMIT") {
-            map_serializer.serialize_entry("source_commit", &source_commit)?;
-        }
         map_serializer.serialize_entry(TARGET, metadata.target())?;
         map_serializer.serialize_entry(SERVICE, &self.service)?;
         map_serializer.serialize_entry(LINE, &metadata.line())?;
@@ -640,4 +697,166 @@ where
     fn on_enter(&self, _id: &tracing::Id, _ctx: Context<'_, S>) {}
 
     fn on_close(&self, _id: tracing::Id, _ctx: Context<'_, S>) {}
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{Arc, Mutex};
+    use tracing_subscriber::prelude::*;
+
+    struct LogWriter(Arc<Mutex<Vec<u8>>>);
+
+    impl Write for LogWriter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0
+                .lock()
+                .map_err(|_| std::io::Error::other("log buffer poisoned"))?
+                .extend_from_slice(bytes);
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn failed_response_fields_survive_json_formatting() -> Result<(), Box<dyn std::error::Error>> {
+        let bytes = Arc::new(Mutex::new(Vec::new()));
+        let output = bytes.clone();
+        let subscriber = tracing_subscriber::registry()
+            .with(super::super::storage::StorageSubscription)
+            .with(FormattingLayer::new("open_router", move || {
+                LogWriter(output.clone())
+            }));
+        tracing::subscriber::with_default(subscriber, || {
+            let span = tracing::info_span!(
+                "request",
+                route = "/old",
+                "x-request-id" = "old-id",
+                custom_context = "span-context",
+                custom_result = "stale"
+            );
+            let _entered = span.enter();
+            tracing::warn!(
+                route = "/rule/get",
+                method = "POST",
+                status_code = 404_u16,
+                request_id = "request-404",
+                latency_ms = 2_u64,
+                "api_response_failed"
+            );
+            tracing::error!(
+                route = "/routing/hybrid",
+                method = "POST",
+                status_code = 500_u16,
+                request_id = "request-500",
+                latency_ms = 9_u64,
+                "api_response_failed"
+            );
+            tracing::info!(
+                custom_result = "success",
+                custom_count = 7_u64,
+                custom_flag = true,
+                "operation_succeeded"
+            );
+            tracing::info!(
+                category = "INCOMING_API",
+                custom_result = "incoming",
+                custom_count = 3_u64,
+                method = "GET",
+                "incoming_request"
+            );
+        });
+        let buffer = bytes.lock().map_err(|_| "log buffer poisoned")?;
+        let lines: Vec<Value> = std::str::from_utf8(&buffer)?
+            .lines()
+            .map(serde_json::from_str)
+            .collect::<Result<_, _>>()?;
+        assert_eq!(lines.len(), 4);
+        for (line, route, status, id, latency) in [
+            (&lines[0], "/rule/get", 404, "request-404", 2),
+            (&lines[1], "/routing/hybrid", 500, "request-500", 9),
+        ] {
+            assert_eq!(line["message"], "api_response_failed");
+            assert_eq!(line["route"], route);
+            assert_eq!(line["endpoint"], route);
+            assert_eq!(line["method"], "POST");
+            assert_eq!(line["status_code"], status);
+            assert_eq!(line["request_id"], id);
+            assert_eq!(line["x-request-id"], id);
+            assert_eq!(line["latency_ms"], latency);
+        }
+        assert_eq!(lines[0]["level"], "Warn");
+        assert_eq!(lines[1]["level"], "Error");
+        assert_eq!(lines[2]["custom_result"], "success");
+        assert_eq!(lines[2]["custom_context"], "span-context");
+        assert_eq!(lines[2]["custom_count"], 7);
+        assert_eq!(lines[2]["custom_flag"], true);
+        assert_eq!(lines[2]["message"], "operation_succeeded");
+        assert_eq!(lines[3]["custom_result"], "incoming");
+        assert_eq!(lines[3]["custom_count"], 3);
+        assert_eq!(lines[3]["custom_context"], "span-context");
+        assert!(lines[3]["message"].is_object());
+        Ok(())
+    }
+    #[test]
+    fn aliases_and_reserved_fields_have_no_duplicate_keys() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let formatter = FormattingLayer::new("open_router", std::io::sink);
+        let _subscriber = tracing::subscriber::set_default(tracing_subscriber::registry());
+        let span = tracing::info_span!("test_metadata");
+        let metadata = span.metadata().ok_or("missing span metadata")?;
+        for canonical in [Value::Null, Value::String("canonical-id".into())] {
+            let mut storage = Storage::new();
+            storage.record_value("message", Value::String("api_response_failed".into()));
+            storage.record_value("request_id", Value::String("fallback-id".into()));
+            storage.record_value("x-request-id", canonical.clone());
+            storage.record_value("route", Value::String("/rule/get".into()));
+            storage.record_value("endpoint", Value::Null);
+            storage.record_value("timestamp", Value::String("stale".into()));
+            storage.record_value("source_commit", Value::String("stale".into()));
+            storage.record_value("message_number", Value::from(0));
+            storage.record_value(
+                "details",
+                serde_json::json!({"nested": [true, 3, "quoted\"value"]}),
+            );
+            let mut bytes = Vec::new();
+            let mut serializer = serde_json::Serializer::new(&mut bytes);
+            let mut map = serializer.serialize_map(None)?;
+            formatter.common_serialize::<tracing_subscriber::Registry>(
+                &mut map, metadata, None, &storage, "?",
+            )?;
+            map.end()?;
+            let text = std::str::from_utf8(&bytes)?;
+            let value: Value = serde_json::from_slice(&bytes)?;
+            assert_eq!(
+                value["x-request-id"],
+                if canonical.is_null() {
+                    Value::String("fallback-id".into())
+                } else {
+                    canonical
+                }
+            );
+            assert_eq!(value["endpoint"], "/rule/get");
+            assert_ne!(value["timestamp"], "stale");
+            assert_ne!(value["source_commit"], "stale");
+            assert_eq!(value["details"], storage.values["details"]);
+            for key in [
+                "x-request-id",
+                "endpoint",
+                "timestamp",
+                "source_commit",
+                "message_number",
+                "message",
+            ] {
+                assert_eq!(
+                    text.matches(&format!("\"{key}\":")).count(),
+                    1,
+                    "duplicate key: {key}"
+                );
+            }
+        }
+        Ok(())
+    }
 }
