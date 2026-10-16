@@ -187,10 +187,8 @@ pub async fn updateScoreAndQueue(
         bucket_size,
     )
     .await;
-    let (value, _should_score_increase): (String, bool) = match gateway_scoring_type {
-        GatewayScoringType::PenaliseSrv3 => ("0".into(), false),
-        GatewayScoringType::Reward => ("1".into(), true),
-        _ => ("0".into(), false),
+    let Some(value) = sr_v3_sample_value(&gateway_scoring_type) else {
+        return;
     };
     // let is_debug_mode_enabled = isFeatureEnabled(
     //     DC::enableDebugModeOnSrV3.get_key(),
@@ -255,10 +253,42 @@ pub async fn updateScoreAndQueue(
         C::kvRedis(),
         key_for_gateway_selection_queue.clone(),
         key_for_gateway_selection_score.clone(),
-        value.clone(),
+        value.to_string(),
         bucket_size,
     )
     .await;
+}
+
+fn sr_v3_sample_value(gateway_scoring_type: &GatewayScoringType) -> Option<&'static str> {
+    match gateway_scoring_type {
+        GatewayScoringType::PenaliseSrv3 => Some("0"),
+        GatewayScoringType::Reward => Some("1"),
+        GatewayScoringType::Penalise => None,
+    }
+}
+
+#[cfg(test)]
+mod score_feedback_tests {
+    use super::sr_v3_sample_value;
+    use crate::feedback::utils::GatewayScoringType;
+
+    #[test]
+    fn successful_feedback_records_a_reward_sample() {
+        assert_eq!(sr_v3_sample_value(&GatewayScoringType::Reward), Some("1"));
+    }
+
+    #[test]
+    fn terminal_failure_feedback_records_a_penalty_sample() {
+        assert_eq!(
+            sr_v3_sample_value(&GatewayScoringType::PenaliseSrv3),
+            Some("0")
+        );
+    }
+
+    #[test]
+    fn pending_latency_penalty_is_not_an_srv3_sample() {
+        assert_eq!(sr_v3_sample_value(&GatewayScoringType::Penalise), None);
+    }
 }
 
 //Original Haskell function: getSrV3MerchantBucketSize
