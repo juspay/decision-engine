@@ -27,6 +27,7 @@ pub mod order;
 pub mod order_metadata_v2;
 pub mod payment;
 pub mod payment_flow;
+pub mod payment_instrument;
 pub mod routing_configuration;
 pub mod service_configuration;
 pub mod source_object_id;

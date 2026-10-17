@@ -72,6 +72,9 @@ pub async fn create_rule_config(
 
     let result = match payload.config {
         types::routing_configuration::ConfigVariant::SuccessRate(success_config) => {
+            let success_config = success_config
+                .normalised()
+                .map_err(error::RuleConfigurationError::InvalidPaymentMethod)?;
             let name = format!("SR_V3_INPUT_CONFIG_{}", mid);
             let serialized_config = serde_json::to_string(&success_config)
                 .map_err(|_| error::RuleConfigurationError::StorageError)?;
@@ -407,6 +410,9 @@ pub async fn update_rule_config(
     // Update DB call for updating the rule configuration
     let result = match payload.config {
         types::routing_configuration::ConfigVariant::SuccessRate(success_config) => {
+            let success_config = success_config
+                .normalised()
+                .map_err(error::RuleConfigurationError::InvalidPaymentMethod)?;
             let name = format!("SR_V3_INPUT_CONFIG_{}", mid);
             let serialized_config = serde_json::to_string(&success_config)
                 .map_err(|_| error::RuleConfigurationError::StorageError)?;

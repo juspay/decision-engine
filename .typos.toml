@@ -58,6 +58,9 @@ encrypter = "encrypter"
 sepa_guarenteed_debit = "sepa_guarenteed_debit"
 pix_automatico_push = "pix_automatico_push"
 pix_automatico_qr = "pix_automatico_qr"
+SepaGuarenteedDebit = "SepaGuarenteedDebit"
+PixAutomaticoPush = "PixAutomaticoPush"
+PixAutomaticoQr = "PixAutomaticoQr"
 
 [default.extend-words]
 # Project-specific terms that are valid

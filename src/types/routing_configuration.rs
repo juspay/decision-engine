@@ -46,6 +46,29 @@ pub struct SuccessRateData {
     pub margin: Option<f64>,
 }
 
+impl SuccessRateData {
+    /// Checks each sub-level row's payment method as `/decide-gateway` checks a request's, and
+    /// stores it as the engine's codes: `paymentMethod` is the category (`card` → `CARD`),
+    /// required, and `paymentMethodType` the specific method within it (`credit` → `CREDIT`),
+    /// optional.
+    pub fn normalised(mut self) -> Result<Self, String> {
+        for row in self.sub_level_input_config.iter_mut().flatten() {
+            let instrument = crate::types::payment_instrument::PaymentInstrument::parse(
+                row.payment_method.as_deref().unwrap_or_default(),
+                row.payment_method_type.as_deref(),
+            )
+            .map_err(|error| error.to_string())?;
+            let method_type = instrument.method_type_code();
+            row.payment_method = Some(instrument.method_code().into_owned());
+            row.payment_method_type = (!method_type.is_empty()).then(|| method_type.into_owned());
+        }
+        Ok(self)
+    }
+}
+
+/// One sub-level SR override. `paymentMethod` is the payment method category (`CARD`) and
+/// `paymentMethodType` the specific method within it (`CREDIT`), in the standard meaning; the
+/// row applies to payments matching every dimension it sets.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SRSubLevelInputConfig {
@@ -103,4 +126,63 @@ pub struct DebitRoutingData {
 pub struct TransactionLatencyThreshold {
     /// To have a hard threshold for latency in millis, which is used to filter out gateways that exceed this threshold.
     pub gatewayLatency: Option<f64>,
+}
+
+#[cfg(test)]
+#[allow(clippy::panic_in_result_fn)]
+mod success_rate_normalisation_tests {
+    use super::SuccessRateData;
+    use serde_json::json;
+
+    fn config(rows: serde_json::Value) -> Result<SuccessRateData, serde_json::Error> {
+        serde_json::from_value(json!({ "defaultBucketSize": 200, "subLevelInputConfig": rows }))
+    }
+
+    fn row(method: &str, method_type: Option<&str>) -> serde_json::Value {
+        json!({
+            "paymentMethod": method, "paymentMethodType": method_type,
+            "bucketSize": 50, "hedgingPercent": null, "latencyThreshold": null,
+            "lowerResetFactor": null, "upperResetFactor": null, "gatewayExtraScore": null,
+        })
+    }
+
+    #[test]
+    fn rows_are_stored_as_codes() -> Result<(), serde_json::Error> {
+        let normalised =
+            config(json!([row("card", Some("credit")), row("wallet", None)]))?.normalised();
+        let rows = normalised
+            .ok()
+            .and_then(|config| config.sub_level_input_config)
+            .unwrap_or_default();
+        let pairs: Vec<_> = rows
+            .iter()
+            .map(|row| (row.payment_method.clone(), row.payment_method_type.clone()))
+            .collect();
+        assert_eq!(
+            pairs,
+            [
+                (Some("CARD".to_string()), Some("CREDIT".to_string())),
+                (Some("WALLET".to_string()), None),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_legacy_order_row_is_rejected() -> Result<(), serde_json::Error> {
+        let error = config(json!([row("CREDIT", Some("CARD"))]))?
+            .normalised()
+            .err()
+            .unwrap_or_default();
+        assert!(error.contains("look swapped"), "{error}");
+        let error = config(json!([row("card", Some("google_pay"))]))?
+            .normalised()
+            .err()
+            .unwrap_or_default();
+        assert!(
+            error.contains("is not a card payment method type"),
+            "{error}"
+        );
+        Ok(())
+    }
 }
