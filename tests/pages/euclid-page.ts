@@ -40,6 +40,20 @@ export class EuclidRuleBuilder extends RoutingListPage {
     await this.page.getByRole('button', { name: 'Add Rule', exact: true }).click()
   }
 
+  /** The grip in a rule block's header — the only element that starts a reorder. */
+  ruleDragHandle(index = 0): Locator {
+    return this.ruleBlock(index).locator('[aria-label^="Reorder"]').first()
+  }
+
+  async moveRuleBlock(index: number, direction: 'up' | 'down', steps = 1): Promise<void> {
+    await this.ruleDragHandle(index).focus()
+    await this.page.keyboard.press(' ')
+    for (let i = 0; i < steps; i += 1) {
+      await this.page.keyboard.press(direction === 'down' ? 'ArrowDown' : 'ArrowUp')
+    }
+    await this.page.keyboard.press(' ')
+  }
+
   /** The nth nested (OR) branch inside a rule block — the sky-bordered, indented group. */
   nestedBranch(blockIndex: number, index: number): Locator {
     return this.ruleBlock(blockIndex).locator('.border-l-2.border-sky-200').nth(index)
