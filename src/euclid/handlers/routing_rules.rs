@@ -1117,6 +1117,48 @@ async fn evaluate_algorithm_data(
             }
         };
 
+    let (output, evaluated_output, rule_name) = match payload
+        .fallback_output
+        .as_deref()
+        .filter(|fallback| !fallback.is_empty())
+    {
+        Some(fallback) => {
+            let routable_connectors = evaluated_output
+                .iter()
+                .filter(|connector| fallback.contains(connector))
+                .cloned()
+                .collect::<Vec<_>>();
+
+            if routable_connectors.is_empty() {
+                logger::warn!(
+                    rule_name = ?rule_name,
+                    chosen = ?evaluated_output,
+                    "routing_evaluation: answering with the fallback because no connector the rule chose is in fallback_output"
+                );
+                (
+                    Output::Priority(fallback.to_vec()),
+                    fallback.to_vec(),
+                    Some("default_fallback".to_string()),
+                )
+            } else if routable_connectors.len() == evaluated_output.len() {
+                (output, evaluated_output, rule_name)
+            } else {
+                logger::warn!(
+                    rule_name = ?rule_name,
+                    chosen = ?evaluated_output,
+                    routable_connectors = ?routable_connectors,
+                    "routing_evaluation: dropping connectors the rule chose that are not in fallback_output"
+                );
+                (
+                    Output::Priority(routable_connectors.clone()),
+                    routable_connectors,
+                    Some("default_fallback".to_string()),
+                )
+            }
+        }
+        None => (output, evaluated_output, rule_name),
+    };
+
     let pm_filter_bundle = if pm_filter_graph::has_payment_method_type(parameters) {
         state.get_pm_filter_graph_bundle().await
     } else {
