@@ -734,17 +734,15 @@ pub fn validate_volume_contract_config(
         &mut errors,
     );
 
-    for (field, interval) in [("forecast_interval_secs", config.forecast_interval_secs)] {
-        if let Some(secs) = interval {
-            if !(MIN_INTERVAL_SECS..=MAX_INTERVAL_SECS).contains(&secs) {
-                errors.push(ValidationErrorDetails::new(
-                    field,
-                    "out_of_range",
-                    format!(
-                        "{field} must be within {MIN_INTERVAL_SECS}..={MAX_INTERVAL_SECS} seconds"
-                    ),
-                ));
-            }
+    if let Some(secs) = config.forecast_interval_secs {
+        if !(MIN_INTERVAL_SECS..=MAX_INTERVAL_SECS).contains(&secs) {
+            errors.push(ValidationErrorDetails::new(
+                "forecast_interval_secs",
+                "out_of_range",
+                format!(
+                    "forecast_interval_secs must be within {MIN_INTERVAL_SECS}..={MAX_INTERVAL_SECS} seconds"
+                ),
+            ));
         }
     }
 

@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/Rust-1.85%2B-orange?style=for-the-badge&logo=rust&logoColor=white" alt="Rust"/>
+<img src="https://img.shields.io/badge/Rust-1.88%2B-orange?style=for-the-badge&logo=rust&logoColor=white" alt="Rust"/>
 <img src="https://img.shields.io/badge/License-AGPL%20v3-blue?style=for-the-badge" alt="License"/>
 <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker"/>
 <img src="https://img.shields.io/github/v/release/juspay/decision-engine?include_prereleases&style=for-the-badge&label=Release&color=brightgreen" alt="Release"/>
@@ -114,7 +114,7 @@ secure cluster (e.g. CockroachDB Cloud), set `pg_sslmode` (and `pg_ssl_root_cert
 
 ### From Source
 
-Prerequisites: Rust 1.85+, MySQL or PostgreSQL, Redis, [`just`](https://just.systems)
+Prerequisites: Rust 1.88+, MySQL or PostgreSQL, Redis, [`just`](https://just.systems)
 
 ```bash
 git clone https://github.com/juspay/decision-engine.git
