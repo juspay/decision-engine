@@ -18,6 +18,20 @@
        than San Francisco or Segoe UI in both proportion and weight. This order also decides what
        shows during the `display=swap` flash on a normal load. */
     --font-sans: 'Google Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+
+    --color-brand-DEFAULT: #0c69ee;
+    --color-brand-50: #eef5ff;
+    --color-brand-100: #d9eaff;
+    --color-brand-200: #bfdbfe;
+    --color-brand-300: #93c5fd;
+    --color-brand-400: #60a5fa;
+    --color-brand-500: #3b82f6;
+    --color-brand-600: #0c69ee;
+    --color-brand-700: #0954be;
+    --color-brand-800: #073f8f;
+    --color-brand-900: #062d66;
+    --color-brand-950: #041c3d;
     --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
     color-scheme: light;
     --chart-tooltip-bg: rgba(248, 250, 252, 0.98);
