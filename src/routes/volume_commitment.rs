@@ -226,7 +226,6 @@ pub struct VolumeCommitmentView {
 /// Render a plan as the dashboard view of it. Shared by the live view, which reads the stored
 /// plan, and the projection, which computes one it never stores — so the two can never describe
 /// the same plan differently.
-
 fn view_from_plan(
     merchant_id: String,
     inputs: &CommitmentInputs,

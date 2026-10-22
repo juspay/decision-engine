@@ -94,7 +94,7 @@ Choose the startup path based on task intent:
 
 ## Coding Expectations
 
-- Rust edition is 2021; MSRV in `Cargo.toml` is `1.85.0`
+- Rust edition is 2021; MSRV in `Cargo.toml` is `1.88.0`
 - `unsafe` is forbidden
 - Treat clippy warnings around `unwrap`, `expect`, `panic`, `todo`, and `unimplemented` as meaningful design constraints
 - Verify both DB tracks when changing shared core logic; do not assume only one backend is affected
