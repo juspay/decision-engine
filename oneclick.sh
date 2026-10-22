@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 set -e
 
@@ -107,11 +107,19 @@ is_own_compose_container() {
 check_and_kill_ports() {
     local pids_to_kill=()
     local ports_in_use=()
+    # Infra ports are freed only so Compose can bind them. Without Docker nothing would take them
+    # over, so whatever serves them (e.g. `nix run .#infra`) is left running and reused.
+    local kill_ports=("${PORTS[@]}")
+    if check_docker_daemon; then
+        kill_ports+=("${INFRA_PORTS[@]}")
+    else
+        echo "Docker is not available — leaving infra ports ${INFRA_PORTS[*]} to the services already on them."
+    fi
 
-    echo "Checking for processes on ports ${PORTS[*]} ${INFRA_PORTS[*]}..."
+    echo "Checking for processes on ports ${kill_ports[*]}..."
     echo ""
 
-    for port in "${PORTS[@]}" "${INFRA_PORTS[@]}"; do
+    for port in "${kill_ports[@]}"; do
         local pids
         pids=$(lsof -t -iTCP:$port -sTCP:LISTEN 2>/dev/null || true)
         if [ -n "$pids" ]; then
@@ -174,7 +182,7 @@ check_and_kill_ports() {
 
         sleep 1
 
-        for port in "${PORTS[@]}" "${INFRA_PORTS[@]}"; do
+        for port in "${kill_ports[@]}"; do
             local pid
             pid=$(lsof -t -iTCP:$port -sTCP:LISTEN 2>/dev/null || true)
             if [ -n "$pid" ]; then
@@ -190,7 +198,7 @@ check_and_kill_ports() {
         echo "Done. All ports cleared."
         echo ""
     else
-        echo "No conflicting processes found on ports ${PORTS[*]} ${INFRA_PORTS[*]}."
+        echo "No conflicting processes found on ports ${kill_ports[*]}."
         echo ""
     fi
 }
