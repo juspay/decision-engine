@@ -241,7 +241,6 @@ pub async fn transform_fallback(
 }
 
 #[cfg(test)]
-#[allow(clippy::panic_in_result_fn)]
 mod tests {
     use super::*;
 
@@ -437,6 +436,7 @@ mod tests {
 
     #[tokio::test]
     #[ignore = "requires Redis at 127.0.0.1:6379"]
+    #[allow(clippy::panic_in_result_fn)]
     async fn snapshot_replacement_removes_ttl_and_survives_reads() -> Result<(), String> {
         let settings = redis_interface::RedisSettings {
             host: "127.0.0.1".to_string(),
