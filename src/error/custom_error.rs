@@ -106,6 +106,9 @@ pub enum RuleConfigurationError {
     DeserializationError,
     #[error("Debit routing not enabled for merchant")]
     DebitRoutingNotEnabled,
+    /// A sub-level row names a payment method or type that is not Hyperswitch's.
+    #[error("Invalid payment method: {0}")]
+    InvalidPaymentMethod(String),
 }
 
 impl axum::response::IntoResponse for RuleConfigurationError {
@@ -136,6 +139,15 @@ impl axum::response::IntoResponse for RuleConfigurationError {
                     "Invalid routing rule configuration".to_string(),
                     None,
                 ),
+            )
+                .into_response(),
+            Self::InvalidPaymentMethod(detail) => (
+                hyper::StatusCode::BAD_REQUEST,
+                axum::Json(crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    format!("Invalid payment method: {detail}"),
+                    None,
+                )),
             )
                 .into_response(),
             Self::MerchantNotFound => (

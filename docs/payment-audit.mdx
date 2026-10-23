@@ -31,9 +31,63 @@ The page supports these filters:
 - `routing_kind`
 - `gateway`
 - `route`
-- `status`
+- `outcome` — the payment's outcome (the page's outcome dropdown), one or several, see below
+- `status` — an event's exact status (e.g. `FAILURE`); for what happened to the payment, use
+  `outcome`
 - `flow_type`
+- `error_code` — one or several (under **More filters**)
+- payment attributes (under **More filters**): `payment_method`, `payment_method_type`,
+  `card_network`, `auth_type`, `currency`, `min_amount`, `max_amount`
 - time window: `15m`, `1h`, `12h`, `1d`, `1w`
+
+### Outcome
+
+A payment's outcome comes from the statuses reported for it on `/update-gateway-score`:
+
+| Outcome | Meaning |
+| --- | --- |
+| `success` | An attempt succeeded (e.g. `CHARGED`), including after failed retries. |
+| `failure` | An attempt failed terminally (e.g. `AUTHORIZATION_FAILED`) and none succeeded. |
+| `pending` | No terminal status reported yet (only routing events, or e.g. `PENDING_VBV`). |
+
+A routing call's own `success` status is the API call's result, not the payment's, and never
+counts. The success / failure totals above the results use the same outcome. Pick several outcomes
+(`outcome=failure,pending`) to see payments with any of them.
+
+### Payment attributes
+
+Payment attributes come from the payment's routing decision. Both `/routing/hybrid` and
+`/decide-gateway` record them in the same meaning (see [Payment Methods](/payment-methods)):
+`payment_method` is the category (`card`, `wallet`, `upi`…) and `payment_method_type` the
+specific method (`credit`, `debit`, `google_pay`…). Each takes several values (comma-separated in the API, e.g.
+`currency=USD,EUR`) and matches a payment with any of them. Values match case-insensitively, and
+the amount bounds are inclusive.
+
+The dropdowns list what the merchant's own payments carried in the selected window, read from
+`GET /analytics/payment-audit/filter-options` (same `range` / `start_ms` / `end_ms`), so each
+merchant sees its own gateways, methods, networks, currencies and error codes rather than a fixed
+list. Gateway, route, outcome, error code and the attributes all take several values.
+
+They select whole payments: a matching payment keeps all its events, including the score
+updates that carry no attributes, so its outcome still reads correctly. These filters read the
+raw event table rather than the pre-aggregated summaries, so keep the time window narrow on busy
+merchants.
+
+### Page size and query cost
+
+Results page at 10, 20 (default), 50 or 100 payments; the API accepts `page_size` up to 100 and defaults to 20. A
+search runs four ClickHouse reads (count, page keys, page rows, A/B assignments), the selected
+payment three (summary, timeline, A/B assignments), and the dropdown values one per time window,
+cached for a minute. Multi-select dropdowns search once when their list closes, not on every
+tick. Every read is merchant-scoped and goes through the analytics query guard (a few concurrent
+reads per pod, a time limit and memory-bounded settings).
+
+### Remembered search
+
+The page saves the last search per merchant in the browser (filters, time range and page size,
+not the page number or selected payment). Opening Decision Audit without a search in the URL,
+e.g. from the sidebar, resumes it; a link with its own filters always wins. If the browser blocks
+storage, the page simply starts unfiltered.
 
 Use an exact `payment_id` when you have it. If you only have a request trace, use `request_id`.
 Payment Audit is always merchant-scoped by the authenticated JWT or API key. The route does not
@@ -58,6 +112,18 @@ Current stages include:
 The raw flow type remains visible as well, for example `decide_gateway_decision`,
 `decide_gateway_rule_hit`, `update_gateway_score_update`, `routing_evaluate_advanced`, or
 `routing_hybrid_decision`.
+
+## A/B Experiments
+
+In the search results, a payment routed under an A/B experiment is tagged **A/B · control** or
+**A/B · variant**; untagged payments were not in one. Opening a payment shows the same badge next
+to its status, with the endpoint that split it (`hybrid routing`, `decide gateway` or
+`rule evaluate`) and a link to the experiment, or **Not in an A/B experiment** — including
+payments Hyperswitch routed itself, such as straight-through, which never reach the Decision
+Engine.
+
+Each search result carries its assignments in `experiments`. They come from the experiment's own
+routing events, which stay out of the timeline so they don't change its event counts.
 
 ## Data Sources
 

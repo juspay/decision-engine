@@ -565,6 +565,30 @@ pub struct KeysConfig {
     pub keys: BTreeMap<String, KeyConfig>,
 }
 
+impl KeysConfig {
+    /// Sets the keys that name payment methods from the code's vocabulary, replacing any the
+    /// config file declares, so the rule engine, the dashboard and request checks agree. See
+    /// [`crate::types::payment_instrument::payment_method_routing_keys`].
+    pub fn with_payment_method_keys(mut self) -> Self {
+        for (key, values) in crate::types::payment_instrument::payment_method_routing_keys() {
+            self.keys.insert(
+                key,
+                KeyConfig {
+                    data_type: KeyDataType::Enum,
+                    values: Some(values.join(", ")),
+                    min_value: None,
+                    max_value: None,
+                    min_length: None,
+                    max_length: None,
+                    exact_length: None,
+                    regex: None,
+                },
+            );
+        }
+        self
+    }
+}
+
 /// The complete TOML configuration structure
 #[derive(Clone, Debug, Deserialize, Serialize, Default)]
 pub struct TomlConfig {

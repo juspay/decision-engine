@@ -42,8 +42,8 @@ test.describe('Dynamic Routing API', () => {
         merchantId: m,
         paymentInfo: {
           paymentId: firstPaymentId,
-          paymentMethodType: 'UPI',
-          paymentMethod: 'UPI_PAY',
+          paymentMethod: 'UPI',
+          paymentMethodType: 'UPI_COLLECT',
         },
       }),
     )
@@ -70,8 +70,8 @@ test.describe('Dynamic Routing API', () => {
         merchantId: m,
         paymentInfo: {
           paymentId: secondPaymentId,
-          paymentMethodType: 'UPI',
-          paymentMethod: 'UPI_PAY',
+          paymentMethod: 'UPI',
+          paymentMethodType: 'UPI_COLLECT',
         },
       }),
     )

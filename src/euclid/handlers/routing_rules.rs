@@ -1117,6 +1117,48 @@ async fn evaluate_algorithm_data(
             }
         };
 
+    let (output, evaluated_output, rule_name) = match payload
+        .fallback_output
+        .as_deref()
+        .filter(|fallback| !fallback.is_empty())
+    {
+        Some(fallback) => {
+            let routable_connectors = evaluated_output
+                .iter()
+                .filter(|connector| fallback.contains(connector))
+                .cloned()
+                .collect::<Vec<_>>();
+
+            if routable_connectors.is_empty() {
+                logger::warn!(
+                    rule_name = ?rule_name,
+                    chosen = ?evaluated_output,
+                    "routing_evaluation: answering with the fallback because no connector the rule chose is in fallback_output"
+                );
+                (
+                    Output::Priority(fallback.to_vec()),
+                    fallback.to_vec(),
+                    Some("default_fallback".to_string()),
+                )
+            } else if routable_connectors.len() == evaluated_output.len() {
+                (output, evaluated_output, rule_name)
+            } else {
+                logger::warn!(
+                    rule_name = ?rule_name,
+                    chosen = ?evaluated_output,
+                    routable_connectors = ?routable_connectors,
+                    "routing_evaluation: dropping connectors the rule chose that are not in fallback_output"
+                );
+                (
+                    Output::Priority(routable_connectors.clone()),
+                    routable_connectors,
+                    Some("default_fallback".to_string()),
+                )
+            }
+        }
+        None => (output, evaluated_output, rule_name),
+    };
+
     let pm_filter_bundle = if pm_filter_graph::has_payment_method_type(parameters) {
         state.get_pm_filter_graph_bundle().await
     } else {
@@ -1153,16 +1195,16 @@ async fn evaluate_algorithm_data(
     })
 }
 
-/// Attributes a real payment's rule decision to its A/B arm: the routing event the experiment
-/// results count, and the in-flight context the score update turns into an outcome event.
-/// Skipped when real-payment A/B tracking is off, the request carries no payment id, or no
-/// connector was selected.
+/// Attributes a real payment's rule decision to its A/B arm with the routing event the
+/// experiment results count; the payment's score updates supply its outcome. Skipped when
+/// real-payment A/B tracking is off, the request carries no payment id, or no connector was
+/// selected.
 async fn track_ab_rule_decision(
     payload: &RoutingRequest,
     response: &RoutingEvaluateResponse,
     ab: &AbEvaluation,
 ) {
-    use crate::decider::gatewaydecider::ab_test::{config, interceptor, outcome};
+    use crate::decider::gatewaydecider::ab_test::{config, interceptor, CostOutcome};
 
     let Some(payment_id) = payload.payment_id.as_deref().filter(|id| !id.is_empty()) else {
         return;
@@ -1183,15 +1225,9 @@ async fn track_ab_rule_decision(
         &ab.assignment,
         &ab.projection,
         Some(gateway.as_str()),
-    );
-    outcome::store_inflight(
-        payment_id,
-        &ab.assignment,
-        Some(gateway.as_str()),
-        true,
+        &CostOutcome::default(),
         amount,
-    )
-    .await;
+    );
 }
 
 pub async fn routing_evaluate(
@@ -1576,12 +1612,12 @@ pub async fn routing_evaluate_batch(
             let call_payment_id = batch_payment_id.clone();
             let mut entry_outcomes = Vec::with_capacity(payload.requests.len());
             let mut results = Vec::with_capacity(payload.requests.len());
-            for entry in payload.requests {
+            for entry in &payload.requests {
                 let entry_payload = RoutingRequest {
-                    payment_id: entry.payment_id,
+                    payment_id: entry.payment_id.clone(),
                     created_by: payload.created_by.clone(),
                     fallback_output: payload.fallback_output.clone(),
-                    parameters: entry.parameters,
+                    parameters: entry.parameters.clone(),
                     algorithm_for: payload.algorithm_for.clone(),
                 };
                 let response = build_no_active_algorithm_response(&state, &entry_payload).await;
@@ -1594,6 +1630,7 @@ pub async fn routing_evaluate_batch(
                 }));
                 results.push(response);
             }
+            let response = RoutingBatchResponse { results };
             // One preview event for the whole call: the batch is one evaluation moment,
             // and its per-entry answers live in the event's details.
             crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
@@ -1603,16 +1640,10 @@ pub async fn routing_evaluate_batch(
                 ),
                 Some(payload.created_by.clone()),
                 call_payment_id,
-                results.first().and_then(preview_gateway),
+                response.results.first().and_then(preview_gateway),
                 None,
                 Some("no_active_algorithm".to_string()),
-                serialize_batch_analytics_details(
-                    &payload.created_by,
-                    payload.algorithm_for.as_deref(),
-                    &payload.fallback_output,
-                    &entry_outcomes,
-                    0,
-                ),
+                serialize_batch_analytics_details(&payload, &response, &entry_outcomes, 0),
                 request_id.clone(),
                 global_request_id.clone(),
                 trace_id.clone(),
@@ -1623,7 +1654,7 @@ pub async fn routing_evaluate_batch(
             if let Some(timer) = timer.take() {
                 timer.observe_duration();
             }
-            return Ok(Json(RoutingBatchResponse { results }));
+            return Ok(Json(response));
         }
         Err(e) => return fail_batch(e, "batch_active_routing_lookup_failed"),
     };
@@ -1652,14 +1683,14 @@ pub async fn routing_evaluate_batch(
     let mut first_entry_error: Option<(ContainerError<EuclidErrors>, &'static str)> = None;
     let mut failed_entries: usize = 0;
     let mut results = Vec::with_capacity(payload.requests.len());
-    for entry in payload.requests {
+    for entry in &payload.requests {
         // Each entry is evaluated as if it were a single call sharing the batch's
         // identity; its outcome is folded into the one preview event the call records.
         let entry_payload = RoutingRequest {
-            payment_id: entry.payment_id,
+            payment_id: entry.payment_id.clone(),
             created_by: payload.created_by.clone(),
             fallback_output: payload.fallback_output.clone(),
-            parameters: entry.parameters,
+            parameters: entry.parameters.clone(),
             algorithm_for: payload.algorithm_for.clone(),
         };
 
@@ -1744,6 +1775,7 @@ pub async fn routing_evaluate_batch(
     } else {
         ok_status
     };
+    let response = RoutingBatchResponse { results };
     crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
         crate::analytics::AnalyticsFlowContext::new(
             crate::analytics::ApiFlow::RuleBasedRouting,
@@ -1754,13 +1786,7 @@ pub async fn routing_evaluate_batch(
         call_gateway,
         call_rule_name,
         Some(call_status),
-        serialize_batch_analytics_details(
-            &payload.created_by,
-            payload.algorithm_for.as_deref(),
-            &payload.fallback_output,
-            &entry_outcomes,
-            failed_entries,
-        ),
+        serialize_batch_analytics_details(&payload, &response, &entry_outcomes, failed_entries),
         request_id.clone(),
         global_request_id.clone(),
         trace_id.clone(),
@@ -1784,7 +1810,7 @@ pub async fn routing_evaluate_batch(
     if let Some(timer) = timer.take() {
         timer.observe_duration();
     }
-    Ok(Json(RoutingBatchResponse { results }))
+    Ok(Json(response))
 }
 
 /// The one payment id a batch answers for, when every entry names the same one --
@@ -1797,26 +1823,23 @@ fn uniform_payment_id(requests: &[crate::euclid::types::RoutingBatchEntry]) -> O
         .then_some(first)
 }
 
-/// Call-level analytics details for a batch: the shared request fields plus one
-/// compact outcome per entry. Full request/response detail stays with the single
-/// endpoint, where one entry is the whole call -- and a compact shape keeps 50
-/// entries far under the details truncation limit.
+/// Full payloads and per-entry outcomes for one batch audit event.
 fn serialize_batch_analytics_details(
-    created_by: &str,
-    algorithm_for: Option<&str>,
-    fallback_output: &Option<Vec<ConnectorInfo>>,
+    request: &RoutingBatchRequest,
+    response: &RoutingBatchResponse,
     entries: &[Value],
     failed_count: usize,
 ) -> Option<String> {
-    serde_json::to_string(&json!({
-        "created_by": created_by,
-        "algorithm_for": algorithm_for,
-        "fallback_output": fallback_output,
+    crate::analytics::serialize_details(&json!({
+        "request": request,
+        "response": response,
+        "created_by": request.created_by,
+        "algorithm_for": request.algorithm_for,
+        "fallback_output": request.fallback_output,
         "entry_count": entries.len(),
         "failed_count": failed_count,
         "entries": entries,
     }))
-    .ok()
 }
 
 fn record_routing_evaluate_preview_error(

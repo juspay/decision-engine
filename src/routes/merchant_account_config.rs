@@ -139,49 +139,90 @@ impl KnownFeature {
 
     /// Updates the FeatureConf row in service_configuration by adding or removing
     /// the merchant. This is the only write path — no per-merchant keys involved.
+    ///
+    /// Every merchant shares the one row, so the write only lands if the row still holds what was
+    /// read; otherwise another merchant's toggle got in first and the update is redone on top of
+    /// it. A blind write would drop that toggle and silently flip the feature for its merchant.
+    /// Toggles on this instance queue on a lock rather than retrying against each other, so the
+    /// retries only absorb the occasional race with another instance.
     async fn update_conf(
         &self,
         merchant_id: &str,
         enabled: bool,
     ) -> error_stack::Result<(), crate::generics::MeshError> {
         let key = self.feature_conf_key().to_string();
+        let _queued = FEATURE_CONF_WRITE_LOCK.lock().await;
 
-        let existing = service_configuration::find_config_by_name(key.clone())
-            .await
-            .unwrap_or(None);
+        for attempt in 0..FEATURE_CONF_UPDATE_ATTEMPTS {
+            if attempt > 0 {
+                // Let the other instance's write land before re-reading.
+                tokio::time::sleep(std::time::Duration::from_millis(
+                    10 * attempt as u64 + rand::random::<u64>() % 20,
+                ))
+                .await;
+            }
+            let existing = service_configuration::find_config_by_name(key.clone())
+                .await
+                .map_err(|e| error_stack::report!(e))?;
+            let Some(existing) = existing else {
+                let serialized = with_merchant(None, merchant_id, enabled)?;
+                return service_configuration::insert_config(key, Some(serialized)).await;
+            };
 
-        let exists = existing.is_some();
-
-        let mut conf: FeatureConf = existing
-            .and_then(|c| c.value)
-            .and_then(|v| serde_json::from_str(&v).ok())
-            .unwrap_or(FeatureConf {
-                enableAll: false,
-                enableAllRollout: None,
-                disableAny: None,
-                merchants: Some(vec![]),
-            });
-
-        let mut merchants = conf.merchants.take().unwrap_or_default();
-        merchants.retain(|m| m.merchantId.to_lowercase() != merchant_id.to_lowercase());
-        if enabled {
-            merchants.push(FeatureMerchant {
-                merchantId: merchant_id.to_string(),
-                rollout: 100,
-            });
+            let serialized = with_merchant(existing.value.as_deref(), merchant_id, enabled)?;
+            if service_configuration::compare_and_update_config(
+                key.clone(),
+                existing.value,
+                Some(serialized),
+            )
+            .await?
+            {
+                return Ok(());
+            }
         }
-        conf.merchants = Some(merchants);
 
-        let serialized = serde_json::to_string(&conf)
-            .map_err(|e| error_stack::report!(e))
-            .change_context(crate::generics::MeshError::Others)?;
-
-        if exists {
-            service_configuration::update_config(key, Some(serialized)).await
-        } else {
-            service_configuration::insert_config(key, Some(serialized)).await
-        }
+        Err(error_stack::report!(crate::generics::MeshError::Others)).attach_printable(format!(
+            "{key} kept changing; gave up after {FEATURE_CONF_UPDATE_ATTEMPTS} attempts"
+        ))
     }
+}
+
+/// How many times a feature toggle is redone after losing a race with another instance's toggle.
+const FEATURE_CONF_UPDATE_ATTEMPTS: usize = 10;
+
+/// Serializes this instance's FeatureConf writes; see `KnownFeature::update_conf`.
+static FEATURE_CONF_WRITE_LOCK: once_cell::sync::Lazy<tokio::sync::Mutex<()>> =
+    once_cell::sync::Lazy::new(|| tokio::sync::Mutex::new(()));
+
+/// The FeatureConf JSON `current` becomes with `merchant_id` enabled or disabled. A missing or
+/// unparsable `current` starts from an empty roster.
+fn with_merchant(
+    current: Option<&str>,
+    merchant_id: &str,
+    enabled: bool,
+) -> error_stack::Result<String, crate::generics::MeshError> {
+    let mut conf: FeatureConf = current
+        .and_then(|v| serde_json::from_str(v).ok())
+        .unwrap_or(FeatureConf {
+            enableAll: false,
+            enableAllRollout: None,
+            disableAny: None,
+            merchants: Some(vec![]),
+        });
+
+    let mut merchants = conf.merchants.take().unwrap_or_default();
+    merchants.retain(|m| m.merchantId.to_lowercase() != merchant_id.to_lowercase());
+    if enabled {
+        merchants.push(FeatureMerchant {
+            merchantId: merchant_id.to_string(),
+            rollout: 100,
+        });
+    }
+    conf.merchants = Some(merchants);
+
+    serde_json::to_string(&conf)
+        .map_err(|e| error_stack::report!(e))
+        .change_context(crate::generics::MeshError::Others)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -595,4 +636,59 @@ pub async fn delete_merchant_config(
 
     timer.observe_duration();
     response
+}
+
+#[cfg(test)]
+mod tests {
+    use super::with_merchant;
+    use crate::redis::types::FeatureConf;
+
+    fn merchants(json: &str) -> Vec<String> {
+        let conf: FeatureConf = serde_json::from_str(json).unwrap();
+        conf.merchants
+            .unwrap_or_default()
+            .into_iter()
+            .map(|m| m.merchantId)
+            .collect()
+    }
+
+    #[test]
+    fn enabling_keeps_every_other_merchant_and_setting() {
+        let current = r#"{"enableAll":true,"enableAllRollout":20,"disableAny":["m_x"],
+            "merchants":[{"merchantId":"m_a","rollout":100},{"merchantId":"m_b","rollout":50}]}"#;
+        let next = with_merchant(Some(current), "m_c", true).unwrap();
+        assert_eq!(merchants(&next), ["m_a", "m_b", "m_c"]);
+
+        let conf: FeatureConf = serde_json::from_str(&next).unwrap();
+        assert!(conf.enableAll);
+        assert_eq!(conf.enableAllRollout, Some(20));
+        assert_eq!(conf.disableAny, Some(vec!["m_x".to_string()]));
+    }
+
+    #[test]
+    fn disabling_removes_only_that_merchant_ignoring_case() {
+        let current = r#"{"enableAll":false,"merchants":[
+            {"merchantId":"M_A","rollout":100},{"merchantId":"m_b","rollout":100}]}"#;
+        let next = with_merchant(Some(current), "m_a", false).unwrap();
+        assert_eq!(merchants(&next), ["m_b"]);
+    }
+
+    #[test]
+    fn re_enabling_does_not_duplicate() {
+        let current = r#"{"enableAll":false,"merchants":[{"merchantId":"m_a","rollout":100}]}"#;
+        let next = with_merchant(Some(current), "m_a", true).unwrap();
+        assert_eq!(merchants(&next), ["m_a"]);
+    }
+
+    #[test]
+    fn missing_or_unparsable_value_starts_empty() {
+        assert_eq!(
+            merchants(&with_merchant(None, "m_a", true).unwrap()),
+            ["m_a"]
+        );
+        assert_eq!(
+            merchants(&with_merchant(Some("not json"), "m_a", true).unwrap()),
+            ["m_a"]
+        );
+    }
 }

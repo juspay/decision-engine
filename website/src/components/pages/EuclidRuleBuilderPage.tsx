@@ -1,6 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import useSWR from 'swr'
+import {
+  DndContext,
+  DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
 import { Plus, ArrowLeft } from 'lucide-react'
 import { Card, CardBody } from '../ui/Card'
 import { Button } from '../ui/Button'
@@ -222,6 +237,25 @@ export function EuclidRuleBuilderPage() {
     ])
   }
 
+  // A few pixels of travel before a drag starts, so a click on the grip is still a click.
+  const ruleSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
+  // Rules are evaluated top-down and the first match wins, so their array order is their
+  // priority. Moving the block is the whole change.
+  function handleRuleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    setRuleBlocks((prev) => {
+      const from = prev.findIndex((b) => b.id === active.id)
+      const to = prev.findIndex((b) => b.id === over.id)
+      if (from === -1 || to === -1) return prev
+      return arrayMove(prev, from, to)
+    })
+  }
+
   function switchToCode() {
     if (ruleBlocks.length > 0) {
       setCodeText(serializeToDSL(ruleBlocks))
@@ -354,26 +388,39 @@ export function EuclidRuleBuilderPage() {
               )}
               {editorMode === 'visual' ? (
                 <>
-                  {ruleBlocks.map((block, i) => (
-                    <RuleBlockEditor
-                      key={block.id}
-                      block={block}
-                      index={i}
-                      routingKeys={routingKeys}
-                      gatewaySuggestions={gatewaySuggestions}
-                      error={blockErrors[block.id]}
-                      onChange={(updated) => {
-                        setRuleBlocks((prev) => prev.map((b) => (b.id === block.id ? updated : b)))
-                        if (blockErrors[block.id]) {
-                          setBlockErrors(({ [block.id]: _removed, ...rest }) => rest)
-                        }
-                      }}
-                      onRemove={() => {
-                        setRuleBlocks((prev) => prev.filter((b) => b.id !== block.id))
-                        setBlockErrors(({ [block.id]: _removed, ...rest }) => rest)
-                      }}
-                    />
-                  ))}
+                  <DndContext
+                    sensors={ruleSensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handleRuleDragEnd}
+                  >
+                    <SortableContext
+                      items={ruleBlocks.map((b) => b.id)}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      <div className="space-y-3">
+                        {ruleBlocks.map((block, i) => (
+                          <RuleBlockEditor
+                            key={block.id}
+                            block={block}
+                            index={i}
+                            routingKeys={routingKeys}
+                            gatewaySuggestions={gatewaySuggestions}
+                            error={blockErrors[block.id]}
+                            onChange={(updated) => {
+                              setRuleBlocks((prev) => prev.map((b) => (b.id === block.id ? updated : b)))
+                              if (blockErrors[block.id]) {
+                                setBlockErrors(({ [block.id]: _removed, ...rest }) => rest)
+                              }
+                            }}
+                            onRemove={() => {
+                              setRuleBlocks((prev) => prev.filter((b) => b.id !== block.id))
+                              setBlockErrors(({ [block.id]: _removed, ...rest }) => rest)
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </SortableContext>
+                  </DndContext>
                   <Button
                     type="button"
                     variant="secondary"

@@ -89,7 +89,7 @@ pub fn derive_cluster_key(txn_detail: &TxnDetail, txn_card_info: &TxnCardInfo) -
             .as_ref()
             .and_then(|s| non_empty(s))
             .map(|s| s.trim().to_lowercase()),
-        wallet: wallet_from_payment_method(&txn_card_info.paymentMethod),
+        wallet: wallet_from_payment_method(&txn_card_info.instrument.method_type_code()),
         // Cross-border = card issued outside the merchant's home region (here: anything that
         // normalizes to "intl"). Derived for completeness; pricing matches on the region.
         cross_border_flag: txn_card_info

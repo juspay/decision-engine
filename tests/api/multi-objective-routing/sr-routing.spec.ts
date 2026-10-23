@@ -77,7 +77,7 @@ test.describe('SR Routing (API)', () => {
         factory.srDecideGatewayRequest({
           merchantId: m,
           eligibleGatewayList: gateways,
-          paymentInfo: { paymentMethodType: 'CARD', paymentMethod: 'VISA', paymentId: pid },
+          paymentInfo: { paymentMethod: 'CARD', paymentMethodType: 'CREDIT', paymentId: pid },
         }),
       )
       expectValidGatewayResponse(decide.body)
@@ -106,7 +106,7 @@ test.describe('SR Routing (API)', () => {
           factory.srDecideGatewayRequest({
             merchantId: m,
             eligibleGatewayList: gateways,
-            paymentInfo: { paymentMethodType: 'CARD', paymentMethod: 'VISA' },
+            paymentInfo: { paymentMethod: 'CARD', paymentMethodType: 'CREDIT' },
           }),
         ),
       ({ body }) => Math.min(...[...failed].map((g) => body.gateway_priority_map[g])) < 1.0,

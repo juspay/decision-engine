@@ -1,11 +1,12 @@
 use clickhouse::{query::Query, Client};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum BindArg {
     String(String),
     I64(i64),
     U64(u64),
     Bool(bool),
+    F64(f64),
 }
 
 impl BindArg {
@@ -15,6 +16,7 @@ impl BindArg {
             Self::I64(value) => query.bind(value),
             Self::U64(value) => query.bind(value),
             Self::Bool(value) => query.bind(value),
+            Self::F64(value) => query.bind(value),
         }
     }
 }
@@ -46,6 +48,12 @@ impl From<u64> for BindArg {
 impl From<usize> for BindArg {
     fn from(value: usize) -> Self {
         Self::U64(value as u64)
+    }
+}
+
+impl From<f64> for BindArg {
+    fn from(value: f64) -> Self {
+        Self::F64(value)
     }
 }
 

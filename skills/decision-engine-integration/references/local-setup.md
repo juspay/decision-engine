@@ -34,7 +34,7 @@ Profile cheat sheet (`--profile <name>`):
 
 There is also a guided `./oneclick.sh` in the repo root that provisions
 dependencies (Postgres, Redis, ClickHouse, Kafka) and opens the docs — handy for
-a from-source run. From-source needs Rust 1.85+, a DB, and Redis; see the repo
+a from-source run. From-source needs Rust 1.88+, a DB, and Redis; see the repo
 README.
 
 Verify:

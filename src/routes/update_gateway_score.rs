@@ -71,6 +71,9 @@ struct UpdateGatewayScoreSkippedDetail<'a> {
 struct UpdateGatewayScoreFailureDetail<'a> {
     payment_id: &'a str,
     request_id: Option<&'a str>,
+    /// The reported transaction status, so the payment's outcome still reaches the A/B
+    /// experiment results when the score update itself failed.
+    status: &'a str,
 }
 
 fn request_parse_error_response(error: impl ToString) -> ErrorResponse {
@@ -322,6 +325,7 @@ pub async fn update_gateway_score(
                             crate::analytics::serialize_details(&UpdateGatewayScoreFailureDetail {
                                 payment_id: &payment_id,
                                 request_id: None,
+                                status: &transaction_status,
                             }),
                             Some("score_update_failed".to_string()),
                             None,

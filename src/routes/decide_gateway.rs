@@ -95,6 +95,26 @@ fn request_parse_error_response(error: impl ToString) -> ErrorResponse {
     }
 }
 
+fn invalid_payment_method_response(developer_message: String) -> ErrorResponse {
+    ErrorResponse {
+        status: "400".to_string(),
+        error_code: "400".to_string(),
+        error_message: "Invalid payment method".to_string(),
+        priority_logic_tag: None,
+        routing_approach: None,
+        filter_wise_gateways: None,
+        error_info: UnifiedError {
+            code: "INVALID_PAYMENT_METHOD".to_string(),
+            user_message:
+                "paymentMethod and paymentMethodType are missing, swapped or do not fit together."
+                    .to_string(),
+            developer_message,
+        },
+        priority_logic_output: None,
+        is_dynamic_mga_enabled: false,
+    }
+}
+
 impl IntoResponse for DecidedGateway {
     fn into_response(self) -> axum::http::Response<axum::body::Body> {
         let body = serde_json::to_string(&self).unwrap();
@@ -137,6 +157,7 @@ pub(crate) async fn run_decider_with_analytics(
     {
         Ok(decided_gateway) => {
             let routing_approach = decided_gateway.routing_approach.to_string();
+            let (payment_method, payment_method_type) = payload.instrument().analytics_columns();
 
             DomainAnalyticsEvent::record_decision(
                 AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayDecision),
@@ -165,8 +186,8 @@ pub(crate) async fn run_decider_with_analytics(
                 global_request_id,
                 trace_id,
                 Some("gateway_decided".to_string()),
-                Some(payload.payment_method_type().to_string()),
-                Some(payload.payment_method().to_string()),
+                payment_method_type,
+                payment_method,
                 auth_type,
                 payload.card_network(),
                 Some(payload.currency()),
@@ -276,8 +297,14 @@ pub async fn decide_gateway(
             return Err(error_response);
         }
     };
-    let api_decider_request: Result<DomainDeciderRequestForApiCallV2, _> =
-        serde_json::from_slice(&body);
+    let api_decider_request =
+        match serde_json::from_slice::<DomainDeciderRequestForApiCallV2>(&body) {
+            Ok(payload) => match payload.check_payment_method() {
+                Ok(_) => Ok(payload),
+                Err(error) => Err(invalid_payment_method_response(error.to_string())),
+            },
+            Err(e) => Err(request_parse_error_response(&e)),
+        };
     let result = match api_decider_request {
         Ok(payload) => {
             let span = tracing::Span::current();
@@ -308,8 +335,8 @@ pub async fn decide_gateway(
                 trace_id,
                 None,
                 None,
-                "400".to_string(),
-                "Error parsing request".to_string(),
+                error_response.error_code.clone(),
+                error_response.error_message.clone(),
                 serialize_details(&DecideGatewayParseFailureDetail {
                     request_id: &x_request_id,
                     raw_request: String::from_utf8_lossy(&body),

@@ -1032,10 +1032,19 @@ impl GlobalConfig {
             )
             .build()?;
 
-        serde_path_to_error::deserialize(config).map_err(|error| {
-            logger::error!("Unable to deserialize application configuration: {error}");
-            error.into_inner()
-        })
+        let mut global_config: Self =
+            serde_path_to_error::deserialize(config).map_err(|error| {
+                logger::error!("Unable to deserialize application configuration: {error}");
+                error.into_inner()
+            })?;
+        // Payment method keys come from the code, not the file.
+        global_config.routing_config =
+            global_config
+                .routing_config
+                .map(|routing_config| TomlConfig {
+                    keys: routing_config.keys.with_payment_method_keys(),
+                });
+        Ok(global_config)
     }
 
     pub fn builder(

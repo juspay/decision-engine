@@ -11,6 +11,12 @@ use crate::{
 
 pub struct InternalKeyManager;
 
+impl InternalKeyManager {
+    fn not_implemented() -> ContainerError<error::ApiError> {
+        error::ApiError::KeyManagerError("Internal key manager is not implemented").into()
+    }
+}
+
 #[async_trait::async_trait]
 impl super::KeyProvider for InternalKeyManager {
     async fn find_by_entity_id(
@@ -18,7 +24,7 @@ impl super::KeyProvider for InternalKeyManager {
         _tenant_app_state: &TenantAppState,
         _entity_id: String,
     ) -> Result<Box<dyn CryptoOperationsManager>, ContainerError<error::ApiError>> {
-        todo!()
+        Err(Self::not_implemented())
     }
 
     async fn find_or_create_entity(
@@ -26,7 +32,7 @@ impl super::KeyProvider for InternalKeyManager {
         _tenant_app_state: &TenantAppState,
         _entity_id: String,
     ) -> Result<Box<dyn CryptoOperationsManager>, ContainerError<error::ApiError>> {
-        todo!()
+        Err(Self::not_implemented())
     }
 }
 

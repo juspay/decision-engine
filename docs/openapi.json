@@ -987,7 +987,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
             }
           },
           {
@@ -1052,7 +1055,8 @@
             "required": false,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Payment audit: comma-separated to match payments that went through any of them."
           },
           {
             "name": "payment_id",
@@ -1076,14 +1080,44 @@
             "required": false,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Payment audit: comma-separated to match payments that went through any of them."
           },
           {
             "name": "status",
             "in": "query",
             "required": false,
+            "description": "Matches payments with an event of exactly this status (e.g. `FAILURE`, `CHARGED`; `success` / `failure` also match routing calls). To filter by what happened to the payment, use `outcome`.",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "required": false,
+            "description": "The payment's outcome from its reported statuses: `success` (any attempt succeeded), `failure` (failed terminally, never succeeded) or `pending` (no terminal status yet). Comma-separated to match any of several, e.g. `failure,pending`.",
+            "schema": {
+              "type": "string",
+              "example": "failure,pending"
+            }
+          },
+          {
+            "name": "min_amount",
+            "in": "query",
+            "required": false,
+            "description": "Payment audit only: payments whose routed amount is at least this. Like `currency`, `payment_method`, `payment_method_type`, `card_network` and `auth_type` (which on the payment audit take comma-separated values and match any of them, case-insensitively), it matches the whole payment by its routing decision.",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "max_amount",
+            "in": "query",
+            "required": false,
+            "description": "Payment audit only: payments whose routed amount is at most this.",
+            "schema": {
+              "type": "number"
             }
           },
           {
@@ -1116,7 +1150,8 @@
             "required": false,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Payment audit: comma-separated to match payments that hit any of these error codes."
           },
           {
             "name": "scope",
@@ -2124,8 +2159,8 @@
                       "country": "US",
                       "customerId": "cust_123",
                       "paymentType": "ORDER_PAYMENT",
-                      "paymentMethodType": "CARD",
-                      "paymentMethod": "CREDIT",
+                      "paymentMethod": "CARD",
+                      "paymentMethodType": "CREDIT",
                       "authType": "THREE_DS",
                       "cardIsin": "411111"
                     },
@@ -2147,8 +2182,8 @@
                       "amount": 1000,
                       "currency": "USD",
                       "paymentType": "ORDER_PAYMENT",
-                      "paymentMethodType": "CARD",
-                      "paymentMethod": "DEBIT",
+                      "paymentMethod": "CARD",
+                      "paymentMethodType": "DEBIT",
                       "authType": "THREE_DS",
                       "metadata": "{\"merchant_category_code\":\"merchant_category_code_0001\",\"acquirer_country\":\"US\",\"co_badged_card_data\":{\"co_badged_card_networks\":[\"VISA\",\"NYCE\",\"PULSE\",\"STAR\"],\"issuer_country\":\"US\",\"is_regulated\":false,\"regulated_name\":null,\"card_type\":\"debit\"}}"
                     },
@@ -2169,8 +2204,8 @@
                       "amount": 750,
                       "currency": "USD",
                       "paymentType": "ORDER_PAYMENT",
-                      "paymentMethodType": "CARD",
-                      "paymentMethod": "DEBIT"
+                      "paymentMethod": "CARD",
+                      "paymentMethodType": "DEBIT"
                     },
                     "eligibleGatewayList": [
                       "stripe",
@@ -2191,8 +2226,8 @@
                       "currency": "USD",
                       "country": "US",
                       "paymentType": "ORDER_PAYMENT",
-                      "paymentMethodType": "CARD",
-                      "paymentMethod": "CREDIT",
+                      "paymentMethod": "CARD",
+                      "paymentMethodType": "CREDIT",
                       "authType": "THREE_DS",
                       "cardIsin": "424242"
                     },
@@ -5067,6 +5102,73 @@
           }
         }
       }
+    },
+    "/analytics/payment-audit/filter-options": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Payment audit filter options",
+        "description": "The values the payment audit dropdown filters can take for the merchant: the distinct gateways, payment methods, method types, card networks, auth types and currencies its payments carried in the window, in the form the filters match (attributes lower-cased). Up to 200 per field.",
+        "operationId": "analyticsPaymentAuditFilterOptions",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": true,
+            "description": "Tenant to resolve. The shipped config files define only the \"public\" tenant. No fallback — omitting this fails with TE_03.",
+            "schema": {
+              "type": "string",
+              "default": "public"
+            },
+            "example": "public"
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "start_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "end_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Filter options",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentAuditFilterOptions"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5158,11 +5260,13 @@
           },
           "paymentMethodType": {
             "type": "string",
-            "example": "CARD"
+            "description": "The specific method within `paymentMethod`: `CREDIT` or `DEBIT` for cards, `UPI_COLLECT`, `GOOGLE_PAY` and so on.",
+            "example": "CREDIT"
           },
           "paymentMethod": {
             "type": "string",
-            "example": "CREDIT"
+            "description": "The payment method category: `CARD`, `UPI`, `WALLET` and so on. Before this release `/decide-gateway` read the two fields the other way round.",
+            "example": "CARD"
           },
           "country": {
             "type": [
@@ -5192,8 +5296,13 @@
             "description": "Positional user-defined fields."
           },
           "preferredConnectors": {
-            "type": ["array", "null"],
-            "items": { "type": "string" },
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "string"
+            },
             "description": "Ordered connector:mca_id preferences from the customer's profile-scoped history. The first entry is considered; health and eligibility checks still apply."
           },
           "metadata": {
@@ -6696,19 +6805,21 @@
       },
       "SRSubLevelInputConfig": {
         "type": "object",
+        "required": [
+          "paymentMethod"
+        ],
         "properties": {
+          "paymentMethod": {
+            "type": "string",
+            "description": "The payment method category (`card`, `wallet`, `upi`). Stored and returned as an upper-case code.",
+            "example": "CARD"
+          },
           "paymentMethodType": {
             "type": [
               "string",
               "null"
             ],
-            "example": "CARD"
-          },
-          "paymentMethod": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "description": "The specific method within `paymentMethod` (`credit`, `google_pay`); omit it to cover the whole method. Must belong to `paymentMethod`. Stored and returned as an upper-case code.",
             "example": "CREDIT"
           },
           "cardNetwork": {
@@ -7759,6 +7870,15 @@
             ],
             "example": "success"
           },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failure",
+              "pending"
+            ],
+            "description": "The payment's outcome from its reported statuses. Unlike `latest_status`, a routing call's own `success` does not count."
+          },
           "latest_gateway": {
             "type": [
               "string",
@@ -7783,6 +7903,13 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "experiments": {
+            "type": "array",
+            "description": "A/B experiments that routed this payment, with the arm it was assigned; empty when it was not routed under one. Omitted when the lookup failed.",
+            "items": {
+              "$ref": "#/components/schemas/PaymentAuditExperiment"
             }
           }
         }
@@ -7946,6 +8073,44 @@
           }
         }
       },
+      "PaymentAuditExperiment": {
+        "type": "object",
+        "description": "A payment's assignment to an A/B experiment on one routing endpoint.",
+        "required": [
+          "experiment_id",
+          "arm",
+          "endpoint",
+          "routed_at_ms"
+        ],
+        "properties": {
+          "experiment_id": {
+            "type": "string",
+            "example": "routing_dd6ec3ad-aac4-4c8c-b6f7-03c732163f90"
+          },
+          "arm": {
+            "type": "string",
+            "enum": [
+              "control",
+              "variant"
+            ],
+            "example": "variant"
+          },
+          "endpoint": {
+            "type": "string",
+            "enum": [
+              "hybrid_routing",
+              "decide_gateway",
+              "evaluate"
+            ],
+            "example": "hybrid_routing"
+          },
+          "routed_at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When the payment was first routed under this assignment."
+          }
+        }
+      },
       "PaymentAuditResponse": {
         "type": "object",
         "properties": {
@@ -8011,7 +8176,7 @@
           },
           "page_size": {
             "type": "integer",
-            "example": 12
+            "example": 20
           },
           "total_results": {
             "type": "integer",
@@ -9498,6 +9663,63 @@
           }
         },
         "description": "Generic API error envelope: an error code, a human-readable message, and an optional structured payload."
+      },
+      "PaymentAuditFilterOptions": {
+        "type": "object",
+        "required": [
+          "gateways",
+          "payment_methods",
+          "payment_method_types",
+          "card_networks",
+          "auth_types",
+          "currencies",
+          "error_codes"
+        ],
+        "properties": {
+          "gateways": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "payment_methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "payment_method_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "card_networks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "auth_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "currencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "error_codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Error codes as recorded (matched exactly)."
+          }
+        }
       }
     }
   }

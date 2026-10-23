@@ -6,8 +6,8 @@ use crate::analytics::models::{
     AnalyticsLogSummariesResponse, AnalyticsOverviewResponse, AnalyticsQuery,
     AnalyticsRoutingStatsResponse, CommitmentAnalytics, CommitmentAnalyticsQuery,
     CommitmentImpactData, ExperimentResultsQuery, ExperimentResultsResponse,
-    ExperimentTransactionsQuery, ExperimentTransactionsResponse, PaymentAuditQuery,
-    PaymentAuditResponse, RoutingEventsQuery, RoutingEventsResponse,
+    ExperimentTransactionsQuery, ExperimentTransactionsResponse, PaymentAuditFilterOptions,
+    PaymentAuditQuery, PaymentAuditResponse, RoutingEventsQuery, RoutingEventsResponse,
 };
 use crate::error::ApiError;
 
@@ -101,6 +101,11 @@ pub trait AnalyticsReadStore: Send + Sync {
         &self,
         query: &PaymentAuditQuery,
     ) -> Result<PaymentAuditResponse, ApiError>;
+
+    async fn payment_audit_filter_options(
+        &self,
+        query: &PaymentAuditQuery,
+    ) -> Result<PaymentAuditFilterOptions, ApiError>;
 
     async fn preview_trace(
         &self,
@@ -202,6 +207,13 @@ impl AnalyticsReadStore for UnavailableAnalyticsReadStore {
         &self,
         _query: &PaymentAuditQuery,
     ) -> Result<PaymentAuditResponse, ApiError> {
+        Err(ApiError::DatabaseError)
+    }
+
+    async fn payment_audit_filter_options(
+        &self,
+        _query: &PaymentAuditQuery,
+    ) -> Result<PaymentAuditFilterOptions, ApiError> {
         Err(ApiError::DatabaseError)
     }
 

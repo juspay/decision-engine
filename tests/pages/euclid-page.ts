@@ -40,6 +40,36 @@ export class EuclidRuleBuilder extends RoutingListPage {
     await this.page.getByRole('button', { name: 'Add Rule', exact: true }).click()
   }
 
+  /** The grip in a rule block's header — the only element that starts a reorder. */
+  ruleDragHandle(index = 0): Locator {
+    return this.ruleBlock(index).locator('[aria-label^="Reorder"]').first()
+  }
+
+  /** dnd-kit's live region, where it announces the pick-up, every move, and the drop. */
+  private dragAnnouncement(): Promise<string> {
+    return this.page
+      .locator('[role="status"]')
+      .allTextContents()
+      .then((texts) => texts.join(' '))
+  }
+
+  async moveRuleBlock(index: number, direction: 'up' | 'down', steps = 1): Promise<void> {
+    await this.ruleDragHandle(index).focus()
+    await this.page.keyboard.press(' ')
+    // Picking a block up scrolls it into view, and an arrow key pressed while that scroll is in
+    // flight is spent scrolling the container instead of moving the block (dnd-kit's keyboard
+    // sensor handles scrolling first and returns). Waiting for the pick-up announcement is the
+    // signal that the drag is settled and the arrows will land on the block.
+    await expect.poll(() => this.dragAnnouncement()).toMatch(/draggable item/i)
+    for (let i = 0; i < steps; i += 1) {
+      const before = await this.dragAnnouncement()
+      await this.page.keyboard.press(direction === 'down' ? 'ArrowDown' : 'ArrowUp')
+      // Each move is announced, so the text changing is the signal that this step landed.
+      await expect.poll(() => this.dragAnnouncement()).not.toBe(before)
+    }
+    await this.page.keyboard.press(' ')
+  }
+
   /** The nth nested (OR) branch inside a rule block — the sky-bordered, indented group. */
   nestedBranch(blockIndex: number, index: number): Locator {
     return this.ruleBlock(blockIndex).locator('.border-l-2.border-sky-200').nth(index)

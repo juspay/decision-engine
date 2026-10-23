@@ -90,26 +90,26 @@ const MULTI_OBJECTIVE_CARD_BRANDS = ['VISA', 'MASTERCARD'] as const
 // falling back to the seed table.
 const MULTI_OBJECTIVE_CLUSTER_VARIANTS: Array<{
   label: string
-  paymentMethod: 'CREDIT' | 'DEBIT'
+  paymentMethodType: 'CREDIT' | 'DEBIT'
   cardSwitchProvider: 'VISA' | 'MASTERCARD' | 'AMEX'
   cardProgram: 'STANDARD' | 'PREMIUM' | 'COMMERCIAL'
   // Raw issuer country a BIN lookup would supply (ISO-2, e.g. 'US', 'FR', 'AU'). The engine buckets
   // it to a pricing region for the coarse fallback and uses the raw value for the fine predictor.
   cardIssuerCountry: string
 }> = [
-  { label: 'US debit', paymentMethod: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD',   cardIssuerCountry: 'US'   },
-  { label: 'US standard credit', paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD',   cardIssuerCountry: 'US'   },
-  { label: 'US premium credit', paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'PREMIUM',    cardIssuerCountry: 'US'   },
-  { label: 'US corporate',       paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'COMMERCIAL', cardIssuerCountry: 'US'   },
-  { label: 'Amex US consumer',   paymentMethod: 'CREDIT', cardSwitchProvider: 'AMEX',       cardProgram: 'PREMIUM',    cardIssuerCountry: 'US'   },
+  { label: 'US debit', paymentMethodType: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD',   cardIssuerCountry: 'US'   },
+  { label: 'US standard credit', paymentMethodType: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD',   cardIssuerCountry: 'US'   },
+  { label: 'US premium credit', paymentMethodType: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'PREMIUM',    cardIssuerCountry: 'US'   },
+  { label: 'US corporate',       paymentMethodType: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'COMMERCIAL', cardIssuerCountry: 'US'   },
+  { label: 'Amex US consumer',   paymentMethodType: 'CREDIT', cardSwitchProvider: 'AMEX',       cardProgram: 'PREMIUM',    cardIssuerCountry: 'US'   },
   // EU / AU scenarios carry a *raw* issuer country (as a BIN lookup would supply), so the in-house
   // category predictor resolves the specific fitted cluster. Pair the EU cards with EUR and the AU
   // card with AUD to land on in-house models.
-  { label: 'FR debit (Visa)',        paymentMethod: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'FR' },
-  { label: 'IT debit (Mastercard)',  paymentMethod: 'DEBIT',  cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD', cardIssuerCountry: 'IT' },
-  { label: 'FR credit (Visa)',       paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'FR' },
-  { label: 'IT credit (Mastercard)', paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD', cardIssuerCountry: 'IT' },
-  { label: 'AU debit (Visa)',        paymentMethod: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'AU' },
+  { label: 'FR debit (Visa)',        paymentMethodType: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'FR' },
+  { label: 'IT debit (Mastercard)',  paymentMethodType: 'DEBIT',  cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD', cardIssuerCountry: 'IT' },
+  { label: 'FR credit (Visa)',       paymentMethodType: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'FR' },
+  { label: 'IT credit (Mastercard)', paymentMethodType: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD', cardIssuerCountry: 'IT' },
+  { label: 'AU debit (Visa)',        paymentMethodType: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'AU' },
 ]
 
 // Scenario the simulator opens on. 'US debit' is the headline Adyen-wins-on-cost case, so it's the
@@ -122,7 +122,7 @@ const DEFAULT_MULTI_OBJ_SCENARIO: number | 'ALL' =
 // (jaywan, mada, …) and an optional representative ticket.
 type MoClusterVariant = {
   label: string
-  paymentMethod: 'CREDIT' | 'DEBIT'
+  paymentMethodType: 'CREDIT' | 'DEBIT'
   cardSwitchProvider: string
   cardProgram: string
   cardIssuerCountry?: string
@@ -242,7 +242,7 @@ function seedRowsToVariants(
       'Scenario'
     out.push({
       label,
-      paymentMethod: (r.payment_method_type ?? '').toUpperCase() === 'DEBIT' ? 'DEBIT' : 'CREDIT',
+      paymentMethodType: (r.payment_method_type ?? '').toUpperCase() === 'DEBIT' ? 'DEBIT' : 'CREDIT',
       cardSwitchProvider: (r.card_network ?? '').toUpperCase() || 'VISA',
       cardProgram: (r.card_type ?? '').toUpperCase() || 'STANDARD',
       cardIssuerCountry: issuerCountryFor(r, ccy, clusters),
@@ -2276,8 +2276,8 @@ export function DecisionSimulatorPage() {
           amount: parseFloat(form.amount) || 1000,
           currency: form.currency,
           paymentType: 'ORDER_PAYMENT',
-          paymentMethodType: form.payment_method_type,
-          paymentMethod: form.payment_method,
+          paymentMethod: form.payment_method_type,
+          paymentMethodType: form.payment_method,
           authType: form.auth_type,
           cardBrand: form.card_brand,
           cardSwitchProvider: form.card_brand,
@@ -2370,8 +2370,8 @@ export function DecisionSimulatorPage() {
           amount: parseFloat(debitForm.amount) || 1000,
           currency: debitForm.currency,
           paymentType: 'ORDER_PAYMENT',
-          paymentMethodType: 'CARD',
-          paymentMethod: 'DEBIT',
+          paymentMethod: 'CARD',
+          paymentMethodType: 'DEBIT',
           authType: debitForm.auth_type,
           metadata: buildDebitRoutingMetadata(),
         },
@@ -2518,8 +2518,9 @@ export function DecisionSimulatorPage() {
             ? activeVars[i % activeVars.length]
             : (activeVars[scenarioSel] ?? activeVars[0]))
         : null
-      const paymentMethodType = isMultiObjective ? 'CARD' : form.payment_method_type
-      const paymentMethod = variant ? variant.paymentMethod : form.payment_method
+      // The method is the category (CARD), its type the specific method (CREDIT).
+      const paymentMethod = isMultiObjective ? 'CARD' : form.payment_method_type
+      const paymentMethodType = variant ? variant.paymentMethodType : form.payment_method
       const cardBrand = variant ? variant.cardSwitchProvider : form.card_brand
       const cardProgram = variant ? variant.cardProgram : form.card_program
       const cardIssuerCountry = variant ? variant.cardIssuerCountry : undefined
@@ -2544,7 +2545,7 @@ export function DecisionSimulatorPage() {
           authType: form.auth_type,
           cardBrand,
           cardSwitchProvider: cardBrand,
-          cardType: paymentMethod,
+          cardType: paymentMethodType,
           cardProgram,
           ...(cardIssuerCountry && { cardIssuerCountry }),
           channel: moChannel,
@@ -2561,8 +2562,8 @@ export function DecisionSimulatorPage() {
             created_by: effectiveMerchantId,
             payment_id: paymentId,
             parameters: hybridRuleParameters(routingKeysConfig, {
-              payment_method: paymentMethodType,
-              payment_method_type: paymentMethod,
+              payment_method: paymentMethod,
+              payment_method_type: paymentMethodType,
               card_network: cardBrand,
               currency: formRef.current.currency,
               authentication_type: form.auth_type,
@@ -5608,8 +5609,8 @@ export function DecisionSimulatorPage() {
                     decideParams={{
                       amount: form.amount,
                       currency: form.currency,
-                      paymentMethodType: form.payment_method_type,
-                      paymentMethod: form.payment_method,
+                      paymentMethod: form.payment_method_type,
+                      paymentMethodType: form.payment_method,
                       authType: form.auth_type,
                       cardBrand: form.card_brand,
                       rankingAlgorithm: 'SR_BASED_ROUTING',

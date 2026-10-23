@@ -4,6 +4,8 @@ const { spawn } = require('child_process')
 const net = require('net')
 const path = require('path')
 
+const { SUPER_ADMIN_EMAIL } = require('../tests/fixtures/super-admin-identity.js')
+
 const ROOT = path.resolve(__dirname, '..')
 const VALID_MODES = new Set(['source', 'docker', 'all'])
 const READINESS_TIMEOUT_MS = Number(process.env.E2E_READINESS_TIMEOUT_MS) || 180000
@@ -326,6 +328,9 @@ async function runSourceMode(keepAlive) {
     detached: true,
     env: {
       ONECLICK_AUTO_CONFIRM: '1',
+      // The super-admin-view spec logs in as this identity; Playwright injects the same roster
+      // when it starts the API itself (playwright.config.ts), but here oneclick.sh starts it.
+      DECISION_ENGINE__USER_AUTH__SUPER_ADMIN_EMAILS: SUPER_ADMIN_EMAIL,
     },
   })
 
@@ -358,7 +363,6 @@ async function runDockerMode(keepAlive) {
   const composeProfile = 'dashboard-postgres-local'
 
   await stopKnownComposeProjects()
-  await runCommand('dashboard-build', 'bash', ['-lc', 'npm --prefix website run build'])
   await runCommand(
     'docker-up',
     'bash',

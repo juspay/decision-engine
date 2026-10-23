@@ -198,9 +198,12 @@ pub async fn hybrid_routing_evaluate(
         .inc();
 
     let HybridRoutingRequest {
-        static_routing_request,
+        mut static_routing_request,
         dynamic_routing_request,
     } = payload;
+    if let Some(request) = static_routing_request.as_mut() {
+        crate::routes::profile_connectors::transform_fallback(request).await?;
+    }
     let dynamic_routing_request = static_routing_request
         .as_ref()
         .map(|request| DomainDeciderRequestForApiCallV2::from((request, dynamic_routing_request)));
@@ -532,6 +535,9 @@ pub async fn hybrid_routing_evaluate(
     };
 
     let dynamic_request = recorded_request.dynamic_routing_request.as_ref();
+    let (payment_method, payment_method_type) = dynamic_request
+        .map(|request| request.instrument().analytics_columns())
+        .unwrap_or_default();
     let record_failure = |error_code: String, error_message: String, error: serde_json::Value| {
         DomainAnalyticsEvent::record_error(
             AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::RoutingHybridError),
@@ -580,8 +586,8 @@ pub async fn hybrid_routing_evaluate(
                 global_request_id.clone(),
                 trace_id.clone(),
                 Some("hybrid_routed".to_string()),
-                dynamic_request.map(|request| request.payment_method_type().to_string()),
-                dynamic_request.map(|request| request.payment_method().to_string()),
+                payment_method_type.clone(),
+                payment_method.clone(),
                 auth_type.clone(),
                 dynamic_request.and_then(|request| request.card_network()),
                 dynamic_request.map(|request| request.currency()),

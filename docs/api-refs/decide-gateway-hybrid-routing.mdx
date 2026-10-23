@@ -22,8 +22,8 @@ curl --location "$BASE_URL/decide-gateway" \
       "amount": 1000,
       "currency": "USD",
       "paymentType": "ORDER_PAYMENT",
-      "paymentMethodType": "CARD",
-      "paymentMethod": "DEBIT",
+      "paymentMethod": "CARD",
+      "paymentMethodType": "DEBIT",
       "authType": "THREE_DS",
       "metadata": "{\"merchant_category_code\":\"merchant_category_code_0001\",\"acquirer_country\":\"US\",\"co_badged_card_data\":{\"co_badged_card_networks\":[\"VISA\",\"NYCE\",\"PULSE\",\"STAR\"],\"issuer_country\":\"US\",\"is_regulated\":false,\"regulated_name\":null,\"card_type\":\"debit\"}}"
     }
@@ -50,4 +50,4 @@ curl --location "$BASE_URL/decide-gateway" \
 
 ## Multi-Objective Option
 
-When multi-objective routing is enabled (request field `enableMultiObjective`, or the `multi_objective_routing_enabled` merchant feature flag), a cost-aware post-step may re-rank the SR result and the response gains a `multi_objective_info` block. Details and examples: [Multi-objective routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-multi-objective.mdx).
+When multi-objective routing is enabled (request field `enableMultiObjective`, or the `cost_savings_enabled` merchant feature flag), a cost-aware post-step may re-rank the SR result and the response gains a `multi_objective_info` block. Details and examples: [Multi-objective routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-multi-objective.mdx).
