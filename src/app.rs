@@ -58,37 +58,51 @@ async fn ensure_request_id(mut request: Request<Body>, next: Next) -> Response {
     response
 }
 
-/// Counts every response to a route this service defines by route, method and status code and logs each 4xx/5xx with its request id; runs outermost so the auth layer's 401/403s are covered too.
+/// Count responses for matched routes without emitting an additional failure event.
 async fn record_api_response(request: Request<Body>, next: Next) -> Response {
-    // Only supported APIs carry a matched route; axum answers unknown paths itself, before this layer.
+    // Keep metric labels bounded to registered routes; unmatched requests still get completion logs.
     let route = request
         .extensions()
         .get::<axum::extract::MatchedPath>()
         .map(|path| path.as_str().to_owned());
     let method = request.method().to_string();
-    let started_at = Instant::now();
     let response = next.run(request).await;
     if let Some(route) = route {
         let status = response.status();
         crate::metrics::API_RESPONSE_COUNTER
             .with_label_values(&[route.as_str(), method.as_str(), status.as_str()])
             .inc();
-        if status.is_client_error() || status.is_server_error() {
-            // One flat, greppable line per failure carrying the id the client received, so a count on the dashboard turns into request ids in the logs.
-            let request_id = response
-                .headers()
-                .get(storage::consts::X_REQUEST_ID)
-                .and_then(|value| value.to_str().ok())
-                .unwrap_or("unknown");
-            let latency_ms = started_at.elapsed().as_millis() as u64;
-            if status.is_server_error() {
-                logger::error!(route = %route, method = %method, status_code = status.as_u16(), request_id = %request_id, latency_ms, "api_response_failed");
-            } else {
-                logger::warn!(route = %route, method = %method, status_code = status.as_u16(), request_id = %request_id, latency_ms, "api_response_failed");
-            }
-        }
     }
     response
+}
+
+/// Generate IDs before tracing and keep request logs outside authentication.
+fn with_request_logging<S>(router: axum::Router<S>) -> axum::Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    let middleware = ServiceBuilder::new()
+        .layer(middleware::from_fn(ensure_request_id))
+        .layer(
+            tower_trace::TraceLayer::new_for_http()
+                .make_span_with(|request: &Request<_>| utils::record_fields_from_header(request))
+                .on_request(tower_trace::DefaultOnRequest::new().level(tracing::Level::INFO))
+                .on_response(
+                    |response: &Response, latency: std::time::Duration, span: &tracing::Span| {
+                        span.in_scope(|| {
+                            logger::info!(
+                                status_code = response.status().as_u16(),
+                                latency_ms = latency.as_millis() as u64,
+                                "finished processing request"
+                            );
+                        });
+                    },
+                )
+                // Application errors are logged at their source; completion records status.
+                .on_failure(()),
+        )
+        .layer(middleware::from_fn(record_api_response));
+    router.layer(middleware)
 }
 
 fn generate_request_id_header_value() -> HeaderValue {
@@ -748,33 +762,14 @@ where
         .merge(protected_router)
         .merge(public_router);
 
-    let middleware = ServiceBuilder::new()
-        .layer(middleware::from_fn(record_api_response))
-        .layer(middleware::from_fn(ensure_request_id))
-        .layer(middleware::from_fn_with_state(
-            global_app_state.clone(),
-            capture_api_event,
-        ))
-        .layer(
-            tower_trace::TraceLayer::new_for_http()
-                .make_span_with(|request: &Request<_>| utils::record_fields_from_header(request))
-                .on_request(tower_trace::DefaultOnRequest::new().level(tracing::Level::INFO))
-                .on_response(
-                    tower_trace::DefaultOnResponse::new()
-                        .level(tracing::Level::INFO)
-                        .latency_unit(tower_http::LatencyUnit::Micros),
-                )
-                .on_failure(
-                    tower_trace::DefaultOnFailure::new()
-                        .latency_unit(tower_http::LatencyUnit::Micros)
-                        .level(tracing::Level::ERROR),
-                ),
-        );
-
-    let router = router
-        .nest("/health", routes::health::serve())
-        .layer(middleware)
-        .with_state(global_app_state.clone());
+    let router =
+        router
+            .nest("/health", routes::health::serve())
+            .layer(middleware::from_fn_with_state(
+                global_app_state.clone(),
+                capture_api_event,
+            ));
+    let router = with_request_logging(router).with_state(global_app_state.clone());
 
     logger::info!(
         category = "SERVER",

@@ -12,8 +12,8 @@
 //! `sync` then writes ancestry forward (onto each scope) and rebuilds the reverse indexes. It
 //! is idempotent — re-running with an unchanged tree reports zero changes.
 
+use crate::custom_extractors::Json;
 use axum::http::HeaderMap;
-use axum::Json;
 use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};

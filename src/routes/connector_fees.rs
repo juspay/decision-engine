@@ -7,9 +7,9 @@
 
 use std::collections::{BTreeSet, HashMap};
 
+use crate::custom_extractors::Json;
 use axum::extract::Path;
 use axum::http::StatusCode;
-use axum::Json;
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Iso8601;
 
@@ -17,6 +17,7 @@ use crate::config::ClickHouseAnalyticsConfig;
 use crate::cost_ingestion::blended::{self, ConnectorBlend};
 use crate::cost_ingestion::overrides::{self, FeeOverride};
 use crate::cost_ingestion::{creds, serving};
+use crate::error::TextError;
 
 /// One connector's fee picture for the dashboard.
 #[derive(Debug, Serialize)]
@@ -56,7 +57,7 @@ pub(crate) fn clickhouse_config() -> Result<ClickHouseAnalyticsConfig, (StatusCo
 /// `GET /merchant-account/:merchant_id/connector-fees`
 pub async fn list_connector_fees(
     Path(merchant_id): Path<String>,
-) -> Result<Json<Vec<ConnectorFee>>, (StatusCode, String)> {
+) -> Result<Json<Vec<ConnectorFee>>, TextError> {
     let cfg = clickhouse_config()?;
 
     // Three sources, each keyed by lowercase connector: the fitted-model blend, manual overrides,
@@ -152,7 +153,7 @@ pub struct FeeOverrideResponse {
 pub async fn set_fee_override(
     Path((merchant_id, connector)): Path<(String, String)>,
     Json(body): Json<SetFeeOverrideRequest>,
-) -> Result<Json<FeeOverrideResponse>, (StatusCode, String)> {
+) -> Result<Json<FeeOverrideResponse>, TextError> {
     // A fee can't be negative; guard so a typo can't flip EV ranking into nonsense.
     if !body.pct_bps.is_finite()
         || !body.fixed.is_finite()
@@ -162,7 +163,8 @@ pub async fn set_fee_override(
         return Err((
             StatusCode::BAD_REQUEST,
             "pct_bps and fixed must be finite and non-negative".to_string(),
-        ));
+        )
+            .into());
     }
     let connector = connector.to_lowercase();
     let updated_at = time::OffsetDateTime::now_utc()
@@ -194,7 +196,7 @@ pub async fn set_fee_override(
 /// `DELETE /merchant-account/:merchant_id/connectors/:connector/fee-override`
 pub async fn delete_fee_override(
     Path((merchant_id, connector)): Path<(String, String)>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<StatusCode, TextError> {
     let connector = connector.to_lowercase();
     overrides::delete(&merchant_id, &connector)
         .await

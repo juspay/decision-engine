@@ -10,15 +10,16 @@
 //! cleanly onto the dashboard's editable table. Rows are (de)normalized to/from the nested
 //! `Vec<SeedCostEntry>` the resolver consumes.
 
+use crate::custom_extractors::Json;
 use axum::extract::Path;
 use axum::http::StatusCode;
-use axum::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::app::get_tenant_app_state;
 use crate::config::{fee_components, SeedCostEntry, SeedCostTier, SeedFeeModel};
 use crate::decider::gatewaydecider::multi_objective::cluster_key::ClusterKey;
 use crate::decider::gatewaydecider::multi_objective::{seed_costs, seed_store};
+use crate::error::TextError;
 
 /// One row of the merchant's seed table: a PSP's fee for one card scenario, split into the contract
 /// components (interchange / scheme / markup, all bps) plus the flat `fixed` per-transaction fee.
@@ -171,7 +172,7 @@ fn rows_to_entries(rows: Vec<SeedCostRow>) -> Vec<SeedCostEntry> {
 /// (their saved edits, else the config default).
 pub async fn get_seed_costs(
     Path(merchant_id): Path<String>,
-) -> Result<Json<Vec<SeedCostRow>>, (StatusCode, String)> {
+) -> Result<Json<Vec<SeedCostRow>>, TextError> {
     let app_state = get_tenant_app_state().await;
     let entries =
         seed_store::effective_seed_entries(&merchant_id, &app_state.config.hypersense).await;
@@ -187,20 +188,22 @@ pub struct SaveSeedCostsRequest {
 pub async fn set_seed_costs(
     Path(merchant_id): Path<String>,
     Json(body): Json<SaveSeedCostsRequest>,
-) -> Result<Json<Vec<SeedCostRow>>, (StatusCode, String)> {
+) -> Result<Json<Vec<SeedCostRow>>, TextError> {
     for r in &body.rows {
         if r.psp.trim().is_empty() {
             return Err((
                 StatusCode::BAD_REQUEST,
                 "each row must name a PSP".to_string(),
-            ));
+            )
+                .into());
         }
         for v in [r.interchange_bps, r.scheme_bps, r.markup_bps, r.fixed] {
             if !v.is_finite() || v < 0.0 {
                 return Err((
                     StatusCode::BAD_REQUEST,
                     "fee components and fixed fee must be finite and non-negative".to_string(),
-                ));
+                )
+                    .into());
             }
         }
     }
@@ -215,7 +218,7 @@ pub async fn set_seed_costs(
 /// default; returns the default table.
 pub async fn delete_seed_costs(
     Path(merchant_id): Path<String>,
-) -> Result<Json<Vec<SeedCostRow>>, (StatusCode, String)> {
+) -> Result<Json<Vec<SeedCostRow>>, TextError> {
     seed_store::delete_seed_table(&merchant_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
@@ -265,12 +268,13 @@ pub struct SimulateRow {
 pub async fn simulate_seed_costs(
     Path(merchant_id): Path<String>,
     Json(body): Json<SimulateRequest>,
-) -> Result<Json<Vec<SimulateRow>>, (StatusCode, String)> {
+) -> Result<Json<Vec<SimulateRow>>, TextError> {
     if !body.amount.is_finite() || body.amount <= 0.0 {
         return Err((
             StatusCode::BAD_REQUEST,
             "amount must be a positive number".to_string(),
-        ));
+        )
+            .into());
     }
     let app_state = get_tenant_app_state().await;
     let entries =

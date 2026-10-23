@@ -1,4 +1,4 @@
-use axum::Json;
+use crate::custom_extractors::Json;
 use error_stack::ResultExt;
 use serde::{Deserialize, Serialize};
 

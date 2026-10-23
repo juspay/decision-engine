@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
-use axum::{routing::post, Json};
+use crate::custom_extractors::Json;
+use axum::{routing::post};
 
 #[cfg(feature = "limit")]
 use axum::{error_handling::HandleErrorLayer, response::IntoResponse};

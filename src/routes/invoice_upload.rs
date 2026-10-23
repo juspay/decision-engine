@@ -15,6 +15,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::cost_ingestion::invoice::{self, StoredAddon};
+use crate::error::TextError;
 
 use super::connector_fees::clickhouse_config;
 
@@ -71,15 +72,16 @@ pub async fn upload_invoice(
     Path((merchant_id, connector)): Path<(String, String)>,
     Query(params): Query<InvoiceParams>,
     body: Bytes, // buffered: invoices are small
-) -> Result<Json<InvoiceUploadResponse>, (StatusCode, String)> {
+) -> Result<Json<InvoiceUploadResponse>, TextError> {
     if body.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "empty invoice body".to_string()));
+        return Err((StatusCode::BAD_REQUEST, "empty invoice body".to_string()).into());
     }
     if body.len() > MAX_INVOICE_BYTES {
         return Err((
             StatusCode::PAYLOAD_TOO_LARGE,
             format!("invoice exceeds {MAX_INVOICE_BYTES} byte limit"),
-        ));
+        )
+            .into());
     }
 
     let cfg = clickhouse_config()?;
@@ -131,7 +133,7 @@ pub struct AddonDto {
 /// `GET /merchant-account/:merchant_id/invoice-addons` — the invoice add-ons in effect.
 pub async fn list_addons(
     Path(merchant_id): Path<String>,
-) -> Result<Json<Vec<AddonDto>>, (StatusCode, String)> {
+) -> Result<Json<Vec<AddonDto>>, TextError> {
     let list = invoice::store::list(&merchant_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
@@ -146,7 +148,7 @@ pub async fn list_addons(
 /// revert this merchant's served models to the learned-only cost.
 pub async fn delete_addon(
     Path((merchant_id, connector)): Path<(String, String)>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<StatusCode, TextError> {
     let connector = connector.to_lowercase();
     invoice::store::delete(&merchant_id, &connector)
         .await
@@ -159,7 +161,7 @@ pub async fn delete_addon(
 /// invoice: coverage before/after and the remaining residual (architecture "Step 2").
 pub async fn get_reconciliation(
     Path(merchant_id): Path<String>,
-) -> Result<Json<Vec<invoice::Reconciliation>>, (StatusCode, String)> {
+) -> Result<Json<Vec<invoice::Reconciliation>>, TextError> {
     let cfg = clickhouse_config()?;
     let recon = invoice::reconcile_merchant(&cfg, &merchant_id)
         .await

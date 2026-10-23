@@ -1,9 +1,10 @@
 use crate::app::get_tenant_app_state;
 use crate::auth;
+use crate::custom_extractors::Json;
 use crate::error::{self, ApiKeyError};
 use crate::storage::types::{MerchantApiKey, MerchantApiKeyNew, MerchantApiKeyRevoke};
 use crate::utils::date_time;
-use axum::{extract::Path, Json};
+use axum::extract::Path;
 use diesel::associations::HasTable;
 use diesel::ExpressionMethods;
 use serde::{Deserialize, Serialize};

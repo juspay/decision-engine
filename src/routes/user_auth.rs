@@ -1,5 +1,6 @@
 use crate::app::{get_tenant_app_state, APP_STATE};
 use crate::auth::{self, TOKEN_TYPE_HS_REDIRECT, TOKEN_TYPE_STANDARD, TOKEN_TYPE_SUPER_ADMIN_VIEW};
+use crate::custom_extractors::Json;
 use crate::error::{self, ContainerError, ResultContainerExt, UserAuthError};
 use crate::storage::types::{
     MerchantAccountNew, NewUser, NewUserMerchant, User, UserEmailVerifiedUpdate, UserMerchant,
@@ -10,7 +11,6 @@ use crate::types::merchant::merchant_account::load_merchant_by_merchant_id;
 use crate::utils::date_time;
 use axum::extract::Query;
 use axum::http::HeaderMap;
-use axum::Json;
 use diesel::associations::HasTable;
 use diesel::{BoolExpressionMethods, ExpressionMethods};
 use error_stack::ResultExt;

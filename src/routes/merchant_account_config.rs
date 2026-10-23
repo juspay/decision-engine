@@ -1,10 +1,11 @@
 use crate::app::APP_STATE;
+use crate::custom_extractors::Json;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::redis::types::{FeatureConf, MerchantFeature as FeatureMerchant};
 use crate::types::merchant as ETM;
 use crate::types::service_configuration;
 use crate::{error, logger};
-use axum::{extract::Path, http::HeaderMap, Json};
+use axum::{extract::Path, http::HeaderMap};
 use error_stack::ResultExt;
 use masking::PeekInterface;
 use serde::{Deserialize, Serialize};

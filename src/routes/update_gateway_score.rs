@@ -113,10 +113,15 @@ pub async fn update_gateway_score(
         .inc();
 
     let headers = req.headers();
-    for (name, value) in headers.iter() {
-        let value = masking::Secret::<_>::new(value);
-        crate::logger::debug!(tag = "UpdateGatewayScore", "Header: {}: {:?}", name, value);
-    }
+    // Mask values by default and consolidate header diagnostics into one event.
+    crate::logger::debug!(
+        tag = "UpdateGatewayScore",
+        headers = ?headers
+            .keys()
+            .map(|name| (name.as_str(), "**MASKED**"))
+            .collect::<std::collections::BTreeMap<_, _>>(),
+        "Incoming request headers"
+    );
     let body = match crate::routes::body::read_request_body(req.into_body()).await {
         Ok(body) => {
             crate::logger::debug!(tag = "UpdateGatewayScore", "Body: {:?}", body);
@@ -124,7 +129,6 @@ pub async fn update_gateway_score(
             body
         }
         Err(e) => {
-            crate::logger::debug!(tag = "UpdateGatewayScore", "Error: {:?}", e);
             let (error_code, error_message) = e.analytics_code_and_message();
             crate::analytics::DomainAnalyticsEvent::record_error(
                 crate::analytics::AnalyticsFlowContext::new(
@@ -159,6 +163,13 @@ pub async fn update_gateway_score(
             let merchant_id = payload.merchant_id.clone();
             let gateway = payload.gateway.clone();
             let payment_id = payload.payment_id.clone();
+            let span = tracing::Span::current();
+            if !merchant_id.is_empty() {
+                span.record("merchant_id", merchant_id.as_str());
+            }
+            if !payment_id.is_empty() {
+                span.record("payment_id", payment_id.as_str());
+            }
             crate::analytics::DomainAnalyticsEvent::record_request_hit(
                 crate::analytics::AnalyticsFlowContext::new(
                     crate::analytics::ApiFlow::DynamicRouting,
@@ -347,7 +358,6 @@ pub async fn update_gateway_score(
             Ok(Json(response))
         }
         Err(e) => {
-            crate::logger::debug!(tag = "UpdateScoreRequest", "Error: {:?}", e);
             let error_response = request_parse_error_response(&e);
             crate::analytics::DomainAnalyticsEvent::record_error(
                 crate::analytics::AnalyticsFlowContext::new(

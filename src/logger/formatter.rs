@@ -18,7 +18,6 @@ use crate::logger;
 
 use super::env::get_env_var;
 use super::storage::Storage;
-use time::format_description::well_known::Iso8601;
 use tracing::{Event, Metadata, Subscriber};
 use tracing_subscriber::{
     fmt::MakeWriter,
@@ -39,8 +38,6 @@ const SERVICE: &str = "service";
 const LINE: &str = "line";
 const FILE: &str = "file";
 const FN: &str = "fn";
-const FULL_NAME: &str = "full_name";
-const TIME: &str = "time";
 
 /// Set of predefined implicit keys.
 pub static IMPLICIT_KEYS: Lazy<rustc_hash::FxHashSet<&str>> = Lazy::new(|| {
@@ -54,10 +51,23 @@ pub static IMPLICIT_KEYS: Lazy<rustc_hash::FxHashSet<&str>> = Lazy::new(|| {
     set.insert(LINE);
     set.insert(FILE);
     set.insert(FN);
-    set.insert(FULL_NAME);
-    set.insert(TIME);
 
     set
+});
+
+/// Fields handled by the formatter rather than copied as custom JSON fields.
+/// Keep separate from IMPLICIT_KEYS so message and schema fields remain recordable.
+static FORMATTER_MANAGED_KEYS: Lazy<rustc_hash::FxHashSet<&'static str>> = Lazy::new(|| {
+    let mut keys = IMPLICIT_KEYS.clone();
+    keys.extend([
+        "message",
+        "timestamp",
+        "@timestamp",
+        "source_commit",
+        "env",
+        "message_number",
+    ]);
+    keys
 });
 
 /// Global counter for auto-incrementing message numbers
@@ -189,16 +199,10 @@ where
     {
         // Define specific keys for "Incoming_api" and "DOMAIN" categories.
         let incoming_api_keys = [
-            "udf_order_id",
-            "udf_customer_id",
-            "udf_txn_uuid",
             "x-request-id",
             "x-global-request-id",
             "merchant_id",
-            "sdk_session_span",
-            "timestamp",
             "hostname",
-            "action",
             "partitionKey",
             "category",
             "entity",
@@ -208,15 +212,10 @@ where
             "gc_time",
             "bytes_allocated",
             "schema_version",
-            "tenant_name",
             "tenant_id",
             "resp_code",
             "url",
-            "cell_selector",
-            "gateway",
             "cell_id",
-            "is_audit_trail_log",
-            "is_art_enabled",
             "error_category",
             "error_code",
         ];
@@ -224,42 +223,17 @@ where
         let domain_keys = [
             "message_number",
             "error_category",
-            "error",
             "error_message",
-            "jp_error_code",
-            "jp_error_message",
-            "source",
             "x-request-id",
-            "endpoint",
-            "upstream_request_id",
-            "upstream_code",
-            "upstream_message",
-            "response_body",
             "env",
             "@timestamp",
-            "udf_txn_uuid",
-            "txn_uuid",
-            "flow_guid",
-            "action",
-            "is_audit_trail_log",
-            "euler-request-id",
-            "tenant_name",
             "hostname",
-            "cluster",
             "level",
             "merchant_id",
-            "udf_order_id",
-            "is_art_enabled",
             "schema_version",
             "message",
-            "gateway",
-            "error_reason",
-            "config_version",
             "category",
             "tenant_id",
-            "timestamp",
-            "sdk_session_span",
-            "tag",
         ];
 
         // Read the category from storage (default is "DOMAIN").
@@ -273,13 +247,39 @@ where
         // Initialize the explicit entries set.
         let mut explicit_entries_set: HashSet<&str> = HashSet::default();
 
+        let is_custom_field = |key: &str| !FORMATTER_MANAGED_KEYS.contains(key);
+        for (key, value) in &storage.values {
+            if is_custom_field(key) {
+                map_serializer.serialize_entry(key, value)?;
+                explicit_entries_set.insert(key);
+            }
+        }
+        if category != "INCOMING_API" {
+            map_serializer.serialize_entry("message", &get_normalized_message::<W>(storage))?;
+            explicit_entries_set.insert("message");
+        }
+
+        if let Some(span) = span {
+            let extensions = span.extensions();
+            if let Some(visitor) = extensions.get::<Storage<'_>>() {
+                for (key, value) in &visitor.values {
+                    if is_custom_field(key) && !explicit_entries_set.contains(key) {
+                        map_serializer.serialize_entry(key, value)?;
+                        explicit_entries_set.insert(key);
+                    }
+                }
+            }
+        }
+
         if category == "INCOMING_API" {
             // Serialize keys from the span that match the incoming_api keys array.
             if let Some(span) = span {
                 let extensions = span.extensions();
                 if let Some(visitor) = extensions.get::<Storage<'_>>() {
                     for key in &incoming_api_keys {
-                        if let Some(value) = visitor.values.get(*key) {
+                        if let Some(value) = visitor.values.get(*key).filter(|_| {
+                            is_custom_field(key) && !explicit_entries_set.contains(*key)
+                        }) {
                             map_serializer.serialize_entry(*key, value)?;
                             explicit_entries_set.insert(*key);
                         }
@@ -289,7 +289,7 @@ where
 
             // Serialize keys from storage that are not already in explicit_entries_set.
             for key in &incoming_api_keys {
-                if !explicit_entries_set.contains(*key) {
+                if is_custom_field(key) && !explicit_entries_set.contains(*key) {
                     if let Some(value) = storage.values.get(*key) {
                         map_serializer.serialize_entry(*key, value)?;
                         explicit_entries_set.insert(*key);
@@ -317,9 +317,6 @@ where
                 let error_info = serde_json::json!({
                     "error_code": storage.values.get("error_code").unwrap_or(&Value::String("null".to_string())),
                     "error_message": storage.values.get("error_message").unwrap_or(&Value::String("null".to_string())),
-                    "jp_error_code": storage.values.get("jp_error_code").unwrap_or(&Value::String("null".to_string())),
-                    "jp_error_message": storage.values.get("jp_error_message").unwrap_or(&Value::String("null".to_string())),
-                    "source": storage.values.get("source").unwrap_or(&Value::String("null".to_string())),
                 });
                 message
                     .as_object_mut()
@@ -368,7 +365,9 @@ where
                 let extensions = span.extensions();
                 if let Some(visitor) = extensions.get::<Storage<'_>>() {
                     for key in &domain_keys {
-                        if let Some(value) = visitor.values.get(*key) {
+                        if let Some(value) = visitor.values.get(*key).filter(|_| {
+                            is_custom_field(key) && !explicit_entries_set.contains(*key)
+                        }) {
                             map_serializer.serialize_entry(*key, value)?;
                             explicit_entries_set.insert(*key);
                         }
@@ -378,7 +377,7 @@ where
 
             // Serialize keys from storage that are not already in explicit_entries_set.
             for key in &domain_keys {
-                if !explicit_entries_set.contains(*key) {
+                if is_custom_field(key) && !explicit_entries_set.contains(*key) {
                     if let Some(value) = storage.values.get(*key) {
                         if key == &"message" {
                             let normalized_value = get_normalized_message::<W>(storage);
@@ -444,46 +443,31 @@ where
                 map_serializer.serialize_entry("message", &normalized_value)?;
                 explicit_entries_set.insert("message");
             }
-
-            if !explicit_entries_set.contains("@timestamp") {
-                map_serializer.serialize_entry("@timestamp", &format_time_custom())?;
-                explicit_entries_set.insert("@timestamp");
-            }
-        }
-
-        if !explicit_entries_set.contains("is_art_enabled") {
-            map_serializer.serialize_entry("is_art_enabled", "false")?;
-            explicit_entries_set.insert("is_art_enabled");
         }
 
         // Serialize other common fields.
-        map_serializer.serialize_entry("timestamp", &format_time_custom())?;
-        map_serializer.serialize_entry("app_framework", "Rust")?;
+        if !explicit_entries_set.contains("@timestamp") {
+            map_serializer.serialize_entry("@timestamp", &format_time_custom())?;
+            explicit_entries_set.insert("@timestamp");
+        }
         map_serializer.serialize_entry("hostname", &self.hostname)?;
         map_serializer.serialize_entry("source_commit", &get_env_var("SOURCE_COMMIT", "NA"))?;
         if let Ok(env) = std::env::var("ENV") {
             map_serializer.serialize_entry("env", &env)?;
         }
 
-        if let Ok(source_commit) = std::env::var("SOURCE_COMMIT") {
-            map_serializer.serialize_entry("source_commit", &source_commit)?;
-        }
         map_serializer.serialize_entry(TARGET, metadata.target())?;
         map_serializer.serialize_entry(SERVICE, &self.service)?;
         map_serializer.serialize_entry(LINE, &metadata.line())?;
         map_serializer.serialize_entry(FILE, &metadata.file())?;
         if name != "?" {
             map_serializer.serialize_entry(FN, name)?;
-            map_serializer
-                .serialize_entry(FULL_NAME, &format!("{}::{}", metadata.target(), name))?;
         }
         map_serializer.serialize_entry(
             "message_number",
             &MESSAGE_NUMBER.fetch_add(1, Ordering::SeqCst),
         )?;
         explicit_entries_set.insert("message_number");
-        explicit_entries_set.insert("timestamp");
-        explicit_entries_set.insert("app_framework");
         explicit_entries_set.insert("source_commit");
         explicit_entries_set.insert("env");
         explicit_entries_set.insert("hostname");
@@ -492,7 +476,6 @@ where
         explicit_entries_set.insert(LINE);
         explicit_entries_set.insert(FILE);
         explicit_entries_set.insert(FN);
-        explicit_entries_set.insert(FULL_NAME);
 
         if category == "INCOMING_API" {
             for key in &incoming_api_keys {
@@ -508,10 +491,6 @@ where
                     explicit_entries_set.insert(*key); // optional, not needed beyond this
                 }
             }
-        }
-
-        if let Ok(time) = &time::OffsetDateTime::now_utc().format(&Iso8601::DEFAULT) {
-            map_serializer.serialize_entry(TIME, time)?;
         }
 
         explicit_entries_set.clear();
@@ -571,6 +550,16 @@ where
 
         let mut storage = Storage::default();
         event.record(&mut storage);
+        // Tracing carries JSON via Display; preserve error_info as a nested object.
+        if let Some(value) = storage.values.get_mut("error_info") {
+            if let Some(object) = value
+                .as_str()
+                .and_then(|raw| serde_json::from_str::<Value>(raw).ok())
+                .filter(Value::is_object)
+            {
+                *value = object;
+            }
+        }
 
         let name = span.map_or("?", SpanRef::name);
 
@@ -590,7 +579,6 @@ where
         .get("message")
         .or_else(|| storage.values.get("error"))
         .or_else(|| storage.values.get("error_message"))
-        .or_else(|| storage.values.get("jp_error_message"))
         .cloned()
         .unwrap_or(Value::String("null".to_string()));
 

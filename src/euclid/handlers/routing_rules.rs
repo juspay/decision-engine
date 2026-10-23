@@ -23,6 +23,7 @@ use crate::{
     types::service_configuration::{find_config_by_name, insert_config, update_config},
 };
 
+use crate::custom_extractors::Json;
 use crate::euclid::{
     errors::EuclidErrors,
     errors::ValidationErrorDetails,
@@ -30,7 +31,7 @@ use crate::euclid::{
 };
 use crate::generics::MeshError;
 use crate::{euclid::types::RoutingAlgorithm, logger, metrics};
-use axum::{extract::Path, response::IntoResponse, Json};
+use axum::{extract::Path, response::IntoResponse};
 use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods};
 use error_stack::ResultExt;
 

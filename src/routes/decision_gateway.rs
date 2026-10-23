@@ -28,6 +28,16 @@ impl IntoResponse for DecidedGatewayResponse {
 
 impl IntoResponse for ErrorResponse {
     fn into_response(self) -> axum::http::Response<axum::body::Body> {
+        crate::logger::error!(
+            error_message = %self.error_message,
+            error_code = %self.error_code,
+            error_info = %serde_json::json!({
+                "code": self.error_info.code,
+                "user_message": self.error_info.user_message,
+                "developer_message": self.error_info.developer_message,
+            }),
+            "Routing request failed"
+        );
         let body = serde_json::to_string(&self).unwrap();
         axum::http::Response::builder()
             .status(StatusCode::BAD_REQUEST)
@@ -144,14 +154,6 @@ where
 
             let merchant_id_txt = crate::types::merchant::id::merchant_id_to_text(merchant_id);
             tracing::Span::current().record("merchant_id", merchant_id_txt.clone());
-            tracing::Span::current().record("udf_txn_uuid", payload.txnDetail.txnUuid.clone());
-            tracing::Span::current().record("txn_uuid", payload.txnDetail.txnUuid.clone());
-            tracing::Span::current()
-                .record("udf_order_id", payload.orderReference.orderId.0.as_str());
-            tracing::Span::current().record(
-                "is_audit_trail_log",
-                payload.shouldConsumeResult.unwrap_or(false),
-            );
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
 
