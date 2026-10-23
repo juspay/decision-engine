@@ -113,65 +113,65 @@ impl axum::response::IntoResponse for RuleConfigurationError {
         match self {
             Self::StorageError => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "Storage error".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
             Self::DeserializationError => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "Failed to deserialize configuration".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
             Self::InvalidRuleConfiguration => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "Invalid routing rule configuration".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
             Self::MerchantNotFound => (
                 hyper::StatusCode::NOT_FOUND,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "MerchantId not found".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
             Self::ConfigurationNotFound => (
                 hyper::StatusCode::NOT_FOUND,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "Rule configuration not found".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
             Self::ConfigurationAlreadyExists => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "Rule configuration already exists".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
             Self::DebitRoutingNotEnabled => (
                 hyper::StatusCode::FORBIDDEN,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_05,
                     "Debit routing not enabled for merchant".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
         }
@@ -201,65 +201,65 @@ impl axum::response::IntoResponse for MerchantAccountConfigurationError {
         match self {
             Self::StorageError => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "Storage error".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
             Self::InvalidConfiguration => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "Invalid merchant account configuration".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
             Self::MerchantNotFound => (
                 hyper::StatusCode::NOT_FOUND,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "MerchantId not found".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
             Self::MerchantAlreadyExists => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "Merchant account already exists".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
             Self::MerchantDeletionFailed => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "Merchant account deletion failed".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
             Self::MerchantInsertionFailed => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "Merchant account insertion failed".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
             Self::Unauthorized => (
                 hyper::StatusCode::UNAUTHORIZED,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "Invalid or missing x-admin-secret header".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
         }
@@ -285,29 +285,29 @@ impl axum::response::IntoResponse for ApiKeyError {
         match self {
             Self::NotFound => (
                 hyper::StatusCode::NOT_FOUND,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "API key not found".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
             Self::MerchantNotFound => (
                 hyper::StatusCode::NOT_FOUND,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "Merchant not found".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
             Self::CreationFailed | Self::RevocationFailed | Self::StorageError => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     self.to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
         }
@@ -380,11 +380,7 @@ impl axum::response::IntoResponse for UserAuthError {
         };
         (
             status,
-            axum::Json(crate::error::ApiErrorResponse::new(
-                crate::error::error_codes::TE_04,
-                message,
-                None,
-            )),
+            crate::error::ApiErrorResponse::new(crate::error::error_codes::TE_04, message, None),
         )
             .into_response()
     }

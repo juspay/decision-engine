@@ -77,181 +77,181 @@ impl axum::response::IntoResponse for EuclidErrors {
         match self {
             Self::InvalidRuleConfiguration => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_04,
                     "Invalid routing rule configuration".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
 
             Self::InvalidRequestParameter(param) => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_04,
                     format!(
                     "Invalid parameter: {}",
                     param
                 ),
                     None,
-                )),
+                ),
             )
                 .into_response(),
 
             Self::FailedToValidateRoutingRule => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_04,
                     "Failed to validate the provided routing rule".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
 
             Self::InvalidRequest(msg) => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_04,
                     format!(
                     "Invalid request received : {}",
                     msg
                 ),
                     None,
-                )),
+                ),
             )
                 .into_response(),
 
             Self::GlobalRoutingConfigsUnavailable => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_04,
                     "Routing configurations not found".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
 
             Self::StorageError => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_04,
                     "Something went wrong".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
 
             Self::FailedToParseJsonInput => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_04,
                     "Failed to parse Json received in request".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
 
             Self::FailedToSerializeJsonToString => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_04,
                     "Failed to serialize Json ".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
 
             Self::ActiveRoutingAlgorithmNotFound(msg) => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_04,
                     format!(
                     "No active routing algorithm found for the created_by entity : {}",
                     msg
                 ),
                     None,
-                )),
+                ),
             )
                 .into_response(),
 
             Self::RoutingAlgorithmNotFound(msg) => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_04,
                     format!(
                     "Routing algorithm not found for the provided id : {}",
                     msg
                 ),
                     None,
-                )),
+                ),
             )
                 .into_response(),
 
             Self::RoutingAlgorithmNotActive(msg) => (
                 hyper::StatusCode::NOT_FOUND,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_04,
                     format!(
                     "Routing algorithm not active for merchant: {}",
                     msg
                 ),
                     None,
-                )),
+                ),
             )
                 .into_response(),
 
             Self::DefaultFallbackNotFound(creator_by) => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_04,
                     format!(
                     "Default fallback not found for the provided created_by id: {}",
                     creator_by
                 ),
                     None,
-                )),
+                ),
             )
                 .into_response(),
 
             Self::FailedToEvaluateOutput(msg) => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_04,
                     format!(
                     "Failed to evaluate output for algorithm kind : {}",
                     msg
                 ),
                     None,
-                )),
+                ),
             ).into_response(),
 
             Self::RoutingInterpretationFailed => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_04,
                     "unable to evaluate output for routing algorithm against the provided parameters".to_string(),
                     None,
-                )),
+                ),
             )
                 .into_response(),
 
             Self::InvalidSrDimensionConfig(msg) => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_04,
                     msg,
                     None,
-                )),
+                ),
             )
                 .into_response(),
 
             Self::FieldValidationFailed(msg) => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_04,
                     format!("Field validation failed: {}", msg),
                     None,
-                )),
+                ),
             )
                 .into_response(),
         }

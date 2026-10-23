@@ -4,7 +4,8 @@ use std::collections::HashMap;
 
 use axum::extract::{Path, Query};
 use axum::http::{HeaderMap, StatusCode};
-use axum::{Extension, Json};
+use axum::Extension;
+use axum::Json;
 use futures::FutureExt;
 use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
@@ -15,6 +16,7 @@ use crate::analytics::models::{
 };
 use crate::auth::AuthContext;
 use crate::decider::gatewaydecider::volume_commitment;
+use crate::error::TextError;
 use volume_commitment::controller::{self, RunReport};
 use volume_commitment::{math, Commitment, CommitmentInputs, Deps, SteeringPlan};
 
@@ -82,7 +84,7 @@ pub async fn run_forecast(
     headers: HeaderMap,
     session: Option<Extension<AuthContext>>,
     Query(query): Query<RunQuery>,
-) -> Result<Json<RunReport>, (StatusCode, String)> {
+) -> Result<Json<RunReport>, TextError> {
     authorize_run(
         presents_admin_secret(&headers),
         session.as_ref().map(|Extension(context)| context),
@@ -95,7 +97,8 @@ pub async fn run_forecast(
         return Err((
             StatusCode::SERVICE_UNAVAILABLE,
             "volume commitment is not configured in this process".to_string(),
-        ));
+        )
+            .into());
     };
 
     let Some(merchant_id) = query.merchant_id else {
@@ -226,7 +229,6 @@ pub struct VolumeCommitmentView {
 /// Render a plan as the dashboard view of it. Shared by the live view, which reads the stored
 /// plan, and the projection, which computes one it never stores — so the two can never describe
 /// the same plan differently.
-
 fn view_from_plan(
     merchant_id: String,
     inputs: &CommitmentInputs,
@@ -356,7 +358,7 @@ async fn pacing_view(merchant_id: String) -> VolumeCommitmentView {
 /// forecast is filed, and the feature flag is left exactly as it was.
 pub async fn get_projection(
     Path(merchant_id): Path<String>,
-) -> Result<Json<VolumeCommitmentView>, (StatusCode, String)> {
+) -> Result<Json<VolumeCommitmentView>, TextError> {
     let Some(deps) = volume_commitment::deps() else {
         return Ok(Json(inactive(merchant_id)));
     };
@@ -744,7 +746,7 @@ async fn dashboard_parts(
 pub async fn get_dashboard(
     Path(merchant_id): Path<String>,
     Query(query): Query<SeriesQuery>,
-) -> Result<Json<DashboardResponse>, (StatusCode, String)> {
+) -> Result<Json<DashboardResponse>, TextError> {
     let empty_series = || SeriesResponse {
         merchant_id: merchant_id.clone(),
         currency: None,
@@ -868,7 +870,7 @@ pub struct ImpactResponse {
 pub async fn get_impact(
     Path(merchant_id): Path<String>,
     Query(query): Query<RunScopedQuery>,
-) -> Result<Json<ImpactResponse>, (StatusCode, String)> {
+) -> Result<Json<ImpactResponse>, TextError> {
     let not_active = || {
         (
             StatusCode::NOT_FOUND,
@@ -876,10 +878,10 @@ pub async fn get_impact(
         )
     };
     let Some(deps) = volume_commitment::deps() else {
-        return Err(not_active());
+        return Err(not_active().into());
     };
     let Some(inputs) = deps.inputs.load(&merchant_id).await else {
-        return Err(not_active());
+        return Err(not_active().into());
     };
 
     let (eliminated, steering): (Vec<String>, Vec<String>) =
@@ -897,7 +899,7 @@ pub async fn get_impact(
 
     let commitments = commitments_for_run(&inputs.commitments, query.run_id.as_deref());
     let Some(first) = commitments.first() else {
-        return Err(not_active());
+        return Err(not_active().into());
     };
     // PSP contracts share a cycle in practice; where they do not, the reported window is the
     // widest span so every connector's traffic is inside it. The figures below are still measured
@@ -1073,7 +1075,7 @@ pub struct SamplesResponse {
 /// From that point it is an ordinary contract and the ordinary engine paces it.
 pub async fn get_samples(
     Path(merchant_id): Path<String>,
-) -> Result<Json<SamplesResponse>, (StatusCode, String)> {
+) -> Result<Json<SamplesResponse>, TextError> {
     let Some(deps) = volume_commitment::deps() else {
         return Ok(Json(SamplesResponse {
             merchant_id,

@@ -5,7 +5,6 @@ use axum::{
     extract::FromRequestParts,
     http::{request::Parts, StatusCode},
     response::{IntoResponse, Response},
-    Json,
 };
 
 use crate::{
@@ -54,13 +53,18 @@ where
             .get::<AuthContext>()
             .cloned()
             .ok_or_else(|| {
+                crate::logger::error!(
+                    error_message = "Analytics access requires JWT or API key authentication",
+                    error_code = crate::error::error_codes::TE_03,
+                    "Analytics authentication failed"
+                );
                 (
                     StatusCode::UNAUTHORIZED,
-                    Json(crate::error::ApiErrorResponse::new(
+                    crate::error::ApiErrorResponse::new(
                         crate::error::error_codes::TE_03,
                         "Analytics access requires JWT or API key authentication".to_string(),
                         None,
-                    )),
+                    ),
                 )
                     .into_response()
             })?;

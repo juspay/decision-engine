@@ -233,6 +233,13 @@ pub async fn hybrid_routing_evaluate(
                 .as_ref()
                 .and_then(|request| request.payment_id.clone())
         });
+    let span = tracing::Span::current();
+    if let Some(value) = merchant_id.as_deref().filter(|value| !value.is_empty()) {
+        span.record("merchant_id", value);
+    }
+    if let Some(value) = payment_id.as_deref().filter(|value| !value.is_empty()) {
+        span.record("payment_id", value);
+    }
     let auth_type = dynamic_routing_request
         .as_ref()
         .and_then(|request| request.auth_type());

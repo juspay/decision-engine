@@ -3,7 +3,7 @@ use crate::auth;
 use crate::custom_extractors::TenantStateResolver;
 use crate::error::{self, ContainerError};
 use axum::body::Body;
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use axum::{http::Request, http::StatusCode, middleware::Next};
 use diesel::ExpressionMethods;
 use masking::PeekInterface;
@@ -32,7 +32,12 @@ pub async fn authenticate(
 ) -> Result<Response<Body>, ContainerError<error::ApiError>> {
     let app_state = match APP_STATE.get() {
         Some(s) => s,
-        None => return Ok((StatusCode::INTERNAL_SERVER_ERROR, "Server not ready").into_response()),
+        None => {
+            return Ok(crate::error::text_error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Server not ready",
+            ))
+        }
     };
     let mut req = req;
 
@@ -68,18 +73,20 @@ pub async fn authenticate(
                     auth::access::required_permission(req.method(), matched_path.as_deref());
 
                 if !context.allows(&required) {
-                    return Ok((
+                    return Ok(crate::error::text_error_response(
                         StatusCode::FORBIDDEN,
                         format!("This session does not have {}", required.as_str()),
-                    )
-                        .into_response());
+                    ));
                 }
 
                 req.extensions_mut().insert(context);
                 return Ok(next.run(req).await);
             }
             Err(_) => {
-                return Ok((StatusCode::UNAUTHORIZED, "Invalid or expired token").into_response())
+                return Ok(crate::error::text_error_response(
+                    StatusCode::UNAUTHORIZED,
+                    "Invalid or expired token",
+                ))
             }
         }
     }
@@ -98,7 +105,10 @@ pub async fn authenticate(
         if !expected.is_empty() && provided == expected {
             return Ok(next.run(req).await);
         }
-        return Ok((StatusCode::UNAUTHORIZED, "Invalid admin secret").into_response());
+        return Ok(crate::error::text_error_response(
+            StatusCode::UNAUTHORIZED,
+            "Invalid admin secret",
+        ));
     }
 
     if !app_state.global_config.api_key_auth_enabled {
@@ -108,11 +118,10 @@ pub async fn authenticate(
     let api_key = match req.headers().get("x-api-key").and_then(|v| v.to_str().ok()) {
         Some(k) => k.to_owned(),
         None => {
-            return Ok((
+            return Ok(crate::error::text_error_response(
                 StatusCode::UNAUTHORIZED,
                 "Missing authentication credentials",
-            )
-                .into_response())
+            ))
         }
     };
 
@@ -123,7 +132,10 @@ pub async fn authenticate(
         match crate::tenant::GlobalAppState::get_app_state_of_tenant(app_state, "public").await {
             Ok(s) => s,
             Err(_) => {
-                return Ok((StatusCode::INTERNAL_SERVER_ERROR, "Tenant not found").into_response())
+                return Ok(crate::error::text_error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Tenant not found",
+                ))
             }
         };
 
@@ -171,7 +183,10 @@ pub async fn authenticate(
             };
 
             if !is_active {
-                return Ok((StatusCode::UNAUTHORIZED, "API key is revoked").into_response());
+                return Ok(crate::error::text_error_response(
+                    StatusCode::UNAUTHORIZED,
+                    "API key is revoked",
+                ));
             }
 
             // Populate Redis cache
@@ -184,6 +199,9 @@ pub async fn authenticate(
                 .insert(auth::AuthContext::from_api_key(record.merchant_id));
             Ok(next.run(req).await)
         }
-        None => Ok((StatusCode::UNAUTHORIZED, "Invalid API key").into_response()),
+        None => Ok(crate::error::text_error_response(
+            StatusCode::UNAUTHORIZED,
+            "Invalid API key",
+        )),
     }
 }

@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::app::get_tenant_app_state;
 use crate::cost_ingestion::{creds, ConnectorCreds, ConnectorCredsStore};
+use crate::error::TextError;
 
 #[derive(Debug, Deserialize)]
 pub struct SetCredentialsRequest {
@@ -36,7 +37,7 @@ pub struct SetCredentialsResponse {
 pub async fn set_connector_credentials(
     Path((merchant_id, connector)): Path<(String, String)>,
     Json(body): Json<SetCredentialsRequest>,
-) -> Result<Json<SetCredentialsResponse>, (StatusCode, String)> {
+) -> Result<Json<SetCredentialsResponse>, TextError> {
     let app_state = get_tenant_app_state().await;
     let cfg = &app_state.config.cost_ingestion;
     let store = ConnectorCredsStore::from_keyring(
@@ -71,7 +72,7 @@ pub async fn set_connector_credentials(
 /// list. Idempotent — deleting a source that isn't there returns success.
 pub async fn delete_connector_credentials(
     Path((merchant_id, connector, account)): Path<(String, String, String)>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<StatusCode, TextError> {
     creds::delete_source(&connector, &account, &merchant_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
@@ -83,7 +84,7 @@ pub async fn delete_connector_credentials(
 /// the credential keyring isn't configured (nothing decryptable).
 pub async fn list_connector_credentials(
     Path(merchant_id): Path<String>,
-) -> Result<Json<Vec<creds::MaskedSource>>, (StatusCode, String)> {
+) -> Result<Json<Vec<creds::MaskedSource>>, TextError> {
     let app_state = get_tenant_app_state().await;
     let cfg = &app_state.config.cost_ingestion;
     match ConnectorCredsStore::from_keyring(
@@ -94,7 +95,7 @@ pub async fn list_connector_credentials(
             .list_masked(&merchant_id)
             .await
             .map(Json)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}"))),
+            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")).into()),
         None => {
             let sources = creds::list_sources(&merchant_id)
                 .await

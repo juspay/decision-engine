@@ -5,11 +5,12 @@ use axum::http::StatusCode;
 use axum::Json;
 
 use crate::cost_ingestion::coverage::{self, CoverageSummary};
+use crate::error::TextError;
 
 /// `GET /merchant-account/:merchant_id/cost-coverage`
 pub async fn get_cost_coverage(
     Path(merchant_id): Path<String>,
-) -> Result<Json<CoverageSummary>, (StatusCode, String)> {
+) -> Result<Json<CoverageSummary>, TextError> {
     // ClickHouse config lives on the global config (not the per-tenant config).
     let clickhouse = crate::app::APP_STATE
         .get()

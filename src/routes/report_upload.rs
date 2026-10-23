@@ -22,6 +22,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
 use crate::cost_ingestion::{mapping, pipeline, sink, store};
+use crate::error::TextError;
 use crate::logger;
 use crate::storage::types::CostIngestion;
 
@@ -98,7 +99,7 @@ impl From<CostIngestion> for IngestionDto {
 /// first. The dashboard polls this to show history and live progress of processing jobs.
 pub async fn list_ingestions(
     Path(merchant_id): Path<String>,
-) -> Result<Json<Vec<IngestionDto>>, (StatusCode, String)> {
+) -> Result<Json<Vec<IngestionDto>>, TextError> {
     let rows = store::list_for_merchant(&merchant_id, HISTORY_LIMIT)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
@@ -111,7 +112,7 @@ pub async fn list_ingestions(
 /// be deleted.
 pub async fn delete_ingestion(
     Path((merchant_id, ingestion_id)): Path<(String, String)>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<StatusCode, TextError> {
     let row = store::get_for_merchant(&merchant_id, &ingestion_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?
@@ -121,7 +122,8 @@ pub async fn delete_ingestion(
         return Err((
             StatusCode::CONFLICT,
             "cannot delete an in-progress ingestion".to_string(),
-        ));
+        )
+            .into());
     }
 
     let clickhouse = crate::app::APP_STATE
@@ -191,7 +193,7 @@ pub async fn delete_ingestion(
 /// flat fee) changed.
 pub async fn list_price_changes(
     Path(merchant_id): Path<String>,
-) -> Result<Json<Vec<crate::cost_ingestion::detect::PriceChange>>, (StatusCode, String)> {
+) -> Result<Json<Vec<crate::cost_ingestion::detect::PriceChange>>, TextError> {
     let clickhouse = crate::app::APP_STATE
         .get()
         .ok_or((
@@ -246,14 +248,14 @@ pub async fn upload_report(
     Path((merchant_id, connector)): Path<(String, String)>,
     Query(params): Query<UploadParams>,
     body: Body, // must be the last extractor (consumes the request body)
-) -> Result<(StatusCode, Json<UploadAccepted>), (StatusCode, String)> {
+) -> Result<(StatusCode, Json<UploadAccepted>), TextError> {
     let path = temp_report_path();
 
     // Stream the body to the temp file, capping total size. On any failure here we remove the
     // partial file and bail — the background task only takes over once the file is complete.
     if let Err(err) = stream_to_file(&path, body).await {
         let _ = tokio::fs::remove_file(&path).await;
-        return Err(err);
+        return Err(err.into());
     }
 
     // ClickHouse config lives on the global config (not the per-tenant config).
@@ -264,7 +266,8 @@ pub async fn upload_report(
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "app state not initialized".to_string(),
-            ));
+            )
+                .into());
         }
     };
 
@@ -346,12 +349,12 @@ pub async fn validate_report_headers(
     Path((merchant_id, connector)): Path<(String, String)>,
     Query(params): Query<PreflightParams>,
     body: Body,
-) -> Result<Json<crate::cost_ingestion::preflight::PreflightReport>, (StatusCode, String)> {
+) -> Result<Json<crate::cost_ingestion::preflight::PreflightReport>, TextError> {
     use crate::cost_ingestion::preflight;
 
     let sample = read_capped(body, preflight::HEADER_SAMPLE_BYTES).await?;
     if sample.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "empty header sample".to_string()));
+        return Err((StatusCode::BAD_REQUEST, "empty header sample".to_string()).into());
     }
 
     // Validate against the source's saved mapping when there is an account to look one up for, so a
@@ -366,7 +369,7 @@ pub async fn validate_report_headers(
     let registry = crate::cost_ingestion::source::ConnectorRegistry::with_builtins();
     preflight::check(&registry, &connector, &sample, &mapping)
         .map(Json)
-        .map_err(map_preflight_error)
+        .map_err(|error| map_preflight_error(error).into())
 }
 
 #[derive(Debug, Deserialize)]
@@ -408,7 +411,7 @@ pub struct MappingRequest {
 pub async fn preview_column_mapping(
     Path((_merchant_id, connector)): Path<(String, String)>,
     Json(req): Json<MappingRequest>,
-) -> Result<Json<crate::cost_ingestion::preflight::PreviewReport>, (StatusCode, String)> {
+) -> Result<Json<crate::cost_ingestion::preflight::PreviewReport>, TextError> {
     use crate::cost_ingestion::preflight;
 
     let registry = crate::cost_ingestion::source::ConnectorRegistry::with_builtins();
@@ -421,7 +424,7 @@ pub async fn preview_column_mapping(
         req.truncated,
     )
     .map(Json)
-    .map_err(map_preflight_error)
+    .map_err(|error| map_preflight_error(error).into())
 }
 
 /// `GET /merchant-account/:id/connectors/:connector/report/column-mapping?account=` — the saved
@@ -429,11 +432,11 @@ pub async fn preview_column_mapping(
 pub async fn get_column_mapping(
     Path((merchant_id, connector)): Path<(String, String)>,
     Query(params): Query<UploadParams>,
-) -> Result<Json<mapping::ColumnMapping>, (StatusCode, String)> {
+) -> Result<Json<mapping::ColumnMapping>, TextError> {
     mapping::load(&merchant_id, &connector, &params.account)
         .await
         .map(Json)
-        .map_err(|e| storage_error("load column mapping", e))
+        .map_err(|e| storage_error("load column mapping", e).into())
 }
 
 /// `PUT /merchant-account/:id/connectors/:connector/report/column-mapping?account=` — save a
@@ -449,7 +452,7 @@ pub async fn set_column_mapping(
     Path((merchant_id, connector)): Path<(String, String)>,
     Query(params): Query<UploadParams>,
     Json(req): Json<MappingRequest>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<StatusCode, TextError> {
     use crate::cost_ingestion::preflight;
 
     let candidate = mapping::ColumnMapping::from_pairs(req.columns);
@@ -461,7 +464,8 @@ pub async fn set_column_mapping(
             return Err((
                 StatusCode::BAD_REQUEST,
                 "a file sample is required to validate a mapping".to_string(),
-            ));
+            )
+                .into());
         }
         let registry = crate::cost_ingestion::source::ConnectorRegistry::with_builtins();
         let report = preflight::check(
@@ -493,7 +497,7 @@ pub async fn set_column_mapping(
 pub async fn delete_column_mapping(
     Path((merchant_id, connector)): Path<(String, String)>,
     Query(params): Query<UploadParams>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<StatusCode, TextError> {
     mapping::delete(&merchant_id, &connector, &params.account)
         .await
         .map_err(|e| storage_error("clear column mapping", e))?;
@@ -549,7 +553,7 @@ async fn read_capped(body: Body, cap: usize) -> Result<Vec<u8>, (StatusCode, Str
 /// the background — the dashboard polls the same history/progress.
 pub async fn run_sample_report(
     Path((merchant_id, connector)): Path<(String, String)>,
-) -> Result<(StatusCode, Json<UploadAccepted>), (StatusCode, String)> {
+) -> Result<(StatusCode, Json<UploadAccepted>), TextError> {
     // Only connectors that support report ingestion can have samples.
     let registry = crate::cost_ingestion::source::ConnectorRegistry::with_builtins();
     let _ = registry.get(&connector).map_err(|_| {

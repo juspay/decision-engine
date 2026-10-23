@@ -63,7 +63,6 @@ impl<'a> Storage<'a> {
             "latency",
             serde_json::Value::Number(serde_json::Number::from(123)),
         );
-        self.record_value("is_art_enabled", serde_json::Value::Bool(true));
         self.record_value(
             "error_code",
             serde_json::Value::String("ERR123".to_string()),

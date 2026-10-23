@@ -232,17 +232,21 @@ pub async fn decide_gateway(
         .to_string();
     let global_request_id = global_request_id_from_headers(&headers);
     let trace_id = trace_id_from_headers(&headers);
-    for (name, value) in headers.iter() {
-        let value = masking::Secret::<_>::new(value);
-        logger::debug!(tag = "DecideGateway", "Header: {}: {:?}", name, value);
-    }
+    // Mask values by default and consolidate header diagnostics into one event.
+    logger::debug!(
+        tag = "DecideGateway",
+        headers = ?headers
+            .keys()
+            .map(|name| (name.as_str(), "**MASKED**"))
+            .collect::<std::collections::BTreeMap<_, _>>(),
+        "Incoming request headers"
+    );
     let body = match crate::routes::body::read_request_body(req.into_body()).await {
         Ok(body) => {
             logger::debug!("Body: {:?}", body);
             body
         }
         Err(e) => {
-            logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
             let (error_code, error_message) = e.analytics_code_and_message();
             let analytics_stage = e.analytics_stage().to_string();
             let error_response = e.into_error_response();
@@ -276,6 +280,13 @@ pub async fn decide_gateway(
         serde_json::from_slice(&body);
     let result = match api_decider_request {
         Ok(payload) => {
+            let span = tracing::Span::current();
+            if !payload.merchant_id.is_empty() {
+                span.record("merchant_id", payload.merchant_id.as_str());
+            }
+            if !payload.payment_id().is_empty() {
+                span.record("payment_id", payload.payment_id());
+            }
             run_decider_with_analytics(
                 payload,
                 &x_request_id,
@@ -286,7 +297,6 @@ pub async fn decide_gateway(
             .await
         }
         Err(e) => {
-            logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
             let error_response = request_parse_error_response(&e);
             DomainAnalyticsEvent::record_error(
                 AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayError),

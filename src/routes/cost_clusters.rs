@@ -17,6 +17,7 @@ use crate::cost_ingestion::blended::{
     self, ClusterFilter, ClusterOrder, ClusterScope, ClusterSegment, TopCluster,
 };
 use crate::cost_ingestion::overrides::{self, ClusterDims, ClusterOverride};
+use crate::error::TextError;
 use crate::routes::connector_fees::{clickhouse_config, refresh_serving};
 
 /// How many top clusters to surface by default (top by GMV) when the caller asks for none.
@@ -237,7 +238,7 @@ pub struct ApiClusterFacet {
 pub async fn list_cost_cluster_facets(
     Path(merchant_id): Path<String>,
     Query(q): Query<TopClustersQuery>,
-) -> Result<Json<Vec<ApiClusterFacet>>, (StatusCode, String)> {
+) -> Result<Json<Vec<ApiClusterFacet>>, TextError> {
     let cfg = clickhouse_config()?;
     let scope = ClusterScope {
         connector: q.connector.as_deref(),
@@ -269,7 +270,7 @@ pub async fn list_cost_clusters(
     Path(merchant_id): Path<String>,
     Query(q): Query<TopClustersQuery>,
     RawQuery(raw): RawQuery,
-) -> Result<Json<Vec<ClusterFee>>, (StatusCode, String)> {
+) -> Result<Json<Vec<ClusterFee>>, TextError> {
     let filters = ClusterFilterQuery::from_raw(raw.as_deref());
     let cfg = clickhouse_config()?;
     let limit = q.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
@@ -499,7 +500,7 @@ pub struct SetClusterOverrideRequest {
 pub async fn set_cluster_override(
     Path((merchant_id, cluster_key)): Path<(String, String)>,
     Json(body): Json<SetClusterOverrideRequest>,
-) -> Result<Json<ClusterOverride>, (StatusCode, String)> {
+) -> Result<Json<ClusterOverride>, TextError> {
     if !body.pct_bps.is_finite()
         || !body.fixed.is_finite()
         || body.pct_bps < 0.0
@@ -508,7 +509,8 @@ pub async fn set_cluster_override(
         return Err((
             StatusCode::BAD_REQUEST,
             "pct_bps and fixed must be finite and non-negative".to_string(),
-        ));
+        )
+            .into());
     }
     let dims = ClusterDims::from_key(&cluster_key).ok_or((
         StatusCode::BAD_REQUEST,
@@ -532,7 +534,7 @@ pub async fn set_cluster_override(
 /// `DELETE /merchant-account/:merchant_id/cost-clusters/:cluster_key/fee-override`
 pub async fn delete_cluster_override(
     Path((merchant_id, cluster_key)): Path<(String, String)>,
-) -> Result<StatusCode, (StatusCode, String)> {
+) -> Result<StatusCode, TextError> {
     let dims = ClusterDims::from_key(&cluster_key).ok_or((
         StatusCode::BAD_REQUEST,
         "cluster key must have 7 '|'-separated fields".to_string(),

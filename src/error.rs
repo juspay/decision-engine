@@ -333,40 +333,32 @@ impl axum::response::IntoResponse for ApiError {
         match self {
             Self::CustodianLocked => (
                 hyper::StatusCode::UNAUTHORIZED,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_00,
-                    "Custodian is locked".into(),
-                    None,
-                )),
+                ApiErrorResponse::new(error_codes::TE_00, "Custodian is locked".into(), None),
             )
                 .into_response(),
 
             Self::MissingRequiredField(field_name) => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_00,
                     format!("Missing required param: {field_name}"),
                     None,
-                )),
+                ),
             )
                 .into_response(),
 
             Self::DecryptingKeysFailed(err) => (
                 hyper::StatusCode::UNAUTHORIZED,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_00,
                     format!("Failed while decrypting two custodian keys: {err}"),
                     None,
-                )),
+                ),
             )
                 .into_response(),
             data @ Self::EncodingError => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_00,
-                    format!("{}", data),
-                    None,
-                )),
+                ApiErrorResponse::new(error_codes::TE_00, format!("{}", data), None),
             )
                 .into_response(),
             data @ Self::ResponseMiddlewareError(_)
@@ -374,11 +366,7 @@ impl axum::response::IntoResponse for ApiError {
             | data @ Self::MerchantKeyError
             | data @ Self::KeyManagerError(_) => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_00,
-                    format!("{}", data),
-                    None,
-                )),
+                ApiErrorResponse::new(error_codes::TE_00, format!("{}", data), None),
             )
                 .into_response(),
 
@@ -387,11 +375,7 @@ impl axum::response::IntoResponse for ApiError {
             | data @ Self::DatabaseDeleteFailed(_)
             | data @ Self::RetrieveDataFailed(_) => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_01,
-                    format!("{}", data),
-                    None,
-                )),
+                ApiErrorResponse::new(error_codes::TE_01, format!("{}", data), None),
             )
                 .into_response(),
             data @ Self::RequestMiddlewareError(_)
@@ -401,38 +385,22 @@ impl axum::response::IntoResponse for ApiError {
             | data @ Self::CustodianUnlocked
             | data @ Self::TenantError(_) => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_03,
-                    format!("{}", data),
-                    None,
-                )),
+                ApiErrorResponse::new(error_codes::TE_03, format!("{}", data), None),
             )
                 .into_response(),
             data @ Self::NotFoundError => (
                 hyper::StatusCode::NOT_FOUND,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_02,
-                    format!("{}", data),
-                    None,
-                )),
+                ApiErrorResponse::new(error_codes::TE_02, format!("{}", data), None),
             )
                 .into_response(),
             data @ Self::MerchantError => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_02,
-                    format!("{}", data),
-                    None,
-                )),
+                ApiErrorResponse::new(error_codes::TE_02, format!("{}", data), None),
             )
                 .into_response(),
             data @ Self::ParsingError(..) => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_03,
-                    format!("{}", data),
-                    None,
-                )),
+                ApiErrorResponse::new(error_codes::TE_03, format!("{}", data), None),
             )
                 .into_response(),
         }
@@ -443,7 +411,7 @@ impl<T: axum::response::IntoResponse + error_stack::Context + Clone> axum::respo
     for ContainerError<T>
 {
     fn into_response(self) -> axum::response::Response {
-        crate::logger::error!(error=?self.error);
+        crate::logger::error!(error = ?self.error, error_message = %self.error.current_context());
         self.error.current_context().clone().into_response()
     }
 }
@@ -489,3 +457,36 @@ impl ApiErrorResponse {
 //         output.map_err(|err| (*err.current_context()))
 //     }
 // }
+
+impl axum::response::IntoResponse for ApiErrorResponse {
+    fn into_response(self) -> axum::response::Response {
+        axum::Json(self).into_response()
+    }
+}
+
+/// Log authentication/plain-text errors once while preserving their HTTP response.
+pub(crate) fn text_error_response(
+    status: StatusCode,
+    message: impl Into<String>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let message = message.into();
+    crate::logger::error!(error_message = %message, error_code = status.as_str(), "Request failed");
+    (status, message).into_response()
+}
+
+/// Plain-text handler error logged at the response conversion boundary.
+#[derive(Debug)]
+pub struct TextError(pub StatusCode, pub String);
+
+impl From<(StatusCode, String)> for TextError {
+    fn from((status, message): (StatusCode, String)) -> Self {
+        Self(status, message)
+    }
+}
+
+impl axum::response::IntoResponse for TextError {
+    fn into_response(self) -> axum::response::Response {
+        text_error_response(self.0, self.1)
+    }
+}
