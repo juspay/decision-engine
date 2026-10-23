@@ -14,7 +14,7 @@ import { useAuthStore } from '../../store/authStore'
 import { useCanEditRouting } from '../../store/authStore'
 import { releaseAdmits, useFeatureReleased, type ReleasedFeature } from '../../lib/featureReleases'
 import { apiPost, fetcher } from '../../lib/api'
-import { PAYMENT_METHOD_TYPES, PAYMENT_METHODS } from '../../lib/constants'
+import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import {
   Plus,
   Trash2,
@@ -90,8 +90,9 @@ const optionalDim = z.preprocess(
 )
 
 const subLevelSchema = z.object({
-  paymentMethodType: z.string().min(1),
+  // The method is the category (card), its type the specific method (credit).
   paymentMethod: z.string().min(1),
+  paymentMethodType: optionalDim,
   cardNetwork: optionalDim,
   currency: optionalDim,
   country: optionalDim,
@@ -144,7 +145,7 @@ interface SRConfigResponse {
       defaultHedgingPercent: number | null
       margin: number | null
       subLevelInputConfig: {
-        paymentMethodType: string
+        paymentMethodType?: string | null
         paymentMethod: string
         cardNetwork?: string | null
         currency?: string | null
@@ -208,6 +209,9 @@ export function SRRoutingPage() {
   const selectedMerchantId = useMerchantStore((state) => state.merchantId)
   const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
   const merchantId = selectedMerchantId || authMerchantId
+  // Payment methods (`card`) and each method's types (`credit`), from the routing keys the backend
+  // generates from its payment method vocabulary.
+  const { getKeyValues } = useDynamicRoutingConfig()
   // When Autopilot is on, its calibration job owns bucket size + hedging % on the Auto-badged
   // sub-level rows and overwrites human edits there on the next cycle — so those two fields are
   // locked in the UI to match. Manual rows, defaults, and latency are never touched, so they stay
@@ -299,8 +303,9 @@ export function SRRoutingPage() {
       const d = existing.config.data
       // Normalize so the optional dimension fields are always present (controlled inputs).
       const subLevelRows = (d.subLevelInputConfig ?? []).map((r) => ({
-        paymentMethodType: r.paymentMethodType,
-        paymentMethod: r.paymentMethod,
+        // Stored as codes (CARD, CREDIT); the dropdowns use lower-case names.
+        paymentMethod: r.paymentMethod?.toLowerCase() ?? '',
+        paymentMethodType: r.paymentMethodType?.toLowerCase() ?? null,
         cardNetwork: r.cardNetwork ?? null,
         currency: r.currency ?? null,
         country: r.country ?? null,
@@ -329,7 +334,7 @@ export function SRRoutingPage() {
 
   function addSubLevelOverride() {
     setShowSubLevelOverrides(true)
-    append({ paymentMethodType: 'card', paymentMethod: 'credit', cardNetwork: null, currency: null, country: null, authType: null, source: null, bucketSize: 20, hedgingPercent: null, latencyThreshold: null })
+    append({ paymentMethod: 'card', paymentMethodType: 'credit', cardNetwork: null, currency: null, country: null, authType: null, source: null, bucketSize: 20, hedgingPercent: null, latencyThreshold: null })
   }
 
   function removeSubLevelOverride(index: number) {
@@ -529,8 +534,8 @@ export function SRRoutingPage() {
                         <thead>
                           <tr className="text-left text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] border-b border-slate-200 dark:border-[#1c1c24] bg-slate-50 dark:bg-[#0a0a0f] leading-4">
                             <th className="px-4 py-2">Source</th>
-                            <th className="px-4 py-2">Method Type</th>
-                            <th className="px-4 py-2">Method</th>
+                            <th className="px-4 py-2">Payment Method</th>
+                            <th className="px-4 py-2">Payment Method Type</th>
                             <th className="px-4 py-2">Card Network</th>
                             <th className="px-4 py-2">Currency</th>
                             <th className="px-4 py-2">Country</th>
@@ -543,14 +548,13 @@ export function SRRoutingPage() {
                         </thead>
                         <tbody>
                           {fields.map((field, idx) => {
-                            const methodType = watchedRows?.[idx]?.paymentMethodType || ''
                             const method = watchedRows?.[idx]?.paymentMethod || ''
-                            // PAYMENT_METHODS is keyed lowercase; match case-insensitively. Always
-                            // include the stored value as an option so auto-calibrated rows (which
-                            // use the casing live txns send, e.g. "CARD"/"CREDIT") still display.
-                            const baseMethodOptions = PAYMENT_METHODS[methodType.toLowerCase()] || ['credit', 'debit']
-                            const typeOptions = optionsWithValue(PAYMENT_METHOD_TYPES, methodType)
-                            const methodOptions = optionsWithValue(baseMethodOptions, method)
+                            const methodType = watchedRows?.[idx]?.paymentMethodType || ''
+                            // The method's own types come from its routing key (`card` lists credit,
+                            // debit). The stored value is always an option, so a row saved before the
+                            // routing keys loaded still displays.
+                            const methodOptions = optionsWithValue(getKeyValues('payment_method'), method)
+                            const typeOptions = optionsWithValue(getKeyValues(method), methodType)
                             // An Auto row is fully owned by the calibration job while Autopilot is on
                             // (it re-tunes bucket/hedging and matches its own rows by the dimension
                             // keys), so the whole row is locked. Locked cells render as plain text —
@@ -578,24 +582,25 @@ export function SRRoutingPage() {
                                       input that round-trips the value on save. */}
                                   {autopilotOwned ? (
                                     <>
-                                      <input type="hidden" {...register(`subLevelInputConfig.${idx}.paymentMethodType`)} />
-                                      <span className={lockedTextCls} title={lockedTitle}>{methodType || '—'}</span>
-                                    </>
-                                  ) : (
-                                    <select {...register(`subLevelInputConfig.${idx}.paymentMethodType`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg pl-2 pr-7 py-1 text-sm min-w-[6rem] focus:outline-none focus:border-brand-500">
-                                      {typeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
-                                    </select>
-                                  )}
-                                </td>
-                                <td className="px-4 py-2">
-                                  {autopilotOwned ? (
-                                    <>
                                       <input type="hidden" {...register(`subLevelInputConfig.${idx}.paymentMethod`)} />
                                       <span className={lockedTextCls} title={lockedTitle}>{method || '—'}</span>
                                     </>
                                   ) : (
                                     <select {...register(`subLevelInputConfig.${idx}.paymentMethod`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg pl-2 pr-7 py-1 text-sm min-w-[6rem] focus:outline-none focus:border-brand-500">
                                       {methodOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+                                    </select>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2">
+                                  {autopilotOwned ? (
+                                    <>
+                                      <input type="hidden" {...register(`subLevelInputConfig.${idx}.paymentMethodType`)} />
+                                      <span className={lockedTextCls} title={lockedTitle}>{methodType || 'Any'}</span>
+                                    </>
+                                  ) : (
+                                    <select {...register(`subLevelInputConfig.${idx}.paymentMethodType`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg pl-2 pr-7 py-1 text-sm min-w-[6rem] focus:outline-none focus:border-brand-500">
+                                      <option value="">Any</option>
+                                      {typeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
                                     </select>
                                   )}
                                 </td>

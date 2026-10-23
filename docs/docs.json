@@ -28,6 +28,7 @@
           "api-reference",
           "analytics",
           "payment-audit",
+          "payment-methods",
           "clickhouse-analytics",
           "benchmarks"
         ]

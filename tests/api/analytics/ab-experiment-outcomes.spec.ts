@@ -346,7 +346,7 @@ test.describe('A/B experiment outcomes (API)', () => {
         factory.srDecideGatewayRequest({
           merchantId: m,
           eligibleGatewayList: ['stripe', 'adyen', 'checkout'],
-          paymentInfo: { paymentId, amount: 100, paymentMethodType: 'CARD', paymentMethod: 'VISA' },
+          paymentInfo: { paymentId, amount: 100, paymentMethod: 'CARD', paymentMethodType: 'CREDIT' },
         }),
       )
       expect(decided.status, JSON.stringify(decided.body)).toBe(200)
