@@ -323,8 +323,7 @@ pub async fn decide_gateway(
             )
             .await
         }
-        Err(e) => {
-            let error_response = request_parse_error_response(&e);
+        Err(error_response) => {
             DomainAnalyticsEvent::record_error(
                 AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayError),
                 AnalyticsRoute::DecideGateway,
