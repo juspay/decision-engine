@@ -5,5 +5,9 @@ metadata:
   labels:
     {{- include "decision-engine.labels" . | nindent 4 }}
 data:
+  # The repository's own config, symlinked into the chart at config/development.toml, so it always
+  # matches the source tree it ships with. Everything that differs per deployment - database and
+  # Redis hosts, credentials, bind addresses, log level, analytics - is overridden with
+  # DECISION_ENGINE__* environment variables on the container (see templates/deployment.yaml).
   development.toml: |-
-    {{ .Files.Get "config/development.toml" | nindent 4 }}
+    {{- .Files.Get "config/development.toml" | nindent 4 }}
