@@ -128,10 +128,20 @@ Redis is required — it's used for caching routing config and service config. F
 jwt_secret = "change_me_in_production_use_32chars!!"
 jwt_expiry_seconds = 86400
 email_verification_enabled = false
+signup_requires_admin_secret = true
+super_admin_emails = ["admin@example.com"]
 jwt_revocation_cache_ttl_ms = 0
 ```
 
 Use a strong, random `jwt_secret` — 32+ characters recommended. Set `email_verification_enabled = true` if you've wired an email provider.
+
+`super_admin_emails` grants access to every merchant. Provision these accounts through
+`POST /auth/signup` with `x-admin-secret`; rostered addresses require that secret even when
+`signup_requires_admin_secret = false`. Merchant admins cannot invite a rostered address,
+including a case variant. A super-admin session's email must exactly match a roster entry,
+so keep the configured spelling identical to the account's stored email. Set a strong,
+non-default admin secret and JWT secret before enabling the roster. Audit existing accounts
+that match or differ only by case; this change does not revoke credentials already issued.
 
 `jwt_revocation_cache_ttl_ms` caches "this token is not revoked" in memory, so authenticated
 requests skip the JWT denylist read in Redis for that many milliseconds. The cost is that
