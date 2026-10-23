@@ -4,9 +4,9 @@
 //! report-download auth. Secrets are encrypted at rest (`ConnectorCredsStore`); this route never
 //! returns them back. See `scratch/inhouse-cost-architecture.md` §7–8.
 
+use crate::custom_extractors::Json;
 use axum::extract::Path;
 use axum::http::StatusCode;
-use axum::Json;
 use masking::Secret;
 use serde::{Deserialize, Serialize};
 

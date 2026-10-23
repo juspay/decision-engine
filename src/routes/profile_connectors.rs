@@ -1,3 +1,4 @@
+use crate::custom_extractors::Json;
 use crate::{
     app::{get_tenant_app_state, APP_STATE},
     error::ContainerError,
@@ -10,7 +11,6 @@ use crate::{
 use axum::{
     extract::Path,
     http::{HeaderMap, StatusCode},
-    Json,
 };
 use error_stack::ResultExt;
 use fred::interfaces::KeysInterface;

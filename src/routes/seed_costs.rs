@@ -10,9 +10,9 @@
 //! cleanly onto the dashboard's editable table. Rows are (de)normalized to/from the nested
 //! `Vec<SeedCostEntry>` the resolver consumes.
 
+use crate::custom_extractors::Json;
 use axum::extract::Path;
 use axum::http::StatusCode;
-use axum::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::app::get_tenant_app_state;
