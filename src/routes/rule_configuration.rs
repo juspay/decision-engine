@@ -638,7 +638,7 @@ mod fetch_response_tests {
     use crate::types::routing_configuration::{RuleConfigGetResponse, SuccessRateData};
 
     #[test]
-    fn missing_config_is_a_successful_null_response() -> Result<(), serde_json::Error> {
+    fn missing_config_is_a_successful_null_response() {
         assert!(matches!(
             parse_optional_rule_config::<SuccessRateData>(None),
             Ok(None)
@@ -648,12 +648,11 @@ mod fetch_response_tests {
             config: None,
         };
         assert_eq!(
-            serde_json::to_value(response)?,
-            serde_json::json!({
+            serde_json::to_value(response).ok(),
+            Some(serde_json::json!({
                 "merchant_id": "merchant_defaults", "config": null
-            })
+            }))
         );
-        Ok(())
     }
 
     #[test]
