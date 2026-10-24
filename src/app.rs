@@ -682,6 +682,13 @@ where
         )
         .route("/api-key/:key_id", delete(routes::api_key::revoke_api_key))
         .nest("/analytics", routes::analytics::serve())
+        // Ordering matters: layers run outermost-first, so `authenticate` (added last) runs before
+        // `enforce_merchant_scope` (added here, inner). The scope guard therefore sees the
+        // `AuthContext` that `authenticate` inserts, and rejects a per-merchant session reaching
+        // across to another merchant's `:merchant-id` route.
+        .layer(middleware::from_fn(
+            custom_middleware::enforce_merchant_scope,
+        ))
         .layer(middleware::from_fn(custom_middleware::authenticate));
 
     // Routes that do not require authentication (public)

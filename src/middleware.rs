@@ -10,6 +10,55 @@ use masking::PeekInterface;
 
 const API_KEY_CACHE_TTL: i64 = 300;
 
+/// Enforce that a per-merchant session may only act on its own merchant.
+///
+/// Runs immediately *after* [`authenticate`], so an `AuthContext` is already in the request
+/// extensions for the JWT and api-key lanes. Those lanes carry a concrete `merchant_id`; every
+/// route scoped to one merchant names it in the path (`:merchant-id`, or `:merchant_id` on the two
+/// snake-case routes). When the two disagree the request is refused here, so no handler has to
+/// remember the check — and a route added later is covered the day it is written.
+///
+/// Service credentials (the shared admin secret, and the `api_key_auth_enabled = false`
+/// backward-compat lane) insert *no* `AuthContext`, so they fall through unrestricted exactly as
+/// before — they are trusted callers that scope requests off the path/body themselves. Routes that
+/// are not addressed by a `merchant-id` path parameter (api-key create takes it in the body, revoke
+/// by `key_id`) carry their own binding in the handler.
+pub async fn enforce_merchant_scope(
+    req: Request<Body>,
+    next: Next,
+) -> Result<Response<Body>, ContainerError<error::ApiError>> {
+    use axum::extract::{FromRequestParts, RawPathParams};
+
+    // No context ⇒ admin-secret / compat lane ⇒ trusted service caller, nothing to scope.
+    let Some(context) = req.extensions().get::<auth::AuthContext>().cloned() else {
+        return Ok(next.run(req).await);
+    };
+
+    let (mut parts, body) = req.into_parts();
+    // `RawPathParams` is populated during routing; this layer runs after it. Borrow the pattern's
+    // captured values without consuming any typed `Path` extractor the handler still needs.
+    let path_params = RawPathParams::from_request_parts(&mut parts, &())
+        .await
+        .ok();
+    let req = Request::from_parts(parts, body);
+
+    if let Some(path_params) = path_params {
+        for (key, value) in &path_params {
+            // Both spellings appear in the route table; treat either as the merchant selector.
+            if (key == "merchant-id" || key == "merchant_id")
+                && value != context.merchant_id.as_str()
+            {
+                return Ok(crate::error::text_error_response(
+                    StatusCode::FORBIDDEN,
+                    "This session may only act on its own merchant",
+                ));
+            }
+        }
+    }
+
+    Ok(next.run(req).await)
+}
+
 /// Middleware providing implementation to perform JWE + JWS encryption and decryption around the
 /// card APIs
 pub async fn middleware(

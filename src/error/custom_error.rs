@@ -288,6 +288,8 @@ pub enum ApiKeyError {
     RevocationFailed,
     #[error("Merchant not found")]
     MerchantNotFound,
+    #[error("This session may only manage its own merchant's API keys")]
+    Forbidden,
     #[error("Storage error")]
     StorageError,
 }
@@ -309,6 +311,15 @@ impl axum::response::IntoResponse for ApiKeyError {
                 crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "Merchant not found".to_string(),
+                    None,
+                ),
+            )
+                .into_response(),
+            Self::Forbidden => (
+                hyper::StatusCode::FORBIDDEN,
+                crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    self.to_string(),
                     None,
                 ),
             )
