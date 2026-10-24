@@ -78,7 +78,9 @@ curl --location "$BASE_URL/rule/get" \
 
 ## Notes
 
-- A missing config should be treated as not configured in the dashboard.
+- An existing merchant with no saved configuration returns HTTP 200 with `{"merchant_id":"merchant_demo","config":null}`. The dashboard treats this as not configured and uses its default-settings state. This also applies immediately after deleting a configuration.
+- An unknown merchant returns HTTP 404. Configuration storage read failures and malformed stored configurations also return HTTP 404, with the underlying error retained in server logs.
+- Create and update requests still require a concrete `config`; only the fetch response permits `null`.
 - Use this to determine overview setup readiness.
 
 ## Related

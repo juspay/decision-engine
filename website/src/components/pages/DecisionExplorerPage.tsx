@@ -895,9 +895,9 @@ export function DecisionExplorerPage() {
   )
   const gsmRules = gsmOptionsData?.rules ?? []
 
-  const { data: eliminationConfig } = useSWR<{ config: { data: { threshold: number } } } | null>(
+  const { data: eliminationConfig } = useSWR<{ config: { data: { threshold: number } } | null } | null>(
     effectiveMerchantId ? ['rule-elimination', effectiveMerchantId] : null,
-    () => apiPost<{ config: { data: { threshold: number } } }>('/rule/get', { merchant_id: effectiveMerchantId, algorithm: 'elimination' }).catch(() => null),
+    () => apiPost<{ config: { data: { threshold: number } } | null }>('/rule/get', { merchant_id: effectiveMerchantId, algorithm: 'elimination' }).catch(() => null),
     { revalidateOnFocus: false, dedupingInterval: 60_000 },
   )
   const eliminationConfigured = eliminationConfig?.config?.data?.threshold != null
@@ -2774,7 +2774,7 @@ export function DecisionExplorerPage() {
                                   {gwFailureMode === 'timeout' && (
                                     <p className={`text-xs px-3 py-2 rounded-lg ${eliminationConfigured ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400' : 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400'} max-w-[68ch]`}>
                                       {eliminationConfigured
-                                        ? `Removed from routing below ${eliminationConfig!.config.data.threshold} threshold.`
+                                        ? `Removed from routing below ${eliminationConfig!.config!.data.threshold} threshold.`
                                         : 'Elimination not configured. Set it up in SR Routing settings.'}
                                     </p>
                                   )}

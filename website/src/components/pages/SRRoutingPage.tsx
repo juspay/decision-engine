@@ -157,7 +157,7 @@ interface SRConfigResponse {
         latencyThreshold: number | null
       }[] | null
     }
-  }
+  } | null
 }
 
 interface EliminationConfigResponse {
@@ -169,7 +169,7 @@ interface EliminationConfigResponse {
       threshold: number
       txnLatency: { gatewayLatency: number | null } | null
     }
-  }
+  } | null
 }
 
 type SRTab = 'autopilot' | 'manual' | 'flags' | 'cost' | 'volume'
@@ -358,7 +358,7 @@ export function SRRoutingPage() {
     setSaving(true); setSaveError(null); setSaveSuccess(false)
     try {
       if (!existing) await ensureMerchantExists()
-      const endpoint = existing ? '/rule/update' : '/rule/create'
+      const endpoint = existing?.config ? '/rule/update' : '/rule/create'
       await apiPost(endpoint, {
         merchant_id: merchantId,
         config: {
@@ -1175,7 +1175,7 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
     }
     setSaving(true); setSaveError(null); setSaveSuccess(false)
     try {
-      const endpoint = existing ? '/rule/update' : '/rule/create'
+      const endpoint = existing?.config ? '/rule/update' : '/rule/create'
       const parsedLatency = gatewayLatency !== '' ? parseFloat(gatewayLatency) : null
       await apiPost(endpoint, {
         merchant_id: merchantId,

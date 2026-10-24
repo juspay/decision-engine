@@ -18,7 +18,7 @@ import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
 import { apiPost, fetcher } from '../../lib/api'
-import { AnalyticsOverviewResponse, RoutingAlgorithm, RuleConfig, SRConfigData } from '../../types/api'
+import { AnalyticsOverviewResponse, RoutingAlgorithm, FetchedRuleConfig, SRConfigData } from '../../types/api'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 
@@ -85,9 +85,11 @@ export function RoutingHubPage() {
     () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`),
   )
 
-  const { data: srConfig, isLoading: srLoading } = useSWR<RuleConfig>(
+  const { data: srConfig, isLoading: srLoading } = useSWR<FetchedRuleConfig>(
     merchantId ? ['/rule/get', 'successRate', merchantId] : null,
     () => apiPost('/rule/get', { merchant_id: merchantId, algorithm: 'successRate' }),
+    // Match the other pages that share this configuration cache.
+    { shouldRetryOnError: false, revalidateOnFocus: false },
   )
 
   const { data: analyticsData } = useSWR<AnalyticsOverviewResponse>(
@@ -98,7 +100,7 @@ export function RoutingHubPage() {
 
   // A running experiment is listed beside the active rule; the rule is the routing that's set up.
   const activeAlgorithm = activeAlgorithms?.find((a) => algorithmType(a) !== 'ab_test') ?? activeAlgorithms?.[0]
-  const srData = ((srConfig as any)?.config?.data ?? srConfig?.data) as SRConfigData | undefined
+  const srData = srConfig?.config?.data as SRConfigData | undefined
   // Auth Rate routing (the `sr-routing` feature) decides whether the SR decider runs at all. While
   // it is on, Autopilot, a manual config saved on /routing/sr, or neither (the default settings)
   // says how it is tuned.
