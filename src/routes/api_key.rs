@@ -65,8 +65,19 @@ impl From<MerchantApiKey> for ApiKeyListItem {
 
 #[axum::debug_handler]
 pub async fn create_api_key(
+    session: Option<axum::Extension<auth::AuthContext>>,
     Json(payload): Json<CreateApiKeyRequest>,
 ) -> Result<Json<CreateApiKeyResponse>, error::ContainerError<ApiKeyError>> {
+    // A per-merchant session (JWT / api key) may only mint a key for its own merchant — otherwise a
+    // body-supplied `merchant_id` would let any authenticated caller create a working key for a
+    // victim merchant and impersonate it. The admin-secret lane inserts no session and may mint for
+    // any merchant (that is how Hyperswitch provisions keys).
+    if let Some(axum::Extension(context)) = session.as_ref() {
+        if payload.merchant_id != context.merchant_id {
+            return Err(ApiKeyError::Forbidden.into());
+        }
+    }
+
     let raw_key = auth::generate_api_key();
     let key_hash = auth::hash_api_key(&raw_key);
     let key_prefix = auth::extract_key_prefix(&raw_key);
@@ -119,9 +130,32 @@ pub async fn list_api_keys(
 
 #[axum::debug_handler]
 pub async fn revoke_api_key(
+    session: Option<axum::Extension<auth::AuthContext>>,
     Path(key_id): Path<String>,
 ) -> Result<Json<RevokeApiKeyResponse>, error::ContainerError<ApiKeyError>> {
     let app_state = get_tenant_app_state().await;
+
+    // This route is keyed by `key_id`, not `:merchant-id`, so the scope middleware cannot bind it.
+    // A per-merchant session may only revoke a key that belongs to its own merchant; resolve the
+    // key first and check ownership. A missing key reads as NotFound either way, so a caller cannot
+    // probe which key ids exist under other merchants. The admin-secret lane (no session) may
+    // revoke any key.
+    let existing = crate::generics::generic_find_all::<
+        <MerchantApiKey as HasTable>::Table,
+        _,
+        MerchantApiKey,
+    >(&app_state.db, dsl::key_id.eq(key_id.clone()))
+    .await
+    .map_err(|_| ApiKeyError::StorageError)?;
+    let key_record = existing.into_iter().next().ok_or(ApiKeyError::NotFound)?;
+
+    if let Some(axum::Extension(context)) = session.as_ref() {
+        if key_record.merchant_id != context.merchant_id {
+            // Same response shape as a genuinely missing key — no cross-merchant existence oracle.
+            return Err(ApiKeyError::NotFound.into());
+        }
+    }
+
     let conn = &app_state
         .db
         .get_conn()
