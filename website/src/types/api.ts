@@ -334,6 +334,11 @@ export interface RuleConfig {
   data?: SRConfigData | EliminationData | DebitRoutingData
 }
 
+export interface FetchedRuleConfig {
+  merchant_id: string
+  config: RuleConfig | null
+}
+
 export interface CreateRuleRequest {
   merchant_id: string
   config: RuleConfig

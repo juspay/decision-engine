@@ -6,6 +6,14 @@ pub struct RoutingRule {
     pub config: ConfigVariant,
 }
 
+/// Read response: an existing merchant may use defaults without a saved configuration.
+/// Write requests continue to require a concrete `RoutingRule::config`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RuleConfigGetResponse {
+    pub merchant_id: String,
+    pub config: Option<ConfigVariant>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FetchRoutingRule {
     pub merchant_id: String,
