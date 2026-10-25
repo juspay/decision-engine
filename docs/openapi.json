@@ -940,6 +940,15 @@
         ],
         "parameters": [
           {
+            "name": "connector_mismatch",
+            "in": "query",
+            "description": "Only payments whose latest Decide Gateway or Hybrid Routing connector differs from a reported update connector in the selected window. Compares connector names without case or account suffixes. Keeps complete payment summaries and timelines; ignored for exact ID lookup.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
             "name": "x-tenant-id",
             "in": "header",
             "required": true,
