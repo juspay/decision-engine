@@ -11,6 +11,7 @@
 //! listing cheap without scanning: a per-merchant list of connectors, and a global list of
 //! merchants that have any override (so the periodic serving refresh can hydrate them all).
 
+use error_stack::{Report, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::types::service_configuration;
@@ -97,28 +98,40 @@ const GLOBAL_INDEX_NAME: &str = "cost_fee_override_merchants";
 async fn read_json<T: for<'de> Deserialize<'de>>(name: String) -> Result<Option<T>, IngestError> {
     let stored = service_configuration::find_config_by_name(name)
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+        .map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?;
     match stored.and_then(|c| c.value) {
-        Some(v) => serde_json::from_str(&v)
-            .map(Some)
-            .map_err(|e| IngestError::Storage(e.to_string())),
+        Some(v) => serde_json::from_str(&v).map(Some).map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        }),
         None => Ok(None),
     }
 }
 
 async fn write_json<T: Serialize>(name: String, value: &T) -> Result<(), IngestError> {
-    let serialized =
-        serde_json::to_string(value).map_err(|e| IngestError::Storage(e.to_string()))?;
+    let serialized = serde_json::to_string(value).map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     let exists = service_configuration::find_config_by_name(name.clone())
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?
+        .map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?
         .is_some();
     if exists {
         service_configuration::update_config(name, Some(serialized)).await
     } else {
         service_configuration::insert_config(name, Some(serialized)).await
     }
-    .map_err(|e| IngestError::Storage(e.to_string()))
+    .map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })
 }
 
 // ── index maintenance ─────────────────────────────────────────────────────────────────────────
@@ -188,7 +201,10 @@ pub async fn put(merchant_id: &str, connector: &str, ov: &FeeOverride) -> Result
 pub async fn delete(merchant_id: &str, connector: &str) -> Result<(), IngestError> {
     service_configuration::delete_config(override_name(merchant_id, connector))
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+        .map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?;
     index_remove(merchant_index_name(merchant_id), connector).await?;
     prune_global_index(merchant_id).await
 }

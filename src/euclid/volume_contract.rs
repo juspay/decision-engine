@@ -31,10 +31,13 @@
 //!   `SCHEMA_VERSION_MAX` and keep parse support for older versions.
 //! - Enabling archetype B, or the reserved `scope` conditions, is a validation change only.
 
+use crate::logger;
+use error_stack::{Report, ResultExt};
 use serde::{Deserialize, Serialize};
 
 use super::ast::Comparison;
 use super::errors::ValidationErrorDetails;
+use crate::error::ErrorMessage;
 use crate::types::currency::Currency;
 
 pub const SCHEMA_VERSION_MIN: u32 = 1;
@@ -470,27 +473,36 @@ impl<'de> Deserialize<'de> for ToleranceBps {
             Str(String),
         }
         let bps = match Raw::deserialize(deserializer)? {
-            Raw::Int(n) => n,
-            Raw::Str(s) => parse_tolerance(&s).map_err(D::Error::custom)?,
+            Raw::Int(n) => Ok(n),
+            Raw::Str(s) => parse_tolerance(&s),
         };
-        u16::try_from(bps)
-            .map(ToleranceBps)
-            .map_err(|_| D::Error::custom(format!("tolerance {bps} bps out of range")))
+        bps.and_then(|bps| {
+            u16::try_from(bps)
+                .map(ToleranceBps)
+                .change_context(ErrorMessage(format!("tolerance {bps} bps out of range")))
+        })
+        .map_err(|error| {
+            // Serde consumes the report as a display-only custom error here.
+            logger::error!(error = ?error, "Invalid volume-contract tolerance");
+            D::Error::custom(error.current_context())
+        })
     }
 }
 
-fn parse_tolerance(s: &str) -> Result<u64, String> {
+fn parse_tolerance(s: &str) -> error_stack::Result<u64, ErrorMessage> {
     let t = s.trim().to_ascii_lowercase();
     let invalid = || format!("invalid tolerance '{s}': expected basis points, '<n>pp' or '<n>bps'");
     if let Some(pp) = t.strip_suffix("pp") {
         pp.trim()
             .parse::<u64>()
             .map(|n| n.saturating_mul(100))
-            .map_err(|_| invalid())
+            .change_context(ErrorMessage(invalid()))
     } else if let Some(bps) = t.strip_suffix("bps") {
-        bps.trim().parse::<u64>().map_err(|_| invalid())
+        bps.trim()
+            .parse::<u64>()
+            .change_context(ErrorMessage(invalid()))
     } else {
-        t.parse::<u64>().map_err(|_| invalid())
+        t.parse::<u64>().change_context(ErrorMessage(invalid()))
     }
 }
 
@@ -620,15 +632,23 @@ fn canonicalize_amount(
 ) {
     match to_minor(amount, units, exponent) {
         Ok(minor) => *amount = Amount::Int(minor),
-        Err(message) => errors.push(ValidationErrorDetails::new(
-            field,
-            "invalid_amount",
-            format!("{field}: {message}"),
-        )),
+        Err(error) => {
+            // The existing validation collector consumes this failure instead of propagating it.
+            logger::error!(error = ?error, field, "Invalid volume-contract amount");
+            errors.push(ValidationErrorDetails::new(
+                field,
+                "invalid_amount",
+                format!("{field}: {error}"),
+            ));
+        }
     }
 }
 
-fn to_minor(amount: &Amount, units: AmountUnits, exponent: u32) -> Result<u64, String> {
+fn to_minor(
+    amount: &Amount,
+    units: AmountUnits,
+    exponent: u32,
+) -> error_stack::Result<u64, ErrorMessage> {
     let scale = match units {
         AmountUnits::Major => 10u128.pow(exponent),
         AmountUnits::Minor => 1,
@@ -636,44 +656,51 @@ fn to_minor(amount: &Amount, units: AmountUnits, exponent: u32) -> Result<u64, S
     let minor: u128 = match amount {
         Amount::Int(n) => (*n as u128) * scale,
         Amount::Decimal(s) => {
-            let (int_part, frac_part) = parse_decimal(s)?;
+            let (int_part, frac_part) =
+                parse_decimal(s).map_err(|message| Report::new(ErrorMessage(message)))?;
             let frac_scale = match units {
                 AmountUnits::Minor => {
                     if frac_part.chars().any(|c| c != '0') {
-                        return Err(format!(
+                        return Err(Report::new(ErrorMessage(format!(
                             "fractional amount '{s}' is not allowed with minor units"
-                        ));
+                        ))));
                     }
                     String::new()
                 }
                 AmountUnits::Major => {
                     let trimmed = frac_part.trim_end_matches('0');
                     if trimmed.len() > exponent as usize {
-                        return Err(format!(
+                        return Err(Report::new(ErrorMessage(format!(
                             "'{s}' has more than {exponent} decimal place(s) for this currency"
-                        ));
+                        ))));
                     }
                     // Pad to exactly `exponent` digits so it is already in minor units.
                     format!("{trimmed:0<width$}", width = exponent as usize)
                 }
             };
             let int_value: u128 = int_part
-                .parse()
-                .map_err(|_| format!("'{s}' is not a valid amount"))?;
+                .parse::<u128>()
+                .change_context(ErrorMessage(format!("'{s}' is not a valid amount")))?;
             let frac_value: u128 = if frac_scale.is_empty() {
                 0
             } else {
                 frac_scale
-                    .parse()
-                    .map_err(|_| format!("'{s}' is not a valid amount"))?
+                    .parse::<u128>()
+                    .change_context(ErrorMessage(format!("'{s}' is not a valid amount")))?
             };
             int_value
                 .checked_mul(scale)
                 .and_then(|v| v.checked_add(frac_value))
-                .ok_or_else(|| format!("'{s}' overflows the supported amount range"))?
+                .ok_or_else(|| {
+                    Report::new(ErrorMessage(format!(
+                        "'{s}' overflows the supported amount range"
+                    )))
+                })?
         }
     };
-    u64::try_from(minor).map_err(|_| "amount overflows the supported range".to_string())
+    u64::try_from(minor).change_context(ErrorMessage(
+        "amount overflows the supported range".to_string(),
+    ))
 }
 
 /// Splits a non-negative decimal literal into integer and fraction digits. Rejects signs,

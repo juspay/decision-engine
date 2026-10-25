@@ -1,4 +1,5 @@
 use async_trait::async_trait;
+use error_stack::Result;
 
 use crate::analytics::events::{ApiEvent, DomainAnalyticsEvent};
 use crate::analytics::models::{
@@ -165,77 +166,77 @@ impl AnalyticsReadStore for UnavailableAnalyticsReadStore {
         &self,
         _query: &AnalyticsQuery,
     ) -> Result<AnalyticsOverviewResponse, ApiError> {
-        Err(ApiError::DatabaseError)
+        Err(ApiError::DatabaseError.into())
     }
 
     async fn gateway_scores(
         &self,
         _query: &AnalyticsQuery,
     ) -> Result<AnalyticsGatewayScoresResponse, ApiError> {
-        Err(ApiError::DatabaseError)
+        Err(ApiError::DatabaseError.into())
     }
 
     async fn decisions(
         &self,
         _query: &AnalyticsQuery,
     ) -> Result<AnalyticsDecisionResponse, ApiError> {
-        Err(ApiError::DatabaseError)
+        Err(ApiError::DatabaseError.into())
     }
 
     async fn routing_stats(
         &self,
         _query: &AnalyticsQuery,
     ) -> Result<AnalyticsRoutingStatsResponse, ApiError> {
-        Err(ApiError::DatabaseError)
+        Err(ApiError::DatabaseError.into())
     }
 
     async fn cost_savings(
         &self,
         _query: &AnalyticsQuery,
     ) -> Result<AnalyticsCostSavingsResponse, ApiError> {
-        Err(ApiError::DatabaseError)
+        Err(ApiError::DatabaseError.into())
     }
 
     async fn log_summaries(
         &self,
         _query: &AnalyticsQuery,
     ) -> Result<AnalyticsLogSummariesResponse, ApiError> {
-        Err(ApiError::DatabaseError)
+        Err(ApiError::DatabaseError.into())
     }
 
     async fn payment_audit(
         &self,
         _query: &PaymentAuditQuery,
     ) -> Result<PaymentAuditResponse, ApiError> {
-        Err(ApiError::DatabaseError)
+        Err(ApiError::DatabaseError.into())
     }
 
     async fn payment_audit_filter_options(
         &self,
         _query: &PaymentAuditQuery,
     ) -> Result<PaymentAuditFilterOptions, ApiError> {
-        Err(ApiError::DatabaseError)
+        Err(ApiError::DatabaseError.into())
     }
 
     async fn preview_trace(
         &self,
         _query: &PaymentAuditQuery,
     ) -> Result<PaymentAuditResponse, ApiError> {
-        Err(ApiError::DatabaseError)
+        Err(ApiError::DatabaseError.into())
     }
 
     async fn experiment_results(
         &self,
         _query: &ExperimentResultsQuery,
     ) -> Result<ExperimentResultsResponse, ApiError> {
-        Err(ApiError::DatabaseError)
+        Err(ApiError::DatabaseError.into())
     }
 
     async fn experiment_transactions(
         &self,
         _query: &ExperimentTransactionsQuery,
     ) -> Result<ExperimentTransactionsResponse, ApiError> {
-        Err(ApiError::DatabaseError)
+        Err(ApiError::DatabaseError.into())
     }
 
     async fn experiment_has_recorded_payments(
@@ -243,13 +244,13 @@ impl AnalyticsReadStore for UnavailableAnalyticsReadStore {
         _merchant_id: &str,
         _experiment_id: &str,
     ) -> Result<bool, ApiError> {
-        Err(ApiError::DatabaseError)
+        Err(ApiError::DatabaseError.into())
     }
 
     async fn routing_events(
         &self,
         _query: &RoutingEventsQuery,
     ) -> Result<RoutingEventsResponse, ApiError> {
-        Err(ApiError::DatabaseError)
+        Err(ApiError::DatabaseError.into())
     }
 }

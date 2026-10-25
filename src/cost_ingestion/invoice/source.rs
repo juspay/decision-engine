@@ -5,6 +5,7 @@
 //! `InvoiceSource` impl plus a registry line — the reduction, storage, and serving overlay never
 //! change.
 
+use error_stack::{Report, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -44,7 +45,7 @@ impl InvoiceRegistry {
         self.sources
             .get(connector)
             .cloned()
-            .ok_or_else(|| IngestError::UnknownConnector(connector.to_string()))
+            .ok_or_else(|| Report::new(IngestError::UnknownConnector(connector.to_string())))
     }
 }
 

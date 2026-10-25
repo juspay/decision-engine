@@ -12,6 +12,7 @@
 //! `cost_ingestion.report_poll_enabled` is set, so a dedicated ingest deployment owns it. Nothing
 //! here names a specific connector: adding a pull PSP requires no change to this file.
 
+use error_stack::Result;
 use std::time::Duration;
 
 use futures::FutureExt;

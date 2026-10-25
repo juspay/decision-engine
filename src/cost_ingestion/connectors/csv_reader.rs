@@ -12,6 +12,7 @@
 //! creation, header handling, and the reuse loop live here once, so every connector benefits and no
 //! connector re-implements them.
 
+use error_stack::{Report, Result};
 use std::cell::RefCell;
 use std::io::Read;
 
@@ -117,7 +118,8 @@ impl<'a> Headers<'a> {
             required: self.required.borrow().clone(),
             optional: self.optional.borrow().clone(),
             found: self.found(),
-        })
+        }
+        .into())
     }
 }
 
@@ -159,7 +161,10 @@ pub fn parse<C>(
     // Headers are read once; clone so the borrow doesn't pin the reader for the row loop.
     let header_rec = rdr
         .byte_headers()
-        .map_err(|e| IngestError::Parse(e.to_string()))?
+        .map_err(|e| {
+            let context = IngestError::Parse(e.to_string());
+            Report::from(e).change_context(context)
+        })?
         .clone();
     // Resolve columns, then convert any accumulated misses into one error *before* the row loop —
     // `prepare` returns `Ok` even with columns missing (see `Headers::require`), so this check is
@@ -170,10 +175,10 @@ pub fn parse<C>(
 
     // One record, reused for every row — the whole point of the ByteRecord path.
     let mut rec = csv::ByteRecord::new();
-    while rdr
-        .read_byte_record(&mut rec)
-        .map_err(|e| IngestError::Parse(e.to_string()))?
-    {
+    while rdr.read_byte_record(&mut rec).map_err(|e| {
+        let context = IngestError::Parse(e.to_string());
+        Report::from(e).change_context(context)
+    })? {
         if let Some(row) = map_row(&cols, &Row { record: &rec })? {
             on_row(row)?;
         }

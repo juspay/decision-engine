@@ -7,6 +7,7 @@
 //! Manual uploads do NOT flow through here — they run their own task (see `routes::report_upload`)
 //! but write to the same `cost_ingestion` table, so history and progress are unified.
 
+use error_stack::Result;
 use std::time::Duration;
 
 use futures::FutureExt;
@@ -84,14 +85,14 @@ async fn run_once(batch: usize, clickhouse: &ClickHouseAnalyticsConfig) {
                 if let Err(e) = super::serving::refresh_merchant(clickhouse, &merchant_id).await {
                     logger::warn!(
                         tag = "ingest_worker",
-                        "serving refresh after ingest failed: {}",
+                        "serving refresh after ingest failed: {:?}",
                         e
                     );
                 }
             }
             Err(e) => {
-                let msg = format!("{e:?}");
-                logger::warn!(tag = "ingest_worker", "job {} failed: {}", id, msg);
+                let msg = format!("{:?}", e.current_context());
+                logger::warn!(error = ?e, tag = "ingest_worker", "job {} failed: {}", id, msg);
                 if let Err(e2) = store::mark_failed(&id, &msg).await {
                     logger::warn!(tag = "ingest_worker", "mark_failed {} failed: {:?}", id, e2);
                 }

@@ -1,4 +1,5 @@
 use clickhouse::Row;
+use error_stack::Result;
 use serde::Deserialize;
 
 use crate::analytics::clickhouse::common::{fetch_all, static_flow_type_in_sql, DOMAIN_TABLE};

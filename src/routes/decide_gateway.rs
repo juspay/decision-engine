@@ -248,7 +248,7 @@ pub async fn decide_gateway(
     let headers = req.headers().clone();
     let x_request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .unwrap_or("unknown")
         .to_string();
     let global_request_id = global_request_id_from_headers(&headers);

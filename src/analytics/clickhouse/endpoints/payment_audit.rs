@@ -3,6 +3,8 @@ use crate::analytics::models::{
     PaymentAuditOutcome, PaymentAuditQuery, PaymentAuditResponse, PaymentAuditScope,
 };
 use crate::error::ApiError;
+use crate::logger;
+use error_stack::{Result, ResultExt};
 
 use super::super::metrics;
 use super::super::time::payment_audit_range;
@@ -21,18 +23,7 @@ pub async fn load(
         if let Some(lookup_key) = requested_lookup_key.clone() {
             let results = metrics::audit_summaries::load_exact(client, query, scope, &lookup_key)
                 .await
-                .map_err(|error| {
-                    crate::logger::error!(
-                        ?error,
-                        ?scope,
-                        lookup_key,
-                        merchant_id = %query.merchant_id,
-                        payment_id = ?query.payment_id,
-                        request_id = ?query.request_id,
-                        "payment audit exact summary load failed"
-                    );
-                    error
-                })?;
+                .attach_printable("payment audit exact summary load failed")?;
             let success = results
                 .iter()
                 .filter(|r| r.outcome == PaymentAuditOutcome::Success)
@@ -46,30 +37,10 @@ pub async fn load(
             let (total_results, total_success, total_failure) =
                 metrics::audit_summaries::count(client, query, scope)
                     .await
-                    .map_err(|error| {
-                        crate::logger::error!(
-                            ?error,
-                            ?scope,
-                            merchant_id = %query.merchant_id,
-                            payment_id = ?query.payment_id,
-                            request_id = ?query.request_id,
-                            "payment audit summary count failed"
-                        );
-                        error
-                    })?;
+                    .attach_printable("payment audit summary count failed")?;
             let results = metrics::audit_summaries::load_page(client, query, scope)
                 .await
-                .map_err(|error| {
-                    crate::logger::error!(
-                        ?error,
-                        ?scope,
-                        merchant_id = %query.merchant_id,
-                        payment_id = ?query.payment_id,
-                        request_id = ?query.request_id,
-                        "payment audit summary page load failed"
-                    );
-                    error
-                })?;
+                .attach_printable("payment audit summary page load failed")?;
             (total_results, total_success, total_failure, results)
         };
     let page = query.page;
@@ -90,18 +61,7 @@ pub async fn load(
     let timeline = if let Some(lookup_key) = timeline_lookup_key.as_deref() {
         metrics::audit_timeline::load(client, query, scope, lookup_key)
             .await
-            .map_err(|error| {
-                crate::logger::error!(
-                    ?error,
-                    ?scope,
-                    lookup_key,
-                    merchant_id = %query.merchant_id,
-                    payment_id = ?query.payment_id,
-                    request_id = ?query.request_id,
-                    "payment audit timeline load failed"
-                );
-                error
-            })?
+            .attach_printable("payment audit timeline load failed")?
     } else {
         Vec::new()
     };
@@ -117,7 +77,7 @@ pub async fn load(
     {
         Ok(assignments) => Some(assignments),
         Err(error) => {
-            crate::logger::warn!(
+            logger::warn!(
                 ?error,
                 merchant_id = %query.merchant_id,
                 "payment audit experiment assignments load failed"

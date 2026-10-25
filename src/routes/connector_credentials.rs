@@ -56,7 +56,10 @@ pub async fn set_connector_credentials(
     store
         .put(&connector, &body.account, &merchant_id, &new)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(|error| {
+            let message = format!("{:?}", error.current_context());
+            TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+        })?;
 
     Ok(Json(SetCredentialsResponse {
         merchant_id,
@@ -75,7 +78,10 @@ pub async fn delete_connector_credentials(
 ) -> Result<StatusCode, TextError> {
     creds::delete_source(&connector, &account, &merchant_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(|error| {
+            let message = format!("{:?}", error.current_context());
+            TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+        })?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -95,11 +101,15 @@ pub async fn list_connector_credentials(
             .list_masked(&merchant_id)
             .await
             .map(Json)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")).into()),
+            .map_err(|error| {
+                let message = format!("{:?}", error.current_context());
+                TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+            }),
         None => {
-            let sources = creds::list_sources(&merchant_id)
-                .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+            let sources = creds::list_sources(&merchant_id).await.map_err(|error| {
+                let message = format!("{:?}", error.current_context());
+                TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+            })?;
             Ok(Json(
                 sources
                     .into_iter()

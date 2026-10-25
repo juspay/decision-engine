@@ -5,6 +5,7 @@
 //! replaces the learned model for every EV calculation on that connector — see
 //! [`crate::cost_ingestion::serving::lookup`] and `overrides`.
 
+use crate::logger;
 use std::collections::{BTreeSet, HashMap};
 
 use crate::custom_extractors::Json;
@@ -66,9 +67,15 @@ pub async fn list_connector_fees(
     // merchant with no fitted models rather than a broken query.
     let model: HashMap<String, ConnectorBlend> = blended::by_connector(&cfg, &merchant_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(|error| {
+            let message = format!("{:?}", error.current_context());
+            TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+        })?;
     let override_map: HashMap<String, FeeOverride> = overrides::list(&merchant_id)
         .await
+        .inspect_err(|cause| {
+            logger::error!(error = ?cause);
+        })
         .unwrap_or_default()
         .into_iter()
         .map(|(c, o)| (c.to_lowercase(), o))
@@ -177,7 +184,10 @@ pub async fn set_fee_override(
     };
     overrides::put(&merchant_id, &connector, &ov)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(|error| {
+            let message = format!("{:?}", error.current_context());
+            TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+        })?;
 
     // Push the change onto the hot path now, so the next decide uses it without waiting for the
     // periodic refresh. Best-effort: the override is already persisted and will be picked up on the
@@ -200,7 +210,10 @@ pub async fn delete_fee_override(
     let connector = connector.to_lowercase();
     overrides::delete(&merchant_id, &connector)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(|error| {
+            let message = format!("{:?}", error.current_context());
+            TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+        })?;
     refresh_serving(&merchant_id).await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -210,9 +223,9 @@ pub async fn delete_fee_override(
 pub(crate) async fn refresh_serving(merchant_id: &str) {
     let Ok(cfg) = clickhouse_config() else { return };
     if let Err(e) = serving::refresh_merchant(&cfg, merchant_id).await {
-        crate::logger::warn!(
+        logger::warn!(
             tag = "cost_serving",
-            "inline refresh after override change failed for {}: {}",
+            "inline refresh after override change failed for {}: {:?}",
             merchant_id,
             e
         );

@@ -1,5 +1,6 @@
 //! Read-only dashboard/projection/impact/samples views plus the scheduler-called run endpoint.
 
+use crate::logger;
 use std::collections::HashMap;
 
 use axum::extract::{Path, Query};
@@ -44,7 +45,7 @@ fn presents_admin_secret(headers: &HeaderMap) -> bool {
     let expected = state.global_config.admin_secret.secret.peek();
     let provided = headers
         .get("x-admin-secret")
-        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .unwrap_or("");
     !expected.is_empty() && provided == expected
 }
@@ -114,8 +115,13 @@ pub async fn run_forecast(
         Ok(Ok(None)) => (0, 1, 0, Vec::new()),
         // Logged where it happened.
         Ok(Err(_)) => (0, 0, 1, Vec::new()),
-        Err(_) => {
-            crate::logger::error!(
+        Err(panic) => {
+            logger::error!(
+                error = panic
+                    .downcast_ref::<String>()
+                    .map(String::as_str)
+                    .or_else(|| panic.downcast_ref::<&str>().copied())
+                    .unwrap_or("non-string panic payload"),
                 tag = "volume_commitment",
                 merchant_id = merchant_id.as_str(),
                 "panic in volume commitment pass"
@@ -335,7 +341,7 @@ async fn pacing_view(merchant_id: String) -> VolumeCommitmentView {
         )
         .await
         .unwrap_or_else(|error| {
-            crate::logger::warn!(
+            logger::warn!(
                 tag = "volume_commitment",
                 merchant_id = merchant_id.as_str(),
                 "pacing card rendered without delivered volume: {error}"
@@ -731,6 +737,9 @@ async fn dashboard_parts(
         Some(store) => store
             .volume_commitment(&analytics_query(&inputs, &commitments, per_day))
             .await
+            .inspect_err(|cause| {
+                logger::error!(error = ?cause);
+            })
             .unwrap_or_default(),
         None => CommitmentAnalytics::default(),
     };
@@ -939,6 +948,9 @@ pub async fn get_impact(
         Some(store) => store
             .volume_commitment_impact(&analytics_query(&inputs, &commitments, 1))
             .await
+            .inspect_err(|cause| {
+                logger::error!(error = ?cause);
+            })
             .unwrap_or_default(),
         None => crate::analytics::models::CommitmentImpactData::default(),
     };

@@ -2,7 +2,7 @@ use crate::custom_extractors::Json;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::types::merchant as ETM;
 use crate::{error, logger, types};
-use error_stack::ResultExt;
+use error_stack::{Report, ResultExt};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -51,7 +51,7 @@ pub async fn create_rule_config(
     let analytics_config = config.clone();
     let request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .map(str::to_string);
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
@@ -77,7 +77,7 @@ pub async fn create_rule_config(
                 .map_err(error::RuleConfigurationError::InvalidPaymentMethod)?;
             let name = format!("SR_V3_INPUT_CONFIG_{}", mid);
             let serialized_config = serde_json::to_string(&success_config)
-                .map_err(|_| error::RuleConfigurationError::StorageError)?;
+                .change_context(error::RuleConfigurationError::StorageError)?;
 
             // Check if config already exists
             let result = types::service_configuration::find_config_by_name(name.clone())
@@ -120,7 +120,7 @@ pub async fn create_rule_config(
         types::routing_configuration::ConfigVariant::Elimination(elimination_config) => {
             let db_config = types::gateway_routing_input::GatewaySuccessRateBasedRoutingInput::from_elimination_threshold(elimination_config);
             let serialized_config = serde_json::to_string(&db_config)
-                .map_err(|_| error::RuleConfigurationError::StorageError)?;
+                .change_context(error::RuleConfigurationError::StorageError)?;
 
             let result = types::merchant::merchant_account::update_merchant_account(
                 mid,
@@ -151,7 +151,7 @@ pub async fn create_rule_config(
         types::routing_configuration::ConfigVariant::DebitRouting(debit_config) => {
             let name = format!("DEBIT_ROUTING_CONFIG_{}", mid);
             let serialized_config = serde_json::to_string(&debit_config)
-                .map_err(|_| error::RuleConfigurationError::StorageError)?;
+                .change_context(error::RuleConfigurationError::StorageError)?;
 
             // Check if config already exists
             let result = types::service_configuration::find_config_by_name(name.clone())
@@ -218,7 +218,7 @@ pub async fn create_rule_config(
 // while using the same 404 context as the other configuration operations.
 fn parse_optional_rule_config<T: serde::de::DeserializeOwned>(
     value: Option<&str>,
-) -> Result<Option<T>, error_stack::Report<error::RuleConfigurationError>> {
+) -> Result<Option<T>, Report<error::RuleConfigurationError>> {
     value
         .map(serde_json::from_str)
         .transpose()
@@ -243,7 +243,7 @@ pub async fn get_rule_config(
     let analytics_payload = payload.clone();
     let request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .map(str::to_string);
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
@@ -267,7 +267,7 @@ pub async fn get_rule_config(
 
     use types::routing_configuration::{AlgorithmType, ConfigVariant, RuleConfigGetResponse};
     let (result, metric): (
-        Result<Option<ConfigVariant>, error_stack::Report<error::RuleConfigurationError>>,
+        Result<Option<ConfigVariant>, Report<error::RuleConfigurationError>>,
         &str,
     ) = match payload.algorithm {
         AlgorithmType::SuccessRate | AlgorithmType::DebitRouting => {
@@ -373,7 +373,7 @@ pub async fn update_rule_config(
     let analytics_config = config.clone();
     let request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .map(str::to_string);
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
@@ -391,7 +391,7 @@ pub async fn update_rule_config(
                 .map_err(error::RuleConfigurationError::InvalidPaymentMethod)?;
             let name = format!("SR_V3_INPUT_CONFIG_{}", mid);
             let serialized_config = serde_json::to_string(&success_config)
-                .map_err(|_| error::RuleConfigurationError::StorageError)?;
+                .change_context(error::RuleConfigurationError::StorageError)?;
 
             let result = types::service_configuration::update_config(name, Some(serialized_config))
                 .await
@@ -419,7 +419,7 @@ pub async fn update_rule_config(
         types::routing_configuration::ConfigVariant::Elimination(elimination_config) => {
             let db_config = types::gateway_routing_input::GatewaySuccessRateBasedRoutingInput::from_elimination_threshold(elimination_config);
             let serialized_config = serde_json::to_string(&db_config)
-                .map_err(|_| error::RuleConfigurationError::StorageError)?;
+                .change_context(error::RuleConfigurationError::StorageError)?;
 
             let result = types::merchant::merchant_account::update_merchant_account(
                 mid,
@@ -450,7 +450,7 @@ pub async fn update_rule_config(
         types::routing_configuration::ConfigVariant::DebitRouting(debit_config) => {
             let name = format!("DEBIT_ROUTING_CONFIG_{}", mid);
             let serialized_config = serde_json::to_string(&debit_config)
-                .map_err(|_| error::RuleConfigurationError::StorageError)?;
+                .change_context(error::RuleConfigurationError::StorageError)?;
 
             let result = types::service_configuration::update_config(name, Some(serialized_config))
                 .await
@@ -512,7 +512,7 @@ pub async fn delete_rule_config(
     let analytics_payload = payload.clone();
     let request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .map(str::to_string);
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);

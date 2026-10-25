@@ -86,9 +86,14 @@ pub async fn run_all(deps: &Deps) -> RunReport {
             Ok(Ok(None)) => report.merchants_skipped += 1,
             // Already logged where it happened; the previous plan stands.
             Ok(Err(_)) => report.merchants_failed += 1,
-            Err(_) => {
+            Err(panic) => {
                 report.merchants_failed += 1;
                 logger::error!(
+                    error = panic
+                        .downcast_ref::<String>()
+                        .map(String::as_str)
+                        .or_else(|| panic.downcast_ref::<&str>().copied())
+                        .unwrap_or("non-string panic payload"),
                     tag = "volume_commitment",
                     merchant_id = merchant_id.as_str(),
                     "panic in volume commitment pass; the rest of the run continues"

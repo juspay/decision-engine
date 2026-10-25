@@ -1,7 +1,8 @@
 use crate::custom_extractors::Json;
+use crate::logger;
 use crate::{
     app::{get_tenant_app_state, APP_STATE},
-    error::ContainerError,
+    error::{ContainerError, TextError},
     euclid::{
         ast::{ConnectorInfo, ValueType},
         errors::EuclidErrors,
@@ -123,7 +124,7 @@ fn admin_authorized(headers: &HeaderMap, expected: &str) -> bool {
     !expected.is_empty()
         && headers
             .get("x-admin-secret")
-            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
             .is_some_and(|value| value == expected)
 }
 
@@ -131,7 +132,7 @@ pub async fn replace_profile_connectors(
     headers: HeaderMap,
     Path(profile_id): Path<String>,
     Json(inputs): Json<Vec<ConnectorInput>>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
+) -> Result<Json<serde_json::Value>, TextError> {
     let config = APP_STATE.get().map(|state| &state.global_config).ok_or((
         StatusCode::INTERNAL_SERVER_ERROR,
         "Application state unavailable".to_string(),
@@ -144,17 +145,18 @@ pub async fn replace_profile_connectors(
         let state = get_tenant_app_state().await;
         store_snapshot(&state.redis_conn.conn, &profile_id, &snapshot)
             .await
-            .map_err(|_| {
-                (
+            .map_err(|cause| {
+                TextError::from_report(
+                    cause,
                     StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to store connector eligibility".to_string(),
+                    "Failed to store connector eligibility",
                 )
             })?;
         Ok(Json(
             serde_json::json!({"profile_id": profile_id, "connector_count": snapshot.len()}),
         ))
     } else {
-        Err((StatusCode::UNAUTHORIZED, "Invalid admin secret".to_string()))
+        Err((StatusCode::UNAUTHORIZED, "Invalid admin secret".to_string()).into())
     }
 }
 
@@ -217,10 +219,10 @@ pub async fn transform_fallback(
             .conn
             .get_key(&redis_key(&request.created_by))
             .await
-            .map_err(|_| EuclidErrors::StorageError)?;
+            .change_context(EuclidErrors::StorageError)?;
         if !bytes.is_empty() {
             let snapshot: Vec<ConnectorEligibility> =
-                serde_json::from_slice(&bytes).map_err(|_| EuclidErrors::StorageError)?;
+                serde_json::from_slice(&bytes).change_context(EuclidErrors::StorageError)?;
             let fallback = eligible_fallback(request, &snapshot);
             if fallback.is_empty() {
                 Err(EuclidErrors::InvalidRequest(

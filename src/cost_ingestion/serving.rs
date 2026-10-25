@@ -9,6 +9,7 @@
 //! and only then to the seed/hypersense sources. So this strictly improves precision without
 //! losing coverage.
 
+use error_stack::{Report, Result};
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::{OnceLock, RwLock};
@@ -18,6 +19,7 @@ use masking::PeekInterface;
 
 use crate::config::ClickHouseAnalyticsConfig;
 use crate::decider::gatewaydecider::multi_objective::cluster_key::issuer_region;
+use crate::error::ErrorMessage;
 use crate::logger;
 // Shared with the rollup aggregator so decide-time bucketing and the stored `band` column (which is
 // stamped by the same thresholds at ingestion) can never diverge.
@@ -593,7 +595,7 @@ pub fn spawn(clickhouse: ClickHouseAnalyticsConfig) {
                     "refreshed in-house cost models: {} merchant(s)",
                     n
                 ),
-                Err(e) => logger::warn!(tag = "cost_serving", "refresh failed: {}", e),
+                Err(e) => logger::warn!(error = ?e, tag = "cost_serving", "refresh failed"),
             }
         }
     });
@@ -681,7 +683,7 @@ FORMAT TSV
 /// Rebuild the **entire** served-model cache from ClickHouse. Used by the periodic background ticker
 /// (off the request path). `O(all merchants)` — for the inline post-ingest/-delete refresh prefer
 /// [`refresh_merchant`], which touches only the affected merchant.
-pub async fn refresh(cfg: &ClickHouseAnalyticsConfig) -> Result<usize, String> {
+pub async fn refresh(cfg: &ClickHouseAnalyticsConfig) -> Result<usize, ErrorMessage> {
     refresh_inner(cfg, None).await
 }
 
@@ -693,14 +695,14 @@ pub async fn refresh(cfg: &ClickHouseAnalyticsConfig) -> Result<usize, String> {
 pub async fn refresh_merchant(
     cfg: &ClickHouseAnalyticsConfig,
     merchant_id: &str,
-) -> Result<usize, String> {
+) -> Result<usize, ErrorMessage> {
     refresh_inner(cfg, Some(merchant_id)).await
 }
 
 async fn refresh_inner(
     cfg: &ClickHouseAnalyticsConfig,
     merchant: Option<&str>,
-) -> Result<usize, String> {
+) -> Result<usize, ErrorMessage> {
     // Refresh the GLOBAL BIN → dominant-card_product map (shared across all merchants — a card's
     // product is universal). A single small read, done on every refresh so decide-time resolution
     // tracks BINs as new reports land. Empty on failure ⇒ card_product resolves to "" ⇒ coarse blend.
@@ -744,7 +746,7 @@ async fn refresh_inner(
     let seg_rows = match query(cfg, &seg_sql, merchant).await {
         Ok(r) => r,
         Err(e) => {
-            logger::warn!(tag = "cost_serving", "segment load skipped: {}", e);
+            logger::warn!(tag = "cost_serving", "segment load skipped: {:?}", e);
             String::new()
         }
     };
@@ -963,9 +965,10 @@ async fn refresh_inner(
         }
         Some(mid) => {
             let models = snap.remove(mid);
-            let mut guard = cache()
-                .write()
-                .map_err(|_| "serving cache poisoned".to_string())?;
+            let mut guard = cache().write().map_err(|cause| {
+                Report::new(ErrorMessage("serving cache poisoned".to_string()))
+                    .attach_printable(cause.to_string())
+            })?;
             let mut merged: Snapshot = (**guard).clone();
             match models {
                 Some(m) if !m.is_empty() => {
@@ -1198,7 +1201,7 @@ async fn query(
     cfg: &ClickHouseAnalyticsConfig,
     sql: &str,
     merchant: Option<&str>,
-) -> Result<String, String> {
+) -> Result<String, ErrorMessage> {
     let sql = sql.replace("__DB__", &cfg.database);
     let mut req = super::ch_http::post(client(), &cfg.url).body(sql);
     // Bound as `param_merchant` for the `{merchant:String}` placeholder in a single-merchant refresh.
@@ -1208,15 +1211,21 @@ async fn query(
     if !cfg.user.is_empty() {
         req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
     }
-    let resp = req.send().await.map_err(|e| e.to_string())?;
+    let resp = req.send().await.map_err(|error| {
+        let context = ErrorMessage(error.to_string());
+        Report::from(error).change_context(context)
+    })?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(format!(
+        return Err(Report::new(ErrorMessage(format!(
             "clickhouse serving query failed ({status}): {text}"
-        ));
+        ))));
     }
-    resp.text().await.map_err(|e| e.to_string())
+    resp.text().await.map_err(|error| {
+        let context = ErrorMessage(error.to_string());
+        Report::from(error).change_context(context)
+    })
 }
 
 fn client() -> &'static reqwest::Client {

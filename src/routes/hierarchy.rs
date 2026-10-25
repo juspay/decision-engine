@@ -14,6 +14,7 @@
 
 use crate::custom_extractors::Json;
 use axum::http::HeaderMap;
+use error_stack::ResultExt;
 use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -147,7 +148,7 @@ fn verify_admin_secret(
 
     let provided = headers
         .get("x-admin-secret")
-        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .unwrap_or("");
 
     if provided != global_config.admin_secret.secret.peek().as_str() {
@@ -169,7 +170,7 @@ pub async fn reconcile_hierarchy(
 
     let accounts = MA::load_all_merchant_accounts()
         .await
-        .map_err(|_| error::MerchantAccountConfigurationError::StorageError)?;
+        .change_context(error::MerchantAccountConfigurationError::StorageError)?;
 
     let mut scopes = Vec::with_capacity(accounts.len());
     let (mut linked, mut unlinked, mut stranded) = (0usize, 0usize, 0usize);
@@ -272,13 +273,15 @@ pub async fn sync_hierarchy(
                             gateway_success_rate_based_decider_input: None,
                         })
                         .await
-                        .map_err(|_| {
-                            error::MerchantAccountConfigurationError::MerchantInsertionFailed
-                        })?;
+                        .change_context(
+                            error::MerchantAccountConfigurationError::MerchantInsertionFailed,
+                        )?;
 
                         MA::update_merchant_hierarchy(profile.profile_id.clone(), &desired)
                             .await
-                            .map_err(|_| error::MerchantAccountConfigurationError::StorageError)?;
+                            .change_context(
+                                error::MerchantAccountConfigurationError::StorageError,
+                            )?;
                         created += 1;
                     }
                     Some(account) => {
@@ -299,9 +302,9 @@ pub async fn sync_hierarchy(
                         } else {
                             MA::update_merchant_hierarchy(profile.profile_id.clone(), &desired)
                                 .await
-                                .map_err(|_| {
-                                    error::MerchantAccountConfigurationError::StorageError
-                                })?;
+                                .change_context(
+                                    error::MerchantAccountConfigurationError::StorageError,
+                                )?;
                             updated += 1;
                         }
                     }
@@ -312,7 +315,7 @@ pub async fn sync_hierarchy(
 
     write_reverse_indexes(&payload)
         .await
-        .map_err(|_| error::MerchantAccountConfigurationError::StorageError)?;
+        .change_context(error::MerchantAccountConfigurationError::StorageError)?;
 
     // Stranded scopes stay visible after the initial reconcile, since they are the one class
     // where doing nothing loses working configuration — unless the caller opted out because
@@ -410,7 +413,12 @@ impl TreeIndex {
 async fn collect_stranded(index: &TreeIndex) -> Vec<String> {
     let accounts = match MA::load_all_merchant_accounts().await {
         Ok(accounts) => accounts,
-        Err(_) => return Vec::new(),
+        Err(error) => {
+            return {
+                logger::error!(error = ?error);
+                Vec::new()
+            }
+        }
     };
 
     accounts

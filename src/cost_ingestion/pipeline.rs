@@ -11,6 +11,8 @@
 //! flow we also fold the report's shape (period, currencies, countries, volume) for the history
 //! record and tick per-job progress. When the report is fully aggregated we insert the buckets once.
 
+use crate::logger;
+use error_stack::{Report, Result};
 use std::collections::BTreeSet;
 use std::io::{Cursor, Read};
 
@@ -117,8 +119,10 @@ pub async fn ingest_report_reader(
     // date internally, so a monthly file, daily files, or a mix all fold into the same model.
     let report_date = crate::utils::date_time::now().date().to_string();
     // Rows whose report carries no transaction date are dated to the ingest day for the rollup.
-    let fallback_date = NaiveDate::parse_from_str(&report_date, "%Y-%m-%d")
-        .map_err(|e| IngestError::Storage(format!("bad report date: {e}")))?;
+    let fallback_date = NaiveDate::parse_from_str(&report_date, "%Y-%m-%d").map_err(|e| {
+        let context = IngestError::Storage(format!("bad report date: {e}"));
+        Report::from(e).change_context(context)
+    })?;
 
     // Blocking CSV parse → bounded channel → async aggregation. `blocking_send` inside the parser
     // applies backpressure, so parsing never runs more than CHANNEL_DEPTH batches ahead.
@@ -129,7 +133,10 @@ pub async fn ingest_report_reader(
             tx.blocking_send(batch)
                 // The receiver drops only when the consume loop has already errored out; end the
                 // parse quietly and let that error surface to the caller.
-                .map_err(|_| IngestError::Storage("aggregate side closed".to_string()))
+                .map_err(|cause| {
+                    let context = IngestError::Storage("aggregate side closed".to_string());
+                    Report::from(cause).change_context(context)
+                })
         })
     });
 
@@ -174,9 +181,10 @@ pub async fn ingest_report_reader(
     drop(rx);
 
     // Join the parser. A parse error wins over any "aggregate side closed" it may have observed.
-    let parse_result = parse
-        .await
-        .map_err(|e| IngestError::Storage(format!("parse task panicked: {e}")))?;
+    let parse_result = parse.await.map_err(|e| {
+        let context = IngestError::Storage(format!("parse task panicked: {e}"));
+        Report::from(e).change_context(context)
+    })?;
     parse_result?;
 
     // One insert of the fully-aggregated buckets, then fit from what the rollup now holds. The
@@ -199,7 +207,7 @@ pub async fn ingest_report_reader(
     // is a refinement layered on the per-row-rate fallback, so a failure here must not fail the
     // report's ingest/fit — log and continue.
     if let Err(e) = sink::insert_bin_product(clickhouse, &bin_rows).await {
-        crate::logger::warn!(
+        logger::warn!(
             tag = "cost_ingestion",
             "bin_product insert failed ({} bins): {}",
             bin_rows.len(),

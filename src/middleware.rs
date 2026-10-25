@@ -2,6 +2,7 @@ use crate::app::APP_STATE;
 use crate::auth;
 use crate::custom_extractors::TenantStateResolver;
 use crate::error::{self, ContainerError};
+use crate::logger;
 use axum::body::Body;
 use axum::response::Response;
 use axum::{http::Request, http::StatusCode, middleware::Next};
@@ -36,6 +37,7 @@ pub async fn authenticate(
             return Ok(crate::error::text_error_response(
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "Server not ready",
+                None,
             ))
         }
     };
@@ -45,7 +47,7 @@ pub async fn authenticate(
     if let Some(bearer) = req
         .headers()
         .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .and_then(|v| v.strip_prefix("Bearer "))
     {
         use crate::routes::user_auth::verify_jwt_not_revoked;
@@ -76,16 +78,18 @@ pub async fn authenticate(
                     return Ok(crate::error::text_error_response(
                         StatusCode::FORBIDDEN,
                         format!("This session does not have {}", required.as_str()),
+                        None,
                     ));
                 }
 
                 req.extensions_mut().insert(context);
                 return Ok(next.run(req).await);
             }
-            Err(_) => {
+            Err(error) => {
                 return Ok(crate::error::text_error_response(
                     StatusCode::UNAUTHORIZED,
                     "Invalid or expired token",
+                    Some(&error),
                 ))
             }
         }
@@ -99,7 +103,7 @@ pub async fn authenticate(
     if let Some(provided) = req
         .headers()
         .get("x-admin-secret")
-        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
     {
         let expected = app_state.global_config.admin_secret.secret.peek();
         if !expected.is_empty() && provided == expected {
@@ -108,6 +112,7 @@ pub async fn authenticate(
         return Ok(crate::error::text_error_response(
             StatusCode::UNAUTHORIZED,
             "Invalid admin secret",
+            None,
         ));
     }
 
@@ -115,12 +120,13 @@ pub async fn authenticate(
         return Ok(next.run(req).await);
     }
 
-    let api_key = match req.headers().get("x-api-key").and_then(|v| v.to_str().ok()) {
+    let api_key = match req.headers().get("x-api-key").and_then(|v| v.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok()) {
         Some(k) => k.to_owned(),
         None => {
             return Ok(crate::error::text_error_response(
                 StatusCode::UNAUTHORIZED,
                 "Missing authentication credentials",
+                None,
             ))
         }
     };
@@ -131,10 +137,11 @@ pub async fn authenticate(
     let tenant_state =
         match crate::tenant::GlobalAppState::get_app_state_of_tenant(app_state, "public").await {
             Ok(s) => s,
-            Err(_) => {
+            Err(error) => {
                 return Ok(crate::error::text_error_response(
                     StatusCode::INTERNAL_SERVER_ERROR,
                     "Tenant not found",
+                    Some(&error),
                 ))
             }
         };
@@ -166,7 +173,10 @@ pub async fn authenticate(
 
     let key_record = match results {
         Ok(mut rows) => rows.pop(),
-        Err(_) => None,
+        Err(error) => {
+            logger::error!(error = ?error);
+            None
+        }
     };
 
     match key_record {
@@ -186,6 +196,7 @@ pub async fn authenticate(
                 return Ok(crate::error::text_error_response(
                     StatusCode::UNAUTHORIZED,
                     "API key is revoked",
+                    None,
                 ));
             }
 
@@ -193,7 +204,10 @@ pub async fn authenticate(
             let _ = tenant_state
                 .redis_conn
                 .set_key_with_ttl(&cache_key, &record.merchant_id, API_KEY_CACHE_TTL)
-                .await;
+                .await
+                .inspect_err(|cause| {
+                    logger::error!(error = ?cause);
+                });
 
             req.extensions_mut()
                 .insert(auth::AuthContext::from_api_key(record.merchant_id));
@@ -202,6 +216,7 @@ pub async fn authenticate(
         None => Ok(crate::error::text_error_response(
             StatusCode::UNAUTHORIZED,
             "Invalid API key",
+            None,
         )),
     }
 }

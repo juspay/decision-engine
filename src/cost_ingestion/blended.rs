@@ -6,6 +6,7 @@
 //! purely a display roll-up of what the router already serves fine-grained; the manual override
 //! (`super::overrides`) is layered on top by the route handler.
 
+use error_stack::{Report, Result};
 use std::collections::HashMap;
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -495,21 +496,22 @@ pub async fn top_clusters(
     if !cfg.user.is_empty() {
         req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
     }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let resp = req.send().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         return Err(IngestError::Storage(format!(
             "clickhouse top-clusters query failed ({status}): {text}"
-        )));
+        ))
+        .into());
     }
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let text = resp.text().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
 
     let mut out = Vec::new();
     for line in text.lines() {
@@ -657,21 +659,22 @@ pub async fn cluster_facets(
     if !cfg.user.is_empty() {
         req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
     }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let resp = req.send().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         return Err(IngestError::Storage(format!(
             "clickhouse cluster-facets query failed ({status}): {text}"
-        )));
+        ))
+        .into());
     }
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let text = resp.text().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
 
     let mut out = Vec::new();
     for line in text.lines() {
@@ -718,21 +721,22 @@ pub async fn segmented_clusters(
     if !cfg.user.is_empty() {
         req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
     }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let resp = req.send().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         return Err(IngestError::Storage(format!(
             "clickhouse segments query failed ({status}): {text}"
-        )));
+        ))
+        .into());
     }
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let text = resp.text().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
 
     // Rows arrive grouped+ordered by the seven key fields, then seg_idx. Fold contiguous rows of the
     // same cluster into one SegmentedCluster.
@@ -799,21 +803,22 @@ pub async fn by_connector(
         req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
     }
 
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let resp = req.send().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         return Err(IngestError::Storage(format!(
             "clickhouse blend query failed ({status}): {text}"
-        )));
+        ))
+        .into());
     }
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let text = resp.text().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
 
     let mut out = HashMap::new();
     for line in text.lines() {

@@ -792,7 +792,7 @@ impl RedisConnectionWrapper {
         match result {
             Some(value_str) => {
                 let value: T = serde_json::from_str(&value_str)
-                    .map_err(|_| errors::RedisError::UnknownResult)
+                    .change_context(errors::RedisError::UnknownResult)
                     .change_context(errors::RedisError::GetFailed)?;
                 Ok(Some(value))
             }

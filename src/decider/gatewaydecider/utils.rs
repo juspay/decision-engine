@@ -21,6 +21,7 @@ use crate::types::user_eligibility_info::{
 };
 use crate::utils::generate_random_number;
 use crate::{feedback, logger};
+use error_stack::{Report, ResultExt};
 use fred::prelude::{KeysInterface, ListInterface};
 use masking::PeekInterface;
 use masking::Secret;
@@ -86,7 +87,7 @@ use crate::redis::cache as RService;
 // // use eulerhs::tenant_redis_layer as RC;
 // // use eulerhs::types as EHT;
 // // use configs::env_vars as ENV;
-use crate::error::StorageError;
+use crate::error::{ErrorMessage, StorageError};
 use crate::types::gateway_card_info::ValidationType;
 use crate::types::order::udfs::{get_udf, UDFs};
 
@@ -650,7 +651,7 @@ pub async fn get_card_brand(decider_flow: &mut DeciderFlow<'_>) -> Option<String
                     Some(val)
                 }
                 None => {
-                    crate::logger::info!("getCardBrand: Not Found in redis querying DB");
+                    logger::info!("getCardBrand: Not Found in redis querying DB");
                     match get_card_brand_from_db(m_isin).await {
                         Some(cb) => {
                             decider_flow.writer.cardBrand = Some(cb.clone());
@@ -730,7 +731,7 @@ pub async fn metric_tracker_log(
     let normalized_log_data = match serde_json::to_value(&log_data) {
         Ok(value) => value,
         Err(e) => {
-            crate::logger::info!(
+            logger::info!(
                 action = "metric_tracking_log_error",
                 "Failed to serialize log_data: {}",
                 e
@@ -740,13 +741,13 @@ pub async fn metric_tracker_log(
     };
 
     if consume_from_router == Some(true) {
-        crate::logger::info!(
+        logger::info!(
             action = "metric_tracking_log",
             "{}",
             normalized_log_data.to_string(),
         );
     } else {
-        crate::logger::info!(
+        logger::info!(
             action = "metric_tracking_log_diff_check_de",
             "{}",
             normalized_log_data.to_string(),
@@ -914,7 +915,7 @@ pub async fn get_card_bin_from_token_bin(
                 token_bin_info.cardBin.chars().take(length).collect()
             }
             None => {
-                crate::logger::info!(
+                logger::info!(
                     "getCardBinFromTokenBin: tokenBin <> cardbin mapping not present {}",
                     token_bin
                 );
@@ -1190,7 +1191,7 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<ETCa::card
                 vec![(ETCa::isin::to_isin(bin))]
             };
             let card_info_list =
-                ETCa::card_info::getAllCardInfoByIsins(bin_list.into_iter().flatten().collect())
+                ETCa::card_info::getAllCardInfoByIsins(bin_list.into_iter().inspect(|result| { if let Err(error) = result { logger::error!(error = ?error, "Invalid card BIN; retaining existing fallback"); } }).flatten().collect())
                     .await;
             let card_bins_in_db = card_info_list
                 .iter()
@@ -1532,28 +1533,32 @@ pub fn find_weight_and_index(weight_arr: &[(f64, i32)], i: i32) -> f64 {
         .map_or(1.0, |&(score, _)| score)
 }
 
-pub fn get_date_in_format(date_text: &str, format_text: &str) -> Result<String, String> {
+pub fn get_date_in_format(
+    date_text: &str,
+    format_text: &str,
+) -> error_stack::Result<String, ErrorMessage> {
     // Create a custom format description from the input format
-    let parse_format = parse(format_text).map_err(|_| "Invalid input format".to_string())?;
+    let parse_format =
+        parse(format_text).change_context(ErrorMessage("Invalid input format".into()))?;
 
     // Parse the date
-    let parsed_date =
-        Date::parse(date_text, &parse_format).map_err(|_| "Invalid date".to_string())?;
+    let parsed_date = Date::parse(date_text, &parse_format)
+        .change_context(ErrorMessage("Invalid date".into()))?;
 
     // Format the date in dd-mm-yyyy format
     parsed_date
         .format(
             &parse("[day]-[month]-[year]")
-                .map_err(|_| "Failed to create output format".to_string())?,
+                .change_context(ErrorMessage("Failed to create output format".into()))?,
         )
-        .map_err(|_| "Failed to format date".to_string())
+        .change_context(ErrorMessage("Failed to format date".into()))
 }
 
 pub async fn get_experiment_tag(utc_time: OffsetDateTime, dim: &str) -> Option<String> {
     match get_date_in_format(&utc_time.to_string(), "%Y-%m-%d %H:%M:%S %Z") {
         Ok(date) => Some(format!("EXPERIMENT_{}_{}", dim, date)),
         Err(e) => {
-            logger::error!("Error in getExperimentTag: {}", e);
+            logger::error!(error = ?e, "Error in getExperimentTag");
             None
         }
     }
@@ -1568,31 +1573,30 @@ pub async fn create_moving_window_and_score(
 ) {
     // todo!()
     let app_state = get_tenant_app_state().await;
-    let _r: Result<Vec<String>, error_stack::Report<redis_interface::errors::RedisError>> =
-        app_state
-            .redis_conn
-            .multi(false, |transaction| {
-                Box::pin(async move {
-                    transaction.del::<(), _>(queue_key.clone()).await?;
-                    transaction
-                        .lpush::<(), _, _>(
-                            queue_key.as_bytes(),
-                            score_list.iter().map(|s| s.as_bytes()).collect::<Vec<_>>(),
-                        )
-                        .await?;
-                    transaction
-                        .set::<(), _, _>(score_key.clone(), score.to_string(), None, None, false)
-                        .await?;
-                    transaction
-                        .expire::<(), _>(queue_key.as_bytes(), 10000000)
-                        .await?;
-                    transaction
-                        .expire::<(), _>(score_key.as_bytes(), 10000000)
-                        .await?;
-                    Ok(())
-                })
+    let _r: Result<Vec<String>, Report<redis_interface::errors::RedisError>> = app_state
+        .redis_conn
+        .multi(false, |transaction| {
+            Box::pin(async move {
+                transaction.del::<(), _>(queue_key.clone()).await?;
+                transaction
+                    .lpush::<(), _, _>(
+                        queue_key.as_bytes(),
+                        score_list.iter().map(|s| s.as_bytes()).collect::<Vec<_>>(),
+                    )
+                    .await?;
+                transaction
+                    .set::<(), _, _>(score_key.clone(), score.to_string(), None, None, false)
+                    .await?;
+                transaction
+                    .expire::<(), _>(queue_key.as_bytes(), 10000000)
+                    .await?;
+                transaction
+                    .expire::<(), _>(score_key.as_bytes(), 10000000)
+                    .await?;
+                Ok(())
             })
-            .await;
+        })
+        .await;
     // let result = RC::multi_exec(redis_name, |k| {
     //     RC::del_tx(&[queue_key.as_bytes()], k);
     //     RC::lpush_tx(queue_key.as_bytes(), &score_list.iter().map(|s| s.as_bytes()).collect::<Vec<_>>(), k);
@@ -2527,7 +2531,7 @@ pub async fn get_unified_key(
         .map(|(gw, key)| format!("{} :{}", gw, key))
         .collect::<Vec<_>>()
         .join(" ");
-    crate::logger::info!("GatewayRedisKeyMap: {}", gateway_key_log);
+    logger::info!("GatewayRedisKeyMap: {}", gateway_key_log);
 
     gateway_redis_key_map
 }

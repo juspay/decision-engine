@@ -10,6 +10,7 @@
 //! progress are unified. (Single-node assumption: the background task reads the temp file on the
 //! same host that received the upload.)
 
+use error_stack::Report;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -21,7 +22,7 @@ use futures::StreamExt;
 use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
-use crate::cost_ingestion::{mapping, pipeline, sink, store};
+use crate::cost_ingestion::{mapping, pipeline, sink, store, IngestError};
 use crate::error::TextError;
 use crate::logger;
 use crate::storage::types::CostIngestion;
@@ -102,7 +103,10 @@ pub async fn list_ingestions(
 ) -> Result<Json<Vec<IngestionDto>>, TextError> {
     let rows = store::list_for_merchant(&merchant_id, HISTORY_LIMIT)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(|error| {
+            let message = format!("{:?}", error.current_context());
+            TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+        })?;
     Ok(Json(rows.into_iter().map(IngestionDto::from).collect()))
 }
 
@@ -115,7 +119,10 @@ pub async fn delete_ingestion(
 ) -> Result<StatusCode, TextError> {
     let row = store::get_for_merchant(&merchant_id, &ingestion_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?
+        .map_err(|error| {
+            let message = format!("{:?}", error.current_context());
+            TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+        })?
         .ok_or((StatusCode::NOT_FOUND, "ingestion not found".to_string()))?;
 
     if row.status == "processing" {
@@ -147,7 +154,10 @@ pub async fn delete_ingestion(
         &ingestion_id,
     )
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+    .map_err(|error| {
+        let message = format!("{:?}", error.current_context());
+        TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+    })?;
 
     let report_date = crate::utils::date_time::now().date().to_string();
     if let Err(e) = crate::cost_ingestion::fit::fit_snapshot(
@@ -168,7 +178,10 @@ pub async fn delete_ingestion(
 
     store::delete(&merchant_id, &ingestion_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(|error| {
+            let message = format!("{:?}", error.current_context());
+            TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+        })?;
 
     // Revert the served models immediately rather than waiting for the periodic refresh. Runs
     // unconditionally — including when the refit above was empty (last data deleted), in which case
@@ -180,7 +193,7 @@ pub async fn delete_ingestion(
     {
         logger::warn!(
             tag = "report_upload",
-            "serving refresh after delete failed: {}",
+            "serving refresh after delete failed: {:?}",
             e
         );
     }
@@ -206,7 +219,10 @@ pub async fn list_price_changes(
         .clone();
     let changes = crate::cost_ingestion::detect::price_changes(&clickhouse, &merchant_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(|error| {
+            let message = format!("{:?}", error.current_context());
+            TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+        })?;
     Ok(Json(changes))
 }
 
@@ -254,7 +270,9 @@ pub async fn upload_report(
     // Stream the body to the temp file, capping total size. On any failure here we remove the
     // partial file and bail — the background task only takes over once the file is complete.
     if let Err(err) = stream_to_file(&path, body).await {
-        let _ = tokio::fs::remove_file(&path).await;
+        let _ = tokio::fs::remove_file(&path).await.inspect_err(|cause| {
+            logger::error!(error = ?cause);
+        });
         return Err(err.into());
     }
 
@@ -262,7 +280,9 @@ pub async fn upload_report(
     let clickhouse = match crate::app::APP_STATE.get() {
         Some(state) => state.global_config.analytics.clickhouse.clone(),
         None => {
-            let _ = tokio::fs::remove_file(&path).await;
+            let _ = tokio::fs::remove_file(&path).await.inspect_err(|cause| {
+                logger::error!(error = ?cause);
+            });
             return Err((
                 StatusCode::INTERNAL_SERVER_ERROR,
                 "app state not initialized".to_string(),
@@ -276,10 +296,8 @@ pub async fn upload_report(
     let job_id = store::create_manual(&merchant_id, &connector, &params.account, &path_str)
         .await
         .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("could not create ingestion job: {e:?}"),
-            )
+            let message = format!("could not create ingestion job: {:?}", e.current_context());
+            TextError::from_report(e, StatusCode::INTERNAL_SERVER_ERROR, message)
         })?;
 
     // Process in the background: the request returns now; the merchant watches progress via polling.
@@ -369,7 +387,7 @@ pub async fn validate_report_headers(
     let registry = crate::cost_ingestion::source::ConnectorRegistry::with_builtins();
     preflight::check(&registry, &connector, &sample, &mapping)
         .map(Json)
-        .map_err(|error| map_preflight_error(error).into())
+        .map_err(map_preflight_error)
 }
 
 #[derive(Debug, Deserialize)]
@@ -424,7 +442,7 @@ pub async fn preview_column_mapping(
         req.truncated,
     )
     .map(Json)
-    .map_err(|error| map_preflight_error(error).into())
+    .map_err(map_preflight_error)
 }
 
 /// `GET /merchant-account/:id/connectors/:connector/report/column-mapping?account=` — the saved
@@ -436,7 +454,7 @@ pub async fn get_column_mapping(
     mapping::load(&merchant_id, &connector, &params.account)
         .await
         .map(Json)
-        .map_err(|e| storage_error("load column mapping", e).into())
+        .map_err(|e| storage_error("load column mapping", e))
 }
 
 /// `PUT /merchant-account/:id/connectors/:connector/report/column-mapping?account=` — save a
@@ -513,19 +531,23 @@ pub async fn delete_column_mapping(
 /// Deliberately not applied to the 4xx paths: a rejected column mapping ("'Payable (SC)' is mapped
 /// to 'X', which is not a column in this file") is the merchant's own input described back to them,
 /// and it is the entire value of that response.
-fn storage_error(op: &str, e: crate::cost_ingestion::IngestError) -> (StatusCode, String) {
-    logger::error!(tag = "report_upload", "{} failed: {:?}", op, e);
-    (StatusCode::INTERNAL_SERVER_ERROR, format!("could not {op}"))
+fn storage_error(op: &str, error: Report<IngestError>) -> TextError {
+    TextError::from_report(
+        error,
+        StatusCode::INTERNAL_SERVER_ERROR,
+        format!("could not {op}"),
+    )
 }
 
-fn map_preflight_error(e: crate::cost_ingestion::IngestError) -> (StatusCode, String) {
-    match e {
-        crate::cost_ingestion::IngestError::UnknownConnector(c) => (
+fn map_preflight_error(error: Report<IngestError>) -> TextError {
+    let (status, message) = match error.current_context() {
+        IngestError::UnknownConnector(c) => (
             StatusCode::NOT_FOUND,
             format!("connector {c} does not support report ingestion"),
         ),
         other => (StatusCode::BAD_REQUEST, format!("{other}")),
-    }
+    };
+    TextError::from_report(error, status, message)
 }
 
 /// Read at most `cap` bytes of a body into memory, stopping early once the cap is reached. Used only
@@ -556,8 +578,9 @@ pub async fn run_sample_report(
 ) -> Result<(StatusCode, Json<UploadAccepted>), TextError> {
     // Only connectors that support report ingestion can have samples.
     let registry = crate::cost_ingestion::source::ConnectorRegistry::with_builtins();
-    let _ = registry.get(&connector).map_err(|_| {
-        (
+    let _ = registry.get(&connector).map_err(|cause| {
+        TextError::from_report(
+            cause,
             StatusCode::NOT_FOUND,
             format!("connector {connector} does not support sample reports"),
         )
@@ -587,10 +610,8 @@ pub async fn run_sample_report(
     let job_id = store::create_sample(&merchant_id, &connector, &account, &report_ref)
         .await
         .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("could not create ingestion job: {e:?}"),
-            )
+            let message = format!("could not create ingestion job: {:?}", e.current_context());
+            TextError::from_report(e, StatusCode::INTERNAL_SERVER_ERROR, message)
         })?;
 
     let path = temp_report_path();
@@ -669,8 +690,7 @@ async fn fetch_sample_from_s3(
     key: &str,
     region: Option<&str>,
     path: &PathBuf,
-) -> Result<(), crate::cost_ingestion::IngestError> {
-    use crate::cost_ingestion::IngestError;
+) -> error_stack::Result<(), IngestError> {
     use aws_config::BehaviorVersion;
 
     let mut loader = aws_config::defaults(BehaviorVersion::latest());
@@ -687,33 +707,42 @@ async fn fetch_sample_from_s3(
         .send()
         .await
         .map_err(|e| {
-            IngestError::Download(format!("s3 get_object s3://{bucket}/{key} failed: {e}"))
+            let context =
+                IngestError::Download(format!("s3 get_object s3://{bucket}/{key} failed: {e}"));
+            Report::from(e).change_context(context)
         })?;
 
     let mut file = tokio::fs::File::create(path).await.map_err(|e| {
-        IngestError::Download(format!("could not open temp file {path:?} for sample: {e}"))
+        let context =
+            IngestError::Download(format!("could not open temp file {path:?} for sample: {e}"));
+        Report::from(e).change_context(context)
     })?;
 
     let mut total: usize = 0;
     while let Some(chunk) = output.body.next().await {
-        let chunk =
-            chunk.map_err(|e| IngestError::Download(format!("s3 body stream error: {e}")))?;
+        let chunk = chunk.map_err(|e| {
+            let context = IngestError::Download(format!("s3 body stream error: {e}"));
+            Report::from(e).change_context(context)
+        })?;
         total = total.saturating_add(chunk.len());
         if total > MAX_UPLOAD_BYTES {
             return Err(IngestError::Download(format!(
                 "sample exceeds {MAX_UPLOAD_BYTES} byte limit"
-            )));
+            ))
+            .into());
         }
-        file.write_all(&chunk)
-            .await
-            .map_err(|e| IngestError::Download(format!("temp file write failed: {e}")))?;
+        file.write_all(&chunk).await.map_err(|e| {
+            let context = IngestError::Download(format!("temp file write failed: {e}"));
+            Report::from(e).change_context(context)
+        })?;
     }
-    file.flush()
-        .await
-        .map_err(|e| IngestError::Download(format!("temp flush failed: {e}")))?;
+    file.flush().await.map_err(|e| {
+        let context = IngestError::Download(format!("temp flush failed: {e}"));
+        Report::from(e).change_context(context)
+    })?;
 
     if total == 0 {
-        return Err(IngestError::Download("empty sample object".to_string()));
+        return Err(IngestError::Download("empty sample object".to_string()).into());
     }
     Ok(())
 }
@@ -797,7 +826,7 @@ async fn process_upload(
 /// on failure mark it failed with the error. Shared by the manual upload and sample flows.
 async fn finish_ingest(
     job_id: &str,
-    result: Result<pipeline::IngestOutcome, crate::cost_ingestion::IngestError>,
+    result: error_stack::Result<pipeline::IngestOutcome, IngestError>,
     clickhouse: &crate::config::ClickHouseAnalyticsConfig,
     merchant_id: &str,
 ) {
@@ -820,14 +849,14 @@ async fn finish_ingest(
             {
                 logger::warn!(
                     tag = "report_upload",
-                    "serving refresh after ingest failed: {}",
+                    "serving refresh after ingest failed: {:?}",
                     e
                 );
             }
         }
         Err(e) => {
-            let msg = format!("{e:?}");
-            logger::warn!(tag = "report_upload", "ingest {} failed: {}", job_id, msg);
+            let msg = format!("{:?}", e.current_context());
+            logger::warn!(error = ?e, tag = "report_upload", "ingest {} failed: {}", job_id, msg);
             if let Err(e2) = store::mark_failed(job_id, &msg).await {
                 logger::warn!(
                     tag = "report_upload",
@@ -848,10 +877,11 @@ async fn run_ingest(
     connector: &str,
     account: &str,
     merchant_id: &str,
-) -> Result<pipeline::IngestOutcome, crate::cost_ingestion::IngestError> {
-    use crate::cost_ingestion::IngestError;
-    let std_file = std::fs::File::open(path)
-        .map_err(|e| IngestError::Storage(format!("could not reopen temp file: {e}")))?;
+) -> error_stack::Result<pipeline::IngestOutcome, IngestError> {
+    let std_file = std::fs::File::open(path).map_err(|e| {
+        let context = IngestError::Storage(format!("could not reopen temp file: {e}"));
+        Report::from(e).change_context(context)
+    })?;
     let reader = Box::new(std::io::BufReader::new(std_file));
 
     pipeline::ingest_report_reader(

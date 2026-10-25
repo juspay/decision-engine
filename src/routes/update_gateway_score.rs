@@ -23,6 +23,7 @@ use crate::feedback::gateway_scoring_service::{
     check_and_update_gateway_score_, SCORE_UPDATE_SKIPPED,
 };
 use crate::feedback::types::{UpdateScorePayload, UpdateScoreResponse};
+use crate::logger;
 use crate::metrics::API_LATENCY_HISTOGRAM;
 use crate::metrics::API_REQUEST_COUNTER;
 use crate::metrics::API_REQUEST_TOTAL_COUNTER;
@@ -101,7 +102,7 @@ pub async fn update_gateway_score(
     let x_request_id = req
         .headers()
         .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .map(str::to_string);
     let global_request_id = crate::analytics::global_request_id_from_headers(req.headers());
     let trace_id = crate::analytics::trace_id_from_headers(req.headers());
@@ -114,7 +115,7 @@ pub async fn update_gateway_score(
 
     let headers = req.headers();
     // Mask values by default and consolidate header diagnostics into one event.
-    crate::logger::debug!(
+    logger::debug!(
         tag = "UpdateGatewayScore",
         headers = ?headers
             .keys()
@@ -124,7 +125,7 @@ pub async fn update_gateway_score(
     );
     let body = match crate::routes::body::read_request_body(req.into_body()).await {
         Ok(body) => {
-            crate::logger::debug!(tag = "UpdateGatewayScore", "Body: {:?}", body);
+            logger::debug!(tag = "UpdateGatewayScore", "Body: {:?}", body);
 
             body
         }
@@ -330,7 +331,7 @@ pub async fn update_gateway_score(
                             Some("score_update_failed".to_string()),
                             None,
                         );
-                        crate::logger::error!(
+                        logger::error!(
                             merchant_id = %merchant_id,
                             gateway = %gateway,
                             payment_id = %payment_id,
@@ -345,7 +346,7 @@ pub async fn update_gateway_score(
             tokio::spawn(async move {
                 if let Err(e) = handle.await {
                     if e.is_panic() {
-                        crate::logger::error!(
+                        logger::error!(
                             merchant_id = %spawn_merchant_id,
                             payment_id = %spawn_payment_id,
                             "Async gateway score update task panicked"

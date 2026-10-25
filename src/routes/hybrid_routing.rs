@@ -16,6 +16,7 @@ use crate::euclid::handlers::routing_rules::{
 };
 use crate::euclid::types::ExperimentEndpoint;
 use crate::feedback::constants::kvRedis;
+use crate::logger;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::redis::feature::is_feature_enabled;
 use crate::types::hybrid_routing::HybridRoutingRequest;
@@ -28,7 +29,7 @@ fn to_json_value_or_invalid<T: Serialize>(
     context: &str,
 ) -> Result<serde_json::Value, ContainerError<EuclidErrors>> {
     serde_json::to_value(value).map_err(|err| {
-        crate::logger::error!(
+        logger::error!(
             serialization_context = context,
             "Failed to serialize hybrid routing response field: {}",
             err
@@ -51,9 +52,9 @@ fn insert_serialized<T: Serialize>(
 fn log_serializable_response<T: Serialize>(label: &str, value: &T) {
     match serde_json::to_value(value) {
         Ok(response_value) => {
-            crate::logger::debug!(decision_engine_response_label = label, decision_engine_response = ?response_value)
+            logger::debug!(decision_engine_response_label = label, decision_engine_response = ?response_value)
         }
-        Err(err) => crate::logger::warn!(
+        Err(err) => logger::warn!(
             decision_engine_response_label = label,
             "Failed to serialize response for logging: {}",
             err
@@ -215,7 +216,7 @@ pub async fn hybrid_routing_evaluate(
 
     let request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .map(str::to_string)
         .unwrap_or_else(crate::analytics::next_event_id);
     let global_request_id = global_request_id_from_headers(&headers);
@@ -309,7 +310,7 @@ pub async fn hybrid_routing_evaluate(
                         .as_deref()
                         .is_some_and(|id| !id.is_empty() && id != dynamic_payment_id)
                     {
-                        crate::logger::warn!(
+                        logger::warn!(
                             "hybrid routing: static payment_id {:?} differs from dynamic payment_id {}; using the dynamic one",
                             req.payment_id,
                             dynamic_payment_id
@@ -379,7 +380,7 @@ pub async fn hybrid_routing_evaluate(
                     .inc();
                 Some(result)
             } else {
-                crate::logger::debug!(
+                logger::debug!(
                     "dynamic routing skipped for merchant {}: sr_routing_enabled is off or the A/B arm has no SR layer",
                     req.merchant_id
                 );
@@ -395,7 +396,7 @@ pub async fn hybrid_routing_evaluate(
                     if let Err(err) =
                         store_scoring_context_without_decider(&req, STATIC_ROUTING_APPROACH).await
                     {
-                        crate::logger::warn!(
+                        logger::warn!(
                             "failed to store scoring context for rule-routed payment {}: {}",
                             req.payment_id(),
                             err.error_message
@@ -468,7 +469,8 @@ pub async fn hybrid_routing_evaluate(
                 insert_evaluated_connectors(&mut res, &dynamic_connector)?;
                 Ok(Ok((res, summary)))
             }
-            (false, Some(Err(_dynamic_err)), Some(dynamic_fallback), _, _) => {
+            (false, Some(Err(dynamic_err)), Some(dynamic_fallback), _, _) => {
+                logger::warn!(error = ?dynamic_err, "Dynamic routing failed; using configured fallback connectors");
                 // when dynamic fails but fallback connectors exist,
                 // return fallback connectors instead of hard-failing.
                 let dynamic_payload = DynamicRoutingEnvelope {
@@ -515,11 +517,11 @@ pub async fn hybrid_routing_evaluate(
                 )))
             }
             (false, None, _, None, Some(static_err)) => {
-                crate::logger::debug!(decision_engine_response_label = "static_error_response", error = ?static_err);
+                logger::debug!(decision_engine_response_label = "static_error_response", error = ?static_err);
                 let error_message = static_err.get_inner().to_string();
                 let error = static_err
                     .downcast_ref::<crate::error::ApiErrorResponse>()
-                    .and_then(|payload| serde_json::to_value(payload).ok())
+                    .and_then(|payload| serde_json::to_value(payload).inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
                     .unwrap_or_else(|| serde_json::Value::String(error_message.clone()));
                 Ok(Err(HybridFailure {
                     error_code: "HYBRID_STATIC_ROUTING_FAILED".to_string(),
@@ -567,7 +569,7 @@ pub async fn hybrid_routing_evaluate(
     let api_result = match resolve() {
         Ok(Ok((res, summary))) => {
             let response_value = serde_json::Value::Object(res);
-            crate::logger::debug!(decision_engine_success_response = ?response_value);
+            logger::debug!(decision_engine_success_response = ?response_value);
             DomainAnalyticsEvent::record_decision(
                 AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::RoutingHybridDecision),
                 merchant_id.clone(),

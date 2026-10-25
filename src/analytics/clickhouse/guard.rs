@@ -14,6 +14,8 @@
 //!   (the overview alone issues nine), so its own queries queue behind each other; the wait is
 //!   sized for that.
 
+use crate::logger;
+use error_stack::{Result, ResultExt};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
@@ -65,30 +67,18 @@ async fn run_with<F: std::future::Future>(
     slots: &Semaphore,
     query: F,
 ) -> Result<F::Output, ApiError> {
-    let permit = match tokio::time::timeout(PERMIT_WAIT, slots.acquire()).await {
-        Ok(Ok(permit)) => permit,
-        Ok(Err(_closed)) => return Err(ApiError::DatabaseError),
-        Err(_elapsed) => {
-            crate::logger::warn!(
-                max_concurrent = MAX_CONCURRENT_QUERIES,
-                wait_secs = PERMIT_WAIT.as_secs(),
-                "clickhouse analytics query slots exhausted; rejecting read"
-            );
-            return Err(ApiError::DatabaseError);
-        }
-    };
+    let permit = tokio::time::timeout(PERMIT_WAIT, slots.acquire())
+        .await
+        .change_context(ApiError::DatabaseError)
+        .attach_printable("ClickHouse analytics query slots exhausted")?
+        .change_context(ApiError::DatabaseError)
+        .attach_printable("ClickHouse analytics query semaphore closed")?;
 
     let outcome = tokio::time::timeout(QUERY_TIMEOUT, query).await;
     drop(permit);
-
-    outcome.map_err(|_elapsed| {
-        crate::logger::warn!(
-            timeout_secs = QUERY_TIMEOUT.as_secs(),
-            settings_accepted = settings_accepted(),
-            "clickhouse analytics read exceeded its deadline; abandoning it"
-        );
-        ApiError::DatabaseError
-    })
+    outcome
+        .change_context(ApiError::DatabaseError)
+        .attach_printable("ClickHouse analytics read exceeded its deadline")
 }
 
 /// Whether the configured ClickHouse user accepts per-query settings, as detected by the last
@@ -111,7 +101,7 @@ pub async fn detect_settings_support(client: &Client) {
 
     let accepted = match readonly {
         Ok(ReadonlyRow { readonly: 1 }) => {
-            crate::logger::warn!(
+            logger::warn!(
                 "clickhouse analytics user has readonly=1, which rejects per-query settings; \
                  max_threads, max_bytes_before_external_group_by and \
                  max_bytes_before_external_sort must be set on the user's server-side profile"
@@ -119,14 +109,14 @@ pub async fn detect_settings_support(client: &Client) {
             false
         }
         Ok(ReadonlyRow { readonly }) => {
-            crate::logger::info!(
+            logger::info!(
                 readonly,
                 "clickhouse analytics reads use memory-bounded query settings"
             );
             true
         }
         Err(error) => {
-            crate::logger::warn!(
+            logger::warn!(
                 ?error,
                 "could not read the clickhouse profile's readonly level; sending no query settings"
             );

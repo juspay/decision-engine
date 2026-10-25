@@ -1,4 +1,5 @@
 use clickhouse::Row;
+use error_stack::Result;
 use serde::Deserialize;
 
 use super::experiment_results::{experiment_payments, ExperimentScope};

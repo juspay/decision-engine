@@ -1,4 +1,5 @@
 use clickhouse::{query::Query, Row};
+use error_stack::{Result, ResultExt};
 use serde::Deserialize;
 
 use crate::analytics::flow::{AnalyticsRoute, FlowType};
@@ -87,10 +88,7 @@ where
 {
     super::guard::run(query.fetch_all::<T>())
         .await?
-        .map_err(|error| {
-            crate::logger::error!(?error, "clickhouse fetch_all failed");
-            ApiError::DatabaseError
-        })
+        .change_context(ApiError::DatabaseError)
 }
 
 pub async fn fetch_one<T>(query: Query) -> Result<T, ApiError>
@@ -99,10 +97,7 @@ where
 {
     super::guard::run(query.fetch_one::<T>())
         .await?
-        .map_err(|error| {
-            crate::logger::error!(?error, "clickhouse fetch_one failed");
-            ApiError::DatabaseError
-        })
+        .change_context(ApiError::DatabaseError)
 }
 
 pub fn static_flow_type_in_sql(flow_types: &[FlowType]) -> String {

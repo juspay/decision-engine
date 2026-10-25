@@ -11,7 +11,10 @@
 //! merchant's table here is not on the production routing hot path.
 
 use crate::config::{HypersenseConfig, SeedCostEntry};
+use crate::error::ErrorMessage;
+use crate::logger;
 use crate::types::service_configuration;
+use error_stack::{Report, Result};
 
 /// Config-store key holding one merchant's edited seed table (JSON `Vec<SeedCostEntry>`).
 fn seed_costs_name(merchant_id: &str) -> String {
@@ -23,32 +26,54 @@ fn seed_costs_name(merchant_id: &str) -> String {
 pub async fn get_seed_table(merchant_id: &str) -> Option<Vec<SeedCostEntry>> {
     let stored = service_configuration::find_config_by_name(seed_costs_name(merchant_id))
         .await
+        .inspect_err(|error| {
+            logger::error!(error = ?error, "Seed cost lookup failed; retaining config fallback");
+        })
         .ok()?;
     let value = stored?.value?;
-    serde_json::from_str(&value).ok()
+    serde_json::from_str(&value)
+        .inspect_err(|error| {
+            logger::error!(error = ?error, "Seed cost parsing failed; retaining config fallback");
+        })
+        .ok()
 }
 
 /// Upsert (create or replace) the merchant's seed table.
-pub async fn put_seed_table(merchant_id: &str, table: &[SeedCostEntry]) -> Result<(), String> {
-    let serialized = serde_json::to_string(table).map_err(|e| e.to_string())?;
+pub async fn put_seed_table(
+    merchant_id: &str,
+    table: &[SeedCostEntry],
+) -> Result<(), ErrorMessage> {
+    let serialized = serde_json::to_string(table).map_err(|error| {
+        let context = ErrorMessage(error.to_string());
+        Report::from(error).change_context(context)
+    })?;
     let name = seed_costs_name(merchant_id);
     let exists = service_configuration::find_config_by_name(name.clone())
         .await
-        .map_err(|e| e.to_string())?
+        .map_err(|error| {
+            let context = ErrorMessage(error.to_string());
+            Report::from(error).change_context(context)
+        })?
         .is_some();
     if exists {
         service_configuration::update_config(name, Some(serialized)).await
     } else {
         service_configuration::insert_config(name, Some(serialized)).await
     }
-    .map_err(|e| e.to_string())
+    .map_err(|error| {
+        let context = ErrorMessage(error.to_string());
+        Report::from(error).change_context(context)
+    })
 }
 
 /// Reset the merchant to the config default by removing any stored table.
-pub async fn delete_seed_table(merchant_id: &str) -> Result<(), String> {
+pub async fn delete_seed_table(merchant_id: &str) -> Result<(), ErrorMessage> {
     service_configuration::delete_config(seed_costs_name(merchant_id))
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|error| {
+            let context = ErrorMessage(error.to_string());
+            Report::from(error).change_context(context)
+        })
 }
 
 /// The seed entries in effect for a merchant: their stored table when present and non-empty, else

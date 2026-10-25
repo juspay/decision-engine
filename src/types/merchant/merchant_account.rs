@@ -1,4 +1,7 @@
+use crate::generics::MeshError;
+use crate::logger;
 use crate::utils::date_time;
+use error_stack::ResultExt;
 use serde::{Deserialize, Serialize};
 // use db::eulermeshimpl::{mesh_config, throw_missing_tenant_error, throw_tenant_mismatch_error, default_tenant_account_id};
 // use db::mesh::internal::*;
@@ -244,10 +247,17 @@ pub async fn load_merchant_by_merchant_id(merchant_id: String) -> Option<Merchan
     >(&app_state.db, dsl::merchant_id.eq(merchant_id))
     .await
     {
-        Ok(mut db_results) => db_results
-            .pop()
-            .and_then(|db_merchant| MerchantAccount::try_from(db_merchant).ok()),
-        Err(_) => None,
+        Ok(mut db_results) => db_results.pop().and_then(|db_merchant| {
+            MerchantAccount::try_from(db_merchant)
+                .inspect_err(|cause| {
+                    logger::error!(error = ?cause);
+                })
+                .ok()
+        }),
+        Err(error) => {
+            logger::error!(error = ?error);
+            None
+        }
     };
 
     if let Some(ref merchant) = result {
@@ -258,26 +268,22 @@ pub async fn load_merchant_by_merchant_id(merchant_id: String) -> Option<Merchan
     result
 }
 
-pub async fn insert_merchant_account<T>(
-    value: T,
-) -> error_stack::Result<(), crate::generics::MeshError>
+pub async fn insert_merchant_account<T>(value: T) -> error_stack::Result<(), MeshError>
 where
     MerchantAccountNew: TryFrom<T>,
+    <MerchantAccountNew as TryFrom<T>>::Error: error_stack::Context,
 {
     // Perform the query using Diesel's generic_find_all
     let app_state = get_tenant_app_state().await;
 
-    let config =
-        MerchantAccountNew::try_from(value).map_err(|_| crate::generics::MeshError::Others)?;
+    let config = MerchantAccountNew::try_from(value).change_context(MeshError::Others)?;
 
     crate::generics::generic_insert(&app_state.db, config).await?;
 
     Ok(())
 }
 
-pub async fn delete_merchant_account(
-    merchant_id: String,
-) -> Result<(), crate::generics::MeshError> {
+pub async fn delete_merchant_account(merchant_id: String) -> Result<(), MeshError> {
     let app_state = get_tenant_app_state().await;
 
     let conn = &app_state.db.get_conn().await?;
@@ -295,8 +301,7 @@ pub async fn delete_merchant_account(
 /// Every merchant account in the tenant. Used by the hierarchy reconcile report, which must
 /// classify existing rows — including ones HS has never heard of — before any sync writes.
 /// Not for request paths: this is a full read of the table.
-pub async fn load_all_merchant_accounts() -> Result<Vec<MerchantAccount>, crate::generics::MeshError>
-{
+pub async fn load_all_merchant_accounts() -> Result<Vec<MerchantAccount>, MeshError> {
     let app_state = get_tenant_app_state().await;
 
     let db_results = crate::generics::generic_find_all::<
@@ -308,7 +313,13 @@ pub async fn load_all_merchant_accounts() -> Result<Vec<MerchantAccount>, crate:
 
     Ok(db_results
         .into_iter()
-        .filter_map(|db_merchant| MerchantAccount::try_from(db_merchant).ok())
+        .filter_map(|db_merchant| {
+            MerchantAccount::try_from(db_merchant)
+                .inspect_err(|cause| {
+                    logger::error!(error = ?cause);
+                })
+                .ok()
+        })
         .collect())
 }
 
@@ -317,7 +328,7 @@ pub async fn load_all_merchant_accounts() -> Result<Vec<MerchantAccount>, crate:
 pub async fn update_merchant_hierarchy(
     merchant_id: String,
     hierarchy: &super::hierarchy::Hierarchy,
-) -> error_stack::Result<(), crate::generics::MeshError> {
+) -> error_stack::Result<(), MeshError> {
     let app_state = get_tenant_app_state().await;
 
     // Read-modify-write so a sibling key written by another consumer survives the write.
@@ -333,7 +344,7 @@ pub async fn update_merchant_hierarchy(
 
     let internal_metadata =
         super::hierarchy::merge_into_metadata(existing_metadata.as_deref(), hierarchy)
-            .map_err(|_| crate::generics::MeshError::Others)?;
+            .change_context(MeshError::Others)?;
 
     let values = crate::storage::types::MerchantAccountHierarchyUpdate {
         internal_metadata: Some(internal_metadata),
@@ -355,7 +366,7 @@ pub async fn update_merchant_hierarchy(
 pub async fn update_merchant_account(
     merchant_id: String,
     value: Option<String>,
-) -> error_stack::Result<(), crate::generics::MeshError> {
+) -> error_stack::Result<(), MeshError> {
     let app_state = get_tenant_app_state().await;
     let values = MerchantAccountUpdate {
         gateway_success_rate_based_decider_input: value,

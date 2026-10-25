@@ -1,8 +1,9 @@
+use crate::logger;
 use crate::{
     decider::gatewaydecider::runner::ResponseBody, error::ApiClientError, storage::consts,
 };
 use axum::{body::Body, extract::Request};
-use error_stack::ResultExt;
+use error_stack::{Result, ResultExt};
 use hyper::{StatusCode, Uri};
 use rand::Rng;
 use reqwest::{
@@ -54,8 +55,8 @@ pub fn record_fields_from_header(request: &Request<Body>) -> tracing::Span {
     span
 }
 
-/// Effectively, equivalent to `Result<T, error_stack::Report<E>>`
-pub type CustomResult<T, E> = error_stack::Result<T, E>;
+/// Effectively, equivalent to `std::result::Result<T, error_stack::Report<E>>`
+pub type CustomResult<T, E> = Result<T, E>;
 
 /// Parsing Errors
 #[allow(missing_docs)] // Only to prevent warnings about struct fields not being documented
@@ -143,33 +144,21 @@ pub async fn call_api(url: &str, body: &serde_json::Value) -> Result<ResponseBod
     let mut headers = HeaderMap::new();
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
 
-    crate::logger::debug!("Calling API: {}", url);
-    crate::logger::debug!("Request Body: {}", body);
-    crate::logger::debug!("Headers: {:?}", headers);
+    logger::debug!("Calling API: {}", url);
+    logger::debug!("Request Body: {}", body);
+    logger::debug!("Headers: {:?}", headers);
 
-    // Validate URL
-    if url.parse::<Uri>().is_err() {
-        crate::logger::error!("Invalid URL: {}", url);
-        return Err(ApiClientError::RequestNotSent);
-    }
-
-    // Serialize the body
-    let body = serde_json::to_string(body).map_err(|err| {
-        crate::logger::error!("Error serializing body: {}", err);
-        ApiClientError::RequestNotSent
-    })?;
-
-    // Send the request
+    // Preserve transport failures for the caller that handles the failed evaluation.
+    url.parse::<Uri>()
+        .change_context(ApiClientError::RequestNotSent)?;
+    let body = serde_json::to_string(body).change_context(ApiClientError::RequestNotSent)?;
     let response = client
         .post(url)
         .headers(headers)
-        .body(body.to_string())
+        .body(body)
         .send()
         .await
-        .map_err(|err| {
-            crate::logger::error!("Error sending request: {}", err);
-            ApiClientError::RequestNotSent
-        })?;
+        .change_context(ApiClientError::RequestNotSent)?;
 
     let status_code = response.status();
 
@@ -177,25 +166,26 @@ pub async fn call_api(url: &str, body: &serde_json::Value) -> Result<ResponseBod
     let body_bytes = response
         .bytes()
         .await
-        .map_err(|_| ApiClientError::ResponseDecodingFailed)?;
+        .change_context(ApiClientError::ResponseDecodingFailed)?;
 
     if status_code.is_success() {
         // Deserialize the response body into `ResponseBody`
         let body: ResponseBody = serde_json::from_slice(&body_bytes)
-            .map_err(|_| ApiClientError::ResponseDecodingFailed)?;
+            .change_context(ApiClientError::ResponseDecodingFailed)?;
         Ok(body)
     } else {
         // Map errors based on the status code
         match status_code {
-            StatusCode::BAD_REQUEST => Err(ApiClientError::BadRequest(body_bytes)),
-            StatusCode::UNAUTHORIZED => Err(ApiClientError::Unauthorized(body_bytes)),
+            StatusCode::BAD_REQUEST => Err(ApiClientError::BadRequest(body_bytes).into()),
+            StatusCode::UNAUTHORIZED => Err(ApiClientError::Unauthorized(body_bytes).into()),
             StatusCode::INTERNAL_SERVER_ERROR => {
-                Err(ApiClientError::InternalServerError(body_bytes))
+                Err(ApiClientError::InternalServerError(body_bytes).into())
             }
             _ => Err(ApiClientError::Unexpected {
                 status_code,
                 message: body_bytes,
-            }),
+            }
+            .into()),
         }
     }
 }

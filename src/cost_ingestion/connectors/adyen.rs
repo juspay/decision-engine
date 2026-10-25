@@ -5,6 +5,7 @@
 //! `gross`/`total_fee`. Everything Adyen-specific (report column names, the notification shape,
 //! the HMAC scheme, the download auth) is contained in this file.
 
+use error_stack::{Report, Result};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -79,7 +80,9 @@ impl SettlementReportSource for AdyenReportSource {
             .and_then(Value::as_str)
             .map(str::to_string)
             .ok_or_else(|| {
-                IngestError::MalformedNotification("missing merchantAccountCode".to_string())
+                Report::new(IngestError::MalformedNotification(
+                    "missing merchantAccountCode".to_string(),
+                ))
             })
     }
 
@@ -97,7 +100,9 @@ impl SettlementReportSource for AdyenReportSource {
             .and_then(|a| a.get("hmacSignature"))
             .and_then(Value::as_str)
             .ok_or_else(|| {
-                IngestError::MalformedNotification("missing hmacSignature".to_string())
+                Report::new(IngestError::MalformedNotification(
+                    "missing hmacSignature".to_string(),
+                ))
             })?;
 
         // NOTE: field set/ordering below follows Adyen's *standard* notification signing scheme.
@@ -105,7 +110,7 @@ impl SettlementReportSource for AdyenReportSource {
         // production (see architecture doc §7.7) — the HMAC *mechanism* here is correct.
         let payload = hmac_payload(&item);
         if !verify_hmac(&payload, provided_sig, secret.peek()) {
-            return Err(IngestError::SignatureMismatch);
+            return Err(IngestError::SignatureMismatch.into());
         }
 
         let account = item
@@ -134,7 +139,8 @@ impl SettlementReportSource for AdyenReportSource {
         if report_ref.is_empty() {
             return Err(IngestError::MalformedNotification(
                 "no report reference in notification".to_string(),
-            ));
+            )
+            .into());
         }
 
         Ok(ReportNotification {
@@ -162,17 +168,18 @@ impl SettlementReportSource for AdyenReportSource {
             None => request.header("X-API-Key", auth),
         };
 
-        let resp = request
-            .send()
-            .await
-            .map_err(|e| IngestError::Download(e.to_string()))?;
+        let resp = request.send().await.map_err(|e| {
+            let context = IngestError::Download(e.to_string());
+            Report::from(e).change_context(context)
+        })?;
 
         if !resp.status().is_success() {
-            return Err(IngestError::Download(format!("status {}", resp.status())));
+            return Err(IngestError::Download(format!("status {}", resp.status())).into());
         }
-        resp.bytes()
-            .await
-            .map_err(|e| IngestError::Download(e.to_string()))
+        resp.bytes().await.map_err(|e| {
+            let context = IngestError::Download(e.to_string());
+            Report::from(e).change_context(context)
+        })
     }
 
     fn parse_rows(
@@ -300,9 +307,9 @@ fn notification_item(raw_body: &[u8]) -> Result<Value, IngestError> {
         if v.get("merchantAccountCode").is_some() {
             return Ok(v);
         }
-        return Err(IngestError::MalformedNotification(
-            "no NotificationRequestItem".to_string(),
-        ));
+        return Err(
+            IngestError::MalformedNotification("no NotificationRequestItem".to_string()).into(),
+        );
     }
     Ok(form_to_item(raw_body))
 }

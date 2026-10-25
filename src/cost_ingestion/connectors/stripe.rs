@@ -38,6 +38,7 @@
 //! dashboard upload (which only calls `parse_rows`). The webhook/download methods return a
 //! descriptive error until Stripe's report-ready webhook and download auth are wired.
 
+use error_stack::{Report, Result};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -94,7 +95,7 @@ impl SettlementReportSource for StripeReportSource {
     fn peek_account(&self, _raw_body: &[u8]) -> Result<String, IngestError> {
         // TODO(stripe-webhook): extract the connected-account id from the unverified event body
         // once Stripe's report-ready webhook is wired. Manual upload passes the account explicitly.
-        Err(not_implemented("peek_account"))
+        Err(not_implemented("peek_account").into())
     }
 
     fn verify_and_parse_notification(
@@ -105,7 +106,7 @@ impl SettlementReportSource for StripeReportSource {
     ) -> Result<ReportNotification, IngestError> {
         // TODO(stripe-webhook): verify the `Stripe-Signature` header (HMAC-SHA256 over
         // `timestamp.payload`) and pull the report handle from the event.
-        Err(not_implemented("verify_and_parse_notification"))
+        Err(not_implemented("verify_and_parse_notification").into())
     }
 
     async fn download_report(
@@ -114,7 +115,7 @@ impl SettlementReportSource for StripeReportSource {
         _note: &ReportNotification,
     ) -> Result<Bytes, IngestError> {
         // TODO(stripe-webhook): fetch the report file via the Files API using the merchant's key.
-        Err(not_implemented("download_report"))
+        Err(not_implemented("download_report").into())
     }
 
     fn parse_rows(
@@ -131,7 +132,10 @@ impl SettlementReportSource for StripeReportSource {
         // do, and so the upload preflight can enumerate this connector's schema the same way.
         let header_rec = reader
             .byte_headers()
-            .map_err(|e| IngestError::Parse(e.to_string()))?
+            .map_err(|e| {
+                let context = IngestError::Parse(e.to_string());
+                Report::from(e).change_context(context)
+            })?
             .clone();
         let h = csv_reader::Headers::new(&header_rec, mapping);
 
@@ -158,7 +162,10 @@ impl SettlementReportSource for StripeReportSource {
         h.finish()?;
 
         for record in reader.records() {
-            let record = record.map_err(|e| IngestError::Parse(e.to_string()))?;
+            let record = record.map_err(|e| {
+                let context = IngestError::Parse(e.to_string());
+                Report::from(e).change_context(context)
+            })?;
             let get = |i: usize| record.get(i).unwrap_or("");
             let get_opt = |i: Option<usize>| i.map(get).unwrap_or("");
 
@@ -347,7 +354,7 @@ mc,Ecommerce,DOMESTIC,CREDIT,mccommercialcredit,Scheme Fee,100000,150,USD,USD,20
             .unwrap_err();
         let IngestError::MissingColumns {
             missing, required, ..
-        } = err
+        } = err.current_context()
         else {
             panic!("expected MissingColumns, got {err:?}");
         };

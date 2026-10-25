@@ -50,7 +50,10 @@ macro_rules! impl_to_sql_from_sql_text_pg {
             fn from_sql(value: ::diesel::pg::PgValue<'_>) -> ::diesel::deserialize::Result<Self> {
                 use core::str::FromStr;
                 let s = ::core::str::from_utf8(value.as_bytes())?;
-                <$type>::from_str(s).map_err(|_| "Unrecognized enum variant".into())
+                <$type>::from_str(s).map_err(|cause| {
+                    $crate::logger::error!(error = ?cause, "Failed to decode database enum");
+                    "Unrecognized enum variant".into()
+                })
             }
         }
     };

@@ -25,6 +25,8 @@
 //! Persisted in the generic `service_configuration` KV store, like connector credentials — no new
 //! table. Mappings hold no secrets, so unlike credentials they are stored as plain JSON.
 
+use crate::generics::MeshError;
+use error_stack::{Report, Result};
 use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
@@ -113,10 +115,10 @@ impl ColumnMapping {
         if problems.is_empty() {
             Ok(())
         } else {
-            Err(IngestError::Parse(format!(
-                "invalid column mapping: {}",
-                problems.join("; ")
-            )))
+            Err(
+                IngestError::Parse(format!("invalid column mapping: {}", problems.join("; ")))
+                    .into(),
+            )
         }
     }
 }
@@ -142,7 +144,10 @@ pub async fn load(
     let stored =
         service_configuration::find_config_by_name(config_name(merchant_id, connector, account))
             .await
-            .map_err(|e| IngestError::Storage(e.to_string()))?;
+            .map_err(|e| {
+                let context = IngestError::Storage(e.to_string());
+                Report::from(e).change_context(context)
+            })?;
     Ok(stored
         .and_then(|c| c.value)
         .and_then(|v| serde_json::from_str(&v).ok())
@@ -161,17 +166,26 @@ pub async fn save(
     if mapping.is_empty() {
         return delete(merchant_id, connector, account).await;
     }
-    let value = serde_json::to_string(mapping).map_err(|e| IngestError::Storage(e.to_string()))?;
+    let value = serde_json::to_string(mapping).map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     let exists = service_configuration::find_config_by_name(name.clone())
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?
+        .map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?
         .is_some();
     if exists {
         service_configuration::update_config(name, Some(value)).await
     } else {
         service_configuration::insert_config(name, Some(value)).await
     }
-    .map_err(|e| IngestError::Storage(e.to_string()))
+    .map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })
 }
 
 /// Remove a source's mapping. Idempotent — clearing a mapping that was never set is not an error,
@@ -181,12 +195,15 @@ pub async fn delete(merchant_id: &str, connector: &str, account: &str) -> Result
     match service_configuration::delete_config(config_name(merchant_id, connector, account)).await {
         Ok(()) => Ok(()),
         // The one absorbed case: nothing was stored, which is the state the caller asked for.
-        Err(crate::generics::MeshError::NoRowstoDelete) => Ok(()),
+        Err(error) if matches!(error.current_context(), MeshError::NoRowstoDelete) => Ok(()),
         // Anything else — a dropped connection, a failed query — really did fail to clear the
         // mapping. Reporting success there would tell a merchant their mapping was removed while
         // the next ingestion silently kept applying it: precisely the quiet wrong answer this
         // module exists to prevent.
-        Err(e) => Err(IngestError::Storage(e.to_string())),
+        Err(error) => {
+            let context = IngestError::Storage(error.to_string());
+            Err(error.change_context(context))
+        }
     }
 }
 

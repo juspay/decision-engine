@@ -4,6 +4,7 @@
 //! Adding Stripe / Checkout / Worldpay is a new `SettlementReportSource` impl plus its
 //! credentials — the queue, staging, fit, and serving never change.
 
+use error_stack::{Report, Result};
 use std::collections::HashMap;
 use std::io::{Cursor, Read};
 use std::sync::Arc;
@@ -194,7 +195,7 @@ impl ConnectorRegistry {
         self.sources
             .get(connector)
             .cloned()
-            .ok_or_else(|| IngestError::UnknownConnector(connector.to_string()))
+            .ok_or_else(|| Report::new(IngestError::UnknownConnector(connector.to_string())))
     }
 
     /// Every registered connector id. Used by the upload preflight to test a header row against all

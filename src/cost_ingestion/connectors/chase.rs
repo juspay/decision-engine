@@ -35,6 +35,7 @@
 //! return a descriptive error until then; the parser (`parse_rows`) is complete and independently
 //! testable.
 
+use error_stack::Report;
 use std::collections::HashMap;
 use std::io::{BufReader, Read};
 use std::sync::{Mutex, OnceLock};
@@ -151,11 +152,12 @@ struct ChaseCreds {
 
 impl ChaseCreds {
     /// Read the JSON credential blob out of `download_auth`.
-    fn parse(creds: &ConnectorCreds) -> Result<Self, IngestError> {
+    fn parse(creds: &ConnectorCreds) -> error_stack::Result<Self, IngestError> {
         serde_json::from_str(creds.download_auth.peek()).map_err(|e| {
-            IngestError::MalformedNotification(format!(
+            let context = IngestError::MalformedNotification(format!(
                 "chase download_auth must be a JSON credential blob: {e}"
-            ))
+            ));
+            Report::from(e).change_context(context)
         })
     }
 }
@@ -213,10 +215,10 @@ impl SettlementReportSource for ChaseReportSource {
         "chase"
     }
 
-    fn peek_account(&self, _raw_body: &[u8]) -> Result<String, IngestError> {
+    fn peek_account(&self, _raw_body: &[u8]) -> error_stack::Result<String, IngestError> {
         // Chase is pull-based (no report-ready webhook), so the webhook ingress never routes here —
         // discovery happens in the report poller via `poll_ready_reports`.
-        Err(not_implemented("peek_account"))
+        Err(not_implemented("peek_account").into())
     }
 
     fn verify_and_parse_notification(
@@ -224,9 +226,9 @@ impl SettlementReportSource for ChaseReportSource {
         _headers: &HeaderMap,
         _raw_body: &[u8],
         _secret: &Secret<String>,
-    ) -> Result<ReportNotification, IngestError> {
+    ) -> error_stack::Result<ReportNotification, IngestError> {
         // Pull-based: no inbound webhook to verify. See `chase_poller`.
-        Err(not_implemented("verify_and_parse_notification"))
+        Err(not_implemented("verify_and_parse_notification").into())
     }
 
     /// Chase is pull-based: the report poller lists ready reports (below) rather than receiving a
@@ -240,7 +242,7 @@ impl SettlementReportSource for ChaseReportSource {
     async fn poll_ready_reports(
         &self,
         creds: &ConnectorCreds,
-    ) -> Result<Vec<ReadyReport>, IngestError> {
+    ) -> error_stack::Result<Vec<ReadyReport>, IngestError> {
         let chase = ChaseCreds::parse(creds)?;
         list_ready_reports(&chase).await
     }
@@ -252,7 +254,7 @@ impl SettlementReportSource for ChaseReportSource {
         &self,
         creds: &ConnectorCreds,
         note: &ReportNotification,
-    ) -> Result<Bytes, IngestError> {
+    ) -> error_stack::Result<Bytes, IngestError> {
         let chase = ChaseCreds::parse(creds)?;
         let token = oauth_token(&chase).await?;
         let resp = http_client()
@@ -260,16 +262,21 @@ impl SettlementReportSource for ChaseReportSource {
             .bearer_auth(&token)
             .send()
             .await
-            .map_err(|e| IngestError::Download(format!("chase report download: {e}")))?;
+            .map_err(|e| {
+                let context = IngestError::Download(format!("chase report download: {e}"));
+                Report::from(e).change_context(context)
+            })?;
         if !resp.status().is_success() {
             return Err(IngestError::Download(format!(
                 "chase report download status {}",
                 resp.status()
-            )));
+            ))
+            .into());
         }
-        resp.bytes()
-            .await
-            .map_err(|e| IngestError::Download(e.to_string()))
+        resp.bytes().await.map_err(|e| {
+            let context = IngestError::Download(e.to_string());
+            Report::from(e).change_context(context)
+        })
     }
 
     fn unwrap_envelope(&self, reader: Box<dyn Read + Send>) -> Box<dyn Read + Send> {
@@ -280,8 +287,8 @@ impl SettlementReportSource for ChaseReportSource {
         &self,
         reader: Box<dyn Read + Send>,
         mapping: &crate::cost_ingestion::mapping::ColumnMapping,
-        on_row: &mut dyn FnMut(SettledFeeRow) -> Result<(), IngestError>,
-    ) -> Result<(), IngestError> {
+        on_row: &mut dyn FnMut(SettledFeeRow) -> error_stack::Result<(), IngestError>,
+    ) -> error_stack::Result<(), IngestError> {
         // Resolved column indices for one report. Preset-report column order can drift between
         // report versions, so never index positionally — resolve every column by its exact label.
         struct Cols {
@@ -400,7 +407,9 @@ fn not_implemented(method: &str) -> IngestError {
 
 /// `GET /api/v1/reports`, following the `next`/`lastPage` cursor → all completed Submission details
 /// instances across pages.
-async fn list_ready_reports(creds: &ChaseCreds) -> Result<Vec<ReadyReport>, IngestError> {
+async fn list_ready_reports(
+    creds: &ChaseCreds,
+) -> error_stack::Result<Vec<ReadyReport>, IngestError> {
     let token = oauth_token(creds).await?;
     let mut out = Vec::new();
     let mut next: Option<String> = None;
@@ -413,20 +422,19 @@ async fn list_ready_reports(creds: &ChaseCreds) -> Result<Vec<ReadyReport>, Inge
         if let Some(cursor) = &next {
             req = req.header("next", cursor.as_str());
         }
-        let resp = req
-            .send()
-            .await
-            .map_err(|e| IngestError::Download(format!("chase reports request: {e}")))?;
+        let resp = req.send().await.map_err(|e| {
+            let context = IngestError::Download(format!("chase reports request: {e}"));
+            Report::from(e).change_context(context)
+        })?;
         if !resp.status().is_success() {
-            return Err(IngestError::Download(format!(
-                "chase reports status {}",
-                resp.status()
-            )));
+            return Err(
+                IngestError::Download(format!("chase reports status {}", resp.status())).into(),
+            );
         }
-        let body = resp
-            .bytes()
-            .await
-            .map_err(|e| IngestError::Download(format!("chase reports body: {e}")))?;
+        let body = resp.bytes().await.map_err(|e| {
+            let context = IngestError::Download(format!("chase reports body: {e}"));
+            Report::from(e).change_context(context)
+        })?;
         let page = parse_reports_page(&body)?;
         let last = page.last_page || page.next.is_none();
         next = page.next.clone();
@@ -439,9 +447,11 @@ async fn list_ready_reports(creds: &ChaseCreds) -> Result<Vec<ReadyReport>, Inge
 }
 
 /// Parse one `GET /reports` page (typed), leaving pagination and filtering to the caller.
-fn parse_reports_page(body: &[u8]) -> Result<ReportsListResponse, IngestError> {
-    serde_json::from_slice(body)
-        .map_err(|e| IngestError::Download(format!("chase reports parse: {e}")))
+fn parse_reports_page(body: &[u8]) -> error_stack::Result<ReportsListResponse, IngestError> {
+    serde_json::from_slice(body).map_err(|e| {
+        let context = IngestError::Download(format!("chase reports parse: {e}"));
+        Report::from(e).change_context(context)
+    })
 }
 
 /// Keep only completed Submission details instances that carry a download URL.
@@ -454,7 +464,7 @@ fn ready_reports(resp: ReportsListResponse) -> Vec<ReadyReport> {
 
 /// Buffered convenience over [`parse_reports_page`] + [`ready_reports`] for one page (used by tests).
 #[cfg(test)]
-fn parse_reports_list(body: &[u8]) -> Result<Vec<ReadyReport>, IngestError> {
+fn parse_reports_list(body: &[u8]) -> error_stack::Result<Vec<ReadyReport>, IngestError> {
     Ok(ready_reports(parse_reports_page(body)?))
 }
 
@@ -502,7 +512,7 @@ fn parse_ts_date(s: &str) -> Option<NaiveDate> {
 
 /// Return a valid access token for `creds`, minting a new one only when the cache is empty/expired.
 /// Caching respects J.P. Morgan's token-request rate limit (tokens are valid ~8h).
-async fn oauth_token(creds: &ChaseCreds) -> Result<String, IngestError> {
+async fn oauth_token(creds: &ChaseCreds) -> error_stack::Result<String, IngestError> {
     // Local/mock testing: a pre-supplied token bypasses OAuth signing entirely.
     if let Some(tok) = creds.access_token.as_ref().filter(|t| !t.is_empty()) {
         return Ok(tok.clone());
@@ -517,17 +527,17 @@ async fn oauth_token(creds: &ChaseCreds) -> Result<String, IngestError> {
         .form(&form)
         .send()
         .await
-        .map_err(|e| IngestError::Download(format!("chase token request: {e}")))?;
+        .map_err(|e| {
+            let context = IngestError::Download(format!("chase token request: {e}"));
+            Report::from(e).change_context(context)
+        })?;
     if !resp.status().is_success() {
-        return Err(IngestError::Download(format!(
-            "chase token status {}",
-            resp.status()
-        )));
+        return Err(IngestError::Download(format!("chase token status {}", resp.status())).into());
     }
-    let token: TokenResponse = resp
-        .json()
-        .await
-        .map_err(|e| IngestError::Download(format!("chase token parse: {e}")))?;
+    let token: TokenResponse = resp.json().await.map_err(|e| {
+        let context = IngestError::Download(format!("chase token parse: {e}"));
+        Report::from(e).change_context(context)
+    })?;
     store_token(&creds.client_id, &token);
     Ok(token.access_token)
 }
@@ -570,10 +580,13 @@ fn build_client_assertion(
     creds: &ChaseCreds,
     now: SystemTime,
     jti: &str,
-) -> Result<String, IngestError> {
+) -> error_stack::Result<String, IngestError> {
     let signer = josekit::jws::RS256
         .signer_from_pem(creds.private_key_pem.as_bytes())
-        .map_err(|e| IngestError::Download(format!("chase jwt signer: {e}")))?;
+        .map_err(|e| {
+            let context = IngestError::Download(format!("chase jwt signer: {e}"));
+            Report::from(e).change_context(context)
+        })?;
     let mut header = JwsHeader::new();
     header.set_token_type("JWT");
     let mut payload = JwtPayload::new();
@@ -583,8 +596,10 @@ fn build_client_assertion(
     payload.set_issued_at(&now);
     payload.set_expires_at(&(now + ASSERTION_TTL));
     payload.set_jwt_id(jti);
-    jwt::encode_with_signer(&payload, &header, &signer)
-        .map_err(|e| IngestError::Download(format!("chase jwt encode: {e}")))
+    jwt::encode_with_signer(&payload, &header, &signer).map_err(|e| {
+        let context = IngestError::Download(format!("chase jwt encode: {e}"));
+        Report::from(e).change_context(context)
+    })
 }
 
 /// The `application/x-www-form-urlencoded` body of the `client_credentials` token request.
@@ -871,7 +886,7 @@ o2,ED,3,GB,GBP,EDBT,SALE,100,-1.00,-0.20\n";
         let err = ChaseReportSource::new().parse_report(csv).unwrap_err();
         let IngestError::MissingColumns {
             missing, required, ..
-        } = err
+        } = err.current_context()
         else {
             panic!("expected MissingColumns, got {err:?}");
         };
@@ -1001,7 +1016,9 @@ o2,ED,3,GB,GBP,EDBT,SALE,100,-1.00,-0.20\n";
             download_auth: Secret::new("nope".to_string()),
         };
         assert!(matches!(
-            ChaseCreds::parse(&bad),
+            ChaseCreds::parse(&bad)
+                .as_ref()
+                .map_err(|error| error.current_context()),
             Err(IngestError::MalformedNotification(_))
         ));
     }

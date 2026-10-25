@@ -2,6 +2,7 @@ use crate::app::{get_tenant_app_state, APP_STATE};
 use crate::auth::{self, TOKEN_TYPE_HS_REDIRECT, TOKEN_TYPE_STANDARD, TOKEN_TYPE_SUPER_ADMIN_VIEW};
 use crate::custom_extractors::Json;
 use crate::error::{self, ContainerError, ResultContainerExt, UserAuthError};
+use crate::logger;
 use crate::storage::types::{
     MerchantAccountNew, NewUser, NewUserMerchant, User, UserEmailVerifiedUpdate, UserMerchant,
     UserMerchantIdUpdate,
@@ -13,7 +14,7 @@ use axum::extract::Query;
 use axum::http::HeaderMap;
 use diesel::associations::HasTable;
 use diesel::{BoolExpressionMethods, ExpressionMethods};
-use error_stack::ResultExt;
+use error_stack::{Report, ResultExt};
 use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
 
@@ -143,7 +144,7 @@ pub async fn signup(
     if global_config.user_auth.signup_requires_admin_secret {
         let provided_admin_secret = headers
             .get("x-admin-secret")
-            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
             .unwrap_or("");
         if provided_admin_secret != global_config.admin_secret.secret.peek().as_str() {
             return Err(error::ContainerError::from(UserAuthError::Unauthorized));
@@ -241,7 +242,13 @@ pub async fn signup(
             )
             .await;
         if send_result.is_err() {
-            let _ = app_state.redis_conn.delete_key(&pending_key).await;
+            let _ = app_state
+                .redis_conn
+                .delete_key(&pending_key)
+                .await
+                .inspect_err(|cause| {
+                    logger::error!(error = ?cause);
+                });
         }
         send_result.change_context(UserAuthError::EmailSendFailed)?;
 
@@ -252,7 +259,13 @@ pub async fn signup(
             .set_key_with_ttl(&redis_key, &user_id, EMAIL_VERIFICATION_TTL_SECONDS)
             .await;
         if token_result.is_err() {
-            let _ = app_state.redis_conn.delete_key(&pending_key).await;
+            let _ = app_state
+                .redis_conn
+                .delete_key(&pending_key)
+                .await
+                .inspect_err(|cause| {
+                    logger::error!(error = ?cause);
+                });
         }
         token_result.change_context(UserAuthError::StorageError)?;
 
@@ -275,8 +288,20 @@ pub async fn signup(
 
         let user_insert_result = crate::generics::generic_insert(&app_state.db, new_user).await;
         if user_insert_result.is_err() {
-            let _ = app_state.redis_conn.delete_key(&redis_key).await;
-            let _ = app_state.redis_conn.delete_key(&pending_key).await;
+            let _ = app_state
+                .redis_conn
+                .delete_key(&redis_key)
+                .await
+                .inspect_err(|cause| {
+                    logger::error!(error = ?cause);
+                });
+            let _ = app_state
+                .redis_conn
+                .delete_key(&pending_key)
+                .await
+                .inspect_err(|cause| {
+                    logger::error!(error = ?cause);
+                });
         }
         user_insert_result.change_context(UserAuthError::StorageError)?;
 
@@ -291,21 +316,49 @@ pub async fn signup(
             let merchant_insert_result =
                 crate::generics::generic_insert(&app_state.db, new_user_merchant).await;
             if merchant_insert_result.is_err() {
-                let conn = app_state.db.get_conn().await.ok();
+                let conn = app_state
+                    .db
+                    .get_conn()
+                    .await
+                    .inspect_err(|cause| {
+                        logger::error!(error = ?cause);
+                    })
+                    .ok();
                 if let Some(conn) = conn {
                     let _ = crate::generics::generic_delete::<
                         <User as diesel::associations::HasTable>::Table,
                         _,
                     >(&conn, dsl::user_id.eq(user_id.clone()))
-                    .await;
+                    .await
+                    .inspect_err(|cause| {
+                        logger::error!(error = ?cause);
+                    });
                 }
-                let _ = app_state.redis_conn.delete_key(&redis_key).await;
-                let _ = app_state.redis_conn.delete_key(&pending_key).await;
+                let _ = app_state
+                    .redis_conn
+                    .delete_key(&redis_key)
+                    .await
+                    .inspect_err(|cause| {
+                        logger::error!(error = ?cause);
+                    });
+                let _ = app_state
+                    .redis_conn
+                    .delete_key(&pending_key)
+                    .await
+                    .inspect_err(|cause| {
+                        logger::error!(error = ?cause);
+                    });
             }
             merchant_insert_result.change_context(UserAuthError::StorageError)?;
         }
 
-        let _ = app_state.redis_conn.delete_key(&pending_key).await;
+        let _ = app_state
+            .redis_conn
+            .delete_key(&pending_key)
+            .await
+            .inspect_err(|cause| {
+                logger::error!(error = ?cause);
+            });
 
         return Ok(Json(SignupResponse::VerificationPending(
             SignupVerificationPendingResponse {
@@ -919,7 +972,7 @@ pub async fn invite_member(
             .into_message();
 
             if let Err(err) = email_client.send_email(email_msg).await {
-                crate::logger::warn!(
+                logger::warn!(
                     to = %existing_user.email,
                     error = ?err,
                     "Failed to send member-added notification email"
@@ -972,16 +1025,29 @@ pub async fn invite_member(
 
         if crate::generics::generic_insert(&app_state.db, new_user_merchant)
             .await
+            .inspect_err(|cause| {
+                logger::error!(error = ?cause);
+            })
             .is_err()
         {
             // Compensating delete: remove orphaned user if membership insert fails
-            let conn = app_state.db.get_conn().await.ok();
+            let conn = app_state
+                .db
+                .get_conn()
+                .await
+                .inspect_err(|cause| {
+                    logger::error!(error = ?cause);
+                })
+                .ok();
             if let Some(conn) = conn {
                 let _ = crate::generics::generic_delete::<
                     <User as diesel::associations::HasTable>::Table,
                     _,
                 >(&conn, dsl::user_id.eq(user_id.clone()))
-                .await;
+                .await
+                .inspect_err(|cause| {
+                    logger::error!(error = ?cause);
+                });
             }
             return Err(error::ContainerError::from(UserAuthError::StorageError));
         }
@@ -1002,7 +1068,7 @@ pub async fn invite_member(
             .into_message();
 
             if let Err(err) = email_client.send_email(email_msg).await {
-                crate::logger::warn!(
+                logger::warn!(
                     to = %payload.email,
                     error = ?err,
                     "Failed to send invite email; invite still succeeded"
@@ -1126,7 +1192,10 @@ pub async fn logout(
         let _ = app_state
             .redis_conn
             .set_key_with_ttl(&deny_key, "1", remaining_ttl)
-            .await;
+            .await
+            .inspect_err(|cause| {
+                logger::error!(error = ?cause);
+            });
     }
 
     Ok(Json(
@@ -1368,7 +1437,7 @@ pub async fn forgot_password(
     // Without a configured email backend there is no way to deliver the reset link,
     // so short-circuit — but still return the generic response to avoid leaking that.
     if !global_config.email.is_active() {
-        crate::logger::warn!(
+        logger::warn!(
             "forgot_password requested but no email backend is configured; skipping send"
         );
         return generic_ok();
@@ -1433,7 +1502,13 @@ pub async fn forgot_password(
 
     if send_result.is_err() {
         // Drop the token so a failed send doesn't leave a dangling reset entry.
-        let _ = app_state.redis_conn.delete_key(&redis_key).await;
+        let _ = app_state
+            .redis_conn
+            .delete_key(&redis_key)
+            .await
+            .inspect_err(|cause| {
+                logger::error!(error = ?cause);
+            });
         send_result.change_context(UserAuthError::EmailSendFailed)?;
     }
 
@@ -1494,7 +1569,7 @@ pub async fn reset_password(
     .change_context(UserAuthError::StorageError)?;
 
     if rows_updated == 0 {
-        crate::logger::error!(user_id = %user_id, "Password reset matched 0 rows — user_id not found in DB");
+        logger::error!(user_id = %user_id, "Password reset matched 0 rows — user_id not found in DB");
         return Err(error::ContainerError::from(
             UserAuthError::InvalidResetToken,
         ));
@@ -1555,13 +1630,19 @@ pub async fn verify_email(
     .change_context(UserAuthError::StorageError)?;
 
     if rows_updated == 0 {
-        crate::logger::error!(user_id = %user_id, "Email verification update matched 0 rows — user_id not found in DB");
+        logger::error!(user_id = %user_id, "Email verification update matched 0 rows — user_id not found in DB");
         return Err(error::ContainerError::from(
             UserAuthError::InvalidVerificationToken,
         ));
     }
 
-    let _ = app_state.redis_conn.delete_key(&redis_key).await;
+    let _ = app_state
+        .redis_conn
+        .delete_key(&redis_key)
+        .await
+        .inspect_err(|cause| {
+            logger::error!(error = ?cause);
+        });
 
     Ok(Json(VerifyEmailResponse {
         message: "Email verified successfully. You can now log in.".to_string(),
@@ -1569,11 +1650,20 @@ pub async fn verify_email(
 }
 
 fn extract_bearer_token(headers: &HeaderMap) -> Result<&str, error::ContainerError<UserAuthError>> {
-    headers
+    let header = headers
         .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
-        .ok_or_else(|| error::ContainerError::from(UserAuthError::InvalidToken))
+        .ok_or_else(|| {
+            Report::new(UserAuthError::InvalidToken)
+                .attach_printable("Authorization header is missing")
+        })?;
+    let value = header
+        .to_str()
+        .change_context(UserAuthError::InvalidToken)?;
+    value.strip_prefix("Bearer ").ok_or_else(|| {
+        Report::new(UserAuthError::InvalidToken)
+            .attach_printable("Authorization header does not use the Bearer scheme")
+            .into()
+    })
 }
 
 pub async fn verify_jwt_not_revoked(
@@ -1599,7 +1689,9 @@ pub async fn verify_jwt_not_revoked(
     match app_state.redis_conn.get_key_string(&deny_key).await {
         // On the denylist: refused, and never cached.
         Ok(value) if !value.is_empty() => {
-            return Err(ContainerError::from(UserAuthError::InvalidToken))
+            return Err(Report::new(UserAuthError::InvalidToken)
+                .attach_printable("JWT has been revoked")
+                .into())
         }
         // Confirmed absent from the denylist — the only answer worth remembering.
         Ok(_) => {
@@ -1610,7 +1702,17 @@ pub async fn verify_jwt_not_revoked(
         // Denylist unreadable: admit the request, but store nothing. Caching an unverified
         // token would turn a momentary Redis failure into a full TTL of accepting revoked
         // sessions; the next request reads the denylist again.
-        Err(_) => {}
+        Err(error)
+            if matches!(
+                error.current_context(),
+                redis_interface::errors::RedisError::NotFound
+            ) =>
+        {
+            logger::debug!(error = ?error, "JWT has no revocation entry; admitting uncached session");
+        }
+        Err(error) => {
+            logger::warn!(error = ?error, "JWT revocation lookup failed; admitting uncached session");
+        }
     }
 
     Ok(claims)
@@ -1758,11 +1860,13 @@ pub async fn admin_merchant_token(
 
     let provided = headers
         .get("x-admin-secret")
-        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .unwrap_or("");
 
     if provided != global_config.admin_secret.secret.peek().as_str() {
-        return Err(error::ContainerError::from(UserAuthError::InvalidToken));
+        return Err(Report::new(UserAuthError::InvalidToken)
+            .attach_printable("SSO handoff admin secret is missing or does not match")
+            .into());
     }
 
     // Verify the merchant actually exists in DE before issuing a code.
@@ -1839,7 +1943,7 @@ pub async fn exchange_merchant_token(
         .await
     {
         Ok(entry) => entry.resolve(),
-        Err(_) => return Err(error::ContainerError::from(UserAuthError::InvalidToken)),
+        Err(error) => return Err(error.change_context(UserAuthError::InvalidToken).into()),
     };
 
     // Atomically claim the code by deleting it. `DEL` is atomic and reports whether *this* call
@@ -1853,7 +1957,9 @@ pub async fn exchange_merchant_token(
         .change_context(UserAuthError::StorageError)?;
 
     if !matches!(claimed, redis_interface::types::DelReply::KeyDeleted) {
-        return Err(error::ContainerError::from(UserAuthError::InvalidToken));
+        return Err(Report::new(UserAuthError::InvalidToken)
+            .attach_printable("SSO handoff code expired or was already consumed")
+            .into());
     }
 
     let synthetic_user_id = format!("hs_{}", merchant_id);

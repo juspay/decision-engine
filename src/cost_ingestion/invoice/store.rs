@@ -10,6 +10,7 @@
 //! two served parameters so reconciliation ([`super::reconcile`]) and the dashboard can show *why*
 //! the add-on is what it is, without re-parsing the invoice.
 
+use error_stack::{Report, Result};
 use serde::{Deserialize, Serialize};
 
 use crate::cost_ingestion::types::IngestError;
@@ -83,28 +84,40 @@ const GLOBAL_INDEX_NAME: &str = "cost_invoice_addon_merchants";
 async fn read_json<T: for<'de> Deserialize<'de>>(name: String) -> Result<Option<T>, IngestError> {
     let stored = service_configuration::find_config_by_name(name)
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+        .map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?;
     match stored.and_then(|c| c.value) {
-        Some(v) => serde_json::from_str(&v)
-            .map(Some)
-            .map_err(|e| IngestError::Storage(e.to_string())),
+        Some(v) => serde_json::from_str(&v).map(Some).map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        }),
         None => Ok(None),
     }
 }
 
 async fn write_json<T: Serialize>(name: String, value: &T) -> Result<(), IngestError> {
-    let serialized =
-        serde_json::to_string(value).map_err(|e| IngestError::Storage(e.to_string()))?;
+    let serialized = serde_json::to_string(value).map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     let exists = service_configuration::find_config_by_name(name.clone())
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?
+        .map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?
         .is_some();
     if exists {
         service_configuration::update_config(name, Some(serialized)).await
     } else {
         service_configuration::insert_config(name, Some(serialized)).await
     }
-    .map_err(|e| IngestError::Storage(e.to_string()))
+    .map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })
 }
 
 async fn read_list(name: String) -> Result<Vec<String>, IngestError> {
@@ -175,7 +188,10 @@ pub async fn delete(merchant_id: &str, connector: &str) -> Result<(), IngestErro
     let connector = connector.to_lowercase();
     service_configuration::delete_config(addon_name(merchant_id, &connector))
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+        .map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?;
     let remaining = index_remove(merchant_index_name(merchant_id), &connector).await?;
     if remaining == 0 {
         index_remove(GLOBAL_INDEX_NAME.to_string(), merchant_id).await?;

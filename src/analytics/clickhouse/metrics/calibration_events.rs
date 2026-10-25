@@ -1,4 +1,5 @@
 use clickhouse::Row;
+use error_stack::Result;
 use serde::Deserialize;
 
 use crate::analytics::models::{RoutingEventsQuery, AUTOPILOT_CALIBRATION_STAGE};

@@ -6,6 +6,7 @@
 //! moves — a price-change timeline for the dashboard. The two-part model means we can say *which*
 //! part moved: the percentage (`pct_bps`) or the flat fee (`fixed`). See §10.
 
+use error_stack::{Report, Result};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -85,21 +86,22 @@ pub async fn price_changes(
     if !cfg.user.is_empty() {
         req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
     }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let resp = req.send().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         return Err(IngestError::Storage(format!(
             "clickhouse price-change query failed ({status}): {text}"
-        )));
+        ))
+        .into());
     }
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let text = resp.text().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
 
     let mut out = Vec::new();
     for line in text.lines() {

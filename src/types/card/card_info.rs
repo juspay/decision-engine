@@ -1,5 +1,7 @@
 use crate::error::ApiError;
+use crate::logger;
 use diesel::associations::HasTable;
+use error_stack::Report;
 use serde::{Deserialize, Serialize};
 // use db::eulermeshimpl::meshConfig;
 // use db::mesh::internal;
@@ -47,9 +49,9 @@ pub struct CardInfo {
 }
 
 impl TryFrom<DBCardInfo> for CardInfo {
-    type Error = ApiError;
+    type Error = Report<ApiError>;
 
-    fn try_from(value: DBCardInfo) -> Result<Self, ApiError> {
+    fn try_from(value: DBCardInfo) -> error_stack::Result<Self, ApiError> {
         Ok(Self {
             card_isin: to_isin(value.card_isin)?,
             card_switch_provider: value.card_switch_provider,
@@ -142,9 +144,17 @@ pub async fn getAllCardInfoByIsins(isin_list: Vec<Isin>) -> Vec<CardInfo> {
         Ok(db_card_info_list) => db_card_info_list
             .into_iter()
             .map(CardInfo::try_from)
+            .inspect(|result| {
+                if let Err(cause) = result {
+                    logger::error!(error = ?cause);
+                }
+            })
             .filter_map(Result::ok)
             .collect(),
-        Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
+        Err(cause) => {
+            logger::error!(error = ?cause);
+            Vec::new()
+        } // Silently handle any errors by returning empty vec
     }
 }
 

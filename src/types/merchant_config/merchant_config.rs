@@ -1,4 +1,6 @@
+use crate::logger;
 use diesel::*;
+use error_stack::{Report, Result, ResultExt};
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
 use std::fmt::Debug;
@@ -32,17 +34,17 @@ pub struct MerchantConfig {
 }
 
 impl TryFrom<DBMerchantConfig> for MerchantConfig {
-    type Error = ApiError;
+    type Error = Report<ApiError>;
 
     fn try_from(db: DBMerchantConfig) -> Result<Self, ApiError> {
         Ok(Self {
             id: to_merchant_config_pid(db.id),
             merchant_account_id: MerchantPId(db.merchant_account_id),
             config_category: to_config_category(&db.config_category)
-                .map_err(|_| ApiError::ParsingError("Invalid config category"))?,
+                .change_context(ApiError::ParsingError("Invalid config category"))?,
             config_name: to_config_name(&db.config_name),
             status: to_config_status(&db.status)
-                .map_err(|_| ApiError::ParsingError("Invalid config status"))?,
+                .change_context(ApiError::ParsingError("Invalid config status"))?,
             config_value: db.config_value,
             last_updated: db.last_updated,
         })
@@ -73,8 +75,12 @@ pub async fn load_merchant_config_by_mpid_category_name_and_status(
     )
     .await
     {
-        Ok(Some(db_record)) => MerchantConfig::try_from(db_record).ok(),
-        Ok(None) | Err(_) => None, // Silently handle errors or no results by returning None
+        Ok(Some(db_record)) => MerchantConfig::try_from(db_record).inspect_err(|error| { logger::error!(error = ?error, "Merchant config conversion failed; retaining existing fallback"); }).ok(),
+        Ok(None) => None,
+        Err(cause) => {
+            logger::error!(error = ?cause);
+            None
+        } // Silently handle errors or no results by returning None
     }
 }
 
@@ -100,8 +106,12 @@ pub async fn load_merchant_config_by_mpid_category_and_name(
     {
         Ok(db_record) => MerchantConfig::try_from(db_record)
             .and_then(parse_merchant_config)
+            .inspect_err(|error| { logger::error!(error = ?error, "Merchant config conversion failed; retaining existing fallback"); })
             .ok(),
-        Err(_) => None,
+        Err(cause) => {
+            logger::error!(error = ?cause);
+            None
+        }
     }
 }
 
@@ -133,7 +143,7 @@ pub async fn load_arr_merchant_config_by_mpid_category_and_name(
     {
         Ok(db_results) => db_results
             .into_iter()
-            .filter_map(|db_merchant_config| MerchantConfig::try_from(db_merchant_config).ok())
+            .filter_map(|db_merchant_config| MerchantConfig::try_from(db_merchant_config).inspect_err(|error| { logger::error!(error = ?error, "Merchant config conversion failed; retaining existing fallback"); }).ok())
             .collect(),
         Err(_) => vec![],
     }

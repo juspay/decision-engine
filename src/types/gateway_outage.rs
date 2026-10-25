@@ -1,4 +1,5 @@
 use crate::error::ApiError;
+use crate::logger;
 use serde::{Deserialize, Serialize};
 use time::PrimitiveDateTime;
 // use db::eulermeshimpl::meshConfig;
@@ -146,7 +147,10 @@ pub async fn getPotentialGwOutages(time_now: PrimitiveDateTime) -> Vec<GatewayOu
             .into_iter()
             .filter_map(|db_record| GatewayOutage::try_from(db_record).ok())
             .collect(),
-        Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
+        Err(cause) => {
+            logger::error!(error = ?cause);
+            Vec::new()
+        } // Silently handle any errors by returning empty vec
     }
 }
 

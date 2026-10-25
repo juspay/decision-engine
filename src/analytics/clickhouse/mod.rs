@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use clickhouse::{Client, Row};
+use error_stack::{Result, ResultExt};
 use masking::PeekInterface;
 use serde::Deserialize;
 
@@ -40,16 +41,9 @@ impl ClickHouseAnalyticsStore {
             client = client.with_password(password.peek().clone());
         }
 
-        verify_connectivity(&client).await.map_err(|error| {
-            crate::logger::error!(
-                ?error,
-                clickhouse_url = %config.url,
-                clickhouse_database = %config.database,
-                clickhouse_user = %config.user,
-                "clickhouse analytics startup connectivity check failed"
-            );
-            error
-        })?;
+        verify_connectivity(&client)
+            .await
+            .attach_printable("ClickHouse analytics startup connectivity check failed")?;
         guard::detect_settings_support(&client).await;
 
         Ok(Self {
@@ -62,10 +56,7 @@ async fn verify_connectivity(client: &Client) -> Result<(), ApiError> {
     // Fail fast on bad ClickHouse config instead of deferring the error to the first dashboard read.
     let probe = common::fetch_one::<StartupProbeRow>(client.query("SELECT 1 AS value"))
         .await
-        .map_err(|error| {
-            crate::logger::error!(?error, "clickhouse startup probe failed");
-            ApiError::DatabaseError
-        })?;
+        .attach_printable("ClickHouse startup probe failed")?;
     let _ = probe.value;
     Ok(())
 }

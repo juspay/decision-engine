@@ -24,6 +24,7 @@
 //! most common upload mistake — picking the wrong connector in the dropdown — which no amount of
 //! column mapping would fix, and which mapping would actively paper over.
 
+use error_stack::{Report, Result};
 use std::io::Cursor;
 
 use serde::Serialize;
@@ -264,13 +265,14 @@ pub fn preview(
     let outcome = source.parse_rows(reader, mapping, &mut |row| {
         rows.push(row);
         if rows.len() >= PREVIEW_ROWS {
-            return Err(IngestError::Parse(STOP.to_string()));
+            return Err(IngestError::Parse(STOP.to_string()).into());
         }
         Ok(())
     });
     match outcome {
         Ok(()) => {}
-        Err(IngestError::Parse(ref m)) if m == STOP => {}
+        Err(ref error) if matches!(error.current_context(), IngestError::Parse(m) if m == STOP) => {
+        }
         // A genuine failure (missing columns under this mapping) is the caller's answer.
         Err(e) => return Err(e),
     }
@@ -363,7 +365,7 @@ enum Resolution {
         optional: Vec<String>,
         found: Vec<String>,
     },
-    Unreadable(IngestError),
+    Unreadable(Report<IngestError>),
 }
 
 /// Drive `source`'s real `parse_rows` over `header_sample` and classify what came back.
@@ -385,18 +387,20 @@ fn resolve(
         Ok(()) => Resolution::Ok {
             found: header_labels(source, header_sample),
         },
-        Err(IngestError::MissingColumns {
-            missing,
-            required,
-            optional,
-            found,
-        }) => Resolution::Missing {
-            missing,
-            required,
-            optional,
-            found,
+        Err(error) => match error.current_context() {
+            IngestError::MissingColumns {
+                missing,
+                required,
+                optional,
+                found,
+            } => Resolution::Missing {
+                missing: missing.clone(),
+                required: required.clone(),
+                optional: optional.clone(),
+                found: found.clone(),
+            },
+            _ => Resolution::Unreadable(error),
         },
-        Err(e) => Resolution::Unreadable(e),
     }
 }
 
@@ -689,7 +693,9 @@ Settled,REF1,visacredit,visa,IN,EUR,96.00,1.00,0.50,0.50,2.00,\n";
             [("Payable (SC)".to_string(), "Not In This File".to_string())].into(),
         );
         assert!(matches!(
-            preview(&registry(), "adyen", RENAMED_SAMPLE, &m, false),
+            preview(&registry(), "adyen", RENAMED_SAMPLE, &m, false)
+                .as_ref()
+                .map_err(|error| error.current_context()),
             Err(IngestError::MissingColumns { .. })
         ));
     }
@@ -702,7 +708,9 @@ Settled,REF1,visacredit,visa,IN,EUR,96.00,1.00,0.50,0.50,2.00,\n";
                 "not_a_psp",
                 ADYEN_HEADER,
                 ColumnMapping::none()
-            ),
+            )
+            .as_ref()
+            .map_err(|error| error.current_context()),
             Err(IngestError::UnknownConnector(_))
         ));
     }

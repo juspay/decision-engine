@@ -3,6 +3,7 @@ use crate::analytics::models::{
 };
 use crate::analytics::service::format_range;
 use crate::error::ApiError;
+use error_stack::Result;
 
 use super::super::metrics;
 
