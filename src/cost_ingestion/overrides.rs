@@ -149,16 +149,21 @@ async fn index_remove(name: String, item: &str) -> Result<usize, IngestError> {
 // ── public API ────────────────────────────────────────────────────────────────────────────────
 
 /// The connectors a merchant has overrides for (from its index).
-pub async fn list_connectors(merchant_id: &str) -> Result<Vec<String>, IngestError> {
+pub async fn list_connectors(
+    merchant: &crate::auth::AuthorizedMerchant,
+) -> Result<Vec<String>, IngestError> {
+    let merchant_id = merchant.as_str();
     read_list(merchant_index_name(merchant_id)).await
 }
 
 /// All `(connector, override)` a merchant has configured.
-pub async fn list(merchant_id: &str) -> Result<Vec<(String, FeeOverride)>, IngestError> {
-    let connectors = list_connectors(merchant_id).await?;
+pub async fn list(
+    merchant: &crate::auth::AuthorizedMerchant,
+) -> Result<Vec<(String, FeeOverride)>, IngestError> {
+    let connectors = list_connectors(merchant).await?;
     let mut out = Vec::with_capacity(connectors.len());
     for connector in connectors {
-        if let Some(ov) = get(merchant_id, &connector).await? {
+        if let Some(ov) = get(merchant, &connector).await? {
             out.push((connector, ov));
         }
     }
@@ -171,12 +176,21 @@ pub async fn list_merchants() -> Result<Vec<String>, IngestError> {
 }
 
 /// The override for one `(merchant, connector)`, if set.
-pub async fn get(merchant_id: &str, connector: &str) -> Result<Option<FeeOverride>, IngestError> {
+pub async fn get(
+    merchant: &crate::auth::AuthorizedMerchant,
+    connector: &str,
+) -> Result<Option<FeeOverride>, IngestError> {
+    let merchant_id = merchant.as_str();
     read_json::<FeeOverride>(override_name(merchant_id, connector)).await
 }
 
 /// Upsert a merchant's blended-fee override for a connector, and record it in both indices.
-pub async fn put(merchant_id: &str, connector: &str, ov: &FeeOverride) -> Result<(), IngestError> {
+pub async fn put(
+    merchant: &crate::auth::AuthorizedMerchant,
+    connector: &str,
+    ov: &FeeOverride,
+) -> Result<(), IngestError> {
+    let merchant_id = merchant.as_str();
     write_json(override_name(merchant_id, connector), ov).await?;
     index_add(merchant_index_name(merchant_id), connector).await?;
     index_add(GLOBAL_INDEX_NAME.to_string(), merchant_id).await?;
@@ -185,19 +199,24 @@ pub async fn put(merchant_id: &str, connector: &str, ov: &FeeOverride) -> Result
 
 /// Remove a merchant's override for a connector; drops the merchant from the global index once it
 /// has no overrides of *either* kind left, so the periodic refresh stops hydrating it.
-pub async fn delete(merchant_id: &str, connector: &str) -> Result<(), IngestError> {
+pub async fn delete(
+    merchant: &crate::auth::AuthorizedMerchant,
+    connector: &str,
+) -> Result<(), IngestError> {
+    let merchant_id = merchant.as_str();
     service_configuration::delete_config(override_name(merchant_id, connector))
         .await
         .map_err(|e| IngestError::Storage(e.to_string()))?;
     index_remove(merchant_index_name(merchant_id), connector).await?;
-    prune_global_index(merchant_id).await
+    prune_global_index(merchant).await
 }
 
 /// Drop a merchant from the global override index once it has neither a connector nor a cluster
 /// override remaining.
-async fn prune_global_index(merchant_id: &str) -> Result<(), IngestError> {
-    let connectors = list_connectors(merchant_id).await?;
-    let clusters = list_clusters(merchant_id).await?;
+async fn prune_global_index(merchant: &crate::auth::AuthorizedMerchant) -> Result<(), IngestError> {
+    let merchant_id = merchant.as_str();
+    let connectors = list_connectors(merchant).await?;
+    let clusters = list_clusters(merchant).await?;
     if connectors.is_empty() && clusters.is_empty() {
         index_remove(GLOBAL_INDEX_NAME.to_string(), merchant_id).await?;
     }
@@ -207,7 +226,10 @@ async fn prune_global_index(merchant_id: &str) -> Result<(), IngestError> {
 // ── cluster overrides ─────────────────────────────────────────────────────────────────────────
 
 /// A merchant's cluster overrides (identity is the dims).
-pub async fn list_clusters(merchant_id: &str) -> Result<Vec<ClusterOverride>, IngestError> {
+pub async fn list_clusters(
+    merchant: &crate::auth::AuthorizedMerchant,
+) -> Result<Vec<ClusterOverride>, IngestError> {
+    let merchant_id = merchant.as_str();
     Ok(
         read_json::<Vec<ClusterOverride>>(cluster_overrides_name(merchant_id))
             .await?
@@ -216,8 +238,12 @@ pub async fn list_clusters(merchant_id: &str) -> Result<Vec<ClusterOverride>, In
 }
 
 /// Upsert a cluster override (replaces any existing one with the same dims).
-pub async fn put_cluster(merchant_id: &str, ov: &ClusterOverride) -> Result<(), IngestError> {
-    let mut list = list_clusters(merchant_id).await?;
+pub async fn put_cluster(
+    merchant: &crate::auth::AuthorizedMerchant,
+    ov: &ClusterOverride,
+) -> Result<(), IngestError> {
+    let merchant_id = merchant.as_str();
+    let mut list = list_clusters(merchant).await?;
     list.retain(|c| c.dims != ov.dims);
     list.push(ov.clone());
     write_json(cluster_overrides_name(merchant_id), &list).await?;
@@ -226,12 +252,16 @@ pub async fn put_cluster(merchant_id: &str, ov: &ClusterOverride) -> Result<(), 
 }
 
 /// Remove the cluster override matching `dims`; prunes the global index when nothing is left.
-pub async fn delete_cluster(merchant_id: &str, dims: &ClusterDims) -> Result<(), IngestError> {
-    let mut list = list_clusters(merchant_id).await?;
+pub async fn delete_cluster(
+    merchant: &crate::auth::AuthorizedMerchant,
+    dims: &ClusterDims,
+) -> Result<(), IngestError> {
+    let merchant_id = merchant.as_str();
+    let mut list = list_clusters(merchant).await?;
     let before = list.len();
     list.retain(|c| &c.dims != dims);
     if list.len() != before {
         write_json(cluster_overrides_name(merchant_id), &list).await?;
     }
-    prune_global_index(merchant_id).await
+    prune_global_index(merchant).await
 }

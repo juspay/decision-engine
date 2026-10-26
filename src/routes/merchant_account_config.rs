@@ -1,5 +1,6 @@
 use crate::app::APP_STATE;
 use crate::custom_extractors::Json;
+use crate::custom_extractors::MerchantFromPath;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::redis::types::{FeatureConf, MerchantFeature as FeatureMerchant};
 use crate::types::merchant as ETM;
@@ -245,11 +246,12 @@ pub struct UpdateFeatureRequest {
 
 #[axum::debug_handler]
 pub async fn get_debit_routing(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<
     Json<DebitRoutingResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
 > {
+    let merchant_id = merchant.as_str().to_string();
     API_REQUEST_TOTAL_COUNTER
         .with_label_values(&["merchant_debit_routing_get"])
         .inc();
@@ -297,11 +299,12 @@ pub async fn get_debit_routing(
 
 #[axum::debug_handler]
 pub async fn get_merchant_config(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<
     Json<ETM::merchant_account::MerchantAccountResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
 > {
+    let merchant_id = merchant.as_str().to_string();
     // Record total request count and start timer
     API_REQUEST_TOTAL_COUNTER
         .with_label_values(&["merchant_account_get"])
@@ -397,11 +400,17 @@ pub async fn create_merchant_config(
             API_REQUEST_COUNTER
                 .with_label_values(&["merchant_account_create", "success"])
                 .inc();
-            let api_key = crate::routes::api_key::insert_api_key_for_merchant(
-                &merchant_id,
-                Some("Default API key".to_string()),
-            )
-            .await;
+            // This route verified the admin secret above: the service lane, acting for the
+            // merchant it is provisioning.
+            let api_key = match crate::auth::authorize_merchant_id(None, &merchant_id) {
+                Ok(merchant) => crate::routes::api_key::mint_api_key(
+                    &merchant,
+                    Some("Default API key".to_string()),
+                )
+                .await
+                .map(|created| created.api_key),
+                Err(_) => None,
+            };
             Ok(Json(MerchantAccountCreateResponse {
                 message: "Merchant account created successfully".to_string(),
                 merchant_id,
@@ -423,12 +432,13 @@ pub async fn create_merchant_config(
 
 #[axum::debug_handler]
 pub async fn update_debit_routing(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
     Json(payload): Json<DebitRoutingRequest>,
 ) -> Result<
     Json<DebitRoutingResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
 > {
+    let merchant_id = merchant.as_str().to_string();
     API_REQUEST_TOTAL_COUNTER
         .with_label_values(&["merchant_debit_routing_update"])
         .inc();
@@ -491,11 +501,12 @@ pub async fn update_debit_routing(
 
 #[axum::debug_handler]
 pub async fn get_merchant_features(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<
     Json<MerchantFeaturesResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
 > {
+    let merchant_id = merchant.as_str().to_string();
     API_REQUEST_TOTAL_COUNTER
         .with_label_values(&["merchant_features_get"])
         .inc();
@@ -539,12 +550,14 @@ pub async fn get_merchant_features(
 
 #[axum::debug_handler]
 pub async fn update_merchant_feature(
-    Path((merchant_id, feature_slug)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, feature_slug)): Path<(String, String)>,
     Json(payload): Json<UpdateFeatureRequest>,
 ) -> Result<
     Json<MerchantFeaturesResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
 > {
+    let merchant_id = merchant.as_str().to_string();
     API_REQUEST_TOTAL_COUNTER
         .with_label_values(&["merchant_feature_update"])
         .inc();
@@ -595,11 +608,12 @@ pub async fn update_merchant_feature(
 
 #[axum::debug_handler]
 pub async fn delete_merchant_config(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<
     Json<MerchantAccountDeleteResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
 > {
+    let merchant_id = merchant.as_str().to_string();
     // Record total request count and start timer
     API_REQUEST_TOTAL_COUNTER
         .with_label_values(&["merchant_account_delete"])

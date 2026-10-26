@@ -10,8 +10,9 @@
 //! cleanly onto the dashboard's editable table. Rows are (de)normalized to/from the nested
 //! `Vec<SeedCostEntry>` the resolver consumes.
 
+use crate::custom_extractors::MerchantFromPath;
+
 use crate::custom_extractors::Json;
-use axum::extract::Path;
 use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 
@@ -171,11 +172,10 @@ fn rows_to_entries(rows: Vec<SeedCostRow>) -> Vec<SeedCostEntry> {
 /// `GET /merchant-account/:merchant-id/seed-costs` — the merchant's editable contract-rate table
 /// (their saved edits, else the config default).
 pub async fn get_seed_costs(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<Vec<SeedCostRow>>, TextError> {
     let app_state = get_tenant_app_state().await;
-    let entries =
-        seed_store::effective_seed_entries(&merchant_id, &app_state.config.hypersense).await;
+    let entries = seed_store::effective_seed_entries(&merchant, &app_state.config.hypersense).await;
     Ok(Json(entries_to_rows(&entries)))
 }
 
@@ -186,7 +186,7 @@ pub struct SaveSeedCostsRequest {
 
 /// `PUT /merchant-account/:merchant-id/seed-costs` — replace the merchant's whole table.
 pub async fn set_seed_costs(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
     Json(body): Json<SaveSeedCostsRequest>,
 ) -> Result<Json<Vec<SeedCostRow>>, TextError> {
     for r in &body.rows {
@@ -208,7 +208,7 @@ pub async fn set_seed_costs(
         }
     }
     let entries = rows_to_entries(body.rows);
-    seed_store::put_seed_table(&merchant_id, &entries)
+    seed_store::put_seed_table(&merchant, &entries)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     Ok(Json(entries_to_rows(&entries)))
@@ -217,14 +217,13 @@ pub async fn set_seed_costs(
 /// `DELETE /merchant-account/:merchant-id/seed-costs` — clear edits, reverting to the config
 /// default; returns the default table.
 pub async fn delete_seed_costs(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<Vec<SeedCostRow>>, TextError> {
-    seed_store::delete_seed_table(&merchant_id)
+    seed_store::delete_seed_table(&merchant)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
     let app_state = get_tenant_app_state().await;
-    let entries =
-        seed_store::effective_seed_entries(&merchant_id, &app_state.config.hypersense).await;
+    let entries = seed_store::effective_seed_entries(&merchant, &app_state.config.hypersense).await;
     Ok(Json(entries_to_rows(&entries)))
 }
 
@@ -266,7 +265,7 @@ pub struct SimulateRow {
 /// (currency, scenario, amount) using the merchant's configured seed table, via the exact tier
 /// resolver the decide path uses. This is the lightweight cost preview beside the editor.
 pub async fn simulate_seed_costs(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
     Json(body): Json<SimulateRequest>,
 ) -> Result<Json<Vec<SimulateRow>>, TextError> {
     if !body.amount.is_finite() || body.amount <= 0.0 {
@@ -277,8 +276,7 @@ pub async fn simulate_seed_costs(
             .into());
     }
     let app_state = get_tenant_app_state().await;
-    let entries =
-        seed_store::effective_seed_entries(&merchant_id, &app_state.config.hypersense).await;
+    let entries = seed_store::effective_seed_entries(&merchant, &app_state.config.hypersense).await;
 
     let cluster = ClusterKey {
         amount: Some(body.amount),

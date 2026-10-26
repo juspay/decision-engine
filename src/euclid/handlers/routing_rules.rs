@@ -29,7 +29,7 @@ use crate::euclid::{
 };
 use crate::generics::MeshError;
 use crate::{euclid::types::RoutingAlgorithm, logger, metrics};
-use axum::{extract::Path, response::IntoResponse};
+use axum::response::IntoResponse;
 use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods};
 use error_stack::ResultExt;
 
@@ -461,7 +461,7 @@ fn field_validation_failure(
 }
 
 pub async fn config_sr_dimensions(
-    ScopedJson { payload, .. }: ScopedJson<SrDimensionConfig>,
+    ScopedJson { merchant, payload }: ScopedJson<SrDimensionConfig>,
 ) -> Result<Json<String>, ContainerError<EuclidErrors>> {
     let timer = metrics::API_LATENCY_HISTOGRAM
         .with_label_values(&["config_sr_dimensions"])
@@ -504,7 +504,7 @@ pub async fn config_sr_dimensions(
         .into());
     }
 
-    let mid = payload.merchant_id.clone();
+    let mid = merchant.as_str().to_string();
     let config = serde_json::to_string(&payload)
         .change_context(EuclidErrors::FailedToSerializeJsonToString)?;
     let name = format!("SR_DIMENSION_CONFIG_{}", mid);
@@ -557,8 +557,9 @@ pub async fn config_sr_dimensions(
 /// Returns the merchant's SR dimension config (which dimensions clusters are split on). Empty
 /// `fields` when nothing is configured yet — so the dashboard can render the selector.
 pub async fn get_sr_dimensions(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<SrDimensionConfig>, ContainerError<EuclidErrors>> {
+    let merchant_id = merchant.as_str().to_string();
     let name = format!("SR_DIMENSION_CONFIG_{}", merchant_id);
     let stored = find_config_by_name(name)
         .await

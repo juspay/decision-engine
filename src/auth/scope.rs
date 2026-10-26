@@ -33,12 +33,30 @@ pub trait MerchantScoped {
     fn merchant_ids(&self) -> Vec<&str>;
 }
 
-/// A merchant the current request is authorized to act on. Constructed only by [`authorize`] and
-/// [`authorize_merchant_id`].
+/// A merchant the current request is authorized to act on. Requests construct one only through
+/// [`authorize`], [`authorize_merchant_id`] and [`session_merchant`]; work Decision Engine starts
+/// itself uses [`AuthorizedMerchant::internal`], and a signed callback
+/// [`AuthorizedMerchant::signed_callback`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthorizedMerchant(String);
 
 impl AuthorizedMerchant {
+    /// The merchant that work Decision Engine starts itself acts on — a scheduler, a poller, a
+    /// background refresh — whose id comes from Decision Engine's own storage. Never call this with
+    /// an id taken from a request: requests are authorized with [`authorize`] or
+    /// [`authorize_merchant_id`].
+    pub fn internal(merchant_id: impl Into<String>) -> Self {
+        Self(merchant_id.into())
+    }
+
+    /// The merchant an unauthenticated, signed callback (a connector settlement webhook) names in
+    /// its path. The signature — checked against that merchant's own secret — is what authorizes it:
+    /// use this to load the merchant's verification secret, and act on the callback only once the
+    /// signature verifies.
+    pub fn signed_callback(merchant_id: impl Into<String>) -> Self {
+        Self(merchant_id.into())
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -116,6 +134,12 @@ pub fn authorize(
         return Err(MerchantScopeViolation::ConflictingMerchants);
     }
     Ok(AuthorizedMerchant((*first).to_string()))
+}
+
+/// The merchant a session is authorized for, for a route that names no merchant of its own (such as
+/// revoking an api key by id). `None` for a service credential, which has no merchant of its own.
+pub fn session_merchant(session: Option<&AuthContext>) -> Option<AuthorizedMerchant> {
+    session.map(|session| AuthorizedMerchant(session.merchant_id.clone()))
 }
 
 /// Resolve a request that names its merchant once, as a path parameter does.

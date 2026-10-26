@@ -34,7 +34,7 @@ fn serialize_rule_config_analytics_details<Request: Serialize, Response: Seriali
 #[axum::debug_handler]
 pub async fn create_rule_config(
     headers: axum::http::HeaderMap,
-    ScopedJson { payload, .. }: ScopedJson<types::routing_configuration::RoutingRule>,
+    ScopedJson { merchant, payload }: ScopedJson<types::routing_configuration::RoutingRule>,
 ) -> Result<Json<RuleConfigResponse>, error::ContainerError<error::RuleConfigurationError>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["create_rule_config"])
@@ -44,7 +44,7 @@ pub async fn create_rule_config(
         .inc();
     logger::debug!("Received rule configuration: {:?}", payload);
 
-    let merchant_id = payload.merchant_id.clone();
+    let merchant_id = merchant.as_str().to_string();
     let config = payload.config.clone();
     let analytics_payload = payload.clone();
     let analytics_merchant_id = merchant_id.clone();
@@ -56,7 +56,7 @@ pub async fn create_rule_config(
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
-    let mid = payload.merchant_id.clone();
+    let mid = merchant.as_str().to_string();
 
     // Check if merchant exists
     if ETM::merchant_account::load_merchant_by_merchant_id(mid.clone())
@@ -217,7 +217,7 @@ pub async fn create_rule_config(
 #[axum::debug_handler]
 pub async fn get_rule_config(
     headers: axum::http::HeaderMap,
-    ScopedJson { payload, .. }: ScopedJson<types::routing_configuration::FetchRoutingRule>,
+    ScopedJson { merchant, payload }: ScopedJson<types::routing_configuration::FetchRoutingRule>,
 ) -> Result<
     Json<types::routing_configuration::RoutingRule>,
     error::ContainerError<error::RuleConfigurationError>,
@@ -237,7 +237,7 @@ pub async fn get_rule_config(
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
-    let mid = payload.merchant_id.clone();
+    let mid = merchant.as_str().to_string();
     let analytics_mid = mid.clone();
     // Resolve the scope before dispatching on algorithm. Only the elimination config lives on the
     // merchant row; the others are looked up by a name derived from the merchant id, so without
@@ -380,7 +380,7 @@ pub async fn get_rule_config(
 #[axum::debug_handler]
 pub async fn update_rule_config(
     headers: axum::http::HeaderMap,
-    ScopedJson { payload, .. }: ScopedJson<types::routing_configuration::RoutingRule>,
+    ScopedJson { merchant, payload }: ScopedJson<types::routing_configuration::RoutingRule>,
 ) -> Result<Json<RuleConfigResponse>, error::ContainerError<error::RuleConfigurationError>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["update_rule_config"])
@@ -390,7 +390,7 @@ pub async fn update_rule_config(
         .inc();
     logger::debug!("Received rule update configuration: {:?}", payload);
 
-    let merchant_id = payload.merchant_id.clone();
+    let merchant_id = merchant.as_str().to_string();
     let config = payload.config.clone();
     let analytics_payload = payload.clone();
     let analytics_merchant_id = merchant_id.clone();
@@ -402,7 +402,7 @@ pub async fn update_rule_config(
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
-    let mid = payload.merchant_id.clone();
+    let mid = merchant.as_str().to_string();
     ETM::merchant_account::load_merchant_by_merchant_id(mid.clone())
         .await
         .ok_or(error::RuleConfigurationError::MerchantNotFound)?;
@@ -524,7 +524,7 @@ pub async fn update_rule_config(
 #[axum::debug_handler]
 pub async fn delete_rule_config(
     headers: axum::http::HeaderMap,
-    ScopedJson { payload, .. }: ScopedJson<types::routing_configuration::FetchRoutingRule>,
+    ScopedJson { merchant, payload }: ScopedJson<types::routing_configuration::FetchRoutingRule>,
 ) -> Result<Json<RuleConfigDeleteResponse>, error::ContainerError<error::RuleConfigurationError>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["delete_rule_config"])
@@ -541,7 +541,7 @@ pub async fn delete_rule_config(
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
-    let mid = payload.merchant_id.clone();
+    let mid = merchant.as_str().to_string();
     let analytics_mid = mid.clone();
     let merchant_account = ETM::merchant_account::load_merchant_by_merchant_id(mid.clone())
         .await

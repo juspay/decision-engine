@@ -1,8 +1,9 @@
 //! Read-only dashboard/projection/impact/samples views plus the scheduler-called run endpoint.
 
+use crate::custom_extractors::MerchantFromPath;
 use std::collections::HashMap;
 
-use axum::extract::{Path, Query};
+use axum::extract::Query;
 use axum::http::{HeaderMap, StatusCode};
 use axum::Extension;
 use axum::Json;
@@ -357,8 +358,9 @@ async fn pacing_view(merchant_id: String) -> VolumeCommitmentView {
 /// inferring it from a chart that does not move. Read-only in every sense: no plan is published, no
 /// forecast is filed, and the feature flag is left exactly as it was.
 pub async fn get_projection(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<VolumeCommitmentView>, TextError> {
+    let merchant_id = merchant.as_str().to_string();
     let Some(deps) = volume_commitment::deps() else {
         return Ok(Json(inactive(merchant_id)));
     };
@@ -744,9 +746,10 @@ async fn dashboard_parts(
 /// analytics read. Composing them here is what lets the browser poll once at one cadence instead
 /// of four times at two.
 pub async fn get_dashboard(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
     Query(query): Query<SeriesQuery>,
 ) -> Result<Json<DashboardResponse>, TextError> {
+    let merchant_id = merchant.as_str().to_string();
     let empty_series = || SeriesResponse {
         merchant_id: merchant_id.clone(),
         currency: None,
@@ -868,9 +871,10 @@ pub struct ImpactResponse {
 /// `GET /merchant-account/:merchant_id/volume-commitment/impact` — each PSP's traffic in the cycle
 /// before its own vs the one in flight, split by who sent it.
 pub async fn get_impact(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
     Query(query): Query<RunScopedQuery>,
 ) -> Result<Json<ImpactResponse>, TextError> {
+    let merchant_id = merchant.as_str().to_string();
     let not_active = || {
         (
             StatusCode::NOT_FOUND,
@@ -1074,8 +1078,9 @@ pub struct SamplesResponse {
 /// A sample is a template: the merchant picks one, edits it if they want to, and activates it.
 /// From that point it is an ordinary contract and the ordinary engine paces it.
 pub async fn get_samples(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<SamplesResponse>, TextError> {
+    let merchant_id = merchant.as_str().to_string();
     let Some(deps) = volume_commitment::deps() else {
         return Ok(Json(SamplesResponse {
             merchant_id,

@@ -37,9 +37,9 @@ pub struct ResetGatewayScoresResponse {
 /// new run starts from fresh scores without touching other merchants' data.
 pub async fn reset_gateway_scores(
     TenantStateResolver(state): TenantStateResolver,
-    ScopedJson { payload, .. }: ScopedJson<ResetGatewayScoresRequest>,
+    ScopedJson { merchant, .. }: ScopedJson<ResetGatewayScoresRequest>,
 ) -> Result<Json<ResetGatewayScoresResponse>, error::ContainerError<error::ApiError>> {
-    let merchant_id = payload.merchant_id.trim().to_string();
+    let merchant_id = merchant.as_str().trim().to_string();
     if merchant_id.is_empty() {
         return Err(error::ApiError::MissingRequiredField("merchant_id").into());
     }
