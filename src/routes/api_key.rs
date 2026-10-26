@@ -75,7 +75,7 @@ pub async fn create_api_key(
     // body-supplied `merchant_id` would let any authenticated caller create a working key for a
     // victim merchant and impersonate it. The admin-secret lane inserts no session and may mint for
     // any merchant (that is how Hyperswitch provisions keys).
-    ScopedJson(payload): ScopedJson<CreateApiKeyRequest>,
+    ScopedJson { payload, .. }: ScopedJson<CreateApiKeyRequest>,
 ) -> Result<Json<CreateApiKeyResponse>, error::ContainerError<ApiKeyError>> {
     let raw_key = auth::generate_api_key();
     let key_hash = auth::hash_api_key(&raw_key);

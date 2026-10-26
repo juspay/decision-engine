@@ -10,21 +10,18 @@ use masking::PeekInterface;
 
 const API_KEY_CACHE_TTL: i64 = 300;
 
-/// Path parameters that name the merchant a route acts on. Routing rules are owned by
-/// `created_by`, which is the merchant id under another name.
-const MERCHANT_PATH_PARAMS: &[&str] = &["merchant-id", "merchant_id", "created_by"];
-
 /// Enforce that a per-merchant session may only act on the merchant named in the path.
 ///
 /// Runs immediately *after* [`authenticate`], so an `AuthContext` is already in the request
 /// extensions for the JWT and api-key lanes. Those lanes carry a concrete `merchant_id`; a route
-/// addressed by a merchant names it in the path ([`MERCHANT_PATH_PARAMS`]). When the two disagree
+/// addressed by a merchant names it in the path ([`auth::scope::MERCHANT_PATH_PARAMS`]). When the two disagree
 /// the request is refused here, so no handler has to remember the check — and a path-addressed
 /// route added later is covered the day it is written.
 ///
-/// Routes that take the merchant from the request body bind it with
-/// [`crate::custom_extractors::ScopedJson`] (or [`auth::ensure_merchant_scope`] where the handler
-/// parses the body itself), checked against the typed request rather than raw JSON.
+/// This guard refuses early for every path-addressed route. Handlers then resolve the merchant
+/// they act on as an [`auth::AuthorizedMerchant`] — from the path with
+/// [`crate::custom_extractors::MerchantFromPath`], from the body with
+/// [`crate::custom_extractors::ScopedJson`] — which per-merchant storage requires.
 ///
 /// Service credentials (the shared admin secret, and the `api_key_auth_enabled = false`
 /// backward-compat lane) insert *no* `AuthContext`, so they fall through unrestricted exactly as
@@ -50,9 +47,11 @@ pub async fn enforce_merchant_scope(
 
     if let Some(path_params) = path_params {
         for (key, value) in &path_params {
-            if MERCHANT_PATH_PARAMS.contains(&key) && value != context.merchant_id.as_str() {
+            if auth::scope::MERCHANT_PATH_PARAMS.contains(&key)
+                && value != context.merchant_id.as_str()
+            {
                 return Ok(axum::response::IntoResponse::into_response(
-                    auth::MerchantScopeViolation,
+                    auth::MerchantScopeViolation::ForeignMerchant,
                 ));
             }
         }

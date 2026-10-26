@@ -141,7 +141,7 @@ where
     let api_decider_request: Result<DomainDeciderRequest, _> = serde_json::from_slice(&body);
     match api_decider_request {
         Ok(payload) => {
-            if let Err(violation) = crate::auth::ensure_merchant_scope(session.as_ref(), &payload) {
+            if let Err(violation) = crate::auth::authorize(session.as_ref(), &payload) {
                 API_REQUEST_COUNTER
                     .with_label_values(&["decision_gateway", "failure"])
                     .inc();

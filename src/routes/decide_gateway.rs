@@ -309,7 +309,7 @@ pub async fn decide_gateway(
         };
     let result = match api_decider_request {
         Ok(payload) => {
-            if let Err(violation) = crate::auth::ensure_merchant_scope(session.as_ref(), &payload) {
+            if let Err(violation) = crate::auth::authorize(session.as_ref(), &payload) {
                 metrics::API_REQUEST_COUNTER
                     .with_label_values(&["decide_gateway", "failure"])
                     .inc();

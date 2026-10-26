@@ -81,9 +81,9 @@ impl RequestBodyError {
 }
 
 impl From<crate::auth::MerchantScopeViolation> for ErrorResponse {
-    fn from(_: crate::auth::MerchantScopeViolation) -> Self {
-        let status = StatusCode::FORBIDDEN.as_u16().to_string();
-        let message = crate::auth::MerchantScopeViolation::MESSAGE.to_string();
+    fn from(violation: crate::auth::MerchantScopeViolation) -> Self {
+        let status = violation.status().as_u16().to_string();
+        let message = violation.message().to_string();
         Self {
             status: status.clone(),
             error_code: status,

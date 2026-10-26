@@ -10,7 +10,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 pub use context::{AuthContext, AuthKind};
-pub use scope::{ensure_merchant_scope, MerchantScopeViolation, MerchantScoped};
+pub use scope::{
+    authorize, authorize_merchant_id, AuthorizedMerchant, MerchantScopeViolation, MerchantScoped,
+};
 
 const KEY_PREFIX: &str = "DE_";
 

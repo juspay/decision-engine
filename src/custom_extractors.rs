@@ -62,12 +62,16 @@ impl<T: serde::Serialize> IntoResponse for Json<T> {
     }
 }
 
-/// [`Json`] for a request that names the merchant it acts on: once parsed, the request is bound to
-/// the caller's session with [`crate::auth::ensure_merchant_scope`], and a per-merchant session
-/// naming another merchant is refused with `403` before the handler runs. Parse failures are
+/// [`Json`] for a request that names the merchant it acts on. Once parsed, the request is
+/// authorized with [`crate::auth::authorize`]: a per-merchant session naming another merchant is
+/// refused with `403` before the handler runs. The handler receives the
+/// [`AuthorizedMerchant`](crate::auth::AuthorizedMerchant) alongside the payload. Parse failures are
 /// rejected exactly as [`Json`] rejects them.
-#[derive(Debug, Clone, Copy, Default)]
-pub struct ScopedJson<T>(pub T);
+#[derive(Debug, Clone)]
+pub struct ScopedJson<T> {
+    pub merchant: crate::auth::AuthorizedMerchant,
+    pub payload: T,
+}
 
 #[async_trait]
 impl<S, T> axum::extract::FromRequest<S> for ScopedJson<T>
@@ -83,9 +87,43 @@ where
     ) -> Result<Self, Self::Rejection> {
         let session = request.extensions().get::<AuthContext>().cloned();
         let Json(payload) = Json::<T>::from_request(request, state).await?;
-        crate::auth::ensure_merchant_scope(session.as_ref(), &payload)
+        let merchant = crate::auth::authorize(session.as_ref(), &payload)
             .map_err(IntoResponse::into_response)?;
-        Ok(Self(payload))
+        Ok(Self { merchant, payload })
+    }
+}
+
+/// The merchant a path-addressed route acts on, read from its merchant path parameter (see
+/// [`crate::auth::scope::MERCHANT_PATH_PARAMS`]) and authorized against the caller's session.
+#[derive(Debug, Clone)]
+pub struct MerchantFromPath(pub crate::auth::AuthorizedMerchant);
+
+#[async_trait]
+impl<S> FromRequestParts<S> for MerchantFromPath
+where
+    S: Send + Sync,
+{
+    type Rejection = Response;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let path_params = axum::extract::RawPathParams::from_request_parts(parts, state)
+            .await
+            .map_err(IntoResponse::into_response)?;
+        let Some(merchant_id) = path_params
+            .iter()
+            .find(|(key, _)| crate::auth::scope::MERCHANT_PATH_PARAMS.contains(key))
+            .map(|(_, value)| value.to_string())
+        else {
+            // A route wired with this extractor but no merchant parameter: a programming error.
+            return Err(crate::error::text_error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Route has no merchant path parameter",
+            ));
+        };
+        let session = parts.extensions.get::<AuthContext>();
+        crate::auth::authorize_merchant_id(session, &merchant_id)
+            .map(Self)
+            .map_err(IntoResponse::into_response)
     }
 }
 
@@ -357,6 +395,87 @@ mod tests {
             )
             .await,
             axum::http::StatusCode::FORBIDDEN
+        );
+    }
+
+    #[tokio::test]
+    async fn scoped_json_hands_the_handler_the_authorized_merchant() {
+        use crate::routes::api_key::CreateApiKeyRequest;
+        use axum::{body::Body, extract::FromRequest};
+
+        let request = |session: Option<&str>| {
+            let mut request = Request::builder()
+                .header("content-type", "application/json")
+                .body(Body::from(r#"{"merchant_id":"merchant_b"}"#))
+                .unwrap();
+            if let Some(merchant_id) = session {
+                request
+                    .extensions_mut()
+                    .insert(AuthContext::from_api_key(merchant_id));
+            }
+            request
+        };
+        // A service credential acts on the merchant the request names.
+        let scoped = super::ScopedJson::<CreateApiKeyRequest>::from_request(request(None), &())
+            .await
+            .unwrap();
+        assert_eq!(scoped.merchant.as_str(), "merchant_b");
+        // The session's own merchant.
+        let scoped = super::ScopedJson::<CreateApiKeyRequest>::from_request(
+            request(Some("merchant_b")),
+            &(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(scoped.merchant.as_str(), "merchant_b");
+    }
+
+    #[tokio::test]
+    async fn merchant_from_path_authorizes_the_path_merchant() {
+        use axum::{body::Body, routing::get, Router};
+        use tower::ServiceExt;
+
+        async fn echo(super::MerchantFromPath(merchant): super::MerchantFromPath) -> String {
+            merchant.as_str().to_string()
+        }
+        let app = |session: Option<&'static str>| {
+            Router::new()
+                .route("/merchant-account/:merchant-id/x", get(echo))
+                .route("/routing/list/:created_by", get(echo))
+                .layer(axum::middleware::from_fn(
+                    move |mut req: axum::extract::Request, next: axum::middleware::Next| async move {
+                        if let Some(merchant_id) = session {
+                            req.extensions_mut()
+                                .insert(AuthContext::from_api_key(merchant_id));
+                        }
+                        next.run(req).await
+                    },
+                ))
+        };
+        let call = |session, uri: &'static str| async move {
+            let response = app(session)
+                .oneshot(Request::get(uri).body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+            let status = response.status();
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            (status, String::from_utf8_lossy(&body).into_owned())
+        };
+
+        use axum::http::StatusCode;
+        assert_eq!(
+            call(Some("m_a"), "/merchant-account/m_a/x").await,
+            (StatusCode::OK, "m_a".to_string())
+        );
+        assert_eq!(
+            call(Some("m_a"), "/routing/list/m_b").await.0,
+            StatusCode::FORBIDDEN
+        );
+        assert_eq!(
+            call(None, "/routing/list/m_b").await,
+            (StatusCode::OK, "m_b".to_string())
         );
     }
 }

@@ -189,7 +189,7 @@ struct HybridFailure {
 #[axum::debug_handler]
 pub async fn hybrid_routing_evaluate(
     headers: axum::http::HeaderMap,
-    ScopedJson(payload): ScopedJson<HybridRoutingRequest>,
+    ScopedJson { payload, .. }: ScopedJson<HybridRoutingRequest>,
 ) -> Result<axum::response::Response, ContainerError<EuclidErrors>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["hybrid_routing_evaluate"])

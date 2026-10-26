@@ -162,7 +162,7 @@ pub async fn update_gateway_score(
     let update_score_request: Result<UpdateScorePayload, _> = serde_json::from_slice(&body);
     match update_score_request {
         Ok(payload) => {
-            if let Err(violation) = crate::auth::ensure_merchant_scope(session.as_ref(), &payload) {
+            if let Err(violation) = crate::auth::authorize(session.as_ref(), &payload) {
                 API_REQUEST_COUNTER
                     .with_label_values(&["update_gateway_score", "failure"])
                     .inc();
