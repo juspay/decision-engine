@@ -6,10 +6,22 @@ pub struct RoutingRule {
     pub config: ConfigVariant,
 }
 
+impl crate::auth::MerchantScoped for RoutingRule {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![&self.merchant_id]
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FetchRoutingRule {
     pub merchant_id: String,
     pub algorithm: AlgorithmType,
+}
+
+impl crate::auth::MerchantScoped for FetchRoutingRule {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![&self.merchant_id]
+    }
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]

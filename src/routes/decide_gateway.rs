@@ -262,6 +262,8 @@ pub async fn decide_gateway(
             .collect::<std::collections::BTreeMap<_, _>>(),
         "Incoming request headers"
     );
+    // Read before the body consumes the request: the parsed request is bound to this session below.
+    let session = req.extensions().get::<crate::auth::AuthContext>().cloned();
     let body = match crate::routes::body::read_request_body(req.into_body()).await {
         Ok(body) => {
             logger::debug!("Body: {:?}", body);
@@ -307,6 +309,13 @@ pub async fn decide_gateway(
         };
     let result = match api_decider_request {
         Ok(payload) => {
+            if let Err(violation) = crate::auth::ensure_merchant_scope(session.as_ref(), &payload) {
+                metrics::API_REQUEST_COUNTER
+                    .with_label_values(&["decide_gateway", "failure"])
+                    .inc();
+                timer.observe_duration();
+                return Err(violation.into());
+            }
             let span = tracing::Span::current();
             if !payload.merchant_id.is_empty() {
                 span.record("merchant_id", payload.merchant_id.as_str());

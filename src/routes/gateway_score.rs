@@ -1,4 +1,4 @@
-use crate::custom_extractors::Json;
+use crate::custom_extractors::{Json, ScopedJson};
 use error_stack::ResultExt;
 use serde::{Deserialize, Serialize};
 
@@ -13,6 +13,12 @@ pub struct ResetGatewayScoresRequest {
     /// snake_case and the camelCase the dashboard sends.
     #[serde(rename = "merchant_id", alias = "merchantId")]
     pub merchant_id: String,
+}
+
+impl crate::auth::MerchantScoped for ResetGatewayScoresRequest {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![&self.merchant_id]
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -31,7 +37,7 @@ pub struct ResetGatewayScoresResponse {
 /// new run starts from fresh scores without touching other merchants' data.
 pub async fn reset_gateway_scores(
     TenantStateResolver(state): TenantStateResolver,
-    Json(payload): Json<ResetGatewayScoresRequest>,
+    ScopedJson(payload): ScopedJson<ResetGatewayScoresRequest>,
 ) -> Result<Json<ResetGatewayScoresResponse>, error::ContainerError<error::ApiError>> {
     let merchant_id = payload.merchant_id.trim().to_string();
     if merchant_id.is_empty() {

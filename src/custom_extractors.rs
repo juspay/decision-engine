@@ -62,6 +62,33 @@ impl<T: serde::Serialize> IntoResponse for Json<T> {
     }
 }
 
+/// [`Json`] for a request that names the merchant it acts on: once parsed, the request is bound to
+/// the caller's session with [`crate::auth::ensure_merchant_scope`], and a per-merchant session
+/// naming another merchant is refused with `403` before the handler runs. Parse failures are
+/// rejected exactly as [`Json`] rejects them.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ScopedJson<T>(pub T);
+
+#[async_trait]
+impl<S, T> axum::extract::FromRequest<S> for ScopedJson<T>
+where
+    S: Send + Sync,
+    T: serde::de::DeserializeOwned + crate::auth::MerchantScoped,
+{
+    type Rejection = Response;
+
+    async fn from_request(
+        request: axum::extract::Request,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let session = request.extensions().get::<AuthContext>().cloned();
+        let Json(payload) = Json::<T>::from_request(request, state).await?;
+        crate::auth::ensure_merchant_scope(session.as_ref(), &payload)
+            .map_err(IntoResponse::into_response)?;
+        Ok(Self(payload))
+    }
+}
+
 #[derive(Clone)]
 pub struct TenantStateResolver(pub Arc<TenantAppState>);
 
@@ -268,5 +295,68 @@ mod tests {
                 .unwrap();
 
         assert_eq!(actual, expected);
+    }
+
+    async fn scoped_status<T>(session: Option<&str>, body: &str) -> axum::http::StatusCode
+    where
+        T: serde::de::DeserializeOwned + crate::auth::MerchantScoped,
+    {
+        use axum::{body::Body, extract::FromRequest};
+
+        let mut request = Request::builder()
+            .header("content-type", "application/json")
+            .body(Body::from(body.to_string()))
+            .unwrap();
+        if let Some(merchant_id) = session {
+            request
+                .extensions_mut()
+                .insert(AuthContext::from_api_key(merchant_id));
+        }
+        match super::ScopedJson::<T>::from_request(request, &()).await {
+            Ok(_) => axum::http::StatusCode::OK,
+            Err(rejection) => rejection.status(),
+        }
+    }
+
+    #[tokio::test]
+    async fn scoped_json_binds_the_body_merchant_to_the_session() {
+        use crate::routes::api_key::CreateApiKeyRequest;
+        use axum::http::StatusCode;
+
+        let own = r#"{"merchant_id":"merchant_a"}"#;
+        let foreign = r#"{"merchant_id":"merchant_b"}"#;
+        assert_eq!(
+            scoped_status::<CreateApiKeyRequest>(Some("merchant_a"), own).await,
+            StatusCode::OK
+        );
+        assert_eq!(
+            scoped_status::<CreateApiKeyRequest>(Some("merchant_a"), foreign).await,
+            StatusCode::FORBIDDEN
+        );
+        // A service credential carries no session and may name any merchant.
+        assert_eq!(
+            scoped_status::<CreateApiKeyRequest>(None, foreign).await,
+            StatusCode::OK
+        );
+        // A body that does not parse is rejected as `Json` rejects it, before any scope check.
+        assert_eq!(
+            scoped_status::<CreateApiKeyRequest>(Some("merchant_a"), "{").await,
+            StatusCode::BAD_REQUEST
+        );
+    }
+
+    #[tokio::test]
+    async fn scoped_json_checks_the_merchant_after_serde_aliases() {
+        use crate::routes::gateway_score::ResetGatewayScoresRequest;
+
+        // `merchantId` is an alias the handler accepts, so it is checked like `merchant_id`.
+        assert_eq!(
+            scoped_status::<ResetGatewayScoresRequest>(
+                Some("merchant_a"),
+                r#"{"merchantId":"merchant_b"}"#
+            )
+            .await,
+            axum::http::StatusCode::FORBIDDEN
+        );
     }
 }

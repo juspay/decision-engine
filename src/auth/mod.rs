@@ -1,5 +1,6 @@
 pub mod access;
 pub mod context;
+pub mod scope;
 
 use error_stack::{Report, ResultExt};
 use josekit::jws::JwsHeader;
@@ -9,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 pub use context::{AuthContext, AuthKind};
+pub use scope::{ensure_merchant_scope, MerchantScopeViolation, MerchantScoped};
 
 const KEY_PREFIX: &str = "DE_";
 

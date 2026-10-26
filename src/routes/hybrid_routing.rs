@@ -3,7 +3,7 @@ use crate::analytics::{
     global_request_id_from_headers, serialize_details, trace_id_from_headers, AnalyticsFlowContext,
     AnalyticsRoute, ApiFlow, DomainAnalyticsEvent, FlowType,
 };
-use crate::custom_extractors::Json;
+use crate::custom_extractors::{Json, ScopedJson};
 use crate::decider::gatewaydecider::flow_new::{
     decider_full_payload_hs_function, store_scoring_context_without_decider,
 };
@@ -189,7 +189,7 @@ struct HybridFailure {
 #[axum::debug_handler]
 pub async fn hybrid_routing_evaluate(
     headers: axum::http::HeaderMap,
-    Json(payload): Json<HybridRoutingRequest>,
+    ScopedJson(payload): ScopedJson<HybridRoutingRequest>,
 ) -> Result<axum::response::Response, ContainerError<EuclidErrors>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["hybrid_routing_evaluate"])

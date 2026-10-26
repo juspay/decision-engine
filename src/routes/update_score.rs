@@ -26,6 +26,12 @@ struct UpdateScoreRequest {
     txn_latency: Option<TransactionLatency>,
 }
 
+impl crate::auth::MerchantScoped for UpdateScoreRequest {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![&self.txn_detail.merchantId.0]
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct UpdateScoreReadFailureDetail<'a> {
     request_id: &'a str,
@@ -71,6 +77,8 @@ pub async fn update_score(
         .to_string();
     tracing::Span::current().record("is_audit_trail_log", "true");
     // Buffer the body into memory
+    // Read before the body consumes the request: the parsed request is bound to this session below.
+    let session = req.extensions().get::<crate::auth::AuthContext>().cloned();
     let body_bytes = match crate::routes::body::read_request_body(req.into_body()).await {
         Ok(bytes) => bytes,
         Err(e) => {
@@ -141,6 +149,13 @@ pub async fn update_score(
     let update_score_request: Result<UpdateScoreRequest, _> = serde_json::from_slice(&body_bytes);
     match update_score_request {
         Ok(payload) => {
+            if let Err(violation) = crate::auth::ensure_merchant_scope(session.as_ref(), &payload) {
+                API_REQUEST_COUNTER
+                    .with_label_values(&["update_score", "failure"])
+                    .inc();
+                timer.observe_duration();
+                return Err(violation.into());
+            }
             let merchant_id = payload.txn_detail.merchantId.clone();
             let merchant_id_txt = crate::types::merchant::id::merchant_id_to_text(merchant_id);
             tracing::Span::current().record("merchant_id", merchant_id_txt.clone());

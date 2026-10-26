@@ -975,6 +975,18 @@ pub struct DomainDeciderRequest {
     pub shouldConsumeResult: Option<bool>,
 }
 
+/// The legacy decider request carries its merchant in three places; all of them must agree with
+/// the session.
+impl crate::auth::MerchantScoped for DomainDeciderRequest {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![
+            &self.orderReference.merchantId.0,
+            &self.txnDetail.merchantId.0,
+            &self.merchantAccount.merchantId.0,
+        ]
+    }
+}
+
 // impl Given<SecretContext> for DomainDeciderRequest {}
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -986,6 +998,12 @@ pub struct DomainDeciderRequestForApiCallV2 {
     pub elimination_enabled: Option<bool>,
     #[serde(default)]
     pub enable_multi_objective: Option<bool>,
+}
+
+impl crate::auth::MerchantScoped for DomainDeciderRequestForApiCallV2 {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![&self.merchant_id]
+    }
 }
 
 pub fn deserialize_optional_udfs_to_hashmap<'de, D>(

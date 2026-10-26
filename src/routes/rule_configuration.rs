@@ -1,4 +1,4 @@
-use crate::custom_extractors::Json;
+use crate::custom_extractors::{Json, ScopedJson};
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::types::merchant as ETM;
 use crate::{error, logger, types};
@@ -34,7 +34,7 @@ fn serialize_rule_config_analytics_details<Request: Serialize, Response: Seriali
 #[axum::debug_handler]
 pub async fn create_rule_config(
     headers: axum::http::HeaderMap,
-    Json(payload): Json<types::routing_configuration::RoutingRule>,
+    ScopedJson(payload): ScopedJson<types::routing_configuration::RoutingRule>,
 ) -> Result<Json<RuleConfigResponse>, error::ContainerError<error::RuleConfigurationError>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["create_rule_config"])
@@ -217,7 +217,7 @@ pub async fn create_rule_config(
 #[axum::debug_handler]
 pub async fn get_rule_config(
     headers: axum::http::HeaderMap,
-    Json(payload): Json<types::routing_configuration::FetchRoutingRule>,
+    ScopedJson(payload): ScopedJson<types::routing_configuration::FetchRoutingRule>,
 ) -> Result<
     Json<types::routing_configuration::RoutingRule>,
     error::ContainerError<error::RuleConfigurationError>,
@@ -380,7 +380,7 @@ pub async fn get_rule_config(
 #[axum::debug_handler]
 pub async fn update_rule_config(
     headers: axum::http::HeaderMap,
-    Json(payload): Json<types::routing_configuration::RoutingRule>,
+    ScopedJson(payload): ScopedJson<types::routing_configuration::RoutingRule>,
 ) -> Result<Json<RuleConfigResponse>, error::ContainerError<error::RuleConfigurationError>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["update_rule_config"])
@@ -524,7 +524,7 @@ pub async fn update_rule_config(
 #[axum::debug_handler]
 pub async fn delete_rule_config(
     headers: axum::http::HeaderMap,
-    Json(payload): Json<types::routing_configuration::FetchRoutingRule>,
+    ScopedJson(payload): ScopedJson<types::routing_configuration::FetchRoutingRule>,
 ) -> Result<Json<RuleConfigDeleteResponse>, error::ContainerError<error::RuleConfigurationError>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["delete_rule_config"])

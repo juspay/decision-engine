@@ -38,9 +38,15 @@ impl IntoResponse for ErrorResponse {
             }),
             "Routing request failed"
         );
+        // `status` carries the HTTP code. A client error (4xx) is answered with that code; anything
+        // else is answered 400, which is what every decider error has always been answered with.
+        let status = StatusCode::from_bytes(self.status.as_bytes())
+            .ok()
+            .filter(StatusCode::is_client_error)
+            .unwrap_or(StatusCode::BAD_REQUEST);
         let body = serde_json::to_string(&self).unwrap();
         axum::http::Response::builder()
-            .status(StatusCode::BAD_REQUEST)
+            .status(status)
             .header("Content-Type", "application/json")
             .body(axum::body::Body::from(body))
             .unwrap()
@@ -90,6 +96,8 @@ where
     // let req_headers = serde_json::to_string(&headers).unwrap_or("{}".to_string());
 
     // Now consume `req` to get the body
+    // Read before the body consumes the request: the parsed request is bound to this session below.
+    let session = req.extensions().get::<crate::auth::AuthContext>().cloned();
     let body = match crate::routes::body::read_request_body(req.into_body()).await {
         Ok(body) => body,
         Err(e) => {
@@ -133,6 +141,13 @@ where
     let api_decider_request: Result<DomainDeciderRequest, _> = serde_json::from_slice(&body);
     match api_decider_request {
         Ok(payload) => {
+            if let Err(violation) = crate::auth::ensure_merchant_scope(session.as_ref(), &payload) {
+                API_REQUEST_COUNTER
+                    .with_label_values(&["decision_gateway", "failure"])
+                    .inc();
+                timer.observe_duration();
+                return Err(violation.into());
+            }
             let merchant_id = payload.orderReference.merchantId.clone();
             let merchant_id_string =
                 crate::types::merchant::id::merchant_id_to_text(merchant_id.clone());

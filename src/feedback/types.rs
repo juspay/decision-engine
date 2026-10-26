@@ -261,6 +261,12 @@ pub struct UpdateScorePayload {
     pub is_smart_retry: Option<bool>,
 }
 
+impl crate::auth::MerchantScoped for UpdateScorePayload {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![&self.merchant_id]
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UpdateScoreResponse {
     pub message: String,

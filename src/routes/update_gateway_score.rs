@@ -122,6 +122,8 @@ pub async fn update_gateway_score(
             .collect::<std::collections::BTreeMap<_, _>>(),
         "Incoming request headers"
     );
+    // Read before the body consumes the request: the parsed request is bound to this session below.
+    let session = req.extensions().get::<crate::auth::AuthContext>().cloned();
     let body = match crate::routes::body::read_request_body(req.into_body()).await {
         Ok(body) => {
             crate::logger::debug!(tag = "UpdateGatewayScore", "Body: {:?}", body);
@@ -160,6 +162,13 @@ pub async fn update_gateway_score(
     let update_score_request: Result<UpdateScorePayload, _> = serde_json::from_slice(&body);
     match update_score_request {
         Ok(payload) => {
+            if let Err(violation) = crate::auth::ensure_merchant_scope(session.as_ref(), &payload) {
+                API_REQUEST_COUNTER
+                    .with_label_values(&["update_gateway_score", "failure"])
+                    .inc();
+                timer.observe_duration();
+                return Err(violation.into());
+            }
             let merchant_id = payload.merchant_id.clone();
             let gateway = payload.gateway.clone();
             let payment_id = payload.payment_id.clone();

@@ -45,6 +45,12 @@ pub struct RoutingRule {
     pub metadata: Option<serde_json::Value>,
 }
 
+impl crate::auth::MerchantScoped for RoutingRule {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![&self.created_by]
+    }
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, strum::Display)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum StaticRoutingAlgorithm {
@@ -207,6 +213,12 @@ pub struct RoutingRequest {
     pub algorithm_for: Option<String>,
 }
 
+impl crate::auth::MerchantScoped for RoutingRequest {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![&self.created_by]
+    }
+}
+
 /// One evaluation in a batch request: only the parameters (and optional payment id)
 /// differ per entry; everything shared lives on `RoutingBatchRequest`.
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
@@ -226,6 +238,12 @@ pub struct RoutingBatchRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub algorithm_for: Option<String>,
     pub requests: Vec<RoutingBatchEntry>,
+}
+
+impl crate::auth::MerchantScoped for RoutingBatchRequest {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![&self.created_by]
+    }
 }
 
 /// Positional results for a batch evaluation. An entry the engine could not evaluate
@@ -273,6 +291,12 @@ impl RoutingDictionaryRecord {
 pub struct SrDimensionConfig {
     pub merchant_id: String,
     pub paymentInfo: SrDimensionInfo,
+}
+
+impl crate::auth::MerchantScoped for SrDimensionConfig {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![&self.merchant_id]
+    }
 }
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SrDimensionInfo {
@@ -394,10 +418,22 @@ pub struct ActivateRoutingConfigRequest {
     pub routing_algorithm_id: String,
 }
 
+impl crate::auth::MerchantScoped for ActivateRoutingConfigRequest {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![&self.created_by]
+    }
+}
+
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
 pub struct DeactivateRoutingConfigRequest {
     pub created_by: String,
     pub routing_algorithm_id: String,
+}
+
+impl crate::auth::MerchantScoped for DeactivateRoutingConfigRequest {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![&self.created_by]
+    }
 }
 
 /// Delete an existing routing algorithm (e.g. an A/B experiment). Only permitted while the
@@ -406,6 +442,12 @@ pub struct DeactivateRoutingConfigRequest {
 pub struct DeleteRoutingConfigRequest {
     pub created_by: String,
     pub routing_algorithm_id: String,
+}
+
+impl crate::auth::MerchantScoped for DeleteRoutingConfigRequest {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![&self.created_by]
+    }
 }
 
 /// Edit an existing (inactive) routing algorithm in place — updates its name/description and
@@ -418,6 +460,12 @@ pub struct UpdateRoutingConfigRequest {
     #[serde(default)]
     pub description: String,
     pub algorithm: StaticRoutingAlgorithm,
+}
+
+impl crate::auth::MerchantScoped for UpdateRoutingConfigRequest {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![&self.created_by]
+    }
 }
 
 #[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]

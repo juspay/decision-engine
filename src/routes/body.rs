@@ -79,3 +79,25 @@ impl RequestBodyError {
         (spec.status.as_u16().to_string(), spec.error_message)
     }
 }
+
+impl From<crate::auth::MerchantScopeViolation> for ErrorResponse {
+    fn from(_: crate::auth::MerchantScopeViolation) -> Self {
+        let status = StatusCode::FORBIDDEN.as_u16().to_string();
+        let message = crate::auth::MerchantScopeViolation::MESSAGE.to_string();
+        Self {
+            status: status.clone(),
+            error_code: status,
+            error_message: message.clone(),
+            priority_logic_tag: None,
+            routing_approach: None,
+            filter_wise_gateways: None,
+            error_info: UnifiedError {
+                code: "MERCHANT_SCOPE_VIOLATION".to_string(),
+                user_message: message.clone(),
+                developer_message: message,
+            },
+            priority_logic_output: None,
+            is_dynamic_mga_enabled: false,
+        }
+    }
+}

@@ -1,6 +1,6 @@
 use crate::app::get_tenant_app_state;
 use crate::auth;
-use crate::custom_extractors::Json;
+use crate::custom_extractors::{Json, ScopedJson};
 use crate::error::{self, ApiKeyError};
 use crate::storage::types::{MerchantApiKey, MerchantApiKeyNew, MerchantApiKeyRevoke};
 use crate::utils::date_time;
@@ -19,6 +19,12 @@ use crate::storage::schema_pg::merchant_api_keys::dsl;
 pub struct CreateApiKeyRequest {
     pub merchant_id: String,
     pub description: Option<String>,
+}
+
+impl crate::auth::MerchantScoped for CreateApiKeyRequest {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![&self.merchant_id]
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -65,19 +71,12 @@ impl From<MerchantApiKey> for ApiKeyListItem {
 
 #[axum::debug_handler]
 pub async fn create_api_key(
-    session: Option<axum::Extension<auth::AuthContext>>,
-    Json(payload): Json<CreateApiKeyRequest>,
-) -> Result<Json<CreateApiKeyResponse>, error::ContainerError<ApiKeyError>> {
     // A per-merchant session (JWT / api key) may only mint a key for its own merchant — otherwise a
     // body-supplied `merchant_id` would let any authenticated caller create a working key for a
     // victim merchant and impersonate it. The admin-secret lane inserts no session and may mint for
     // any merchant (that is how Hyperswitch provisions keys).
-    if let Some(axum::Extension(context)) = session.as_ref() {
-        if payload.merchant_id != context.merchant_id {
-            return Err(ApiKeyError::Forbidden.into());
-        }
-    }
-
+    ScopedJson(payload): ScopedJson<CreateApiKeyRequest>,
+) -> Result<Json<CreateApiKeyResponse>, error::ContainerError<ApiKeyError>> {
     let raw_key = auth::generate_api_key();
     let key_hash = auth::hash_api_key(&raw_key);
     let key_prefix = auth::extract_key_prefix(&raw_key);

@@ -10,19 +10,25 @@ use masking::PeekInterface;
 
 const API_KEY_CACHE_TTL: i64 = 300;
 
-/// Enforce that a per-merchant session may only act on its own merchant.
+/// Path parameters that name the merchant a route acts on. Routing rules are owned by
+/// `created_by`, which is the merchant id under another name.
+const MERCHANT_PATH_PARAMS: &[&str] = &["merchant-id", "merchant_id", "created_by"];
+
+/// Enforce that a per-merchant session may only act on the merchant named in the path.
 ///
 /// Runs immediately *after* [`authenticate`], so an `AuthContext` is already in the request
-/// extensions for the JWT and api-key lanes. Those lanes carry a concrete `merchant_id`; every
-/// route scoped to one merchant names it in the path (`:merchant-id`, or `:merchant_id` on the two
-/// snake-case routes). When the two disagree the request is refused here, so no handler has to
-/// remember the check — and a route added later is covered the day it is written.
+/// extensions for the JWT and api-key lanes. Those lanes carry a concrete `merchant_id`; a route
+/// addressed by a merchant names it in the path ([`MERCHANT_PATH_PARAMS`]). When the two disagree
+/// the request is refused here, so no handler has to remember the check — and a path-addressed
+/// route added later is covered the day it is written.
+///
+/// Routes that take the merchant from the request body bind it with
+/// [`crate::custom_extractors::ScopedJson`] (or [`auth::ensure_merchant_scope`] where the handler
+/// parses the body itself), checked against the typed request rather than raw JSON.
 ///
 /// Service credentials (the shared admin secret, and the `api_key_auth_enabled = false`
 /// backward-compat lane) insert *no* `AuthContext`, so they fall through unrestricted exactly as
-/// before — they are trusted callers that scope requests off the path/body themselves. Routes that
-/// are not addressed by a `merchant-id` path parameter (api-key create takes it in the body, revoke
-/// by `key_id`) carry their own binding in the handler.
+/// before — they are trusted callers that scope requests off the path/body themselves.
 pub async fn enforce_merchant_scope(
     req: Request<Body>,
     next: Next,
@@ -44,13 +50,9 @@ pub async fn enforce_merchant_scope(
 
     if let Some(path_params) = path_params {
         for (key, value) in &path_params {
-            // Both spellings appear in the route table; treat either as the merchant selector.
-            if (key == "merchant-id" || key == "merchant_id")
-                && value != context.merchant_id.as_str()
-            {
-                return Ok(crate::error::text_error_response(
-                    StatusCode::FORBIDDEN,
-                    "This session may only act on its own merchant",
+            if MERCHANT_PATH_PARAMS.contains(&key) && value != context.merchant_id.as_str() {
+                return Ok(axum::response::IntoResponse::into_response(
+                    auth::MerchantScopeViolation,
                 ));
             }
         }
@@ -252,5 +254,72 @@ pub async fn authenticate(
             StatusCode::UNAUTHORIZED,
             "Invalid API key",
         )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::middleware::from_fn;
+    use axum::routing::post;
+    use axum::Router;
+    use tower::ServiceExt;
+
+    const OWN: &str = "merchant_a";
+    const FOREIGN: &str = "merchant_b";
+
+    /// Stands in for `authenticate` on the api-key lane.
+    async fn session_for_own_merchant(mut req: Request<Body>, next: Next) -> Response<Body> {
+        req.extensions_mut()
+            .insert(auth::AuthContext::from_api_key(OWN));
+        next.run(req).await
+    }
+
+    fn app(with_session: bool) -> Router {
+        let router = Router::new()
+            .route(
+                "/merchant-account/:merchant-id/seed-costs",
+                post(|| async {}),
+            )
+            .route("/api-key/list/:merchant_id", post(|| async {}))
+            .route("/routing/list/:created_by", post(|| async {}))
+            .layer(from_fn(enforce_merchant_scope));
+        if with_session {
+            router.layer(from_fn(session_for_own_merchant))
+        } else {
+            router
+        }
+    }
+
+    async fn status(with_session: bool, uri: &str) -> StatusCode {
+        app(with_session)
+            .oneshot(Request::post(uri).body(Body::empty()).expect("request"))
+            .await
+            .expect("response")
+            .status()
+    }
+
+    #[tokio::test]
+    async fn every_merchant_path_param_must_match_the_session() {
+        for route in [
+            "/merchant-account/{}/seed-costs",
+            "/api-key/list/{}",
+            "/routing/list/{}",
+        ] {
+            let own = route.replace("{}", OWN);
+            let foreign = route.replace("{}", FOREIGN);
+            assert_eq!(status(true, &own).await, StatusCode::OK, "{own}");
+            assert_eq!(
+                status(true, &foreign).await,
+                StatusCode::FORBIDDEN,
+                "{foreign}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn service_credentials_are_not_scoped() {
+        let foreign = format!("/merchant-account/{FOREIGN}/seed-costs");
+        assert_eq!(status(false, &foreign).await, StatusCode::OK);
     }
 }

@@ -23,7 +23,7 @@ use crate::{
     types::service_configuration::{find_config_by_name, insert_config, update_config},
 };
 
-use crate::custom_extractors::Json;
+use crate::custom_extractors::{Json, ScopedJson};
 use crate::euclid::{
     errors::EuclidErrors,
     errors::ValidationErrorDetails,
@@ -463,7 +463,7 @@ fn field_validation_failure(
 }
 
 pub async fn config_sr_dimensions(
-    Json(payload): Json<SrDimensionConfig>,
+    ScopedJson(payload): ScopedJson<SrDimensionConfig>,
 ) -> Result<Json<String>, ContainerError<EuclidErrors>> {
     let timer = metrics::API_LATENCY_HISTOGRAM
         .with_label_values(&["config_sr_dimensions"])
@@ -617,6 +617,10 @@ pub async fn routing_create(
                 "could not parse routing rule: {error}"
             )))
         })?;
+    // Parsed here rather than by `ScopedJson` to keep the path-qualified parse error above, so the
+    // merchant binding is checked here too.
+    crate::auth::ensure_merchant_scope(session.as_deref(), &config)
+        .map_err(|_| EuclidErrors::MerchantScopeViolation)?;
 
     // Volume contracts are stored canonicalized (integer minor-unit amounts, tolerance in bps)
     // so every future consumer reads one representation.
@@ -1233,7 +1237,7 @@ async fn track_ab_rule_decision(
 
 pub async fn routing_evaluate(
     headers: axum::http::HeaderMap,
-    Json(payload): Json<RoutingRequest>,
+    ScopedJson(payload): ScopedJson<RoutingRequest>,
 ) -> Result<Json<RoutingEvaluateResponse>, ContainerError<EuclidErrors>> {
     let request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
@@ -1478,7 +1482,7 @@ const MAX_BATCH_EVALUATIONS: usize = 50;
 /// falling back does not take the others down with it.
 pub async fn routing_evaluate_batch(
     headers: axum::http::HeaderMap,
-    Json(payload): Json<RoutingBatchRequest>,
+    ScopedJson(payload): ScopedJson<RoutingBatchRequest>,
 ) -> Result<Json<RoutingBatchResponse>, ContainerError<EuclidErrors>> {
     let mut timer = Some(
         metrics::API_LATENCY_HISTOGRAM
@@ -1965,7 +1969,7 @@ fn refresh_volume_commitment_plan(algorithm_for: &str, merchant_id: &str) {
 }
 
 pub async fn activate_routing_rule(
-    Json(payload): Json<ActivateRoutingConfigRequest>,
+    ScopedJson(payload): ScopedJson<ActivateRoutingConfigRequest>,
 ) -> Result<(), ContainerError<EuclidErrors>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["activate_routing_rule"])
@@ -2013,6 +2017,16 @@ pub async fn activate_routing_rule(
             return Err(e.into());
         }
     };
+    // `created_by` is bound to the caller by the merchant-scope middleware; the algorithm must be
+    // one that merchant owns, or a merchant could activate (and then evaluate) another's rule.
+    // Reads as not-found so a foreign id is indistinguishable from a missing one.
+    if algorithm.created_by != payload.created_by {
+        update_failure_metrics();
+        timer.observe_duration();
+        return Err(
+            EuclidErrors::RoutingAlgorithmNotFound(payload.routing_algorithm_id.clone()).into(),
+        );
+    }
     let algorithm_for = algorithm.algorithm_for.clone();
 
     // An experiment runs in its own slot beside the active rule for its transaction type, so the
@@ -2131,7 +2145,7 @@ pub async fn activate_routing_rule(
 }
 
 pub async fn deactivate_routing_rule(
-    Json(payload): Json<DeactivateRoutingConfigRequest>,
+    ScopedJson(payload): ScopedJson<DeactivateRoutingConfigRequest>,
 ) -> Result<(), ContainerError<EuclidErrors>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["deactivate_routing_rule"])
@@ -2331,7 +2345,7 @@ async fn ensure_experiment_has_no_recorded_payments(
 /// A/B Testing dashboard's Edit action. Keeps the same id so history/links remain valid.
 pub async fn update_routing_rule(
     session: Option<axum::Extension<crate::auth::AuthContext>>,
-    Json(mut payload): Json<crate::euclid::types::UpdateRoutingConfigRequest>,
+    ScopedJson(mut payload): ScopedJson<crate::euclid::types::UpdateRoutingConfigRequest>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["update_routing_rule"])
@@ -2478,7 +2492,7 @@ pub async fn update_routing_rule(
 /// Delete an existing inactive routing algorithm. Used by the A/B Testing dashboard's Delete
 /// action. Removes the `routing_algorithm` row (results already collected remain in analytics).
 pub async fn delete_routing_rule(
-    Json(payload): Json<crate::euclid::types::DeleteRoutingConfigRequest>,
+    ScopedJson(payload): ScopedJson<crate::euclid::types::DeleteRoutingConfigRequest>,
 ) -> Result<Json<serde_json::Value>, ContainerError<EuclidErrors>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["delete_routing_rule"])
