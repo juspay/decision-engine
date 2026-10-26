@@ -543,6 +543,9 @@ impl PaymentAuditOutcome {
 /// updates, rule evaluations) stay in its summary.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct PaymentAuditPaymentFilters {
+    /// Only payments whose latest routing decision differs from a reported update connector.
+    #[serde(default)]
+    pub connector_mismatch: bool,
     /// Payments with any of these outcomes; empty means unfiltered.
     pub outcome: Vec<PaymentAuditOutcome>,
     /// Each attribute matches a payment carrying any of its values; empty means unfiltered.
