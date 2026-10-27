@@ -1023,6 +1023,63 @@ ic_orphan,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,SA,USD,-102.29,2026
     }
 
     #[test]
+    fn checkout_dashboard_transformation_preserves_ingestion_input(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use crate::config::ConnectorReportApiConfig;
+        use crate::routes::connector_credentials::SetCredentialsRequest;
+
+        let config = ConnectorReportApiConfig {
+            checkout_production_api_base_url: "https://api.checkout.com".into(),
+            checkout_sandbox_api_base_url: "https://api.sandbox.checkout.com".into(),
+        };
+        for (environment, expected_url) in [
+            (Some("prod"), "https://api.checkout.com"),
+            (Some("sandbox"), "https://api.sandbox.checkout.com"),
+            (None, "https://api.checkout.com"),
+        ] {
+            // The new dashboard request carries only the key and environment.
+            let mut payload = serde_json::json!({
+                "account": "ent_test",
+                "webhook_secret": "webhook_test",
+                "download_auth": "sk_test_key",
+            });
+            if let Some(environment) = environment {
+                payload["environment"] = serde_json::json!(environment);
+            }
+            let request: SetCredentialsRequest = serde_json::from_value(payload)?;
+            let transformed = ConnectorCreds {
+                webhook_secret: Secret::new(request.webhook_secret),
+                download_auth: request
+                    .environment
+                    .unwrap_or_default()
+                    .encode_credentials(&request.download_auth, &config),
+            };
+
+            // This is the credential JSON that ingestion received before the UI change.
+            let previous_json = serde_json::json!({
+                "secret_key": "sk_test_key",
+                "api_base_url": expected_url,
+            });
+            let previous = ConnectorCreds {
+                webhook_secret: Secret::new("webhook_test".into()),
+                download_auth: Secret::new(previous_json.to_string()),
+            };
+            let stored_json: serde_json::Value =
+                serde_json::from_str(transformed.download_auth.peek())?;
+            assert_eq!(stored_json, previous_json);
+            let before = CheckoutCreds::parse(&previous)?;
+            let after = CheckoutCreds::parse(&transformed)?;
+            assert_eq!(after.secret_key, before.secret_key);
+            assert_eq!(after.base(), before.base());
+            assert_eq!(
+                transformed.webhook_secret.peek(),
+                previous.webhook_secret.peek()
+            );
+        }
+        Ok(())
+    }
+
+    #[test]
     fn webhook_helpers() {
         assert!(is_financial_actions_report("FinancialActions"));
         assert!(is_financial_actions_report("FinancialActionsByPayout"));
