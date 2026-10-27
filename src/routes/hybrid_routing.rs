@@ -3,7 +3,7 @@ use crate::analytics::{
     global_request_id_from_headers, serialize_details, trace_id_from_headers, AnalyticsFlowContext,
     AnalyticsRoute, ApiFlow, DomainAnalyticsEvent, FlowType,
 };
-use crate::custom_extractors::Json;
+use crate::custom_extractors::{Json, ScopedJson};
 use crate::decider::gatewaydecider::flow_new::{
     decider_full_payload_hs_function, store_scoring_context_without_decider,
 };
@@ -189,15 +189,8 @@ struct HybridFailure {
 #[axum::debug_handler]
 pub async fn hybrid_routing_evaluate(
     headers: axum::http::HeaderMap,
-    Json(payload): Json<HybridRoutingRequest>,
+    ScopedJson { payload, .. }: ScopedJson<HybridRoutingRequest>,
 ) -> Result<axum::response::Response, ContainerError<EuclidErrors>> {
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["hybrid_routing_evaluate"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["hybrid_routing_evaluate"])
-        .inc();
-
     let HybridRoutingRequest {
         mut static_routing_request,
         dynamic_routing_request,
@@ -320,7 +313,16 @@ pub async fn hybrid_routing_evaluate(
 
                 // The decider half records the experiment decision when it runs; otherwise the
                 // rule output is the decision and is recorded here.
-                match routing_evaluate_with_analytics(
+                // The static half is measured on its own, as the dynamic half's outcome is below;
+                // the request as a whole is measured by its route's `endpoint` layer.
+                const STATIC_HALF: &str = "hybrid_routing_evaluate_static";
+                API_REQUEST_TOTAL_COUNTER
+                    .with_label_values(&[STATIC_HALF])
+                    .inc();
+                let timer = API_LATENCY_HISTOGRAM
+                    .with_label_values(&[STATIC_HALF])
+                    .start_timer();
+                let result = routing_evaluate_with_analytics(
                     headers.clone(),
                     Json(req),
                     RoutingEvaluateAnalyticsFlows::routing_hybrid(),
@@ -328,8 +330,15 @@ pub async fn hybrid_routing_evaluate(
                     ExperimentEndpoint::HybridRouting,
                     !run_dynamic_routing,
                 )
-                .await
-                {
+                .await;
+                timer.observe_duration();
+                API_REQUEST_COUNTER
+                    .with_label_values(&[
+                        STATIC_HALF,
+                        if result.is_ok() { "success" } else { "failure" },
+                    ])
+                    .inc();
+                match result {
                     Ok(response) => (Some(response.0), None, fallback_gateways),
                     Err(err) => (None, Some(err), fallback_gateways),
                 }
@@ -371,12 +380,6 @@ pub async fn hybrid_routing_evaluate(
                     ExperimentEndpoint::HybridRouting,
                 )
                 .await;
-                API_REQUEST_COUNTER
-                    .with_label_values(&[
-                        "hybrid_routing_evaluate_dynamic",
-                        if result.is_ok() { "success" } else { "failure" },
-                    ])
-                    .inc();
                 Some(result)
             } else {
                 crate::logger::debug!(
@@ -559,9 +562,6 @@ pub async fn hybrid_routing_evaluate(
             Some("hybrid_failed".to_string()),
             auth_type.clone(),
         );
-        API_REQUEST_COUNTER
-            .with_label_values(&["hybrid_routing_evaluate", "failure"])
-            .inc();
     };
 
     let api_result = match resolve() {
@@ -594,9 +594,6 @@ pub async fn hybrid_routing_evaluate(
                 dynamic_request.map(|request| request.currency()),
                 dynamic_request.and_then(|request| request.country()),
             );
-            API_REQUEST_COUNTER
-                .with_label_values(&["hybrid_routing_evaluate", "success"])
-                .inc();
             Ok(Json(response_value).into_response())
         }
         Ok(Err(failure)) => {
@@ -613,6 +610,5 @@ pub async fn hybrid_routing_evaluate(
             Err(err)
         }
     };
-    timer.observe_duration();
     api_result
 }

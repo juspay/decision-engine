@@ -8,6 +8,8 @@
 //! invoice is small — a few hundred lines — so it is buffered and processed synchronously, and the
 //! computed add-on is returned in the response.
 
+use crate::custom_extractors::MerchantFromPath;
+
 use axum::body::Bytes;
 use axum::extract::{Path, Query};
 use axum::http::StatusCode;
@@ -69,10 +71,12 @@ pub struct InvoiceUploadResponse {
 
 /// `POST /merchant-account/:merchant_id/connectors/:connector/invoice?account=…[&invoice_ref=…]`
 pub async fn upload_invoice(
-    Path((merchant_id, connector)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, connector)): Path<(String, String)>,
     Query(params): Query<InvoiceParams>,
     body: Bytes, // buffered: invoices are small
 ) -> Result<Json<InvoiceUploadResponse>, TextError> {
+    let merchant_id = merchant.as_str().to_string();
     if body.is_empty() {
         return Err((StatusCode::BAD_REQUEST, "empty invoice body".to_string()).into());
     }
@@ -89,7 +93,7 @@ pub async fn upload_invoice(
         &cfg,
         &connector,
         &params.account,
-        &merchant_id,
+        &merchant,
         params.invoice_ref.as_deref().unwrap_or(""),
         &body,
     )
@@ -132,9 +136,9 @@ pub struct AddonDto {
 
 /// `GET /merchant-account/:merchant_id/invoice-addons` — the invoice add-ons in effect.
 pub async fn list_addons(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<Vec<AddonDto>>, TextError> {
-    let list = invoice::store::list(&merchant_id)
+    let list = invoice::store::list(&merchant)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
     Ok(Json(
@@ -147,10 +151,12 @@ pub async fn list_addons(
 /// `DELETE /merchant-account/:merchant_id/connectors/:connector/invoice-addon` — drop the add-on and
 /// revert this merchant's served models to the learned-only cost.
 pub async fn delete_addon(
-    Path((merchant_id, connector)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, connector)): Path<(String, String)>,
 ) -> Result<StatusCode, TextError> {
+    let merchant_id = merchant.as_str().to_string();
     let connector = connector.to_lowercase();
-    invoice::store::delete(&merchant_id, &connector)
+    invoice::store::delete(&merchant, &connector)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
     super::connector_fees::refresh_serving(&merchant_id).await;
@@ -160,10 +166,10 @@ pub async fn delete_addon(
 /// `GET /merchant-account/:merchant_id/invoice-reconciliation` — tie each stored add-on back to its
 /// invoice: coverage before/after and the remaining residual (architecture "Step 2").
 pub async fn get_reconciliation(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<Vec<invoice::Reconciliation>>, TextError> {
     let cfg = clickhouse_config()?;
-    let recon = invoice::reconcile_merchant(&cfg, &merchant_id)
+    let recon = invoice::reconcile_merchant(&cfg, &merchant)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
     Ok(Json(recon))

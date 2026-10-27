@@ -1,5 +1,6 @@
 pub mod access;
 pub mod context;
+pub mod scope;
 
 use error_stack::{Report, ResultExt};
 use josekit::jws::JwsHeader;
@@ -9,8 +10,31 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 
 pub use context::{AuthContext, AuthKind};
+pub use scope::{
+    authorize, authorize_merchant_id, session_merchant, AuthorizedMerchant, MerchantScopeViolation,
+    MerchantScoped,
+};
 
 const KEY_PREFIX: &str = "DE_";
+
+/// The header service callers present the deployment's admin secret in.
+pub const ADMIN_SECRET_HEADER: &str = "x-admin-secret";
+
+/// Set on a request that presented the deployment's admin secret: by `authenticate` on a merchant
+/// route's admin lane, and by `require_admin_secret` on every admin route. A handler that treats
+/// the admin caller differently reads this rather than the header.
+#[derive(Debug, Clone, Copy)]
+pub struct AdminCaller;
+
+/// Whether `headers` carry the deployment's admin secret. An unset secret matches nothing. Compared in
+/// constant time, so the time to reject a guess does not reveal how much of it was right.
+pub fn presents_admin_secret(headers: &axum::http::HeaderMap, expected: &str) -> bool {
+    !expected.is_empty()
+        && headers.get(ADMIN_SECRET_HEADER).is_some_and(|value| {
+            ring::constant_time::verify_slices_are_equal(value.as_bytes(), expected.as_bytes())
+                .is_ok()
+        })
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
@@ -398,6 +422,38 @@ pub fn extract_key_prefix(key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_admin_secret_header_presents_the_admin_secret() {
+        use axum::http::{HeaderMap, HeaderValue};
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", HeaderValue::from_static("secret"));
+        headers.insert("authorization", HeaderValue::from_static("Bearer secret"));
+        assert!(!presents_admin_secret(&headers, "secret"));
+        headers.insert(ADMIN_SECRET_HEADER, HeaderValue::from_static("wrong"));
+        assert!(!presents_admin_secret(&headers, "secret"));
+        headers.insert(ADMIN_SECRET_HEADER, HeaderValue::from_static("secret"));
+        assert!(presents_admin_secret(&headers, "secret"));
+    }
+
+    #[test]
+    fn only_the_whole_secret_matches() {
+        use axum::http::{HeaderMap, HeaderValue};
+        for guess in ["secre", "secrets", "secreT", " secret", ""] {
+            let mut headers = HeaderMap::new();
+            headers.insert(ADMIN_SECRET_HEADER, HeaderValue::from_static(guess));
+            assert!(!presents_admin_secret(&headers, "secret"), "{guess:?}");
+        }
+    }
+
+    #[test]
+    fn an_unset_admin_secret_matches_nothing() {
+        use axum::http::{HeaderMap, HeaderValue};
+        let mut headers = HeaderMap::new();
+        assert!(!presents_admin_secret(&headers, ""));
+        headers.insert(ADMIN_SECRET_HEADER, HeaderValue::from_static(""));
+        assert!(!presents_admin_secret(&headers, ""));
+    }
 
     use crate::types::merchant::hierarchy::{GrantLevel, ScopeGrant};
 

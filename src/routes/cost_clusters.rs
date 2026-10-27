@@ -5,6 +5,8 @@
 //! connector override and the learned model at decide time — see
 //! [`crate::cost_ingestion::serving::lookup`].
 
+use crate::custom_extractors::MerchantFromPath;
+
 use std::collections::HashMap;
 
 use crate::custom_extractors::Json;
@@ -236,9 +238,10 @@ pub struct ApiClusterFacet {
 /// autosuggestions. Scoped exactly like the cluster list, so a snapshot view only suggests values
 /// that occur in that snapshot.
 pub async fn list_cost_cluster_facets(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
     Query(q): Query<TopClustersQuery>,
 ) -> Result<Json<Vec<ApiClusterFacet>>, TextError> {
+    let merchant_id = merchant.as_str().to_string();
     let cfg = clickhouse_config()?;
     let scope = ClusterScope {
         connector: q.connector.as_deref(),
@@ -267,10 +270,11 @@ pub async fn list_cost_cluster_facets(
 /// `report_date` pins one exact ingestion's segments. Unscoped is merchant-wide. Overrides are merged
 /// in; in the unscoped view an overridden segment stays visible even if it drops out of the top set.
 pub async fn list_cost_clusters(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
     Query(q): Query<TopClustersQuery>,
     RawQuery(raw): RawQuery,
 ) -> Result<Json<Vec<ClusterFee>>, TextError> {
+    let merchant_id = merchant.as_str().to_string();
     let filters = ClusterFilterQuery::from_raw(raw.as_deref());
     let cfg = clickhouse_config()?;
     let limit = q.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
@@ -296,7 +300,7 @@ pub async fn list_cost_clusters(
         blended::top_clusters(&cfg, &merchant_id, limit, scope, order, filter)
             .await
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
-    let overrides: HashMap<String, ClusterOverride> = overrides::list_clusters(&merchant_id)
+    let overrides: HashMap<String, ClusterOverride> = overrides::list_clusters(&merchant)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -498,9 +502,11 @@ pub struct SetClusterOverrideRequest {
 
 /// `PUT /merchant-account/:merchant_id/cost-clusters/:cluster_key/fee-override`
 pub async fn set_cluster_override(
-    Path((merchant_id, cluster_key)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, cluster_key)): Path<(String, String)>,
     Json(body): Json<SetClusterOverrideRequest>,
 ) -> Result<Json<ClusterOverride>, TextError> {
+    let merchant_id = merchant.as_str().to_string();
     if !body.pct_bps.is_finite()
         || !body.fixed.is_finite()
         || body.pct_bps < 0.0
@@ -524,7 +530,7 @@ pub async fn set_cluster_override(
             .format(&Iso8601::DEFAULT)
             .unwrap_or_default(),
     };
-    overrides::put_cluster(&merchant_id, &ov)
+    overrides::put_cluster(&merchant, &ov)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
     refresh_serving(&merchant_id).await;
@@ -533,15 +539,16 @@ pub async fn set_cluster_override(
 
 /// `DELETE /merchant-account/:merchant_id/cost-clusters/:cluster_key/fee-override`
 pub async fn delete_cluster_override(
-    Path((merchant_id, cluster_key)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, cluster_key)): Path<(String, String)>,
 ) -> Result<StatusCode, TextError> {
     let dims = ClusterDims::from_key(&cluster_key).ok_or((
         StatusCode::BAD_REQUEST,
         "cluster key must have 7 '|'-separated fields".to_string(),
     ))?;
-    overrides::delete_cluster(&merchant_id, &dims)
+    overrides::delete_cluster(&merchant, &dims)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
-    refresh_serving(&merchant_id).await;
+    refresh_serving(merchant.as_str()).await;
     Ok(StatusCode::NO_CONTENT)
 }

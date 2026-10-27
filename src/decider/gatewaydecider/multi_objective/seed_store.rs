@@ -20,7 +20,13 @@ fn seed_costs_name(merchant_id: &str) -> String {
 
 /// The merchant's stored seed table, if they have saved one. Returns `None` on any miss (never
 /// stored, empty value, or a parse/store failure) so the caller falls back to the config default.
-pub async fn get_seed_table(merchant_id: &str) -> Option<Vec<SeedCostEntry>> {
+pub async fn get_seed_table(
+    merchant: &crate::auth::AuthorizedMerchant,
+) -> Option<Vec<SeedCostEntry>> {
+    read_seed_table(merchant.as_str()).await
+}
+
+async fn read_seed_table(merchant_id: &str) -> Option<Vec<SeedCostEntry>> {
     let stored = service_configuration::find_config_by_name(seed_costs_name(merchant_id))
         .await
         .ok()?;
@@ -29,7 +35,11 @@ pub async fn get_seed_table(merchant_id: &str) -> Option<Vec<SeedCostEntry>> {
 }
 
 /// Upsert (create or replace) the merchant's seed table.
-pub async fn put_seed_table(merchant_id: &str, table: &[SeedCostEntry]) -> Result<(), String> {
+pub async fn put_seed_table(
+    merchant: &crate::auth::AuthorizedMerchant,
+    table: &[SeedCostEntry],
+) -> Result<(), String> {
+    let merchant_id = merchant.as_str();
     let serialized = serde_json::to_string(table).map_err(|e| e.to_string())?;
     let name = seed_costs_name(merchant_id);
     let exists = service_configuration::find_config_by_name(name.clone())
@@ -45,7 +55,8 @@ pub async fn put_seed_table(merchant_id: &str, table: &[SeedCostEntry]) -> Resul
 }
 
 /// Reset the merchant to the config default by removing any stored table.
-pub async fn delete_seed_table(merchant_id: &str) -> Result<(), String> {
+pub async fn delete_seed_table(merchant: &crate::auth::AuthorizedMerchant) -> Result<(), String> {
+    let merchant_id = merchant.as_str();
     service_configuration::delete_config(seed_costs_name(merchant_id))
         .await
         .map_err(|e| e.to_string())
@@ -53,12 +64,25 @@ pub async fn delete_seed_table(merchant_id: &str) -> Result<(), String> {
 
 /// The seed entries in effect for a merchant: their stored table when present and non-empty, else
 /// the global config default. This is the single resolver both the decide path
-/// ([`super::hypersense_client`]) and the simulation-preview route consult, so the two never drift.
+/// ([`seed_entries_for_routing`]) and the simulation-preview route consult, so the two never drift.
 pub async fn effective_seed_entries(
+    merchant: &crate::auth::AuthorizedMerchant,
+    cfg: &HypersenseConfig,
+) -> Vec<SeedCostEntry> {
+    resolve_entries(merchant.as_str(), cfg).await
+}
+
+/// [`effective_seed_entries`] for the decide path ([`super::hypersense_client`]), which carries the
+/// merchant of a routing request its handler has already authorized.
+pub(crate) async fn seed_entries_for_routing(
     merchant_id: &str,
     cfg: &HypersenseConfig,
 ) -> Vec<SeedCostEntry> {
-    match get_seed_table(merchant_id).await {
+    resolve_entries(merchant_id, cfg).await
+}
+
+async fn resolve_entries(merchant_id: &str, cfg: &HypersenseConfig) -> Vec<SeedCostEntry> {
+    match read_seed_table(merchant_id).await {
         Some(table) if !table.is_empty() => table,
         _ => cfg.seed_costs.clone(),
     }

@@ -1,6 +1,7 @@
 //! Cost-model coverage endpoint backing the dashboard health card.
 
-use axum::extract::Path;
+use crate::custom_extractors::MerchantFromPath;
+
 use axum::http::StatusCode;
 use axum::Json;
 
@@ -9,7 +10,7 @@ use crate::error::TextError;
 
 /// `GET /merchant-account/:merchant_id/cost-coverage`
 pub async fn get_cost_coverage(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<CoverageSummary>, TextError> {
     // ClickHouse config lives on the global config (not the per-tenant config).
     let clickhouse = crate::app::APP_STATE
@@ -23,7 +24,7 @@ pub async fn get_cost_coverage(
         .clickhouse
         .clone();
 
-    let summary = coverage::for_merchant(&clickhouse, &merchant_id)
+    let summary = coverage::for_merchant(&clickhouse, merchant.as_str())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
     Ok(Json(summary))

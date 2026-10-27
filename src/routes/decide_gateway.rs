@@ -1,5 +1,6 @@
 use std::{borrow::Cow, time::Instant};
 
+use crate::custom_extractors::{ScopedJson, ScopedJsonRejection};
 use crate::euclid::types::ExperimentEndpoint;
 use crate::{
     analytics::{
@@ -13,7 +14,7 @@ use crate::{
             GatewayDeciderApproach, RankingAlgorithm, ResetApproach, UnifiedError,
         },
     },
-    logger, metrics,
+    logger,
 };
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -193,9 +194,6 @@ pub(crate) async fn run_decider_with_analytics(
                 Some(payload.currency()),
                 payload.country(),
             );
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["decide_gateway", "success"])
-                .inc();
             Ok(decided_gateway)
         }
         Err(e) => {
@@ -225,9 +223,6 @@ pub(crate) async fn run_decider_with_analytics(
                 Some("request_failed".to_string()),
                 auth_type,
             );
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["decide_gateway", "failure"])
-                .inc();
             Err(e)
         }
     }
@@ -235,17 +230,11 @@ pub(crate) async fn run_decider_with_analytics(
 
 #[axum::debug_handler]
 pub async fn decide_gateway(
-    req: axum::http::Request<axum::body::Body>,
+    headers: axum::http::HeaderMap,
+    request: Result<ScopedJson<DomainDeciderRequestForApiCallV2>, ScopedJsonRejection>,
 ) -> Result<DecidedGateway, ErrorResponse> {
     let cpu_start = Instant::now();
-    let timer = metrics::API_LATENCY_HISTOGRAM
-        .with_label_values(&["decide_gateway"])
-        .start_timer();
-    metrics::API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["decide_gateway"])
-        .inc();
 
-    let headers = req.headers().clone();
     let x_request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
         .and_then(|value| value.to_str().ok())
@@ -262,12 +251,19 @@ pub async fn decide_gateway(
             .collect::<std::collections::BTreeMap<_, _>>(),
         "Incoming request headers"
     );
-    let body = match crate::routes::body::read_request_body(req.into_body()).await {
-        Ok(body) => {
+    let (body, parsed) = match request {
+        Ok(ScopedJson { payload, body, .. }) => {
             logger::debug!("Body: {:?}", body);
-            body
+            (body, Ok(payload))
         }
-        Err(e) => {
+        Err(ScopedJsonRejection::Parse { body, error }) => {
+            logger::debug!("Body: {:?}", body);
+            (body, Err(error))
+        }
+        Err(ScopedJsonRejection::Scope(violation)) => {
+            return Err(violation.into());
+        }
+        Err(ScopedJsonRejection::Read(e)) => {
             let (error_code, error_message) = e.analytics_code_and_message();
             let analytics_stage = e.analytics_stage().to_string();
             let error_response = e.into_error_response();
@@ -290,21 +286,16 @@ pub async fn decide_gateway(
                 Some(analytics_stage),
                 None,
             );
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["decide_gateway", "failure"])
-                .inc();
-            timer.observe_duration();
             return Err(error_response);
         }
     };
-    let api_decider_request =
-        match serde_json::from_slice::<DomainDeciderRequestForApiCallV2>(&body) {
-            Ok(payload) => match payload.check_payment_method() {
-                Ok(_) => Ok(payload),
-                Err(error) => Err(invalid_payment_method_response(error.to_string())),
-            },
-            Err(e) => Err(request_parse_error_response(&e)),
-        };
+    let api_decider_request = match parsed {
+        Ok(payload) => match payload.check_payment_method() {
+            Ok(_) => Ok(payload),
+            Err(error) => Err(invalid_payment_method_response(error.to_string())),
+        },
+        Err(e) => Err(request_parse_error_response(&e)),
+    };
     let result = match api_decider_request {
         Ok(payload) => {
             let span = tracing::Span::current();
@@ -344,13 +335,9 @@ pub async fn decide_gateway(
                 Some("request_parse_failed".to_string()),
                 None,
             );
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["decide_gateway", "failure"])
-                .inc();
             Err(error_response)
         }
     };
-    timer.observe_duration();
 
     // let connection = state.db.get_conn().await.unwrap();
     // println!("Starting Decision Gateway");

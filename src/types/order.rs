@@ -212,13 +212,14 @@ where
     Ok(UDFs(hashmap))
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, crate::auth::MerchantScoped)]
 pub struct Order {
     pub id: OrderPrimId,
     pub amount: Money,
     pub currency: Currency,
     #[serde(with = "time::serde::iso8601")]
     pub dateCreated: OffsetDateTime,
+    #[merchant]
     pub merchantId: MerchantId,
     pub orderId: OrderId,
     pub status: OrderStatus,

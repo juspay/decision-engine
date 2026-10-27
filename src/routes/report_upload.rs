@@ -10,6 +10,8 @@
 //! progress are unified. (Single-node assumption: the background task reads the temp file on the
 //! same host that received the upload.)
 
+use crate::custom_extractors::MerchantFromPath;
+
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -98,9 +100,9 @@ impl From<CostIngestion> for IngestionDto {
 /// `GET /merchant-account/:id/cost-ingestions` — recent ingestions (history + in-flight), newest
 /// first. The dashboard polls this to show history and live progress of processing jobs.
 pub async fn list_ingestions(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<Vec<IngestionDto>>, TextError> {
-    let rows = store::list_for_merchant(&merchant_id, HISTORY_LIMIT)
+    let rows = store::list_for_merchant(&merchant, HISTORY_LIMIT)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
     Ok(Json(rows.into_iter().map(IngestionDto::from).collect()))
@@ -111,9 +113,10 @@ pub async fn list_ingestions(
 /// so the served model reflects what remains, and deletes the history row. In-progress jobs can't
 /// be deleted.
 pub async fn delete_ingestion(
-    Path((merchant_id, ingestion_id)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, ingestion_id)): Path<(String, String)>,
 ) -> Result<StatusCode, TextError> {
-    let row = store::get_for_merchant(&merchant_id, &ingestion_id)
+    let row = store::get_for_merchant(&merchant, &ingestion_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?
         .ok_or((StatusCode::NOT_FOUND, "ingestion not found".to_string()))?;
@@ -143,7 +146,7 @@ pub async fn delete_ingestion(
         &clickhouse,
         &row.connector,
         &row.account,
-        &merchant_id,
+        merchant.as_str(),
         &ingestion_id,
     )
     .await
@@ -154,7 +157,7 @@ pub async fn delete_ingestion(
         &clickhouse,
         &row.connector,
         &row.account,
-        &merchant_id,
+        merchant.as_str(),
         &report_date,
         // No ingestion to attribute clusters to — this refit exists precisely because that
         // ingestion's rows were just deleted. Empty asks for the snapshot-wide summary, which is
@@ -166,7 +169,7 @@ pub async fn delete_ingestion(
         logger::warn!(tag = "report_upload", "refit after delete failed: {:?}", e);
     }
 
-    store::delete(&merchant_id, &ingestion_id)
+    store::delete(&merchant, &ingestion_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
 
@@ -176,7 +179,7 @@ pub async fn delete_ingestion(
     // (dropping it), so the router stops using models with no supporting data right away instead of
     // after the 300s tick. Per-merchant: other merchants' cached models are left untouched.
     if let Err(e) =
-        crate::cost_ingestion::serving::refresh_merchant(&clickhouse, &merchant_id).await
+        crate::cost_ingestion::serving::refresh_merchant(&clickhouse, merchant.as_str()).await
     {
         logger::warn!(
             tag = "report_upload",
@@ -192,7 +195,7 @@ pub async fn delete_ingestion(
 /// cluster's two most recent fits. Surfaces when a connector's pricing moved and which part (% or
 /// flat fee) changed.
 pub async fn list_price_changes(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<Vec<crate::cost_ingestion::detect::PriceChange>>, TextError> {
     let clickhouse = crate::app::APP_STATE
         .get()
@@ -204,7 +207,7 @@ pub async fn list_price_changes(
         .analytics
         .clickhouse
         .clone();
-    let changes = crate::cost_ingestion::detect::price_changes(&clickhouse, &merchant_id)
+    let changes = crate::cost_ingestion::detect::price_changes(&clickhouse, merchant.as_str())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
     Ok(Json(changes))
@@ -245,10 +248,12 @@ fn temp_report_path() -> PathBuf {
 }
 
 pub async fn upload_report(
-    Path((merchant_id, connector)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, connector)): Path<(String, String)>,
     Query(params): Query<UploadParams>,
     body: Body, // must be the last extractor (consumes the request body)
 ) -> Result<(StatusCode, Json<UploadAccepted>), TextError> {
+    let merchant_id = merchant.as_str().to_string();
     let path = temp_report_path();
 
     // Stream the body to the temp file, capping total size. On any failure here we remove the
@@ -273,7 +278,7 @@ pub async fn upload_report(
 
     // Create the ingestion row (status=processing) up front so the dashboard can poll it.
     let path_str = path.to_string_lossy().to_string();
-    let job_id = store::create_manual(&merchant_id, &connector, &params.account, &path_str)
+    let job_id = store::create_manual(&merchant, &connector, &params.account, &path_str)
         .await
         .map_err(|e| {
             (
@@ -346,7 +351,8 @@ pub struct ConnectorInfo {
 /// missing these columns" is a successful answer to the question asked. Only an unknown connector
 /// (404) or an unreadable sample (400) is an error.
 pub async fn validate_report_headers(
-    Path((merchant_id, connector)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, connector)): Path<(String, String)>,
     Query(params): Query<PreflightParams>,
     body: Body,
 ) -> Result<Json<crate::cost_ingestion::preflight::PreflightReport>, TextError> {
@@ -360,7 +366,7 @@ pub async fn validate_report_headers(
     // Validate against the source's saved mapping when there is an account to look one up for, so a
     // merchant who mapped this source last month sees their next file pass immediately.
     let mapping = match params.account.as_deref() {
-        Some(account) => mapping::load(&merchant_id, &connector, account)
+        Some(account) => mapping::load(merchant.as_str(), &connector, account)
             .await
             .map_err(|e| storage_error("load column mapping", e))?,
         None => Default::default(),
@@ -409,7 +415,10 @@ pub struct MappingRequest {
 /// wrong price to the router. Returning the derived `gross` / `total_fee` / effective rate is what
 /// lets a human catch that, so the dashboard renders this before it will save.
 pub async fn preview_column_mapping(
-    Path((_merchant_id, connector)): Path<(String, String)>,
+    // Previews touch no stored data, but the route still names a merchant, so it is held to the
+    // caller's like every other.
+    MerchantFromPath(_merchant): MerchantFromPath,
+    Path((_, connector)): Path<(String, String)>,
     Json(req): Json<MappingRequest>,
 ) -> Result<Json<crate::cost_ingestion::preflight::PreviewReport>, TextError> {
     use crate::cost_ingestion::preflight;
@@ -430,10 +439,11 @@ pub async fn preview_column_mapping(
 /// `GET /merchant-account/:id/connectors/:connector/report/column-mapping?account=` — the saved
 /// mapping for a settlement source, or an empty one.
 pub async fn get_column_mapping(
-    Path((merchant_id, connector)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, connector)): Path<(String, String)>,
     Query(params): Query<UploadParams>,
 ) -> Result<Json<mapping::ColumnMapping>, TextError> {
-    mapping::load(&merchant_id, &connector, &params.account)
+    mapping::load(merchant.as_str(), &connector, &params.account)
         .await
         .map(Json)
         .map_err(|e| storage_error("load column mapping", e).into())
@@ -449,7 +459,8 @@ pub async fn get_column_mapping(
 /// [`preview_column_mapping`], since an unusual-but-real report is indistinguishable from a wrong
 /// mapping from here.
 pub async fn set_column_mapping(
-    Path((merchant_id, connector)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, connector)): Path<(String, String)>,
     Query(params): Query<UploadParams>,
     Json(req): Json<MappingRequest>,
 ) -> Result<StatusCode, TextError> {
@@ -486,7 +497,7 @@ pub async fn set_column_mapping(
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e}")))?;
     }
 
-    mapping::save(&merchant_id, &connector, &params.account, &candidate)
+    mapping::save(merchant.as_str(), &connector, &params.account, &candidate)
         .await
         .map_err(|e| storage_error("save column mapping", e))?;
     Ok(StatusCode::NO_CONTENT)
@@ -495,10 +506,11 @@ pub async fn set_column_mapping(
 /// `DELETE /merchant-account/:id/connectors/:connector/report/column-mapping?account=` — clear a
 /// source's mapping so its reports parse with the connector's own labels again.
 pub async fn delete_column_mapping(
-    Path((merchant_id, connector)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, connector)): Path<(String, String)>,
     Query(params): Query<UploadParams>,
 ) -> Result<StatusCode, TextError> {
-    mapping::delete(&merchant_id, &connector, &params.account)
+    mapping::delete(merchant.as_str(), &connector, &params.account)
         .await
         .map_err(|e| storage_error("clear column mapping", e))?;
     Ok(StatusCode::NO_CONTENT)
@@ -552,8 +564,10 @@ async fn read_capped(body: Body, cap: usize) -> Result<Vec<u8>, (StatusCode, Str
 /// returns 404. Like the manual upload, it returns the job id immediately (202) and processes in
 /// the background — the dashboard polls the same history/progress.
 pub async fn run_sample_report(
-    Path((merchant_id, connector)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, connector)): Path<(String, String)>,
 ) -> Result<(StatusCode, Json<UploadAccepted>), TextError> {
+    let merchant_id = merchant.as_str().to_string();
     // Only connectors that support report ingestion can have samples.
     let registry = crate::cost_ingestion::source::ConnectorRegistry::with_builtins();
     let _ = registry.get(&connector).map_err(|_| {
@@ -584,7 +598,7 @@ pub async fn run_sample_report(
 
     // Create the ingestion row (status=processing) up front so the dashboard can poll it. The row
     // records the S3 location as its ref, mirroring how a manual upload records its temp path.
-    let job_id = store::create_sample(&merchant_id, &connector, &account, &report_ref)
+    let job_id = store::create_sample(&merchant, &connector, &account, &report_ref)
         .await
         .map_err(|e| {
             (

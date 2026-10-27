@@ -29,7 +29,7 @@ pub enum DataType {
     GlobalRef,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, crate::auth::MerchantScoped)]
 pub struct RoutingRule {
     pub rule_id: Option<String>,
     pub name: String,
@@ -37,6 +37,7 @@ pub struct RoutingRule {
     /// string, which is what the column requires.
     #[serde(default)]
     pub description: Option<String>,
+    #[merchant]
     pub created_by: String,
     pub algorithm: StaticRoutingAlgorithm,
     #[serde(default)]
@@ -195,9 +196,10 @@ pub enum AlgorithmType {
     VolumeCommitment,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, crate::auth::MerchantScoped)]
 pub struct RoutingRequest {
     pub payment_id: Option<String>,
+    #[merchant]
     pub created_by: String,
     pub fallback_output: Option<Vec<ConnectorInfo>>,
     pub parameters: HashMap<String, Option<ValueType>>,
@@ -217,8 +219,9 @@ pub struct RoutingBatchEntry {
 
 /// Evaluates the caller's active algorithm against several parameter sets in one round
 /// trip. The algorithm is resolved and parsed once; results are positional.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct RoutingBatchRequest {
+    #[merchant]
     pub created_by: String,
     pub fallback_output: Option<Vec<ConnectorInfo>>,
     /// Transaction type whose active rule should be evaluated; absent keeps the
@@ -269,11 +272,15 @@ impl RoutingDictionaryRecord {
     }
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Default, Clone, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped,
+)]
 pub struct SrDimensionConfig {
+    #[merchant]
     pub merchant_id: String,
     pub paymentInfo: SrDimensionInfo,
 }
+
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SrDimensionInfo {
     pub udfs: Vec<i32>,
@@ -388,30 +395,34 @@ impl RoutingAlgorithmMapperNew {
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct ActivateRoutingConfigRequest {
+    #[merchant]
     pub created_by: String,
     pub routing_algorithm_id: String,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct DeactivateRoutingConfigRequest {
+    #[merchant]
     pub created_by: String,
     pub routing_algorithm_id: String,
 }
 
 /// Delete an existing routing algorithm (e.g. an A/B experiment). Only permitted while the
 /// algorithm is inactive.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct DeleteRoutingConfigRequest {
+    #[merchant]
     pub created_by: String,
     pub routing_algorithm_id: String,
 }
 
 /// Edit an existing (inactive) routing algorithm in place — updates its name/description and
 /// algorithm definition without minting a new id.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct UpdateRoutingConfigRequest {
+    #[merchant]
     pub created_by: String,
     pub routing_algorithm_id: String,
     pub name: String,

@@ -1,13 +1,13 @@
 //! Read-only dashboard/projection/impact/samples views plus the scheduler-called run endpoint.
 
+use crate::custom_extractors::MerchantFromPath;
 use std::collections::HashMap;
 
-use axum::extract::{Path, Query};
-use axum::http::{HeaderMap, StatusCode};
+use axum::extract::Query;
+use axum::http::StatusCode;
 use axum::Extension;
 use axum::Json;
 use futures::FutureExt;
-use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
 
 use crate::analytics::models::{
@@ -32,21 +32,6 @@ const UNNAMED_RUN: &str = "earlier";
 pub struct RunQuery {
     #[serde(default)]
     pub merchant_id: Option<String>,
-}
-
-/// True when the request carries the deployment's admin secret — what the scheduler presents.
-/// Checked here as well as in the middleware because the middleware attaches no session to such
-/// a caller, and in api-key compat mode a request with no credentials at all reaches the handler.
-fn presents_admin_secret(headers: &HeaderMap) -> bool {
-    let Some(state) = crate::app::APP_STATE.get() else {
-        return false;
-    };
-    let expected = state.global_config.admin_secret.secret.peek();
-    let provided = headers
-        .get("x-admin-secret")
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("");
-    !expected.is_empty() && provided == expected
 }
 
 /// Who may run what: the admin secret may run anything, a session or api key only its own
@@ -81,12 +66,14 @@ fn authorize_run(
 /// behind. A merchant with no usable commitments counts as skipped; one whose delivery could not
 /// be measured, or whose pass panicked, as failed — its previous plan stands.
 pub async fn run_forecast(
-    headers: HeaderMap,
+    admin: Option<Extension<crate::auth::AdminCaller>>,
     session: Option<Extension<AuthContext>>,
     Query(query): Query<RunQuery>,
 ) -> Result<Json<RunReport>, TextError> {
+    // The admin secret is what the scheduler presents. In api-key compat mode a request with no
+    // credentials at all reaches the handler too, with neither marker nor session.
     authorize_run(
-        presents_admin_secret(&headers),
+        admin.is_some(),
         session.as_ref().map(|Extension(context)| context),
         query.merchant_id.as_deref(),
     )?;
@@ -357,8 +344,9 @@ async fn pacing_view(merchant_id: String) -> VolumeCommitmentView {
 /// inferring it from a chart that does not move. Read-only in every sense: no plan is published, no
 /// forecast is filed, and the feature flag is left exactly as it was.
 pub async fn get_projection(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<VolumeCommitmentView>, TextError> {
+    let merchant_id = merchant.as_str().to_string();
     let Some(deps) = volume_commitment::deps() else {
         return Ok(Json(inactive(merchant_id)));
     };
@@ -744,9 +732,10 @@ async fn dashboard_parts(
 /// analytics read. Composing them here is what lets the browser poll once at one cadence instead
 /// of four times at two.
 pub async fn get_dashboard(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
     Query(query): Query<SeriesQuery>,
 ) -> Result<Json<DashboardResponse>, TextError> {
+    let merchant_id = merchant.as_str().to_string();
     let empty_series = || SeriesResponse {
         merchant_id: merchant_id.clone(),
         currency: None,
@@ -868,9 +857,10 @@ pub struct ImpactResponse {
 /// `GET /merchant-account/:merchant_id/volume-commitment/impact` — each PSP's traffic in the cycle
 /// before its own vs the one in flight, split by who sent it.
 pub async fn get_impact(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
     Query(query): Query<RunScopedQuery>,
 ) -> Result<Json<ImpactResponse>, TextError> {
+    let merchant_id = merchant.as_str().to_string();
     let not_active = || {
         (
             StatusCode::NOT_FOUND,
@@ -1074,8 +1064,9 @@ pub struct SamplesResponse {
 /// A sample is a template: the merchant picks one, edits it if they want to, and activates it.
 /// From that point it is an ordinary contract and the ordinary engine paces it.
 pub async fn get_samples(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<SamplesResponse>, TextError> {
+    let merchant_id = merchant.as_str().to_string();
     let Some(deps) = volume_commitment::deps() else {
         return Ok(Json(SamplesResponse {
             merchant_id,

@@ -986,8 +986,11 @@ async fn refresh_inner(
 /// — and set them on its snapshot entry (creating the entry when the merchant has overlays but no
 /// ClickHouse-derived models). Each overlay is non-fatal on error.
 async fn load_overlays_into(snap: &mut Snapshot, merchant_id: &str) {
+    // Hydrating the serving snapshot is work Decision Engine runs itself, on its own schedule or
+    // after a merchant's authorized write.
+    let merchant = crate::auth::AuthorizedMerchant::internal(merchant_id);
     // Connector-level overrides (lowercase connector → flat cost).
-    match super::overrides::list(merchant_id).await {
+    match super::overrides::list(&merchant).await {
         Ok(list) if !list.is_empty() => {
             let overrides = list
                 .into_iter()
@@ -1013,7 +1016,7 @@ async fn load_overlays_into(snap: &mut Snapshot, merchant_id: &str) {
     }
 
     // Cluster-level overrides, keyed by the same fine_key the lookup builds at decide time.
-    match super::overrides::list_clusters(merchant_id).await {
+    match super::overrides::list_clusters(&merchant).await {
         Ok(list) if !list.is_empty() => {
             let cluster_overrides = list
                 .into_iter()
@@ -1051,7 +1054,7 @@ async fn load_overlays_into(snap: &mut Snapshot, merchant_id: &str) {
 
     // Invoice-derived add-ons (lowercase connector → {pct_addon_bps, fixed}). Layered onto the
     // learned models at lookup; stored connector keys are already lowercased by the invoice store.
-    match super::invoice::store::list(merchant_id).await {
+    match super::invoice::store::list(&merchant).await {
         Ok(list) if !list.is_empty() => {
             let addons = list
                 .into_iter()
