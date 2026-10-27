@@ -11,9 +11,22 @@
 //!   carries no session and acts on behalf of whichever merchant the request names. This is how
 //!   Hyperswitch calls Decision Engine.
 //!
-//! The merchant is named in the path (read by [`crate::custom_extractors::MerchantFromPath`]) or in
-//! the body (read through [`MerchantScoped`] by [`crate::custom_extractors::ScopedJson`], or by
-//! handlers that parse the body themselves).
+//! # Adding an endpoint
+//!
+//! 1. Register it in the route group for its caller, in `app.rs`: `merchant_routes()` for anything
+//!    acting on one merchant, `admin_routes()` for deployment-level calls only the admin secret may
+//!    make, `public_routes()` for routes that authenticate themselves (sign-in, signed webhooks).
+//! 2. Take the merchant from the request with an extractor — handlers never call [`authorize`]:
+//!    - Named in the path: spell the parameter `:merchant_id` ([`MERCHANT_PATH_PARAM`]) and take
+//!      [`MerchantFromPath`](crate::custom_extractors::MerchantFromPath).
+//!    - Named in the body: `#[derive(MerchantScoped)]` on the request type, `#[merchant]` on every
+//!      field naming a merchant (nested request types included), and take
+//!      [`ScopedJson<T>`](crate::custom_extractors::ScopedJson). A handler with its own error
+//!      format takes `Result<ScopedJson<T>, ScopedJsonRejection>` and answers each rejection.
+//!    - Named by neither, only by an object id: the session's merchant ([`session_merchant`]),
+//!      or for a service caller the object's owner, as api-key revoke does.
+//! 3. Pass the [`AuthorizedMerchant`] to storage. A store holding per-merchant rows takes one and
+//!    filters every query by it, so another merchant's object reads as not found.
 
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};

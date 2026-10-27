@@ -1,4 +1,4 @@
-use crate::custom_extractors::{ScopedBody, ScopedBodyRejection};
+use crate::custom_extractors::{ScopedJson, ScopedJsonRejection};
 use std::time::Instant;
 
 use crate::decider::gatewaydecider::{
@@ -65,7 +65,7 @@ pub struct DecidedGatewayResponse {
 pub async fn decision_gateway(
     headers: axum::http::HeaderMap,
     uri: axum::http::Uri,
-    request: Result<ScopedBody<DomainDeciderRequest>, ScopedBodyRejection>,
+    request: Result<ScopedJson<DomainDeciderRequest>, ScopedJsonRejection>,
 ) -> Result<DecidedGatewayResponse, ErrorResponse>
 where
     DecidedGatewayResponse: IntoResponse,
@@ -97,16 +97,16 @@ where
     // let req_headers = serde_json::to_string(&headers).unwrap_or("{}".to_string());
 
     let (body, api_decider_request) = match request {
-        Ok(ScopedBody { payload, body, .. }) => (body, Ok(payload)),
-        Err(ScopedBodyRejection::Parse { body, error }) => (body, Err(error)),
-        Err(ScopedBodyRejection::Scope(violation)) => {
+        Ok(ScopedJson { payload, body, .. }) => (body, Ok(payload)),
+        Err(ScopedJsonRejection::Parse { body, error }) => (body, Err(error)),
+        Err(ScopedJsonRejection::Scope(violation)) => {
             API_REQUEST_COUNTER
                 .with_label_values(&["decision_gateway", "failure"])
                 .inc();
             timer.observe_duration();
             return Err(violation.into());
         }
-        Err(ScopedBodyRejection::Read(e)) => {
+        Err(ScopedJsonRejection::Read(e)) => {
             let error_response = e.into_error_response();
 
             let latency = start_time.elapsed().as_millis() as u64;

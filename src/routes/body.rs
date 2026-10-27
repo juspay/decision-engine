@@ -1,4 +1,3 @@
-use axum::body::{to_bytes, Body, Bytes};
 use axum::http::StatusCode;
 
 use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
@@ -36,10 +35,12 @@ pub enum RequestBodyError {
     Read(axum::Error),
 }
 
-pub async fn read_request_body(body: Body) -> Result<Bytes, RequestBodyError> {
-    to_bytes(body, usize::MAX)
-        .await
-        .map_err(RequestBodyError::Read)
+impl std::fmt::Display for RequestBodyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Read(error) => error.fmt(f),
+        }
+    }
 }
 
 impl RequestBodyError {

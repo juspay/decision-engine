@@ -92,6 +92,14 @@ Choose the startup path based on task intent:
 - deployment review: Helm and compose manifests
 - API behavior inspection: route code plus health/startup verification
 
+## Adding an Endpoint
+
+Every route follows one auth pattern; the full guide is the module docs of `src/auth/scope.rs`.
+
+- Register it in its caller's route group in `src/app.rs`: `merchant_routes()`, `admin_routes()` (admin secret only) or `public_routes()` (routes that authenticate themselves).
+- Take the merchant from an extractor, never by calling `auth::authorize` in the handler: `MerchantFromPath` for a `:merchant_id` path parameter (the only spelling), `ScopedJson<T>` for a body whose type derives `MerchantScoped` with `#[merchant]` on each merchant field.
+- Per-merchant storage takes the resulting `AuthorizedMerchant` and filters every query by it.
+
 ## Coding Expectations
 
 - Rust edition is 2021; MSRV in `Cargo.toml` is `1.88.0`

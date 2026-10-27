@@ -1,4 +1,4 @@
-use crate::custom_extractors::{ScopedBody, ScopedBodyRejection};
+use crate::custom_extractors::{ScopedJson, ScopedJsonRejection};
 // use std::sync::Arc;
 //
 // use axum::{routing::post, Json};
@@ -98,7 +98,7 @@ fn request_parse_error_response(error: impl ToString) -> ErrorResponse {
 #[axum::debug_handler]
 pub async fn update_gateway_score(
     headers: axum::http::HeaderMap,
-    request: Result<ScopedBody<UpdateScorePayload>, ScopedBodyRejection>,
+    request: Result<ScopedJson<UpdateScorePayload>, ScopedJsonRejection>,
 ) -> Result<Json<UpdateScoreResponse>, ErrorResponse> {
     let x_request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
@@ -123,22 +123,22 @@ pub async fn update_gateway_score(
         "Incoming request headers"
     );
     let update_score_request = match request {
-        Ok(ScopedBody { payload, body, .. }) => {
+        Ok(ScopedJson { payload, body, .. }) => {
             crate::logger::debug!(tag = "UpdateGatewayScore", "Body: {:?}", body);
             Ok(payload)
         }
-        Err(ScopedBodyRejection::Parse { body, error }) => {
+        Err(ScopedJsonRejection::Parse { body, error }) => {
             crate::logger::debug!(tag = "UpdateGatewayScore", "Body: {:?}", body);
             Err(error)
         }
-        Err(ScopedBodyRejection::Scope(violation)) => {
+        Err(ScopedJsonRejection::Scope(violation)) => {
             API_REQUEST_COUNTER
                 .with_label_values(&["update_gateway_score", "failure"])
                 .inc();
             timer.observe_duration();
             return Err(violation.into());
         }
-        Err(ScopedBodyRejection::Read(e)) => {
+        Err(ScopedJsonRejection::Read(e)) => {
             let (error_code, error_message) = e.analytics_code_and_message();
             crate::analytics::DomainAnalyticsEvent::record_error(
                 crate::analytics::AnalyticsFlowContext::new(

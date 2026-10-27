@@ -1,6 +1,6 @@
 use std::{borrow::Cow, time::Instant};
 
-use crate::custom_extractors::{ScopedBody, ScopedBodyRejection};
+use crate::custom_extractors::{ScopedJson, ScopedJsonRejection};
 use crate::euclid::types::ExperimentEndpoint;
 use crate::{
     analytics::{
@@ -237,7 +237,7 @@ pub(crate) async fn run_decider_with_analytics(
 #[axum::debug_handler]
 pub async fn decide_gateway(
     headers: axum::http::HeaderMap,
-    request: Result<ScopedBody<DomainDeciderRequestForApiCallV2>, ScopedBodyRejection>,
+    request: Result<ScopedJson<DomainDeciderRequestForApiCallV2>, ScopedJsonRejection>,
 ) -> Result<DecidedGateway, ErrorResponse> {
     let cpu_start = Instant::now();
     let timer = metrics::API_LATENCY_HISTOGRAM
@@ -264,22 +264,22 @@ pub async fn decide_gateway(
         "Incoming request headers"
     );
     let (body, parsed) = match request {
-        Ok(ScopedBody { payload, body, .. }) => {
+        Ok(ScopedJson { payload, body, .. }) => {
             logger::debug!("Body: {:?}", body);
             (body, Ok(payload))
         }
-        Err(ScopedBodyRejection::Parse { body, error }) => {
+        Err(ScopedJsonRejection::Parse { body, error }) => {
             logger::debug!("Body: {:?}", body);
             (body, Err(error))
         }
-        Err(ScopedBodyRejection::Scope(violation)) => {
+        Err(ScopedJsonRejection::Scope(violation)) => {
             metrics::API_REQUEST_COUNTER
                 .with_label_values(&["decide_gateway", "failure"])
                 .inc();
             timer.observe_duration();
             return Err(violation.into());
         }
-        Err(ScopedBodyRejection::Read(e)) => {
+        Err(ScopedJsonRejection::Read(e)) => {
             let (error_code, error_message) = e.analytics_code_and_message();
             let analytics_stage = e.analytics_stage().to_string();
             let error_response = e.into_error_response();

@@ -1,4 +1,4 @@
-use crate::custom_extractors::{ScopedBody, ScopedBodyRejection};
+use crate::custom_extractors::{ScopedJson, ScopedJsonRejection};
 use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
 use crate::feedback::gateway_scoring_service::{
     check_and_update_gateway_score, invalid_request_error,
@@ -44,7 +44,7 @@ struct UpdateScoreValidationFailureDetail<'a> {
 pub async fn update_score(
     headers: axum::http::HeaderMap,
     uri: axum::http::Uri,
-    request: Result<ScopedBody<UpdateScoreRequest>, ScopedBodyRejection>,
+    request: Result<ScopedJson<UpdateScoreRequest>, ScopedJsonRejection>,
 ) -> Result<&'static str, ErrorResponse> {
     // Extract headers and URI
     let cpu_start = ProcessTime::now();
@@ -74,16 +74,16 @@ pub async fn update_score(
         .to_string();
     tracing::Span::current().record("is_audit_trail_log", "true");
     let (body_bytes, update_score_request) = match request {
-        Ok(ScopedBody { payload, body, .. }) => (body, Ok(payload)),
-        Err(ScopedBodyRejection::Parse { body, error }) => (body, Err(error)),
-        Err(ScopedBodyRejection::Scope(violation)) => {
+        Ok(ScopedJson { payload, body, .. }) => (body, Ok(payload)),
+        Err(ScopedJsonRejection::Parse { body, error }) => (body, Err(error)),
+        Err(ScopedJsonRejection::Scope(violation)) => {
             API_REQUEST_COUNTER
                 .with_label_values(&["update_score", "failure"])
                 .inc();
             timer.observe_duration();
             return Err(violation.into());
         }
-        Err(ScopedBodyRejection::Read(e)) => {
+        Err(ScopedJsonRejection::Read(e)) => {
             API_REQUEST_COUNTER
                 .with_label_values(&["update_score", "failure"])
                 .inc();

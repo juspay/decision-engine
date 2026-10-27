@@ -418,7 +418,10 @@ pub struct MappingRequest {
 /// wrong price to the router. Returning the derived `gross` / `total_fee` / effective rate is what
 /// lets a human catch that, so the dashboard renders this before it will save.
 pub async fn preview_column_mapping(
-    Path((_merchant_id, connector)): Path<(String, String)>,
+    // Previews touch no stored data, but the route still names a merchant, so it is held to the
+    // caller's like every other.
+    MerchantFromPath(_merchant): MerchantFromPath,
+    Path((_, connector)): Path<(String, String)>,
     Json(req): Json<MappingRequest>,
 ) -> Result<Json<crate::cost_ingestion::preflight::PreviewReport>, TextError> {
     use crate::cost_ingestion::preflight;

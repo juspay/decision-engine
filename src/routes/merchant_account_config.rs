@@ -1,5 +1,5 @@
 use crate::custom_extractors::Json;
-use crate::custom_extractors::MerchantFromPath;
+use crate::custom_extractors::{MerchantFromPath, ScopedJson};
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::redis::types::{FeatureConf, MerchantFeature as FeatureMerchant};
 use crate::types::merchant as ETM;
@@ -341,7 +341,9 @@ pub async fn get_merchant_config(
 
 #[axum::debug_handler]
 pub async fn create_merchant_config(
-    Json(payload): Json<ETM::merchant_account::MerchantAccountCreateRequest>,
+    ScopedJson {
+        merchant, payload, ..
+    }: ScopedJson<ETM::merchant_account::MerchantAccountCreateRequest>,
 ) -> Result<
     Json<MerchantAccountCreateResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
@@ -384,17 +386,12 @@ pub async fn create_merchant_config(
             API_REQUEST_COUNTER
                 .with_label_values(&["merchant_account_create", "success"])
                 .inc();
-            // This route verified the admin secret above: the service lane, acting for the
-            // merchant it is provisioning.
-            let api_key = match crate::auth::authorize_merchant_id(None, &merchant_id) {
-                Ok(merchant) => crate::routes::api_key::mint_api_key(
-                    &merchant,
-                    Some("Default API key".to_string()),
-                )
-                .await
-                .map(|created| created.api_key),
-                Err(_) => None,
-            };
+            let api_key = crate::routes::api_key::mint_api_key(
+                &merchant,
+                Some("Default API key".to_string()),
+            )
+            .await
+            .map(|created| created.api_key);
             Ok(Json(MerchantAccountCreateResponse {
                 message: "Merchant account created successfully".to_string(),
                 merchant_id,

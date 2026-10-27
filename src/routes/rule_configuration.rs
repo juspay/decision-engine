@@ -34,7 +34,9 @@ fn serialize_rule_config_analytics_details<Request: Serialize, Response: Seriali
 #[axum::debug_handler]
 pub async fn create_rule_config(
     headers: axum::http::HeaderMap,
-    ScopedJson { merchant, payload }: ScopedJson<types::routing_configuration::RoutingRule>,
+    ScopedJson {
+        merchant, payload, ..
+    }: ScopedJson<types::routing_configuration::RoutingRule>,
 ) -> Result<Json<RuleConfigResponse>, error::ContainerError<error::RuleConfigurationError>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["create_rule_config"])
@@ -217,7 +219,9 @@ pub async fn create_rule_config(
 #[axum::debug_handler]
 pub async fn get_rule_config(
     headers: axum::http::HeaderMap,
-    ScopedJson { merchant, payload }: ScopedJson<types::routing_configuration::FetchRoutingRule>,
+    ScopedJson {
+        merchant, payload, ..
+    }: ScopedJson<types::routing_configuration::FetchRoutingRule>,
 ) -> Result<
     Json<types::routing_configuration::RoutingRule>,
     error::ContainerError<error::RuleConfigurationError>,
@@ -380,7 +384,9 @@ pub async fn get_rule_config(
 #[axum::debug_handler]
 pub async fn update_rule_config(
     headers: axum::http::HeaderMap,
-    ScopedJson { merchant, payload }: ScopedJson<types::routing_configuration::RoutingRule>,
+    ScopedJson {
+        merchant, payload, ..
+    }: ScopedJson<types::routing_configuration::RoutingRule>,
 ) -> Result<Json<RuleConfigResponse>, error::ContainerError<error::RuleConfigurationError>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["update_rule_config"])
@@ -524,7 +530,9 @@ pub async fn update_rule_config(
 #[axum::debug_handler]
 pub async fn delete_rule_config(
     headers: axum::http::HeaderMap,
-    ScopedJson { merchant, payload }: ScopedJson<types::routing_configuration::FetchRoutingRule>,
+    ScopedJson {
+        merchant, payload, ..
+    }: ScopedJson<types::routing_configuration::FetchRoutingRule>,
 ) -> Result<Json<RuleConfigDeleteResponse>, error::ContainerError<error::RuleConfigurationError>> {
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["delete_rule_config"])
