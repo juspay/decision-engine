@@ -6,6 +6,7 @@ use crate::storage::schema::service_configuration::dsl;
 use crate::storage::schema_pg::service_configuration::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
+use error_stack::ResultExt;
 use std::option::Option;
 use std::string::String;
 // use sequelize::{Clause::{Is, And}, Term::{Eq, In}};
@@ -27,10 +28,25 @@ pub async fn find_config_by_name(
     .await
 }
 
+/// The longest configuration name either backend stores: MySQL's unique index on `name` covers this
+/// many characters in full. Names are built from merchant, connector and account ids; a longer one is
+/// refused on both backends alike rather than only where the column would reject it.
+pub const MAX_NAME_LEN: usize = 768;
+
+fn check_name(name: &str) -> error_stack::Result<(), crate::generics::MeshError> {
+    if name.chars().count() > MAX_NAME_LEN {
+        return Err(error_stack::report!(crate::generics::MeshError::Others)).attach_printable(
+            format!("configuration name longer than {MAX_NAME_LEN} characters"),
+        );
+    }
+    Ok(())
+}
+
 pub async fn insert_config(
     name: String,
     value: Option<String>,
 ) -> error_stack::Result<(), crate::generics::MeshError> {
+    check_name(&name)?;
     let app_state = get_tenant_app_state().await;
 
     let config = ServiceConfigurationNew {
@@ -104,8 +120,8 @@ pub async fn upsert_config(
     value: Option<String>,
 ) -> error_stack::Result<(), crate::generics::MeshError> {
     use async_bb8_diesel::AsyncRunQueryDsl;
-    use error_stack::ResultExt;
 
+    check_name(&name)?;
     let app_state = get_tenant_app_state().await;
     let conn = app_state
         .db
@@ -206,6 +222,14 @@ pub async fn delete_config(name: String) -> Result<(), crate::generics::MeshErro
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_name_is_stored_only_up_to_the_indexed_length() {
+        assert!(check_name(&"x".repeat(MAX_NAME_LEN)).is_ok());
+        assert!(check_name(&"x".repeat(MAX_NAME_LEN + 1)).is_err());
+        // Counted in characters, as the column is: a multi-byte name at the limit still fits.
+        assert!(check_name(&"é".repeat(MAX_NAME_LEN)).is_ok());
+    }
 
     fn row() -> ServiceConfigurationNew {
         ServiceConfigurationNew {

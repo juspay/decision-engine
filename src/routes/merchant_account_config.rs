@@ -138,7 +138,22 @@ impl KnownFeature {
                 .map_err(|e| error_stack::report!(e))?;
             let Some(existing) = existing else {
                 let serialized = with_merchant(None, merchant_id, enabled)?;
-                return service_configuration::insert_config(key, Some(serialized)).await;
+                match service_configuration::insert_config(key.clone(), Some(serialized)).await {
+                    Ok(()) => return Ok(()),
+                    // The name is unique: when another instance created the row first, this
+                    // insert is refused and the next attempt merges into the row it created.
+                    Err(error) => {
+                        let created = service_configuration::find_config_by_name(key.clone())
+                            .await
+                            .ok()
+                            .flatten()
+                            .is_some();
+                        if !created {
+                            return Err(error);
+                        }
+                        continue;
+                    }
+                }
             };
 
             let serialized = with_merchant(existing.value.as_deref(), merchant_id, enabled)?;
