@@ -140,7 +140,9 @@ pub async fn signup(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    if global_config.user_auth.signup_requires_admin_secret {
+    if global_config.user_auth.signup_requires_admin_secret
+        || is_rostered_email(&global_config.user_auth.super_admin_emails, &payload.email)
+    {
         let provided_admin_secret = headers
             .get("x-admin-secret")
             .and_then(|v| v.to_str().ok())
@@ -838,6 +840,10 @@ pub async fn invite_member(
         return Err(error::ContainerError::from(UserAuthError::Forbidden));
     }
 
+    if is_rostered_email(&global_config.user_auth.super_admin_emails, &payload.email) {
+        return Err(error::ContainerError::from(UserAuthError::Forbidden));
+    }
+
     let role = match payload.role.as_deref().unwrap_or("member") {
         "admin" => "admin".to_string(),
         _ => "member".to_string(),
@@ -1249,8 +1255,7 @@ fn view_grant(
 ///
 /// Two conditions, both checked here rather than at the call sites. The session must be one DE
 /// issued against a real account — a standard session, or the view session a super admin is
-/// already inside — and its email must be on the roster (compared case-insensitively; emails are
-/// not).
+/// already inside — and its email must exactly match a roster entry.
 ///
 /// The session-type half is the important one, and it lives here so a later caller cannot omit it.
 /// A session handed over from Hyperswitch carries that user's real email, which may well be on the
@@ -1261,6 +1266,13 @@ fn is_super_admin(global_config: &crate::config::GlobalConfig, claims: &auth::Jw
     roster_admits(&global_config.user_auth.super_admin_emails, claims)
 }
 
+// Block case variants at account creation even though only the exact roster spelling grants access.
+fn is_rostered_email(roster: &[String], email: &str) -> bool {
+    roster
+        .iter()
+        .any(|allowed| allowed.eq_ignore_ascii_case(email))
+}
+
 /// The roster decision itself, taking the list rather than the whole config so it can be tested.
 fn roster_admits(roster: &[String], claims: &auth::JwtClaims) -> bool {
     if claims.token_type != TOKEN_TYPE_STANDARD && claims.token_type != TOKEN_TYPE_SUPER_ADMIN_VIEW
@@ -1268,10 +1280,7 @@ fn roster_admits(roster: &[String], claims: &auth::JwtClaims) -> bool {
         return false;
     }
 
-    !claims.email.is_empty()
-        && roster
-            .iter()
-            .any(|allowed| allowed.eq_ignore_ascii_case(&claims.email))
+    !claims.email.is_empty() && roster.iter().any(|allowed| allowed == &claims.email)
 }
 
 async fn fetch_user_merchants(
@@ -2341,11 +2350,18 @@ mod tests {
             &roster,
             &claims_for(TOKEN_TYPE_SUPER_ADMIN_VIEW, "admin@example.com")
         ));
-        // Emails are not case-sensitive.
-        assert!(roster_admits(
+        assert!(!roster_admits(
             &roster,
             &claims_for(TOKEN_TYPE_STANDARD, "Admin@Example.COM")
         ));
+    }
+
+    #[test]
+    fn rostered_email_matches_case_variants() {
+        let roster = vec!["admin@example.com".to_string()];
+        assert!(is_rostered_email(&roster, "admin@example.com"));
+        assert!(is_rostered_email(&roster, "Admin@Example.COM"));
+        assert!(!is_rostered_email(&roster, "someone@example.com"));
     }
 
     #[test]

@@ -46,6 +46,49 @@ async function superAdminToken(api: ApiClient): Promise<string> {
 }
 
 test.describe('Super-admin merchant view (API)', () => {
+  test('merchant admins cannot invite a rostered address or its case variant', async ({ api, merchant }) => {
+    for (const email of [SUPER_ADMIN_EMAIL, SUPER_ADMIN_EMAIL.toUpperCase()]) {
+      const invited = await api.raw('POST', '/merchant/members/invite', {
+        failOnStatusCode: false,
+        body: { email, role: 'admin' },
+      })
+
+      expect(invited.status).toBe(403)
+    }
+  })
+
+  test('rostered addresses cannot sign up without the admin secret', async ({ api }) => {
+    for (const email of [SUPER_ADMIN_EMAIL, SUPER_ADMIN_EMAIL.toUpperCase()]) {
+      const signup = await api.anonymous().raw('POST', '/auth/signup', {
+        failOnStatusCode: false,
+        body: { email, password: SUPER_ADMIN_PASSWORD },
+      })
+
+      expect(signup.status).toBe(401)
+    }
+  })
+
+  test('a case-variant account cannot use super-admin access', async ({ api, merchant }) => {
+    const email = SUPER_ADMIN_EMAIL.toUpperCase()
+    const signup = await api.raw('POST', '/auth/signup', {
+      failOnStatusCode: false,
+      body: { email, password: SUPER_ADMIN_PASSWORD },
+    })
+    const token = signup.status === 200
+      ? signup.body.token
+      : (await api.raw('POST', '/auth/login', {
+          body: { email, password: SUPER_ADMIN_PASSWORD },
+        })).body.token
+
+    const entered = await api.raw('POST', '/auth/super-admin/enter-merchant', {
+      failOnStatusCode: false,
+      ...bearer(token),
+      body: { merchant_id: merchant.id },
+    })
+
+    expect(entered.status).toBe(403)
+  })
+
   test('a rostered super-admin can enter any merchant, keeping their own identity', async ({ api, merchant }) => {
     const superToken = await superAdminToken(api)
 
