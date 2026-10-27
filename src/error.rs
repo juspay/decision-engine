@@ -475,18 +475,114 @@ pub(crate) fn text_error_response(
     (status, message).into_response()
 }
 
-/// Plain-text handler error logged at the response conversion boundary.
+/// A route's error, answered with the standard `{code, message, data}` body and logged once when it
+/// becomes the response.
+///
+/// `message` is what the caller sees. An unexpected failure is built with [`RouteError::internal`],
+/// which keeps its cause for the log and tells the caller only that the request failed.
 #[derive(Debug)]
-pub struct TextError(pub StatusCode, pub String);
+pub struct RouteError {
+    status: StatusCode,
+    message: String,
+    /// The underlying failure, logged and never sent.
+    cause: Option<String>,
+}
 
-impl From<(StatusCode, String)> for TextError {
-    fn from((status, message): (StatusCode, String)) -> Self {
-        Self(status, message)
+impl RouteError {
+    pub fn new(status: StatusCode, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+            cause: None,
+        }
+    }
+
+    pub fn bad_request(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, message)
+    }
+
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::NOT_FOUND, message)
+    }
+
+    /// A failure the caller cannot act on — storage, ClickHouse, the filesystem. Its detail goes to
+    /// the log; the response says only that the request failed.
+    pub fn internal(cause: impl std::fmt::Debug) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: "The request could not be completed".to_string(),
+            cause: Some(format!("{cause:?}")),
+        }
+    }
+
+    pub fn status(&self) -> StatusCode {
+        self.status
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    fn code(&self) -> &'static str {
+        match self.status {
+            StatusCode::NOT_FOUND => error_codes::TE_02,
+            status if status.is_client_error() => error_codes::TE_03,
+            _ => error_codes::TE_00,
+        }
     }
 }
 
-impl axum::response::IntoResponse for TextError {
+impl axum::response::IntoResponse for RouteError {
     fn into_response(self) -> axum::response::Response {
-        text_error_response(self.0, self.1)
+        crate::logger::error!(
+            error_message = %self.message,
+            error_code = self.status.as_str(),
+            cause = self.cause.as_deref().unwrap_or_default(),
+            "Request failed"
+        );
+        let code = self.code();
+        (self.status, ApiErrorResponse::new(code, self.message, None)).into_response()
+    }
+}
+
+#[cfg(test)]
+mod route_error_tests {
+    use super::RouteError;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+
+    async fn body(error: RouteError) -> (StatusCode, serde_json::Value) {
+        let response = error.into_response();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        (status, serde_json::from_slice(&bytes).expect("json"))
+    }
+
+    #[tokio::test]
+    async fn answers_with_the_standard_json_error() {
+        assert_eq!(
+            body(RouteError::not_found("ingestion not found")).await,
+            (
+                StatusCode::NOT_FOUND,
+                serde_json::json!({"code": "TE_02", "message": "ingestion not found", "data": null})
+            )
+        );
+        assert_eq!(
+            body(RouteError::bad_request("empty report body")).await.1["code"],
+            "TE_03"
+        );
+    }
+
+    #[tokio::test]
+    async fn an_internal_error_keeps_its_cause_out_of_the_response() {
+        let (status, json) = body(RouteError::internal(
+            "connection refused: postgres://user:pw@db",
+        ))
+        .await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(json["code"], "TE_00");
+        assert!(!json.to_string().contains("postgres"), "{json}");
     }
 }

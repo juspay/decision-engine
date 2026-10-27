@@ -15,11 +15,10 @@ use axum::http::StatusCode;
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Iso8601;
 
-use crate::config::ClickHouseAnalyticsConfig;
 use crate::cost_ingestion::blended::{self, ConnectorBlend};
 use crate::cost_ingestion::overrides::{self, FeeOverride};
 use crate::cost_ingestion::{creds, serving};
-use crate::error::TextError;
+use crate::error::RouteError;
 
 /// One connector's fee picture for the dashboard.
 #[derive(Debug, Serialize)]
@@ -43,25 +42,12 @@ pub struct ConnectorFee {
     pub source: String,
 }
 
-pub(crate) fn clickhouse_config() -> Result<ClickHouseAnalyticsConfig, (StatusCode, String)> {
-    Ok(crate::app::APP_STATE
-        .get()
-        .ok_or((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "app state not initialized".to_string(),
-        ))?
-        .global_config
-        .analytics
-        .clickhouse
-        .clone())
-}
-
 /// `GET /merchant-account/:merchant_id/connector-fees`
 pub async fn list_connector_fees(
     MerchantFromPath(merchant): MerchantFromPath,
-) -> Result<Json<Vec<ConnectorFee>>, TextError> {
+) -> Result<Json<Vec<ConnectorFee>>, RouteError> {
     let merchant_id = merchant.as_str().to_string();
-    let cfg = clickhouse_config()?;
+    let cfg = super::global_config()?.analytics.clickhouse.clone();
 
     // Three sources, each keyed by lowercase connector: the fitted-model blend, manual overrides,
     // and configured credentials (for the account label + a "configured but no data yet" state).
@@ -69,7 +55,7 @@ pub async fn list_connector_fees(
     // merchant with no fitted models rather than a broken query.
     let model: HashMap<String, ConnectorBlend> = blended::by_connector(&cfg, &merchant_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
     let override_map: HashMap<String, FeeOverride> = overrides::list(&merchant)
         .await
         .unwrap_or_default()
@@ -157,7 +143,7 @@ pub async fn set_fee_override(
     MerchantFromPath(merchant): MerchantFromPath,
     Path((_, connector)): Path<(String, String)>,
     Json(body): Json<SetFeeOverrideRequest>,
-) -> Result<Json<FeeOverrideResponse>, TextError> {
+) -> Result<Json<FeeOverrideResponse>, RouteError> {
     let merchant_id = merchant.as_str().to_string();
     // A fee can't be negative; guard so a typo can't flip EV ranking into nonsense.
     if !body.pct_bps.is_finite()
@@ -165,11 +151,9 @@ pub async fn set_fee_override(
         || body.pct_bps < 0.0
         || body.fixed < 0.0
     {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "pct_bps and fixed must be finite and non-negative".to_string(),
-        )
-            .into());
+        return Err(RouteError::bad_request(
+            "pct_bps and fixed must be finite and non-negative",
+        ));
     }
     let connector = connector.to_lowercase();
     let updated_at = time::OffsetDateTime::now_utc()
@@ -182,7 +166,7 @@ pub async fn set_fee_override(
     };
     overrides::put(&merchant, &connector, &ov)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
 
     // Push the change onto the hot path now, so the next decide uses it without waiting for the
     // periodic refresh. Best-effort: the override is already persisted and will be picked up on the
@@ -202,11 +186,11 @@ pub async fn set_fee_override(
 pub async fn delete_fee_override(
     MerchantFromPath(merchant): MerchantFromPath,
     Path((_, connector)): Path<(String, String)>,
-) -> Result<StatusCode, TextError> {
+) -> Result<StatusCode, RouteError> {
     let connector = connector.to_lowercase();
     overrides::delete(&merchant, &connector)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
     refresh_serving(merchant.as_str()).await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -214,7 +198,9 @@ pub async fn delete_fee_override(
 /// Reload one merchant's served models (so an override edit applies immediately). Logged, not
 /// surfaced — the write already succeeded and the periodic refresh is the backstop.
 pub(crate) async fn refresh_serving(merchant_id: &str) {
-    let Ok(cfg) = clickhouse_config() else { return };
+    let Ok(cfg) = super::global_config().map(|config| config.analytics.clickhouse.clone()) else {
+        return;
+    };
     if let Err(e) = serving::refresh_merchant(&cfg, merchant_id).await {
         crate::logger::warn!(
             tag = "cost_serving",

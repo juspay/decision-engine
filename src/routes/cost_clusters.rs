@@ -19,8 +19,8 @@ use crate::cost_ingestion::blended::{
     self, ClusterFilter, ClusterOrder, ClusterScope, ClusterSegment, TopCluster,
 };
 use crate::cost_ingestion::overrides::{self, ClusterDims, ClusterOverride};
-use crate::error::TextError;
-use crate::routes::connector_fees::{clickhouse_config, refresh_serving};
+use crate::error::RouteError;
+use crate::routes::connector_fees::refresh_serving;
 
 /// How many top clusters to surface by default (top by GMV) when the caller asks for none.
 const DEFAULT_LIMIT: u32 = 10;
@@ -240,9 +240,9 @@ pub struct ApiClusterFacet {
 pub async fn list_cost_cluster_facets(
     MerchantFromPath(merchant): MerchantFromPath,
     Query(q): Query<TopClustersQuery>,
-) -> Result<Json<Vec<ApiClusterFacet>>, TextError> {
+) -> Result<Json<Vec<ApiClusterFacet>>, RouteError> {
     let merchant_id = merchant.as_str().to_string();
-    let cfg = clickhouse_config()?;
+    let cfg = super::global_config()?.analytics.clickhouse.clone();
     let scope = ClusterScope {
         connector: q.connector.as_deref(),
         account: q.account.as_deref(),
@@ -251,7 +251,7 @@ pub async fn list_cost_cluster_facets(
     };
     let facets = blended::cluster_facets(&cfg, &merchant_id, scope)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
     Ok(Json(
         facets
             .into_iter()
@@ -273,10 +273,10 @@ pub async fn list_cost_clusters(
     MerchantFromPath(merchant): MerchantFromPath,
     Query(q): Query<TopClustersQuery>,
     RawQuery(raw): RawQuery,
-) -> Result<Json<Vec<ClusterFee>>, TextError> {
+) -> Result<Json<Vec<ClusterFee>>, RouteError> {
     let merchant_id = merchant.as_str().to_string();
     let filters = ClusterFilterQuery::from_raw(raw.as_deref());
-    let cfg = clickhouse_config()?;
+    let cfg = super::global_config()?.analytics.clickhouse.clone();
     let limit = q.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
 
     let scope = ClusterScope {
@@ -299,7 +299,7 @@ pub async fn list_cost_clusters(
     let top: Vec<TopCluster> =
         blended::top_clusters(&cfg, &merchant_id, limit, scope, order, filter)
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+            .map_err(RouteError::internal)?;
     let overrides: HashMap<String, ClusterOverride> = overrides::list_clusters(&merchant)
         .await
         .unwrap_or_default()
@@ -505,22 +505,19 @@ pub async fn set_cluster_override(
     MerchantFromPath(merchant): MerchantFromPath,
     Path((_, cluster_key)): Path<(String, String)>,
     Json(body): Json<SetClusterOverrideRequest>,
-) -> Result<Json<ClusterOverride>, TextError> {
+) -> Result<Json<ClusterOverride>, RouteError> {
     let merchant_id = merchant.as_str().to_string();
     if !body.pct_bps.is_finite()
         || !body.fixed.is_finite()
         || body.pct_bps < 0.0
         || body.fixed < 0.0
     {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "pct_bps and fixed must be finite and non-negative".to_string(),
-        )
-            .into());
+        return Err(RouteError::bad_request(
+            "pct_bps and fixed must be finite and non-negative",
+        ));
     }
-    let dims = ClusterDims::from_key(&cluster_key).ok_or((
-        StatusCode::BAD_REQUEST,
-        "cluster key must have 7 '|'-separated fields".to_string(),
+    let dims = ClusterDims::from_key(&cluster_key).ok_or(RouteError::bad_request(
+        "cluster key must have 7 '|'-separated fields",
     ))?;
     let ov = ClusterOverride {
         dims,
@@ -532,7 +529,7 @@ pub async fn set_cluster_override(
     };
     overrides::put_cluster(&merchant, &ov)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
     refresh_serving(&merchant_id).await;
     Ok(Json(ov))
 }
@@ -541,14 +538,13 @@ pub async fn set_cluster_override(
 pub async fn delete_cluster_override(
     MerchantFromPath(merchant): MerchantFromPath,
     Path((_, cluster_key)): Path<(String, String)>,
-) -> Result<StatusCode, TextError> {
-    let dims = ClusterDims::from_key(&cluster_key).ok_or((
-        StatusCode::BAD_REQUEST,
-        "cluster key must have 7 '|'-separated fields".to_string(),
+) -> Result<StatusCode, RouteError> {
+    let dims = ClusterDims::from_key(&cluster_key).ok_or(RouteError::bad_request(
+        "cluster key must have 7 '|'-separated fields",
     ))?;
     overrides::delete_cluster(&merchant, &dims)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
     refresh_serving(merchant.as_str()).await;
     Ok(StatusCode::NO_CONTENT)
 }

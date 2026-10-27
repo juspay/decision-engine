@@ -231,6 +231,14 @@ impl TryFrom<DBMerchantAccount> for MerchantAccount {
 //     unimplemented!()
 // }
 
+/// The account of a merchant the request is authorized for. `None` for one that was never created:
+/// a service caller may name any merchant.
+pub async fn load_authorized(
+    merchant: &crate::auth::AuthorizedMerchant,
+) -> Option<MerchantAccount> {
+    load_merchant_by_merchant_id(merchant.as_str().to_string()).await
+}
+
 pub async fn load_merchant_by_merchant_id(merchant_id: String) -> Option<MerchantAccount> {
     let cache_key = format!("merchant_acct_{}", merchant_id);
 

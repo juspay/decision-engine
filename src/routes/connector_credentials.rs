@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::app::get_tenant_app_state;
 use crate::cost_ingestion::{creds, ConnectorCreds, ConnectorCredsStore};
-use crate::error::TextError;
+use crate::error::RouteError;
 
 #[derive(Debug, Deserialize)]
 pub struct SetCredentialsRequest {
@@ -40,7 +40,7 @@ pub async fn set_connector_credentials(
     MerchantFromPath(merchant): MerchantFromPath,
     Path((_, connector)): Path<(String, String)>,
     Json(body): Json<SetCredentialsRequest>,
-) -> Result<Json<SetCredentialsResponse>, TextError> {
+) -> Result<Json<SetCredentialsResponse>, RouteError> {
     let merchant_id = merchant.as_str().to_string();
     let app_state = get_tenant_app_state().await;
     let cfg = &app_state.config.cost_ingestion;
@@ -48,9 +48,9 @@ pub async fn set_connector_credentials(
         &cfg.creds_encryption_current,
         &cfg.creds_encryption_keys,
     )
-    .ok_or((
+    .ok_or(RouteError::new(
         StatusCode::SERVICE_UNAVAILABLE,
-        "credential encryption keyring not configured".to_string(),
+        "credential encryption keyring not configured",
     ))?;
 
     let new = ConnectorCreds {
@@ -60,7 +60,7 @@ pub async fn set_connector_credentials(
     store
         .put(&connector, &body.account, &merchant, &new)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
 
     Ok(Json(SetCredentialsResponse {
         merchant_id,
@@ -77,10 +77,10 @@ pub async fn set_connector_credentials(
 pub async fn delete_connector_credentials(
     MerchantFromPath(merchant): MerchantFromPath,
     Path((_, connector, account)): Path<(String, String, String)>,
-) -> Result<StatusCode, TextError> {
+) -> Result<StatusCode, RouteError> {
     creds::delete_source(&connector, &account, &merchant)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -89,7 +89,7 @@ pub async fn delete_connector_credentials(
 /// the credential keyring isn't configured (nothing decryptable).
 pub async fn list_connector_credentials(
     MerchantFromPath(merchant): MerchantFromPath,
-) -> Result<Json<Vec<creds::MaskedSource>>, TextError> {
+) -> Result<Json<Vec<creds::MaskedSource>>, RouteError> {
     let app_state = get_tenant_app_state().await;
     let cfg = &app_state.config.cost_ingestion;
     match ConnectorCredsStore::from_keyring(
@@ -100,11 +100,11 @@ pub async fn list_connector_credentials(
             .list_masked(&merchant)
             .await
             .map(Json)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")).into()),
+            .map_err(RouteError::internal),
         None => {
             let sources = creds::list_sources(&merchant)
                 .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+                .map_err(RouteError::internal)?;
             Ok(Json(
                 sources
                     .into_iter()

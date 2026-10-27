@@ -1,4 +1,5 @@
 use crate::custom_extractors::Json;
+use crate::error::RouteError;
 use crate::{
     app::get_tenant_app_state,
     error::ContainerError,
@@ -8,7 +9,7 @@ use crate::{
         types::RoutingRequest,
     },
 };
-use axum::{extract::Path, http::StatusCode};
+use axum::extract::Path;
 use error_stack::ResultExt;
 use fred::interfaces::KeysInterface;
 use serde::{Deserialize, Serialize};
@@ -118,18 +119,12 @@ async fn store_snapshot(
 pub async fn replace_profile_connectors(
     Path(profile_id): Path<String>,
     Json(inputs): Json<Vec<ConnectorInput>>,
-) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let snapshot = compact_snapshot(&profile_id, inputs)
-        .map_err(|message| (StatusCode::BAD_REQUEST, message))?;
+) -> Result<Json<serde_json::Value>, RouteError> {
+    let snapshot = compact_snapshot(&profile_id, inputs).map_err(RouteError::bad_request)?;
     let state = get_tenant_app_state().await;
     store_snapshot(&state.redis_conn.conn, &profile_id, &snapshot)
         .await
-        .map_err(|_| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "Failed to store connector eligibility".to_string(),
-            )
-        })?;
+        .map_err(RouteError::internal)?;
     Ok(Json(
         serde_json::json!({"profile_id": profile_id, "connector_count": snapshot.len()}),
     ))
