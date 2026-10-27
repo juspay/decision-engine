@@ -36,11 +36,12 @@ pub struct EnableTokenization {
     pub enable_issuer_tokenization: bool,
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize, crate::auth::MerchantScoped)]
 pub struct MerchantAccount {
     // #[serde(rename = "id")]
     pub id: MerchantPId,
     // #[serde(rename = "merchantId")]
+    #[merchant]
     pub merchantId: MerchantId,
     // #[serde(rename = "country")]
     pub country: Option<String>,
@@ -111,8 +112,9 @@ impl Debug for MerchantAccount {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, crate::auth::MerchantScoped)]
 pub struct MerchantAccountCreateRequest {
+    #[merchant]
     pub merchant_id: String,
     pub gateway_success_rate_based_decider_input: Option<String>,
 }

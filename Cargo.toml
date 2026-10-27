@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/gsm"]
+members = ["crates/gsm", "crates/merchant_scoped_derive"]
 resolver = "2"
 
 [package]
@@ -27,6 +27,7 @@ redis_compression = ["dep:zstd"]
 
 [dependencies]
 gsm = { path = "crates/gsm", features = ["loader", "s3"] }
+merchant_scoped_derive = { path = "crates/merchant_scoped_derive" }
 aws-config = { version = "1.5.5" }
 aws-sdk-kms = { version = "1.40.0", optional = true }
 aws-sdk-s3 = { version = "1" }

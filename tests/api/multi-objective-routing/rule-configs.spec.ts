@@ -19,12 +19,21 @@ test.describe('Rule Config CRUD API', () => {
     })
 
     test(`${algorithm}: unknown merchant still returns 404`, async ({ api, merchant }) => {
-      const response = await api.raw('POST', '/rule/get', {
+      // Only a service caller can name a merchant other than its own; a session gets 403 first.
+      const response = await api.asService().raw('POST', '/rule/get', {
         body: { merchant_id: `${merchant.id}_missing`, algorithm },
         failOnStatusCode: false,
       })
       expect(response.status).toBe(404)
       expect(response.body.message).toBe('MerchantId not found')
+    })
+
+    test(`${algorithm}: a session naming another merchant is refused`, async ({ api, merchant }) => {
+      const response = await api.raw('POST', '/rule/get', {
+        body: { merchant_id: `${merchant.id}_other`, algorithm },
+        failOnStatusCode: false,
+      })
+      expect(response.status).toBe(403)
     })
   }
 

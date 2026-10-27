@@ -184,6 +184,7 @@ type AuditFilters = {
   authType: string
   minAmount: string
   maxAmount: string
+  connectorMismatch: string
 }
 
 type InspectorTab = (typeof INSPECTOR_TABS)[number]
@@ -204,6 +205,7 @@ const EMPTY_FILTERS: AuditFilters = {
   authType: '',
   minAmount: '',
   maxAmount: '',
+  connectorMismatch: '',
 }
 
 function normalizeAuditFilters(filters: AuditFilters): AuditFilters {
@@ -226,6 +228,7 @@ function normalizeAuditFilters(filters: AuditFilters): AuditFilters {
     authType: filters.authType.trim(),
     minAmount: filters.minAmount.trim(),
     maxAmount: filters.maxAmount.trim(),
+    connectorMismatch: filters.connectorMismatch === 'true' ? 'true' : '',
   }
 }
 
@@ -243,6 +246,7 @@ function paymentFilterParams(filters: AuditFilters): Record<string, string | und
     auth_type: filters.authType || undefined,
     min_amount: filters.minAmount || undefined,
     max_amount: filters.maxAmount || undefined,
+    connector_mismatch: filters.connectorMismatch || undefined,
   }
 }
 
@@ -328,6 +332,7 @@ function parseFilters(searchParams: URLSearchParams): AuditFilters {
     authType: searchParams.get('auth_type') || '',
     minAmount: searchParams.get('min_amount') || '',
     maxAmount: searchParams.get('max_amount') || '',
+    connectorMismatch: searchParams.get('connector_mismatch') || '',
   })
 }
 
@@ -1338,6 +1343,18 @@ export function PaymentAuditPage() {
               placeholder="Max amount"
               aria-label="Max amount"
             />
+            <label
+              className={`${fieldClassName(filters.connectorMismatch === 'true')} flex cursor-pointer items-center gap-2`}
+              title="Only payments whose latest Decide Gateway or Hybrid Routing decision differs from a reported update connector."
+            >
+              <input
+                type="checkbox"
+                checked={filters.connectorMismatch === 'true'}
+                onChange={(event) => applyDropdownFilter('connectorMismatch', event.target.checked ? 'true' : '')}
+                className="h-4 w-4 shrink-0 rounded border-slate-300 accent-brand-600"
+              />
+              Connector mismatches only
+            </label>
           </div>
         ) : null}
         {/* The redesigned bar has no Search button; this keeps Enter submitting the text fields. */}

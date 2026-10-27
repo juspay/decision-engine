@@ -54,11 +54,12 @@ pub struct Completion {
 pub async fn enqueue_pending(
     connector: &str,
     account: &str,
-    merchant_id: &str,
+    merchant: &crate::auth::AuthorizedMerchant,
     notification_id: &str,
     report_ref: &str,
     source: &str,
 ) -> Result<bool, IngestError> {
+    let merchant_id = merchant.as_str();
     let app_state = get_tenant_app_state().await;
 
     // The UNIQUE (merchant_id, connector, notification_id) constraint is the real guard; this check
@@ -101,11 +102,12 @@ pub async fn enqueue_pending(
 /// can report progress and record the outcome against it. The id is generated client-side (UUIDv7),
 /// so it's known up front — no read-back of the freshly-inserted row is needed.
 pub async fn create_manual(
-    merchant_id: &str,
+    merchant: &crate::auth::AuthorizedMerchant,
     connector: &str,
     account: &str,
     report_ref: &str,
 ) -> Result<String, IngestError> {
+    let merchant_id = merchant.as_str();
     let app_state = get_tenant_app_state().await;
     let id = generate_uuid();
     let new = CostIngestionNew {
@@ -128,11 +130,12 @@ pub async fn create_manual(
 /// Identical to [`create_manual`] but tagged `source = "sample"` so history/coverage can label it a
 /// demo run; it still shares the pipeline, progress ticking, and undo path (`delete_ingestion`).
 pub async fn create_sample(
-    merchant_id: &str,
+    merchant: &crate::auth::AuthorizedMerchant,
     connector: &str,
     account: &str,
     report_ref: &str,
 ) -> Result<String, IngestError> {
+    let merchant_id = merchant.as_str();
     let app_state = get_tenant_app_state().await;
     let id = generate_uuid();
     let new = CostIngestionNew {
@@ -278,9 +281,10 @@ pub async fn mark_failed(id: &str, error: &str) -> Result<(), IngestError> {
 
 /// A merchant's ingestion history (and any in-flight jobs), newest first.
 pub async fn list_for_merchant(
-    merchant_id: &str,
+    merchant: &crate::auth::AuthorizedMerchant,
     limit: i64,
 ) -> Result<Vec<CostIngestion>, IngestError> {
+    let merchant_id = merchant.as_str();
     let app_state = get_tenant_app_state().await;
     let conn = app_state
         .db
@@ -299,9 +303,10 @@ pub async fn list_for_merchant(
 
 /// A single ingestion by id, scoped to the merchant (used for progress polling).
 pub async fn get_for_merchant(
-    merchant_id: &str,
+    merchant: &crate::auth::AuthorizedMerchant,
     id: &str,
 ) -> Result<Option<CostIngestion>, IngestError> {
+    let merchant_id = merchant.as_str();
     let app_state = get_tenant_app_state().await;
     generics::generic_find_one_optional::<<CostIngestion as HasTable>::Table, _, CostIngestion>(
         &app_state.db,
@@ -315,7 +320,11 @@ pub async fn get_for_merchant(
 
 /// Hard-delete an ingestion's history row, scoped to the merchant. Returns `true` if a row was
 /// removed. The caller deletes the ClickHouse data separately (see `sink::delete_snapshot`).
-pub async fn delete(merchant_id: &str, id: &str) -> Result<bool, IngestError> {
+pub async fn delete(
+    merchant: &crate::auth::AuthorizedMerchant,
+    id: &str,
+) -> Result<bool, IngestError> {
+    let merchant_id = merchant.as_str();
     let app_state = get_tenant_app_state().await;
     let conn = app_state
         .db

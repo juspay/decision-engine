@@ -104,7 +104,10 @@ fn sources_index_name(merchant_id: &str) -> String {
 }
 
 /// List the `(connector, account)` sources a merchant has configured (no secrets).
-pub async fn list_sources(merchant_id: &str) -> Result<Vec<SourceRef>, IngestError> {
+pub async fn list_sources(
+    merchant: &crate::auth::AuthorizedMerchant,
+) -> Result<Vec<SourceRef>, IngestError> {
+    let merchant_id = merchant.as_str();
     let stored = service_configuration::find_config_by_name(sources_index_name(merchant_id))
         .await
         .map_err(|e| IngestError::Storage(e.to_string()))?;
@@ -115,8 +118,13 @@ pub async fn list_sources(merchant_id: &str) -> Result<Vec<SourceRef>, IngestErr
 }
 
 /// Record a `(connector, account)` in the merchant's source index (idempotent).
-async fn add_source(merchant_id: &str, connector: &str, account: &str) -> Result<(), IngestError> {
-    let mut sources = list_sources(merchant_id).await?;
+async fn add_source(
+    merchant: &crate::auth::AuthorizedMerchant,
+    connector: &str,
+    account: &str,
+) -> Result<(), IngestError> {
+    let merchant_id = merchant.as_str();
+    let mut sources = list_sources(merchant).await?;
     let entry = SourceRef {
         connector: connector.to_string(),
         account: account.to_string(),
@@ -142,11 +150,12 @@ async fn add_source(merchant_id: &str, connector: &str, account: &str) -> Result
 /// Remove a `(connector, account)` from the merchant's source index (idempotent). When the last
 /// source goes, the index row is dropped entirely rather than left as an empty `[]`.
 async fn remove_source(
-    merchant_id: &str,
+    merchant: &crate::auth::AuthorizedMerchant,
     connector: &str,
     account: &str,
 ) -> Result<(), IngestError> {
-    let mut sources = list_sources(merchant_id).await?;
+    let merchant_id = merchant.as_str();
+    let mut sources = list_sources(merchant).await?;
     let before = sources.len();
     sources.retain(|s| !(s.connector == connector && s.account == account));
     if sources.len() == before {
@@ -172,15 +181,16 @@ async fn remove_source(
 pub async fn delete_source(
     connector: &str,
     account: &str,
-    merchant_id: &str,
+    merchant: &crate::auth::AuthorizedMerchant,
 ) -> Result<(), IngestError> {
+    let merchant_id = merchant.as_str();
     service_configuration::delete_config(config_name(merchant_id, connector, account))
         .await
         .map_err(|e| IngestError::Storage(e.to_string()))?;
     if is_pull_connector(connector) {
         remove_poll_source(merchant_id, connector, account).await?;
     }
-    remove_source(merchant_id, connector, account).await
+    remove_source(merchant, connector, account).await
 }
 
 /// `service_configuration.name` under which a `(merchant_id, connector, account)`'s encrypted creds
@@ -382,9 +392,10 @@ impl ConnectorCredsStore {
         &self,
         connector: &str,
         account: &str,
-        merchant_id: &str,
+        merchant: &crate::auth::AuthorizedMerchant,
         creds: &ConnectorCreds,
     ) -> Result<(), IngestError> {
+        let merchant_id = merchant.as_str();
         let name = config_name(merchant_id, connector, account);
         let value = self.seal(merchant_id, creds)?;
         let exists = service_configuration::find_config_by_name(name.clone())
@@ -399,7 +410,7 @@ impl ConnectorCredsStore {
         .map_err(|e| IngestError::Storage(e.to_string()))?;
 
         // Record the source in the merchant's index so the dashboard can list it.
-        add_source(merchant_id, connector, account).await?;
+        add_source(merchant, connector, account).await?;
 
         // Pull connectors also go in a per-connector poll index so the background poller can find
         // every source to sweep, across merchants, without a prefix scan.
@@ -413,15 +424,15 @@ impl ConnectorCredsStore {
     /// derive the hint, but only ever returns the masked form — never a full secret.
     pub async fn list_masked(
         &self,
-        merchant_id: &str,
+        merchant: &crate::auth::AuthorizedMerchant,
         config: &crate::config::CostIngestionConfig,
     ) -> Result<Vec<MaskedSource>, IngestError> {
-        let sources = list_sources(merchant_id).await?;
+        let sources = list_sources(merchant).await?;
         let mut out = Vec::with_capacity(sources.len());
         for s in sources {
             // A missing/undecryptable blob still lists the source, just without hints.
             let (webhook_secret_hint, download_auth_hint, environment) =
-                match self.get(merchant_id, &s.connector, &s.account).await {
+                match self.get(merchant, &s.connector, &s.account).await {
                     Ok(Some(r)) => {
                         let raw = r.creds.download_auth.peek();
                         let (hint, environment) = if s.connector == "checkout" {
@@ -462,10 +473,11 @@ impl ConnectorCredsStore {
     /// key and are never returned here.
     pub async fn get(
         &self,
-        merchant_id: &str,
+        merchant: &crate::auth::AuthorizedMerchant,
         connector: &str,
         account: &str,
     ) -> Result<Option<ResolvedCreds>, IngestError> {
+        let merchant_id = merchant.as_str();
         let name = config_name(merchant_id, connector, account);
         let stored = service_configuration::find_config_by_name(name)
             .await

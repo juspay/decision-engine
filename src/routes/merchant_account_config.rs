@@ -1,14 +1,14 @@
-use crate::app::APP_STATE;
+use crate::auth::AuthorizedMerchant;
 use crate::custom_extractors::Json;
-use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
+use crate::custom_extractors::{MerchantFromPath, ScopedJson};
 use crate::redis::types::{FeatureConf, MerchantFeature as FeatureMerchant};
 use crate::types::merchant as ETM;
 use crate::types::service_configuration;
 use crate::{error, logger};
-use axum::{extract::Path, http::HeaderMap};
+use axum::extract::Path;
 use error_stack::ResultExt;
-use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
+use strum::IntoEnumIterator;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct MerchantAccountCreateResponse {
@@ -41,7 +41,7 @@ fn debit_routing_config_name(merchant_id: &str) -> String {
 
 /// All merchant-level feature flags that can be toggled from the dashboard.
 /// Adding a new feature here is the only change needed on the backend.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, strum::EnumIter)]
 #[serde(rename_all = "kebab-case")]
 pub enum KnownFeature {
     GsmScoringFilter,
@@ -58,35 +58,6 @@ pub enum KnownFeature {
 }
 
 impl KnownFeature {
-    fn all() -> &'static [Self] {
-        &[
-            Self::GsmScoringFilter,
-            Self::ExploreExploitSrv3,
-            Self::AbTestRealPayments,
-            Self::CostSavings,
-            Self::Elimination,
-            Self::Autopilot,
-            Self::VolumeContracts,
-            Self::SrRouting,
-            Self::SrScoresFromRuleRouting,
-        ]
-    }
-
-    fn from_slug(s: &str) -> Option<Self> {
-        match s {
-            "gsm-scoring-filter" => Some(Self::GsmScoringFilter),
-            "explore-exploit-srv3" => Some(Self::ExploreExploitSrv3),
-            "ab-test-real-payments" => Some(Self::AbTestRealPayments),
-            "cost-savings" => Some(Self::CostSavings),
-            "elimination" => Some(Self::Elimination),
-            "autopilot" => Some(Self::Autopilot),
-            "volume-contracts" => Some(Self::VolumeContracts),
-            "sr-routing" => Some(Self::SrRouting),
-            "sr-scores-from-rule-routing" => Some(Self::SrScoresFromRuleRouting),
-            _ => None,
-        }
-    }
-
     /// The service_configuration key that holds the FeatureConf for this feature.
     /// This is the single source of truth — no per-merchant keys are used.
     fn feature_conf_key(&self) -> &'static str {
@@ -245,17 +216,12 @@ pub struct UpdateFeatureRequest {
 
 #[axum::debug_handler]
 pub async fn get_debit_routing(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<
     Json<DebitRoutingResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
 > {
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["merchant_debit_routing_get"])
-        .inc();
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["merchant_debit_routing_get"])
-        .start_timer();
+    let merchant_id = merchant.as_str().to_string();
 
     logger::debug!(
         "Received request to get debit routing flag for merchant {}",
@@ -282,33 +248,17 @@ pub async fn get_debit_routing(
     }
     .await;
 
-    match &response {
-        Ok(_) => API_REQUEST_COUNTER
-            .with_label_values(&["merchant_debit_routing_get", "success"])
-            .inc(),
-        Err(_) => API_REQUEST_COUNTER
-            .with_label_values(&["merchant_debit_routing_get", "failure"])
-            .inc(),
-    }
-
-    timer.observe_duration();
     response
 }
 
 #[axum::debug_handler]
 pub async fn get_merchant_config(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<
     Json<ETM::merchant_account::MerchantAccountResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
 > {
-    // Record total request count and start timer
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["merchant_account_get"])
-        .inc();
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["merchant_account_get"])
-        .start_timer();
+    let merchant_id = merchant.as_str().to_string();
 
     logger::debug!(
         "Received request to get merchant account configuration for ID: {}",
@@ -319,54 +269,21 @@ pub async fn get_merchant_config(
         .await
         .ok_or(error::MerchantAccountConfigurationError::MerchantNotFound);
 
-    let response = match result {
-        Ok(merchant_account) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["merchant_account_get", "success"])
-                .inc();
-            Ok(Json(merchant_account.into()))
-        }
-        Err(e) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["merchant_account_get", "failure"])
-                .inc();
-            Err(e.into())
-        }
-    };
-
-    timer.observe_duration();
-    response
+    match result {
+        Ok(merchant_account) => Ok(Json(merchant_account.into())),
+        Err(e) => Err(e.into()),
+    }
 }
 
 #[axum::debug_handler]
 pub async fn create_merchant_config(
-    headers: HeaderMap,
-    Json(payload): Json<ETM::merchant_account::MerchantAccountCreateRequest>,
+    ScopedJson {
+        merchant, payload, ..
+    }: ScopedJson<ETM::merchant_account::MerchantAccountCreateRequest>,
 ) -> Result<
     Json<MerchantAccountCreateResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
 > {
-    let global_config = APP_STATE
-        .get()
-        .map(|s| s.global_config.clone())
-        .ok_or(error::MerchantAccountConfigurationError::StorageError)?;
-
-    let provided = headers
-        .get("x-admin-secret")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-
-    if provided != global_config.admin_secret.secret.peek().as_str() {
-        return Err(error::MerchantAccountConfigurationError::Unauthorized.into());
-    }
-    // Record total request count and start timer
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["merchant_account_create"])
-        .inc();
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["merchant_account_create"])
-        .start_timer();
-
     logger::debug!(
         "Received request to create merchant account configuration: {:?}",
         payload
@@ -380,10 +297,6 @@ pub async fn create_merchant_config(
         ETM::merchant_account::load_merchant_by_merchant_id(payload.merchant_id.clone()).await;
 
     if merchant_account.is_some() {
-        API_REQUEST_COUNTER
-            .with_label_values(&["merchant_account_create", "failure"])
-            .inc();
-        timer.observe_duration();
         return Err(error::MerchantAccountConfigurationError::MerchantAlreadyExists.into());
     }
 
@@ -391,17 +304,15 @@ pub async fn create_merchant_config(
         .await
         .change_context(error::MerchantAccountConfigurationError::MerchantInsertionFailed);
 
-    let response = match result {
+    match result {
         Ok(_) => {
             logger::debug!("Merchant account configuration created successfully");
-            API_REQUEST_COUNTER
-                .with_label_values(&["merchant_account_create", "success"])
-                .inc();
-            let api_key = crate::routes::api_key::insert_api_key_for_merchant(
-                &merchant_id,
+            let api_key = crate::routes::api_key::mint_api_key(
+                &merchant,
                 Some("Default API key".to_string()),
             )
-            .await;
+            .await
+            .map(|created| created.api_key);
             Ok(Json(MerchantAccountCreateResponse {
                 message: "Merchant account created successfully".to_string(),
                 merchant_id,
@@ -409,32 +320,19 @@ pub async fn create_merchant_config(
                 api_key,
             }))
         }
-        Err(e) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["merchant_account_create", "failure"])
-                .inc();
-            Err(e.into())
-        }
-    };
-
-    timer.observe_duration();
-    response
+        Err(e) => Err(e.into()),
+    }
 }
 
 #[axum::debug_handler]
 pub async fn update_debit_routing(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
     Json(payload): Json<DebitRoutingRequest>,
 ) -> Result<
     Json<DebitRoutingResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
 > {
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["merchant_debit_routing_update"])
-        .inc();
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["merchant_debit_routing_update"])
-        .start_timer();
+    let merchant_id = merchant.as_str().to_string();
 
     logger::debug!(
         "Received request to update debit routing for merchant {}: enabled={}",
@@ -467,146 +365,75 @@ pub async fn update_debit_routing(
             .change_context(error::MerchantAccountConfigurationError::StorageError)
     };
 
-    let response = match result {
-        Ok(_) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["merchant_debit_routing_update", "success"])
-                .inc();
-            Ok(Json(DebitRoutingResponse {
-                merchant_id: merchant_id.clone(),
-                debit_routing_enabled: payload.enabled,
-            }))
-        }
-        Err(e) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["merchant_debit_routing_update", "failure"])
-                .inc();
-            Err(e.into())
-        }
-    };
+    match result {
+        Ok(_) => Ok(Json(DebitRoutingResponse {
+            merchant_id: merchant_id.clone(),
+            debit_routing_enabled: payload.enabled,
+        })),
+        Err(e) => Err(e.into()),
+    }
+}
 
-    timer.observe_duration();
-    response
+/// Every known feature and whether it is on for the merchant, as the dashboard lists them.
+async fn features_of(merchant: &AuthorizedMerchant) -> MerchantFeaturesResponse {
+    let mut features = Vec::new();
+    for feature in KnownFeature::iter() {
+        let enabled = feature.read_effective(merchant.as_str()).await;
+        features.push(MerchantFeatureEntry { feature, enabled });
+    }
+    MerchantFeaturesResponse {
+        merchant_id: merchant.as_str().to_string(),
+        features,
+    }
+}
+
+/// Feature flags are kept by merchant id whether or not the merchant exists, so an admin caller
+/// naming a merchant that was never created is told so rather than flagging a ghost.
+async fn ensure_merchant_exists(
+    merchant: &AuthorizedMerchant,
+) -> Result<(), error::ContainerError<error::MerchantAccountConfigurationError>> {
+    ETM::merchant_account::load_merchant_by_merchant_id(merchant.as_str().to_string())
+        .await
+        .map(|_| ())
+        .ok_or_else(|| error::MerchantAccountConfigurationError::MerchantNotFound.into())
 }
 
 #[axum::debug_handler]
 pub async fn get_merchant_features(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<
     Json<MerchantFeaturesResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
 > {
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["merchant_features_get"])
-        .inc();
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["merchant_features_get"])
-        .start_timer();
-
-    let response = async {
-        ETM::merchant_account::load_merchant_by_merchant_id(merchant_id.clone())
-            .await
-            .ok_or(error::MerchantAccountConfigurationError::MerchantNotFound)?;
-
-        let mut features = Vec::new();
-        for feature in KnownFeature::all() {
-            let enabled = feature.read_effective(&merchant_id).await;
-            features.push(MerchantFeatureEntry {
-                feature: feature.clone(),
-                enabled,
-            });
-        }
-
-        Ok(Json(MerchantFeaturesResponse {
-            merchant_id,
-            features,
-        }))
-    }
-    .await;
-
-    match &response {
-        Ok(_) => API_REQUEST_COUNTER
-            .with_label_values(&["merchant_features_get", "success"])
-            .inc(),
-        Err(_) => API_REQUEST_COUNTER
-            .with_label_values(&["merchant_features_get", "failure"])
-            .inc(),
-    }
-
-    timer.observe_duration();
-    response
+    ensure_merchant_exists(&merchant).await?;
+    Ok(Json(features_of(&merchant).await))
 }
 
 #[axum::debug_handler]
 pub async fn update_merchant_feature(
-    Path((merchant_id, feature_slug)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, feature)): Path<(String, KnownFeature)>,
     Json(payload): Json<UpdateFeatureRequest>,
 ) -> Result<
     Json<MerchantFeaturesResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
 > {
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["merchant_feature_update"])
-        .inc();
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["merchant_feature_update"])
-        .start_timer();
-
-    let feature = KnownFeature::from_slug(&feature_slug)
-        .ok_or(error::MerchantAccountConfigurationError::InvalidConfiguration)?;
-
-    ETM::merchant_account::load_merchant_by_merchant_id(merchant_id.clone())
+    ensure_merchant_exists(&merchant).await?;
+    feature
+        .update_conf(merchant.as_str(), payload.enabled)
         .await
-        .ok_or(error::MerchantAccountConfigurationError::MerchantNotFound)?;
-
-    let result = feature
-        .update_conf(&merchant_id, payload.enabled)
-        .await
-        .change_context(error::MerchantAccountConfigurationError::StorageError);
-
-    let response = match result {
-        Ok(_) => {
-            let mut features = Vec::new();
-            for f in KnownFeature::all() {
-                features.push(MerchantFeatureEntry {
-                    feature: f.clone(),
-                    enabled: f.read_effective(&merchant_id).await,
-                });
-            }
-            API_REQUEST_COUNTER
-                .with_label_values(&["merchant_feature_update", "success"])
-                .inc();
-            Ok(Json(MerchantFeaturesResponse {
-                merchant_id,
-                features,
-            }))
-        }
-        Err(e) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["merchant_feature_update", "failure"])
-                .inc();
-            Err(e.into())
-        }
-    };
-
-    timer.observe_duration();
-    response
+        .change_context(error::MerchantAccountConfigurationError::StorageError)?;
+    Ok(Json(features_of(&merchant).await))
 }
 
 #[axum::debug_handler]
 pub async fn delete_merchant_config(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<
     Json<MerchantAccountDeleteResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
 > {
-    // Record total request count and start timer
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["merchant_account_delete"])
-        .inc();
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["merchant_account_delete"])
-        .start_timer();
+    let merchant_id = merchant.as_str().to_string();
 
     logger::debug!(
         "Received request to delete merchant account configuration for ID: {}",
@@ -617,26 +444,13 @@ pub async fn delete_merchant_config(
         .await
         .change_context(error::MerchantAccountConfigurationError::MerchantDeletionFailed);
 
-    let response = match result {
-        Ok(_) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["merchant_account_delete", "success"])
-                .inc();
-            Ok(Json(MerchantAccountDeleteResponse {
-                message: "Merchant account deleted successfully".to_string(),
-                merchant_id,
-            }))
-        }
-        Err(e) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["merchant_account_delete", "failure"])
-                .inc();
-            Err(e.into())
-        }
-    };
-
-    timer.observe_duration();
-    response
+    match result {
+        Ok(_) => Ok(Json(MerchantAccountDeleteResponse {
+            message: "Merchant account deleted successfully".to_string(),
+            merchant_id,
+        })),
+        Err(e) => Err(e.into()),
+    }
 }
 
 #[cfg(test)]

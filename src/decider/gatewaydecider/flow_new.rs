@@ -243,7 +243,7 @@ pub async fn decider_full_payload_hs_function(
                     code: crate::error::error_codes::TE_05.to_string(),
                     user_message: "Debit routing is not enabled for this merchant".to_string(),
                     developer_message: format!(
-                        "Merchant {} does not have debit routing enabled. Enable it via the /merchant-account/:merchant-id/debit-routing API.",
+                        "Merchant {} does not have debit routing enabled. Enable it via the /merchant-account/:merchant_id/debit-routing API.",
                         dreq_.merchant_id
                     ),
                 },

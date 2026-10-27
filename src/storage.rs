@@ -33,6 +33,7 @@ use diesel_async::{
 use error_stack::ResultExt;
 use masking::PeekInterface;
 
+pub mod api_keys;
 pub mod consts;
 pub mod db;
 #[cfg(feature = "mysql")]

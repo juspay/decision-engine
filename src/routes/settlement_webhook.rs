@@ -77,8 +77,11 @@ async fn handle(
         &cfg.creds_encryption_keys,
     )
     .ok_or_else(|| IngestError::Storage("credential encryption keyring not configured".into()))?;
+    // The signature below, checked against this merchant's own secret, is what authorizes the
+    // path merchant; nothing is written until it verifies.
+    let merchant = crate::auth::AuthorizedMerchant::signed_callback(merchant_id);
     let resolved = creds_store
-        .get(merchant_id, connector, &account)
+        .get(&merchant, connector, &account)
         .await?
         .ok_or_else(|| {
             IngestError::MalformedNotification(format!(
@@ -96,7 +99,7 @@ async fn handle(
     store::enqueue_pending(
         connector,
         &account,
-        merchant_id,
+        &merchant,
         &note.notification_id,
         &note.report_ref,
         "webhook",

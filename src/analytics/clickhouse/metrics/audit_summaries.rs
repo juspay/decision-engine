@@ -4,6 +4,7 @@ use std::collections::HashMap;
 use clickhouse::Row;
 use serde::Deserialize;
 
+use crate::analytics::flow::FlowType;
 use crate::analytics::models::{
     PaymentAuditOutcome, PaymentAuditQuery, PaymentAuditScope, PaymentAuditSummary,
 };
@@ -12,7 +13,8 @@ use crate::feedback::gateway_scoring_service::{txn_failure_states, txn_success_s
 use crate::types::txn_details::types::TxnStatus;
 
 use super::super::common::{
-    fetch_all, fetch_one, payment_audit_route_label, payment_audit_stage_label, DOMAIN_TABLE,
+    fetch_all, fetch_one, payment_audit_route_label, payment_audit_stage_label,
+    static_flow_type_in_sql, ALL_DECISION_FLOW_TYPES, DOMAIN_TABLE,
     PAYMENT_AUDIT_SUMMARY_BUCKET_TABLE,
 };
 use super::super::filters::{
@@ -337,6 +339,51 @@ fn subquery(fragment: SqlFragment) -> BoundQueryBuilder {
     ))
 }
 
+/// A payment-level filter: retain its whole summary and trail, and apply before pagination.
+/// The existing summaries don't distinguish decided gateways from reported update gateways,
+/// so read those raw rows only when this filter is enabled.
+fn connector_mismatch_filter(
+    query: &PaymentAuditQuery,
+    scope: PaymentAuditScope,
+) -> Option<FilterClause> {
+    if !query.payment_filters.connector_mismatch {
+        return None;
+    }
+    let decisions = static_flow_type_in_sql(ALL_DECISION_FLOW_TYPES);
+    let updates = static_flow_type_in_sql(&[
+        FlowType::UpdateGatewayScoreUpdate,
+        FlowType::UpdateGatewayScoreSkipped,
+        FlowType::UpdateGatewayScoreError,
+    ]);
+    let mut payments = BoundQueryBuilder::new(DOMAIN_TABLE);
+    payments.extend_selects([
+        "assumeNotNull(lookup_key) AS lookup_key".to_string(),
+        format!("argMaxIf(ifNull(gateway, ''), tuple(created_at_ms, event_id), flow_type IN {decisions}) AS decided_gateway"),
+        format!("groupUniqArrayIf(ifNull(gateway, ''), flow_type IN {updates}) AS update_gateways"),
+    ]);
+    payments.extend_filters(payment_audit_timeline_filters(query, scope));
+    payments.add_filter(FilterClause::raw("notEmpty(ifNull(payment_id, ''))"));
+    payments.add_filter(FilterClause::raw("notEmpty(ifNull(lookup_key, ''))"));
+    payments.add_filter(FilterClause::raw("notEmpty(ifNull(gateway, ''))"));
+    payments.add_filter(FilterClause::raw(format!(
+        "(flow_type IN {decisions} OR flow_type IN {updates})"
+    )));
+    payments.add_group_by("lookup_key");
+    let mut mismatches = subquery(payments.into_fragment());
+    mismatches.add_select("lookup_key");
+    mismatches.add_filter(FilterClause::raw("notEmpty(decided_gateway)"));
+    // Hybrid can record `gateway:mca_id` while feedback records just `gateway`.
+    // Provider names also arrive in mixed case; account suffixes alone are not mismatches.
+    mismatches.add_filter(FilterClause::raw(
+        "arrayExists(gateway -> lowerUTF8(splitByChar(':', gateway)[1]) != lowerUTF8(splitByChar(':', decided_gateway)[1]), update_gateways)",
+    ));
+    let fragment = mismatches.into_fragment();
+    Some(FilterClause::new(
+        format!("lookup_key IN ({})", fragment.sql()),
+        fragment.binds().to_vec(),
+    ))
+}
+
 /// The pre-aggregated path: one row per payment, merged across every `summary_kind` the payment
 /// produced (rule preview, hybrid, dynamic), so a hybrid payment's rule-evaluate, decide-gateway
 /// and score-update events read as one trail. It reads the 15-minute summary buckets that overlap
@@ -354,6 +401,9 @@ fn merged_summary_fragment(
     source.add_select("lookup_key");
     source.extend_selects(aggregates.iter().map(|aggregate| aggregate.state_column()));
     source.extend_filters(payment_audit_summary_bucket_filters(query, scope));
+    if lookup_keys.is_none() {
+        source.extend_filters(connector_mismatch_filter(query, scope));
+    }
     source.extend_filters(lookup_keys.and_then(|keys| FilterClause::in_list("lookup_key", keys)));
 
     let mut builder = subquery(source.into_fragment());
@@ -386,6 +436,9 @@ fn raw_summary_fragment(
     let mut source = BoundQueryBuilder::new(DOMAIN_TABLE);
     source.extend_selects(columns);
     source.extend_filters(payment_audit_summary_scope_filters(query, scope));
+    if lookup_keys.is_none() {
+        source.extend_filters(connector_mismatch_filter(query, scope));
+    }
     source.add_filter(FilterClause::raw("lookup_key IS NOT NULL"));
     source.add_filter(FilterClause::raw("lookup_key != ''"));
     source.extend_filters(lookup_keys.and_then(|keys| FilterClause::in_list("lookup_key", keys)));

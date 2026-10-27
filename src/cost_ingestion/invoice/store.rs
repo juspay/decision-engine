@@ -131,21 +131,30 @@ async fn index_remove(name: String, item: &str) -> Result<usize, IngestError> {
 // ── public API ──────────────────────────────────────────────────────────────────────────────────
 
 /// The connectors a merchant has an invoice add-on for.
-pub async fn list_connectors(merchant_id: &str) -> Result<Vec<String>, IngestError> {
+pub async fn list_connectors(
+    merchant: &crate::auth::AuthorizedMerchant,
+) -> Result<Vec<String>, IngestError> {
+    let merchant_id = merchant.as_str();
     read_list(merchant_index_name(merchant_id)).await
 }
 
 /// The add-on for one `(merchant, connector)`, if set.
-pub async fn get(merchant_id: &str, connector: &str) -> Result<Option<StoredAddon>, IngestError> {
+pub async fn get(
+    merchant: &crate::auth::AuthorizedMerchant,
+    connector: &str,
+) -> Result<Option<StoredAddon>, IngestError> {
+    let merchant_id = merchant.as_str();
     read_json::<StoredAddon>(addon_name(merchant_id, connector)).await
 }
 
 /// All `(connector, add-on)` a merchant has.
-pub async fn list(merchant_id: &str) -> Result<Vec<(String, StoredAddon)>, IngestError> {
-    let connectors = list_connectors(merchant_id).await?;
+pub async fn list(
+    merchant: &crate::auth::AuthorizedMerchant,
+) -> Result<Vec<(String, StoredAddon)>, IngestError> {
+    let connectors = list_connectors(merchant).await?;
     let mut out = Vec::with_capacity(connectors.len());
     for connector in connectors {
-        if let Some(a) = get(merchant_id, &connector).await? {
+        if let Some(a) = get(merchant, &connector).await? {
             out.push((connector, a));
         }
     }
@@ -159,10 +168,11 @@ pub async fn list_merchants() -> Result<Vec<String>, IngestError> {
 
 /// Upsert a merchant's invoice add-on for a connector, recording it in both indices.
 pub async fn put(
-    merchant_id: &str,
+    merchant: &crate::auth::AuthorizedMerchant,
     connector: &str,
     addon: &StoredAddon,
 ) -> Result<(), IngestError> {
+    let merchant_id = merchant.as_str();
     let connector = connector.to_lowercase();
     write_json(addon_name(merchant_id, &connector), addon).await?;
     index_add(merchant_index_name(merchant_id), &connector).await?;
@@ -171,7 +181,11 @@ pub async fn put(
 }
 
 /// Remove a merchant's add-on for a connector; drops it from the global index once none remain.
-pub async fn delete(merchant_id: &str, connector: &str) -> Result<(), IngestError> {
+pub async fn delete(
+    merchant: &crate::auth::AuthorizedMerchant,
+    connector: &str,
+) -> Result<(), IngestError> {
+    let merchant_id = merchant.as_str();
     let connector = connector.to_lowercase();
     service_configuration::delete_config(addon_name(merchant_id, &connector))
         .await

@@ -47,6 +47,8 @@ pub struct AnalyticsQueryParams {
     /// Payment audit only: amount bounds, inclusive.
     pub min_amount: Option<f64>,
     pub max_amount: Option<f64>,
+    /// Payment audit only: compare routing decisions with reported update connectors.
+    pub connector_mismatch: Option<bool>,
 }
 
 fn analytics_query_from_params(
@@ -96,6 +98,7 @@ fn payment_audit_query_from_params(
         params.routing_kind.clone(),
     )
     .with_payment_filters(PaymentAuditPaymentFilters {
+        connector_mismatch: params.connector_mismatch.unwrap_or(false),
         outcome: PaymentAuditPaymentFilters::values(params.outcome.as_deref())
             .iter()
             .filter_map(|value| PaymentAuditOutcome::from_query(Some(value)))

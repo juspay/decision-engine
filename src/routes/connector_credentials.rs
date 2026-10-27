@@ -4,6 +4,8 @@
 //! report-download auth. Secrets are encrypted at rest (`ConnectorCredsStore`); this route never
 //! returns them back. See `scratch/inhouse-cost-architecture.md` §7–8.
 
+use crate::custom_extractors::MerchantFromPath;
+
 use crate::custom_extractors::Json;
 use axum::extract::Path;
 use axum::http::StatusCode;
@@ -39,9 +41,11 @@ pub struct SetCredentialsResponse {
 
 /// `POST /merchant-account/:merchant_id/connectors/:connector/credentials`
 pub async fn set_connector_credentials(
-    Path((merchant_id, connector)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, connector)): Path<(String, String)>,
     Json(body): Json<SetCredentialsRequest>,
 ) -> Result<Json<SetCredentialsResponse>, TextError> {
+    let merchant_id = merchant.as_str().to_string();
     let app_state = get_tenant_app_state().await;
     let cfg = &app_state.config.cost_ingestion;
     let download_auth = if connector == "checkout" {
@@ -65,7 +69,7 @@ pub async fn set_connector_credentials(
         download_auth,
     };
     store
-        .put(&connector, &body.account, &merchant_id, &new)
+        .put(&connector, &body.account, &merchant, &new)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
 
@@ -82,9 +86,10 @@ pub async fn set_connector_credentials(
 /// Removes the stored credentials and the source-index entry so the pair drops off the configured
 /// list. Idempotent — deleting a source that isn't there returns success.
 pub async fn delete_connector_credentials(
-    Path((merchant_id, connector, account)): Path<(String, String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, connector, account)): Path<(String, String, String)>,
 ) -> Result<StatusCode, TextError> {
-    creds::delete_source(&connector, &account, &merchant_id)
+    creds::delete_source(&connector, &account, &merchant)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
     Ok(StatusCode::NO_CONTENT)
@@ -94,7 +99,7 @@ pub async fn delete_connector_credentials(
 /// previews (last-4 hints only, never full secrets). Falls back to source ids without hints when
 /// the credential keyring isn't configured (nothing decryptable).
 pub async fn list_connector_credentials(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<Vec<creds::MaskedSource>>, TextError> {
     let app_state = get_tenant_app_state().await;
     let cfg = &app_state.config.cost_ingestion;
@@ -103,12 +108,12 @@ pub async fn list_connector_credentials(
         &cfg.creds_encryption_keys,
     ) {
         Some(store) => store
-            .list_masked(&merchant_id, cfg)
+            .list_masked(&merchant, cfg)
             .await
             .map(Json)
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")).into()),
         None => {
-            let sources = creds::list_sources(&merchant_id)
+            let sources = creds::list_sources(&merchant)
                 .await
                 .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
             Ok(Json(

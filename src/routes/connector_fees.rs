@@ -5,6 +5,8 @@
 //! replaces the learned model for every EV calculation on that connector — see
 //! [`crate::cost_ingestion::serving::lookup`] and `overrides`.
 
+use crate::custom_extractors::MerchantFromPath;
+
 use std::collections::{BTreeSet, HashMap};
 
 use crate::custom_extractors::Json;
@@ -56,8 +58,9 @@ pub(crate) fn clickhouse_config() -> Result<ClickHouseAnalyticsConfig, (StatusCo
 
 /// `GET /merchant-account/:merchant_id/connector-fees`
 pub async fn list_connector_fees(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<Vec<ConnectorFee>>, TextError> {
+    let merchant_id = merchant.as_str().to_string();
     let cfg = clickhouse_config()?;
 
     // Three sources, each keyed by lowercase connector: the fitted-model blend, manual overrides,
@@ -67,7 +70,7 @@ pub async fn list_connector_fees(
     let model: HashMap<String, ConnectorBlend> = blended::by_connector(&cfg, &merchant_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
-    let override_map: HashMap<String, FeeOverride> = overrides::list(&merchant_id)
+    let override_map: HashMap<String, FeeOverride> = overrides::list(&merchant)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -75,7 +78,7 @@ pub async fn list_connector_fees(
         .collect();
     let mut accounts: HashMap<String, String> = HashMap::new();
     let mut credentialed: BTreeSet<String> = BTreeSet::new();
-    if let Ok(sources) = creds::list_sources(&merchant_id).await {
+    if let Ok(sources) = creds::list_sources(&merchant).await {
         for s in sources {
             let connector = s.connector.to_lowercase();
             credentialed.insert(connector.clone());
@@ -151,9 +154,11 @@ pub struct FeeOverrideResponse {
 
 /// `PUT /merchant-account/:merchant_id/connectors/:connector/fee-override`
 pub async fn set_fee_override(
-    Path((merchant_id, connector)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, connector)): Path<(String, String)>,
     Json(body): Json<SetFeeOverrideRequest>,
 ) -> Result<Json<FeeOverrideResponse>, TextError> {
+    let merchant_id = merchant.as_str().to_string();
     // A fee can't be negative; guard so a typo can't flip EV ranking into nonsense.
     if !body.pct_bps.is_finite()
         || !body.fixed.is_finite()
@@ -175,7 +180,7 @@ pub async fn set_fee_override(
         fixed: body.fixed,
         updated_at: updated_at.clone(),
     };
-    overrides::put(&merchant_id, &connector, &ov)
+    overrides::put(&merchant, &connector, &ov)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
 
@@ -195,13 +200,14 @@ pub async fn set_fee_override(
 
 /// `DELETE /merchant-account/:merchant_id/connectors/:connector/fee-override`
 pub async fn delete_fee_override(
-    Path((merchant_id, connector)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, connector)): Path<(String, String)>,
 ) -> Result<StatusCode, TextError> {
     let connector = connector.to_lowercase();
-    overrides::delete(&merchant_id, &connector)
+    overrides::delete(&merchant, &connector)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
-    refresh_serving(&merchant_id).await;
+    refresh_serving(merchant.as_str()).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

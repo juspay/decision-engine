@@ -82,45 +82,53 @@ test.describe('API keys (API)', () => {
 })
 
 /**
- * KNOWN GAP — api-key routes carry no cross-merchant authorization.
- *
- * `authenticate` populates an AuthContext with the caller's merchant but never compares it against the
- * merchant_id in the path or body, and the api_key handlers don't check it either. Any authenticated
- * session can therefore mint, list and revoke keys for ANY merchant.
- *
- * These tests pin the CURRENT behaviour so a future fix is a deliberate, visible change rather than a
- * surprise CI failure. The correct behaviour is noted per-test. If these start failing with 403s, the
- * gap has been closed — update the expectations rather than reverting the handler.
+ * A session may manage only its own merchant's keys. A service caller (the admin secret, as
+ * Hyperswitch calls) manages any merchant's.
  */
-test.describe('API key cross-merchant isolation (known gap)', () => {
-  test('a session can list another merchant\'s keys', async ({ api, merchant }) => {
+test.describe('API key cross-merchant isolation', () => {
+  test('a session cannot list another merchant\'s keys', async ({ api, merchant }) => {
+    const service = api.asService()
     const other = factory.merchantId('apikey_other')
-    await api.ensureMerchantAccount(other)
-    const otherKey = await api.createApiKey(other, 'belongs-to-other')
+    await service.ensureMerchantAccount(other)
+    const otherKey = await service.createApiKey(other, 'belongs-to-other')
 
-    // api.token is still the ORIGINAL merchant's session at this point.
+    // api.token is still the ORIGINAL merchant's session.
     const list = await api.raw('GET', `/api-key/list/${other}`, { failOnStatusCode: false })
+    expect(list.status).toBe(403)
 
-    // Should be 403. Metadata only — the raw key is never returned by list.
-    expect(list.status).toBe(200)
-    expect(list.body.some((k: any) => k.key_id === otherKey.body.key_id)).toBe(true)
+    const asService = await service.listApiKeys(other)
+    expect(asService.body.some((k: any) => k.key_id === otherKey.body.key_id)).toBe(true)
 
-    await api.cleanupTestData(other)
+    await service.cleanupTestData(other)
   })
 
-  test('a session can mint a key for a merchant it does not own', async ({ api, merchant }) => {
+  test('a session cannot mint a key for a merchant it does not own', async ({ api, merchant }) => {
+    const service = api.asService()
     const other = factory.merchantId('apikey_mint_other')
-    await api.ensureMerchantAccount(other)
+    await service.ensureMerchantAccount(other)
 
     const created = await api.raw('POST', '/api-key/create', {
       failOnStatusCode: false,
       body: { merchant_id: other, description: 'minted-across-merchants' },
     })
+    expect(created.status).toBe(403)
 
-    // Should be 403.
-    expect(created.status).toBe(200)
-    expect(created.body.merchant_id).toBe(other)
+    await service.cleanupTestData(other)
+  })
 
-    await api.cleanupTestData(other)
+  test('a session cannot revoke another merchant\'s key', async ({ api, merchant }) => {
+    const service = api.asService()
+    const other = factory.merchantId('apikey_revoke_other')
+    await service.ensureMerchantAccount(other)
+    const otherKey = await service.createApiKey(other, 'not-yours')
+
+    // Another merchant's key reads as not found, so its existence is not disclosed either.
+    const revoke = await api.raw('DELETE', `/api-key/${otherKey.body.key_id}`, { failOnStatusCode: false })
+    expect(revoke.status).toBe(404)
+
+    const stillThere = await service.listApiKeys(other)
+    expect(stillThere.body.find((k: any) => k.key_id === otherKey.body.key_id)?.is_active).toBeTruthy()
+
+    await service.cleanupTestData(other)
   })
 })

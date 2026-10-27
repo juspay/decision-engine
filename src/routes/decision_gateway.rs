@@ -1,3 +1,4 @@
+use crate::custom_extractors::{ScopedJson, ScopedJsonRejection};
 use std::time::Instant;
 
 use crate::decider::gatewaydecider::{
@@ -5,7 +6,6 @@ use crate::decider::gatewaydecider::{
     types::{DecidedGateway, DomainDeciderRequest, ErrorResponse, UnifiedError},
 };
 use crate::logger;
-use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::redis::feature::{
     check_redis_comp_merchant_flag, is_feature_enabled, RedisCompressionConfig,
     RedisCompressionConfigCombined,
@@ -38,9 +38,15 @@ impl IntoResponse for ErrorResponse {
             }),
             "Routing request failed"
         );
+        // `status` carries the HTTP code. A client error (4xx) is answered with that code; anything
+        // else is answered 400, which is what every decider error has always been answered with.
+        let status = StatusCode::from_bytes(self.status.as_bytes())
+            .ok()
+            .filter(StatusCode::is_client_error)
+            .unwrap_or(StatusCode::BAD_REQUEST);
         let body = serde_json::to_string(&self).unwrap();
         axum::http::Response::builder()
-            .status(StatusCode::BAD_REQUEST)
+            .status(status)
             .header("Content-Type", "application/json")
             .body(axum::body::Body::from(body))
             .unwrap()
@@ -56,23 +62,17 @@ pub struct DecidedGatewayResponse {
 
 #[axum::debug_handler]
 pub async fn decision_gateway(
-    req: axum::http::Request<axum::body::Body>,
+    headers: axum::http::HeaderMap,
+    uri: axum::http::Uri,
+    request: Result<ScopedJson<DomainDeciderRequest>, ScopedJsonRejection>,
 ) -> Result<DecidedGatewayResponse, ErrorResponse>
 where
     DecidedGatewayResponse: IntoResponse,
     ErrorResponse: IntoResponse,
 {
     let cpu_start = Instant::now();
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["decision_gateway"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["decision_gateway"])
-        .inc();
 
-    // Clone the headers and URI before consuming `req`
-    let headers = req.headers().clone();
-    let original_url = req.uri().to_string();
+    let original_url = uri.to_string();
     let x_request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
         .and_then(|v| v.to_str().ok())
@@ -89,10 +89,13 @@ where
     // Extract request headers as a JSON string
     // let req_headers = serde_json::to_string(&headers).unwrap_or("{}".to_string());
 
-    // Now consume `req` to get the body
-    let body = match crate::routes::body::read_request_body(req.into_body()).await {
-        Ok(body) => body,
-        Err(e) => {
+    let (body, api_decider_request) = match request {
+        Ok(ScopedJson { payload, body, .. }) => (body, Ok(payload)),
+        Err(ScopedJsonRejection::Parse { body, error }) => (body, Err(error)),
+        Err(ScopedJsonRejection::Scope(violation)) => {
+            return Err(violation.into());
+        }
+        Err(ScopedJsonRejection::Read(e)) => {
             let error_response = e.into_error_response();
 
             let latency = start_time.elapsed().as_millis() as u64;
@@ -121,16 +124,10 @@ where
                 "Error occurred while parsing request body"
             );
 
-            API_REQUEST_COUNTER
-                .with_label_values(&["decision_gateway", "failure"])
-                .inc();
-            timer.observe_duration();
-
             return Err(error_response);
         }
     };
 
-    let api_decider_request: Result<DomainDeciderRequest, _> = serde_json::from_slice(&body);
     match api_decider_request {
         Ok(payload) => {
             let merchant_id = payload.orderReference.merchantId.clone();
@@ -201,9 +198,6 @@ where
                         "Successfully processed request"
                     );
 
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["decision_gateway", "success"])
-                        .inc();
                     Ok(response)
                 }
                 Err(e) => {
@@ -233,14 +227,10 @@ where
                         "Error occurred while processing decider function"
                     );
 
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["decision_gateway", "failure"])
-                        .inc();
                     Err(e)
                 }
             };
 
-            timer.observe_duration();
             final_result
         }
         Err(e) => {
@@ -286,10 +276,6 @@ where
                 "Error occurred while parsing request payload"
             );
 
-            API_REQUEST_COUNTER
-                .with_label_values(&["decision_gateway", "failure"])
-                .inc();
-            timer.observe_duration();
             Err(error_response)
         }
     }

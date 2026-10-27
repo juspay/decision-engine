@@ -1,4 +1,4 @@
-use crate::custom_extractors::Json;
+use crate::custom_extractors::{Json, ScopedJson};
 use error_stack::ResultExt;
 use serde::{Deserialize, Serialize};
 
@@ -7,10 +7,11 @@ use crate::decider::gatewaydecider::constants as C;
 use crate::error;
 use crate::logger;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, crate::auth::MerchantScoped)]
 pub struct ResetGatewayScoresRequest {
     /// Merchant whose gateway (SR) scores should be flushed. Accepts both the
     /// snake_case and the camelCase the dashboard sends.
+    #[merchant]
     #[serde(rename = "merchant_id", alias = "merchantId")]
     pub merchant_id: String,
 }
@@ -31,9 +32,9 @@ pub struct ResetGatewayScoresResponse {
 /// new run starts from fresh scores without touching other merchants' data.
 pub async fn reset_gateway_scores(
     TenantStateResolver(state): TenantStateResolver,
-    Json(payload): Json<ResetGatewayScoresRequest>,
+    ScopedJson { merchant, .. }: ScopedJson<ResetGatewayScoresRequest>,
 ) -> Result<Json<ResetGatewayScoresResponse>, error::ContainerError<error::ApiError>> {
-    let merchant_id = payload.merchant_id.trim().to_string();
+    let merchant_id = merchant.as_str().trim().to_string();
     if merchant_id.is_empty() {
         return Err(error::ApiError::MissingRequiredField("merchant_id").into());
     }

@@ -49,6 +49,9 @@ pub enum EuclidErrors {
 
     #[error("Field validation failed: {0}")]
     FieldValidationFailed(String),
+
+    #[error("{0}")]
+    MerchantScopeViolation(crate::auth::MerchantScopeViolation),
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -174,6 +177,7 @@ impl axum::response::IntoResponse for EuclidErrors {
             )
                 .into_response(),
 
+            Self::MerchantScopeViolation(violation) => violation.into_response(),
             Self::RoutingAlgorithmNotFound(msg) => (
                 hyper::StatusCode::BAD_REQUEST,
                 ApiErrorResponse::new(

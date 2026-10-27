@@ -66,6 +66,16 @@ export class ApiClient {
     return client
   }
 
+  /**
+   * A client sharing this request context as a service caller: the admin secret and no session, the
+   * way Hyperswitch calls Decision Engine. A session may only name its own merchant; a service caller
+   * acts for whichever merchant the request names — use this to reach another merchant, or one that
+   * does not exist.
+   */
+  asService(): ApiClient {
+    return new ApiClient(this.request)
+  }
+
   /** Core request primitive — mirrors Cypress `requestApi`. */
   async raw<T = any>(method: string, path: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
     const { body, failOnStatusCode = true, headers = {}, qs } = options

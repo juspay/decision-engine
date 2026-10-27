@@ -1,7 +1,8 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, crate::auth::MerchantScoped)]
 pub struct RoutingRule {
+    #[merchant]
     pub merchant_id: String,
     pub config: ConfigVariant,
 }
@@ -14,8 +15,9 @@ pub struct RuleConfigGetResponse {
     pub config: Option<ConfigVariant>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, crate::auth::MerchantScoped)]
 pub struct FetchRoutingRule {
+    #[merchant]
     pub merchant_id: String,
     pub algorithm: AlgorithmType,
 }

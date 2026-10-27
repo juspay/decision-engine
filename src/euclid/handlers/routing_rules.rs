@@ -10,10 +10,9 @@ use crate::{
         pm_filter_graph,
         types::{
             ActivateRoutingConfigRequest, AlgorithmType, Context, DeactivateRoutingConfigRequest,
-            ExperimentEndpoint, JsonifiedRoutingAlgorithm, KeyDataType, RoutingAlgorithmMapperNew,
-            RoutingBatchRequest, RoutingBatchResponse, RoutingDictionaryRecord,
-            RoutingEvaluateResponse, RoutingRequest, RoutingRule, SrDimensionConfig,
-            StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
+            ExperimentEndpoint, JsonifiedRoutingAlgorithm, KeyDataType, RoutingBatchRequest,
+            RoutingBatchResponse, RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest,
+            RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
         },
         utils::{
             apply_default_fallback, generate_random_id, is_valid_enum_value,
@@ -23,22 +22,20 @@ use crate::{
     types::service_configuration::{find_config_by_name, insert_config, update_config},
 };
 
-use crate::custom_extractors::Json;
+use crate::custom_extractors::{Json, MerchantFromPath, ScopedJson, ScopedJsonRejection};
+use crate::euclid::algorithm_store;
 use crate::euclid::{
-    errors::EuclidErrors,
-    errors::ValidationErrorDetails,
-    types::{RoutingAlgorithmMapper, RoutingAlgorithmMapperUpdate},
+    errors::EuclidErrors, errors::ValidationErrorDetails, types::RoutingAlgorithmMapper,
 };
 use crate::generics::MeshError;
-use crate::{euclid::types::RoutingAlgorithm, logger, metrics};
-use axum::{extract::Path, response::IntoResponse};
+use crate::{euclid::types::RoutingAlgorithm, logger};
+use axum::response::IntoResponse;
 use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods};
 use error_stack::ResultExt;
 
 use crate::app::get_tenant_app_state;
 
 use crate::error::ContainerError;
-use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 
 // ── Routing algorithm Redis cache ─────────────────────────────────────────────
 //
@@ -463,14 +460,10 @@ fn field_validation_failure(
 }
 
 pub async fn config_sr_dimensions(
-    Json(payload): Json<SrDimensionConfig>,
+    ScopedJson {
+        merchant, payload, ..
+    }: ScopedJson<SrDimensionConfig>,
 ) -> Result<Json<String>, ContainerError<EuclidErrors>> {
-    let timer = metrics::API_LATENCY_HISTOGRAM
-        .with_label_values(&["config_sr_dimensions"])
-        .start_timer();
-    metrics::API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["config_sr_dimensions"])
-        .inc();
     logger::debug!("Received SR Dimension config: {:?}", payload);
 
     // Validate dimensions against ELIGIBLE_DIMENSIONS
@@ -487,11 +480,6 @@ pub async fn config_sr_dimensions(
         .unwrap_or_default();
 
     if !invalid_dimensions.is_empty() {
-        metrics::API_REQUEST_COUNTER
-            .with_label_values(&["config_sr_dimensions", "failure"])
-            .inc();
-        timer.observe_duration();
-
         logger::error!(
             "Invalid dimensions found for merchant {}: {:?}",
             payload.merchant_id,
@@ -506,10 +494,9 @@ pub async fn config_sr_dimensions(
         .into());
     }
 
-    let mid = payload.merchant_id.clone();
     let config = serde_json::to_string(&payload)
         .change_context(EuclidErrors::FailedToSerializeJsonToString)?;
-    let name = format!("SR_DIMENSION_CONFIG_{}", mid);
+    let name = format!("SR_DIMENSION_CONFIG_{}", merchant);
 
     let service_config = find_config_by_name(name.clone())
         .await
@@ -518,14 +505,17 @@ pub async fn config_sr_dimensions(
         Some(_) => {
             logger::debug!(
                 "Updating existing SR Dimension config for merchant: {}",
-                mid
+                merchant
             );
             update_config(name, Some(config))
                 .await
                 .change_context(EuclidErrors::StorageError)
         }
         None => {
-            logger::debug!("Inserting new SR Dimension config for merchant: {}", mid);
+            logger::debug!(
+                "Inserting new SR Dimension config for merchant: {}",
+                merchant
+            );
             insert_config(name, Some(config))
                 .await
                 .change_context(EuclidErrors::StorageError)
@@ -533,23 +523,15 @@ pub async fn config_sr_dimensions(
     };
 
     if let Err(_) = result {
-        metrics::API_REQUEST_COUNTER
-            .with_label_values(&["config_sr_dimensions", "failure"])
-            .inc();
-        timer.observe_duration();
         logger::error!(
             "Failed to insert or update SR Dimension config for merchant: {}",
-            mid
+            merchant
         );
         return Err(ContainerError::from(EuclidErrors::StorageError));
     }
-    metrics::API_REQUEST_COUNTER
-        .with_label_values(&["config_sr_dimensions", "success"])
-        .inc();
-    timer.observe_duration();
     logger::debug!(
         "SR Dimension configuration updated successfully for merchant: {}",
-        mid
+        merchant
     );
     Ok(Json(
         "SR Dimension configuration updated successfully".to_string(),
@@ -559,8 +541,9 @@ pub async fn config_sr_dimensions(
 /// Returns the merchant's SR dimension config (which dimensions clusters are split on). Empty
 /// `fields` when nothing is configured yet — so the dashboard can render the selector.
 pub async fn get_sr_dimensions(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<SrDimensionConfig>, ContainerError<EuclidErrors>> {
+    let merchant_id = merchant.as_str().to_string();
     let name = format!("SR_DIMENSION_CONFIG_{}", merchant_id);
     let stored = find_config_by_name(name)
         .await
@@ -591,15 +574,8 @@ fn scope_experiment_to_session(
 pub async fn routing_create(
     headers: axum::http::HeaderMap,
     session: Option<axum::Extension<crate::auth::AuthContext>>,
-    Json(payload): Json<Value>,
+    request: Result<ScopedJson<RoutingRule>, ScopedJsonRejection>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
-    let timer = metrics::API_LATENCY_HISTOGRAM
-        .with_label_values(&["routing_create"])
-        .start_timer();
-    metrics::API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["routing_create"])
-        .inc();
-
     let state = get_tenant_app_state().await;
     let request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
@@ -608,24 +584,33 @@ pub async fn routing_create(
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
-    // The serde message names the field that did not parse — and serde_path_to_error prefixes
-    // the JSON path to it, which matters for nested documents (volume contracts especially).
-    // Dropping either leaves the caller with a bare 400 and nothing to act on.
-    let mut config: RoutingRule =
-        serde_path_to_error::deserialize(payload.clone()).map_err(|error| {
+    // The parse message names the JSON path of the field that did not parse, which matters for
+    // nested documents (volume contracts especially).
+    let ScopedJson {
+        merchant,
+        payload: mut config,
+        body,
+    } = request.map_err(|rejection| match rejection {
+        ScopedJsonRejection::Read(error) => error_stack::report!(EuclidErrors::InvalidRequest(
+            format!("could not read routing rule: {error}")
+        )),
+        ScopedJsonRejection::Parse { error, .. } => {
             error_stack::report!(EuclidErrors::InvalidRequest(format!(
-                "could not parse routing rule: {error}"
+                "could not parse routing rule: {}",
+                error.body_text()
             )))
-        })?;
+        }
+        ScopedJsonRejection::Scope(violation) => {
+            error_stack::report!(EuclidErrors::MerchantScopeViolation(violation))
+        }
+    })?;
+    // The request as received, for the analytics event.
+    let payload: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
 
     // Volume contracts are stored canonicalized (integer minor-unit amounts, tolerance in bps)
     // so every future consumer reads one representation.
     if let StaticRoutingAlgorithm::VolumeContract(contract_config) = &mut config.algorithm {
         if let Err(errors) = crate::euclid::volume_contract::canonicalize(contract_config) {
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["routing_create", "failure"])
-                .inc();
-            timer.observe_duration();
             return Err(field_validation_failure(
                 "Volume contract amounts are invalid",
                 &errors,
@@ -634,7 +619,7 @@ pub async fn routing_create(
     }
     scope_experiment_to_session(&mut config.algorithm, session.as_deref());
     let create_flow_type = crate::analytics::refine_routing_create_flow_type(&config.algorithm);
-    let analytics_created_by = config.created_by.clone();
+    let analytics_created_by = merchant.as_str().to_string();
     let analytics_config_name = config.name.clone();
 
     logger::debug!("Received routing config: {:?}", config);
@@ -657,11 +642,6 @@ pub async fn routing_create(
 
                 let detailed_error = validation_result.to_error_message();
 
-                metrics::API_REQUEST_COUNTER
-                    .with_label_values(&["routing_create", "failure"])
-                    .inc();
-                timer.observe_duration();
-
                 return Err(ContainerError::new_with_status_code_and_payload(
                     EuclidErrors::FieldValidationFailed(detailed_error.clone()),
                     axum::http::StatusCode::BAD_REQUEST,
@@ -676,10 +656,6 @@ pub async fn routing_create(
         }
         Err(err) => {
             logger::error!(error = ?err, "Failed to validate routing rule configuration");
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["routing_create", "failure"])
-                .inc();
-            timer.observe_duration();
             return Err(err);
         }
     }
@@ -693,7 +669,7 @@ pub async fn routing_create(
 
     let new_algo = RoutingAlgorithm {
         id: algorithm_id.clone(),
-        created_by: config.created_by,
+        created_by: merchant.as_str().to_string(),
         name: config.name.clone(),
         description: config.description.unwrap_or_default(),
         #[cfg(feature = "mysql")]
@@ -710,7 +686,7 @@ pub async fn routing_create(
         modified_at: timestamp,
     };
 
-    crate::generics::generic_insert(&state.db, new_algo)
+    algorithm_store::insert(&state.db, &merchant, new_algo)
         .await
         .map_err(|e| {
             logger::error!("{:?}", e);
@@ -741,10 +717,6 @@ pub async fn routing_create(
         Some("routing_created".to_string()),
     );
 
-    metrics::API_REQUEST_COUNTER
-        .with_label_values(&["routing_create", "success"])
-        .inc();
-    timer.observe_duration();
     Ok(Json(response))
 }
 
@@ -1233,7 +1205,7 @@ async fn track_ab_rule_decision(
 
 pub async fn routing_evaluate(
     headers: axum::http::HeaderMap,
-    Json(payload): Json<RoutingRequest>,
+    ScopedJson { payload, .. }: ScopedJson<RoutingRequest>,
 ) -> Result<Json<RoutingEvaluateResponse>, ContainerError<EuclidErrors>> {
     let request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
@@ -1262,16 +1234,6 @@ pub(crate) async fn routing_evaluate_with_analytics(
     experiment_endpoint: ExperimentEndpoint,
     track_experiment_outcome: bool,
 ) -> Result<Json<RoutingEvaluateResponse>, ContainerError<EuclidErrors>> {
-    let mut timer = Some(
-        metrics::API_LATENCY_HISTOGRAM
-            .with_label_values(&[flows.metric_label])
-            .start_timer(),
-    );
-
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&[flows.metric_label])
-        .inc();
-
     let state = get_tenant_app_state().await;
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
@@ -1297,12 +1259,7 @@ pub(crate) async fn routing_evaluate_with_analytics(
         );
     }
 
-    let update_failure_metrics = || {
-        API_REQUEST_COUNTER
-            .with_label_values(&[flows.metric_label, "failure"])
-            .inc();
-    };
-    let mut fail_preview = |err: ContainerError<EuclidErrors>, stage: &'static str| {
+    let fail_preview = |err: ContainerError<EuclidErrors>, stage: &'static str| {
         record_routing_evaluate_preview_error(
             &flows,
             &payload,
@@ -1312,10 +1269,6 @@ pub(crate) async fn routing_evaluate_with_analytics(
             global_request_id.clone(),
             trace_id.clone(),
         );
-        update_failure_metrics();
-        if let Some(timer) = timer.take() {
-            timer.observe_duration();
-        }
         Err(err)
     };
 
@@ -1359,12 +1312,6 @@ pub(crate) async fn routing_evaluate_with_analytics(
                             .as_ref()
                             .is_some_and(|fallback| !fallback.is_empty()) =>
                     {
-                        API_REQUEST_COUNTER
-                            .with_label_values(&[flows.metric_label, "success"])
-                            .inc();
-                        if let Some(timer) = timer.take() {
-                            timer.observe_duration();
-                        }
                         return Ok(Json(
                             no_active_algorithm_response(
                                 &flows,
@@ -1455,12 +1402,6 @@ pub(crate) async fn routing_evaluate_with_analytics(
         );
     }
 
-    API_REQUEST_COUNTER
-        .with_label_values(&[flows.metric_label, "success"])
-        .inc();
-    if let Some(timer) = timer.take() {
-        timer.observe_duration();
-    }
     Ok(Json(response))
 }
 
@@ -1478,18 +1419,8 @@ const MAX_BATCH_EVALUATIONS: usize = 50;
 /// falling back does not take the others down with it.
 pub async fn routing_evaluate_batch(
     headers: axum::http::HeaderMap,
-    Json(payload): Json<RoutingBatchRequest>,
+    ScopedJson { payload, .. }: ScopedJson<RoutingBatchRequest>,
 ) -> Result<Json<RoutingBatchResponse>, ContainerError<EuclidErrors>> {
-    let mut timer = Some(
-        metrics::API_LATENCY_HISTOGRAM
-            .with_label_values(&["routing_evaluate_batch"])
-            .start_timer(),
-    );
-
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["routing_evaluate_batch"])
-        .inc();
-
     let state = get_tenant_app_state().await;
     let request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
@@ -1532,7 +1463,7 @@ pub async fn routing_evaluate_batch(
             .unwrap_or_default(),
         algorithm_for: payload.algorithm_for.clone(),
     };
-    let mut fail_batch = |err: ContainerError<EuclidErrors>, stage: &'static str| {
+    let fail_batch = |err: ContainerError<EuclidErrors>, stage: &'static str| {
         record_routing_evaluate_preview_error(
             &RoutingEvaluateAnalyticsFlows::routing_evaluate(),
             &batch_error_payload,
@@ -1542,12 +1473,6 @@ pub async fn routing_evaluate_batch(
             global_request_id.clone(),
             trace_id.clone(),
         );
-        API_REQUEST_COUNTER
-            .with_label_values(&["routing_evaluate_batch", "failure"])
-            .inc();
-        if let Some(timer) = timer.take() {
-            timer.observe_duration();
-        }
         Err(err)
     };
 
@@ -1558,12 +1483,6 @@ pub async fn routing_evaluate_batch(
     // fallback; answering the empty batch with an empty result set keeps the contract
     // (`results[i]` answers `requests[i]`) and the noise out of both services' logs.
     if payload.requests.is_empty() {
-        API_REQUEST_COUNTER
-            .with_label_values(&["routing_evaluate_batch", "success"])
-            .inc();
-        if let Some(timer) = timer.take() {
-            timer.observe_duration();
-        }
         return Ok(Json(RoutingBatchResponse { results: vec![] }));
     }
     if payload.requests.len() > MAX_BATCH_EVALUATIONS {
@@ -1649,12 +1568,6 @@ pub async fn routing_evaluate_batch(
                 global_request_id.clone(),
                 trace_id.clone(),
             );
-            API_REQUEST_COUNTER
-                .with_label_values(&["routing_evaluate_batch", "success"])
-                .inc();
-            if let Some(timer) = timer.take() {
-                timer.observe_duration();
-            }
             return Ok(Json(response));
         }
         Err(e) => return fail_batch(e, "batch_active_routing_lookup_failed"),
@@ -1804,12 +1717,6 @@ pub async fn routing_evaluate_batch(
             global_request_id.clone(),
             trace_id.clone(),
         );
-    }
-    API_REQUEST_COUNTER
-        .with_label_values(&["routing_evaluate_batch", "success"])
-        .inc();
-    if let Some(timer) = timer.take() {
-        timer.observe_duration();
     }
     Ok(Json(response))
 }
@@ -1965,279 +1872,114 @@ fn refresh_volume_commitment_plan(algorithm_for: &str, merchant_id: &str) {
 }
 
 pub async fn activate_routing_rule(
-    Json(payload): Json<ActivateRoutingConfigRequest>,
+    ScopedJson {
+        merchant, payload, ..
+    }: ScopedJson<ActivateRoutingConfigRequest>,
 ) -> Result<(), ContainerError<EuclidErrors>> {
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["activate_routing_rule"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["activate_routing_rule"])
-        .inc();
-
-    let update_failure_metrics = || {
-        API_REQUEST_COUNTER
-            .with_label_values(&["activate_routing_rule", "failure"])
-            .inc();
-    };
-
-    let state = get_tenant_app_state().await;
-    let conn = match state
-        .db
-        .get_conn()
-        .await
-        .map_err(|_| EuclidErrors::StorageError)
-    {
-        Ok(connection) => connection,
-        Err(e) => {
-            update_failure_metrics();
-            timer.observe_duration();
-            return Err(e.into());
-        }
-    };
-
-    // === Step 1: Find algorithm_for from RoutingAlgorithm table ===
-    // Keep the full struct so we can populate the Redis cache after a successful activate.
-    let algorithm = match crate::generics::generic_find_one::<
-        <RoutingAlgorithm as HasTable>::Table,
-        _,
-        RoutingAlgorithm,
-    >(&state.db, dsl::id.eq(payload.routing_algorithm_id.clone()))
-    .await
-    .change_context(EuclidErrors::RoutingAlgorithmNotFound(
-        payload.routing_algorithm_id.clone(),
-    )) {
-        Ok(algo) => algo,
-        Err(e) => {
-            update_failure_metrics();
-            timer.observe_duration();
-            return Err(e.into());
-        }
-    };
-    let algorithm_for = algorithm.algorithm_for.clone();
-
-    // An experiment runs in its own slot beside the active rule for its transaction type, so the
-    // rule stays active, and listed as active, while the experiment runs and after it stops.
-    let is_experiment = is_experiment_algorithm(&algorithm);
-    let slot = if is_experiment {
-        experiment_slot(&algorithm_for)
-    } else {
-        algorithm_for.clone()
-    };
-    // === Step 2: Try to find existing entry for (created_by, slot) ===
-    let maybe_existing = crate::generics::generic_find_one::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(
-        &state.db,
-        mapper_dsl::created_by
-            .eq(payload.created_by.clone())
-            .and(mapper_dsl::algorithm_for.eq(slot.clone())),
-    )
-    .await
-    .ok();
-
-    if let Some(existing) = maybe_existing {
-        if existing.routing_algorithm_id != payload.routing_algorithm_id {
-            // === Step 3a: Update routing_algorithm_id in place ===
-            let predicate = mapper_dsl::created_by
-                .eq(payload.created_by.clone())
-                .and(mapper_dsl::algorithm_for.eq(slot.clone()));
-
-            let values = RoutingAlgorithmMapperUpdate {
-                routing_algorithm_id: payload.routing_algorithm_id.clone(),
-                algorithm_for: slot.clone(),
-            };
-
-            match crate::generics::generic_update_if_present::<
-                <RoutingAlgorithmMapper as HasTable>::Table,
-                RoutingAlgorithmMapperUpdate,
-                _,
-            >(&conn, predicate, values)
+    let run = async {
+        let state = get_tenant_app_state().await;
+        let conn = state
+            .db
+            .get_conn()
             .await
-            .change_context(EuclidErrors::StorageError)
-            {
-                Ok(_) => {
-                    if let Err(e) = stamp_contract_activation(&conn, &algorithm).await {
-                        update_failure_metrics();
-                        timer.observe_duration();
-                        return Err(e);
-                    }
-                    cache_activated_algorithm(
-                        &state,
-                        &payload.created_by,
-                        &algorithm,
-                        is_experiment,
-                    )
-                    .await;
-                    // The old document's plan must not steer for the new one.
-                    clear_volume_commitment_plan(&algorithm.algorithm_for, &payload.created_by)
-                        .await;
-                    refresh_volume_commitment_plan(&algorithm.algorithm_for, &payload.created_by);
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["activate_routing_rule", "success"])
-                        .inc();
-                    timer.observe_duration();
-                    return Ok(());
-                }
-                Err(e) => {
-                    update_failure_metrics();
-                    timer.observe_duration();
-                    return Err(e.into());
-                }
-            }
-        }
-        // Already active with the same algorithm — refresh the cache TTL
-        cache_activated_algorithm(&state, &payload.created_by, &algorithm, is_experiment).await;
-        refresh_volume_commitment_plan(&algorithm.algorithm_for, &payload.created_by);
-        API_REQUEST_COUNTER
-            .with_label_values(&["activate_routing_rule", "success"])
-            .inc();
-        timer.observe_duration();
-        return Ok(());
-    }
+            .map_err(|_| EuclidErrors::StorageError)?;
 
-    // === Step 3b: Insert new if not present ===
-    let merchant_id_for_cache = payload.created_by.clone();
-    let mapper_entry =
-        RoutingAlgorithmMapperNew::new(payload.created_by, payload.routing_algorithm_id, slot);
+        // Only the merchant's own algorithm can be activated; another merchant's id reads as
+        // not-found.
+        let algorithm = algorithm_store::find(&state.db, &merchant, &payload.routing_algorithm_id)
+            .await
+            .change_context(EuclidErrors::RoutingAlgorithmNotFound(
+                payload.routing_algorithm_id.clone(),
+            ))?;
 
-    match crate::generics::generic_insert(&state.db, mapper_entry)
-        .await
-        .change_context(EuclidErrors::StorageError)
-    {
-        Ok(_) => {
-            if let Err(e) = stamp_contract_activation(&conn, &algorithm).await {
-                update_failure_metrics();
-                timer.observe_duration();
-                return Err(e);
+        // An experiment runs in its own slot beside the active rule for its transaction type, so
+        // the rule stays active, and listed as active, while the experiment runs and after it
+        // stops.
+        let is_experiment = is_experiment_algorithm(&algorithm);
+        let slot = if is_experiment {
+            experiment_slot(&algorithm.algorithm_for)
+        } else {
+            algorithm.algorithm_for.clone()
+        };
+
+        let occupant = algorithm_store::find_slot(&state.db, &merchant, &slot)
+            .await
+            .change_context(EuclidErrors::StorageError)?;
+        let changed = match occupant {
+            // Already active with the same algorithm: only the cache TTL is refreshed.
+            Some(mapping) if mapping.routing_algorithm_id == algorithm.id => false,
+            Some(_) => {
+                algorithm_store::repoint_slot(&state.db, &merchant, &slot, &algorithm)
+                    .await
+                    .change_context(EuclidErrors::StorageError)?;
+                true
             }
-            cache_activated_algorithm(&state, &merchant_id_for_cache, &algorithm, is_experiment)
-                .await;
-            clear_volume_commitment_plan(&algorithm.algorithm_for, &merchant_id_for_cache).await;
-            refresh_volume_commitment_plan(&algorithm.algorithm_for, &merchant_id_for_cache);
-            API_REQUEST_COUNTER
-                .with_label_values(&["activate_routing_rule", "success"])
-                .inc();
-            timer.observe_duration();
-            Ok(())
+            None => {
+                algorithm_store::occupy_slot(&state.db, &merchant, &slot, &algorithm)
+                    .await
+                    .change_context(EuclidErrors::StorageError)?;
+                true
+            }
+        };
+
+        if changed {
+            stamp_contract_activation(&conn, &algorithm).await?;
         }
-        Err(e) => {
-            update_failure_metrics();
-            timer.observe_duration();
-            Err(e.into())
+        cache_activated_algorithm(&state, merchant.as_str(), &algorithm, is_experiment).await;
+        if changed {
+            // The old document's plan must not steer for the new one.
+            clear_volume_commitment_plan(&algorithm.algorithm_for, merchant.as_str()).await;
         }
-    }
+        refresh_volume_commitment_plan(&algorithm.algorithm_for, merchant.as_str());
+        Ok::<_, ContainerError<EuclidErrors>>(())
+    };
+
+    let outcome = run.await;
+    outcome
 }
 
 pub async fn deactivate_routing_rule(
-    Json(payload): Json<DeactivateRoutingConfigRequest>,
+    ScopedJson {
+        merchant, payload, ..
+    }: ScopedJson<DeactivateRoutingConfigRequest>,
 ) -> Result<(), ContainerError<EuclidErrors>> {
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["deactivate_routing_rule"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["deactivate_routing_rule"])
-        .inc();
+    let run = async {
+        let state = get_tenant_app_state().await;
+        let algorithm = algorithm_store::find(&state.db, &merchant, &payload.routing_algorithm_id)
+            .await
+            .change_context(EuclidErrors::RoutingAlgorithmNotFound(
+                payload.routing_algorithm_id.clone(),
+            ))?;
 
-    let update_failure_metrics = || {
-        API_REQUEST_COUNTER
-            .with_label_values(&["deactivate_routing_rule", "failure"])
-            .inc();
-    };
+        // Either slot: a rule is active in its transaction type's slot, an experiment in the
+        // experiment slot beside it. Idempotent: an algorithm that is not active succeeds.
+        let Some(mapping) = algorithm_store::find_activation(&state.db, &merchant, &algorithm.id)
+            .await
+            .change_context(EuclidErrors::StorageError)?
+        else {
+            logger::debug!(
+                "No active mapping found for routing algorithm {} and merchant {} - already deactivated",
+                algorithm.id,
+                merchant
+            );
+            return Ok(());
+        };
 
-    let state = get_tenant_app_state().await;
-    let conn = match state
-        .db
-        .get_conn()
-        .await
-        .map_err(|_| EuclidErrors::StorageError)
-    {
-        Ok(connection) => connection,
-        Err(e) => {
-            update_failure_metrics();
-            timer.observe_duration();
-            return Err(e.into());
-        }
-    };
-
-    // === Step 1: Find algorithm_for from RoutingAlgorithm table ===
-    let algorithm_for = match crate::generics::generic_find_one::<
-        <RoutingAlgorithm as HasTable>::Table,
-        _,
-        RoutingAlgorithm,
-    >(&state.db, dsl::id.eq(payload.routing_algorithm_id.clone()))
-    .await
-    .change_context(EuclidErrors::RoutingAlgorithmNotFound(
-        payload.routing_algorithm_id.clone(),
-    )) {
-        Ok(algorithm) => algorithm.algorithm_for,
-        Err(e) => {
-            update_failure_metrics();
-            timer.observe_duration();
-            return Err(e.into());
-        }
-    };
-
-    // === Step 2: Find the active mapping for (created_by, routing_algorithm_id) ===
-    // Either slot: a rule is active in its transaction type's slot, an experiment in the
-    // experiment slot beside it.
-    let existing_mapping = crate::generics::generic_find_one::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(
-        &state.db,
-        mapper_dsl::created_by
-            .eq(payload.created_by.clone())
-            .and(mapper_dsl::routing_algorithm_id.eq(payload.routing_algorithm_id.clone())),
-    )
-    .await
-    .ok();
-
-    // === Step 3: Delete the mapping if found (idempotent - return success if not found) ===
-    if let Some(mapping) = existing_mapping {
-        let predicate = mapper_dsl::id.eq(mapping.id);
-
-        match crate::generics::generic_delete::<<RoutingAlgorithmMapper as HasTable>::Table, _>(
-            &conn, predicate,
-        )
-        .await
-        .change_context(EuclidErrors::StorageError)
-        {
-            Ok(_) => {
-                logger::debug!(
-                    "Deactivated routing algorithm {} for merchant {}",
-                    payload.routing_algorithm_id,
-                    payload.created_by
-                );
-                invalidate_routing_algorithm_cache(&state, &payload.created_by).await;
-                clear_volume_commitment_plan(&algorithm_for, &payload.created_by).await;
-                API_REQUEST_COUNTER
-                    .with_label_values(&["deactivate_routing_rule", "success"])
-                    .inc();
-                timer.observe_duration();
-                Ok(())
-            }
-            Err(e) => {
-                update_failure_metrics();
-                timer.observe_duration();
-                Err(e.into())
-            }
-        }
-    } else {
-        // Idempotent: if the mapping doesn't exist, return success
+        algorithm_store::vacate(&state.db, &merchant, &mapping)
+            .await
+            .change_context(EuclidErrors::StorageError)?;
         logger::debug!(
-            "No active mapping found for routing algorithm {} and merchant {} - already deactivated",
-            payload.routing_algorithm_id,
-            payload.created_by
+            "Deactivated routing algorithm {} for merchant {}",
+            algorithm.id,
+            merchant
         );
-        API_REQUEST_COUNTER
-            .with_label_values(&["deactivate_routing_rule", "success"])
-            .inc();
-        timer.observe_duration();
-        Ok(())
-    }
+        invalidate_routing_algorithm_cache(&state, merchant.as_str()).await;
+        clear_volume_commitment_plan(&algorithm.algorithm_for, merchant.as_str()).await;
+        Ok::<_, ContainerError<EuclidErrors>>(())
+    };
+
+    let outcome = run.await;
+    outcome
 }
 
 /// Guard for the edit/delete flows: reject the operation if this algorithm is the merchant's
@@ -2245,21 +1987,12 @@ pub async fn deactivate_routing_rule(
 /// collected results, so the caller must Stop (deactivate) it first.
 async fn ensure_routing_algorithm_inactive(
     state: &crate::app::TenantAppState,
-    created_by: &str,
+    merchant: &crate::auth::AuthorizedMerchant,
     routing_algorithm_id: &str,
 ) -> Result<(), ContainerError<EuclidErrors>> {
-    let active = crate::generics::generic_find_one_optional::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(
-        &state.db,
-        mapper_dsl::created_by
-            .eq(created_by.to_string())
-            .and(mapper_dsl::routing_algorithm_id.eq(routing_algorithm_id.to_string())),
-    )
-    .await
-    .change_context(EuclidErrors::StorageError)?;
+    let active = algorithm_store::find_activation(&state.db, merchant, routing_algorithm_id)
+        .await
+        .change_context(EuclidErrors::StorageError)?;
 
     if active.is_some() {
         return Err(EuclidErrors::InvalidRequest(
@@ -2331,52 +2064,27 @@ async fn ensure_experiment_has_no_recorded_payments(
 /// A/B Testing dashboard's Edit action. Keeps the same id so history/links remain valid.
 pub async fn update_routing_rule(
     session: Option<axum::Extension<crate::auth::AuthContext>>,
-    Json(mut payload): Json<crate::euclid::types::UpdateRoutingConfigRequest>,
+    ScopedJson {
+        merchant,
+        mut payload,
+        ..
+    }: ScopedJson<crate::euclid::types::UpdateRoutingConfigRequest>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["update_routing_rule"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["update_routing_rule"])
-        .inc();
-    let fail = || {
-        API_REQUEST_COUNTER
-            .with_label_values(&["update_routing_rule", "failure"])
-            .inc();
-    };
+    let fail = || {};
 
     let run = async {
         let state = get_tenant_app_state().await;
-        let conn = state
-            .db
-            .get_conn()
-            .await
-            .map_err(|_| EuclidErrors::StorageError)?;
 
         // Only inactive experiments can be edited.
-        ensure_routing_algorithm_inactive(
-            &state,
-            &payload.created_by,
-            &payload.routing_algorithm_id,
-        )
-        .await?;
+        ensure_routing_algorithm_inactive(&state, &merchant, &payload.routing_algorithm_id).await?;
 
-        // Load the existing row (also verifies ownership) so we can preserve created_at/algorithm_for.
-        let existing = crate::generics::generic_find_one::<
-            <RoutingAlgorithm as HasTable>::Table,
-            _,
-            RoutingAlgorithm,
-        >(&state.db, dsl::id.eq(payload.routing_algorithm_id.clone()))
-        .await
-        .change_context(EuclidErrors::RoutingAlgorithmNotFound(
-            payload.routing_algorithm_id.clone(),
-        ))?;
-
-        if existing.created_by != payload.created_by {
-            return Err(ContainerError::from(EuclidErrors::InvalidRequest(
-                "Routing algorithm does not belong to this merchant".to_string(),
-            )));
-        }
+        // Load the merchant's row so we can preserve created_at/algorithm_for. Another merchant's
+        // id reads as not-found.
+        let existing = algorithm_store::find(&state.db, &merchant, &payload.routing_algorithm_id)
+            .await
+            .change_context(EuclidErrors::RoutingAlgorithmNotFound(
+                payload.routing_algorithm_id.clone(),
+            ))?;
 
         if let Some(routing_config) = state.config.routing_config.as_ref() {
             normalize_rule_value_types(&mut payload.algorithm, routing_config);
@@ -2394,7 +2102,7 @@ pub async fn update_routing_rule(
                 && changes_experiment_routing(&existing_algorithm, &algorithm)
             {
                 ensure_experiment_has_no_recorded_payments(
-                    &payload.created_by,
+                    merchant.as_str(),
                     &payload.routing_algorithm_id,
                 )
                 .await?;
@@ -2417,7 +2125,7 @@ pub async fn update_routing_rule(
             rule_id: Some(payload.routing_algorithm_id.clone()),
             name: payload.name.clone(),
             description: Some(payload.description.clone()),
-            created_by: payload.created_by.clone(),
+            created_by: merchant.as_str().to_string(),
             algorithm,
             algorithm_for,
             metadata: None,
@@ -2435,20 +2143,19 @@ pub async fn update_routing_rule(
         let algorithm_data = serde_json::to_string(&rule_for_validation.algorithm)
             .change_context(EuclidErrors::FailedToSerializeJsonToString)?;
 
-        crate::generics::generic_update::<<RoutingAlgorithm as HasTable>::Table, _, _>(
-            &conn,
-            dsl::id.eq(payload.routing_algorithm_id.clone()),
-            (
-                dsl::name.eq(payload.name.clone()),
-                dsl::description.eq(payload.description.clone()),
-                dsl::algorithm_data.eq(algorithm_data),
-                dsl::modified_at.eq(timestamp),
-            ),
+        algorithm_store::update_definition(
+            &state.db,
+            &merchant,
+            &existing.id,
+            &payload.name,
+            &payload.description,
+            algorithm_data,
+            timestamp,
         )
         .await
         .change_context(EuclidErrors::StorageError)?;
 
-        invalidate_routing_algorithm_cache(&state, &payload.created_by).await;
+        invalidate_routing_algorithm_cache(&state, merchant.as_str()).await;
 
         Ok(RoutingDictionaryRecord::new(
             payload.routing_algorithm_id.clone(),
@@ -2460,16 +2167,9 @@ pub async fn update_routing_rule(
     };
 
     match run.await {
-        Ok(record) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["update_routing_rule", "success"])
-                .inc();
-            timer.observe_duration();
-            Ok(Json(record))
-        }
+        Ok(record) => Ok(Json(record)),
         Err(e) => {
             fail();
-            timer.observe_duration();
             Err(e)
         }
     }
@@ -2478,170 +2178,66 @@ pub async fn update_routing_rule(
 /// Delete an existing inactive routing algorithm. Used by the A/B Testing dashboard's Delete
 /// action. Removes the `routing_algorithm` row (results already collected remain in analytics).
 pub async fn delete_routing_rule(
-    Json(payload): Json<crate::euclid::types::DeleteRoutingConfigRequest>,
+    ScopedJson {
+        merchant, payload, ..
+    }: ScopedJson<crate::euclid::types::DeleteRoutingConfigRequest>,
 ) -> Result<Json<serde_json::Value>, ContainerError<EuclidErrors>> {
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["delete_routing_rule"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["delete_routing_rule"])
-        .inc();
-    let fail = || {
-        API_REQUEST_COUNTER
-            .with_label_values(&["delete_routing_rule", "failure"])
-            .inc();
-    };
+    let fail = || {};
 
     let run = async {
         let state = get_tenant_app_state().await;
-        let conn = state
-            .db
-            .get_conn()
-            .await
-            .map_err(|_| EuclidErrors::StorageError)?;
 
         // Only inactive experiments can be deleted.
-        ensure_routing_algorithm_inactive(
-            &state,
-            &payload.created_by,
-            &payload.routing_algorithm_id,
-        )
-        .await?;
+        ensure_routing_algorithm_inactive(&state, &merchant, &payload.routing_algorithm_id).await?;
 
-        crate::generics::generic_delete::<<RoutingAlgorithm as HasTable>::Table, _>(
-            &conn,
-            dsl::id.eq(payload.routing_algorithm_id.clone()),
-        )
-        .await
-        .change_context(EuclidErrors::StorageError)?;
+        algorithm_store::delete(&state.db, &merchant, &payload.routing_algorithm_id)
+            .await
+            .change_context(EuclidErrors::StorageError)?;
 
-        invalidate_routing_algorithm_cache(&state, &payload.created_by).await;
+        invalidate_routing_algorithm_cache(&state, merchant.as_str()).await;
         Ok(())
     };
 
     match run.await {
-        Ok(()) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["delete_routing_rule", "success"])
-                .inc();
-            timer.observe_duration();
-            Ok(Json(serde_json::json!({
-                "status": "deleted",
-                "routing_algorithm_id": payload.routing_algorithm_id,
-            })))
-        }
+        Ok(()) => Ok(Json(serde_json::json!({
+            "status": "deleted",
+            "routing_algorithm_id": payload.routing_algorithm_id,
+        }))),
         Err(e) => {
             fail();
-            timer.observe_duration();
             Err(e)
         }
     }
 }
 
 pub async fn list_all_routing_algorithm_id(
-    Path(created_by): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<Vec<JsonifiedRoutingAlgorithm>>, ContainerError<EuclidErrors>> {
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["list_all_routing_algorithm_id"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["list_all_routing_algorithm_id"])
-        .inc();
-
     let state = get_tenant_app_state().await;
+    let outcome = algorithm_store::list(&state.db, &merchant)
+        .await
+        .change_context(EuclidErrors::StorageError);
 
-    match crate::generics::generic_find_all::<
-        <RoutingAlgorithm as HasTable>::Table,
-        _,
-        RoutingAlgorithm,
-    >(&state.db, dsl::created_by.eq(created_by))
-    .await
-    .change_context(EuclidErrors::StorageError)
-    {
-        Ok(algorithms) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["list_all_routing_algorithm_id", "success"])
-                .inc();
-            timer.observe_duration();
-            Ok(Json(algorithms.into_iter().map(Into::into).collect()))
-        }
-        Err(e) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["list_all_routing_algorithm_id", "failure"])
-                .inc();
-            timer.observe_duration();
-            Err(e.into())
-        }
-    }
+    Ok(Json(outcome?.into_iter().map(Into::into).collect()))
 }
 
 #[axum::debug_handler]
 pub async fn list_active_routing_algorithm(
-    Path(created_by): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<Vec<JsonifiedRoutingAlgorithm>>, ContainerError<EuclidErrors>> {
-    let timer = metrics::API_LATENCY_HISTOGRAM
-        .with_label_values(&["list_active_routing_algorithm"])
-        .start_timer();
-    metrics::API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["list_active_routing_algorithm"])
-        .inc();
-
-    let update_failure_metrics = || {
-        API_REQUEST_COUNTER
-            .with_label_values(&["list_active_routing_algorithm", "failure"])
-            .inc();
-    };
-
     let state = get_tenant_app_state().await;
+    let outcome = algorithm_store::list_active(&state.db, &merchant)
+        .await
+        .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
+            merchant.as_str().to_string(),
+        ));
 
-    let active_mappings = match crate::generics::generic_find_all::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(&state.db, mapper_dsl::created_by.eq(created_by.clone()))
-    .await
-    .change_context(EuclidErrors::ActiveRoutingAlgorithmNotFound(
-        created_by.clone(),
-    )) {
-        Ok(mappings) => mappings,
-        Err(e) => {
-            update_failure_metrics();
-            timer.observe_duration();
-            return Err(e.into());
-        }
-    };
-
-    let ids: Vec<String> = active_mappings
-        .into_iter()
-        .map(|m| m.routing_algorithm_id)
-        .collect();
-
-    let routing_algorithms = match crate::generics::generic_find_all::<
-        <RoutingAlgorithm as HasTable>::Table,
-        _,
-        RoutingAlgorithm,
-    >(&state.db, dsl::id.eq_any(ids))
-    .await
-    .change_context(EuclidErrors::StorageError)
-    {
-        Ok(algos) => algos,
-        Err(e) => {
-            update_failure_metrics();
-            timer.observe_duration();
-            return Err(e.into());
-        }
-    };
-    let result = routing_algorithms
-        .into_iter()
-        .map(JsonifiedRoutingAlgorithm::from)
-        .collect();
-
-    API_REQUEST_COUNTER
-        .with_label_values(&["list_active_routing_algorithm", "success"])
-        .inc();
-    timer.observe_duration();
-
-    Ok(Json(result))
+    Ok(Json(
+        outcome?
+            .into_iter()
+            .map(JsonifiedRoutingAlgorithm::from)
+            .collect(),
+    ))
 }
 
 fn format_output(output: &Output) -> Value {
@@ -2785,13 +2381,6 @@ pub(crate) fn extract_connectors_for_eligibility(output: &Output) -> Vec<Connect
 /// This allows the dashboard to dynamically fetch valid routing keys
 pub async fn get_routing_config(
 ) -> Result<Json<crate::euclid::types::TomlConfig>, ContainerError<EuclidErrors>> {
-    let timer = metrics::API_LATENCY_HISTOGRAM
-        .with_label_values(&["get_routing_config"])
-        .start_timer();
-    metrics::API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["get_routing_config"])
-        .inc();
-
     let tenant_state = get_tenant_app_state().await;
 
     // Clone the routing config to return it
@@ -2800,11 +2389,6 @@ pub async fn get_routing_config(
         .routing_config
         .clone()
         .ok_or(EuclidErrors::GlobalRoutingConfigsUnavailable)?;
-
-    metrics::API_REQUEST_COUNTER
-        .with_label_values(&["get_routing_config", "success"])
-        .inc();
-    timer.observe_duration();
 
     logger::info!("Successfully served routing config");
 
