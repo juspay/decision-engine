@@ -306,10 +306,7 @@ pub async fn authenticate(
     use crate::storage::types::MerchantApiKey;
     use diesel::associations::HasTable;
 
-    #[cfg(feature = "mysql")]
-    use crate::storage::schema::merchant_api_keys::dsl;
-    #[cfg(feature = "postgres")]
-    use crate::storage::schema_pg::merchant_api_keys::dsl;
+    use crate::storage::backend::schema::merchant_api_keys::dsl;
 
     let results = crate::generics::generic_find_all::<
         <MerchantApiKey as HasTable>::Table,

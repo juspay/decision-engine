@@ -1,7 +1,4 @@
-#[cfg(feature = "mysql")]
-use crate::storage::schema::routing_algorithm::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::routing_algorithm::dsl;
+use crate::storage::backend::schema::routing_algorithm::dsl;
 use crate::{
     error::ApiErrorResponse,
     euclid::{
@@ -703,10 +700,7 @@ async fn fetch_algorithm_from_db_and_cache(
     merchant_id: &str,
     algorithm_for: Option<&str>,
 ) -> Result<RoutingAlgorithm, ContainerError<EuclidErrors>> {
-    #[cfg(feature = "mysql")]
-    use crate::storage::schema::routing_algorithm_mapper::dsl as db_mapper_dsl;
-    #[cfg(feature = "postgres")]
-    use crate::storage::schema_pg::routing_algorithm_mapper::dsl as db_mapper_dsl;
+    use crate::storage::backend::schema::routing_algorithm_mapper::dsl as db_mapper_dsl;
 
     // The merchant can hold one mapper row per algorithm_for slot (payment, payout, 3DS,
     // volume_commitment). Callers that omit `algorithm_for` are on the legacy payment flow and
@@ -1783,16 +1777,12 @@ fn record_routing_evaluate_preview_error(
     );
 }
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
+use crate::storage::backend::schema::routing_algorithm_mapper::dsl as mapper_dsl;
 
 /// Bump `modified_at` on activation of a volume contract — it anchors `test_minutes` cycles (see
 /// `volume_commitment::dsl::active_config`); other rule types keep it as a plain edit timestamp.
 async fn stamp_contract_activation(
-    #[cfg(feature = "mysql")] conn: &crate::storage::MysqlPoolConn,
-    #[cfg(feature = "postgres")] conn: &crate::storage::PgPoolConn,
+    conn: &crate::storage::backend::PoolConn,
     algorithm: &RoutingAlgorithm,
 ) -> Result<(), ContainerError<EuclidErrors>> {
     if algorithm.algorithm_for != AlgorithmType::VolumeCommitment.to_string() {

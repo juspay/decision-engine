@@ -1,9 +1,6 @@
 use crate::app::get_tenant_app_state;
 use crate::redis::cache::{evict_service_config, write_through_service_config};
-#[cfg(feature = "mysql")]
-use crate::storage::schema::service_configuration::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::service_configuration::dsl;
+use crate::storage::backend::schema::service_configuration::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 use error_stack::ResultExt;

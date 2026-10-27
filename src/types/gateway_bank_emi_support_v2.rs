@@ -15,10 +15,7 @@ use std::vec::Vec;
 // use sequelize::{Clause, Term};
 // use test::quickcheck::Arbitrary;
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::gateway_bank_emi_support_v2::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::gateway_bank_emi_support_v2::dsl;
+use crate::storage::backend::schema::gateway_bank_emi_support_v2::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 

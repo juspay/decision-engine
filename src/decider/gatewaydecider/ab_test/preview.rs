@@ -1,10 +1,7 @@
 //! Rule-layer evaluation of an A/B arm for `/routing/evaluate` and the static half of
 //! `/routing/hybrid`. The SR layer is applied by the decider intercept in interceptor.rs.
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::routing_algorithm::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::routing_algorithm::dsl;
+use crate::storage::backend::schema::routing_algorithm::dsl;
 
 use crate::{
     error::ContainerError,

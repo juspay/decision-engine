@@ -4,10 +4,7 @@
 //! algorithm or mapping is simply not found: ownership is part of the query rather than a comparison
 //! each caller has to remember.
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::{routing_algorithm::dsl, routing_algorithm_mapper::dsl as mapper_dsl};
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::{
+use crate::storage::backend::schema::{
     routing_algorithm::dsl, routing_algorithm_mapper::dsl as mapper_dsl,
 };
 

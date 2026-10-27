@@ -1,7 +1,4 @@
-#[cfg(feature = "mysql")]
-use crate::storage::schema::tenant_config_filter::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::tenant_config_filter::dsl;
+use crate::storage::backend::schema::tenant_config_filter::dsl;
 use crate::{
     app::get_tenant_app_state, error::ApiError,
     storage::types::TenantConfigFilter as DBTenantConfigFilter,

@@ -1,9 +1,6 @@
 use super::ast::ConnectorInfo;
 use crate::euclid::ast::{Output, Program, ValueType};
-#[cfg(feature = "mysql")]
-use crate::storage::schema;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg;
+use crate::storage::backend::schema;
 use diesel::prelude::AsChangeset;
 use diesel::Identifiable;
 use diesel::Insertable;
@@ -313,8 +310,7 @@ pub struct RoutingEvaluateResponse {
     Queryable,
     Selectable,
 )]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm))]
+#[diesel(table_name = schema::routing_algorithm)]
 pub struct RoutingAlgorithm {
     pub id: String,
     pub created_by: String,
@@ -366,8 +362,7 @@ impl From<RoutingAlgorithm> for JsonifiedRoutingAlgorithm {
 #[derive(
     AsChangeset, Insertable, Debug, serde::Serialize, serde::Deserialize, Identifiable, Queryable,
 )]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm_mapper))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm_mapper))]
+#[diesel(table_name = schema::routing_algorithm_mapper)]
 #[diesel(primary_key(id))]
 pub struct RoutingAlgorithmMapper {
     pub id: i32,
@@ -377,8 +372,7 @@ pub struct RoutingAlgorithmMapper {
 }
 
 #[derive(Insertable, Debug, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm_mapper))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm_mapper))]
+#[diesel(table_name = schema::routing_algorithm_mapper)]
 pub struct RoutingAlgorithmMapperNew {
     pub created_by: String,
     pub routing_algorithm_id: String,
@@ -432,8 +426,7 @@ pub struct UpdateRoutingConfigRequest {
 }
 
 #[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm_mapper))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm_mapper))]
+#[diesel(table_name = schema::routing_algorithm_mapper)]
 pub struct RoutingAlgorithmMapperUpdate {
     pub routing_algorithm_id: String,
     pub algorithm_for: String,

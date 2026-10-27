@@ -28,10 +28,7 @@ use std::string::String;
 // use test::quickcheck_instances_time::*;
 // use data_int::Int64;
 // use data_text::Text;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::feature::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::feature::dsl;
+use crate::storage::backend::schema::feature::dsl;
 use diesel::associations::HasTable;
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]

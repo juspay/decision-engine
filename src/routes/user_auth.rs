@@ -17,15 +17,9 @@ use error_stack::ResultExt;
 use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::users::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::users::dsl;
+use crate::storage::backend::schema::users::dsl;
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::user_merchants::dsl as um_dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::user_merchants::dsl as um_dsl;
+use crate::storage::backend::schema::user_merchants::dsl as um_dsl;
 
 const JWT_DENYLIST_PREFIX: &str = "jwt_revoked:";
 
@@ -181,10 +175,7 @@ pub async fn signup(
             return Err(error::ContainerError::from(UserAuthError::Forbidden));
         }
 
-        #[cfg(feature = "mysql")]
-        use crate::storage::schema::merchant_account::dsl as ma_dsl;
-        #[cfg(feature = "postgres")]
-        use crate::storage::schema_pg::merchant_account::dsl as ma_dsl;
+        use crate::storage::backend::schema::merchant_account::dsl as ma_dsl;
 
         let existing_merchant = crate::generics::generic_find_all::<
             <crate::storage::types::MerchantAccount as HasTable>::Table,
@@ -512,10 +503,7 @@ pub async fn create_merchant(
 
     // Update users.merchant_id to the newly created merchant
     {
-        #[cfg(feature = "mysql")]
-        use crate::storage::schema::users::dsl as u_dsl;
-        #[cfg(feature = "postgres")]
-        use crate::storage::schema_pg::users::dsl as u_dsl;
+        use crate::storage::backend::schema::users::dsl as u_dsl;
 
         let conn = &app_state
             .db
@@ -846,10 +834,7 @@ pub async fn invite_member(
 
     let app_state = get_tenant_app_state().await;
 
-    #[cfg(feature = "mysql")]
-    use crate::storage::schema::merchant_account::dsl as ma_dsl;
-    #[cfg(feature = "postgres")]
-    use crate::storage::schema_pg::merchant_account::dsl as ma_dsl;
+    use crate::storage::backend::schema::merchant_account::dsl as ma_dsl;
 
     let merchant_name = crate::generics::generic_find_all::<
         <crate::storage::types::MerchantAccount as HasTable>::Table,
@@ -1279,10 +1264,7 @@ async fn fetch_user_merchants(
     app_state: &crate::app::TenantAppState,
     user_id: &String,
 ) -> Result<Vec<MerchantInfo>, ContainerError<UserAuthError>> {
-    #[cfg(feature = "mysql")]
-    use crate::storage::schema::merchant_account::dsl as ma_dsl;
-    #[cfg(feature = "postgres")]
-    use crate::storage::schema_pg::merchant_account::dsl as ma_dsl;
+    use crate::storage::backend::schema::merchant_account::dsl as ma_dsl;
 
     let user_merchant_rows = crate::generics::generic_find_all::<
         <UserMerchant as HasTable>::Table,
@@ -2078,10 +2060,7 @@ pub async fn lookup_merchants(
         return Ok(Json(vec![]));
     }
 
-    #[cfg(feature = "mysql")]
-    use crate::storage::schema::merchant_account::dsl as ma_dsl;
-    #[cfg(feature = "postgres")]
-    use crate::storage::schema_pg::merchant_account::dsl as ma_dsl;
+    use crate::storage::backend::schema::merchant_account::dsl as ma_dsl;
 
     // `.like`/`.ilike` live on different traits and only one backend has ILIKE, so the substring
     // predicates below are cfg-split; everything else is shared.
