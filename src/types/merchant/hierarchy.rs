@@ -25,7 +25,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::service_configuration::{find_config_by_name, upsert_config};
+use crate::types::service_configuration::{find_config_by_name, insert_config, update_config};
 
 /// Top-level key inside `merchant_account.internal_metadata` that ancestry lives under.
 /// Namespaced so other future consumers of that column take their own key and never sit
@@ -171,7 +171,17 @@ async fn write_entry<T: Serialize>(
 ) -> error_stack::Result<(), crate::generics::MeshError> {
     let value = serde_json::to_string(entry).map_err(|_| crate::generics::MeshError::Others)?;
 
-    upsert_config(name, Some(value)).await
+    let exists = find_config_by_name(name.clone())
+        .await
+        .ok()
+        .flatten()
+        .is_some();
+
+    if exists {
+        update_config(name, Some(value)).await
+    } else {
+        insert_config(name, Some(value)).await
+    }
 }
 
 pub async fn load_org_index() -> Option<OrgIndex> {

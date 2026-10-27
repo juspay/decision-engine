@@ -21,7 +21,7 @@ use crate::config::SrAutoCalibrationConfig;
 use crate::euclid::types::SrDimensionConfig;
 use crate::logger;
 use crate::types::merchant_config::types::FeatureConf;
-use crate::types::service_configuration::{find_config_by_name, upsert_config};
+use crate::types::service_configuration::{find_config_by_name, insert_config, update_config};
 
 const AUTOPILOT_CONF_KEY: &str = "autopilot_enabled";
 /// Default recalc cadence. 15 min tracks within-day traffic shifts while each tick still sees a
@@ -289,6 +289,7 @@ async fn calibrate_merchant(
 
     let name = format!("SR_V3_INPUT_CONFIG_{merchant_id}");
     let existing = find_config_by_name(name.clone()).await.ok().flatten();
+    let exists = existing.is_some();
     // Edit as raw JSON so fields we don't manage (defaults, margin, dimension-scoped sub-level
     // entries…) are preserved verbatim.
     let mut cfg: serde_json::Value = existing
@@ -356,9 +357,15 @@ async fn calibrate_merchant(
     cfg["subLevelInputConfig"] = serde_json::Value::Array(entries);
     let serialized = cfg.to_string();
 
-    upsert_config(name, Some(serialized))
-        .await
-        .map_err(|e| format!("config write failed: {e:?}"))?;
+    if exists {
+        update_config(name, Some(serialized))
+            .await
+            .map_err(|e| format!("config update failed: {e:?}"))?;
+    } else {
+        insert_config(name, Some(serialized))
+            .await
+            .map_err(|e| format!("config insert failed: {e:?}"))?;
+    }
 
     Ok(())
 }

@@ -131,9 +131,16 @@ async fn add_source(
     sources.push(entry);
     let value = serde_json::to_string(&sources).map_err(|e| IngestError::Storage(e.to_string()))?;
     let name = sources_index_name(merchant_id);
-    service_configuration::upsert_config(name, Some(value))
+    let exists = service_configuration::find_config_by_name(name.clone())
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))
+        .map_err(|e| IngestError::Storage(e.to_string()))?
+        .is_some();
+    if exists {
+        service_configuration::update_config(name, Some(value)).await
+    } else {
+        service_configuration::insert_config(name, Some(value)).await
+    }
+    .map_err(|e| IngestError::Storage(e.to_string()))
 }
 
 /// Remove a `(connector, account)` from the merchant's source index (idempotent). When the last
@@ -275,9 +282,16 @@ async fn remove_poll_source(
 async fn write_poll_index(connector: &str, sources: &[PollSource]) -> Result<(), IngestError> {
     let value = serde_json::to_string(sources).map_err(|e| IngestError::Storage(e.to_string()))?;
     let name = poll_index_name(connector);
-    service_configuration::upsert_config(name, Some(value))
+    let exists = service_configuration::find_config_by_name(name.clone())
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))
+        .map_err(|e| IngestError::Storage(e.to_string()))?
+        .is_some();
+    if exists {
+        service_configuration::update_config(name, Some(value)).await
+    } else {
+        service_configuration::insert_config(name, Some(value)).await
+    }
+    .map_err(|e| IngestError::Storage(e.to_string()))
 }
 
 /// On-the-wire shape of the encrypted blob (before AES). Secrets are peeked only here, at the
@@ -380,9 +394,16 @@ impl ConnectorCredsStore {
         let merchant_id = merchant.as_str();
         let name = config_name(merchant_id, connector, account);
         let value = self.seal(merchant_id, creds)?;
-        service_configuration::upsert_config(name, Some(value))
+        let exists = service_configuration::find_config_by_name(name.clone())
             .await
-            .map_err(|e| IngestError::Storage(e.to_string()))?;
+            .map_err(|e| IngestError::Storage(e.to_string()))?
+            .is_some();
+        if exists {
+            service_configuration::update_config(name, Some(value)).await
+        } else {
+            service_configuration::insert_config(name, Some(value)).await
+        }
+        .map_err(|e| IngestError::Storage(e.to_string()))?;
 
         // Record the source in the merchant's index so the dashboard can list it.
         add_source(merchant, connector, account).await?;

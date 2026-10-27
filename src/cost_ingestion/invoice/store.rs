@@ -95,9 +95,16 @@ async fn read_json<T: for<'de> Deserialize<'de>>(name: String) -> Result<Option<
 async fn write_json<T: Serialize>(name: String, value: &T) -> Result<(), IngestError> {
     let serialized =
         serde_json::to_string(value).map_err(|e| IngestError::Storage(e.to_string()))?;
-    service_configuration::upsert_config(name, Some(serialized))
+    let exists = service_configuration::find_config_by_name(name.clone())
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))
+        .map_err(|e| IngestError::Storage(e.to_string()))?
+        .is_some();
+    if exists {
+        service_configuration::update_config(name, Some(serialized)).await
+    } else {
+        service_configuration::insert_config(name, Some(serialized)).await
+    }
+    .map_err(|e| IngestError::Storage(e.to_string()))
 }
 
 async fn read_list(name: String) -> Result<Vec<String>, IngestError> {

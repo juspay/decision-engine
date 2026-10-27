@@ -19,7 +19,7 @@ use crate::{
             normalize_rule_value_types, validate_routing_rule,
         },
     },
-    types::service_configuration::{find_config_by_name, upsert_config},
+    types::service_configuration::{find_config_by_name, insert_config, update_config},
 };
 
 use crate::custom_extractors::{
@@ -500,9 +500,29 @@ pub async fn config_sr_dimensions(
         .change_context(EuclidErrors::FailedToSerializeJsonToString)?;
     let name = format!("SR_DIMENSION_CONFIG_{}", merchant);
 
-    let result = upsert_config(name, Some(config))
+    let service_config = find_config_by_name(name.clone())
         .await
-        .change_context(EuclidErrors::StorageError);
+        .change_context(EuclidErrors::StorageError)?;
+    let result = match service_config {
+        Some(_) => {
+            logger::debug!(
+                "Updating existing SR Dimension config for merchant: {}",
+                merchant
+            );
+            update_config(name, Some(config))
+                .await
+                .change_context(EuclidErrors::StorageError)
+        }
+        None => {
+            logger::debug!(
+                "Inserting new SR Dimension config for merchant: {}",
+                merchant
+            );
+            insert_config(name, Some(config))
+                .await
+                .change_context(EuclidErrors::StorageError)
+        }
+    };
 
     if let Err(_) = result {
         logger::error!(

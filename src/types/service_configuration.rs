@@ -77,60 +77,6 @@ pub async fn update_config(
     Ok(())
 }
 
-/// The single statement behind [`upsert_config`]: insert the row or, when the unique index on `name`
-/// already holds it, set its value.
-macro_rules! upsert_statement {
-    ($row:expr, $value:expr) => {{
-        #[cfg(feature = "postgres")]
-        let statement = diesel::insert_into(dsl::service_configuration)
-            .values($row)
-            .on_conflict(dsl::name)
-            .do_update()
-            .set(dsl::value.eq($value));
-        #[cfg(feature = "mysql")]
-        let statement = diesel::insert_into(dsl::service_configuration)
-            .values($row)
-            .on_conflict(diesel::dsl::DuplicatedKeys)
-            .do_update()
-            .set(dsl::value.eq($value));
-        statement
-    }};
-}
-
-/// Sets `name` to `value`, creating the row on its first write. One statement, resolved by the
-/// unique index on `name`, so concurrent first writes leave one row instead of two.
-pub async fn upsert_config(
-    name: String,
-    value: Option<String>,
-) -> error_stack::Result<(), crate::generics::MeshError> {
-    use async_bb8_diesel::AsyncRunQueryDsl;
-    use error_stack::ResultExt;
-
-    let app_state = get_tenant_app_state().await;
-    let conn = app_state
-        .db
-        .get_conn()
-        .await
-        .map_err(|_| crate::generics::MeshError::DatabaseConnectionError)?;
-    let row = ServiceConfigurationNew {
-        name: name.clone(),
-        value: value.clone(),
-        new_value: None,
-        previous_value: None,
-        new_value_status: None,
-    };
-    upsert_statement!(row, value.clone())
-        .execute_async(&*conn)
-        .await
-        .change_context(crate::generics::MeshError::Others)?;
-
-    match value {
-        Some(v) => write_through_service_config(name, &v).await,
-        None => evict_service_config(name).await,
-    }
-    Ok(())
-}
-
 /// Sets `name`'s value only if it still holds `expected`: a compare-and-swap for read-modify-write
 /// updates. Returns `false`, writing nothing, when another writer changed the value since it was
 /// read; the caller re-reads and tries again.
@@ -201,44 +147,4 @@ pub async fn delete_config(name: String) -> Result<(), crate::generics::MeshErro
 
     evict_service_config(name).await;
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn row() -> ServiceConfigurationNew {
-        ServiceConfigurationNew {
-            name: "DEBIT_ROUTING_ENABLED_m1".to_string(),
-            value: Some("true".to_string()),
-            new_value: None,
-            previous_value: None,
-            new_value_status: None,
-        }
-    }
-
-    #[cfg(feature = "postgres")]
-    #[test]
-    fn the_upsert_resolves_a_name_collision_by_setting_the_value() {
-        let sql = diesel::debug_query::<diesel::pg::Pg, _>(&upsert_statement!(
-            row(),
-            Some("true".to_string())
-        ))
-        .to_string();
-        assert!(
-            sql.contains(r#"ON CONFLICT ("name") DO UPDATE SET "value" = "#),
-            "{sql}"
-        );
-    }
-
-    #[cfg(feature = "mysql")]
-    #[test]
-    fn the_upsert_resolves_a_name_collision_by_setting_the_value() {
-        let sql = diesel::debug_query::<diesel::mysql::Mysql, _>(&upsert_statement!(
-            row(),
-            Some("true".to_string())
-        ))
-        .to_string();
-        assert!(sql.contains("ON DUPLICATE KEY UPDATE `value` = "), "{sql}");
-    }
 }
