@@ -346,22 +346,9 @@ pub async fn update_debit_routing(
     let config_name = debit_routing_config_name(&merchant_id);
     let config_value = payload.enabled.to_string();
 
-    // Check if config already exists
-    let existing_config = service_configuration::find_config_by_name(config_name.clone())
+    let result = service_configuration::upsert_config(config_name, Some(config_value))
         .await
-        .change_context(error::MerchantAccountConfigurationError::StorageError)?;
-
-    let result = if existing_config.is_some() {
-        // Update existing config
-        service_configuration::update_config(config_name, Some(config_value))
-            .await
-            .change_context(error::MerchantAccountConfigurationError::StorageError)
-    } else {
-        // Insert new config
-        service_configuration::insert_config(config_name, Some(config_value))
-            .await
-            .change_context(error::MerchantAccountConfigurationError::StorageError)
-    };
+        .change_context(error::MerchantAccountConfigurationError::StorageError);
 
     result
         .map(|_| {

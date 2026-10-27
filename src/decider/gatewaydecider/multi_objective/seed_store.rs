@@ -42,16 +42,9 @@ pub async fn put_seed_table(
     let merchant_id = merchant.as_str();
     let serialized = serde_json::to_string(table).map_err(|e| e.to_string())?;
     let name = seed_costs_name(merchant_id);
-    let exists = service_configuration::find_config_by_name(name.clone())
+    service_configuration::upsert_config(name, Some(serialized))
         .await
-        .map_err(|e| e.to_string())?
-        .is_some();
-    if exists {
-        service_configuration::update_config(name, Some(serialized)).await
-    } else {
-        service_configuration::insert_config(name, Some(serialized)).await
-    }
-    .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())
 }
 
 /// Reset the merchant to the config default by removing any stored table.
