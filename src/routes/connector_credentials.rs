@@ -16,6 +16,10 @@ use crate::app::get_tenant_app_state;
 use crate::cost_ingestion::{creds, ConnectorCreds, ConnectorCredsStore};
 use crate::error::RouteError;
 
+/// Longest connector account id accepted. With the merchant and connector ids it forms the stored
+/// credential's name, which must fit [`crate::types::service_configuration::MAX_NAME_LEN`].
+const MAX_ACCOUNT_LEN: usize = 255;
+
 #[derive(Debug, Deserialize)]
 pub struct SetCredentialsRequest {
     /// Connector-side account (e.g. Adyen `merchantAccountCode`).
@@ -41,6 +45,12 @@ pub async fn set_connector_credentials(
     Path((_, connector)): Path<(String, String)>,
     Json(body): Json<SetCredentialsRequest>,
 ) -> Result<Json<SetCredentialsResponse>, RouteError> {
+    // The account is part of the stored credential's name, which is length-limited.
+    if body.account.chars().count() > MAX_ACCOUNT_LEN {
+        return Err(RouteError::bad_request(format!(
+            "account must be at most {MAX_ACCOUNT_LEN} characters"
+        )));
+    }
     let merchant_id = merchant.as_str().to_string();
     let app_state = get_tenant_app_state().await;
     let cfg = &app_state.config.cost_ingestion;
