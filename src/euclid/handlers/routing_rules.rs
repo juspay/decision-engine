@@ -19,10 +19,12 @@ use crate::{
             normalize_rule_value_types, validate_routing_rule,
         },
     },
-    types::service_configuration::{find_config_by_name, insert_config, update_config},
+    types::service_configuration::{find_config_by_name, upsert_config},
 };
 
-use crate::custom_extractors::{Json, MerchantFromPath, ScopedJson, ScopedJsonRejection};
+use crate::custom_extractors::{
+    Json, MerchantFromPath, RequestIds, ScopedJson, ScopedJsonRejection,
+};
 use crate::euclid::algorithm_store;
 use crate::euclid::{
     errors::EuclidErrors, errors::ValidationErrorDetails, types::RoutingAlgorithmMapper,
@@ -498,29 +500,9 @@ pub async fn config_sr_dimensions(
         .change_context(EuclidErrors::FailedToSerializeJsonToString)?;
     let name = format!("SR_DIMENSION_CONFIG_{}", merchant);
 
-    let service_config = find_config_by_name(name.clone())
+    let result = upsert_config(name, Some(config))
         .await
-        .change_context(EuclidErrors::StorageError)?;
-    let result = match service_config {
-        Some(_) => {
-            logger::debug!(
-                "Updating existing SR Dimension config for merchant: {}",
-                merchant
-            );
-            update_config(name, Some(config))
-                .await
-                .change_context(EuclidErrors::StorageError)
-        }
-        None => {
-            logger::debug!(
-                "Inserting new SR Dimension config for merchant: {}",
-                merchant
-            );
-            insert_config(name, Some(config))
-                .await
-                .change_context(EuclidErrors::StorageError)
-        }
-    };
+        .change_context(EuclidErrors::StorageError);
 
     if let Err(_) = result {
         logger::error!(
@@ -572,17 +554,16 @@ fn scope_experiment_to_session(
 }
 
 pub async fn routing_create(
-    headers: axum::http::HeaderMap,
+    ids: RequestIds,
     session: Option<axum::Extension<crate::auth::AuthContext>>,
     request: Result<ScopedJson<RoutingRule>, ScopedJsonRejection>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
     let state = get_tenant_app_state().await;
-    let request_id = headers
-        .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
-    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
-    let trace_id = crate::analytics::trace_id_from_headers(&headers);
+    let RequestIds {
+        request_id,
+        global_request_id,
+        trace_id,
+    } = ids;
 
     // The parse message names the JSON path of the field that did not parse, which matters for
     // nested documents (volume contracts especially).
@@ -1204,18 +1185,13 @@ async fn track_ab_rule_decision(
 }
 
 pub async fn routing_evaluate(
-    headers: axum::http::HeaderMap,
+    ids: RequestIds,
     ScopedJson { payload, .. }: ScopedJson<RoutingRequest>,
 ) -> Result<Json<RoutingEvaluateResponse>, ContainerError<EuclidErrors>> {
-    let request_id = headers
-        .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
     routing_evaluate_with_analytics(
-        headers,
+        ids,
         Json(payload),
         RoutingEvaluateAnalyticsFlows::routing_evaluate(),
-        request_id,
         ExperimentEndpoint::Evaluate,
         true,
     )
@@ -1227,16 +1203,18 @@ pub async fn routing_evaluate(
 /// outcome context for a real payment; `/routing/hybrid` clears it when its decider half records
 /// them instead.
 pub(crate) async fn routing_evaluate_with_analytics(
-    headers: axum::http::HeaderMap,
+    ids: RequestIds,
     Json(payload): Json<RoutingRequest>,
     flows: RoutingEvaluateAnalyticsFlows,
-    request_id: Option<String>,
     experiment_endpoint: ExperimentEndpoint,
     track_experiment_outcome: bool,
 ) -> Result<Json<RoutingEvaluateResponse>, ContainerError<EuclidErrors>> {
     let state = get_tenant_app_state().await;
-    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
-    let trace_id = crate::analytics::trace_id_from_headers(&headers);
+    let RequestIds {
+        request_id,
+        global_request_id,
+        trace_id,
+    } = ids;
     logger::debug!(
         payment_id = ?payload.payment_id,
         created_by = %payload.created_by,
@@ -1418,16 +1396,15 @@ const MAX_BATCH_EVALUATIONS: usize = 50;
 /// `status: "error"` with empty outputs at its position instead, so one wallet type
 /// falling back does not take the others down with it.
 pub async fn routing_evaluate_batch(
-    headers: axum::http::HeaderMap,
+    ids: RequestIds,
     ScopedJson { payload, .. }: ScopedJson<RoutingBatchRequest>,
 ) -> Result<Json<RoutingBatchResponse>, ContainerError<EuclidErrors>> {
     let state = get_tenant_app_state().await;
-    let request_id = headers
-        .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
-    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
-    let trace_id = crate::analytics::trace_id_from_headers(&headers);
+    let RequestIds {
+        request_id,
+        global_request_id,
+        trace_id,
+    } = ids;
     // Shared across entries; carried through every log line and analytics event below.
     let batch_payment_id = uniform_payment_id(&payload.requests);
     logger::debug!(

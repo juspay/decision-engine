@@ -317,8 +317,8 @@ check_clickhouse_schema() {
 # previously created only by routing-config/setup.py (which targets MySQL); the
 # Postgres bring-up creates an empty service_configuration table, so without this
 # the decider can't hedge (e.g. ENABLE_MERCHANT_ON_VOLUME_DISTRIBUTION_FEATURE_SR_V3
-# is absent and route_random_traffic never runs). Idempotent via WHERE NOT EXISTS
-# since service_configuration.name has no unique constraint.
+# is absent and route_random_traffic never runs). Idempotent via WHERE NOT EXISTS, so
+# re-running leaves existing values (service_configuration.name is unique).
 seed_global_configs() {
     echo "Seeding global SR V3 service configs..."
     local sql

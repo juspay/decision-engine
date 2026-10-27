@@ -17,9 +17,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::cost_ingestion::invoice::{self, StoredAddon};
-use crate::error::TextError;
-
-use super::connector_fees::clickhouse_config;
+use crate::error::RouteError;
 
 /// Upper bound on an uploaded invoice. Invoices are small; this rejects an accidental report upload
 /// to the wrong endpoint before parsing.
@@ -75,20 +73,19 @@ pub async fn upload_invoice(
     Path((_, connector)): Path<(String, String)>,
     Query(params): Query<InvoiceParams>,
     body: Bytes, // buffered: invoices are small
-) -> Result<Json<InvoiceUploadResponse>, TextError> {
+) -> Result<Json<InvoiceUploadResponse>, RouteError> {
     let merchant_id = merchant.as_str().to_string();
     if body.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "empty invoice body".to_string()).into());
+        return Err(RouteError::bad_request("empty invoice body"));
     }
     if body.len() > MAX_INVOICE_BYTES {
-        return Err((
+        return Err(RouteError::new(
             StatusCode::PAYLOAD_TOO_LARGE,
             format!("invoice exceeds {MAX_INVOICE_BYTES} byte limit"),
-        )
-            .into());
+        ));
     }
 
-    let cfg = clickhouse_config()?;
+    let cfg = super::global_config()?.analytics.clickhouse.clone();
     let outcome = invoice::ingest_invoice_bytes(
         &cfg,
         &connector,
@@ -98,7 +95,7 @@ pub async fn upload_invoice(
         &body,
     )
     .await
-    .map_err(|e| (StatusCode::UNPROCESSABLE_ENTITY, format!("{e:?}")))?;
+    .map_err(|e| RouteError::new(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))?;
 
     Ok(Json(InvoiceUploadResponse {
         merchant_id,
@@ -137,10 +134,10 @@ pub struct AddonDto {
 /// `GET /merchant-account/:merchant_id/invoice-addons` — the invoice add-ons in effect.
 pub async fn list_addons(
     MerchantFromPath(merchant): MerchantFromPath,
-) -> Result<Json<Vec<AddonDto>>, TextError> {
+) -> Result<Json<Vec<AddonDto>>, RouteError> {
     let list = invoice::store::list(&merchant)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
     Ok(Json(
         list.into_iter()
             .map(|(connector, addon)| AddonDto { connector, addon })
@@ -153,12 +150,12 @@ pub async fn list_addons(
 pub async fn delete_addon(
     MerchantFromPath(merchant): MerchantFromPath,
     Path((_, connector)): Path<(String, String)>,
-) -> Result<StatusCode, TextError> {
+) -> Result<StatusCode, RouteError> {
     let merchant_id = merchant.as_str().to_string();
     let connector = connector.to_lowercase();
     invoice::store::delete(&merchant, &connector)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
     super::connector_fees::refresh_serving(&merchant_id).await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -167,10 +164,10 @@ pub async fn delete_addon(
 /// invoice: coverage before/after and the remaining residual (architecture "Step 2").
 pub async fn get_reconciliation(
     MerchantFromPath(merchant): MerchantFromPath,
-) -> Result<Json<Vec<invoice::Reconciliation>>, TextError> {
-    let cfg = clickhouse_config()?;
+) -> Result<Json<Vec<invoice::Reconciliation>>, RouteError> {
+    let cfg = super::global_config()?.analytics.clickhouse.clone();
     let recon = invoice::reconcile_merchant(&cfg, &merchant)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
     Ok(Json(recon))
 }

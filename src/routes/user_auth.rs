@@ -140,19 +140,8 @@ pub async fn signup(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let admin_secret_ok = {
-        let provided = headers
-            .get("x-admin-secret")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        let expected = global_config.admin_secret.secret.peek();
-        !expected.is_empty()
-            && ring::constant_time::verify_slices_are_equal(
-                provided.as_bytes(),
-                expected.as_bytes(),
-            )
-            .is_ok()
-    };
+    let admin_secret_ok =
+        crate::auth::presents_admin_secret(&headers, global_config.admin_secret.secret.peek());
 
     if global_config.user_auth.signup_requires_admin_secret && !admin_secret_ok {
         return Err(error::ContainerError::from(UserAuthError::Unauthorized));

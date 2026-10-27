@@ -138,7 +138,22 @@ impl KnownFeature {
                 .map_err(|e| error_stack::report!(e))?;
             let Some(existing) = existing else {
                 let serialized = with_merchant(None, merchant_id, enabled)?;
-                return service_configuration::insert_config(key, Some(serialized)).await;
+                match service_configuration::insert_config(key.clone(), Some(serialized)).await {
+                    Ok(()) => return Ok(()),
+                    // The name is unique: when another instance created the row first, this
+                    // insert is refused and the next attempt merges into the row it created.
+                    Err(error) => {
+                        let created = service_configuration::find_config_by_name(key.clone())
+                            .await
+                            .ok()
+                            .flatten()
+                            .is_some();
+                        if !created {
+                            return Err(error);
+                        }
+                        continue;
+                    }
+                }
             };
 
             let serialized = with_merchant(existing.value.as_deref(), merchant_id, enabled)?;
@@ -229,7 +244,7 @@ pub async fn get_debit_routing(
     );
 
     let response = async {
-        ETM::merchant_account::load_merchant_by_merchant_id(merchant_id.clone())
+        ETM::merchant_account::load_authorized(&merchant)
             .await
             .ok_or(error::MerchantAccountConfigurationError::MerchantNotFound)?;
 
@@ -265,14 +280,13 @@ pub async fn get_merchant_config(
         merchant_id
     );
 
-    let result = ETM::merchant_account::load_merchant_by_merchant_id(merchant_id)
+    let result = ETM::merchant_account::load_authorized(&merchant)
         .await
         .ok_or(error::MerchantAccountConfigurationError::MerchantNotFound);
 
-    match result {
-        Ok(merchant_account) => Ok(Json(merchant_account.into())),
-        Err(e) => Err(e.into()),
-    }
+    result
+        .map(|merchant_account| Json(merchant_account.into()))
+        .map_err(Into::into)
 }
 
 #[axum::debug_handler]
@@ -293,10 +307,10 @@ pub async fn create_merchant_config(
     let gateway_success_rate_based_decider_input =
         payload.gateway_success_rate_based_decider_input.clone();
 
-    let merchant_account =
-        ETM::merchant_account::load_merchant_by_merchant_id(payload.merchant_id.clone()).await;
-
-    if merchant_account.is_some() {
+    if ETM::merchant_account::load_authorized(&merchant)
+        .await
+        .is_some()
+    {
         return Err(error::MerchantAccountConfigurationError::MerchantAlreadyExists.into());
     }
 
@@ -340,38 +354,25 @@ pub async fn update_debit_routing(
         payload.enabled
     );
 
-    // Verify merchant exists
-    ETM::merchant_account::load_merchant_by_merchant_id(merchant_id.clone())
+    ETM::merchant_account::load_authorized(&merchant)
         .await
         .ok_or(error::MerchantAccountConfigurationError::MerchantNotFound)?;
 
     let config_name = debit_routing_config_name(&merchant_id);
     let config_value = payload.enabled.to_string();
 
-    // Check if config already exists
-    let existing_config = service_configuration::find_config_by_name(config_name.clone())
+    let result = service_configuration::upsert_config(config_name, Some(config_value))
         .await
-        .change_context(error::MerchantAccountConfigurationError::StorageError)?;
+        .change_context(error::MerchantAccountConfigurationError::StorageError);
 
-    let result = if existing_config.is_some() {
-        // Update existing config
-        service_configuration::update_config(config_name, Some(config_value))
-            .await
-            .change_context(error::MerchantAccountConfigurationError::StorageError)
-    } else {
-        // Insert new config
-        service_configuration::insert_config(config_name, Some(config_value))
-            .await
-            .change_context(error::MerchantAccountConfigurationError::StorageError)
-    };
-
-    match result {
-        Ok(_) => Ok(Json(DebitRoutingResponse {
-            merchant_id: merchant_id.clone(),
-            debit_routing_enabled: payload.enabled,
-        })),
-        Err(e) => Err(e.into()),
-    }
+    result
+        .map(|_| {
+            Json(DebitRoutingResponse {
+                merchant_id: merchant_id.clone(),
+                debit_routing_enabled: payload.enabled,
+            })
+        })
+        .map_err(Into::into)
 }
 
 /// Every known feature and whether it is on for the merchant, as the dashboard lists them.
@@ -392,7 +393,7 @@ async fn features_of(merchant: &AuthorizedMerchant) -> MerchantFeaturesResponse 
 async fn ensure_merchant_exists(
     merchant: &AuthorizedMerchant,
 ) -> Result<(), error::ContainerError<error::MerchantAccountConfigurationError>> {
-    ETM::merchant_account::load_merchant_by_merchant_id(merchant.as_str().to_string())
+    ETM::merchant_account::load_authorized(merchant)
         .await
         .map(|_| ())
         .ok_or_else(|| error::MerchantAccountConfigurationError::MerchantNotFound.into())
@@ -444,13 +445,14 @@ pub async fn delete_merchant_config(
         .await
         .change_context(error::MerchantAccountConfigurationError::MerchantDeletionFailed);
 
-    match result {
-        Ok(_) => Ok(Json(MerchantAccountDeleteResponse {
-            message: "Merchant account deleted successfully".to_string(),
-            merchant_id,
-        })),
-        Err(e) => Err(e.into()),
-    }
+    result
+        .map(|_| {
+            Json(MerchantAccountDeleteResponse {
+                message: "Merchant account deleted successfully".to_string(),
+                merchant_id,
+            })
+        })
+        .map_err(Into::into)
 }
 
 #[cfg(test)]

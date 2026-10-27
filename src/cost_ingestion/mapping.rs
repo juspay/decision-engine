@@ -162,16 +162,9 @@ pub async fn save(
         return delete(merchant_id, connector, account).await;
     }
     let value = serde_json::to_string(mapping).map_err(|e| IngestError::Storage(e.to_string()))?;
-    let exists = service_configuration::find_config_by_name(name.clone())
+    service_configuration::upsert_config(name, Some(value))
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?
-        .is_some();
-    if exists {
-        service_configuration::update_config(name, Some(value)).await
-    } else {
-        service_configuration::insert_config(name, Some(value)).await
-    }
-    .map_err(|e| IngestError::Storage(e.to_string()))
+        .map_err(|e| IngestError::Storage(e.to_string()))
 }
 
 /// Remove a source's mapping. Idempotent — clearing a mapping that was never set is not an error,

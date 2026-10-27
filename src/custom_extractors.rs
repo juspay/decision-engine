@@ -136,6 +136,40 @@ where
     }
 }
 
+/// The ids that tie one request's logs and analytics events together: the caller's `x-request-id`,
+/// and the global request and trace ids. Each is absent when the caller sent none.
+#[derive(Debug, Clone, Default)]
+pub struct RequestIds {
+    pub request_id: Option<String>,
+    pub global_request_id: Option<String>,
+    pub trace_id: Option<String>,
+}
+
+impl RequestIds {
+    pub fn from_headers(headers: &axum::http::HeaderMap) -> Self {
+        Self {
+            request_id: headers
+                .get(consts::X_REQUEST_ID)
+                .and_then(|value| value.to_str().ok())
+                .map(str::to_string),
+            global_request_id: crate::analytics::global_request_id_from_headers(headers),
+            trace_id: crate::analytics::trace_id_from_headers(headers),
+        }
+    }
+}
+
+#[async_trait]
+impl<S> FromRequestParts<S> for RequestIds
+where
+    S: Send + Sync,
+{
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        Ok(Self::from_headers(&parts.headers))
+    }
+}
+
 /// The merchant a path-addressed route acts on, read from its merchant path parameter (see
 /// [`crate::auth::scope::MERCHANT_PATH_PARAM`]) and authorized against the caller's session.
 #[derive(Debug, Clone)]

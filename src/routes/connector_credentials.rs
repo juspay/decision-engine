@@ -13,9 +13,15 @@ use masking::Secret;
 use serde::{Deserialize, Serialize};
 
 use crate::app::get_tenant_app_state;
-use crate::cost_ingestion::checkout_credentials::CheckoutEnvironment;
-use crate::cost_ingestion::{creds, ConnectorCreds, ConnectorCredsStore, ConnectorRegistry};
-use crate::error::TextError;
+use crate::cost_ingestion::{
+    checkout_credentials::CheckoutEnvironment, creds, ConnectorCreds, ConnectorCredsStore,
+    ConnectorRegistry,
+};
+use crate::error::RouteError;
+
+/// Longest connector account id accepted. With the merchant and connector ids it forms the stored
+/// credential's name, which must fit [`crate::types::service_configuration::MAX_NAME_LEN`].
+const MAX_ACCOUNT_LEN: usize = 255;
 
 #[derive(Debug, Deserialize)]
 pub struct SetCredentialsRequest {
@@ -44,10 +50,16 @@ pub async fn set_connector_credentials(
     MerchantFromPath(merchant): MerchantFromPath,
     Path((_, connector)): Path<(String, String)>,
     Json(body): Json<SetCredentialsRequest>,
-) -> Result<Json<SetCredentialsResponse>, TextError> {
+) -> Result<Json<SetCredentialsResponse>, RouteError> {
     ConnectorRegistry::with_builtins()
         .get(&connector)
         .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
+    // The account is part of the stored credential's name, which is length-limited.
+    if body.account.chars().count() > MAX_ACCOUNT_LEN {
+        return Err(RouteError::bad_request(format!(
+            "account must be at most {MAX_ACCOUNT_LEN} characters"
+        )));
+    }
     let merchant_id = merchant.as_str().to_string();
     let app_state = get_tenant_app_state().await;
     let cfg = &app_state.config.cost_ingestion;
@@ -62,9 +74,9 @@ pub async fn set_connector_credentials(
         &cfg.creds_encryption_current,
         &cfg.creds_encryption_keys,
     )
-    .ok_or((
+    .ok_or(RouteError::new(
         StatusCode::SERVICE_UNAVAILABLE,
-        "credential encryption keyring not configured".to_string(),
+        "credential encryption keyring not configured",
     ))?;
 
     let new = ConnectorCreds {
@@ -74,7 +86,7 @@ pub async fn set_connector_credentials(
     store
         .put(&connector, &body.account, &merchant, &new)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
 
     Ok(Json(SetCredentialsResponse {
         merchant_id,
@@ -91,10 +103,10 @@ pub async fn set_connector_credentials(
 pub async fn delete_connector_credentials(
     MerchantFromPath(merchant): MerchantFromPath,
     Path((_, connector, account)): Path<(String, String, String)>,
-) -> Result<StatusCode, TextError> {
+) -> Result<StatusCode, RouteError> {
     creds::delete_source(&connector, &account, &merchant)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
     Ok(StatusCode::NO_CONTENT)
 }
 
@@ -103,7 +115,7 @@ pub async fn delete_connector_credentials(
 /// the credential keyring isn't configured (nothing decryptable).
 pub async fn list_connector_credentials(
     MerchantFromPath(merchant): MerchantFromPath,
-) -> Result<Json<Vec<creds::MaskedSource>>, TextError> {
+) -> Result<Json<Vec<creds::MaskedSource>>, RouteError> {
     let app_state = get_tenant_app_state().await;
     let cfg = &app_state.config.cost_ingestion;
     match ConnectorCredsStore::from_keyring(
@@ -114,11 +126,11 @@ pub async fn list_connector_credentials(
             .list_masked(&merchant, cfg)
             .await
             .map(Json)
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")).into()),
+            .map_err(RouteError::internal),
         None => {
             let sources = creds::list_sources(&merchant)
                 .await
-                .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+                .map_err(RouteError::internal)?;
             Ok(Json(
                 sources
                     .into_iter()
