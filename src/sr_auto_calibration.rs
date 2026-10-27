@@ -7,6 +7,7 @@
 //! by the decider on the next decision. Bucket-size changes are non-destructive thanks to the
 //! resize-in-place window (LPUSH + LTRIM), so re-tuning never wipes accumulated history.
 
+use crate::types::service_configuration::MerchantConfig;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -287,7 +288,7 @@ async fn calibrate_merchant(
         return Err("no segment with enough volume / PSPs".into());
     }
 
-    let name = format!("SR_V3_INPUT_CONFIG_{merchant_id}");
+    let name = crate::types::service_configuration::SrV3Input::name(merchant_id);
     let existing = find_config_by_name(name.clone()).await.ok().flatten();
     // Edit as raw JSON so fields we don't manage (defaults, margin, dimension-scoped sub-level
     // entries…) are preserved verbatim.
@@ -370,7 +371,11 @@ const LOW_CARD_DIMS: [&str; 4] = ["card_network", "currency", "country", "auth_t
 /// The merchant's active SR dimensions, filtered to the low-cardinality set we calibrate on.
 /// Empty when the merchant has no dimension config (then clustering is just (pmt, pm)).
 async fn active_low_card_dims(merchant_id: &str) -> Vec<String> {
-    let fields = match find_config_by_name(format!("SR_DIMENSION_CONFIG_{merchant_id}")).await {
+    let fields = match find_config_by_name(crate::types::service_configuration::SrDimensions::name(
+        merchant_id,
+    ))
+    .await
+    {
         Ok(Some(cfg)) => cfg
             .value
             .and_then(|v| serde_json::from_str::<SrDimensionConfig>(&v).ok())

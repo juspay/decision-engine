@@ -19,7 +19,6 @@ use crate::{
             normalize_rule_value_types, validate_routing_rule,
         },
     },
-    types::service_configuration::{find_config_by_name, upsert_config},
 };
 
 use crate::custom_extractors::{
@@ -496,13 +495,11 @@ pub async fn config_sr_dimensions(
         .into());
     }
 
-    let config = serde_json::to_string(&payload)
-        .change_context(EuclidErrors::FailedToSerializeJsonToString)?;
-    let name = format!("SR_DIMENSION_CONFIG_{}", merchant);
-
-    let result = upsert_config(name, Some(config))
-        .await
-        .change_context(EuclidErrors::StorageError);
+    let result = crate::types::service_configuration::upsert::<
+        crate::types::service_configuration::SrDimensions,
+    >(&merchant, &payload)
+    .await
+    .change_context(EuclidErrors::StorageError);
 
     if let Err(_) = result {
         logger::error!(
@@ -525,19 +522,17 @@ pub async fn config_sr_dimensions(
 pub async fn get_sr_dimensions(
     MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<SrDimensionConfig>, ContainerError<EuclidErrors>> {
-    let merchant_id = merchant.as_str().to_string();
-    let name = format!("SR_DIMENSION_CONFIG_{}", merchant_id);
-    let stored = find_config_by_name(name)
-        .await
-        .change_context(EuclidErrors::StorageError)?;
-    let config = stored
-        .and_then(|c| c.value)
-        .and_then(|v| serde_json::from_str::<SrDimensionConfig>(&v).ok())
-        .unwrap_or(SrDimensionConfig {
-            merchant_id,
-            ..Default::default()
-        });
-    Ok(Json(config))
+    use crate::types::service_configuration::{get, ConfigError, SrDimensions};
+    // A stored config that no longer parses is shown as unconfigured, so the selector still renders.
+    let stored = match get::<SrDimensions>(&merchant).await {
+        Ok(stored) => stored,
+        Err(error) if *error.current_context() == ConfigError::Invalid => None,
+        Err(error) => return Err(error.change_context(EuclidErrors::StorageError).into()),
+    };
+    Ok(Json(stored.unwrap_or(SrDimensionConfig {
+        merchant_id: merchant.as_str().to_string(),
+        ..Default::default()
+    })))
 }
 
 /// Hyperswitch SSO merchants route only through `/routing/hybrid`, so an experiment written from
