@@ -58,6 +58,7 @@
 //!
 //! [`report_generated`]: https://www.checkout.com/docs/developer-resources/event-notifications/event-types/report_generated
 
+use crate::cost_ingestion::card_network::network_key;
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -476,7 +477,7 @@ impl SettlementReportSource for CheckoutReportSource {
                     entry.has_capture = true;
                     // Stamp metadata from the capture row (authoritative, always present here).
                     entry.txn_ref = pid.to_string();
-                    let network = normalize_network(row.get(c.payment_method));
+                    let network = network_key(row.get(c.payment_method));
                     let funding = funding_from_card_type(row.get(c.card_type));
                     entry.variant = build_variant(&network, &funding);
                     entry.card_network = network;
@@ -610,21 +611,6 @@ fn funding_from_card_type(card_type: &str) -> String {
         "debit" => "debit".to_string(),
         "credit" => "credit".to_string(),
         _ => String::new(),
-    }
-}
-
-/// Canonicalize Checkout's `Payment Method` label (`VISA`, `MASTERCARD`, `AMEX`, …) to the
-/// lowercased network ids the rest of the pipeline uses (`visa`, `mc`, `amex`, …).
-fn normalize_network(raw: &str) -> String {
-    match raw.trim().to_lowercase().as_str() {
-        "" => String::new(),
-        "mastercard" | "master card" => "mc".to_string(),
-        "visa" => "visa".to_string(),
-        "american express" | "amex" => "amex".to_string(),
-        "discover" => "discover".to_string(),
-        "diners" | "diners club" => "diners".to_string(),
-        "jcb" => "jcb".to_string(),
-        other => other.replace(' ', ""),
     }
 }
 
@@ -901,10 +887,10 @@ ic_orphan,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,SA,USD,-102.29,2026
         assert_eq!(funding_from_card_type("Debit"), "debit");
         assert_eq!(funding_from_card_type("Credit"), "credit");
         assert_eq!(funding_from_card_type(""), "");
-        assert_eq!(normalize_network("VISA"), "visa");
-        assert_eq!(normalize_network("MASTERCARD"), "mc");
-        assert_eq!(normalize_network("AMEX"), "amex");
-        assert_eq!(normalize_network(""), "");
+        assert_eq!(network_key("VISA"), "visa");
+        assert_eq!(network_key("MASTERCARD"), "mc");
+        assert_eq!(network_key("AMEX"), "amex");
+        assert_eq!(network_key(""), "");
         assert_eq!(build_variant("visa", "credit"), "visacredit");
         assert_eq!(
             parse_date("2026-07-09T18:07:06.844"),

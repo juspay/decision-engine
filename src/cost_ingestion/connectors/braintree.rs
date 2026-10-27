@@ -26,6 +26,7 @@
 //! architecture doc §7.7). Those three methods return a descriptive error until then; the parser
 //! (`parse_rows`) is complete and independently testable.
 
+use crate::cost_ingestion::card_network::network_key;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -179,11 +180,11 @@ impl SettlementReportSource for BraintreeReportSource {
 
                 // Prefer the card brand; fall back to the debit network (pinless), then the instrument.
                 let network = {
-                    let brand = normalize_network(row.get(c.brand));
+                    let brand = network_key(row.get(c.brand));
                     if !brand.is_empty() {
                         brand
                     } else {
-                        let net = normalize_network(row.get_opt(c.network));
+                        let net = network_key(row.get_opt(c.network));
                         if !net.is_empty() {
                             net
                         } else {
@@ -239,21 +240,6 @@ fn funding_from_card_type(card_type: &str) -> String {
         "debit" => "debit".to_string(),
         "credit" => "credit".to_string(),
         _ => String::new(),
-    }
-}
-
-/// Canonicalize a Braintree card-brand / payment-network label to the lowercased network ids the
-/// rest of the pipeline uses (matching Adyen: `mc`, `visa`, `amex`, …). Empty in ⇒ empty out.
-fn normalize_network(raw: &str) -> String {
-    match raw.trim().to_lowercase().as_str() {
-        "" => String::new(),
-        "mastercard" | "master card" => "mc".to_string(),
-        "visa" => "visa".to_string(),
-        "american express" | "amex" => "amex".to_string(),
-        "discover" => "discover".to_string(),
-        "diners" | "diners club" => "diners".to_string(),
-        "jcb" => "jcb".to_string(),
-        other => other.replace(' ', ""),
     }
 }
 
@@ -393,10 +379,10 @@ v1,sale,USD,25.00,,,venmo_account,0.00,0.15\n";
         assert_eq!(funding_from_card_type("Credit"), "credit");
         assert_eq!(funding_from_card_type("Unknown"), "");
         assert_eq!(funding_from_card_type(""), "");
-        assert_eq!(normalize_network("MasterCard"), "mc");
-        assert_eq!(normalize_network("American Express"), "amex");
-        assert_eq!(normalize_network("Visa"), "visa");
-        assert_eq!(normalize_network(""), "");
+        assert_eq!(network_key("MasterCard"), "mc");
+        assert_eq!(network_key("American Express"), "amex");
+        assert_eq!(network_key("Visa"), "visa");
+        assert_eq!(network_key(""), "");
     }
 
     #[test]

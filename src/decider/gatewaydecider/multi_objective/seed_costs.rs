@@ -32,6 +32,7 @@
 //! **3DS is intentionally not a tier dimension.** In the US, authentication shifts fraud
 //! liability but does not change interchange, so `*_3ds_*` and `*_no3ds_*` price the same.
 
+use crate::cost_ingestion::card_network::network_key;
 use std::collections::HashMap;
 
 use crate::config::{fee_components, SeedCostEntry, SeedCostTier};
@@ -77,7 +78,7 @@ fn field(value: &Option<String>) -> &str {
 /// Match specificity of a tier against a cluster, or `None` if it doesn't apply.
 ///
 /// Each field the tier specifies must match the same-named cluster field by case-insensitive
-/// equality. The returned score is `matched_field_count·32 + tiebreak`, so a tier matching
+/// equality — the network by its cost key, so a tier's `amex` matches a live `AmericanExpress`. The returned score is `matched_field_count·32 + tiebreak`, so a tier matching
 /// more fields always outranks one matching fewer, and same-count ties resolve by the more
 /// discriminating dimension (issuer_region > currency > network > funding > program). A
 /// wildcard (`None`) field adds nothing.
@@ -100,7 +101,7 @@ pub(crate) fn tier_score(tier: &SeedCostTier, cluster: &ClusterKey) -> Option<u3
         tiebreak += 8;
     }
     if let Some(v) = &tier.card_network {
-        if !v.eq_ignore_ascii_case(field(&cluster.card_network)) {
+        if network_key(v) != network_key(field(&cluster.card_network)) {
             return None;
         }
         count += 1;
@@ -396,6 +397,21 @@ mod tests {
         let costs = lookup_seed_costs(&e, &usd_credit("mastercard", "premium", 100.0), &psps);
         // 2.50% + $0.24 on $100 = $2.74 → 274 bps.
         assert!((costs["adyen"].effective_cost_bps - 274.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn a_network_tier_matches_every_spelling_of_the_network() {
+        // The amex tier: 3.43% + $0.10 on $100 = $3.53 → 353 bps, whatever the card calls itself.
+        let e = entries();
+        let psps = vec!["adyen".to_string()];
+        for network in ["amex", "AMEX", "American Express", "AmericanExpress"] {
+            let costs = lookup_seed_costs(&e, &usd_credit(network, "standard", 100.0), &psps);
+            assert!(
+                (costs["adyen"].effective_cost_bps - 353.0).abs() < 1e-6,
+                "{network}: {}",
+                costs["adyen"].effective_cost_bps
+            );
+        }
     }
 
     #[test]
