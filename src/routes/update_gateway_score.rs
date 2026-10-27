@@ -1,4 +1,4 @@
-use crate::custom_extractors::{ScopedJson, ScopedJsonRejection};
+use crate::custom_extractors::{RequestIds, ScopedJson, ScopedJsonRejection};
 // use std::sync::Arc;
 //
 // use axum::{routing::post, Json};
@@ -97,12 +97,11 @@ pub async fn update_gateway_score(
     headers: axum::http::HeaderMap,
     request: Result<ScopedJson<UpdateScorePayload>, ScopedJsonRejection>,
 ) -> Result<Json<UpdateScoreResponse>, ErrorResponse> {
-    let x_request_id = headers
-        .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
-    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
-    let trace_id = crate::analytics::trace_id_from_headers(&headers);
+    let RequestIds {
+        request_id: x_request_id,
+        global_request_id,
+        trace_id,
+    } = RequestIds::from_headers(&headers);
 
     // Mask values by default and consolidate header diagnostics into one event.
     crate::logger::debug!(

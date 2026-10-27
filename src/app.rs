@@ -5,7 +5,6 @@ use axum::{
     extract::{Request, State},
     middleware::{self, Next},
     response::Response,
-    routing::{delete, get, post, put},
 };
 use axum_server::{tls_rustls::RustlsConfig, Handle};
 use error_stack::ResultExt;
@@ -16,6 +15,8 @@ use tokio::sync::OnceCell as TokioOnceCell;
 use tower::ServiceBuilder;
 use tower_http::trace as tower_trace;
 
+use crate::euclid::handlers::routing_rules;
+use crate::middleware::metered;
 use crate::{
     api_client::ApiClient,
     config::{self, GlobalConfig, TenantConfig},
@@ -360,122 +361,123 @@ fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
     axum::Router::new()
         .route(
             "/routing/create",
-            axum::routing::post(crate::euclid::handlers::routing_rules::routing_create)
-                .route_layer(custom_middleware::endpoint("routing_create")),
+            metered!(post, routing_rules::routing_create),
         )
         .route(
             "/routing/activate",
-            axum::routing::post(crate::euclid::handlers::routing_rules::activate_routing_rule)
-                .route_layer(custom_middleware::endpoint("activate_routing_rule")),
+            metered!(post, routing_rules::activate_routing_rule),
         )
         .route(
             "/routing/deactivate",
-            axum::routing::post(crate::euclid::handlers::routing_rules::deactivate_routing_rule)
-                .route_layer(custom_middleware::endpoint("deactivate_routing_rule")),
+            metered!(post, routing_rules::deactivate_routing_rule),
         )
         .route(
             "/routing/update",
-            axum::routing::post(crate::euclid::handlers::routing_rules::update_routing_rule)
-                .route_layer(custom_middleware::endpoint("update_routing_rule")),
+            metered!(post, routing_rules::update_routing_rule),
         )
         // Rule deletion is disabled for parity with the Hyperswitch dashboard, which
         // cannot delete routing rules yet (juspay/hyperswitch-control-center#5495,
         // item 4). Re-enable by uncommenting once both dashboards can offer it.
         // .route(
         //     "/routing/delete",
-        //     axum::routing::post(crate::euclid::handlers::routing_rules::delete_routing_rule),
+        //     metered!(post, routing_rules::delete_routing_rule),
         // )
         .route(
             "/routing/list/:merchant_id",
-            axum::routing::post(
-                crate::euclid::handlers::routing_rules::list_all_routing_algorithm_id,
-            )
-            .route_layer(custom_middleware::endpoint("list_all_routing_algorithm_id")),
+            metered!(post, routing_rules::list_all_routing_algorithm_id),
         )
         .route(
             "/routing/list/active/:merchant_id",
-            axum::routing::post(
-                crate::euclid::handlers::routing_rules::list_active_routing_algorithm,
-            )
-            .route_layer(custom_middleware::endpoint("list_active_routing_algorithm")),
+            metered!(post, routing_rules::list_active_routing_algorithm),
         )
         .route(
             "/routing/evaluate",
-            axum::routing::post(crate::euclid::handlers::routing_rules::routing_evaluate)
-                .route_layer(custom_middleware::endpoint("routing_evaluate")),
+            metered!(post, routing_rules::routing_evaluate),
         )
         .route(
             "/routing/evaluate/batch",
-            axum::routing::post(crate::euclid::handlers::routing_rules::routing_evaluate_batch)
-                .route_layer(custom_middleware::endpoint("routing_evaluate_batch")),
+            metered!(post, routing_rules::routing_evaluate_batch),
         )
         .route(
             "/decision_gateway",
-            post(routes::decision_gateway::decision_gateway)
-                .route_layer(custom_middleware::endpoint("decision_gateway")),
+            metered!(post, routes::decision_gateway::decision_gateway),
         )
         .route(
             "/rule/create",
-            post(routes::rule_configuration::create_rule_config)
-                .route_layer(custom_middleware::endpoint("create_rule_config")),
+            metered!(post, routes::rule_configuration::create_rule_config),
         )
         .route(
             "/rule/get",
-            post(routes::rule_configuration::get_rule_config)
-                .route_layer(custom_middleware::endpoint("get_rule_config")),
+            metered!(post, routes::rule_configuration::get_rule_config),
         )
         .route(
             "/rule/update",
-            post(routes::rule_configuration::update_rule_config)
-                .route_layer(custom_middleware::endpoint("update_rule_config")),
+            metered!(post, routes::rule_configuration::update_rule_config),
         )
         .route(
             "/rule/delete",
-            post(routes::rule_configuration::delete_rule_config)
-                .route_layer(custom_middleware::endpoint("delete_rule_config")),
+            metered!(post, routes::rule_configuration::delete_rule_config),
         )
         .route(
             "/merchant-account/:merchant_id",
-            get(routes::merchant_account_config::get_merchant_config)
-                .route_layer(custom_middleware::endpoint("merchant_account_get")),
+            metered!(
+                get,
+                routes::merchant_account_config::get_merchant_config,
+                "merchant_account_get"
+            ),
         )
         .route(
             "/merchant-account/:merchant_id",
-            delete(routes::merchant_account_config::delete_merchant_config)
-                .route_layer(custom_middleware::endpoint("merchant_account_delete")),
+            metered!(
+                delete,
+                routes::merchant_account_config::delete_merchant_config,
+                "merchant_account_delete"
+            ),
         )
         .route(
             "/merchant-account/:merchant_id/debit-routing",
-            get(routes::merchant_account_config::get_debit_routing)
-                .route_layer(custom_middleware::endpoint("merchant_debit_routing_get")),
+            metered!(
+                get,
+                routes::merchant_account_config::get_debit_routing,
+                "merchant_debit_routing_get"
+            ),
         )
         .route(
             "/merchant-account/:merchant_id/connectors",
-            get(routes::connector_credentials::list_connector_credentials),
+            metered!(
+                get,
+                routes::connector_credentials::list_connector_credentials
+            ),
         )
         .route(
             "/merchant-account/:merchant_id/connectors/:connector/credentials",
-            post(routes::connector_credentials::set_connector_credentials),
+            metered!(
+                post,
+                routes::connector_credentials::set_connector_credentials
+            ),
         )
         .route(
             "/merchant-account/:merchant_id/connectors/:connector/credentials/:account",
-            delete(routes::connector_credentials::delete_connector_credentials),
+            metered!(
+                delete,
+                routes::connector_credentials::delete_connector_credentials
+            ),
         )
         .route(
             "/merchant-account/:merchant_id/connectors/:connector/report",
             // Monthly settlement reports run to several GB. The handler streams the body to disk
             // and parses in batches (O(batch) RAM), so lift the body cap to the same hard limit it
             // enforces itself. DefaultBodyLimit otherwise errors the stream at its default.
-            post(routes::report_upload::upload_report).layer(axum::extract::DefaultBodyLimit::max(
-                routes::report_upload::MAX_UPLOAD_BYTES,
-            )),
+            metered!(post, routes::report_upload::upload_report).layer(
+                axum::extract::DefaultBodyLimit::max(routes::report_upload::MAX_UPLOAD_BYTES),
+            ),
         )
         .route(
             // Header preflight: the dashboard posts only the first few KB of the merchant's file to
             // check it parses before committing to a multi-GB upload. Cap the body accordingly —
             // anything larger is a client bug, and the handler stops reading at the cap anyway.
             "/merchant-account/:merchant_id/connectors/:connector/report/validate-headers",
-            post(routes::report_upload::validate_report_headers).layer(
+            metered!(post, routes::report_upload::validate_report_headers).layer(
                 axum::extract::DefaultBodyLimit::max(
                     crate::cost_ingestion::preflight::HEADER_SAMPLE_BYTES,
                 ),
@@ -485,99 +487,106 @@ fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
             // Which connectors support report ingestion, straight off the registry — the dashboard's
             // connector picker reads this instead of keeping its own list.
             "/cost-ingestion/connectors",
-            get(routes::report_upload::list_ingest_connectors),
+            metered!(get, routes::report_upload::list_ingest_connectors),
         )
         .route(
             // Preview a *candidate* column mapping: what the merchant's rows actually become under
             // it. Small JSON body (a mapping + a file sample), so the default body limit applies.
             "/merchant-account/:merchant_id/connectors/:connector/report/preview",
-            post(routes::report_upload::preview_column_mapping),
+            metered!(post, routes::report_upload::preview_column_mapping),
         )
         .route(
             // A settlement source's saved column mapping, applied to every future ingestion of it.
             "/merchant-account/:merchant_id/connectors/:connector/report/column-mapping",
-            get(routes::report_upload::get_column_mapping)
-                .put(routes::report_upload::set_column_mapping)
-                .delete(routes::report_upload::delete_column_mapping),
+            metered!(get, routes::report_upload::get_column_mapping)
+                .merge(metered!(put, routes::report_upload::set_column_mapping))
+                .merge(metered!(
+                    delete,
+                    routes::report_upload::delete_column_mapping
+                )),
         )
         .route(
             // "Use a sample file": run a curated demo report (fetched from configured URL) through
             // the same pipeline, so a merchant without a report file can still exercise the flow.
             "/merchant-account/:merchant_id/connectors/:connector/report/sample",
-            post(routes::report_upload::run_sample_report),
+            metered!(post, routes::report_upload::run_sample_report),
         )
         .route(
             "/merchant-account/:merchant_id/connectors/:connector/invoice",
             // Invoices are small (a few hundred lines): buffered and processed synchronously, so the
             // computed cost add-on is returned in the response. Cap the body to reject a settlement
             // report accidentally uploaded here.
-            post(routes::invoice_upload::upload_invoice).layer(
+            metered!(post, routes::invoice_upload::upload_invoice).layer(
                 axum::extract::DefaultBodyLimit::max(routes::invoice_upload::MAX_INVOICE_BYTES),
             ),
         )
         .route(
             "/merchant-account/:merchant_id/connectors/:connector/invoice-addon",
-            delete(routes::invoice_upload::delete_addon),
+            metered!(delete, routes::invoice_upload::delete_addon),
         )
         .route(
             "/merchant-account/:merchant_id/invoice-addons",
-            get(routes::invoice_upload::list_addons),
+            metered!(get, routes::invoice_upload::list_addons),
         )
         .route(
             "/merchant-account/:merchant_id/invoice-reconciliation",
-            get(routes::invoice_upload::get_reconciliation),
+            metered!(get, routes::invoice_upload::get_reconciliation),
         )
         .route(
             "/merchant-account/:merchant_id/connector-fees",
-            get(routes::connector_fees::list_connector_fees),
+            metered!(get, routes::connector_fees::list_connector_fees),
         )
         .route(
             "/merchant-account/:merchant_id/connectors/:connector/fee-override",
-            put(routes::connector_fees::set_fee_override)
-                .delete(routes::connector_fees::delete_fee_override),
+            metered!(put, routes::connector_fees::set_fee_override).merge(metered!(
+                delete,
+                routes::connector_fees::delete_fee_override
+            )),
         )
         .route(
             "/merchant-account/:merchant_id/cost-clusters",
-            get(routes::cost_clusters::list_cost_clusters),
+            metered!(get, routes::cost_clusters::list_cost_clusters),
         )
         .route(
             "/merchant-account/:merchant_id/cost-cluster-facets",
-            get(routes::cost_clusters::list_cost_cluster_facets),
+            metered!(get, routes::cost_clusters::list_cost_cluster_facets),
         )
         .route(
             "/merchant-account/:merchant_id/cost-clusters/:cluster-key/fee-override",
-            put(routes::cost_clusters::set_cluster_override)
-                .delete(routes::cost_clusters::delete_cluster_override),
+            metered!(put, routes::cost_clusters::set_cluster_override).merge(metered!(
+                delete,
+                routes::cost_clusters::delete_cluster_override
+            )),
         )
         .route(
             "/merchant-account/:merchant_id/seed-costs",
-            get(routes::seed_costs::get_seed_costs)
-                .put(routes::seed_costs::set_seed_costs)
-                .delete(routes::seed_costs::delete_seed_costs),
+            metered!(get, routes::seed_costs::get_seed_costs)
+                .merge(metered!(put, routes::seed_costs::set_seed_costs))
+                .merge(metered!(delete, routes::seed_costs::delete_seed_costs)),
         )
         .route(
             "/merchant-account/:merchant_id/seed-costs/simulate",
-            post(routes::seed_costs::simulate_seed_costs),
+            metered!(post, routes::seed_costs::simulate_seed_costs),
         )
         .route(
             "/merchant-account/:merchant_id/cost-coverage",
-            get(routes::cost_coverage::get_cost_coverage),
+            metered!(get, routes::cost_coverage::get_cost_coverage),
         )
         .route(
             "/merchant-account/:merchant_id/volume-commitment/dashboard",
-            get(routes::volume_commitment::get_dashboard),
+            metered!(get, routes::volume_commitment::get_dashboard),
         )
         .route(
             "/merchant-account/:merchant_id/volume-commitment/projection",
-            get(routes::volume_commitment::get_projection),
+            metered!(get, routes::volume_commitment::get_projection),
         )
         .route(
             "/merchant-account/:merchant_id/volume-commitment/impact",
-            get(routes::volume_commitment::get_impact),
+            metered!(get, routes::volume_commitment::get_impact),
         )
         .route(
             "/merchant-account/:merchant_id/volume-commitment/samples",
-            get(routes::volume_commitment::get_samples),
+            metered!(get, routes::volume_commitment::get_samples),
         )
         // Called by the volume-commitment scheduler when a merchant's forecast comes due. Behind
         // the same auth as any other write, and the handler narrows further: the admin secret
@@ -585,80 +594,89 @@ fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
         // merchant, and the every-merchant sweep is admin-only.
         .route(
             "/volume-commitment/run-forecast",
-            post(routes::volume_commitment::run_forecast),
+            metered!(post, routes::volume_commitment::run_forecast),
         )
         .route(
             "/merchant-account/:merchant_id/cost-ingestions",
-            get(routes::report_upload::list_ingestions),
+            metered!(get, routes::report_upload::list_ingestions),
         )
         .route(
             "/merchant-account/:merchant_id/cost-ingestions/:ingestion-id",
-            delete(routes::report_upload::delete_ingestion),
+            metered!(delete, routes::report_upload::delete_ingestion),
         )
         .route(
             "/merchant-account/:merchant_id/cost-price-changes",
-            get(routes::report_upload::list_price_changes),
+            metered!(get, routes::report_upload::list_price_changes),
         )
         .route(
             "/merchant-account/:merchant_id/debit-routing",
-            post(routes::merchant_account_config::update_debit_routing)
-                .route_layer(custom_middleware::endpoint("merchant_debit_routing_update")),
+            metered!(
+                post,
+                routes::merchant_account_config::update_debit_routing,
+                "merchant_debit_routing_update"
+            ),
         )
         .route(
             "/merchant-account/:merchant_id/features",
-            get(routes::merchant_account_config::get_merchant_features)
-                .route_layer(custom_middleware::endpoint("merchant_features_get")),
+            metered!(
+                get,
+                routes::merchant_account_config::get_merchant_features,
+                "merchant_features_get"
+            ),
         )
         .route(
             "/merchant-account/:merchant_id/features/:feature",
-            post(routes::merchant_account_config::update_merchant_feature)
-                .route_layer(custom_middleware::endpoint("merchant_feature_update")),
+            metered!(
+                post,
+                routes::merchant_account_config::update_merchant_feature,
+                "merchant_feature_update"
+            ),
         )
         .route(
             "/config-sr-dimension",
-            axum::routing::post(crate::euclid::handlers::routing_rules::config_sr_dimensions)
-                .route_layer(custom_middleware::endpoint("config_sr_dimensions")),
+            metered!(post, routing_rules::config_sr_dimensions),
         )
         .route(
             "/config-sr-dimension/:merchant_id",
-            axum::routing::get(crate::euclid::handlers::routing_rules::get_sr_dimensions),
+            metered!(get, routing_rules::get_sr_dimensions),
         )
         .route(
             "/config/routing-keys",
-            axum::routing::get(crate::euclid::handlers::routing_rules::get_routing_config)
-                .route_layer(custom_middleware::endpoint("get_routing_config")),
+            metered!(get, routing_rules::get_routing_config),
         )
-        .route("/gsm/options", get(routes::gsm::gsm_options))
+        .route("/gsm/options", metered!(get, routes::gsm::gsm_options))
         .route(
             "/update-score",
-            post(routes::update_score::update_score)
-                .route_layer(custom_middleware::endpoint("update_score")),
+            metered!(post, routes::update_score::update_score),
         )
         .route(
             "/decide-gateway",
-            post(routes::decide_gateway::decide_gateway)
-                .route_layer(custom_middleware::endpoint("decide_gateway")),
+            metered!(post, routes::decide_gateway::decide_gateway),
         )
         .route(
             "/routing/hybrid",
-            post(routes::hybrid_routing::hybrid_routing_evaluate)
-                .route_layer(custom_middleware::endpoint("hybrid_routing_evaluate")),
+            metered!(post, routes::hybrid_routing::hybrid_routing_evaluate),
         )
         .route(
             "/update-gateway-score",
-            post(routes::update_gateway_score::update_gateway_score)
-                .route_layer(custom_middleware::endpoint("update_gateway_score")),
+            metered!(post, routes::update_gateway_score::update_gateway_score),
         )
         .route(
             "/gateway-score/reset",
-            post(routes::gateway_score::reset_gateway_scores),
+            metered!(post, routes::gateway_score::reset_gateway_scores),
         )
-        .route("/api-key/create", post(routes::api_key::create_api_key))
+        .route(
+            "/api-key/create",
+            metered!(post, routes::api_key::create_api_key),
+        )
         .route(
             "/api-key/list/:merchant_id",
-            get(routes::api_key::list_api_keys),
+            metered!(get, routes::api_key::list_api_keys),
         )
-        .route("/api-key/:key_id", delete(routes::api_key::revoke_api_key))
+        .route(
+            "/api-key/:key_id",
+            metered!(delete, routes::api_key::revoke_api_key),
+        )
         .nest("/analytics", routes::analytics::serve())
         // Ordering matters: layers run outermost-first, so `authenticate` (added last) runs before
         // `enforce_merchant_scope` (added here, inner). The scope guard therefore sees the
@@ -677,24 +695,27 @@ fn admin_routes() -> axum::Router<Arc<GlobalAppState>> {
     axum::Router::new()
         .route(
             "/merchant-account/create",
-            post(routes::merchant_account_config::create_merchant_config)
-                .route_layer(custom_middleware::endpoint("merchant_account_create")),
+            metered!(
+                post,
+                routes::merchant_account_config::create_merchant_config,
+                "merchant_account_create"
+            ),
         )
         .route(
             "/admin/hierarchy/reconcile",
-            post(routes::hierarchy::reconcile_hierarchy),
+            metered!(post, routes::hierarchy::reconcile_hierarchy),
         )
         .route(
             "/admin/profiles/:profile_id/connectors",
-            post(routes::profile_connectors::replace_profile_connectors),
+            metered!(post, routes::profile_connectors::replace_profile_connectors),
         )
         .route(
             "/admin/hierarchy/sync",
-            post(routes::hierarchy::sync_hierarchy),
+            metered!(post, routes::hierarchy::sync_hierarchy),
         )
         .route(
             "/auth/admin/merchant-token",
-            post(routes::user_auth::admin_merchant_token),
+            metered!(post, routes::user_auth::admin_merchant_token),
         )
         .route_layer(middleware::from_fn(custom_middleware::require_admin_secret))
 }
@@ -706,54 +727,63 @@ fn public_routes() -> axum::Router<Arc<GlobalAppState>> {
     axum::Router::new()
         .route(
             "/webhooks/settlement/:merchant_id/:connector",
-            post(routes::settlement_webhook::settlement_webhook),
+            metered!(post, routes::settlement_webhook::settlement_webhook),
         )
-        .route("/auth/signup", post(routes::user_auth::signup))
-        .route("/auth/login", post(routes::user_auth::login))
-        .route("/auth/logout", post(routes::user_auth::logout))
-        .route("/auth/me", get(routes::user_auth::me))
-        .route("/auth/merchants", get(routes::user_auth::list_merchants))
+        .route("/auth/signup", metered!(post, routes::user_auth::signup))
+        .route("/auth/login", metered!(post, routes::user_auth::login))
+        .route("/auth/logout", metered!(post, routes::user_auth::logout))
+        .route("/auth/me", metered!(get, routes::user_auth::me))
+        .route(
+            "/auth/merchants",
+            metered!(get, routes::user_auth::list_merchants),
+        )
         .route(
             "/auth/switch-merchant",
-            post(routes::user_auth::switch_merchant),
+            metered!(post, routes::user_auth::switch_merchant),
         )
         .route(
             "/auth/super-admin/enter-merchant",
-            post(routes::user_auth::enter_merchant),
+            metered!(post, routes::user_auth::enter_merchant),
         )
         .route(
             "/auth/super-admin/exit",
-            post(routes::user_auth::exit_merchant),
+            metered!(post, routes::user_auth::exit_merchant),
         )
         .route(
             "/auth/super-admin/lookup",
-            post(routes::user_auth::lookup_merchants),
+            metered!(post, routes::user_auth::lookup_merchants),
         )
         .route(
             "/onboarding/merchant",
-            post(routes::user_auth::create_merchant),
+            metered!(post, routes::user_auth::create_merchant),
         )
-        .route("/merchant/members", get(routes::user_auth::list_members))
+        .route(
+            "/merchant/members",
+            metered!(get, routes::user_auth::list_members),
+        )
         .route(
             "/merchant/members/invite",
-            post(routes::user_auth::invite_member),
+            metered!(post, routes::user_auth::invite_member),
         )
-        .route("/auth/verify-email", get(routes::user_auth::verify_email))
+        .route(
+            "/auth/verify-email",
+            metered!(get, routes::user_auth::verify_email),
+        )
         .route(
             "/auth/forgot-password",
-            post(routes::user_auth::forgot_password),
+            metered!(post, routes::user_auth::forgot_password),
         )
         .route(
             "/auth/reset-password",
-            post(routes::user_auth::reset_password),
+            metered!(post, routes::user_auth::reset_password),
         )
         .route(
             "/auth/change-password",
-            post(routes::user_auth::change_password),
+            metered!(post, routes::user_auth::change_password),
         )
         .route(
             "/auth/admin/merchant-token/exchange",
-            post(routes::user_auth::exchange_merchant_token),
+            metered!(post, routes::user_auth::exchange_merchant_token),
         )
 }
 
