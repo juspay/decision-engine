@@ -20,17 +20,48 @@ use axum::response::{IntoResponse, Response};
 
 use super::AuthContext;
 
-/// Path parameters that name the merchant a route acts on. Routing rules are owned by
-/// `created_by`, which is the merchant id under another name.
-pub const MERCHANT_PATH_PARAMS: &[&str] = &["merchant-id", "merchant_id", "created_by"];
+pub use merchant_scoped_derive::MerchantScoped;
+
+/// The path parameter that names the merchant a route acts on. Every merchant-addressed route
+/// spells it this way, so the scope guard and [`crate::custom_extractors::MerchantFromPath`] find
+/// it without a per-route list.
+pub const MERCHANT_PATH_PARAM: &str = "merchant_id";
 
 /// A request that names the merchant(s) it acts on.
 ///
-/// Implemented next to each request type that carries a merchant in its body. List *every*
-/// merchant the handler reads from the request — a merchant left out here is one a session can
-/// reach across to.
+/// Derived on each request type that carries a merchant in its body, with `#[merchant]` on every
+/// field naming one — a merchant field left unmarked is one a session can reach across to. A
+/// marked field is itself `MerchantScoped`: an id ([`String`], [`MerchantId`]), an [`Option`] of
+/// one, or a nested type that derives it.
+///
+/// [`MerchantId`]: crate::types::merchant::id::MerchantId
 pub trait MerchantScoped {
     fn merchant_ids(&self) -> Vec<&str>;
+}
+
+impl MerchantScoped for str {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![self]
+    }
+}
+
+impl MerchantScoped for String {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![self.as_str()]
+    }
+}
+
+impl MerchantScoped for crate::types::merchant::id::MerchantId {
+    fn merchant_ids(&self) -> Vec<&str> {
+        vec![self.0.as_str()]
+    }
+}
+
+/// An optional field names a merchant only when present.
+impl<T: MerchantScoped> MerchantScoped for Option<T> {
+    fn merchant_ids(&self) -> Vec<&str> {
+        self.as_ref().map(T::merchant_ids).unwrap_or_default()
+    }
 }
 
 /// A merchant the current request is authorized to act on. Requests construct one only through
@@ -115,7 +146,7 @@ impl IntoResponse for MerchantScopeViolation {
 /// merchant the request names.
 pub fn authorize(
     session: Option<&AuthContext>,
-    request: &impl MerchantScoped,
+    request: &(impl MerchantScoped + ?Sized),
 ) -> Result<AuthorizedMerchant, MerchantScopeViolation> {
     let named = request.merchant_ids();
     if let Some(session) = session {
@@ -147,13 +178,7 @@ pub fn authorize_merchant_id(
     session: Option<&AuthContext>,
     merchant_id: &str,
 ) -> Result<AuthorizedMerchant, MerchantScopeViolation> {
-    struct Named<'a>(&'a str);
-    impl MerchantScoped for Named<'_> {
-        fn merchant_ids(&self) -> Vec<&str> {
-            vec![self.0]
-        }
-    }
-    authorize(session, &Named(merchant_id))
+    authorize(session, merchant_id)
 }
 
 #[cfg(test)]
@@ -204,6 +229,55 @@ mod tests {
         assert_eq!(
             authorized(None, vec![]),
             Err(MerchantScopeViolation::NoMerchant)
+        );
+    }
+
+    #[derive(MerchantScoped)]
+    struct Inner {
+        #[merchant]
+        merchant_id: crate::types::merchant::id::MerchantId,
+    }
+
+    #[derive(MerchantScoped)]
+    struct Request {
+        #[merchant]
+        created_by: String,
+        #[allow(dead_code)]
+        name: String,
+        #[merchant]
+        dynamic: Option<Inner>,
+        #[merchant]
+        nested: Inner,
+    }
+
+    fn request(dynamic: Option<&str>) -> Request {
+        let inner = |id: &str| Inner {
+            merchant_id: crate::types::merchant::id::MerchantId(id.to_string()),
+        };
+        Request {
+            created_by: "a".to_string(),
+            name: "not a merchant".to_string(),
+            dynamic: dynamic.map(inner),
+            nested: inner("c"),
+        }
+    }
+
+    #[test]
+    fn the_derive_lists_every_marked_field_in_order() {
+        assert_eq!(request(Some("b")).merchant_ids(), vec!["a", "b", "c"]);
+    }
+
+    #[test]
+    fn an_absent_optional_field_names_no_merchant() {
+        assert_eq!(request(None).merchant_ids(), vec!["a", "c"]);
+    }
+
+    #[test]
+    fn a_derived_request_is_authorized_on_all_its_merchants() {
+        let session = AuthContext::from_api_key("a".to_string());
+        assert_eq!(
+            authorize(Some(&session), &request(None)),
+            Err(MerchantScopeViolation::ForeignMerchant)
         );
     }
 

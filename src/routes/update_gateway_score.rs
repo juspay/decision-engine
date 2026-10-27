@@ -1,3 +1,4 @@
+use crate::custom_extractors::{ScopedBody, ScopedBodyRejection};
 // use std::sync::Arc;
 //
 // use axum::{routing::post, Json};
@@ -96,15 +97,15 @@ fn request_parse_error_response(error: impl ToString) -> ErrorResponse {
 
 #[axum::debug_handler]
 pub async fn update_gateway_score(
-    req: axum::http::Request<axum::body::Body>,
+    headers: axum::http::HeaderMap,
+    request: Result<ScopedBody<UpdateScorePayload>, ScopedBodyRejection>,
 ) -> Result<Json<UpdateScoreResponse>, ErrorResponse> {
-    let x_request_id = req
-        .headers()
+    let x_request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
-    let global_request_id = crate::analytics::global_request_id_from_headers(req.headers());
-    let trace_id = crate::analytics::trace_id_from_headers(req.headers());
+    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
+    let trace_id = crate::analytics::trace_id_from_headers(&headers);
     let timer = API_LATENCY_HISTOGRAM
         .with_label_values(&["update_gateway_score"])
         .start_timer();
@@ -112,7 +113,6 @@ pub async fn update_gateway_score(
         .with_label_values(&["update_gateway_score"])
         .inc();
 
-    let headers = req.headers();
     // Mask values by default and consolidate header diagnostics into one event.
     crate::logger::debug!(
         tag = "UpdateGatewayScore",
@@ -122,15 +122,23 @@ pub async fn update_gateway_score(
             .collect::<std::collections::BTreeMap<_, _>>(),
         "Incoming request headers"
     );
-    // Read before the body consumes the request: the parsed request is bound to this session below.
-    let session = req.extensions().get::<crate::auth::AuthContext>().cloned();
-    let body = match crate::routes::body::read_request_body(req.into_body()).await {
-        Ok(body) => {
+    let update_score_request = match request {
+        Ok(ScopedBody { payload, body, .. }) => {
             crate::logger::debug!(tag = "UpdateGatewayScore", "Body: {:?}", body);
-
-            body
+            Ok(payload)
         }
-        Err(e) => {
+        Err(ScopedBodyRejection::Parse { body, error }) => {
+            crate::logger::debug!(tag = "UpdateGatewayScore", "Body: {:?}", body);
+            Err(error)
+        }
+        Err(ScopedBodyRejection::Scope(violation)) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["update_gateway_score", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(violation.into());
+        }
+        Err(ScopedBodyRejection::Read(e)) => {
             let (error_code, error_message) = e.analytics_code_and_message();
             crate::analytics::DomainAnalyticsEvent::record_error(
                 crate::analytics::AnalyticsFlowContext::new(
@@ -159,16 +167,8 @@ pub async fn update_gateway_score(
         }
     };
 
-    let update_score_request: Result<UpdateScorePayload, _> = serde_json::from_slice(&body);
     match update_score_request {
         Ok(payload) => {
-            if let Err(violation) = crate::auth::authorize(session.as_ref(), &payload) {
-                API_REQUEST_COUNTER
-                    .with_label_values(&["update_gateway_score", "failure"])
-                    .inc();
-                timer.observe_duration();
-                return Err(violation.into());
-            }
             let merchant_id = payload.merchant_id.clone();
             let gateway = payload.gateway.clone();
             let payment_id = payload.payment_id.clone();

@@ -1748,23 +1748,8 @@ pub struct AdminMerchantCodeResponse {
 /// history, and the `Referer` header.
 #[axum::debug_handler]
 pub async fn admin_merchant_token(
-    headers: HeaderMap,
     Json(payload): Json<AdminMerchantTokenRequest>,
 ) -> Result<Json<AdminMerchantCodeResponse>, error::ContainerError<UserAuthError>> {
-    let global_config = APP_STATE
-        .get()
-        .map(|s| s.global_config.clone())
-        .ok_or(UserAuthError::StorageError)?;
-
-    let provided = headers
-        .get("x-admin-secret")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-
-    if provided != global_config.admin_secret.secret.peek().as_str() {
-        return Err(error::ContainerError::from(UserAuthError::InvalidToken));
-    }
-
     // Verify the merchant actually exists in DE before issuing a code.
     load_merchant_by_merchant_id(payload.merchant_id.clone())
         .await

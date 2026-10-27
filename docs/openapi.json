@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Decision Engine",
-    "description": "Open-source payment gateway routing service by Juspay. Selects the optimal payment processor for each transaction in real-time using success-rate scoring, rule-based routing, and elimination logic.\n\n## Authentication\n\nThis API supports two authentication methods:\n\n1. **JWT Bearer Token** - For dashboard/user sessions\n   - Header: `Authorization: Bearer <jwt_token>`\n   - Obtain via `/auth/login` endpoint\n\n2. **API Key** - For service-to-service/programmatic access\n   - Header: `x-api-key: DE_<64_char_hex>`\n   - Create via `/api-key/create` endpoint\n\nProtected endpoints require one of these authentication methods.\n\n### Merchant scope\n\nA JWT session or API key belongs to one merchant and may only act on that merchant. A request that names any other merchant — in the path (`merchant-id`, `merchant_id`, `created_by`) or in the body (`merchant_id`, `merchantId`, `created_by`, including nested ones such as `dynamic_routing_request.merchantId`) — is refused with `403 Forbidden`. An object that belongs to another merchant — a routing algorithm, an API key — reads as not found, whichever credential is used. Requests made with the admin secret (`x-admin-secret`) act for the merchant the request names; a request that names its merchant in more than one place (for example both halves of `/routing/hybrid`) must name the same one in each, or it is refused with `400`.",
+    "description": "Open-source payment gateway routing service by Juspay. Selects the optimal payment processor for each transaction in real-time using success-rate scoring, rule-based routing, and elimination logic.\n\n## Authentication\n\nThis API supports two authentication methods:\n\n1. **JWT Bearer Token** - For dashboard/user sessions\n   - Header: `Authorization: Bearer <jwt_token>`\n   - Obtain via `/auth/login` endpoint\n\n2. **API Key** - For service-to-service/programmatic access\n   - Header: `x-api-key: DE_<64_char_hex>`\n   - Create via `/api-key/create` endpoint\n\nProtected endpoints require one of these authentication methods.\n\n### Merchant scope\n\nA JWT session or API key belongs to one merchant and may only act on that merchant. A request that names any other merchant — in the path (the `{merchant_id}` segment) or in the body (`merchant_id`, `merchantId`, `created_by`, including nested ones such as `dynamic_routing_request.merchantId`) — is refused with `403 Forbidden`. An object that belongs to another merchant — a routing algorithm, an API key — reads as not found, whichever credential is used. Requests made with the admin secret (`x-admin-secret`) act for the merchant the request names; a request that names its merchant in more than one place (for example both halves of `/routing/hybrid`) must name the same one in each, or it is refused with `400`.\n\n### Admin endpoints\n\n`/merchant-account/create`, `/admin/hierarchy/*`, `/admin/profiles/{profile_id}/connectors` and `/auth/admin/merchant-token` accept only the admin secret (`x-admin-secret`). Any other credential, or none, is refused with `401 Unauthorized`.",
     "version": "1.4.0",
     "contact": {
       "name": "Juspay",
@@ -3285,7 +3285,7 @@
         }
       }
     },
-    "/routing/list/{created_by}": {
+    "/routing/list/{merchant_id}": {
       "post": {
         "operationId": "listRoutingRules",
         "tags": [
@@ -3295,7 +3295,7 @@
         "description": "List all routing rules for a merchant.",
         "parameters": [
           {
-            "name": "created_by",
+            "name": "merchant_id",
             "in": "path",
             "required": true,
             "schema": {
@@ -3329,7 +3329,7 @@
         ]
       }
     },
-    "/routing/list/active/{created_by}": {
+    "/routing/list/active/{merchant_id}": {
       "post": {
         "operationId": "getActiveRoutingRule",
         "tags": [
@@ -3339,7 +3339,7 @@
         "description": "Retrieve the currently active routing rule for a merchant.",
         "parameters": [
           {
-            "name": "created_by",
+            "name": "merchant_id",
             "in": "path",
             "required": true,
             "schema": {

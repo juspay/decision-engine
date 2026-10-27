@@ -1,3 +1,4 @@
+use crate::custom_extractors::{ScopedBody, ScopedBodyRejection};
 use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
 use crate::feedback::gateway_scoring_service::{
     check_and_update_gateway_score, invalid_request_error,
@@ -16,20 +17,15 @@ use cpu_time::ProcessTime;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Debug, Serialize, Deserialize, PartialEq, Clone)]
-struct UpdateScoreRequest {
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, crate::auth::MerchantScoped)]
+pub struct UpdateScoreRequest {
+    #[merchant]
     txn_detail: SafeTxnDetail,
     txn_card_info: SafeTxnCardInfo,
     log_message: String,
     enforce_dynaic_routing_failure: Option<bool>,
     gateway_reference_id: Option<String>,
     txn_latency: Option<TransactionLatency>,
-}
-
-impl crate::auth::MerchantScoped for UpdateScoreRequest {
-    fn merchant_ids(&self) -> Vec<&str> {
-        vec![&self.txn_detail.merchantId.0]
-    }
 }
 
 #[derive(Debug, Serialize)]
@@ -46,7 +42,9 @@ struct UpdateScoreValidationFailureDetail<'a> {
 
 #[axum::debug_handler]
 pub async fn update_score(
-    req: axum::http::Request<axum::body::Body>,
+    headers: axum::http::HeaderMap,
+    uri: axum::http::Uri,
+    request: Result<ScopedBody<UpdateScoreRequest>, ScopedBodyRejection>,
 ) -> Result<&'static str, ErrorResponse> {
     // Extract headers and URI
     let cpu_start = ProcessTime::now();
@@ -57,9 +55,8 @@ pub async fn update_score(
         .with_label_values(&["update_score"])
         .inc();
 
-    let headers = req.headers().clone();
     // let req_headers = serde_json::to_string(&headers).unwrap_or("{}".to_string());
-    let original_url = req.uri().to_string();
+    let original_url = uri.to_string();
     let x_request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
         .and_then(|v| v.to_str().ok())
@@ -76,12 +73,17 @@ pub async fn update_score(
         .unwrap_or("")
         .to_string();
     tracing::Span::current().record("is_audit_trail_log", "true");
-    // Buffer the body into memory
-    // Read before the body consumes the request: the parsed request is bound to this session below.
-    let session = req.extensions().get::<crate::auth::AuthContext>().cloned();
-    let body_bytes = match crate::routes::body::read_request_body(req.into_body()).await {
-        Ok(bytes) => bytes,
-        Err(e) => {
+    let (body_bytes, update_score_request) = match request {
+        Ok(ScopedBody { payload, body, .. }) => (body, Ok(payload)),
+        Err(ScopedBodyRejection::Parse { body, error }) => (body, Err(error)),
+        Err(ScopedBodyRejection::Scope(violation)) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["update_score", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(violation.into());
+        }
+        Err(ScopedBodyRejection::Read(e)) => {
             API_REQUEST_COUNTER
                 .with_label_values(&["update_score", "failure"])
                 .inc();
@@ -145,17 +147,8 @@ pub async fn update_score(
     // Convert the body to a string for logging
     let req_body = String::from_utf8_lossy(&body_bytes).to_string();
 
-    // Deserialize the body into the expected type
-    let update_score_request: Result<UpdateScoreRequest, _> = serde_json::from_slice(&body_bytes);
     match update_score_request {
         Ok(payload) => {
-            if let Err(violation) = crate::auth::authorize(session.as_ref(), &payload) {
-                API_REQUEST_COUNTER
-                    .with_label_values(&["update_score", "failure"])
-                    .inc();
-                timer.observe_duration();
-                return Err(violation.into());
-            }
             let merchant_id = payload.txn_detail.merchantId.clone();
             let merchant_id_txt = crate::types::merchant::id::merchant_id_to_text(merchant_id);
             tracing::Span::current().record("merchant_id", merchant_id_txt.clone());

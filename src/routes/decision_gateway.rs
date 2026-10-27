@@ -1,3 +1,4 @@
+use crate::custom_extractors::{ScopedBody, ScopedBodyRejection};
 use std::time::Instant;
 
 use crate::decider::gatewaydecider::{
@@ -62,7 +63,9 @@ pub struct DecidedGatewayResponse {
 
 #[axum::debug_handler]
 pub async fn decision_gateway(
-    req: axum::http::Request<axum::body::Body>,
+    headers: axum::http::HeaderMap,
+    uri: axum::http::Uri,
+    request: Result<ScopedBody<DomainDeciderRequest>, ScopedBodyRejection>,
 ) -> Result<DecidedGatewayResponse, ErrorResponse>
 where
     DecidedGatewayResponse: IntoResponse,
@@ -76,9 +79,7 @@ where
         .with_label_values(&["decision_gateway"])
         .inc();
 
-    // Clone the headers and URI before consuming `req`
-    let headers = req.headers().clone();
-    let original_url = req.uri().to_string();
+    let original_url = uri.to_string();
     let x_request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
         .and_then(|v| v.to_str().ok())
@@ -95,12 +96,17 @@ where
     // Extract request headers as a JSON string
     // let req_headers = serde_json::to_string(&headers).unwrap_or("{}".to_string());
 
-    // Now consume `req` to get the body
-    // Read before the body consumes the request: the parsed request is bound to this session below.
-    let session = req.extensions().get::<crate::auth::AuthContext>().cloned();
-    let body = match crate::routes::body::read_request_body(req.into_body()).await {
-        Ok(body) => body,
-        Err(e) => {
+    let (body, api_decider_request) = match request {
+        Ok(ScopedBody { payload, body, .. }) => (body, Ok(payload)),
+        Err(ScopedBodyRejection::Parse { body, error }) => (body, Err(error)),
+        Err(ScopedBodyRejection::Scope(violation)) => {
+            API_REQUEST_COUNTER
+                .with_label_values(&["decision_gateway", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(violation.into());
+        }
+        Err(ScopedBodyRejection::Read(e)) => {
             let error_response = e.into_error_response();
 
             let latency = start_time.elapsed().as_millis() as u64;
@@ -138,16 +144,8 @@ where
         }
     };
 
-    let api_decider_request: Result<DomainDeciderRequest, _> = serde_json::from_slice(&body);
     match api_decider_request {
         Ok(payload) => {
-            if let Err(violation) = crate::auth::authorize(session.as_ref(), &payload) {
-                API_REQUEST_COUNTER
-                    .with_label_values(&["decision_gateway", "failure"])
-                    .inc();
-                timer.observe_duration();
-                return Err(violation.into());
-            }
             let merchant_id = payload.orderReference.merchantId.clone();
             let merchant_id_string =
                 crate::types::merchant::id::merchant_id_to_text(merchant_id.clone());

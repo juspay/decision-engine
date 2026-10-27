@@ -240,9 +240,10 @@ pub enum TxnObjectType {
 
 pub use gsm::{GsmErrorInfo, GsmInfo};
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, crate::auth::MerchantScoped)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateScorePayload {
+    #[merchant]
     pub merchant_id: String,
     pub gateway: String,
     pub gateway_reference_id: Option<String>,
@@ -259,12 +260,6 @@ pub struct UpdateScorePayload {
     /// When present, the engine emits a SmartRetryDecision analytics event capturing
     /// which gateway was retried and whether it recovered the payment.
     pub is_smart_retry: Option<bool>,
-}
-
-impl crate::auth::MerchantScoped for UpdateScorePayload {
-    fn merchant_ids(&self) -> Vec<&str> {
-        vec![&self.merchant_id]
-    }
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

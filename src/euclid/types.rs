@@ -29,7 +29,7 @@ pub enum DataType {
     GlobalRef,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, crate::auth::MerchantScoped)]
 pub struct RoutingRule {
     pub rule_id: Option<String>,
     pub name: String,
@@ -37,18 +37,13 @@ pub struct RoutingRule {
     /// string, which is what the column requires.
     #[serde(default)]
     pub description: Option<String>,
+    #[merchant]
     pub created_by: String,
     pub algorithm: StaticRoutingAlgorithm,
     #[serde(default)]
     pub algorithm_for: AlgorithmType,
     #[serde(default)]
     pub metadata: Option<serde_json::Value>,
-}
-
-impl crate::auth::MerchantScoped for RoutingRule {
-    fn merchant_ids(&self) -> Vec<&str> {
-        vec![&self.created_by]
-    }
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, strum::Display)]
@@ -201,9 +196,10 @@ pub enum AlgorithmType {
     VolumeCommitment,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, crate::auth::MerchantScoped)]
 pub struct RoutingRequest {
     pub payment_id: Option<String>,
+    #[merchant]
     pub created_by: String,
     pub fallback_output: Option<Vec<ConnectorInfo>>,
     pub parameters: HashMap<String, Option<ValueType>>,
@@ -211,12 +207,6 @@ pub struct RoutingRequest {
     /// legacy type-blind lookup.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub algorithm_for: Option<String>,
-}
-
-impl crate::auth::MerchantScoped for RoutingRequest {
-    fn merchant_ids(&self) -> Vec<&str> {
-        vec![&self.created_by]
-    }
 }
 
 /// One evaluation in a batch request: only the parameters (and optional payment id)
@@ -229,8 +219,9 @@ pub struct RoutingBatchEntry {
 
 /// Evaluates the caller's active algorithm against several parameter sets in one round
 /// trip. The algorithm is resolved and parsed once; results are positional.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct RoutingBatchRequest {
+    #[merchant]
     pub created_by: String,
     pub fallback_output: Option<Vec<ConnectorInfo>>,
     /// Transaction type whose active rule should be evaluated; absent keeps the
@@ -238,12 +229,6 @@ pub struct RoutingBatchRequest {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub algorithm_for: Option<String>,
     pub requests: Vec<RoutingBatchEntry>,
-}
-
-impl crate::auth::MerchantScoped for RoutingBatchRequest {
-    fn merchant_ids(&self) -> Vec<&str> {
-        vec![&self.created_by]
-    }
 }
 
 /// Positional results for a batch evaluation. An entry the engine could not evaluate
@@ -287,17 +272,15 @@ impl RoutingDictionaryRecord {
     }
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Default, Clone, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped,
+)]
 pub struct SrDimensionConfig {
+    #[merchant]
     pub merchant_id: String,
     pub paymentInfo: SrDimensionInfo,
 }
 
-impl crate::auth::MerchantScoped for SrDimensionConfig {
-    fn merchant_ids(&self) -> Vec<&str> {
-        vec![&self.merchant_id]
-    }
-}
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SrDimensionInfo {
     pub udfs: Vec<i32>,
@@ -412,60 +395,40 @@ impl RoutingAlgorithmMapperNew {
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct ActivateRoutingConfigRequest {
+    #[merchant]
     pub created_by: String,
     pub routing_algorithm_id: String,
 }
 
-impl crate::auth::MerchantScoped for ActivateRoutingConfigRequest {
-    fn merchant_ids(&self) -> Vec<&str> {
-        vec![&self.created_by]
-    }
-}
-
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct DeactivateRoutingConfigRequest {
+    #[merchant]
     pub created_by: String,
     pub routing_algorithm_id: String,
-}
-
-impl crate::auth::MerchantScoped for DeactivateRoutingConfigRequest {
-    fn merchant_ids(&self) -> Vec<&str> {
-        vec![&self.created_by]
-    }
 }
 
 /// Delete an existing routing algorithm (e.g. an A/B experiment). Only permitted while the
 /// algorithm is inactive.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct DeleteRoutingConfigRequest {
+    #[merchant]
     pub created_by: String,
     pub routing_algorithm_id: String,
 }
 
-impl crate::auth::MerchantScoped for DeleteRoutingConfigRequest {
-    fn merchant_ids(&self) -> Vec<&str> {
-        vec![&self.created_by]
-    }
-}
-
 /// Edit an existing (inactive) routing algorithm in place — updates its name/description and
 /// algorithm definition without minting a new id.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct UpdateRoutingConfigRequest {
+    #[merchant]
     pub created_by: String,
     pub routing_algorithm_id: String,
     pub name: String,
     #[serde(default)]
     pub description: String,
     pub algorithm: StaticRoutingAlgorithm,
-}
-
-impl crate::auth::MerchantScoped for UpdateRoutingConfigRequest {
-    fn merchant_ids(&self) -> Vec<&str> {
-        vec![&self.created_by]
-    }
 }
 
 #[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]

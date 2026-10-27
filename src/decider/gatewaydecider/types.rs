@@ -957,13 +957,18 @@ pub struct ApiTxnCardInfo {
 //     }
 // }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// The legacy decider request carries its merchant in three places; all of them must agree with
+/// the session.
+#[derive(Debug, Serialize, Deserialize, Clone, crate::auth::MerchantScoped)]
 pub struct DomainDeciderRequest {
+    #[merchant]
     pub orderReference: ETO::Order,
     pub orderMetadata: ETOMV2::OrderMetadataV2,
+    #[merchant]
     pub txnDetail: ETTD::TxnDetail,
     pub txnOfferDetails: Option<Vec<ETTOD::TxnOfferDetail>>,
     pub txnCardInfo: ETCa::txn_card_info::TxnCardInfo,
+    #[merchant]
     pub merchantAccount: ETM::merchant_account::MerchantAccount,
     pub cardToken: Option<String>,
     pub txnType: Option<String>,
@@ -975,35 +980,18 @@ pub struct DomainDeciderRequest {
     pub shouldConsumeResult: Option<bool>,
 }
 
-/// The legacy decider request carries its merchant in three places; all of them must agree with
-/// the session.
-impl crate::auth::MerchantScoped for DomainDeciderRequest {
-    fn merchant_ids(&self) -> Vec<&str> {
-        vec![
-            &self.orderReference.merchantId.0,
-            &self.txnDetail.merchantId.0,
-            &self.merchantAccount.merchantId.0,
-        ]
-    }
-}
-
 // impl Given<SecretContext> for DomainDeciderRequest {}
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, crate::auth::MerchantScoped)]
 #[serde(rename_all = "camelCase")]
 pub struct DomainDeciderRequestForApiCallV2 {
     pub payment_info: PaymentInfo,
+    #[merchant]
     pub merchant_id: String,
     pub eligible_gateway_list: Option<Vec<String>>,
     pub ranking_algorithm: Option<RankingAlgorithm>,
     pub elimination_enabled: Option<bool>,
     #[serde(default)]
     pub enable_multi_objective: Option<bool>,
-}
-
-impl crate::auth::MerchantScoped for DomainDeciderRequestForApiCallV2 {
-    fn merchant_ids(&self) -> Vec<&str> {
-        vec![&self.merchant_id]
-    }
 }
 
 pub fn deserialize_optional_udfs_to_hashmap<'de, D>(

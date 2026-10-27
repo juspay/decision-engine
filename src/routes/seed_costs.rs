@@ -169,7 +169,7 @@ fn rows_to_entries(rows: Vec<SeedCostRow>) -> Vec<SeedCostEntry> {
         .collect()
 }
 
-/// `GET /merchant-account/:merchant-id/seed-costs` — the merchant's editable contract-rate table
+/// `GET /merchant-account/:merchant_id/seed-costs` — the merchant's editable contract-rate table
 /// (their saved edits, else the config default).
 pub async fn get_seed_costs(
     MerchantFromPath(merchant): MerchantFromPath,
@@ -184,7 +184,7 @@ pub struct SaveSeedCostsRequest {
     pub rows: Vec<SeedCostRow>,
 }
 
-/// `PUT /merchant-account/:merchant-id/seed-costs` — replace the merchant's whole table.
+/// `PUT /merchant-account/:merchant_id/seed-costs` — replace the merchant's whole table.
 pub async fn set_seed_costs(
     MerchantFromPath(merchant): MerchantFromPath,
     Json(body): Json<SaveSeedCostsRequest>,
@@ -214,7 +214,7 @@ pub async fn set_seed_costs(
     Ok(Json(entries_to_rows(&entries)))
 }
 
-/// `DELETE /merchant-account/:merchant-id/seed-costs` — clear edits, reverting to the config
+/// `DELETE /merchant-account/:merchant_id/seed-costs` — clear edits, reverting to the config
 /// default; returns the default table.
 pub async fn delete_seed_costs(
     MerchantFromPath(merchant): MerchantFromPath,
@@ -261,7 +261,7 @@ pub struct SimulateRow {
     pub cost_amount: f64,
 }
 
-/// `POST /merchant-account/:merchant-id/seed-costs/simulate` — price the candidate PSPs for one
+/// `POST /merchant-account/:merchant_id/seed-costs/simulate` — price the candidate PSPs for one
 /// (currency, scenario, amount) using the merchant's configured seed table, via the exact tier
 /// resolver the decide path uses. This is the lightweight cost preview beside the editor.
 pub async fn simulate_seed_costs(

@@ -14,7 +14,7 @@ const API_KEY_CACHE_TTL: i64 = 300;
 ///
 /// Runs immediately *after* [`authenticate`], so an `AuthContext` is already in the request
 /// extensions for the JWT and api-key lanes. Those lanes carry a concrete `merchant_id`; a route
-/// addressed by a merchant names it in the path ([`auth::scope::MERCHANT_PATH_PARAMS`]). When the two disagree
+/// addressed by a merchant names it in the path ([`auth::scope::MERCHANT_PATH_PARAM`]). When the two disagree
 /// the request is refused here, so no handler has to remember the check — and a path-addressed
 /// route added later is covered the day it is written.
 ///
@@ -47,9 +47,7 @@ pub async fn enforce_merchant_scope(
 
     if let Some(path_params) = path_params {
         for (key, value) in &path_params {
-            if auth::scope::MERCHANT_PATH_PARAMS.contains(&key)
-                && value != context.merchant_id.as_str()
-            {
+            if key == auth::scope::MERCHANT_PATH_PARAM && value != context.merchant_id.as_str() {
                 return Ok(axum::response::IntoResponse::into_response(
                     auth::MerchantScopeViolation::ForeignMerchant,
                 ));
@@ -58,6 +56,27 @@ pub async fn enforce_merchant_scope(
     }
 
     Ok(next.run(req).await)
+}
+
+/// Admit only callers presenting the deployment's admin secret. Layered on the admin route group
+/// (see `admin_routes` in `app.rs`), so its handlers never see any other caller.
+pub async fn require_admin_secret(mut req: Request<Body>, next: Next) -> Response<Body> {
+    let expected = APP_STATE
+        .get()
+        .map(|state| state.global_config.admin_secret.secret.peek().as_str())
+        .unwrap_or_default();
+    if !auth::presents_admin_secret(req.headers(), expected) {
+        return axum::response::IntoResponse::into_response((
+            StatusCode::UNAUTHORIZED,
+            error::ApiErrorResponse::new(
+                error::error_codes::TE_04,
+                "Invalid or missing x-admin-secret header".to_string(),
+                None,
+            ),
+        ));
+    }
+    req.extensions_mut().insert(auth::AdminCaller);
+    next.run(req).await
 }
 
 /// Middleware providing implementation to perform JWE + JWS encryption and decryption around the
@@ -143,16 +162,15 @@ pub async fn authenticate(
 
     // Accept the shared admin secret (service-to-service callers such as Hyperswitch, which
     // has no merchant api-key or dashboard session). Checked before the api-key compat mode so
-    // a wrong secret is always rejected. No AuthContext is inserted — like compat mode, these
-    // callers scope requests off the body/path, and extractors that require an AuthContext
-    // (e.g. analytics) keep rejecting them.
-    if let Some(provided) = req
-        .headers()
-        .get("x-admin-secret")
-        .and_then(|v| v.to_str().ok())
-    {
-        let expected = app_state.global_config.admin_secret.secret.peek();
-        if !expected.is_empty() && provided == expected {
+    // a wrong secret is always rejected. No AuthContext is inserted, only `AdminCaller` — like
+    // compat mode, these callers scope requests off the body/path, and extractors that require an
+    // AuthContext (e.g. analytics) keep rejecting them.
+    if req.headers().contains_key(auth::ADMIN_SECRET_HEADER) {
+        if auth::presents_admin_secret(
+            req.headers(),
+            app_state.global_config.admin_secret.secret.peek(),
+        ) {
+            req.extensions_mut().insert(auth::AdminCaller);
             return Ok(next.run(req).await);
         }
         return Ok(crate::error::text_error_response(
@@ -277,11 +295,11 @@ mod tests {
     fn app(with_session: bool) -> Router {
         let router = Router::new()
             .route(
-                "/merchant-account/:merchant-id/seed-costs",
+                "/merchant-account/:merchant_id/seed-costs",
                 post(|| async {}),
             )
             .route("/api-key/list/:merchant_id", post(|| async {}))
-            .route("/routing/list/:created_by", post(|| async {}))
+            .route("/routing/list/:merchant_id", post(|| async {}))
             .layer(from_fn(enforce_merchant_scope));
         if with_session {
             router.layer(from_fn(session_for_own_merchant))

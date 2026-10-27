@@ -1,4 +1,3 @@
-use crate::app::APP_STATE;
 use crate::custom_extractors::Json;
 use crate::custom_extractors::MerchantFromPath;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
@@ -6,9 +5,8 @@ use crate::redis::types::{FeatureConf, MerchantFeature as FeatureMerchant};
 use crate::types::merchant as ETM;
 use crate::types::service_configuration;
 use crate::{error, logger};
-use axum::{extract::Path, http::HeaderMap};
+use axum::extract::Path;
 use error_stack::ResultExt;
-use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -343,25 +341,11 @@ pub async fn get_merchant_config(
 
 #[axum::debug_handler]
 pub async fn create_merchant_config(
-    headers: HeaderMap,
     Json(payload): Json<ETM::merchant_account::MerchantAccountCreateRequest>,
 ) -> Result<
     Json<MerchantAccountCreateResponse>,
     error::ContainerError<error::MerchantAccountConfigurationError>,
 > {
-    let global_config = APP_STATE
-        .get()
-        .map(|s| s.global_config.clone())
-        .ok_or(error::MerchantAccountConfigurationError::StorageError)?;
-
-    let provided = headers
-        .get("x-admin-secret")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-
-    if provided != global_config.admin_secret.secret.peek().as_str() {
-        return Err(error::MerchantAccountConfigurationError::Unauthorized.into());
-    }
     // Record total request count and start timer
     API_REQUEST_TOTAL_COUNTER
         .with_label_values(&["merchant_account_create"])

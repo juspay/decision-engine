@@ -9,16 +9,11 @@ use axum::extract::Path;
 use serde::{Deserialize, Serialize};
 use time::PrimitiveDateTime;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, crate::auth::MerchantScoped)]
 pub struct CreateApiKeyRequest {
+    #[merchant]
     pub merchant_id: String,
     pub description: Option<String>,
-}
-
-impl crate::auth::MerchantScoped for CreateApiKeyRequest {
-    fn merchant_ids(&self) -> Vec<&str> {
-        vec![&self.merchant_id]
-    }
 }
 
 #[derive(Debug, Serialize)]

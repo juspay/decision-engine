@@ -4,11 +4,10 @@ use crate::custom_extractors::MerchantFromPath;
 use std::collections::HashMap;
 
 use axum::extract::Query;
-use axum::http::{HeaderMap, StatusCode};
+use axum::http::StatusCode;
 use axum::Extension;
 use axum::Json;
 use futures::FutureExt;
-use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
 
 use crate::analytics::models::{
@@ -33,21 +32,6 @@ const UNNAMED_RUN: &str = "earlier";
 pub struct RunQuery {
     #[serde(default)]
     pub merchant_id: Option<String>,
-}
-
-/// True when the request carries the deployment's admin secret — what the scheduler presents.
-/// Checked here as well as in the middleware because the middleware attaches no session to such
-/// a caller, and in api-key compat mode a request with no credentials at all reaches the handler.
-fn presents_admin_secret(headers: &HeaderMap) -> bool {
-    let Some(state) = crate::app::APP_STATE.get() else {
-        return false;
-    };
-    let expected = state.global_config.admin_secret.secret.peek();
-    let provided = headers
-        .get("x-admin-secret")
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("");
-    !expected.is_empty() && provided == expected
 }
 
 /// Who may run what: the admin secret may run anything, a session or api key only its own
@@ -82,12 +66,14 @@ fn authorize_run(
 /// behind. A merchant with no usable commitments counts as skipped; one whose delivery could not
 /// be measured, or whose pass panicked, as failed — its previous plan stands.
 pub async fn run_forecast(
-    headers: HeaderMap,
+    admin: Option<Extension<crate::auth::AdminCaller>>,
     session: Option<Extension<AuthContext>>,
     Query(query): Query<RunQuery>,
 ) -> Result<Json<RunReport>, TextError> {
+    // The admin secret is what the scheduler presents. In api-key compat mode a request with no
+    // credentials at all reaches the handler too, with neither marker nor session.
     authorize_run(
-        presents_admin_secret(&headers),
+        admin.is_some(),
         session.as_ref().map(|Extension(context)| context),
         query.merchant_id.as_deref(),
     )?;

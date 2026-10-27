@@ -17,6 +17,24 @@ pub use scope::{
 
 const KEY_PREFIX: &str = "DE_";
 
+/// The header service callers present the deployment's admin secret in.
+pub const ADMIN_SECRET_HEADER: &str = "x-admin-secret";
+
+/// Set on a request that presented the deployment's admin secret: by `authenticate` on a merchant
+/// route's admin lane, and by `require_admin_secret` on every admin route. A handler that treats
+/// the admin caller differently reads this rather than the header.
+#[derive(Debug, Clone, Copy)]
+pub struct AdminCaller;
+
+/// Whether `headers` carry the deployment's admin secret. An unset secret matches nothing.
+pub fn presents_admin_secret(headers: &axum::http::HeaderMap, expected: &str) -> bool {
+    !expected.is_empty()
+        && headers
+            .get(ADMIN_SECRET_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value == expected)
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum AuthError {
     #[error("Failed to get current system time")]
@@ -403,6 +421,28 @@ pub fn extract_key_prefix(key: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn only_the_admin_secret_header_presents_the_admin_secret() {
+        use axum::http::{HeaderMap, HeaderValue};
+        let mut headers = HeaderMap::new();
+        headers.insert("x-api-key", HeaderValue::from_static("secret"));
+        headers.insert("authorization", HeaderValue::from_static("Bearer secret"));
+        assert!(!presents_admin_secret(&headers, "secret"));
+        headers.insert(ADMIN_SECRET_HEADER, HeaderValue::from_static("wrong"));
+        assert!(!presents_admin_secret(&headers, "secret"));
+        headers.insert(ADMIN_SECRET_HEADER, HeaderValue::from_static("secret"));
+        assert!(presents_admin_secret(&headers, "secret"));
+    }
+
+    #[test]
+    fn an_unset_admin_secret_matches_nothing() {
+        use axum::http::{HeaderMap, HeaderValue};
+        let mut headers = HeaderMap::new();
+        assert!(!presents_admin_secret(&headers, ""));
+        headers.insert(ADMIN_SECRET_HEADER, HeaderValue::from_static(""));
+        assert!(!presents_admin_secret(&headers, ""));
+    }
 
     use crate::types::merchant::hierarchy::{GrantLevel, ScopeGrant};
 

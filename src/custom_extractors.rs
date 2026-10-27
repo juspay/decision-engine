@@ -93,8 +93,76 @@ where
     }
 }
 
+/// [`ScopedJson`] for the decider endpoints, which answer read and parse failures in their own
+/// response format and report them to analytics with the raw request. The handler takes
+/// `Result<ScopedBody<T>, ScopedBodyRejection>` so those failures reach it instead of being
+/// answered here; a request that parses is authorized the same way [`ScopedJson`] authorizes it.
+#[derive(Debug)]
+pub struct ScopedBody<T> {
+    pub merchant: crate::auth::AuthorizedMerchant,
+    pub payload: T,
+    /// The request exactly as received, for the handler's request logs.
+    pub body: axum::body::Bytes,
+}
+
+/// Why a [`ScopedBody`] could not be extracted.
+#[derive(Debug)]
+pub enum ScopedBodyRejection {
+    /// The body could not be read.
+    Read(crate::routes::body::RequestBodyError),
+    /// The body is not a valid `T`.
+    Parse {
+        body: axum::body::Bytes,
+        error: serde_json::Error,
+    },
+    /// The request parsed but names a merchant the caller may not act on.
+    Scope(crate::auth::MerchantScopeViolation),
+}
+
+impl IntoResponse for ScopedBodyRejection {
+    fn into_response(self) -> Response {
+        match self {
+            Self::Read(error) => error.into_error_response().into_response(),
+            Self::Parse { error, .. } => {
+                crate::error::text_error_response(StatusCode::BAD_REQUEST, error.to_string())
+            }
+            Self::Scope(violation) => violation.into_response(),
+        }
+    }
+}
+
+#[async_trait]
+impl<S, T> axum::extract::FromRequest<S> for ScopedBody<T>
+where
+    S: Send + Sync,
+    T: serde::de::DeserializeOwned + crate::auth::MerchantScoped,
+{
+    type Rejection = ScopedBodyRejection;
+
+    async fn from_request(
+        request: axum::extract::Request,
+        _state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        let session = request.extensions().get::<AuthContext>().cloned();
+        let body = crate::routes::body::read_request_body(request.into_body())
+            .await
+            .map_err(ScopedBodyRejection::Read)?;
+        let payload = match serde_json::from_slice::<T>(&body) {
+            Ok(payload) => payload,
+            Err(error) => return Err(ScopedBodyRejection::Parse { body, error }),
+        };
+        let merchant = crate::auth::authorize(session.as_ref(), &payload)
+            .map_err(ScopedBodyRejection::Scope)?;
+        Ok(Self {
+            merchant,
+            payload,
+            body,
+        })
+    }
+}
+
 /// The merchant a path-addressed route acts on, read from its merchant path parameter (see
-/// [`crate::auth::scope::MERCHANT_PATH_PARAMS`]) and authorized against the caller's session.
+/// [`crate::auth::scope::MERCHANT_PATH_PARAM`]) and authorized against the caller's session.
 #[derive(Debug, Clone)]
 pub struct MerchantFromPath(pub crate::auth::AuthorizedMerchant);
 
@@ -111,7 +179,7 @@ where
             .map_err(IntoResponse::into_response)?;
         let Some(merchant_id) = path_params
             .iter()
-            .find(|(key, _)| crate::auth::scope::MERCHANT_PATH_PARAMS.contains(key))
+            .find(|(key, _)| *key == crate::auth::scope::MERCHANT_PATH_PARAM)
             .map(|(_, value)| value.to_string())
         else {
             // A route wired with this extractor but no merchant parameter: a programming error.
@@ -440,8 +508,8 @@ mod tests {
         }
         let app = |session: Option<&'static str>| {
             Router::new()
-                .route("/merchant-account/:merchant-id/x", get(echo))
-                .route("/routing/list/:created_by", get(echo))
+                .route("/merchant-account/:merchant_id/x", get(echo))
+                .route("/routing/list/:merchant_id", get(echo))
                 .layer(axum::middleware::from_fn(
                     move |mut req: axum::extract::Request, next: axum::middleware::Next| async move {
                         if let Some(merchant_id) = session {

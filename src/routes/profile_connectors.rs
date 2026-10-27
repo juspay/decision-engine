@@ -1,6 +1,6 @@
 use crate::custom_extractors::Json;
 use crate::{
-    app::{get_tenant_app_state, APP_STATE},
+    app::get_tenant_app_state,
     error::ContainerError,
     euclid::{
         ast::{ConnectorInfo, ValueType},
@@ -8,13 +8,9 @@ use crate::{
         types::RoutingRequest,
     },
 };
-use axum::{
-    extract::Path,
-    http::{HeaderMap, StatusCode},
-};
+use axum::{extract::Path, http::StatusCode};
 use error_stack::ResultExt;
 use fred::interfaces::KeysInterface;
-use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
@@ -119,43 +115,24 @@ async fn store_snapshot(
         .change_context(redis_interface::errors::RedisError::SetFailed)
 }
 
-fn admin_authorized(headers: &HeaderMap, expected: &str) -> bool {
-    !expected.is_empty()
-        && headers
-            .get("x-admin-secret")
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value == expected)
-}
-
 pub async fn replace_profile_connectors(
-    headers: HeaderMap,
     Path(profile_id): Path<String>,
     Json(inputs): Json<Vec<ConnectorInput>>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
-    let config = APP_STATE.get().map(|state| &state.global_config).ok_or((
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "Application state unavailable".to_string(),
-    ))?;
-    let expected = config.admin_secret.secret.peek();
-    let authorized = admin_authorized(&headers, expected);
-    if authorized {
-        let snapshot = compact_snapshot(&profile_id, inputs)
-            .map_err(|message| (StatusCode::BAD_REQUEST, message))?;
-        let state = get_tenant_app_state().await;
-        store_snapshot(&state.redis_conn.conn, &profile_id, &snapshot)
-            .await
-            .map_err(|_| {
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    "Failed to store connector eligibility".to_string(),
-                )
-            })?;
-        Ok(Json(
-            serde_json::json!({"profile_id": profile_id, "connector_count": snapshot.len()}),
-        ))
-    } else {
-        Err((StatusCode::UNAUTHORIZED, "Invalid admin secret".to_string()))
-    }
+    let snapshot = compact_snapshot(&profile_id, inputs)
+        .map_err(|message| (StatusCode::BAD_REQUEST, message))?;
+    let state = get_tenant_app_state().await;
+    store_snapshot(&state.redis_conn.conn, &profile_id, &snapshot)
+        .await
+        .map_err(|_| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Failed to store connector eligibility".to_string(),
+            )
+        })?;
+    Ok(Json(
+        serde_json::json!({"profile_id": profile_id, "connector_count": snapshot.len()}),
+    ))
 }
 
 fn parameter<'a>(request: &'a RoutingRequest, name: &str) -> Option<&'a str> {
@@ -367,28 +344,6 @@ mod tests {
                 .as_deref(),
             Some("wallet")
         );
-    }
-
-    #[test]
-    fn admin_secret_is_required_even_with_other_credentials() {
-        let mut headers = HeaderMap::new();
-        headers.insert("x-api-key", axum::http::HeaderValue::from_static("secret"));
-        headers.insert(
-            "authorization",
-            axum::http::HeaderValue::from_static("Bearer secret"),
-        );
-        assert!(!admin_authorized(&headers, "secret"));
-        headers.insert(
-            "x-admin-secret",
-            axum::http::HeaderValue::from_static("wrong"),
-        );
-        assert!(!admin_authorized(&headers, "secret"));
-        headers.insert(
-            "x-admin-secret",
-            axum::http::HeaderValue::from_static("secret"),
-        );
-        assert!(admin_authorized(&headers, "secret"));
-        assert!(!admin_authorized(&headers, ""));
     }
 
     #[test]

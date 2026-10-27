@@ -1,5 +1,6 @@
 use std::{borrow::Cow, time::Instant};
 
+use crate::custom_extractors::{ScopedBody, ScopedBodyRejection};
 use crate::euclid::types::ExperimentEndpoint;
 use crate::{
     analytics::{
@@ -235,7 +236,8 @@ pub(crate) async fn run_decider_with_analytics(
 
 #[axum::debug_handler]
 pub async fn decide_gateway(
-    req: axum::http::Request<axum::body::Body>,
+    headers: axum::http::HeaderMap,
+    request: Result<ScopedBody<DomainDeciderRequestForApiCallV2>, ScopedBodyRejection>,
 ) -> Result<DecidedGateway, ErrorResponse> {
     let cpu_start = Instant::now();
     let timer = metrics::API_LATENCY_HISTOGRAM
@@ -245,7 +247,6 @@ pub async fn decide_gateway(
         .with_label_values(&["decide_gateway"])
         .inc();
 
-    let headers = req.headers().clone();
     let x_request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
         .and_then(|value| value.to_str().ok())
@@ -262,14 +263,23 @@ pub async fn decide_gateway(
             .collect::<std::collections::BTreeMap<_, _>>(),
         "Incoming request headers"
     );
-    // Read before the body consumes the request: the parsed request is bound to this session below.
-    let session = req.extensions().get::<crate::auth::AuthContext>().cloned();
-    let body = match crate::routes::body::read_request_body(req.into_body()).await {
-        Ok(body) => {
+    let (body, parsed) = match request {
+        Ok(ScopedBody { payload, body, .. }) => {
             logger::debug!("Body: {:?}", body);
-            body
+            (body, Ok(payload))
         }
-        Err(e) => {
+        Err(ScopedBodyRejection::Parse { body, error }) => {
+            logger::debug!("Body: {:?}", body);
+            (body, Err(error))
+        }
+        Err(ScopedBodyRejection::Scope(violation)) => {
+            metrics::API_REQUEST_COUNTER
+                .with_label_values(&["decide_gateway", "failure"])
+                .inc();
+            timer.observe_duration();
+            return Err(violation.into());
+        }
+        Err(ScopedBodyRejection::Read(e)) => {
             let (error_code, error_message) = e.analytics_code_and_message();
             let analytics_stage = e.analytics_stage().to_string();
             let error_response = e.into_error_response();
@@ -299,23 +309,15 @@ pub async fn decide_gateway(
             return Err(error_response);
         }
     };
-    let api_decider_request =
-        match serde_json::from_slice::<DomainDeciderRequestForApiCallV2>(&body) {
-            Ok(payload) => match payload.check_payment_method() {
-                Ok(_) => Ok(payload),
-                Err(error) => Err(invalid_payment_method_response(error.to_string())),
-            },
-            Err(e) => Err(request_parse_error_response(&e)),
-        };
+    let api_decider_request = match parsed {
+        Ok(payload) => match payload.check_payment_method() {
+            Ok(_) => Ok(payload),
+            Err(error) => Err(invalid_payment_method_response(error.to_string())),
+        },
+        Err(e) => Err(request_parse_error_response(&e)),
+    };
     let result = match api_decider_request {
         Ok(payload) => {
-            if let Err(violation) = crate::auth::authorize(session.as_ref(), &payload) {
-                metrics::API_REQUEST_COUNTER
-                    .with_label_values(&["decide_gateway", "failure"])
-                    .inc();
-                timer.observe_duration();
-                return Err(violation.into());
-            }
             let span = tracing::Span::current();
             if !payload.merchant_id.is_empty() {
                 span.record("merchant_id", payload.merchant_id.as_str());
