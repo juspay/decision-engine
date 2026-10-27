@@ -11,6 +11,7 @@
 
 pub mod blended;
 pub mod ch_http;
+pub mod checkout_credentials;
 pub mod connectors;
 pub mod coverage;
 pub mod creds;

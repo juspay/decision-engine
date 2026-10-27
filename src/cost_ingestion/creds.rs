@@ -29,6 +29,7 @@ use crate::crypto::encryption_manager::{
 };
 use crate::types::service_configuration;
 
+use super::checkout_credentials::CheckoutEnvironment;
 use super::types::{ConnectorCreds, IngestError};
 
 /// A resolved settlement source: the credentials plus the merchant they belong to.
@@ -68,6 +69,9 @@ pub struct MaskedSource {
     pub webhook_secret_hint: String,
     /// Basic auth shows the user (`"reportuser:••••"`); an API key shows its tail (`"••••a3f9"`).
     pub download_auth_hint: String,
+    /// Checkout environment only; omitted when credentials cannot be read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<CheckoutEnvironment>,
 }
 
 /// Mask a secret to a recognizable hint: bullets followed by the last 4 characters. Fully masked
@@ -407,24 +411,47 @@ impl ConnectorCredsStore {
 
     /// List a merchant's configured sources with masked credential previews. Decrypts each blob to
     /// derive the hint, but only ever returns the masked form — never a full secret.
-    pub async fn list_masked(&self, merchant_id: &str) -> Result<Vec<MaskedSource>, IngestError> {
+    pub async fn list_masked(
+        &self,
+        merchant_id: &str,
+        config: &crate::config::CostIngestionConfig,
+    ) -> Result<Vec<MaskedSource>, IngestError> {
         let sources = list_sources(merchant_id).await?;
         let mut out = Vec::with_capacity(sources.len());
         for s in sources {
             // A missing/undecryptable blob still lists the source, just without hints.
-            let (webhook_secret_hint, download_auth_hint) =
+            let (webhook_secret_hint, download_auth_hint, environment) =
                 match self.get(merchant_id, &s.connector, &s.account).await {
-                    Ok(Some(r)) => (
-                        mask_secret(r.creds.webhook_secret.peek()),
-                        mask_download_auth(r.creds.download_auth.peek()),
-                    ),
-                    _ => ("—".to_string(), "—".to_string()),
+                    Ok(Some(r)) => {
+                        let raw = r.creds.download_auth.peek();
+                        let (hint, environment) = if s.connector == "checkout" {
+                            let value = serde_json::from_str::<serde_json::Value>(raw).ok();
+                            let key = value
+                                .as_ref()
+                                .and_then(|v| v.get("secret_key"))
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or(raw);
+                            (
+                                mask_secret(key),
+                                CheckoutEnvironment::from_credentials(raw, &config.connector),
+                            )
+                        } else {
+                            (mask_download_auth(raw), None)
+                        };
+                        (
+                            mask_secret(r.creds.webhook_secret.peek()),
+                            hint,
+                            environment,
+                        )
+                    }
+                    _ => ("—".to_string(), "—".to_string(), None),
                 };
             out.push(MaskedSource {
                 connector: s.connector,
                 account: s.account,
                 webhook_secret_hint,
                 download_auth_hint,
+                environment,
             });
         }
         Ok(out)

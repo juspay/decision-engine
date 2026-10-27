@@ -116,6 +116,10 @@ report_poll_interval_secs = 30
 aws_bucket = ""
 aws_region = ""
 
+[cost_ingestion.connector]
+checkout_production_api_base_url = "https://api.checkout.com"
+checkout_sandbox_api_base_url = "https://api.sandbox.checkout.com"
+
 [cost_ingestion.creds_encryption_keys]
 # key-id = AES-256 key (hex, 64 chars). Dev-only placeholder; per environment generate with
 # `openssl rand -hex 32`. On rotation add e.g. `v2 = "..."` and set current = "v2" above.

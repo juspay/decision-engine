@@ -12,6 +12,7 @@ import {
   setConnectorCredentials,
   useConnectorSources,
   type ConnectorSource,
+  type CheckoutEnvironment,
 } from '../../hooks/useCostRouting'
 import { Field, inputClass } from './CostRoutingShared'
 
@@ -27,6 +28,7 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
   const [account, setAccount] = useState('')
   const [webhookSecret, setWebhookSecret] = useState('')
   const [downloadAuth, setDownloadAuth] = useState('')
+  const [environment, setEnvironment] = useState<CheckoutEnvironment>('prod')
   // When set, the form is editing this existing source: the account is its identity (locked), a
   // save upserts its secrets, and its masked hints show what's currently stored.
   const [editing, setEditing] = useState<ConnectorSource | null>(null)
@@ -43,6 +45,7 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
   function resetForm() {
     setEditing(null)
     setAccount('')
+    setEnvironment('prod')
     resetSecrets()
   }
 
@@ -66,7 +69,12 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
       setError('Account, webhook secret and download auth are all required')
       return
     }
-    const payload = { account, webhook_secret: webhookSecret, download_auth: downloadAuth }
+    const payload = {
+      account,
+      webhook_secret: webhookSecret,
+      download_auth: downloadAuth,
+      ...(isCheckout ? { environment } : {}),
+    }
 
     setSaving(true)
     setError(null)
@@ -89,6 +97,7 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
     setEditing(s)
     setConnector(s.connector)
     setAccount(s.account)
+    setEnvironment(s.connector === 'checkout' ? (s.environment ?? 'prod') : 'prod')
     setWebhookSecret('')
     setDownloadAuth('')
     setError(null)
@@ -130,6 +139,8 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
             value={connector}
             onChange={(e) => {
               setConnector(e.target.value)
+              setEnvironment('prod')
+              resetSecrets()
               setError(null)
             }}
           >
@@ -137,6 +148,19 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
             <option value="checkout">Checkout</option>
           </select>
         </Field>
+
+        {isCheckout && (
+          <Field label="Environment">
+            <select
+              className={inputClass}
+              value={environment}
+              onChange={(e) => setEnvironment(e.target.value as CheckoutEnvironment)}
+            >
+              <option value="prod">Production</option>
+              <option value="sandbox">Sandbox</option>
+            </select>
+          </Field>
+        )}
 
         {webhookUrl && (
           <div className="space-y-1.5">
@@ -192,12 +216,12 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
           />
         </Field>
         <Field
-          label="Report download auth"
+          label={isCheckout ? "Secret key" : "Report download auth"}
           hint={
             editing
               ? 'Enter a new value to replace the stored auth'
               : isCheckout
-                ? 'Checkout secret key (sk_…). Or JSON {"secret_key":"sk_…","api_base_url":"…"} for a sandbox/regional host.'
+                ? 'Checkout secret key (sk_…).'
                 : 'Report-user Basic auth as user:password, or a Report Service API key on its own'
           }
         >

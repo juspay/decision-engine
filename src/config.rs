@@ -491,11 +491,21 @@ impl Default for VolumeCommitmentConfig {
     }
 }
 
+/// Server-owned report API endpoints for a connector, grouped by environment.
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[serde(default)]
+pub struct ConnectorReportApiConfig {
+    pub checkout_production_api_base_url: String,
+    pub checkout_sandbox_api_base_url: String,
+}
+
 /// Configuration for the in-house cost-estimation settlement ingestion pipeline
 /// (see `scratch/inhouse-cost-architecture.md` §7).
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(default)]
 pub struct CostIngestionConfig {
+    /// Connector settlement report API endpoints.
+    pub connector: ConnectorReportApiConfig,
     /// Key id used to encrypt *new* connector credentials. Must name a key present in
     /// `creds_encryption_keys`. Rotate by adding a new key there and pointing this at it —
     /// old keys stay in the ring so existing credentials still decrypt. Empty ⇒ storage disabled.
@@ -529,6 +539,7 @@ pub struct CostIngestionConfig {
 impl Default for CostIngestionConfig {
     fn default() -> Self {
         Self {
+            connector: ConnectorReportApiConfig::default(),
             creds_encryption_current: String::new(),
             creds_encryption_keys: std::collections::HashMap::new(),
             worker_enabled: false,

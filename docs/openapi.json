@@ -9295,6 +9295,11 @@
           "download_auth_hint": {
             "type": "string",
             "example": "reportuser:••••"
+          },
+          "environment": {
+            "type": "string",
+            "enum": ["prod", "sandbox"],
+            "description": "Checkout only. Derived from the stored URL and current server configuration. Omitted when credentials cannot be read."
           }
         },
         "description": "Connector credentials with secrets masked. Secrets are never returned in full."
@@ -9446,7 +9451,13 @@
           },
           "download_auth": {
             "type": "string",
-            "description": "Report-download credential: either Basic auth as `user:password`, or a Report Service API key on its own (sent as `X-API-Key`)."
+            "description": "For Checkout, the secret key is treated as an opaque credential; the API URL is selected from server configuration using environment. For Adyen, Basic auth as user:password or a Report Service API key (X-API-Key)."
+          },
+          "environment": {
+            "type": "string",
+            "enum": ["prod", "sandbox"],
+            "default": "prod",
+            "description": "Checkout only. Selects the report API URL from cost_ingestion.connector server configuration; omitted means production. The backend stores the existing secret_key/api_base_url JSON internally."
           }
         }
       },

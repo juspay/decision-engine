@@ -11,6 +11,7 @@ use masking::Secret;
 use serde::{Deserialize, Serialize};
 
 use crate::app::get_tenant_app_state;
+use crate::cost_ingestion::checkout_credentials::CheckoutEnvironment;
 use crate::cost_ingestion::{creds, ConnectorCreds, ConnectorCredsStore};
 use crate::error::TextError;
 
@@ -20,9 +21,12 @@ pub struct SetCredentialsRequest {
     pub account: String,
     /// Secret used to verify inbound webhook signatures.
     pub webhook_secret: String,
-    /// Credential used to authenticate report downloads. Either report-user Basic auth as
+    /// Checkout: plain secret key (sk_…). Adyen: report-user Basic auth as
     /// "user:password", or a Report Service API key on its own (sent as `X-API-Key`).
-    pub download_auth: String,
+    pub download_auth: Secret<String>,
+    /// Checkout only: omitted means production. The client cannot supply a report API URL.
+    #[serde(default)]
+    pub environment: Option<CheckoutEnvironment>,
 }
 
 #[derive(Debug, Serialize)]
@@ -40,6 +44,13 @@ pub async fn set_connector_credentials(
 ) -> Result<Json<SetCredentialsResponse>, TextError> {
     let app_state = get_tenant_app_state().await;
     let cfg = &app_state.config.cost_ingestion;
+    let download_auth = if connector == "checkout" {
+        body.environment
+            .unwrap_or_default()
+            .encode_credentials(&body.download_auth, &cfg.connector)
+    } else {
+        body.download_auth
+    };
     let store = ConnectorCredsStore::from_keyring(
         &cfg.creds_encryption_current,
         &cfg.creds_encryption_keys,
@@ -51,7 +62,7 @@ pub async fn set_connector_credentials(
 
     let new = ConnectorCreds {
         webhook_secret: Secret::new(body.webhook_secret),
-        download_auth: Secret::new(body.download_auth),
+        download_auth,
     };
     store
         .put(&connector, &body.account, &merchant_id, &new)
@@ -92,7 +103,7 @@ pub async fn list_connector_credentials(
         &cfg.creds_encryption_keys,
     ) {
         Some(store) => store
-            .list_masked(&merchant_id)
+            .list_masked(&merchant_id, cfg)
             .await
             .map(Json)
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")).into()),
@@ -108,9 +119,42 @@ pub async fn list_connector_credentials(
                         account: s.account,
                         webhook_secret_hint: "—".to_string(),
                         download_auth_hint: "—".to_string(),
+                        environment: None,
                     })
                     .collect(),
             ))
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn checkout_credentials_request_defaults_to_production() -> Result<(), serde_json::Error> {
+        let request: SetCredentialsRequest = serde_json::from_value(serde_json::json!({
+            "account": "ent_test",
+            "webhook_secret": "test_webhook",
+            "download_auth": "sk_test",
+        }))?;
+        assert_eq!(
+            request.environment.unwrap_or_default(),
+            CheckoutEnvironment::Prod
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn checkout_credentials_request_rejects_unknown_environments() {
+        assert!(
+            serde_json::from_value::<SetCredentialsRequest>(serde_json::json!({
+                "account": "ent_test",
+                "webhook_secret": "test_webhook",
+                "download_auth": "sk_test",
+                "environment": "https://custom.example",
+            }))
+            .is_err()
+        );
     }
 }
