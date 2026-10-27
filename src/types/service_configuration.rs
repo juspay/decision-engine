@@ -276,7 +276,6 @@ type ConfigResult<T> = error_stack::Result<T, ConfigError>;
 pub async fn get<K: MerchantConfig>(
     merchant: &crate::auth::AuthorizedMerchant,
 ) -> ConfigResult<Option<K::Value>> {
-    use error_stack::ResultExt;
     find_config_by_name(K::name(merchant.as_str()))
         .await
         .change_context(ConfigError::Storage)?
@@ -287,7 +286,6 @@ pub async fn get<K: MerchantConfig>(
 }
 
 fn serialize<K: MerchantConfig>(value: &K::Value) -> ConfigResult<String> {
-    use error_stack::ResultExt;
     serde_json::to_string(value).change_context(ConfigError::Storage)
 }
 
@@ -296,7 +294,6 @@ pub async fn create<K: MerchantConfig>(
     merchant: &crate::auth::AuthorizedMerchant,
     value: &K::Value,
 ) -> ConfigResult<()> {
-    use error_stack::ResultExt;
     let name = K::name(merchant.as_str());
     let serialized = serialize::<K>(value)?;
     if find_config_by_name(name.clone())
@@ -316,7 +313,6 @@ pub async fn update<K: MerchantConfig>(
     merchant: &crate::auth::AuthorizedMerchant,
     value: &K::Value,
 ) -> ConfigResult<()> {
-    use error_stack::ResultExt;
     let serialized = serialize::<K>(value)?;
     update_config(K::name(merchant.as_str()), Some(serialized))
         .await
@@ -328,7 +324,6 @@ pub async fn upsert<K: MerchantConfig>(
     merchant: &crate::auth::AuthorizedMerchant,
     value: &K::Value,
 ) -> ConfigResult<()> {
-    use error_stack::ResultExt;
     let serialized = serialize::<K>(value)?;
     upsert_config(K::name(merchant.as_str()), Some(serialized))
         .await
