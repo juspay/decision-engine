@@ -53,7 +53,7 @@ pub async fn set_connector_credentials(
 ) -> Result<Json<SetCredentialsResponse>, RouteError> {
     ConnectorRegistry::with_builtins()
         .get(&connector)
-        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
+        .map_err(|error| RouteError::bad_request(error.to_string()))?;
     // The account is part of the stored credential's name, which is length-limited.
     if body.account.chars().count() > MAX_ACCOUNT_LEN {
         return Err(RouteError::bad_request(format!(
@@ -167,7 +167,9 @@ mod tests {
                 }),
             )
             .await;
-            assert!(matches!(result, Err(TextError(StatusCode::BAD_REQUEST, _))));
+            assert!(matches!(result, Err(error)
+                if error.status() == StatusCode::BAD_REQUEST
+                    && error.message() == format!("no connector registered for '{connector}'")));
         }
     }
 
