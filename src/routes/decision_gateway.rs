@@ -1,4 +1,4 @@
-use crate::custom_extractors::{ScopedJson, ScopedJsonRejection};
+use crate::custom_extractors::{RequestIds, ScopedJson, ScopedJsonRejection};
 use std::time::Instant;
 
 use crate::decider::gatewaydecider::{
@@ -73,10 +73,8 @@ where
     let cpu_start = Instant::now();
 
     let original_url = uri.to_string();
-    let x_request_id = headers
-        .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("unknown");
+    let ids = RequestIds::from_headers(&headers);
+    let x_request_id = ids.request_id.as_deref().unwrap_or("unknown");
     let start_time = std::time::Instant::now();
     let request_time = time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
@@ -112,7 +110,7 @@ where
                 latency = latency.to_string(),
                 x_request_id = x_request_id,
                 request_cputime = cpu_time.to_string(),
-                env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
+                env = crate::logger::env::app_env(),
                 action = "POST",
                 error_code = error_response.error_code.clone(),
                 error_message = error_response.error_message.clone(),
@@ -186,8 +184,7 @@ where
                         x_request_id = x_request_id,
                         request_cputime = cpu_time.to_string(),
                         bytes_allocated = bytes_allocated.to_string(),
-                        env =
-                            std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
+                        env = crate::logger::env::app_env(),
                         action = "POST",
                         req_body = format!("{:?}", payload),
                         req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
@@ -214,8 +211,7 @@ where
                         request_cputime = cpu_time.to_string(),
                         bytes_allocated = bytes_allocated.to_string(),
                         x_request_id = x_request_id,
-                        env =
-                            std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
+                        env = crate::logger::env::app_env(),
                         action = "POST",
                         error_code = e.error_code,
                         error_message = e.error_message,
@@ -263,7 +259,7 @@ where
                 latency = latency.to_string(),
                 x_request_id = x_request_id,
                 request_cputime = cpu_time.to_string(),
-                env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
+                env = crate::logger::env::app_env(),
                 action = "POST",
                 error_code = error_response.error_code,
                 error_message = error_response.error_message,
