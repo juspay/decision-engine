@@ -20,7 +20,6 @@ import { Plus, Trash2, GripVertical, CornerDownRight, ChevronDown, ChevronUp, Pe
 import { Button } from '../../ui/Button'
 import { FieldError } from '../../ui/FieldError'
 import { SearchableSelect } from '../../ui/SearchableSelect'
-import { SearchableMultiSelect } from '../../ui/SearchableMultiSelect'
 import { GatewaySelect } from '../../ui/GatewaySelect'
 import { gatewayOptions, type GatewayOption } from '../../../lib/connectors'
 import { RoutingKeyConfig } from '../../../hooks/useDynamicRoutingConfig'
@@ -599,7 +598,8 @@ export function ConditionRowEditor({
       <div className="flex items-center gap-2">
         {isEnum && isMulti ? (
           <div data-cy="cond-val" className="w-[14rem]">
-            <SearchableMultiSelect
+            <SearchableSelect
+              multiple
               values={selectedValues}
               onChange={(vals) => onChange({ ...row, value: vals })}
               options={(keyInfo?.values || []).map((v: string) => ({ value: v, label: toLabel(v) }))}
