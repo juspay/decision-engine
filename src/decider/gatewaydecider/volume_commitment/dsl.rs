@@ -20,15 +20,8 @@ use crate::euclid::volume_contract::{
 use crate::feedback::constants::kvRedis;
 use crate::logger;
 use crate::redis::feature::is_feature_enabled;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::routing_algorithm::dsl as algo_dsl;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::routing_algorithm::dsl as algo_dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
-
+use crate::storage::backend::schema::routing_algorithm::dsl as algo_dsl;
+use crate::storage::backend::schema::routing_algorithm_mapper::dsl as mapper_dsl;
 /// One basis point is one ten-thousandth. Rewards and tolerance both arrive in bps.
 const BPS: f64 = 10_000.0;
 

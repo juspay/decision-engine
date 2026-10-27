@@ -11,10 +11,7 @@ use chrono::Datelike;
 use diesel::associations::HasTable;
 use diesel::*;
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::cost_ingestion::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::cost_ingestion::dsl;
+use crate::storage::backend::schema::cost_ingestion::dsl;
 
 use crate::app::get_tenant_app_state;
 use crate::generics;

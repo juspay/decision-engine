@@ -4,10 +4,7 @@
 //! not found. Authentication looks keys up by hash instead, before any merchant is known; that
 //! lookup lives in the authenticate middleware.
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::merchant_api_keys::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::merchant_api_keys::dsl;
+use crate::storage::backend::schema::merchant_api_keys::dsl;
 
 use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods};
 use error_stack::Report;

@@ -20,10 +20,7 @@ use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::gateway_card_info::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::gateway_card_info::dsl;
+use crate::storage::backend::schema::gateway_card_info::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 

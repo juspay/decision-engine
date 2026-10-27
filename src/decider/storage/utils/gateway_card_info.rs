@@ -10,14 +10,8 @@ use crate::types::merchant::id::merchant_pid_to_text;
 // use juspay::extra::parsing::{Parsed, Step, around, lift_pure, mandated, parse_field, project};
 // use eulerhs::extra::combinators::to_domain_all;
 // use eulerhs::language::MonadFlow;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::gateway_card_info::dsl;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::merchant_gateway_card_info::dsl as m_dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::gateway_card_info::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::merchant_gateway_card_info::dsl as m_dsl;
+use crate::storage::backend::schema::gateway_card_info::dsl;
+use crate::storage::backend::schema::merchant_gateway_card_info::dsl as m_dsl;
 use crate::types::merchant::merchant_account::MerchantAccount;
 use diesel::associations::HasTable;
 use diesel::*;
