@@ -182,7 +182,7 @@ export class EuclidRuleBuilder extends RoutingListPage {
     await this.selectFromPortal(value)
   }
 
-  /** Select multiple enum values in the SearchableMultiSelect (skips already-checked options). */
+  /** Select multiple enum values in a multi-value SearchableSelect (skips already-checked options). */
   async selectMultiCondVals(index: number, values: string[]): Promise<void> {
     await this.page.locator('[data-cy="cond-val"]').nth(index).click()
     const search = this.page.locator('input[placeholder="Search…"]')
@@ -199,7 +199,7 @@ export class EuclidRuleBuilder extends RoutingListPage {
   }
 
   /**
-   * Close an open SearchableSelect / SearchableMultiSelect.
+   * Close an open SearchableSelect.
    *
    * Not a body click: the dropdown is portalled to <body>, so a click at the body's centre lands on
    * whichever option happens to sit under that point and silently toggles it.

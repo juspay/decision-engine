@@ -14,7 +14,7 @@ import {
 } from '../../types/api'
 import { Button } from '../ui/Button'
 import { Badge } from '../ui/Badge'
-import { SearchableMultiSelect } from '../ui/SearchableMultiSelect'
+import { SearchableSelect } from '../ui/SearchableSelect'
 import { Spinner } from '../ui/Spinner'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Card as GlassCard, InsetPanel } from '../ui/Card'
@@ -1240,7 +1240,8 @@ export function PaymentAuditPage() {
         </div>
 
         <div className="flex-1">
-          <SearchableMultiSelect
+          <SearchableSelect
+            multiple
             values={filters.gateway.split(',').filter(Boolean)}
             options={gatewayOptions.map((gateway) => ({ value: gateway, label: gateway }))}
             onChange={(values) => updateFilter('gateway', values.join(','))}
@@ -1252,7 +1253,8 @@ export function PaymentAuditPage() {
         </div>
 
         <div className="flex-1">
-          <SearchableMultiSelect
+          <SearchableSelect
+            multiple
             values={filters.status.split(',').filter(Boolean)}
             options={OUTCOME_OPTIONS}
             onChange={(values) => updateFilter('status', values.join(','))}
@@ -1276,7 +1278,8 @@ export function PaymentAuditPage() {
         </div>
         {showAdvancedFilters ? (
           <div className="grid w-full basis-full grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-5">
-            <SearchableMultiSelect
+            <SearchableSelect
+              multiple
               values={filters.route.split(',').filter(Boolean)}
               options={ROUTE_OPTIONS}
               onChange={(values) => updateFilter('route', values.join(','))}
@@ -1285,7 +1288,8 @@ export function PaymentAuditPage() {
               triggerClassName={fieldClassName(!!filters.route)}
               compact
             />
-            <SearchableMultiSelect
+            <SearchableSelect
+              multiple
               values={filters.errorCode.split(',').filter(Boolean)}
               options={errorCodeOptions.map((code) => ({ value: code, label: code }))}
               onChange={(values) => updateFilter('errorCode', values.join(','))}
@@ -1309,7 +1313,8 @@ export function PaymentAuditPage() {
                 .filter((value) => !options.some((o) => o.value === value))
                 .map((value) => ({ value, label: attributeLabel(field, value, labels) }))
               return (
-                <SearchableMultiSelect
+                <SearchableSelect
+                  multiple
                   key={field}
                   values={selected}
                   options={[...unlisted, ...options]}
