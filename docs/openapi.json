@@ -940,6 +940,15 @@
         ],
         "parameters": [
           {
+            "name": "connector_mismatch",
+            "in": "query",
+            "description": "Only payments whose latest Decide Gateway or Hybrid Routing connector differs from a reported update connector in the selected window. Compares connector names without case or account suffixes. Keeps complete payment summaries and timelines; ignored for exact ID lookup.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
             "name": "x-tenant-id",
             "in": "header",
             "required": true,
@@ -3493,7 +3502,7 @@
           "Rule Configuration"
         ],
         "summary": "Get rule config",
-        "description": "Retrieve an existing rule configuration by merchant and type.",
+        "description": "Retrieve a saved rule configuration by merchant and type. An existing merchant with no saved configuration returns 200 with config: null. An unknown merchant returns 404.",
         "requestBody": {
           "required": true,
           "content": {
@@ -3510,7 +3519,7 @@
         },
         "responses": {
           "200": {
-            "description": "Rule config",
+            "description": "Saved rule config, or config: null when not configured",
             "content": {
               "application/json": {
                 "schema": {
@@ -3518,7 +3527,8 @@
                 }
               }
             }
-          }
+          },
+          "404": { "description": "Merchant not found, configuration storage read failure, or invalid stored configuration. Underlying read and parsing errors are retained in server logs." }
         },
         "security": [
           {
@@ -7059,10 +7069,14 @@
             "example": "merchant_demo"
           },
           "config": {
-            "$ref": "#/components/schemas/ConfigVariant"
+            "oneOf": [
+              { "$ref": "#/components/schemas/ConfigVariant" },
+              { "type": "null" }
+            ]
           }
         },
-        "description": "`POST /rule/get` returns the stored config without a `message` field."
+        "required": ["merchant_id", "config"],
+        "description": "`POST /rule/get` returns the stored config, or config: null when no configuration is saved for an existing merchant. No message field is returned."
       },
       "HybridRoutingRequest": {
         "type": "object",

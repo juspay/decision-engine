@@ -9,6 +9,25 @@ import { expectValidRuleConfigResponse } from '../../helpers/assertions'
  * merchant afterwards, standing in for the `cleanupTestData` afterEach.
  */
 test.describe('Rule Config CRUD API', () => {
+  for (const algorithm of ['successRate', 'elimination', 'debitRouting']) {
+    test(`${algorithm}: existing merchant without config returns 200`, async ({ api, merchant }) => {
+      const response = await api.raw('POST', '/rule/get', {
+        body: { merchant_id: merchant.id, algorithm },
+      })
+      expect(response.status).toBe(200)
+      expect(response.body).toEqual({ merchant_id: merchant.id, config: null })
+    })
+
+    test(`${algorithm}: unknown merchant still returns 404`, async ({ api, merchant }) => {
+      const response = await api.raw('POST', '/rule/get', {
+        body: { merchant_id: `${merchant.id}_missing`, algorithm },
+        failOnStatusCode: false,
+      })
+      expect(response.status).toBe(404)
+      expect(response.body.message).toBe('MerchantId not found')
+    })
+  }
+
   test('creates, fetches, updates, and deletes success-rate config', async ({ api, merchant }) => {
     const m = merchant.id
 
@@ -37,7 +56,8 @@ test.describe('Rule Config CRUD API', () => {
     expect(del.status).toBe(200)
 
     const afterDelete = await api.getSuccessRateConfig(m, { failOnStatusCode: false })
-    expect(afterDelete.status).not.toBe(200)
+    expect(afterDelete.status).toBe(200)
+    expect(afterDelete.body).toEqual({ merchant_id: m, config: null })
   })
 
   test('creates, fetches, updates, and deletes elimination config', async ({ api, merchant }) => {
@@ -67,6 +87,7 @@ test.describe('Rule Config CRUD API', () => {
     expect(del.status).toBe(200)
 
     const afterDelete = await api.getEliminationConfig(m, { failOnStatusCode: false })
-    expect(afterDelete.status).not.toBe(200)
+    expect(afterDelete.status).toBe(200)
+    expect(afterDelete.body).toEqual({ merchant_id: m, config: null })
   })
 })

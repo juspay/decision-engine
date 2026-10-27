@@ -575,13 +575,13 @@ function useLiveSrConfig(merchantId: string | undefined) {
           defaultBucketSize: number | null
           subLevelInputConfig: { source?: string | null }[] | null
         }
-      }
+      } | null
     }>('/rule/get', { merchant_id: merchantId, algorithm: 'successRate' }),
     { shouldRetryOnError: false, revalidateOnFocus: false },
   )
   const { data: elimConfig } = useSWR(
     merchantId ? ['rule-elim-live', merchantId] : null,
-    () => apiPost<{ config: { data: { threshold: number } } }>(
+    () => apiPost<{ config: { data: { threshold: number } } | null }>(
       '/rule/get', { merchant_id: merchantId, algorithm: 'elimination' }
     ),
     { shouldRetryOnError: false, revalidateOnFocus: false },

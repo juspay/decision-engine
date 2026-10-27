@@ -160,6 +160,17 @@ pub async fn create_rule_config(
     result
 }
 
+// Absence is a normal read result. Failed reads retain their source error in the report
+// while using the same 404 context as the other configuration operations.
+fn parse_optional_rule_config<T: serde::de::DeserializeOwned>(
+    value: Option<&str>,
+) -> Result<Option<T>, error_stack::Report<error::RuleConfigurationError>> {
+    value
+        .map(serde_json::from_str)
+        .transpose()
+        .change_context(error::RuleConfigurationError::ConfigurationNotFound)
+}
+
 #[axum::debug_handler]
 pub async fn get_rule_config(
     headers: axum::http::HeaderMap,
@@ -167,7 +178,7 @@ pub async fn get_rule_config(
         merchant, payload, ..
     }: ScopedJson<types::routing_configuration::FetchRoutingRule>,
 ) -> Result<
-    Json<types::routing_configuration::RoutingRule>,
+    Json<types::routing_configuration::RuleConfigGetResponse>,
     error::ContainerError<error::RuleConfigurationError>,
 > {
     logger::debug!("Received rule fetch request: {:?}", payload);
@@ -193,78 +204,56 @@ pub async fn get_rule_config(
             }
         };
 
-    let result = match payload.algorithm {
-        types::routing_configuration::AlgorithmType::SuccessRate => {
-            let config_name = format!("SR_V3_INPUT_CONFIG_{}", merchant);
-            let result = types::service_configuration::find_config_by_name(config_name.clone())
-                .await
-                .change_context(error::RuleConfigurationError::StorageError)
-                .and_then(|opt_config| {
-                    opt_config
-                        .and_then(|config| config.value)
-                        .ok_or(error::RuleConfigurationError::ConfigurationNotFound.into())
+    use types::routing_configuration::{AlgorithmType, ConfigVariant, RuleConfigGetResponse};
+    let result: Result<Option<ConfigVariant>, error_stack::Report<error::RuleConfigurationError>> =
+        match payload.algorithm {
+            AlgorithmType::SuccessRate | AlgorithmType::DebitRouting => {
+                let config_name = match payload.algorithm {
+                    AlgorithmType::SuccessRate => format!("SR_V3_INPUT_CONFIG_{merchant}"),
+                    _ => format!("DEBIT_ROUTING_CONFIG_{merchant}"),
+                };
+                types::service_configuration::find_config_by_name(config_name)
+                    .await
+                    .change_context(error::RuleConfigurationError::ConfigurationNotFound)
+                    .and_then(|stored| {
+                        let value = stored.and_then(|config| config.value);
+                        match payload.algorithm {
+                            AlgorithmType::SuccessRate => {
+                                parse_optional_rule_config(value.as_deref())
+                                    .map(|config| config.map(ConfigVariant::SuccessRate))
+                            }
+                            _ => parse_optional_rule_config(value.as_deref())
+                                .map(|config| config.map(ConfigVariant::DebitRouting)),
+                        }
+                    })
+            }
+            AlgorithmType::Elimination => {
+                // A missing DB value is represented as an empty string by MerchantAccount.
+                let stored = merchant_account
+                    .gatewaySuccessRateBasedDeciderInput
+                    .as_str();
+                let value = (!stored.trim().is_empty()).then_some(stored);
+                parse_optional_rule_config::<
+                    types::gateway_routing_input::GatewaySuccessRateBasedRoutingInput,
+                >(value)
+                .map(|config| {
+                    config.map(|config| {
+                        ConfigVariant::Elimination(types::routing_configuration::EliminationData {
+                            threshold: config.defaultEliminationThreshold,
+                            txnLatency: config.txnLatency,
+                        })
+                    })
                 })
-                .and_then(|config| {
-                    serde_json::from_str::<types::routing_configuration::SuccessRateData>(&config)
-                        .map_err(|_| error::RuleConfigurationError::StorageError.into())
-                });
-
-            match result {
-                Ok(success_rate_config) => Ok(Json(types::routing_configuration::RoutingRule {
-                    merchant_id: merchant.as_str().to_string(),
-                    config: types::routing_configuration::ConfigVariant::SuccessRate(
-                        success_rate_config,
-                    ),
-                })),
-                Err(e) => Err(e.into()),
             }
-        }
-        types::routing_configuration::AlgorithmType::Elimination => {
-            let result = serde_json::from_str::<
-                types::gateway_routing_input::GatewaySuccessRateBasedRoutingInput,
-            >(&merchant_account.gatewaySuccessRateBasedDeciderInput)
-            .map_err(|_| error::RuleConfigurationError::ConfigurationNotFound)
-            .map(|config| types::routing_configuration::EliminationData {
-                threshold: config.defaultEliminationThreshold,
-                txnLatency: config.txnLatency,
-            });
-
-            match result {
-                Ok(elimination_config) => Ok(Json(types::routing_configuration::RoutingRule {
-                    merchant_id: merchant.as_str().to_string(),
-                    config: types::routing_configuration::ConfigVariant::Elimination(
-                        elimination_config,
-                    ),
-                })),
-                Err(e) => Err(e.into()),
-            }
-        }
-        types::routing_configuration::AlgorithmType::DebitRouting => {
-            let config_name = format!("DEBIT_ROUTING_CONFIG_{}", merchant);
-            let result = types::service_configuration::find_config_by_name(config_name.clone())
-                .await
-                .change_context(error::RuleConfigurationError::StorageError)
-                .and_then(|opt_config| {
-                    opt_config
-                        .and_then(|config| config.value)
-                        .ok_or(error::RuleConfigurationError::ConfigurationNotFound.into())
-                })
-                .and_then(|config| {
-                    serde_json::from_str::<types::routing_configuration::DebitRoutingData>(&config)
-                        .map_err(|_| error::RuleConfigurationError::StorageError.into())
-                });
-
-            match result {
-                Ok(debit_routing_config) => Ok(Json(types::routing_configuration::RoutingRule {
-                    merchant_id: merchant.as_str().to_string(),
-                    config: types::routing_configuration::ConfigVariant::DebitRouting(
-                        debit_routing_config,
-                    ),
-                })),
-                Err(e) => Err(e.into()),
-            }
-        }
-    };
+        };
+    let result: Result<_, error::ContainerError<error::RuleConfigurationError>> = result
+        .map(|config| {
+            Json(RuleConfigGetResponse {
+                merchant_id: merchant.as_str().to_string(),
+                config,
+            })
+        })
+        .map_err(Into::into);
     if let Ok(response) = &result {
         crate::analytics::DomainAnalyticsEvent::record_operation(
             crate::analytics::AnalyticsFlowContext::new(
@@ -279,7 +268,14 @@ pub async fn get_rule_config(
             trace_id,
             Some("success".to_string()),
             serialize_rule_config_analytics_details(&analytics_payload, &response.0),
-            Some("rule_config_loaded".to_string()),
+            Some(
+                if response.0.config.is_some() {
+                    "rule_config_loaded"
+                } else {
+                    "rule_config_not_configured"
+                }
+                .to_string(),
+            ),
         );
     }
     result
@@ -488,4 +484,48 @@ pub async fn delete_rule_config(
         );
     }
     result
+}
+
+#[cfg(test)]
+mod fetch_response_tests {
+    use super::parse_optional_rule_config;
+    use crate::types::routing_configuration::{RuleConfigGetResponse, SuccessRateData};
+
+    #[test]
+    fn missing_config_is_a_successful_null_response() {
+        assert!(matches!(
+            parse_optional_rule_config::<SuccessRateData>(None),
+            Ok(None)
+        ));
+        let response = RuleConfigGetResponse {
+            merchant_id: "merchant_defaults".to_string(),
+            config: None,
+        };
+        assert_eq!(
+            serde_json::to_value(response).ok(),
+            Some(serde_json::json!({
+                "merchant_id": "merchant_defaults", "config": null
+            }))
+        );
+    }
+
+    #[test]
+    fn saved_config_is_preserved() {
+        let result =
+            parse_optional_rule_config::<SuccessRateData>(Some(r#"{"defaultBucketSize":200}"#));
+        assert!(matches!(result, Ok(Some(config)) if config.default_bucket_size == Some(200)));
+    }
+
+    #[test]
+    fn invalid_saved_config_is_not_treated_as_absent() {
+        for value in ["not json", "", "null", r#"{"defaultBucketSize":"invalid"}"#] {
+            let result = parse_optional_rule_config::<SuccessRateData>(Some(value));
+            assert!(result.as_ref().is_err_and(|error| {
+                error.downcast_ref::<serde_json::Error>().is_some()
+                    && axum::response::IntoResponse::into_response(error.current_context().clone())
+                        .status()
+                        == axum::http::StatusCode::NOT_FOUND
+            }));
+        }
+    }
 }

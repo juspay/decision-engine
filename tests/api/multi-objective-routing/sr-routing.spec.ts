@@ -34,8 +34,8 @@ test.describe('SR Routing (API)', () => {
     expect(got.body.config.data.defaultHedgingPercent).toBe(10)
   })
 
-  // Validates write-through cache eviction on delete: /rule/get must return non-200 immediately.
-  test('SR config is not found immediately after deletion (cache eviction)', async ({ api, merchant }) => {
+  // Validates write-through cache eviction on delete: /rule/get must report no saved config immediately.
+  test('SR config is not configured immediately after deletion (cache eviction)', async ({ api, merchant }) => {
     const m = merchant.id
 
     const created = await api.createSuccessRateConfig(m)
@@ -49,7 +49,8 @@ test.describe('SR Routing (API)', () => {
 
     // Must not serve the deleted config from cache.
     const afterDelete = await api.getSuccessRateConfig(m, { failOnStatusCode: false })
-    expect(afterDelete.status).not.toBe(200)
+    expect(afterDelete.status).toBe(200)
+    expect(afterDelete.body).toEqual({ merchant_id: m, config: null })
   })
 
   // Validates the explore-exploit fix: gateway scores must decrease after repeated failure feedback
