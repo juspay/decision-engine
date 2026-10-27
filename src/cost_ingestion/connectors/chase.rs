@@ -35,6 +35,7 @@
 //! return a descriptive error until then; the parser (`parse_rows`) is complete and independently
 //! testable.
 
+use super::common::{http_client, parse_us_date, to_float};
 use crate::cost_ingestion::card_network::chase_network_key;
 use std::collections::HashMap;
 use std::io::{BufReader, Read};
@@ -61,8 +62,6 @@ use crate::cost_ingestion::types::{
 /// `REFUND` rows are reversals whose signed amounts would distort the gross→fee regression, so they
 /// are skipped (mirrors Adyen's record-type and Braintree's transaction-type filter).
 const SALE_ACTION: &str = "SALE";
-
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// The report *type* the J.P. Morgan **Deposit details** preset report is delivered under. Deposit
 /// details carries the per-transaction split interchange/assessment fees plus every cluster
@@ -110,16 +109,6 @@ impl Default for ChaseReportSource {
     fn default() -> Self {
         Self::new()
     }
-}
-
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(DOWNLOAD_TIMEOUT)
-            .build()
-            .expect("failed to build chase report reqwest client")
-    })
 }
 
 /// Chase's OAuth + reporting-API access, carried inside the opaque [`ConnectorCreds::download_auth`]
@@ -357,7 +346,7 @@ impl SettlementReportSource for ChaseReportSource {
                 let funding = reconcile_funding(row.get(c.usage), row.get(c.ic_code));
                 let wallet = row.get_opt(c.wallet);
                 let variant = build_variant(&network, &funding, wallet);
-                let txn_date = c.submission_date.and_then(|i| parse_date(row.get(i)));
+                let txn_date = c.submission_date.and_then(|i| parse_us_date(row.get(i)));
                 // POS when a terminal id is present, else online. Absent column ⇒ unknown ⇒ ecom.
                 let channel = match c.terminal {
                     Some(i) if !row.get(i).trim().is_empty() => "pos",
@@ -661,27 +650,6 @@ fn build_variant(network: &str, funding: &str, wallet: &str) -> String {
     }
 }
 
-/// Parse a money cell; blanks/garbage become `0.0` (mirrors Adyen's/Braintree's `to_float`).
-fn to_float(s: &str) -> f64 {
-    s.trim().parse::<f64>().unwrap_or(0.0)
-}
-
-/// Parse a Chase date cell (`Submission Date`), formatted US `M/D/YYYY` (e.g. `3/3/2025`). A
-/// 2-digit-year fallback is kept for safety. Blank/odd values yield `None`.
-fn parse_date(s: &str) -> Option<chrono::NaiveDate> {
-    let s = s.trim();
-    if s.is_empty() {
-        return None;
-    }
-    // Choose the year format by the last field's width so `%Y` doesn't read `25` as year 0025.
-    let fmt = match s.rsplit('/').next().map(str::len) {
-        Some(4) => "%m/%d/%Y",
-        Some(2) => "%m/%d/%y",
-        _ => return None,
-    };
-    chrono::NaiveDate::parse_from_str(s, fmt).ok()
-}
-
 /// Streams a J.P. Morgan preset report with its envelope stripped: a leading UTF-8 BOM, the
 /// `BEGIN…` and `EntityId=…,ReportTypeName=…` preamble lines, and the trailing `END…` line are all
 /// dropped, leaving a plain `header + data` CSV for [`csv_reader::parse`]. Line-buffered, so a
@@ -900,14 +868,14 @@ o2,ED,3,GB,GBP,EDBT,SALE,100,-1.00,-0.20\n";
         );
         assert_eq!(reconcile_funding("", ""), "", "no signal -> empty");
         assert_eq!(
-            parse_date("3/3/2025"),
+            parse_us_date("3/3/2025"),
             chrono::NaiveDate::from_ymd_opt(2025, 3, 3)
         );
         assert_eq!(
-            parse_date("12/21/2024"),
+            parse_us_date("12/21/2024"),
             chrono::NaiveDate::from_ymd_opt(2024, 12, 21)
         );
-        assert_eq!(parse_date(""), None);
+        assert_eq!(parse_us_date(""), None);
     }
 
     /// Shaped after J.P. Morgan's live `GET /api/v1/reports`: a `Requested` report (no
