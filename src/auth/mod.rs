@@ -26,13 +26,14 @@ pub const ADMIN_SECRET_HEADER: &str = "x-admin-secret";
 #[derive(Debug, Clone, Copy)]
 pub struct AdminCaller;
 
-/// Whether `headers` carry the deployment's admin secret. An unset secret matches nothing.
+/// Whether `headers` carry the deployment's admin secret. An unset secret matches nothing. Compared in
+/// constant time, so the time to reject a guess does not reveal how much of it was right.
 pub fn presents_admin_secret(headers: &axum::http::HeaderMap, expected: &str) -> bool {
     !expected.is_empty()
-        && headers
-            .get(ADMIN_SECRET_HEADER)
-            .and_then(|value| value.to_str().ok())
-            .is_some_and(|value| value == expected)
+        && headers.get(ADMIN_SECRET_HEADER).is_some_and(|value| {
+            ring::constant_time::verify_slices_are_equal(value.as_bytes(), expected.as_bytes())
+                .is_ok()
+        })
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -433,6 +434,16 @@ mod tests {
         assert!(!presents_admin_secret(&headers, "secret"));
         headers.insert(ADMIN_SECRET_HEADER, HeaderValue::from_static("secret"));
         assert!(presents_admin_secret(&headers, "secret"));
+    }
+
+    #[test]
+    fn only_the_whole_secret_matches() {
+        use axum::http::{HeaderMap, HeaderValue};
+        for guess in ["secre", "secrets", "secreT", " secret", ""] {
+            let mut headers = HeaderMap::new();
+            headers.insert(ADMIN_SECRET_HEADER, HeaderValue::from_static(guess));
+            assert!(!presents_admin_secret(&headers, "secret"), "{guess:?}");
+        }
     }
 
     #[test]
