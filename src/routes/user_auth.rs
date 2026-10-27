@@ -140,14 +140,22 @@ pub async fn signup(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    if global_config.user_auth.signup_requires_admin_secret {
-        let provided_admin_secret = headers
+    let admin_secret_ok = {
+        let provided = headers
             .get("x-admin-secret")
             .and_then(|v| v.to_str().ok())
             .unwrap_or("");
-        if provided_admin_secret != global_config.admin_secret.secret.peek().as_str() {
-            return Err(error::ContainerError::from(UserAuthError::Unauthorized));
-        }
+        let expected = global_config.admin_secret.secret.peek();
+        !expected.is_empty()
+            && ring::constant_time::verify_slices_are_equal(
+                provided.as_bytes(),
+                expected.as_bytes(),
+            )
+            .is_ok()
+    };
+
+    if global_config.user_auth.signup_requires_admin_secret && !admin_secret_ok {
+        return Err(error::ContainerError::from(UserAuthError::Unauthorized));
     }
 
     let existing = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
@@ -180,6 +188,10 @@ pub async fn signup(
         .map(str::to_string);
 
     if let Some(merchant_id) = requested_merchant_id.as_ref() {
+        if !admin_secret_ok {
+            return Err(error::ContainerError::from(UserAuthError::Forbidden));
+        }
+
         #[cfg(feature = "mysql")]
         use crate::storage::schema::merchant_account::dsl as ma_dsl;
         #[cfg(feature = "postgres")]
