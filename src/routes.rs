@@ -24,3 +24,13 @@ pub mod settlement_webhook;
 pub mod update_gateway_score;
 pub mod update_score;
 pub mod volume_commitment;
+
+/// The deployment's global config, for a route that needs settings outside its tenant's — ClickHouse,
+/// cost ingestion. It is set at startup, so a request reaching a route without it is a server fault.
+pub(crate) fn global_config(
+) -> Result<&'static crate::config::GlobalConfig, crate::error::RouteError> {
+    crate::app::APP_STATE
+        .get()
+        .map(|state| &state.global_config)
+        .ok_or_else(|| crate::error::RouteError::internal("app state not initialized"))
+}

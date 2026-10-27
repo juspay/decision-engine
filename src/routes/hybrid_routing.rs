@@ -1,9 +1,9 @@
 use crate::analytics::clickhouse::common::STATIC_ROUTING_APPROACH;
 use crate::analytics::{
-    global_request_id_from_headers, serialize_details, trace_id_from_headers, AnalyticsFlowContext,
-    AnalyticsRoute, ApiFlow, DomainAnalyticsEvent, FlowType,
+    serialize_details, AnalyticsFlowContext, AnalyticsRoute, ApiFlow, DomainAnalyticsEvent,
+    FlowType,
 };
-use crate::custom_extractors::{Json, ScopedJson};
+use crate::custom_extractors::{Json, RequestIds, ScopedJson};
 use crate::decider::gatewaydecider::flow_new::{
     decider_full_payload_hs_function, store_scoring_context_without_decider,
 };
@@ -188,7 +188,7 @@ struct HybridFailure {
 
 #[axum::debug_handler]
 pub async fn hybrid_routing_evaluate(
-    headers: axum::http::HeaderMap,
+    ids: RequestIds,
     ScopedJson { payload, .. }: ScopedJson<HybridRoutingRequest>,
 ) -> Result<axum::response::Response, ContainerError<EuclidErrors>> {
     let HybridRoutingRequest {
@@ -206,13 +206,17 @@ pub async fn hybrid_routing_evaluate(
         dynamic_routing_request: dynamic_routing_request.clone(),
     };
 
-    let request_id = headers
-        .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string)
-        .unwrap_or_else(crate::analytics::next_event_id);
-    let global_request_id = global_request_id_from_headers(&headers);
-    let trace_id = trace_id_from_headers(&headers);
+    // Both halves and the audit event share one request id, minted when the caller sent none.
+    let ids = RequestIds {
+        request_id: Some(
+            ids.request_id
+                .unwrap_or_else(crate::analytics::next_event_id),
+        ),
+        ..ids
+    };
+    let request_id = ids.request_id.clone().unwrap_or_default();
+    let global_request_id = ids.global_request_id.clone();
+    let trace_id = ids.trace_id.clone();
 
     let merchant_id = dynamic_routing_request
         .as_ref()
@@ -323,10 +327,9 @@ pub async fn hybrid_routing_evaluate(
                     .with_label_values(&[STATIC_HALF])
                     .start_timer();
                 let result = routing_evaluate_with_analytics(
-                    headers.clone(),
+                    ids.clone(),
                     Json(req),
                     RoutingEvaluateAnalyticsFlows::routing_hybrid(),
-                    Some(request_id.clone()),
                     ExperimentEndpoint::HybridRouting,
                     !run_dynamic_routing,
                 )

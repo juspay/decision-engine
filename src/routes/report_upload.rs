@@ -24,7 +24,7 @@ use serde::{Deserialize, Serialize};
 use tokio::io::AsyncWriteExt;
 
 use crate::cost_ingestion::{mapping, pipeline, sink, store};
-use crate::error::TextError;
+use crate::error::RouteError;
 use crate::logger;
 use crate::storage::types::CostIngestion;
 
@@ -101,10 +101,10 @@ impl From<CostIngestion> for IngestionDto {
 /// first. The dashboard polls this to show history and live progress of processing jobs.
 pub async fn list_ingestions(
     MerchantFromPath(merchant): MerchantFromPath,
-) -> Result<Json<Vec<IngestionDto>>, TextError> {
+) -> Result<Json<Vec<IngestionDto>>, RouteError> {
     let rows = store::list_for_merchant(&merchant, HISTORY_LIMIT)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
     Ok(Json(rows.into_iter().map(IngestionDto::from).collect()))
 }
 
@@ -115,30 +115,20 @@ pub async fn list_ingestions(
 pub async fn delete_ingestion(
     MerchantFromPath(merchant): MerchantFromPath,
     Path((_, ingestion_id)): Path<(String, String)>,
-) -> Result<StatusCode, TextError> {
+) -> Result<StatusCode, RouteError> {
     let row = store::get_for_merchant(&merchant, &ingestion_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?
-        .ok_or((StatusCode::NOT_FOUND, "ingestion not found".to_string()))?;
+        .map_err(RouteError::internal)?
+        .ok_or(RouteError::not_found("ingestion not found"))?;
 
     if row.status == "processing" {
-        return Err((
+        return Err(RouteError::new(
             StatusCode::CONFLICT,
-            "cannot delete an in-progress ingestion".to_string(),
-        )
-            .into());
+            "cannot delete an in-progress ingestion",
+        ));
     }
 
-    let clickhouse = crate::app::APP_STATE
-        .get()
-        .ok_or((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "app state not initialized".to_string(),
-        ))?
-        .global_config
-        .analytics
-        .clickhouse
-        .clone();
+    let clickhouse = super::global_config()?.analytics.clickhouse.clone();
 
     // Remove this ingestion's staged transactions, then refit from what remains so the served model
     // and coverage reflect the deletion. The fit stamps today as the new snapshot.
@@ -150,7 +140,7 @@ pub async fn delete_ingestion(
         &ingestion_id,
     )
     .await
-    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+    .map_err(RouteError::internal)?;
 
     let report_date = crate::utils::date_time::now().date().to_string();
     if let Err(e) = crate::cost_ingestion::fit::fit_snapshot(
@@ -171,7 +161,7 @@ pub async fn delete_ingestion(
 
     store::delete(&merchant, &ingestion_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
 
     // Revert the served models immediately rather than waiting for the periodic refresh. Runs
     // unconditionally — including when the refit above was empty (last data deleted), in which case
@@ -196,20 +186,11 @@ pub async fn delete_ingestion(
 /// flat fee) changed.
 pub async fn list_price_changes(
     MerchantFromPath(merchant): MerchantFromPath,
-) -> Result<Json<Vec<crate::cost_ingestion::detect::PriceChange>>, TextError> {
-    let clickhouse = crate::app::APP_STATE
-        .get()
-        .ok_or((
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "app state not initialized".to_string(),
-        ))?
-        .global_config
-        .analytics
-        .clickhouse
-        .clone();
+) -> Result<Json<Vec<crate::cost_ingestion::detect::PriceChange>>, RouteError> {
+    let clickhouse = super::global_config()?.analytics.clickhouse.clone();
     let changes = crate::cost_ingestion::detect::price_changes(&clickhouse, merchant.as_str())
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
     Ok(Json(changes))
 }
 
@@ -252,7 +233,7 @@ pub async fn upload_report(
     Path((_, connector)): Path<(String, String)>,
     Query(params): Query<UploadParams>,
     body: Body, // must be the last extractor (consumes the request body)
-) -> Result<(StatusCode, Json<UploadAccepted>), TextError> {
+) -> Result<(StatusCode, Json<UploadAccepted>), RouteError> {
     let merchant_id = merchant.as_str().to_string();
     let path = temp_report_path();
 
@@ -264,15 +245,11 @@ pub async fn upload_report(
     }
 
     // ClickHouse config lives on the global config (not the per-tenant config).
-    let clickhouse = match crate::app::APP_STATE.get() {
-        Some(state) => state.global_config.analytics.clickhouse.clone(),
-        None => {
+    let clickhouse = match super::global_config() {
+        Ok(config) => config.analytics.clickhouse.clone(),
+        Err(err) => {
             let _ = tokio::fs::remove_file(&path).await;
-            return Err((
-                StatusCode::INTERNAL_SERVER_ERROR,
-                "app state not initialized".to_string(),
-            )
-                .into());
+            return Err(err);
         }
     };
 
@@ -280,12 +257,7 @@ pub async fn upload_report(
     let path_str = path.to_string_lossy().to_string();
     let job_id = store::create_manual(&merchant, &connector, &params.account, &path_str)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("could not create ingestion job: {e:?}"),
-            )
-        })?;
+        .map_err(RouteError::internal)?;
 
     // Process in the background: the request returns now; the merchant watches progress via polling.
     tokio::spawn(process_upload(
@@ -355,12 +327,12 @@ pub async fn validate_report_headers(
     Path((_, connector)): Path<(String, String)>,
     Query(params): Query<PreflightParams>,
     body: Body,
-) -> Result<Json<crate::cost_ingestion::preflight::PreflightReport>, TextError> {
+) -> Result<Json<crate::cost_ingestion::preflight::PreflightReport>, RouteError> {
     use crate::cost_ingestion::preflight;
 
     let sample = read_capped(body, preflight::HEADER_SAMPLE_BYTES).await?;
     if sample.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "empty header sample".to_string()).into());
+        return Err(RouteError::bad_request("empty header sample"));
     }
 
     // Validate against the source's saved mapping when there is an account to look one up for, so a
@@ -420,7 +392,7 @@ pub async fn preview_column_mapping(
     MerchantFromPath(_merchant): MerchantFromPath,
     Path((_, connector)): Path<(String, String)>,
     Json(req): Json<MappingRequest>,
-) -> Result<Json<crate::cost_ingestion::preflight::PreviewReport>, TextError> {
+) -> Result<Json<crate::cost_ingestion::preflight::PreviewReport>, RouteError> {
     use crate::cost_ingestion::preflight;
 
     let registry = crate::cost_ingestion::source::ConnectorRegistry::with_builtins();
@@ -442,7 +414,7 @@ pub async fn get_column_mapping(
     MerchantFromPath(merchant): MerchantFromPath,
     Path((_, connector)): Path<(String, String)>,
     Query(params): Query<UploadParams>,
-) -> Result<Json<mapping::ColumnMapping>, TextError> {
+) -> Result<Json<mapping::ColumnMapping>, RouteError> {
     mapping::load(merchant.as_str(), &connector, &params.account)
         .await
         .map(Json)
@@ -463,7 +435,7 @@ pub async fn set_column_mapping(
     Path((_, connector)): Path<(String, String)>,
     Query(params): Query<UploadParams>,
     Json(req): Json<MappingRequest>,
-) -> Result<StatusCode, TextError> {
+) -> Result<StatusCode, RouteError> {
     use crate::cost_ingestion::preflight;
 
     let candidate = mapping::ColumnMapping::from_pairs(req.columns);
@@ -472,11 +444,9 @@ pub async fn set_column_mapping(
     // both discovered from the connector rather than hardcoded here.
     if !candidate.is_empty() {
         if req.sample.is_empty() {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "a file sample is required to validate a mapping".to_string(),
-            )
-                .into());
+            return Err(RouteError::bad_request(
+                "a file sample is required to validate a mapping",
+            ));
         }
         let registry = crate::cost_ingestion::source::ConnectorRegistry::with_builtins();
         let report = preflight::check(
@@ -494,7 +464,7 @@ pub async fn set_column_mapping(
             .collect();
         candidate
             .validate(&known, &report.found)
-            .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e}")))?;
+            .map_err(|e| RouteError::bad_request(format!("{e}")))?;
     }
 
     mapping::save(merchant.as_str(), &connector, &params.account, &candidate)
@@ -509,7 +479,7 @@ pub async fn delete_column_mapping(
     MerchantFromPath(merchant): MerchantFromPath,
     Path((_, connector)): Path<(String, String)>,
     Query(params): Query<UploadParams>,
-) -> Result<StatusCode, TextError> {
+) -> Result<StatusCode, RouteError> {
     mapping::delete(merchant.as_str(), &connector, &params.account)
         .await
         .map_err(|e| storage_error("clear column mapping", e))?;
@@ -525,28 +495,27 @@ pub async fn delete_column_mapping(
 /// Deliberately not applied to the 4xx paths: a rejected column mapping ("'Payable (SC)' is mapped
 /// to 'X', which is not a column in this file") is the merchant's own input described back to them,
 /// and it is the entire value of that response.
-fn storage_error(op: &str, e: crate::cost_ingestion::IngestError) -> (StatusCode, String) {
+fn storage_error(op: &str, e: crate::cost_ingestion::IngestError) -> RouteError {
     logger::error!(tag = "report_upload", "{} failed: {:?}", op, e);
-    (StatusCode::INTERNAL_SERVER_ERROR, format!("could not {op}"))
+    RouteError::new(StatusCode::INTERNAL_SERVER_ERROR, format!("could not {op}"))
 }
 
-fn map_preflight_error(e: crate::cost_ingestion::IngestError) -> (StatusCode, String) {
+fn map_preflight_error(e: crate::cost_ingestion::IngestError) -> RouteError {
     match e {
-        crate::cost_ingestion::IngestError::UnknownConnector(c) => (
-            StatusCode::NOT_FOUND,
-            format!("connector {c} does not support report ingestion"),
-        ),
-        other => (StatusCode::BAD_REQUEST, format!("{other}")),
+        crate::cost_ingestion::IngestError::UnknownConnector(c) => {
+            RouteError::not_found(format!("connector {c} does not support report ingestion"))
+        }
+        other => RouteError::bad_request(other.to_string()),
     }
 }
 
 /// Read at most `cap` bytes of a body into memory, stopping early once the cap is reached. Used only
 /// for the header sample — the report upload path itself never buffers a body.
-async fn read_capped(body: Body, cap: usize) -> Result<Vec<u8>, (StatusCode, String)> {
+async fn read_capped(body: Body, cap: usize) -> Result<Vec<u8>, RouteError> {
     let mut buf = Vec::new();
     let mut stream = body.into_data_stream();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| (StatusCode::BAD_REQUEST, format!("read error: {e}")))?;
+        let chunk = chunk.map_err(|e| RouteError::bad_request(format!("read error: {e}")))?;
         let take = cap.saturating_sub(buf.len()).min(chunk.len());
         buf.extend_from_slice(&chunk[..take]);
         if buf.len() >= cap {
@@ -566,46 +535,34 @@ async fn read_capped(body: Body, cap: usize) -> Result<Vec<u8>, (StatusCode, Str
 pub async fn run_sample_report(
     MerchantFromPath(merchant): MerchantFromPath,
     Path((_, connector)): Path<(String, String)>,
-) -> Result<(StatusCode, Json<UploadAccepted>), TextError> {
+) -> Result<(StatusCode, Json<UploadAccepted>), RouteError> {
     let merchant_id = merchant.as_str().to_string();
     // Only connectors that support report ingestion can have samples.
     let registry = crate::cost_ingestion::source::ConnectorRegistry::with_builtins();
     let _ = registry.get(&connector).map_err(|_| {
-        (
-            StatusCode::NOT_FOUND,
-            format!("connector {connector} does not support sample reports"),
-        )
+        RouteError::not_found(format!(
+            "connector {connector} does not support sample reports"
+        ))
     })?;
 
     // Sample config + ClickHouse both live on the global config.
-    let state = crate::app::APP_STATE.get().ok_or((
-        StatusCode::INTERNAL_SERVER_ERROR,
-        "app state not initialized".to_string(),
-    ))?;
-    let cost_cfg = &state.global_config.cost_ingestion;
+    let config = super::global_config()?;
+    let cost_cfg = &config.cost_ingestion;
     let bucket = Some(cost_cfg.aws_bucket.clone())
         .filter(|b| !b.is_empty())
-        .ok_or((
-            StatusCode::NOT_FOUND,
-            "no sample bucket configured".to_string(),
-        ))?;
+        .ok_or(RouteError::not_found("no sample bucket configured"))?;
     let region = cost_cfg.aws_region.clone();
 
     let account = format!("acc_{connector}");
     let key = format!("{connector}_report.csv");
     let report_ref = format!("s3://{bucket}/{key}");
-    let clickhouse = state.global_config.analytics.clickhouse.clone();
+    let clickhouse = config.analytics.clickhouse.clone();
 
     // Create the ingestion row (status=processing) up front so the dashboard can poll it. The row
     // records the S3 location as its ref, mirroring how a manual upload records its temp path.
     let job_id = store::create_sample(&merchant, &connector, &account, &report_ref)
         .await
-        .map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("could not create ingestion job: {e:?}"),
-            )
-        })?;
+        .map_err(RouteError::internal)?;
 
     let path = temp_report_path();
     tokio::spawn(process_sample(
@@ -733,42 +690,29 @@ async fn fetch_sample_from_s3(
 }
 
 /// Stream a request body to `path`, enforcing `MAX_UPLOAD_BYTES`. Never holds the whole body in RAM.
-async fn stream_to_file(path: &PathBuf, body: Body) -> Result<(), (StatusCode, String)> {
-    let mut file = tokio::fs::File::create(path).await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("could not open temp file: {e}"),
-        )
-    })?;
+async fn stream_to_file(path: &PathBuf, body: Body) -> Result<(), RouteError> {
+    let mut file = tokio::fs::File::create(path)
+        .await
+        .map_err(RouteError::internal)?;
 
     let mut total: usize = 0;
     let mut stream = body.into_data_stream();
     while let Some(chunk) = stream.next().await {
         let chunk =
-            chunk.map_err(|e| (StatusCode::BAD_REQUEST, format!("upload read error: {e}")))?;
+            chunk.map_err(|e| RouteError::bad_request(format!("upload read error: {e}")))?;
         total = total.saturating_add(chunk.len());
         if total > MAX_UPLOAD_BYTES {
-            return Err((
+            return Err(RouteError::new(
                 StatusCode::PAYLOAD_TOO_LARGE,
                 format!("report exceeds {MAX_UPLOAD_BYTES} byte limit"),
             ));
         }
-        file.write_all(&chunk).await.map_err(|e| {
-            (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("temp write failed: {e}"),
-            )
-        })?;
+        file.write_all(&chunk).await.map_err(RouteError::internal)?;
     }
-    file.flush().await.map_err(|e| {
-        (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            format!("temp flush failed: {e}"),
-        )
-    })?;
+    file.flush().await.map_err(RouteError::internal)?;
 
     if total == 0 {
-        return Err((StatusCode::BAD_REQUEST, "empty report body".to_string()));
+        return Err(RouteError::bad_request("empty report body"));
     }
     Ok(())
 }

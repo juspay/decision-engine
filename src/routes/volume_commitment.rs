@@ -16,7 +16,7 @@ use crate::analytics::models::{
 };
 use crate::auth::AuthContext;
 use crate::decider::gatewaydecider::volume_commitment;
-use crate::error::TextError;
+use crate::error::RouteError;
 use volume_commitment::controller::{self, RunReport};
 use volume_commitment::{math, Commitment, CommitmentInputs, Deps, SteeringPlan};
 
@@ -41,23 +41,23 @@ fn authorize_run(
     admin: bool,
     session: Option<&AuthContext>,
     merchant_id: Option<&str>,
-) -> Result<(), (StatusCode, String)> {
+) -> Result<(), RouteError> {
     if admin {
         return Ok(());
     }
     match (session, merchant_id) {
-        (_, None) => Err((
+        (_, None) => Err(RouteError::new(
             StatusCode::FORBIDDEN,
-            "running a forecast for every merchant needs the admin secret".to_string(),
+            "running a forecast for every merchant needs the admin secret",
         )),
         (Some(context), Some(merchant_id)) if context.merchant_id == merchant_id => Ok(()),
-        (Some(_), Some(_)) => Err((
+        (Some(_), Some(_)) => Err(RouteError::new(
             StatusCode::FORBIDDEN,
-            "this session may only run a forecast for its own merchant".to_string(),
+            "this session may only run a forecast for its own merchant",
         )),
-        (None, Some(_)) => Err((
+        (None, Some(_)) => Err(RouteError::new(
             StatusCode::UNAUTHORIZED,
-            "running a forecast needs a session, an api key, or the admin secret".to_string(),
+            "running a forecast needs a session, an api key, or the admin secret",
         )),
     }
 }
@@ -69,7 +69,7 @@ pub async fn run_forecast(
     admin: Option<Extension<crate::auth::AdminCaller>>,
     session: Option<Extension<AuthContext>>,
     Query(query): Query<RunQuery>,
-) -> Result<Json<RunReport>, TextError> {
+) -> Result<Json<RunReport>, RouteError> {
     // The admin secret is what the scheduler presents. In api-key compat mode a request with no
     // credentials at all reaches the handler too, with neither marker nor session.
     authorize_run(
@@ -81,11 +81,10 @@ pub async fn run_forecast(
     let Some(deps) = volume_commitment::deps() else {
         // Startup wiring has not run. Worth a real error here: unlike the read view, a caller
         // asking for a run needs to know it did not happen.
-        return Err((
+        return Err(RouteError::new(
             StatusCode::SERVICE_UNAVAILABLE,
-            "volume commitment is not configured in this process".to_string(),
-        )
-            .into());
+            "volume commitment is not configured in this process",
+        ));
     };
 
     let Some(merchant_id) = query.merchant_id else {
@@ -345,7 +344,7 @@ async fn pacing_view(merchant_id: String) -> VolumeCommitmentView {
 /// forecast is filed, and the feature flag is left exactly as it was.
 pub async fn get_projection(
     MerchantFromPath(merchant): MerchantFromPath,
-) -> Result<Json<VolumeCommitmentView>, TextError> {
+) -> Result<Json<VolumeCommitmentView>, RouteError> {
     let merchant_id = merchant.as_str().to_string();
     let Some(deps) = volume_commitment::deps() else {
         return Ok(Json(inactive(merchant_id)));
@@ -365,7 +364,7 @@ pub async fn get_projection(
     let (plan, measured) = controller::compute_plan(deps, &inputs)
         .await
         .map_err(|error| {
-            (
+            RouteError::new(
                 StatusCode::SERVICE_UNAVAILABLE,
                 format!("delivered volume cannot be measured right now: {error}"),
             )
@@ -734,7 +733,7 @@ async fn dashboard_parts(
 pub async fn get_dashboard(
     MerchantFromPath(merchant): MerchantFromPath,
     Query(query): Query<SeriesQuery>,
-) -> Result<Json<DashboardResponse>, TextError> {
+) -> Result<Json<DashboardResponse>, RouteError> {
     let merchant_id = merchant.as_str().to_string();
     let empty_series = || SeriesResponse {
         merchant_id: merchant_id.clone(),
@@ -859,13 +858,12 @@ pub struct ImpactResponse {
 pub async fn get_impact(
     MerchantFromPath(merchant): MerchantFromPath,
     Query(query): Query<RunScopedQuery>,
-) -> Result<Json<ImpactResponse>, TextError> {
+) -> Result<Json<ImpactResponse>, RouteError> {
     let merchant_id = merchant.as_str().to_string();
     let not_active = || {
-        (
-            StatusCode::NOT_FOUND,
-            format!("no active volume contract for merchant {merchant_id}"),
-        )
+        RouteError::not_found(format!(
+            "no active volume contract for merchant {merchant_id}"
+        ))
     };
     let Some(deps) = volume_commitment::deps() else {
         return Err(not_active().into());
@@ -1014,16 +1012,16 @@ mod tests {
     #[test]
     fn the_sweep_needs_the_admin_secret() {
         let refused = authorize_run(false, Some(&session("m1")), None).unwrap_err();
-        assert_eq!(refused.0, StatusCode::FORBIDDEN);
+        assert_eq!(refused.status(), StatusCode::FORBIDDEN);
         let refused = authorize_run(false, None, None).unwrap_err();
-        assert_eq!(refused.0, StatusCode::FORBIDDEN);
+        assert_eq!(refused.status(), StatusCode::FORBIDDEN);
     }
 
     #[test]
     fn a_session_runs_only_its_own_merchant() {
         assert!(authorize_run(false, Some(&session("m1")), Some("m1")).is_ok());
         let refused = authorize_run(false, Some(&session("m1")), Some("m2")).unwrap_err();
-        assert_eq!(refused.0, StatusCode::FORBIDDEN);
+        assert_eq!(refused.status(), StatusCode::FORBIDDEN);
     }
 
     /// Api-key compat mode lets an unauthenticated request through the middleware; here it
@@ -1031,7 +1029,7 @@ mod tests {
     #[test]
     fn no_credentials_at_all_is_refused() {
         let refused = authorize_run(false, None, Some("m1")).unwrap_err();
-        assert_eq!(refused.0, StatusCode::UNAUTHORIZED);
+        assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
     }
 
     /// A past run must not borrow the live plan's verdicts; the live view and a request for the
@@ -1065,7 +1063,7 @@ pub struct SamplesResponse {
 /// From that point it is an ordinary contract and the ordinary engine paces it.
 pub async fn get_samples(
     MerchantFromPath(merchant): MerchantFromPath,
-) -> Result<Json<SamplesResponse>, TextError> {
+) -> Result<Json<SamplesResponse>, RouteError> {
     let merchant_id = merchant.as_str().to_string();
     let Some(deps) = volume_commitment::deps() else {
         return Ok(Json(SamplesResponse {

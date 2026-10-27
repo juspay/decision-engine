@@ -77,6 +77,44 @@ pub async fn update_config(
     Ok(())
 }
 
+/// Sets `name` to `value`, creating the row on its first write. When another writer creates it in
+/// between, the insert collides and the update that follows lands instead.
+pub async fn upsert_config(
+    name: String,
+    value: Option<String>,
+) -> error_stack::Result<(), crate::generics::MeshError> {
+    let app_state = get_tenant_app_state().await;
+    let conn = &app_state
+        .db
+        .get_conn()
+        .await
+        .map_err(|_| crate::generics::MeshError::DatabaseConnectionError)?;
+    let updated = crate::generics::generic_update_if_present::<
+        <ServiceConfiguration as HasTable>::Table,
+        ServiceConfigurationUpdate,
+        _,
+    >(
+        conn,
+        dsl::name.eq(name.clone()),
+        ServiceConfigurationUpdate {
+            value: value.clone(),
+        },
+    )
+    .await?;
+    if updated == 0 {
+        if insert_config(name.clone(), value.clone()).await.is_err() {
+            return update_config(name, value).await;
+        }
+        return Ok(());
+    }
+
+    match value {
+        Some(v) => write_through_service_config(name, &v).await,
+        None => evict_service_config(name).await,
+    }
+    Ok(())
+}
+
 /// Sets `name`'s value only if it still holds `expected`: a compare-and-swap for read-modify-write
 /// updates. Returns `false`, writing nothing, when another writer changed the value since it was
 /// read; the caller re-reads and tries again.

@@ -1,4 +1,4 @@
-use crate::custom_extractors::{Json, ScopedJson};
+use crate::custom_extractors::{Json, RequestIds, ScopedJson};
 use crate::types::merchant as ETM;
 use crate::{error, logger, types};
 use error_stack::ResultExt;
@@ -32,7 +32,7 @@ fn serialize_rule_config_analytics_details<Request: Serialize, Response: Seriali
 
 #[axum::debug_handler]
 pub async fn create_rule_config(
-    headers: axum::http::HeaderMap,
+    ids: RequestIds,
     ScopedJson {
         merchant, payload, ..
     }: ScopedJson<types::routing_configuration::RoutingRule>,
@@ -44,20 +44,16 @@ pub async fn create_rule_config(
     let analytics_payload = payload.clone();
     let analytics_merchant_id = merchant_id.clone();
     let analytics_config = config.clone();
-    let request_id = headers
-        .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
-    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
-    let trace_id = crate::analytics::trace_id_from_headers(&headers);
+    let RequestIds {
+        request_id,
+        global_request_id,
+        trace_id,
+    } = ids;
 
     // Check if merchant exists
-    if ETM::merchant_account::load_merchant_by_merchant_id(merchant.as_str().to_string())
+    ETM::merchant_account::load_authorized(&merchant)
         .await
-        .is_none()
-    {
-        return Err(error::RuleConfigurationError::MerchantNotFound.into());
-    }
+        .ok_or(error::RuleConfigurationError::MerchantNotFound)?;
 
     let result = match payload.config {
         types::routing_configuration::ConfigVariant::SuccessRate(success_config) => {
@@ -102,14 +98,15 @@ pub async fn create_rule_config(
             .await
             .change_context(error::RuleConfigurationError::StorageError);
 
-            match result {
-                Ok(_) => Ok(Json(RuleConfigResponse {
-                    message: "Elimination Configuration created successfully".to_string(),
-                    merchant_id,
-                    config,
-                })),
-                Err(e) => Err(e.into()),
-            }
+            result
+                .map(|_| {
+                    Json(RuleConfigResponse {
+                        message: "Elimination Configuration created successfully".to_string(),
+                        merchant_id,
+                        config,
+                    })
+                })
+                .map_err(Into::into)
         }
         types::routing_configuration::ConfigVariant::DebitRouting(debit_config) => {
             let name = format!("DEBIT_ROUTING_CONFIG_{}", merchant);
@@ -173,7 +170,7 @@ fn parse_optional_rule_config<T: serde::de::DeserializeOwned>(
 
 #[axum::debug_handler]
 pub async fn get_rule_config(
-    headers: axum::http::HeaderMap,
+    ids: RequestIds,
     ScopedJson {
         merchant, payload, ..
     }: ScopedJson<types::routing_configuration::FetchRoutingRule>,
@@ -183,26 +180,19 @@ pub async fn get_rule_config(
 > {
     logger::debug!("Received rule fetch request: {:?}", payload);
     let analytics_payload = payload.clone();
-    let request_id = headers
-        .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
-    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
-    let trace_id = crate::analytics::trace_id_from_headers(&headers);
+    let RequestIds {
+        request_id,
+        global_request_id,
+        trace_id,
+    } = ids;
 
     let analytics_mid = merchant.as_str().to_string();
     // Resolve the scope before dispatching on algorithm. Only the elimination config lives on the
     // merchant row; the others are looked up by a name derived from the merchant id, so without
     // this an unknown merchant is indistinguishable from one that simply has no config yet.
-    let merchant_account =
-        match ETM::merchant_account::load_merchant_by_merchant_id(merchant.as_str().to_string())
-            .await
-        {
-            Some(account) => account,
-            None => {
-                return Err(error::RuleConfigurationError::MerchantNotFound.into());
-            }
-        };
+    let merchant_account = ETM::merchant_account::load_authorized(&merchant)
+        .await
+        .ok_or(error::RuleConfigurationError::MerchantNotFound)?;
 
     use types::routing_configuration::{AlgorithmType, ConfigVariant, RuleConfigGetResponse};
     let result: Result<Option<ConfigVariant>, error_stack::Report<error::RuleConfigurationError>> =
@@ -283,7 +273,7 @@ pub async fn get_rule_config(
 
 #[axum::debug_handler]
 pub async fn update_rule_config(
-    headers: axum::http::HeaderMap,
+    ids: RequestIds,
     ScopedJson {
         merchant, payload, ..
     }: ScopedJson<types::routing_configuration::RoutingRule>,
@@ -295,14 +285,13 @@ pub async fn update_rule_config(
     let analytics_payload = payload.clone();
     let analytics_merchant_id = merchant_id.clone();
     let analytics_config = config.clone();
-    let request_id = headers
-        .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
-    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
-    let trace_id = crate::analytics::trace_id_from_headers(&headers);
+    let RequestIds {
+        request_id,
+        global_request_id,
+        trace_id,
+    } = ids;
 
-    ETM::merchant_account::load_merchant_by_merchant_id(merchant.as_str().to_string())
+    ETM::merchant_account::load_authorized(&merchant)
         .await
         .ok_or(error::RuleConfigurationError::MerchantNotFound)?;
 
@@ -320,14 +309,15 @@ pub async fn update_rule_config(
                 .await
                 .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
-            match result {
-                Ok(_) => Ok(Json(RuleConfigResponse {
-                    message: "Success Rate Configuration updated successfully".to_string(),
-                    merchant_id,
-                    config,
-                })),
-                Err(e) => Err(e.into()),
-            }
+            result
+                .map(|_| {
+                    Json(RuleConfigResponse {
+                        message: "Success Rate Configuration updated successfully".to_string(),
+                        merchant_id,
+                        config,
+                    })
+                })
+                .map_err(Into::into)
         }
         types::routing_configuration::ConfigVariant::Elimination(elimination_config) => {
             let db_config = types::gateway_routing_input::GatewaySuccessRateBasedRoutingInput::from_elimination_threshold(elimination_config);
@@ -341,14 +331,15 @@ pub async fn update_rule_config(
             .await
             .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
-            match result {
-                Ok(_) => Ok(Json(RuleConfigResponse {
-                    message: "Elimination Configuration updated successfully".to_string(),
-                    merchant_id,
-                    config,
-                })),
-                Err(e) => Err(e.into()),
-            }
+            result
+                .map(|_| {
+                    Json(RuleConfigResponse {
+                        message: "Elimination Configuration updated successfully".to_string(),
+                        merchant_id,
+                        config,
+                    })
+                })
+                .map_err(Into::into)
         }
         types::routing_configuration::ConfigVariant::DebitRouting(debit_config) => {
             let name = format!("DEBIT_ROUTING_CONFIG_{}", merchant);
@@ -359,14 +350,15 @@ pub async fn update_rule_config(
                 .await
                 .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
-            match result {
-                Ok(_) => Ok(Json(RuleConfigResponse {
-                    message: "Debit Routing Configuration updated successfully".to_string(),
-                    merchant_id,
-                    config,
-                })),
-                Err(e) => Err(e.into()),
-            }
+            result
+                .map(|_| {
+                    Json(RuleConfigResponse {
+                        message: "Debit Routing Configuration updated successfully".to_string(),
+                        merchant_id,
+                        config,
+                    })
+                })
+                .map_err(Into::into)
         }
     };
     if let Ok(response) = &result {
@@ -391,25 +383,23 @@ pub async fn update_rule_config(
 
 #[axum::debug_handler]
 pub async fn delete_rule_config(
-    headers: axum::http::HeaderMap,
+    ids: RequestIds,
     ScopedJson {
         merchant, payload, ..
     }: ScopedJson<types::routing_configuration::FetchRoutingRule>,
 ) -> Result<Json<RuleConfigDeleteResponse>, error::ContainerError<error::RuleConfigurationError>> {
     logger::debug!("Received rule delete request: {:?}", payload);
     let analytics_payload = payload.clone();
-    let request_id = headers
-        .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string);
-    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
-    let trace_id = crate::analytics::trace_id_from_headers(&headers);
+    let RequestIds {
+        request_id,
+        global_request_id,
+        trace_id,
+    } = ids;
 
     let analytics_mid = merchant.as_str().to_string();
-    let merchant_account =
-        ETM::merchant_account::load_merchant_by_merchant_id(merchant.as_str().to_string())
-            .await
-            .ok_or(error::RuleConfigurationError::MerchantNotFound)?;
+    let merchant_account = ETM::merchant_account::load_authorized(&merchant)
+        .await
+        .ok_or(error::RuleConfigurationError::MerchantNotFound)?;
 
     // Delete DB call for deleting the rule configuration
     let result = match payload.algorithm {
@@ -419,13 +409,14 @@ pub async fn delete_rule_config(
                 .await
                 .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
-            match result {
-                Ok(_) => Ok(Json(RuleConfigDeleteResponse {
-                    message: "Success Rate Configuration deleted successfully".to_string(),
-                    merchant_id: merchant.as_str().to_string(),
-                })),
-                Err(e) => Err(e.into()),
-            }
+            result
+                .map(|_| {
+                    Json(RuleConfigDeleteResponse {
+                        message: "Success Rate Configuration deleted successfully".to_string(),
+                        merchant_id: merchant.as_str().to_string(),
+                    })
+                })
+                .map_err(Into::into)
         }
         types::routing_configuration::AlgorithmType::Elimination => {
             if merchant_account
@@ -442,13 +433,14 @@ pub async fn delete_rule_config(
             .await
             .change_context(error::RuleConfigurationError::StorageError);
 
-            match result {
-                Ok(_) => Ok(Json(RuleConfigDeleteResponse {
-                    message: "Elimination Configuration deleted successfully".to_string(),
-                    merchant_id: merchant.as_str().to_string(),
-                })),
-                Err(e) => Err(e.into()),
-            }
+            result
+                .map(|_| {
+                    Json(RuleConfigDeleteResponse {
+                        message: "Elimination Configuration deleted successfully".to_string(),
+                        merchant_id: merchant.as_str().to_string(),
+                    })
+                })
+                .map_err(Into::into)
         }
         types::routing_configuration::AlgorithmType::DebitRouting => {
             let config_name = format!("DEBIT_ROUTING_CONFIG_{}", merchant);
@@ -456,13 +448,14 @@ pub async fn delete_rule_config(
                 .await
                 .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
-            match result {
-                Ok(_) => Ok(Json(RuleConfigDeleteResponse {
-                    message: "Debit Routing Configuration deleted successfully".to_string(),
-                    merchant_id: merchant.as_str().to_string(),
-                })),
-                Err(e) => Err(e.into()),
-            }
+            result
+                .map(|_| {
+                    Json(RuleConfigDeleteResponse {
+                        message: "Debit Routing Configuration deleted successfully".to_string(),
+                        merchant_id: merchant.as_str().to_string(),
+                    })
+                })
+                .map_err(Into::into)
         }
     };
 
