@@ -1,3 +1,4 @@
+use crate::generics::Repository;
 use crate::storage::backend::schema::routing_algorithm::dsl;
 use crate::{
     error::ApiErrorResponse,
@@ -182,11 +183,7 @@ async fn resolve_slot_experiment(
         }));
     }
 
-    let mapping = crate::generics::generic_find_one_optional::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(
+    let mapping = RoutingAlgorithmMapper::find_optional(
         &state.db,
         mapper_dsl::created_by
             .eq(merchant_id.to_string())
@@ -195,13 +192,11 @@ async fn resolve_slot_experiment(
     .await
     .change_context(EuclidErrors::StorageError)?;
     let experiment = match mapping {
-        Some(mapping) => crate::generics::generic_find_one_optional::<
-            <RoutingAlgorithm as HasTable>::Table,
-            _,
-            RoutingAlgorithm,
-        >(&state.db, dsl::id.eq(mapping.routing_algorithm_id))
-        .await
-        .change_context(EuclidErrors::StorageError)?,
+        Some(mapping) => {
+            RoutingAlgorithm::find_optional(&state.db, dsl::id.eq(mapping.routing_algorithm_id))
+                .await
+                .change_context(EuclidErrors::StorageError)?
+        }
         None => None,
     };
     cache_experiment_slot(state, merchant_id, algorithm_for, experiment.as_ref()).await;
@@ -708,11 +703,7 @@ async fn fetch_algorithm_from_db_and_cache(
     let mapper_algorithm_for = algorithm_for
         .map(str::to_string)
         .unwrap_or_else(|| AlgorithmType::Payment.to_string());
-    let mapper_result = crate::generics::generic_find_one::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(
+    let mapper_result = RoutingAlgorithmMapper::find_one(
         &state.db,
         db_mapper_dsl::created_by
             .eq(merchant_id.to_string())
@@ -741,21 +732,18 @@ async fn fetch_algorithm_from_db_and_cache(
         }
     };
 
-    let algorithm = crate::generics::generic_find_one::<
-        <RoutingAlgorithm as HasTable>::Table,
-        _,
-        RoutingAlgorithm,
-    >(&state.db, dsl::id.eq(active_routing_algorithm_id.clone()))
-    .await
-    .inspect_err(|&e| {
-        logger::error!(
-            ?e,
-            "Failed to fetch RoutingAlgorithm for ID {:?}",
-            active_routing_algorithm_id
-        );
-    })
-    .change_context(EuclidErrors::StorageError)
-    .map_err(ContainerError::from)?;
+    let algorithm =
+        RoutingAlgorithm::find_one(&state.db, dsl::id.eq(active_routing_algorithm_id.clone()))
+            .await
+            .inspect_err(|&e| {
+                logger::error!(
+                    ?e,
+                    "Failed to fetch RoutingAlgorithm for ID {:?}",
+                    active_routing_algorithm_id
+                );
+            })
+            .change_context(EuclidErrors::StorageError)
+            .map_err(ContainerError::from)?;
 
     // Back-fill only the key shape this caller reads; never evict the legacy key here.
     cache_routing_algorithm_under_key(

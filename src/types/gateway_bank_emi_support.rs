@@ -3,6 +3,7 @@
 // use control::category::compose as compose; // Equivalent to Haskell's >>> operator
 use crate::app::get_tenant_app_state;
 use crate::error::ApiError;
+use crate::generics::Repository;
 use crate::storage::types::GatewayBankEmiSupport as DBGatewayBankEmiSupport;
 use serde::{Deserialize, Serialize};
 use std::option::Option;
@@ -20,7 +21,6 @@ use std::vec::Vec;
 // use test::quickcheck::Arbitrary;
 
 use crate::storage::backend::schema::gateway_bank_emi_support::dsl;
-use diesel::associations::HasTable;
 use diesel::*;
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
@@ -69,11 +69,7 @@ pub async fn get_gateway_bank_emi_support_db(
 
     // Build the query based on scp value
     let query = if scp == "NULL" {
-        crate::generics::generic_find_all::<
-            <DBGatewayBankEmiSupport as HasTable>::Table,
-            _,
-            DBGatewayBankEmiSupport,
-        >(
+        DBGatewayBankEmiSupport::find_all(
             &app_state.db,
             dsl::bank
                 .eq(emi_bank)
@@ -82,11 +78,7 @@ pub async fn get_gateway_bank_emi_support_db(
         )
         .await
     } else {
-        crate::generics::generic_find_all::<
-            <DBGatewayBankEmiSupport as HasTable>::Table,
-            _,
-            DBGatewayBankEmiSupport,
-        >(
+        DBGatewayBankEmiSupport::find_all(
             &app_state.db,
             dsl::bank
                 .eq(emi_bank)

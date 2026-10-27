@@ -2,6 +2,7 @@ use crate::app::APP_STATE;
 use crate::auth;
 use crate::custom_extractors::TenantStateResolver;
 use crate::error::{self, ContainerError};
+use crate::generics::Repository;
 use axum::body::Body;
 use axum::response::Response;
 use axum::{http::Request, http::StatusCode, middleware::Next};
@@ -304,16 +305,11 @@ pub async fn authenticate(
 
     // Cache miss — query DB
     use crate::storage::types::MerchantApiKey;
-    use diesel::associations::HasTable;
 
     use crate::storage::backend::schema::merchant_api_keys::dsl;
 
-    let results = crate::generics::generic_find_all::<
-        <MerchantApiKey as HasTable>::Table,
-        _,
-        MerchantApiKey,
-    >(&tenant_state.db, dsl::key_hash.eq(key_hash.clone()))
-    .await;
+    let results =
+        MerchantApiKey::find_all(&tenant_state.db, dsl::key_hash.eq(key_hash.clone())).await;
 
     let key_record = match results {
         Ok(mut rows) => rows.pop(),

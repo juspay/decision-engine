@@ -2,6 +2,7 @@
 // use db::mesh::internal::*;
 use crate::app::get_tenant_app_state;
 use crate::error::ApiError;
+use crate::generics::Repository;
 use crate::storage::types::IsinRoutes as DBIsinRoutes;
 use crate::types::merchant::id::{merchant_id_to_text, to_merchant_id, MerchantId};
 use serde::{Deserialize, Serialize};
@@ -18,7 +19,6 @@ use time::PrimitiveDateTime;
 // use sequelize::{Clause, Term};
 // use test::quickcheck::Arbitrary;
 use crate::storage::backend::schema::isin_routes::dsl;
-use diesel::associations::HasTable;
 use diesel::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -65,7 +65,7 @@ pub async fn find_all_by_isin_and_merchant_id_db(
     let merchant_id_str = merchant_id_to_text(mid.clone());
     let app_state = get_tenant_app_state().await;
     // Use Diesel's query builder with multiple conditions
-    crate::generics::generic_find_all::<<DBIsinRoutes as HasTable>::Table, _, DBIsinRoutes>(
+    DBIsinRoutes::find_all(
         &app_state.db,
         dsl::merchant_id
             .eq(merchant_id_str)

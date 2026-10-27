@@ -1,5 +1,5 @@
 use crate::app::get_tenant_app_state;
-use diesel::associations::HasTable;
+use crate::generics::Repository;
 use diesel::ExpressionMethods;
 use serde::{Deserialize, Serialize};
 
@@ -43,12 +43,7 @@ impl From<DBBankCode> for BankCode {
 
 pub async fn find_bank_code(bank_code: String) -> Option<BankCode> {
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_one::<<DBBankCode as HasTable>::Table, _, DBBankCode>(
-        &app_state.db,
-        dsl::bank_code.eq(bank_code),
-    )
-    .await
-    {
+    match DBBankCode::find_one(&app_state.db, dsl::bank_code.eq(bank_code)).await {
         Ok(db_record) => parse_juspay_bank_code(db_record).ok(),
         Err(_e) => None,
     }

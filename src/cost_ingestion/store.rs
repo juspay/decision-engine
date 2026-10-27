@@ -6,6 +6,7 @@
 //! volume, fit outcome). Connector-generic — every row carries its `connector`. See
 //! `scratch/inhouse-cost-architecture.md` §7.
 
+use crate::generics::Repository;
 use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Datelike;
 use diesel::associations::HasTable;
@@ -61,11 +62,7 @@ pub async fn enqueue_pending(
 
     // The UNIQUE (merchant_id, connector, notification_id) constraint is the real guard; this check
     // keeps a duplicate delivery from erroring in the common case.
-    let existing = generics::generic_find_one_optional::<
-        <CostIngestion as HasTable>::Table,
-        _,
-        CostIngestion,
-    >(
+    let existing = CostIngestion::find_optional(
         &app_state.db,
         dsl::merchant_id
             .eq(merchant_id.to_string())
@@ -305,7 +302,7 @@ pub async fn get_for_merchant(
 ) -> Result<Option<CostIngestion>, IngestError> {
     let merchant_id = merchant.as_str();
     let app_state = get_tenant_app_state().await;
-    generics::generic_find_one_optional::<<CostIngestion as HasTable>::Table, _, CostIngestion>(
+    CostIngestion::find_optional(
         &app_state.db,
         dsl::id
             .eq(id.to_string())

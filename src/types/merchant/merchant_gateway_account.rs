@@ -1,4 +1,5 @@
 use crate::error::ApiError;
+use crate::generics::Repository;
 use masking::Secret;
 use serde::{Deserialize, Serialize};
 // use eulerhs::types::{MeshError};
@@ -18,7 +19,6 @@ use std::vec::Vec;
 // use std::text::Text;
 
 use crate::storage::backend::schema::merchant_gateway_account::dsl;
-use diesel::associations::HasTable;
 use diesel::*;
 use std::fmt::Debug;
 
@@ -203,13 +203,7 @@ impl TryFrom<DBMerchantGatewayAccount> for MerchantGatewayAccount {
 pub async fn getEnabledMgasByMerchantId(mid: String) -> Vec<MerchantGatewayAccount> {
     // Call the DB function and handle results using Diesel
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_all::<
-        <DBMerchantGatewayAccount as HasTable>::Table,
-        _,
-        DBMerchantGatewayAccount,
-    >(&app_state.db, dsl::merchant_id.eq(mid))
-    .await
-    {
+    match DBMerchantGatewayAccount::find_all(&app_state.db, dsl::merchant_id.eq(mid)).await {
         Ok(db_results) => db_results
             .into_iter()
             .filter_map(|db_record| MerchantGatewayAccount::try_from(db_record).ok())
@@ -224,11 +218,7 @@ pub async fn getEnabledMgasByMerchantIdAndRefId(
 ) -> Vec<MerchantGatewayAccount> {
     // Use Diesel's query builder with multiple conditions
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_all::<
-        <DBMerchantGatewayAccount as HasTable>::Table,
-        _,
-        DBMerchantGatewayAccount,
-    >(
+    match DBMerchantGatewayAccount::find_all(
         &app_state.db,
         dsl::merchant_id
             .eq(mid)

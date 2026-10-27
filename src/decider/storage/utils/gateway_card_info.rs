@@ -1,5 +1,6 @@
 // use db::eulermeshimpl::mesh_config;
 // use db::mesh::internal::*;
+use crate::generics::Repository;
 use crate::storage::types::{
     BitBool, GatewayCardInfo as DBGatewayCardInfo,
     MerchantGatewayCardInfo as DBMerchantGatewayCardInfo,
@@ -13,7 +14,6 @@ use crate::types::merchant::id::merchant_pid_to_text;
 use crate::storage::backend::schema::gateway_card_info::dsl;
 use crate::storage::backend::schema::merchant_gateway_card_info::dsl as m_dsl;
 use crate::types::merchant::merchant_account::MerchantAccount;
-use diesel::associations::HasTable;
 use diesel::*;
 use std::clone::Clone;
 use std::option::Option;
@@ -33,11 +33,7 @@ pub async fn get_supported_gateway_card_info_for_bins(
     card_bins: Vec<Option<String>>,
 ) -> Result<Vec<GatewayCardInfo>, ErrorResponse> {
     // Step 1: Query GatewayCardInfo with diesel
-    let gci_records: Vec<DBGatewayCardInfo> = crate::generics::generic_find_all::<
-        <DBGatewayCardInfo as HasTable>::Table,
-        _,
-        DBGatewayCardInfo,
-    >(
+    let gci_records: Vec<DBGatewayCardInfo> = DBGatewayCardInfo::find_all(
         &app_state.db,
         dsl::isin
             .eq_any(card_bins.clone())
@@ -52,11 +48,7 @@ pub async fn get_supported_gateway_card_info_for_bins(
     }
 
     // Step 2: Query MerchantGatewayCardInfo using diesel
-    let mgci_records: Vec<DBMerchantGatewayCardInfo> = crate::generics::generic_find_all::<
-        <DBMerchantGatewayCardInfo as HasTable>::Table,
-        _,
-        DBMerchantGatewayCardInfo,
-    >(
+    let mgci_records: Vec<DBMerchantGatewayCardInfo> = DBMerchantGatewayCardInfo::find_all(
         &app_state.db,
         m_dsl::merchant_account_id
             .eq(merchant_pid_to_text(input_merchant_account.id))

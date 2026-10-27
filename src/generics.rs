@@ -293,6 +293,60 @@ where
     to_optional(generic_find_by_id_core::<T, _, _>(&conn, id).await)
 }
 
+/// Reads over a model's table, named by the model rather than its table type:
+///
+/// ```ignore
+/// MerchantApiKey::find_all(db, dsl::merchant_id.eq(id)).await
+/// ```
+///
+/// in place of `generic_find_all::<<MerchantApiKey as HasTable>::Table, _, MerchantApiKey>(db, …)`.
+/// Every model with a table has it; the storage stays explicit, so the caller picks the tenant.
+pub trait Repository: HasTable + Sized + Send + 'static {
+    /// Every row matching `predicate`.
+    fn find_all<P>(
+        storage: &Storage,
+        predicate: P,
+    ) -> impl std::future::Future<Output = StorageResult<Vec<Self>>> + Send
+    where
+        Self::Table: FilterDsl<P> + HasTable<Table = Self::Table> + Table + 'static,
+        Filter<Self::Table, P>:
+            LoadQuery<'static, DbConnection, Self> + QueryFragment<Db> + Send + 'static,
+        P: Send,
+    {
+        generic_find_all::<Self::Table, P, Self>(storage, predicate)
+    }
+
+    /// The row matching `predicate`; [`MeshError::NotFound`] when there is none.
+    fn find_one<P>(
+        storage: &Storage,
+        predicate: P,
+    ) -> impl std::future::Future<Output = StorageResult<Self>> + Send
+    where
+        Self::Table: FilterDsl<P> + HasTable<Table = Self::Table> + Table + 'static,
+        Filter<Self::Table, P>:
+            LoadQuery<'static, DbConnection, Self> + QueryFragment<Db> + Send + 'static,
+        P: Send,
+    {
+        generic_find_one::<Self::Table, P, Self>(storage, predicate)
+    }
+
+    /// The row matching `predicate`, or `None`.
+    fn find_optional<P>(
+        storage: &Storage,
+        predicate: P,
+    ) -> impl std::future::Future<Output = StorageResult<Option<Self>>> + Send
+    where
+        Self::Table: FilterDsl<P> + HasTable<Table = Self::Table> + Table + 'static,
+        Filter<Self::Table, P>:
+            LoadQuery<'static, DbConnection, Self> + QueryFragment<Db> + Send + 'static,
+        P: Send,
+    {
+        generic_find_one_optional::<Self::Table, P, Self>(storage, predicate)
+    }
+}
+
+impl<R: HasTable + Sized + Send + 'static> Repository for R {}
+
 pub async fn track_database_call<T, Fut, U>(future: Fut, _operation: DatabaseOperation) -> U
 where
     Fut: std::future::Future<Output = U>,

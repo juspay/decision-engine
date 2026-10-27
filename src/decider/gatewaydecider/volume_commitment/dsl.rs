@@ -1,10 +1,10 @@
 //! Flattens the stored volume-contract document (a routing-rule row activated in the
 //! `volume_commitment` slot) into `CommitmentInputs`; nothing downstream knows the DSL exists.
 
+use crate::generics::Repository;
 use async_trait::async_trait;
 use chrono::{DateTime, Datelike, Months, NaiveDate, Utc};
 use chrono_tz::Tz;
-use diesel::associations::HasTable;
 use diesel::{BoolExpressionMethods, ExpressionMethods};
 
 use super::inputs::{Commitment, CommitmentInputs, InputSource};
@@ -66,11 +66,7 @@ async fn active_config(merchant_id: &str) -> Option<(VolumeContractConfig, i64, 
     let state = get_tenant_app_state().await;
 
     // A merchant holds at most one mapper row per slot; the volume_commitment slot is ours.
-    let mapper = crate::generics::generic_find_one_optional::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(
+    let mapper = RoutingAlgorithmMapper::find_optional(
         &state.db,
         mapper_dsl::created_by
             .eq(merchant_id.to_string())
@@ -80,11 +76,7 @@ async fn active_config(merchant_id: &str) -> Option<(VolumeContractConfig, i64, 
     .ok()
     .flatten()?;
 
-    let algorithm = crate::generics::generic_find_one_optional::<
-        <RoutingAlgorithm as HasTable>::Table,
-        _,
-        RoutingAlgorithm,
-    >(
+    let algorithm = RoutingAlgorithm::find_optional(
         &state.db,
         algo_dsl::id.eq(mapper.routing_algorithm_id.clone()),
     )
@@ -122,11 +114,7 @@ async fn active_config(merchant_id: &str) -> Option<(VolumeContractConfig, i64, 
 /// Every merchant with a contract document activated. Read on each pass of the schedule.
 async fn active_merchant_ids() -> Vec<String> {
     let state = get_tenant_app_state().await;
-    let rows: Vec<RoutingAlgorithmMapper> = crate::generics::generic_find_all::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(
+    let rows: Vec<RoutingAlgorithmMapper> = RoutingAlgorithmMapper::find_all(
         &state.db,
         mapper_dsl::algorithm_for.eq(AlgorithmType::VolumeCommitment.to_string()),
     )
