@@ -1,4 +1,5 @@
 use crate::app::get_tenant_app_state;
+use crate::generics::Repository;
 use crate::redis::cache::{evict_service_config, write_through_service_config};
 use crate::storage::backend::schema::service_configuration::dsl;
 use diesel::associations::HasTable;
@@ -17,12 +18,7 @@ pub async fn find_config_by_name(
     // Extract IDs from GciPId objects
     let app_state = get_tenant_app_state().await;
     // Use Diesel's query builder with multiple conditions
-    crate::generics::generic_find_one_optional::<
-        <ServiceConfiguration as HasTable>::Table,
-        _,
-        ServiceConfiguration,
-    >(&app_state.db, dsl::name.eq(name))
-    .await
+    ServiceConfiguration::find_optional(&app_state.db, dsl::name.eq(name)).await
 }
 
 /// The longest configuration name either backend stores: MySQL's unique index on `name` covers this

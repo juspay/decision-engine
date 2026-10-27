@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 // use db::mesh::internal;
 // use control::category::compose as compose; // Equivalent to Haskell's Control.Category ((>>>))
 use crate::app::get_tenant_app_state;
+use crate::generics::Repository;
 use crate::storage::types::{BitBool, MerchantGatewayCardInfo as DBMerchantGatewayCardInfo};
 // use types::utils::dbconfig::get_euler_db_conf;
 use crate::types::gateway_card_info::{to_gci_pid, GciPId};
@@ -19,7 +20,6 @@ use crate::types::money::internal::Money;
 // use sequelize::{Clause, Term};
 // use test::quickcheck::Arbitrary;
 use crate::storage::backend::schema::merchant_gateway_card_info::dsl;
-use diesel::associations::HasTable;
 use diesel::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -64,11 +64,7 @@ pub async fn find_all_mgcis_by_macc_and_gci_p_id_db(
     let gci_id_values: Vec<i64> = gci_ids.iter().map(|gci| gci.gciPId).collect();
     let app_state = get_tenant_app_state().await;
     // Use Diesel's query builder with multiple conditions
-    crate::generics::generic_find_all::<
-        <DBMerchantGatewayCardInfo as HasTable>::Table,
-        _,
-        DBMerchantGatewayCardInfo,
-    >(
+    DBMerchantGatewayCardInfo::find_all(
         &app_state.db,
         dsl::gateway_card_info_id
             .eq_any(gci_id_values)

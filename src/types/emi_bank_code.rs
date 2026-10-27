@@ -1,4 +1,5 @@
 use crate::app::get_tenant_app_state;
+use crate::generics::Repository;
 use crate::storage::types::EmiBankCode as DBEmiBankCode;
 use time::PrimitiveDateTime;
 // use db::storageprelude::LocalTime;
@@ -8,7 +9,6 @@ use time::PrimitiveDateTime;
 // use db::eulermeshimpl::mesh_config;
 // use sequelize::{Clause, Term, Where};
 use crate::storage::backend::schema::emi_bank_code::dsl;
-use diesel::associations::HasTable;
 use diesel::*;
 use serde::{Deserialize, Serialize};
 use std::clone::Clone;
@@ -53,12 +53,7 @@ impl From<DBEmiBankCode> for EmiBankCode {
 pub async fn findEmiBankCodeByEMIBank(bank_name: &str) -> Vec<DBEmiBankCode> {
     // Try to find the EMI bank codes using diesel
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_all::<<DBEmiBankCode as HasTable>::Table, _, _>(
-        &app_state.db,
-        dsl::emi_bank.eq(bank_name.to_owned()),
-    )
-    .await
-    {
+    match DBEmiBankCode::find_all(&app_state.db, dsl::emi_bank.eq(bank_name.to_owned())).await {
         Ok(db_results) => db_results
             .into_iter()
             .map(|db_emi_bank_code: DBEmiBankCode| db_emi_bank_code)

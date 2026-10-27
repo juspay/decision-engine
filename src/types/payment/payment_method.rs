@@ -1,4 +1,5 @@
 use crate::app::get_tenant_app_state;
+use crate::generics::Repository;
 use serde::{Deserialize, Serialize};
 // use db::euler_mesh_impl::mesh_config;
 // use db::mesh::internal::*;
@@ -13,7 +14,6 @@ use crate::storage::types::PaymentMethod as DBPaymentMethod;
 use crate::types::bank_code::{to_bank_code_id, BankCodeId};
 
 use crate::storage::backend::schema::payment_method::dsl;
-use diesel::associations::HasTable;
 use diesel::*;
 use std::convert::TryFrom;
 use std::option::Option;
@@ -141,13 +141,7 @@ impl TryFrom<DBPaymentMethod> for PaymentMethod {
 
 pub async fn get_by_name(name: String) -> Option<PaymentMethod> {
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_one_optional::<
-        <DBPaymentMethod as HasTable>::Table,
-        _,
-        DBPaymentMethod,
-    >(&app_state.db, dsl::name.eq(name))
-    .await
-    {
+    match DBPaymentMethod::find_optional(&app_state.db, dsl::name.eq(name)).await {
         Ok(Some(db_payment_method)) => PaymentMethod::try_from(db_payment_method).ok(),
         _ => None,
     }

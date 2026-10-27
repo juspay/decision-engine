@@ -5,13 +5,13 @@ use serde::{Deserialize, Serialize};
 // use eulerhs::prelude::*;
 // use eulerhs::extra::combinators::toDomainAll;
 use crate::app::get_tenant_app_state;
+use crate::generics::Repository;
 use crate::storage::types::TokenBinInfo as DBTokenBinInfo;
 // use types::utils::dbconfig::getEulerDbConf;
 // use juspay::extra::parsing::{Parsed, Step, parseField, project};
 // use named::*;
 // use sequelize::{Clause::Is, Term::In};
 use crate::storage::backend::schema::token_bin_info::dsl;
-use diesel::associations::HasTable;
 use diesel::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -56,17 +56,10 @@ impl From<DBTokenBinInfo> for TokenBinInfo {
 // }
 
 pub async fn getAllTokenBinInfoByTokenBins(token_bins: Vec<String>) -> Vec<TokenBinInfo> {
-    // Perform database query using Diesel's generic_find_all
+    // Perform database query using Diesel's find_all
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_all::<
-            <DBTokenBinInfo as HasTable>::Table,
-            _,
-            DBTokenBinInfo
-        >(
-            &app_state.db,
-            dsl::token_bin.eq_any(token_bins),
-        ).await {
-            Ok(db_results) => db_results.into_iter().map(From::from).collect(),
-            Err(_) => Vec::new(), // Silently handle any errors by returning an empty vec
-        }
+    match DBTokenBinInfo::find_all(&app_state.db, dsl::token_bin.eq_any(token_bins)).await {
+        Ok(db_results) => db_results.into_iter().map(From::from).collect(),
+        Err(_) => Vec::new(), // Silently handle any errors by returning an empty vec
+    }
 }
