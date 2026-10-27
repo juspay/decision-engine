@@ -103,6 +103,11 @@ precommit: fmt clippy
 ci_hack:
     scripts/ci-checks.sh
 
+# Structural guardrails CI runs: orphan modules, DB cfg placement, config key names, copy-paste
+guardrails:
+    python3 scripts/guardrails.py
+    npx --yes jscpd@4.0.5
+
 # Use the env variables if present, or fallback to default values
 
 db_user := env_var_or_default('DB_USER', 'db_user')

@@ -1,0 +1,11 @@
+{
+  "path": ["src", "crates", "website/src"],
+  "format": ["rust", "typescript", "tsx"],
+  "ignore": ["**/node_modules/**", "**/target/**", "**/dist/**"],
+  "minLines": 12,
+  "mode": "weak",
+  "threshold": 2,
+  "reporters": ["console"],
+  "absolute": false,
+  "gitignore": true
+}

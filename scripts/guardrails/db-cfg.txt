@@ -1,0 +1,18 @@
+# Allowed `feature = "mysql"` / `feature = "postgres"` occurrences per file.
+# Counts may only go down; regenerate with `python3 scripts/guardrails.py --update-baseline`.
+2 src/app.rs
+4 src/config.rs
+2 src/decider/gatewaydecider/types.rs
+8 src/decider/network_decider/types.rs
+2 src/euclid/handlers/routing_rules.rs
+4 src/euclid/types.rs
+2 src/middleware.rs
+4 src/routes/api_key.rs
+30 src/routes/user_auth.rs
+25 src/storage.rs
+2 src/storage/api_keys.rs
+2 src/storage/backend.rs
+40 src/storage/types.rs
+2 src/types/bank_code.rs
+4 src/types/feature.rs
+4 src/types/service_configuration.rs

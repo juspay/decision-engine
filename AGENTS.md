@@ -101,6 +101,27 @@ Every route follows one auth pattern; the full guide is the module docs of `src/
 - Take the merchant from an extractor, never by calling `auth::authorize` in the handler: `MerchantFromPath` for a `:merchant_id` path parameter (the only spelling), `ScopedJson<T>` for a body whose type derives `MerchantScoped` with `#[merchant]` on each merchant field.
 - Per-merchant storage takes the resulting `AuthorizedMerchant` and filters every query by it.
 
+## Where Shared Helpers Live
+
+Look here before writing a new helper; `just guardrails` (run in CI) enforces the starred rules.
+
+- Route registration and metrics: `metered!` in `src/middleware.rs`
+- Route errors as JSON: `RouteError` in `src/error.rs`
+- Request and tracing ids from headers: `RequestIds` in `src/custom_extractors.rs`
+- Global (non-merchant) service configuration reads: `global_config` in `src/routes.rs`
+- Admin-secret checks: `auth::presents_admin_secret` in `src/auth/mod.rs`
+- Loading a merchant account behind authorization: `load_authorized` in `src/types/merchant/merchant_account.rs`
+- \* Per-merchant configuration: a `MerchantConfig` key in `src/types/service_configuration.rs` with its typed `get`/`create`/`update`/`upsert`/`delete`. Never `format!` a key name by hand.
+- \* Database backend types: `Db`, `DbConnection` and `schema` from `src/storage/backend.rs`. Keep `cfg(feature = "mysql" | "postgres")` out of new code. `scripts/guardrails/db-cfg.txt` holds the per-file counts that remain, and they may only go down.
+- Table reads: the `Repository` trait in `src/generics.rs` (`find_all`, `find_one`, `find_optional`)
+- Cost connectors: `src/cost_ingestion/connectors/common.rs` (HTTP client, number and date parsing, `not_implemented`)
+- Card network names and codes: `CardNetwork` in `src/cost_ingestion/card_network.rs`
+- Dashboard rule lists: `RoutingRuleListPage` in `website/src/components/routing/` (a page is a config)
+- Dashboard dropdowns: `SearchableSelect` in `website/src/components/ui/` (`multiple` for multi-select)
+- Signed-out pages: `AuthCardLayout` and `AuthStatus` in `website/src/components/auth/`
+- \* Every `.rs` file must be reachable through `mod` declarations, so an unused copy can't sit in the tree uncompiled.
+- \* Copy-paste stays under the `.jscpd.json` threshold.
+
 ## Coding Expectations
 
 - Rust edition is 2021; MSRV in `Cargo.toml` is `1.88.0`

@@ -160,6 +160,25 @@ jobs:
       - name: Run unit tests
         run: cargo test
 
+  # Structural checks that keep refactored duplication from returning: unreachable `.rs` files,
+  # DB feature cfgs outside their baseline, hand-built merchant config names, and copy-paste
+  # growth past the `.jscpd.json` threshold. `just guardrails` runs the same thing locally.
+  guardrails:
+    name: Guardrails
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Structural checks
+        run: python3 scripts/guardrails.py
+      - name: Copy-paste detection
+        run: npx --yes jscpd@4.0.5
+
   frontend-typecheck:
     name: Frontend Type Check
     runs-on: ubuntu-latest
@@ -316,6 +335,7 @@ jobs:
       - ci-hack
       - unit-tests
       - frontend-typecheck
+      - guardrails
       - helm
       - e2e-playwright
     if: always()
