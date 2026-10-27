@@ -58,10 +58,9 @@
 //!
 //! [`report_generated`]: https://www.checkout.com/docs/developer-resources/event-notifications/event-types/report_generated
 
+use super::common::{http_client, to_float};
 use crate::cost_ingestion::card_network::network_key;
 use std::collections::{HashMap, HashSet};
-use std::sync::OnceLock;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use axum::http::HeaderMap;
@@ -80,19 +79,6 @@ use crate::cost_ingestion::types::{
 
 /// The `type` of the report-ready webhook event this connector handles.
 const REPORT_GENERATED_EVENT: &str = "report_generated";
-
-/// Cap on a report download (details + file fetches), mirroring the other connectors.
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
-
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(DOWNLOAD_TIMEOUT)
-            .build()
-            .expect("failed to build checkout report reqwest client")
-    })
-}
 
 /// Production Reports API host; overridable via the credential blob for sandbox/regional hosts.
 fn default_api_base() -> String {
@@ -641,11 +627,6 @@ fn normalize_card_category(raw: &str) -> String {
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
         None => String::new(),
     }
-}
-
-/// Parse a money cell; blanks/garbage become `0.0` (mirrors the other connectors' `to_float`).
-fn to_float(s: &str) -> f64 {
-    s.trim().parse::<f64>().unwrap_or(0.0)
 }
 
 /// Parse a Checkout date cell (`Processed On`), an ISO-8601 local timestamp

@@ -5,8 +5,7 @@
 //! `gross`/`total_fee`. Everything Adyen-specific (report column names, the notification shape,
 //! the HMAC scheme, the download auth) is contained in this file.
 
-use std::sync::OnceLock;
-use std::time::Duration;
+use super::common::{http_client, to_float};
 
 use async_trait::async_trait;
 use axum::http::HeaderMap;
@@ -41,8 +40,6 @@ use crate::cost_ingestion::types::{
 /// the newer report supersedes that day cleanly.
 const FEE_RECORD_TYPES: [&str; 1] = ["Settled"];
 
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
-
 pub struct AdyenReportSource;
 
 impl AdyenReportSource {
@@ -55,16 +52,6 @@ impl Default for AdyenReportSource {
     fn default() -> Self {
         Self::new()
     }
-}
-
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(DOWNLOAD_TIMEOUT)
-            .build()
-            .expect("failed to build adyen report reqwest client")
-    })
 }
 
 #[async_trait]
@@ -442,11 +429,6 @@ fn ic_bps(raw: &str) -> Option<f64> {
     arr.iter()
         .find(|e| e.get("t").and_then(Value::as_str) == Some("ic"))
         .and_then(|e| e.get("bps").and_then(Value::as_f64))
-}
-
-/// Parse a money cell; blanks/garbage become `0.0` (mirrors `par_extract.to_float`).
-fn to_float(s: &str) -> f64 {
-    s.trim().parse::<f64>().unwrap_or(0.0)
 }
 
 /// Parse Adyen's `Booking Date` (`"2026-01-16 00:00:53"`, optional timezone column) to a date.
