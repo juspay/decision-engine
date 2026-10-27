@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::app::get_tenant_app_state;
 use crate::cost_ingestion::checkout_credentials::CheckoutEnvironment;
-use crate::cost_ingestion::{creds, ConnectorCreds, ConnectorCredsStore};
+use crate::cost_ingestion::{creds, ConnectorCreds, ConnectorCredsStore, ConnectorRegistry};
 use crate::error::TextError;
 
 #[derive(Debug, Deserialize)]
@@ -45,6 +45,9 @@ pub async fn set_connector_credentials(
     Path((_, connector)): Path<(String, String)>,
     Json(body): Json<SetCredentialsRequest>,
 ) -> Result<Json<SetCredentialsResponse>, TextError> {
+    ConnectorRegistry::with_builtins()
+        .get(&connector)
+        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
     let merchant_id = merchant.as_str().to_string();
     let app_state = get_tenant_app_state().await;
     let cfg = &app_state.config.cost_ingestion;
@@ -135,6 +138,26 @@ pub async fn list_connector_credentials(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn credentials_reject_unregistered_connectors_before_storage() {
+        for connector in ["checkout::ent_test", "unknown"] {
+            let result = set_connector_credentials(
+                MerchantFromPath(crate::auth::AuthorizedMerchant::internal("merchant_test")),
+                Path(("merchant_test".into(), connector.into())),
+                Json(SetCredentialsRequest {
+                    account: "suffix".into(),
+                    webhook_secret: "test_webhook".into(),
+                    download_auth: Secret::new(
+                        r#"{"secret_key":"test","api_base_url":"https://other.example"}"#.into(),
+                    ),
+                    environment: None,
+                }),
+            )
+            .await;
+            assert!(matches!(result, Err(TextError(StatusCode::BAD_REQUEST, _))));
+        }
+    }
 
     #[test]
     fn checkout_credentials_request_defaults_to_production() -> Result<(), serde_json::Error> {

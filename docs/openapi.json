@@ -4240,7 +4240,7 @@
           "Cost Ingestion"
         ],
         "summary": "Set connector credentials",
-        "description": "Store the webhook secret and report-download credential for one connector account.",
+        "description": "Store the webhook secret and report-download credential for one registered connector account. Unregistered connector IDs are rejected with HTTP 400 before credentials are encoded or saved.",
         "security": [
           {
             "BearerAuth": []
