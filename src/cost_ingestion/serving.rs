@@ -9,6 +9,7 @@
 //! and only then to the seed/hypersense sources. So this strictly improves precision without
 //! losing coverage.
 
+use crate::cost_ingestion::card_network::network_key;
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::sync::{OnceLock, RwLock};
@@ -251,16 +252,6 @@ fn resolve_bin_product(bin: &str) -> String {
 
 // ── keys ────────────────────────────────────────────────────────────────────────────────────
 
-/// Canonicalize network aliases (report `mc`/`amex` vs router `mastercard`/`american express`).
-fn normalize_network(network: &str) -> &str {
-    match network {
-        "mastercard" | "master" => "mc",
-        "american express" | "americanexpress" => "amex",
-        "diners club" | "dinersclub" => "diners",
-        other => other,
-    }
-}
-
 fn coarse_key(
     connector: &str,
     network: &str,
@@ -271,7 +262,7 @@ fn coarse_key(
     format!(
         "{}|{}|{}|{}|{}",
         connector.to_lowercase(),
-        normalize_network(&network.to_lowercase()),
+        network_key(network),
         funding.to_lowercase(),
         currency.to_lowercase(),
         region.to_lowercase(),
@@ -291,7 +282,7 @@ fn fine_key(
     format!(
         "{}|{}|{}|{}|{}|{}|{}",
         connector.to_lowercase(),
-        normalize_network(&network.to_lowercase()),
+        network_key(network),
         variant.to_lowercase(),
         funding.to_lowercase(),
         issuer.to_lowercase(),
@@ -331,8 +322,7 @@ fn without_variant(display_key: &str) -> Option<String> {
 /// (`visa` + `standard` + `debit` → `visastandarddebit`). A wallet is its own variant in the report
 /// (`visa_applepay`), so it takes precedence over the network+program+funding form.
 fn reconstruct_variant(network: &str, program: &str, funding: &str, wallet: &str) -> String {
-    let net_l = network.to_lowercase();
-    let net = normalize_network(&net_l);
+    let net = network_key(network);
     let w = wallet.to_lowercase();
     if w.contains("apple") {
         return format!("{net}_applepay");
@@ -354,8 +344,7 @@ fn predictor_level_keys(
     band: &str,
     channel: &str,
 ) -> Vec<String> {
-    let net_l = network.to_lowercase();
-    let net = normalize_network(&net_l);
+    let net = network_key(network);
     let var = variant.to_lowercase();
     let fun = funding.to_lowercase();
     let iss = issuer.to_lowercase();
@@ -443,7 +432,7 @@ pub fn lookup(
                 effective_bps: cost.effective_cost_bps(amount),
                 pct_bps: cost.pct_bps,
                 fixed: cost.fixed,
-                brand: normalize_network(&network.to_lowercase()).to_string(),
+                brand: network_key(network),
                 currency: currency.to_uppercase(),
                 variant: Some(variant.clone()),
                 issuer: Some(issuer.to_uppercase()),
@@ -460,7 +449,7 @@ pub fn lookup(
             effective_bps: cost.effective_cost_bps(amount),
             pct_bps: cost.pct_bps,
             fixed: cost.fixed,
-            brand: normalize_network(&network.to_lowercase()).to_string(),
+            brand: network_key(network),
             currency: currency.to_uppercase(),
             variant: None,
             issuer: None,
@@ -488,7 +477,7 @@ pub fn lookup(
                 effective_bps: cost.effective_cost_bps(amount),
                 pct_bps: cost.pct_bps,
                 fixed: cost.fixed,
-                brand: normalize_network(&network.to_lowercase()).to_string(),
+                brand: network_key(network),
                 currency: currency.to_uppercase(),
                 variant: Some(variant.clone()),
                 issuer: Some(issuer.to_uppercase()),
@@ -504,7 +493,7 @@ pub fn lookup(
                 effective_bps: cost.effective_cost_bps(amount),
                 pct_bps: cost.pct_bps,
                 fixed: cost.fixed,
-                brand: normalize_network(&network.to_lowercase()).to_string(),
+                brand: network_key(network),
                 currency: currency.to_uppercase(),
                 variant: Some(variant.clone()),
                 issuer: Some(issuer.to_uppercase()),
@@ -528,7 +517,7 @@ pub fn lookup(
                 effective_bps: cost.effective_cost_bps(amount),
                 pct_bps: cost.pct_bps,
                 fixed: cost.fixed,
-                brand: normalize_network(&network.to_lowercase()).to_string(),
+                brand: network_key(network),
                 currency: currency.to_uppercase(),
                 variant: Some(variant.clone()),
                 issuer: Some(issuer.to_uppercase()),
@@ -545,7 +534,7 @@ pub fn lookup(
             effective_bps: cost.effective_cost_bps(amount),
             pct_bps: cost.pct_bps,
             fixed: cost.fixed,
-            brand: normalize_network(&network.to_lowercase()).to_string(),
+            brand: network_key(network),
             currency: currency.to_uppercase(),
             variant: None,
             issuer: None,
@@ -1509,6 +1498,22 @@ m1\tadyen\tvisa\tvisadebit\tdebit\tAE\tAED\tVisa UAE Consumer Debit\t100\t0\t20\
             total_weight: 0.0,
         };
         assert_eq!(blend.for_amount(100.0).pct_bps, 0.0);
+    }
+
+    #[test]
+    fn a_report_spelling_and_a_live_spelling_of_one_network_share_a_key() {
+        // Reports spell networks one way, requests another; both must reach the same fitted cost.
+        for (report, live) in [
+            ("American Express", "AmericanExpress"),
+            ("Diners Club", "DinersClub"),
+            ("Master Card", "Mastercard"),
+        ] {
+            assert_eq!(
+                coarse_key("stripe", report, "credit", "USD", "us"),
+                coarse_key("stripe", live, "credit", "USD", "us"),
+                "{report} vs {live}"
+            );
+        }
     }
 
     #[test]

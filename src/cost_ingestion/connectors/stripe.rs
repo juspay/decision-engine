@@ -38,6 +38,7 @@
 //! dashboard upload (which only calls `parse_rows`). The webhook/download methods return a
 //! descriptive error until Stripe's report-ready webhook and download auth are wired.
 
+use crate::cost_ingestion::card_network::network_key;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -170,7 +171,7 @@ impl SettlementReportSource for StripeReportSource {
             let gross = to_float(get(c_gross));
             let total_fee = to_float(get(c_cost));
 
-            let card_network = normalize_network(get(c_brand));
+            let card_network = network_key(get(c_brand));
             let variant = get(c_variant).trim().to_lowercase();
             let funding = funding_from_source(get(c_funding));
             let currency = {
@@ -246,20 +247,6 @@ fn funding_from_source(source: &str) -> String {
         "credit" => "credit".to_string(),
         "prepaid" => "prepaid".to_string(),
         _ => String::new(),
-    }
-}
-
-/// Canonicalize a Stripe card-brand label to the lowercased network ids the rest of the pipeline
-fn normalize_network(raw: &str) -> String {
-    match raw.trim().to_lowercase().as_str() {
-        "" => String::new(),
-        "mastercard" | "master card" => "mc".to_string(),
-        "visa" => "visa".to_string(),
-        "american express" | "amex" => "amex".to_string(),
-        "discover" => "discover".to_string(),
-        "diners" | "diners club" => "diners".to_string(),
-        "jcb" => "jcb".to_string(),
-        other => other.replace(' ', ""),
     }
 }
 
@@ -363,9 +350,9 @@ mc,Ecommerce,DOMESTIC,CREDIT,mccommercialcredit,Scheme Fee,100000,150,USD,USD,20
         assert_eq!(funding_from_source("CREDIT"), "credit");
         assert_eq!(funding_from_source("PREPAID"), "prepaid");
         assert_eq!(funding_from_source(""), "");
-        assert_eq!(normalize_network("mc"), "mc");
-        assert_eq!(normalize_network("MasterCard"), "mc");
-        assert_eq!(normalize_network("Visa"), "visa");
+        assert_eq!(network_key("mc"), "mc");
+        assert_eq!(network_key("MasterCard"), "mc");
+        assert_eq!(network_key("Visa"), "visa");
         assert_eq!(channel_from_interaction("Ecommerce"), "ecom");
         assert_eq!(channel_from_interaction("ContAuth"), "ecom");
         assert_eq!(channel_from_interaction("CardPresent"), "pos");

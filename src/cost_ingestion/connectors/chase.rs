@@ -35,6 +35,7 @@
 //! return a descriptive error until then; the parser (`parse_rows`) is complete and independently
 //! testable.
 
+use crate::cost_ingestion::card_network::chase_network_key;
 use std::collections::HashMap;
 use std::io::{BufReader, Read};
 use std::sync::{Mutex, OnceLock};
@@ -349,7 +350,7 @@ impl SettlementReportSource for ChaseReportSource {
                 // calculation base) and is already positive for sales.
                 let gross = to_float(row.get(c.amount));
 
-                let network = normalize_network(row.get(c.method));
+                let network = chase_network_key(row.get(c.method));
                 // Reconcile funding: the interchange qualification code is authoritative about the
                 // fee tier, so it corrects a `Card Usage Type` that some exports stamp uniformly
                 // (every row `1`), which would otherwise price credit txns as debit.
@@ -596,22 +597,6 @@ fn build_token_form(creds: &ChaseCreds, assertion: &str) -> Vec<(&'static str, S
         ("client_assertion", assertion.to_string()),
         ("resource", creds.resource.clone()),
     ]
-}
-
-/// Map a Chase `Payment Method Code` (MOP) onto the lowercased network ids the rest of the pipeline
-/// uses (matching Adyen/Braintree: `visa`, `mc`, `amex`, …). Unknown codes pass through lowercased
-/// so they still form their own consistent cluster rather than being dropped.
-fn normalize_network(code: &str) -> String {
-    match code.trim().to_uppercase().as_str() {
-        "" => String::new(),
-        "VI" => "visa".to_string(),
-        "MC" => "mc".to_string(),
-        "AX" => "amex".to_string(),
-        "DI" => "discover".to_string(),
-        "JC" => "jcb".to_string(),
-        "DC" => "diners".to_string(),
-        other => other.to_lowercase(),
-    }
 }
 
 /// Map Chase's `Card Usage Type` onto the canonical funding bucket: `1` = signature debit and
@@ -884,10 +869,10 @@ o2,ED,3,GB,GBP,EDBT,SALE,100,-1.00,-0.20\n";
 
     #[test]
     fn helpers() {
-        assert_eq!(normalize_network("VI"), "visa");
-        assert_eq!(normalize_network("mc"), "mc");
-        assert_eq!(normalize_network("AX"), "amex");
-        assert_eq!(normalize_network(""), "");
+        assert_eq!(chase_network_key("VI"), "visa");
+        assert_eq!(chase_network_key("mc"), "mc");
+        assert_eq!(chase_network_key("AX"), "amex");
+        assert_eq!(chase_network_key(""), "");
         assert_eq!(funding_from_usage_type("1"), "debit");
         assert_eq!(funding_from_usage_type("2"), "debit");
         assert_eq!(funding_from_usage_type("3"), "credit");
