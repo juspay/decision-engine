@@ -3,6 +3,7 @@ use super::types::RankingAlgorithm;
 use super::types::UnifiedError;
 use crate::app::get_tenant_app_state;
 use crate::decider::network_decider;
+use crate::types::service_configuration::MerchantConfig;
 use serde_json::json;
 use serde_json::Value as AValue;
 use std::collections::HashMap;
@@ -215,7 +216,8 @@ pub async fn decider_full_payload_hs_function(
                 Some(dreq_.payment_info.amount),
             );
         }
-        let config_name = format!("DEBIT_ROUTING_ENABLED_{}", dreq_.merchant_id);
+        let config_name =
+            crate::types::service_configuration::DebitRoutingEnabled::name(&dreq_.merchant_id);
         let debit_routing_enabled = service_configuration::find_config_by_name(config_name)
             .await
             .ok()
@@ -353,7 +355,7 @@ fn handle_enforced_gateway(gateway_list: Option<Vec<String>>) -> Option<Vec<Stri
 /// gate. Falls back to [`multi_objective::DEFAULT_MARGIN`] when unset.
 pub async fn load_margin(merchant_id: &str) -> f64 {
     let read = || async {
-        let key = format!("SR_V3_INPUT_CONFIG_{}", merchant_id);
+        let key = crate::types::service_configuration::SrV3Input::name(merchant_id);
         let row = service_configuration::find_config_by_name(key)
             .await
             .ok()??;
@@ -373,7 +375,7 @@ pub async fn load_margin(merchant_id: &str) -> f64 {
 /// its noise floor. Falls back to [`C::DEFAULT_SR_V3_BASED_BUCKET_SIZE`] when unset.
 pub async fn load_srv3_default_bucket_size(merchant_id: &str) -> i32 {
     let read = || async {
-        let key = format!("SR_V3_INPUT_CONFIG_{}", merchant_id);
+        let key = crate::types::service_configuration::SrV3Input::name(merchant_id);
         let row = service_configuration::find_config_by_name(key)
             .await
             .ok()??;

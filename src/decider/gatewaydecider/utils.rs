@@ -16,6 +16,7 @@ use crate::types::money::internal::Money;
 use crate::types::payment::payment_method_type_const::*;
 use crate::types::payment_flow::{payment_flows_to_text, PaymentFlow};
 use crate::types::payment_instrument::{PaymentInstrument, PaymentMethod};
+use crate::types::service_configuration::MerchantConfig;
 use crate::types::user_eligibility_info::{
     get_eligibility_info, identifier_name_to_text, IdentifierName,
 };
@@ -2540,7 +2541,7 @@ pub async fn get_unified_sr_key(
 ) -> String {
     let merchant_id = gateway_scoring_data.merchantId.clone();
 
-    let name = format!("SR_DIMENSION_CONFIG_{}", merchant_id);
+    let name = crate::types::service_configuration::SrDimensions::name(&merchant_id);
 
     let service_config: Option<SrDimensionConfig> = findByNameFromRedis(name.clone()).await;
 
