@@ -24,9 +24,6 @@ use crate::feedback::gateway_scoring_service::{
     check_and_update_gateway_score_, SCORE_UPDATE_SKIPPED,
 };
 use crate::feedback::types::{UpdateScorePayload, UpdateScoreResponse};
-use crate::metrics::API_LATENCY_HISTOGRAM;
-use crate::metrics::API_REQUEST_COUNTER;
-use crate::metrics::API_REQUEST_TOTAL_COUNTER;
 use axum::extract::Json;
 use once_cell::sync::Lazy;
 use serde::Serialize;
@@ -106,12 +103,6 @@ pub async fn update_gateway_score(
         .map(str::to_string);
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["update_gateway_score"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["update_gateway_score"])
-        .inc();
 
     // Mask values by default and consolidate header diagnostics into one event.
     crate::logger::debug!(
@@ -132,10 +123,6 @@ pub async fn update_gateway_score(
             Err(error)
         }
         Err(ScopedJsonRejection::Scope(violation)) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["update_gateway_score", "failure"])
-                .inc();
-            timer.observe_duration();
             return Err(violation.into());
         }
         Err(ScopedJsonRejection::Read(e)) => {
@@ -159,10 +146,6 @@ pub async fn update_gateway_score(
                 Some(e.analytics_stage().to_string()),
                 None,
             );
-            API_REQUEST_COUNTER
-                .with_label_values(&["update_gateway_score", "failure"])
-                .inc();
-            timer.observe_duration();
             return Err(e.into_error_response());
         }
     };
@@ -308,14 +291,8 @@ pub async fn update_gateway_score(
                                 Some("score_skipped".to_string()),
                             );
                         }
-                        API_REQUEST_COUNTER
-                            .with_label_values(&["update_gateway_score", "success"])
-                            .inc();
                     }
                     Err(e) => {
-                        API_REQUEST_COUNTER
-                            .with_label_values(&["update_gateway_score", "failure"])
-                            .inc();
                         crate::analytics::DomainAnalyticsEvent::record_error(
                             crate::analytics::AnalyticsFlowContext::new(
                                 crate::analytics::ApiFlow::DynamicRouting,
@@ -363,7 +340,6 @@ pub async fn update_gateway_score(
                 }
             });
 
-            timer.observe_duration();
             Ok(Json(response))
         }
         Err(e) => {
@@ -387,10 +363,6 @@ pub async fn update_gateway_score(
                 Some("request_parse_failed".to_string()),
                 None,
             );
-            API_REQUEST_COUNTER
-                .with_label_values(&["update_gateway_score", "failure"])
-                .inc();
-            timer.observe_duration();
             Err(error_response)
         }
     }

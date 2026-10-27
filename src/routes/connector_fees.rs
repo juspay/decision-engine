@@ -203,12 +203,11 @@ pub async fn delete_fee_override(
     MerchantFromPath(merchant): MerchantFromPath,
     Path((_, connector)): Path<(String, String)>,
 ) -> Result<StatusCode, TextError> {
-    let merchant_id = merchant.as_str().to_string();
     let connector = connector.to_lowercase();
     overrides::delete(&merchant, &connector)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
-    refresh_serving(&merchant_id).await;
+    refresh_serving(merchant.as_str()).await;
     Ok(StatusCode::NO_CONTENT)
 }
 

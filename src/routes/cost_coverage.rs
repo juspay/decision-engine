@@ -12,7 +12,6 @@ use crate::error::TextError;
 pub async fn get_cost_coverage(
     MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<CoverageSummary>, TextError> {
-    let merchant_id = merchant.as_str().to_string();
     // ClickHouse config lives on the global config (not the per-tenant config).
     let clickhouse = crate::app::APP_STATE
         .get()
@@ -25,7 +24,7 @@ pub async fn get_cost_coverage(
         .clickhouse
         .clone();
 
-    let summary = coverage::for_merchant(&clickhouse, &merchant_id)
+    let summary = coverage::for_merchant(&clickhouse, merchant.as_str())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
     Ok(Json(summary))

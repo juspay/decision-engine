@@ -6,7 +6,6 @@ use crate::decider::gatewaydecider::{
     types::{DecidedGateway, DomainDeciderRequest, ErrorResponse, UnifiedError},
 };
 use crate::logger;
-use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::redis::feature::{
     check_redis_comp_merchant_flag, is_feature_enabled, RedisCompressionConfig,
     RedisCompressionConfigCombined,
@@ -72,12 +71,6 @@ where
     ErrorResponse: IntoResponse,
 {
     let cpu_start = Instant::now();
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["decision_gateway"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["decision_gateway"])
-        .inc();
 
     let original_url = uri.to_string();
     let x_request_id = headers
@@ -100,10 +93,6 @@ where
         Ok(ScopedJson { payload, body, .. }) => (body, Ok(payload)),
         Err(ScopedJsonRejection::Parse { body, error }) => (body, Err(error)),
         Err(ScopedJsonRejection::Scope(violation)) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["decision_gateway", "failure"])
-                .inc();
-            timer.observe_duration();
             return Err(violation.into());
         }
         Err(ScopedJsonRejection::Read(e)) => {
@@ -134,11 +123,6 @@ where
                 category = "INCOMING_API",
                 "Error occurred while parsing request body"
             );
-
-            API_REQUEST_COUNTER
-                .with_label_values(&["decision_gateway", "failure"])
-                .inc();
-            timer.observe_duration();
 
             return Err(error_response);
         }
@@ -214,9 +198,6 @@ where
                         "Successfully processed request"
                     );
 
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["decision_gateway", "success"])
-                        .inc();
                     Ok(response)
                 }
                 Err(e) => {
@@ -246,14 +227,10 @@ where
                         "Error occurred while processing decider function"
                     );
 
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["decision_gateway", "failure"])
-                        .inc();
                     Err(e)
                 }
             };
 
-            timer.observe_duration();
             final_result
         }
         Err(e) => {
@@ -299,10 +276,6 @@ where
                 "Error occurred while parsing request payload"
             );
 
-            API_REQUEST_COUNTER
-                .with_label_values(&["decision_gateway", "failure"])
-                .inc();
-            timer.observe_duration();
             Err(error_response)
         }
     }

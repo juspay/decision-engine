@@ -10,6 +10,63 @@ use masking::PeekInterface;
 
 const API_KEY_CACHE_TTL: i64 = 300;
 
+type EndpointMetricsFn =
+    fn(
+        axum::extract::State<&'static str>,
+        Request<Body>,
+        Next,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response<Body>> + Send>>;
+
+/// The request metrics for one route, under `name` — the `endpoint` label the dashboards group by:
+/// `api_requests_total`, `api_latency_seconds`, and `api_requests_by_status` (`success` below
+/// `400`, `failure` otherwise). Attached where the route is registered, in `app.rs`:
+///
+/// ```ignore
+/// .route("/decide-gateway", post(decide_gateway).route_layer(endpoint("decide_gateway")))
+/// ```
+///
+/// As a route layer it runs inside authentication, so it times the handler and its extractors, not
+/// the credential check.
+pub fn endpoint(
+    name: &'static str,
+) -> axum::middleware::FromFnLayer<
+    EndpointMetricsFn,
+    &'static str,
+    (axum::extract::State<&'static str>, Request<Body>),
+> {
+    axum::middleware::from_fn_with_state(name, record_endpoint as EndpointMetricsFn)
+}
+
+fn record_endpoint(
+    axum::extract::State(name): axum::extract::State<&'static str>,
+    req: Request<Body>,
+    next: Next,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response<Body>> + Send>> {
+    Box::pin(async move {
+        crate::metrics::API_REQUEST_TOTAL_COUNTER
+            .with_label_values(&[name])
+            .inc();
+        let timer = crate::metrics::API_LATENCY_HISTOGRAM
+            .with_label_values(&[name])
+            .start_timer();
+        let response = next.run(req).await;
+        timer.observe_duration();
+        crate::metrics::API_REQUEST_COUNTER
+            .with_label_values(&[name, outcome(response.status())])
+            .inc();
+        response
+    })
+}
+
+/// The `status` label of `api_requests_by_status`: every 4xx and 5xx is a failure.
+fn outcome(status: StatusCode) -> &'static str {
+    if status.is_client_error() || status.is_server_error() {
+        "failure"
+    } else {
+        "success"
+    }
+}
+
 /// Enforce that a per-merchant session may only act on the merchant named in the path.
 ///
 /// Runs immediately *after* [`authenticate`], so an `AuthContext` is already in the request
@@ -338,5 +395,33 @@ mod tests {
     async fn service_credentials_are_not_scoped() {
         let foreign = format!("/merchant-account/{FOREIGN}/seed-costs");
         assert_eq!(status(false, &foreign).await, StatusCode::OK);
+    }
+
+    #[test]
+    fn every_client_and_server_error_counts_as_a_failure() {
+        assert_eq!(outcome(StatusCode::OK), "success");
+        assert_eq!(outcome(StatusCode::NO_CONTENT), "success");
+        assert_eq!(outcome(StatusCode::FOUND), "success");
+        assert_eq!(outcome(StatusCode::BAD_REQUEST), "failure");
+        assert_eq!(outcome(StatusCode::FORBIDDEN), "failure");
+        assert_eq!(outcome(StatusCode::INTERNAL_SERVER_ERROR), "failure");
+    }
+
+    #[tokio::test]
+    async fn the_endpoint_layer_passes_the_response_through() {
+        let app = Router::new().route(
+            "/x",
+            post(|| async { (StatusCode::CREATED, "made") })
+                .route_layer(endpoint("endpoint_layer_test")),
+        );
+        let response = app
+            .oneshot(Request::post("/x").body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        assert_eq!(&body[..], b"made");
     }
 }

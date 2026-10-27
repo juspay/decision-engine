@@ -28,7 +28,7 @@ use crate::euclid::{
     errors::EuclidErrors, errors::ValidationErrorDetails, types::RoutingAlgorithmMapper,
 };
 use crate::generics::MeshError;
-use crate::{euclid::types::RoutingAlgorithm, logger, metrics};
+use crate::{euclid::types::RoutingAlgorithm, logger};
 use axum::response::IntoResponse;
 use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods};
 use error_stack::ResultExt;
@@ -36,7 +36,6 @@ use error_stack::ResultExt;
 use crate::app::get_tenant_app_state;
 
 use crate::error::ContainerError;
-use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 
 // ── Routing algorithm Redis cache ─────────────────────────────────────────────
 //
@@ -465,12 +464,6 @@ pub async fn config_sr_dimensions(
         merchant, payload, ..
     }: ScopedJson<SrDimensionConfig>,
 ) -> Result<Json<String>, ContainerError<EuclidErrors>> {
-    let timer = metrics::API_LATENCY_HISTOGRAM
-        .with_label_values(&["config_sr_dimensions"])
-        .start_timer();
-    metrics::API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["config_sr_dimensions"])
-        .inc();
     logger::debug!("Received SR Dimension config: {:?}", payload);
 
     // Validate dimensions against ELIGIBLE_DIMENSIONS
@@ -487,11 +480,6 @@ pub async fn config_sr_dimensions(
         .unwrap_or_default();
 
     if !invalid_dimensions.is_empty() {
-        metrics::API_REQUEST_COUNTER
-            .with_label_values(&["config_sr_dimensions", "failure"])
-            .inc();
-        timer.observe_duration();
-
         logger::error!(
             "Invalid dimensions found for merchant {}: {:?}",
             payload.merchant_id,
@@ -506,10 +494,9 @@ pub async fn config_sr_dimensions(
         .into());
     }
 
-    let mid = merchant.as_str().to_string();
     let config = serde_json::to_string(&payload)
         .change_context(EuclidErrors::FailedToSerializeJsonToString)?;
-    let name = format!("SR_DIMENSION_CONFIG_{}", mid);
+    let name = format!("SR_DIMENSION_CONFIG_{}", merchant);
 
     let service_config = find_config_by_name(name.clone())
         .await
@@ -518,14 +505,17 @@ pub async fn config_sr_dimensions(
         Some(_) => {
             logger::debug!(
                 "Updating existing SR Dimension config for merchant: {}",
-                mid
+                merchant
             );
             update_config(name, Some(config))
                 .await
                 .change_context(EuclidErrors::StorageError)
         }
         None => {
-            logger::debug!("Inserting new SR Dimension config for merchant: {}", mid);
+            logger::debug!(
+                "Inserting new SR Dimension config for merchant: {}",
+                merchant
+            );
             insert_config(name, Some(config))
                 .await
                 .change_context(EuclidErrors::StorageError)
@@ -533,23 +523,15 @@ pub async fn config_sr_dimensions(
     };
 
     if let Err(_) = result {
-        metrics::API_REQUEST_COUNTER
-            .with_label_values(&["config_sr_dimensions", "failure"])
-            .inc();
-        timer.observe_duration();
         logger::error!(
             "Failed to insert or update SR Dimension config for merchant: {}",
-            mid
+            merchant
         );
         return Err(ContainerError::from(EuclidErrors::StorageError));
     }
-    metrics::API_REQUEST_COUNTER
-        .with_label_values(&["config_sr_dimensions", "success"])
-        .inc();
-    timer.observe_duration();
     logger::debug!(
         "SR Dimension configuration updated successfully for merchant: {}",
-        mid
+        merchant
     );
     Ok(Json(
         "SR Dimension configuration updated successfully".to_string(),
@@ -594,13 +576,6 @@ pub async fn routing_create(
     session: Option<axum::Extension<crate::auth::AuthContext>>,
     request: Result<ScopedJson<RoutingRule>, ScopedJsonRejection>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
-    let timer = metrics::API_LATENCY_HISTOGRAM
-        .with_label_values(&["routing_create"])
-        .start_timer();
-    metrics::API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["routing_create"])
-        .inc();
-
     let state = get_tenant_app_state().await;
     let request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
@@ -636,10 +611,6 @@ pub async fn routing_create(
     // so every future consumer reads one representation.
     if let StaticRoutingAlgorithm::VolumeContract(contract_config) = &mut config.algorithm {
         if let Err(errors) = crate::euclid::volume_contract::canonicalize(contract_config) {
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["routing_create", "failure"])
-                .inc();
-            timer.observe_duration();
             return Err(field_validation_failure(
                 "Volume contract amounts are invalid",
                 &errors,
@@ -671,11 +642,6 @@ pub async fn routing_create(
 
                 let detailed_error = validation_result.to_error_message();
 
-                metrics::API_REQUEST_COUNTER
-                    .with_label_values(&["routing_create", "failure"])
-                    .inc();
-                timer.observe_duration();
-
                 return Err(ContainerError::new_with_status_code_and_payload(
                     EuclidErrors::FieldValidationFailed(detailed_error.clone()),
                     axum::http::StatusCode::BAD_REQUEST,
@@ -690,10 +656,6 @@ pub async fn routing_create(
         }
         Err(err) => {
             logger::error!(error = ?err, "Failed to validate routing rule configuration");
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["routing_create", "failure"])
-                .inc();
-            timer.observe_duration();
             return Err(err);
         }
     }
@@ -755,10 +717,6 @@ pub async fn routing_create(
         Some("routing_created".to_string()),
     );
 
-    metrics::API_REQUEST_COUNTER
-        .with_label_values(&["routing_create", "success"])
-        .inc();
-    timer.observe_duration();
     Ok(Json(response))
 }
 
@@ -1276,16 +1234,6 @@ pub(crate) async fn routing_evaluate_with_analytics(
     experiment_endpoint: ExperimentEndpoint,
     track_experiment_outcome: bool,
 ) -> Result<Json<RoutingEvaluateResponse>, ContainerError<EuclidErrors>> {
-    let mut timer = Some(
-        metrics::API_LATENCY_HISTOGRAM
-            .with_label_values(&[flows.metric_label])
-            .start_timer(),
-    );
-
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&[flows.metric_label])
-        .inc();
-
     let state = get_tenant_app_state().await;
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
@@ -1311,12 +1259,7 @@ pub(crate) async fn routing_evaluate_with_analytics(
         );
     }
 
-    let update_failure_metrics = || {
-        API_REQUEST_COUNTER
-            .with_label_values(&[flows.metric_label, "failure"])
-            .inc();
-    };
-    let mut fail_preview = |err: ContainerError<EuclidErrors>, stage: &'static str| {
+    let fail_preview = |err: ContainerError<EuclidErrors>, stage: &'static str| {
         record_routing_evaluate_preview_error(
             &flows,
             &payload,
@@ -1326,10 +1269,6 @@ pub(crate) async fn routing_evaluate_with_analytics(
             global_request_id.clone(),
             trace_id.clone(),
         );
-        update_failure_metrics();
-        if let Some(timer) = timer.take() {
-            timer.observe_duration();
-        }
         Err(err)
     };
 
@@ -1373,12 +1312,6 @@ pub(crate) async fn routing_evaluate_with_analytics(
                             .as_ref()
                             .is_some_and(|fallback| !fallback.is_empty()) =>
                     {
-                        API_REQUEST_COUNTER
-                            .with_label_values(&[flows.metric_label, "success"])
-                            .inc();
-                        if let Some(timer) = timer.take() {
-                            timer.observe_duration();
-                        }
                         return Ok(Json(
                             no_active_algorithm_response(
                                 &flows,
@@ -1469,12 +1402,6 @@ pub(crate) async fn routing_evaluate_with_analytics(
         );
     }
 
-    API_REQUEST_COUNTER
-        .with_label_values(&[flows.metric_label, "success"])
-        .inc();
-    if let Some(timer) = timer.take() {
-        timer.observe_duration();
-    }
     Ok(Json(response))
 }
 
@@ -1494,16 +1421,6 @@ pub async fn routing_evaluate_batch(
     headers: axum::http::HeaderMap,
     ScopedJson { payload, .. }: ScopedJson<RoutingBatchRequest>,
 ) -> Result<Json<RoutingBatchResponse>, ContainerError<EuclidErrors>> {
-    let mut timer = Some(
-        metrics::API_LATENCY_HISTOGRAM
-            .with_label_values(&["routing_evaluate_batch"])
-            .start_timer(),
-    );
-
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["routing_evaluate_batch"])
-        .inc();
-
     let state = get_tenant_app_state().await;
     let request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
@@ -1546,7 +1463,7 @@ pub async fn routing_evaluate_batch(
             .unwrap_or_default(),
         algorithm_for: payload.algorithm_for.clone(),
     };
-    let mut fail_batch = |err: ContainerError<EuclidErrors>, stage: &'static str| {
+    let fail_batch = |err: ContainerError<EuclidErrors>, stage: &'static str| {
         record_routing_evaluate_preview_error(
             &RoutingEvaluateAnalyticsFlows::routing_evaluate(),
             &batch_error_payload,
@@ -1556,12 +1473,6 @@ pub async fn routing_evaluate_batch(
             global_request_id.clone(),
             trace_id.clone(),
         );
-        API_REQUEST_COUNTER
-            .with_label_values(&["routing_evaluate_batch", "failure"])
-            .inc();
-        if let Some(timer) = timer.take() {
-            timer.observe_duration();
-        }
         Err(err)
     };
 
@@ -1572,12 +1483,6 @@ pub async fn routing_evaluate_batch(
     // fallback; answering the empty batch with an empty result set keeps the contract
     // (`results[i]` answers `requests[i]`) and the noise out of both services' logs.
     if payload.requests.is_empty() {
-        API_REQUEST_COUNTER
-            .with_label_values(&["routing_evaluate_batch", "success"])
-            .inc();
-        if let Some(timer) = timer.take() {
-            timer.observe_duration();
-        }
         return Ok(Json(RoutingBatchResponse { results: vec![] }));
     }
     if payload.requests.len() > MAX_BATCH_EVALUATIONS {
@@ -1663,12 +1568,6 @@ pub async fn routing_evaluate_batch(
                 global_request_id.clone(),
                 trace_id.clone(),
             );
-            API_REQUEST_COUNTER
-                .with_label_values(&["routing_evaluate_batch", "success"])
-                .inc();
-            if let Some(timer) = timer.take() {
-                timer.observe_duration();
-            }
             return Ok(Json(response));
         }
         Err(e) => return fail_batch(e, "batch_active_routing_lookup_failed"),
@@ -1818,12 +1717,6 @@ pub async fn routing_evaluate_batch(
             global_request_id.clone(),
             trace_id.clone(),
         );
-    }
-    API_REQUEST_COUNTER
-        .with_label_values(&["routing_evaluate_batch", "success"])
-        .inc();
-    if let Some(timer) = timer.take() {
-        timer.observe_duration();
     }
     Ok(Json(response))
 }
@@ -1983,13 +1876,6 @@ pub async fn activate_routing_rule(
         merchant, payload, ..
     }: ScopedJson<ActivateRoutingConfigRequest>,
 ) -> Result<(), ContainerError<EuclidErrors>> {
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["activate_routing_rule"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["activate_routing_rule"])
-        .inc();
-
     let run = async {
         let state = get_tenant_app_state().await;
         let conn = state
@@ -2049,17 +1935,6 @@ pub async fn activate_routing_rule(
     };
 
     let outcome = run.await;
-    API_REQUEST_COUNTER
-        .with_label_values(&[
-            "activate_routing_rule",
-            if outcome.is_ok() {
-                "success"
-            } else {
-                "failure"
-            },
-        ])
-        .inc();
-    timer.observe_duration();
     outcome
 }
 
@@ -2068,13 +1943,6 @@ pub async fn deactivate_routing_rule(
         merchant, payload, ..
     }: ScopedJson<DeactivateRoutingConfigRequest>,
 ) -> Result<(), ContainerError<EuclidErrors>> {
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["deactivate_routing_rule"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["deactivate_routing_rule"])
-        .inc();
-
     let run = async {
         let state = get_tenant_app_state().await;
         let algorithm = algorithm_store::find(&state.db, &merchant, &payload.routing_algorithm_id)
@@ -2111,17 +1979,6 @@ pub async fn deactivate_routing_rule(
     };
 
     let outcome = run.await;
-    API_REQUEST_COUNTER
-        .with_label_values(&[
-            "deactivate_routing_rule",
-            if outcome.is_ok() {
-                "success"
-            } else {
-                "failure"
-            },
-        ])
-        .inc();
-    timer.observe_duration();
     outcome
 }
 
@@ -2213,17 +2070,7 @@ pub async fn update_routing_rule(
         ..
     }: ScopedJson<crate::euclid::types::UpdateRoutingConfigRequest>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["update_routing_rule"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["update_routing_rule"])
-        .inc();
-    let fail = || {
-        API_REQUEST_COUNTER
-            .with_label_values(&["update_routing_rule", "failure"])
-            .inc();
-    };
+    let fail = || {};
 
     let run = async {
         let state = get_tenant_app_state().await;
@@ -2320,16 +2167,9 @@ pub async fn update_routing_rule(
     };
 
     match run.await {
-        Ok(record) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["update_routing_rule", "success"])
-                .inc();
-            timer.observe_duration();
-            Ok(Json(record))
-        }
+        Ok(record) => Ok(Json(record)),
         Err(e) => {
             fail();
-            timer.observe_duration();
             Err(e)
         }
     }
@@ -2342,17 +2182,7 @@ pub async fn delete_routing_rule(
         merchant, payload, ..
     }: ScopedJson<crate::euclid::types::DeleteRoutingConfigRequest>,
 ) -> Result<Json<serde_json::Value>, ContainerError<EuclidErrors>> {
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["delete_routing_rule"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["delete_routing_rule"])
-        .inc();
-    let fail = || {
-        API_REQUEST_COUNTER
-            .with_label_values(&["delete_routing_rule", "failure"])
-            .inc();
-    };
+    let fail = || {};
 
     let run = async {
         let state = get_tenant_app_state().await;
@@ -2369,19 +2199,12 @@ pub async fn delete_routing_rule(
     };
 
     match run.await {
-        Ok(()) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["delete_routing_rule", "success"])
-                .inc();
-            timer.observe_duration();
-            Ok(Json(serde_json::json!({
-                "status": "deleted",
-                "routing_algorithm_id": payload.routing_algorithm_id,
-            })))
-        }
+        Ok(()) => Ok(Json(serde_json::json!({
+            "status": "deleted",
+            "routing_algorithm_id": payload.routing_algorithm_id,
+        }))),
         Err(e) => {
             fail();
-            timer.observe_duration();
             Err(e)
         }
     }
@@ -2390,29 +2213,11 @@ pub async fn delete_routing_rule(
 pub async fn list_all_routing_algorithm_id(
     MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<Vec<JsonifiedRoutingAlgorithm>>, ContainerError<EuclidErrors>> {
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["list_all_routing_algorithm_id"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["list_all_routing_algorithm_id"])
-        .inc();
-
     let state = get_tenant_app_state().await;
     let outcome = algorithm_store::list(&state.db, &merchant)
         .await
         .change_context(EuclidErrors::StorageError);
 
-    API_REQUEST_COUNTER
-        .with_label_values(&[
-            "list_all_routing_algorithm_id",
-            if outcome.is_ok() {
-                "success"
-            } else {
-                "failure"
-            },
-        ])
-        .inc();
-    timer.observe_duration();
     Ok(Json(outcome?.into_iter().map(Into::into).collect()))
 }
 
@@ -2420,13 +2225,6 @@ pub async fn list_all_routing_algorithm_id(
 pub async fn list_active_routing_algorithm(
     MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<Vec<JsonifiedRoutingAlgorithm>>, ContainerError<EuclidErrors>> {
-    let timer = metrics::API_LATENCY_HISTOGRAM
-        .with_label_values(&["list_active_routing_algorithm"])
-        .start_timer();
-    metrics::API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["list_active_routing_algorithm"])
-        .inc();
-
     let state = get_tenant_app_state().await;
     let outcome = algorithm_store::list_active(&state.db, &merchant)
         .await
@@ -2434,17 +2232,6 @@ pub async fn list_active_routing_algorithm(
             merchant.as_str().to_string(),
         ));
 
-    API_REQUEST_COUNTER
-        .with_label_values(&[
-            "list_active_routing_algorithm",
-            if outcome.is_ok() {
-                "success"
-            } else {
-                "failure"
-            },
-        ])
-        .inc();
-    timer.observe_duration();
     Ok(Json(
         outcome?
             .into_iter()
@@ -2594,13 +2381,6 @@ pub(crate) fn extract_connectors_for_eligibility(output: &Output) -> Vec<Connect
 /// This allows the dashboard to dynamically fetch valid routing keys
 pub async fn get_routing_config(
 ) -> Result<Json<crate::euclid::types::TomlConfig>, ContainerError<EuclidErrors>> {
-    let timer = metrics::API_LATENCY_HISTOGRAM
-        .with_label_values(&["get_routing_config"])
-        .start_timer();
-    metrics::API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["get_routing_config"])
-        .inc();
-
     let tenant_state = get_tenant_app_state().await;
 
     // Clone the routing config to return it
@@ -2609,11 +2389,6 @@ pub async fn get_routing_config(
         .routing_config
         .clone()
         .ok_or(EuclidErrors::GlobalRoutingConfigsUnavailable)?;
-
-    metrics::API_REQUEST_COUNTER
-        .with_label_values(&["get_routing_config", "success"])
-        .inc();
-    timer.observe_duration();
 
     logger::info!("Successfully served routing config");
 

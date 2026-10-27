@@ -14,7 +14,7 @@ use crate::{
             GatewayDeciderApproach, RankingAlgorithm, ResetApproach, UnifiedError,
         },
     },
-    logger, metrics,
+    logger,
 };
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
@@ -194,9 +194,6 @@ pub(crate) async fn run_decider_with_analytics(
                 Some(payload.currency()),
                 payload.country(),
             );
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["decide_gateway", "success"])
-                .inc();
             Ok(decided_gateway)
         }
         Err(e) => {
@@ -226,9 +223,6 @@ pub(crate) async fn run_decider_with_analytics(
                 Some("request_failed".to_string()),
                 auth_type,
             );
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["decide_gateway", "failure"])
-                .inc();
             Err(e)
         }
     }
@@ -240,12 +234,6 @@ pub async fn decide_gateway(
     request: Result<ScopedJson<DomainDeciderRequestForApiCallV2>, ScopedJsonRejection>,
 ) -> Result<DecidedGateway, ErrorResponse> {
     let cpu_start = Instant::now();
-    let timer = metrics::API_LATENCY_HISTOGRAM
-        .with_label_values(&["decide_gateway"])
-        .start_timer();
-    metrics::API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["decide_gateway"])
-        .inc();
 
     let x_request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
@@ -273,10 +261,6 @@ pub async fn decide_gateway(
             (body, Err(error))
         }
         Err(ScopedJsonRejection::Scope(violation)) => {
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["decide_gateway", "failure"])
-                .inc();
-            timer.observe_duration();
             return Err(violation.into());
         }
         Err(ScopedJsonRejection::Read(e)) => {
@@ -302,10 +286,6 @@ pub async fn decide_gateway(
                 Some(analytics_stage),
                 None,
             );
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["decide_gateway", "failure"])
-                .inc();
-            timer.observe_duration();
             return Err(error_response);
         }
     };
@@ -355,13 +335,9 @@ pub async fn decide_gateway(
                 Some("request_parse_failed".to_string()),
                 None,
             );
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["decide_gateway", "failure"])
-                .inc();
             Err(error_response)
         }
     };
-    timer.observe_duration();
 
     // let connection = state.db.get_conn().await.unwrap();
     // println!("Starting Decision Gateway");

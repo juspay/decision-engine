@@ -116,7 +116,6 @@ pub async fn delete_ingestion(
     MerchantFromPath(merchant): MerchantFromPath,
     Path((_, ingestion_id)): Path<(String, String)>,
 ) -> Result<StatusCode, TextError> {
-    let merchant_id = merchant.as_str().to_string();
     let row = store::get_for_merchant(&merchant, &ingestion_id)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?
@@ -147,7 +146,7 @@ pub async fn delete_ingestion(
         &clickhouse,
         &row.connector,
         &row.account,
-        &merchant_id,
+        merchant.as_str(),
         &ingestion_id,
     )
     .await
@@ -158,7 +157,7 @@ pub async fn delete_ingestion(
         &clickhouse,
         &row.connector,
         &row.account,
-        &merchant_id,
+        merchant.as_str(),
         &report_date,
         // No ingestion to attribute clusters to — this refit exists precisely because that
         // ingestion's rows were just deleted. Empty asks for the snapshot-wide summary, which is
@@ -180,7 +179,7 @@ pub async fn delete_ingestion(
     // (dropping it), so the router stops using models with no supporting data right away instead of
     // after the 300s tick. Per-merchant: other merchants' cached models are left untouched.
     if let Err(e) =
-        crate::cost_ingestion::serving::refresh_merchant(&clickhouse, &merchant_id).await
+        crate::cost_ingestion::serving::refresh_merchant(&clickhouse, merchant.as_str()).await
     {
         logger::warn!(
             tag = "report_upload",
@@ -198,7 +197,6 @@ pub async fn delete_ingestion(
 pub async fn list_price_changes(
     MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<Vec<crate::cost_ingestion::detect::PriceChange>>, TextError> {
-    let merchant_id = merchant.as_str().to_string();
     let clickhouse = crate::app::APP_STATE
         .get()
         .ok_or((
@@ -209,7 +207,7 @@ pub async fn list_price_changes(
         .analytics
         .clickhouse
         .clone();
-    let changes = crate::cost_ingestion::detect::price_changes(&clickhouse, &merchant_id)
+    let changes = crate::cost_ingestion::detect::price_changes(&clickhouse, merchant.as_str())
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
     Ok(Json(changes))
@@ -358,7 +356,6 @@ pub async fn validate_report_headers(
     Query(params): Query<PreflightParams>,
     body: Body,
 ) -> Result<Json<crate::cost_ingestion::preflight::PreflightReport>, TextError> {
-    let merchant_id = merchant.as_str().to_string();
     use crate::cost_ingestion::preflight;
 
     let sample = read_capped(body, preflight::HEADER_SAMPLE_BYTES).await?;
@@ -369,7 +366,7 @@ pub async fn validate_report_headers(
     // Validate against the source's saved mapping when there is an account to look one up for, so a
     // merchant who mapped this source last month sees their next file pass immediately.
     let mapping = match params.account.as_deref() {
-        Some(account) => mapping::load(&merchant_id, &connector, account)
+        Some(account) => mapping::load(merchant.as_str(), &connector, account)
             .await
             .map_err(|e| storage_error("load column mapping", e))?,
         None => Default::default(),
@@ -446,8 +443,7 @@ pub async fn get_column_mapping(
     Path((_, connector)): Path<(String, String)>,
     Query(params): Query<UploadParams>,
 ) -> Result<Json<mapping::ColumnMapping>, TextError> {
-    let merchant_id = merchant.as_str().to_string();
-    mapping::load(&merchant_id, &connector, &params.account)
+    mapping::load(merchant.as_str(), &connector, &params.account)
         .await
         .map(Json)
         .map_err(|e| storage_error("load column mapping", e).into())
@@ -468,7 +464,6 @@ pub async fn set_column_mapping(
     Query(params): Query<UploadParams>,
     Json(req): Json<MappingRequest>,
 ) -> Result<StatusCode, TextError> {
-    let merchant_id = merchant.as_str().to_string();
     use crate::cost_ingestion::preflight;
 
     let candidate = mapping::ColumnMapping::from_pairs(req.columns);
@@ -502,7 +497,7 @@ pub async fn set_column_mapping(
             .map_err(|e| (StatusCode::BAD_REQUEST, format!("{e}")))?;
     }
 
-    mapping::save(&merchant_id, &connector, &params.account, &candidate)
+    mapping::save(merchant.as_str(), &connector, &params.account, &candidate)
         .await
         .map_err(|e| storage_error("save column mapping", e))?;
     Ok(StatusCode::NO_CONTENT)
@@ -515,8 +510,7 @@ pub async fn delete_column_mapping(
     Path((_, connector)): Path<(String, String)>,
     Query(params): Query<UploadParams>,
 ) -> Result<StatusCode, TextError> {
-    let merchant_id = merchant.as_str().to_string();
-    mapping::delete(&merchant_id, &connector, &params.account)
+    mapping::delete(merchant.as_str(), &connector, &params.account)
         .await
         .map_err(|e| storage_error("clear column mapping", e))?;
     Ok(StatusCode::NO_CONTENT)

@@ -360,19 +360,23 @@ fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
     axum::Router::new()
         .route(
             "/routing/create",
-            axum::routing::post(crate::euclid::handlers::routing_rules::routing_create),
+            axum::routing::post(crate::euclid::handlers::routing_rules::routing_create)
+                .route_layer(custom_middleware::endpoint("routing_create")),
         )
         .route(
             "/routing/activate",
-            axum::routing::post(crate::euclid::handlers::routing_rules::activate_routing_rule),
+            axum::routing::post(crate::euclid::handlers::routing_rules::activate_routing_rule)
+                .route_layer(custom_middleware::endpoint("activate_routing_rule")),
         )
         .route(
             "/routing/deactivate",
-            axum::routing::post(crate::euclid::handlers::routing_rules::deactivate_routing_rule),
+            axum::routing::post(crate::euclid::handlers::routing_rules::deactivate_routing_rule)
+                .route_layer(custom_middleware::endpoint("deactivate_routing_rule")),
         )
         .route(
             "/routing/update",
-            axum::routing::post(crate::euclid::handlers::routing_rules::update_routing_rule),
+            axum::routing::post(crate::euclid::handlers::routing_rules::update_routing_rule)
+                .route_layer(custom_middleware::endpoint("update_routing_rule")),
         )
         // Rule deletion is disabled for parity with the Hyperswitch dashboard, which
         // cannot delete routing rules yet (juspay/hyperswitch-control-center#5495,
@@ -385,53 +389,65 @@ fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
             "/routing/list/:merchant_id",
             axum::routing::post(
                 crate::euclid::handlers::routing_rules::list_all_routing_algorithm_id,
-            ),
+            )
+            .route_layer(custom_middleware::endpoint("list_all_routing_algorithm_id")),
         )
         .route(
             "/routing/list/active/:merchant_id",
             axum::routing::post(
                 crate::euclid::handlers::routing_rules::list_active_routing_algorithm,
-            ),
+            )
+            .route_layer(custom_middleware::endpoint("list_active_routing_algorithm")),
         )
         .route(
             "/routing/evaluate",
-            axum::routing::post(crate::euclid::handlers::routing_rules::routing_evaluate),
+            axum::routing::post(crate::euclid::handlers::routing_rules::routing_evaluate)
+                .route_layer(custom_middleware::endpoint("routing_evaluate")),
         )
         .route(
             "/routing/evaluate/batch",
-            axum::routing::post(crate::euclid::handlers::routing_rules::routing_evaluate_batch),
+            axum::routing::post(crate::euclid::handlers::routing_rules::routing_evaluate_batch)
+                .route_layer(custom_middleware::endpoint("routing_evaluate_batch")),
         )
         .route(
             "/decision_gateway",
-            post(routes::decision_gateway::decision_gateway),
+            post(routes::decision_gateway::decision_gateway)
+                .route_layer(custom_middleware::endpoint("decision_gateway")),
         )
         .route(
             "/rule/create",
-            post(routes::rule_configuration::create_rule_config),
+            post(routes::rule_configuration::create_rule_config)
+                .route_layer(custom_middleware::endpoint("create_rule_config")),
         )
         .route(
             "/rule/get",
-            post(routes::rule_configuration::get_rule_config),
+            post(routes::rule_configuration::get_rule_config)
+                .route_layer(custom_middleware::endpoint("get_rule_config")),
         )
         .route(
             "/rule/update",
-            post(routes::rule_configuration::update_rule_config),
+            post(routes::rule_configuration::update_rule_config)
+                .route_layer(custom_middleware::endpoint("update_rule_config")),
         )
         .route(
             "/rule/delete",
-            post(routes::rule_configuration::delete_rule_config),
+            post(routes::rule_configuration::delete_rule_config)
+                .route_layer(custom_middleware::endpoint("delete_rule_config")),
         )
         .route(
             "/merchant-account/:merchant_id",
-            get(routes::merchant_account_config::get_merchant_config),
+            get(routes::merchant_account_config::get_merchant_config)
+                .route_layer(custom_middleware::endpoint("merchant_account_get")),
         )
         .route(
             "/merchant-account/:merchant_id",
-            delete(routes::merchant_account_config::delete_merchant_config),
+            delete(routes::merchant_account_config::delete_merchant_config)
+                .route_layer(custom_middleware::endpoint("merchant_account_delete")),
         )
         .route(
             "/merchant-account/:merchant_id/debit-routing",
-            get(routes::merchant_account_config::get_debit_routing),
+            get(routes::merchant_account_config::get_debit_routing)
+                .route_layer(custom_middleware::endpoint("merchant_debit_routing_get")),
         )
         .route(
             "/merchant-account/:merchant_id/connectors",
@@ -585,19 +601,23 @@ fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
         )
         .route(
             "/merchant-account/:merchant_id/debit-routing",
-            post(routes::merchant_account_config::update_debit_routing),
+            post(routes::merchant_account_config::update_debit_routing)
+                .route_layer(custom_middleware::endpoint("merchant_debit_routing_update")),
         )
         .route(
             "/merchant-account/:merchant_id/features",
-            get(routes::merchant_account_config::get_merchant_features),
+            get(routes::merchant_account_config::get_merchant_features)
+                .route_layer(custom_middleware::endpoint("merchant_features_get")),
         )
         .route(
             "/merchant-account/:merchant_id/features/:feature",
-            post(routes::merchant_account_config::update_merchant_feature),
+            post(routes::merchant_account_config::update_merchant_feature)
+                .route_layer(custom_middleware::endpoint("merchant_feature_update")),
         )
         .route(
             "/config-sr-dimension",
-            axum::routing::post(crate::euclid::handlers::routing_rules::config_sr_dimensions),
+            axum::routing::post(crate::euclid::handlers::routing_rules::config_sr_dimensions)
+                .route_layer(custom_middleware::endpoint("config_sr_dimensions")),
         )
         .route(
             "/config-sr-dimension/:merchant_id",
@@ -605,21 +625,29 @@ fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
         )
         .route(
             "/config/routing-keys",
-            axum::routing::get(crate::euclid::handlers::routing_rules::get_routing_config),
+            axum::routing::get(crate::euclid::handlers::routing_rules::get_routing_config)
+                .route_layer(custom_middleware::endpoint("get_routing_config")),
         )
         .route("/gsm/options", get(routes::gsm::gsm_options))
-        .route("/update-score", post(routes::update_score::update_score))
+        .route(
+            "/update-score",
+            post(routes::update_score::update_score)
+                .route_layer(custom_middleware::endpoint("update_score")),
+        )
         .route(
             "/decide-gateway",
-            post(routes::decide_gateway::decide_gateway),
+            post(routes::decide_gateway::decide_gateway)
+                .route_layer(custom_middleware::endpoint("decide_gateway")),
         )
         .route(
             "/routing/hybrid",
-            post(routes::hybrid_routing::hybrid_routing_evaluate),
+            post(routes::hybrid_routing::hybrid_routing_evaluate)
+                .route_layer(custom_middleware::endpoint("hybrid_routing_evaluate")),
         )
         .route(
             "/update-gateway-score",
-            post(routes::update_gateway_score::update_gateway_score),
+            post(routes::update_gateway_score::update_gateway_score)
+                .route_layer(custom_middleware::endpoint("update_gateway_score")),
         )
         .route(
             "/gateway-score/reset",
@@ -649,7 +677,8 @@ fn admin_routes() -> axum::Router<Arc<GlobalAppState>> {
     axum::Router::new()
         .route(
             "/merchant-account/create",
-            post(routes::merchant_account_config::create_merchant_config),
+            post(routes::merchant_account_config::create_merchant_config)
+                .route_layer(custom_middleware::endpoint("merchant_account_create")),
         )
         .route(
             "/admin/hierarchy/reconcile",

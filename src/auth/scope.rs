@@ -16,6 +16,8 @@
 //! 1. Register it in the route group for its caller, in `app.rs`: `merchant_routes()` for anything
 //!    acting on one merchant, `admin_routes()` for deployment-level calls only the admin secret may
 //!    make, `public_routes()` for routes that authenticate themselves (sign-in, signed webhooks).
+//!    Name it for the request metrics with `.route_layer(endpoint("<name>"))` on its method router
+//!    ([`crate::middleware::endpoint`]); the handler records no request metrics of its own.
 //! 2. Take the merchant from the request with an extractor — handlers never call [`authorize`]:
 //!    - Named in the path: spell the parameter `:merchant_id` ([`MERCHANT_PATH_PARAM`]) and take
 //!      [`MerchantFromPath`](crate::custom_extractors::MerchantFromPath).

@@ -1,5 +1,4 @@
 use crate::custom_extractors::{Json, ScopedJson};
-use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::types::merchant as ETM;
 use crate::{error, logger, types};
 use error_stack::ResultExt;
@@ -38,12 +37,6 @@ pub async fn create_rule_config(
         merchant, payload, ..
     }: ScopedJson<types::routing_configuration::RoutingRule>,
 ) -> Result<Json<RuleConfigResponse>, error::ContainerError<error::RuleConfigurationError>> {
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["create_rule_config"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["create_rule_config"])
-        .inc();
     logger::debug!("Received rule configuration: {:?}", payload);
 
     let merchant_id = merchant.as_str().to_string();
@@ -58,17 +51,11 @@ pub async fn create_rule_config(
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
-    let mid = merchant.as_str().to_string();
-
     // Check if merchant exists
-    if ETM::merchant_account::load_merchant_by_merchant_id(mid.clone())
+    if ETM::merchant_account::load_merchant_by_merchant_id(merchant.as_str().to_string())
         .await
         .is_none()
     {
-        API_REQUEST_COUNTER
-            .with_label_values(&["create_rule_config", "failure"])
-            .inc();
-        timer.observe_duration();
         return Err(error::RuleConfigurationError::MerchantNotFound.into());
     }
 
@@ -77,7 +64,7 @@ pub async fn create_rule_config(
             let success_config = success_config
                 .normalised()
                 .map_err(error::RuleConfigurationError::InvalidPaymentMethod)?;
-            let name = format!("SR_V3_INPUT_CONFIG_{}", mid);
+            let name = format!("SR_V3_INPUT_CONFIG_{}", merchant);
             let serialized_config = serde_json::to_string(&success_config)
                 .map_err(|_| error::RuleConfigurationError::StorageError)?;
 
@@ -87,34 +74,18 @@ pub async fn create_rule_config(
                 .change_context(error::RuleConfigurationError::StorageError)?;
 
             match result {
-                Some(_) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["sr_create_rule_config", "failure"])
-                        .inc();
-                    Err(error::RuleConfigurationError::ConfigurationAlreadyExists.into())
-                }
+                Some(_) => Err(error::RuleConfigurationError::ConfigurationAlreadyExists.into()),
                 None => {
                     match types::service_configuration::insert_config(name, Some(serialized_config))
                         .await
                         .change_context(error::RuleConfigurationError::StorageError)
                     {
-                        Ok(_) => {
-                            API_REQUEST_COUNTER
-                                .with_label_values(&["sr_create_rule_config", "success"])
-                                .inc();
-                            Ok(Json(RuleConfigResponse {
-                                message: "Success Rate Configuration created successfully"
-                                    .to_string(),
-                                merchant_id,
-                                config,
-                            }))
-                        }
-                        Err(e) => {
-                            API_REQUEST_COUNTER
-                                .with_label_values(&["sr_create_rule_config", "failure"])
-                                .inc();
-                            Err(e.into())
-                        }
+                        Ok(_) => Ok(Json(RuleConfigResponse {
+                            message: "Success Rate Configuration created successfully".to_string(),
+                            merchant_id,
+                            config,
+                        })),
+                        Err(e) => Err(e.into()),
                     }
                 }
             }
@@ -125,33 +96,23 @@ pub async fn create_rule_config(
                 .map_err(|_| error::RuleConfigurationError::StorageError)?;
 
             let result = types::merchant::merchant_account::update_merchant_account(
-                mid,
+                merchant.as_str().to_string(),
                 Some(serialized_config),
             )
             .await
             .change_context(error::RuleConfigurationError::StorageError);
 
             match result {
-                Ok(_) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["elimination_create_rule_config", "success"])
-                        .inc();
-                    Ok(Json(RuleConfigResponse {
-                        message: "Elimination Configuration created successfully".to_string(),
-                        merchant_id,
-                        config,
-                    }))
-                }
-                Err(e) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["elimination_create_rule_config", "failure"])
-                        .inc();
-                    Err(e.into())
-                }
+                Ok(_) => Ok(Json(RuleConfigResponse {
+                    message: "Elimination Configuration created successfully".to_string(),
+                    merchant_id,
+                    config,
+                })),
+                Err(e) => Err(e.into()),
             }
         }
         types::routing_configuration::ConfigVariant::DebitRouting(debit_config) => {
-            let name = format!("DEBIT_ROUTING_CONFIG_{}", mid);
+            let name = format!("DEBIT_ROUTING_CONFIG_{}", merchant);
             let serialized_config = serde_json::to_string(&debit_config)
                 .map_err(|_| error::RuleConfigurationError::StorageError)?;
 
@@ -161,34 +122,18 @@ pub async fn create_rule_config(
                 .change_context(error::RuleConfigurationError::StorageError)?;
 
             match result {
-                Some(_) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["debit_routing_create_rule_config", "failure"])
-                        .inc();
-                    Err(error::RuleConfigurationError::ConfigurationAlreadyExists.into())
-                }
+                Some(_) => Err(error::RuleConfigurationError::ConfigurationAlreadyExists.into()),
                 None => {
                     match types::service_configuration::insert_config(name, Some(serialized_config))
                         .await
                         .change_context(error::RuleConfigurationError::StorageError)
                     {
-                        Ok(_) => {
-                            API_REQUEST_COUNTER
-                                .with_label_values(&["debit_routing_create_rule_config", "success"])
-                                .inc();
-                            Ok(Json(RuleConfigResponse {
-                                message: "Debit Routing Configuration created successfully"
-                                    .to_string(),
-                                merchant_id,
-                                config,
-                            }))
-                        }
-                        Err(e) => {
-                            API_REQUEST_COUNTER
-                                .with_label_values(&["debit_routing_create_rule_config", "failure"])
-                                .inc();
-                            Err(e.into())
-                        }
+                        Ok(_) => Ok(Json(RuleConfigResponse {
+                            message: "Debit Routing Configuration created successfully".to_string(),
+                            merchant_id,
+                            config,
+                        })),
+                        Err(e) => Err(e.into()),
                     }
                 }
             }
@@ -212,7 +157,6 @@ pub async fn create_rule_config(
             Some("rule_config_created".to_string()),
         );
     }
-    timer.observe_duration();
     result
 }
 
@@ -226,12 +170,6 @@ pub async fn get_rule_config(
     Json<types::routing_configuration::RoutingRule>,
     error::ContainerError<error::RuleConfigurationError>,
 > {
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["get_rule_config"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["get_rule_config"])
-        .inc();
     logger::debug!("Received rule fetch request: {:?}", payload);
     let analytics_payload = payload.clone();
     let request_id = headers
@@ -241,26 +179,23 @@ pub async fn get_rule_config(
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
-    let mid = merchant.as_str().to_string();
-    let analytics_mid = mid.clone();
+    let analytics_mid = merchant.as_str().to_string();
     // Resolve the scope before dispatching on algorithm. Only the elimination config lives on the
     // merchant row; the others are looked up by a name derived from the merchant id, so without
     // this an unknown merchant is indistinguishable from one that simply has no config yet.
     let merchant_account =
-        match ETM::merchant_account::load_merchant_by_merchant_id(mid.clone()).await {
+        match ETM::merchant_account::load_merchant_by_merchant_id(merchant.as_str().to_string())
+            .await
+        {
             Some(account) => account,
             None => {
-                API_REQUEST_COUNTER
-                    .with_label_values(&["get_rule_config", "failure"])
-                    .inc();
-                timer.observe_duration();
                 return Err(error::RuleConfigurationError::MerchantNotFound.into());
             }
         };
 
     let result = match payload.algorithm {
         types::routing_configuration::AlgorithmType::SuccessRate => {
-            let config_name = format!("SR_V3_INPUT_CONFIG_{}", mid);
+            let config_name = format!("SR_V3_INPUT_CONFIG_{}", merchant);
             let result = types::service_configuration::find_config_by_name(config_name.clone())
                 .await
                 .change_context(error::RuleConfigurationError::StorageError)
@@ -275,23 +210,13 @@ pub async fn get_rule_config(
                 });
 
             match result {
-                Ok(success_rate_config) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["sr_get_rule_config", "success"])
-                        .inc();
-                    Ok(Json(types::routing_configuration::RoutingRule {
-                        merchant_id: mid,
-                        config: types::routing_configuration::ConfigVariant::SuccessRate(
-                            success_rate_config,
-                        ),
-                    }))
-                }
-                Err(e) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["sr_get_rule_config", "failure"])
-                        .inc();
-                    Err(e.into())
-                }
+                Ok(success_rate_config) => Ok(Json(types::routing_configuration::RoutingRule {
+                    merchant_id: merchant.as_str().to_string(),
+                    config: types::routing_configuration::ConfigVariant::SuccessRate(
+                        success_rate_config,
+                    ),
+                })),
+                Err(e) => Err(e.into()),
             }
         }
         types::routing_configuration::AlgorithmType::Elimination => {
@@ -305,27 +230,17 @@ pub async fn get_rule_config(
             });
 
             match result {
-                Ok(elimination_config) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["elimination_get_rule_config", "success"])
-                        .inc();
-                    Ok(Json(types::routing_configuration::RoutingRule {
-                        merchant_id: mid,
-                        config: types::routing_configuration::ConfigVariant::Elimination(
-                            elimination_config,
-                        ),
-                    }))
-                }
-                Err(e) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["elimination_get_rule_config", "failure"])
-                        .inc();
-                    Err(e.into())
-                }
+                Ok(elimination_config) => Ok(Json(types::routing_configuration::RoutingRule {
+                    merchant_id: merchant.as_str().to_string(),
+                    config: types::routing_configuration::ConfigVariant::Elimination(
+                        elimination_config,
+                    ),
+                })),
+                Err(e) => Err(e.into()),
             }
         }
         types::routing_configuration::AlgorithmType::DebitRouting => {
-            let config_name = format!("DEBIT_ROUTING_CONFIG_{}", mid);
+            let config_name = format!("DEBIT_ROUTING_CONFIG_{}", merchant);
             let result = types::service_configuration::find_config_by_name(config_name.clone())
                 .await
                 .change_context(error::RuleConfigurationError::StorageError)
@@ -340,23 +255,13 @@ pub async fn get_rule_config(
                 });
 
             match result {
-                Ok(debit_routing_config) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["debit_routing_get_rule_config", "success"])
-                        .inc();
-                    Ok(Json(types::routing_configuration::RoutingRule {
-                        merchant_id: mid,
-                        config: types::routing_configuration::ConfigVariant::DebitRouting(
-                            debit_routing_config,
-                        ),
-                    }))
-                }
-                Err(e) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["debit_routing_get_rule_config", "failure"])
-                        .inc();
-                    Err(e.into())
-                }
+                Ok(debit_routing_config) => Ok(Json(types::routing_configuration::RoutingRule {
+                    merchant_id: merchant.as_str().to_string(),
+                    config: types::routing_configuration::ConfigVariant::DebitRouting(
+                        debit_routing_config,
+                    ),
+                })),
+                Err(e) => Err(e.into()),
             }
         }
     };
@@ -377,7 +282,6 @@ pub async fn get_rule_config(
             Some("rule_config_loaded".to_string()),
         );
     }
-    timer.observe_duration();
     result
 }
 
@@ -388,12 +292,6 @@ pub async fn update_rule_config(
         merchant, payload, ..
     }: ScopedJson<types::routing_configuration::RoutingRule>,
 ) -> Result<Json<RuleConfigResponse>, error::ContainerError<error::RuleConfigurationError>> {
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["update_rule_config"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["update_rule_config"])
-        .inc();
     logger::debug!("Received rule update configuration: {:?}", payload);
 
     let merchant_id = merchant.as_str().to_string();
@@ -408,8 +306,7 @@ pub async fn update_rule_config(
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
-    let mid = merchant.as_str().to_string();
-    ETM::merchant_account::load_merchant_by_merchant_id(mid.clone())
+    ETM::merchant_account::load_merchant_by_merchant_id(merchant.as_str().to_string())
         .await
         .ok_or(error::RuleConfigurationError::MerchantNotFound)?;
 
@@ -419,7 +316,7 @@ pub async fn update_rule_config(
             let success_config = success_config
                 .normalised()
                 .map_err(error::RuleConfigurationError::InvalidPaymentMethod)?;
-            let name = format!("SR_V3_INPUT_CONFIG_{}", mid);
+            let name = format!("SR_V3_INPUT_CONFIG_{}", merchant);
             let serialized_config = serde_json::to_string(&success_config)
                 .map_err(|_| error::RuleConfigurationError::StorageError)?;
 
@@ -428,22 +325,12 @@ pub async fn update_rule_config(
                 .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
             match result {
-                Ok(_) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["sr_update_rule_config", "success"])
-                        .inc();
-                    Ok(Json(RuleConfigResponse {
-                        message: "Success Rate Configuration updated successfully".to_string(),
-                        merchant_id,
-                        config,
-                    }))
-                }
-                Err(e) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["sr_update_rule_config", "failure"])
-                        .inc();
-                    Err(e.into())
-                }
+                Ok(_) => Ok(Json(RuleConfigResponse {
+                    message: "Success Rate Configuration updated successfully".to_string(),
+                    merchant_id,
+                    config,
+                })),
+                Err(e) => Err(e.into()),
             }
         }
         types::routing_configuration::ConfigVariant::Elimination(elimination_config) => {
@@ -452,33 +339,23 @@ pub async fn update_rule_config(
                 .map_err(|_| error::RuleConfigurationError::StorageError)?;
 
             let result = types::merchant::merchant_account::update_merchant_account(
-                mid,
+                merchant.as_str().to_string(),
                 Some(serialized_config),
             )
             .await
             .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
             match result {
-                Ok(_) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["elimination_update_rule_config", "success"])
-                        .inc();
-                    Ok(Json(RuleConfigResponse {
-                        message: "Elimination Configuration updated successfully".to_string(),
-                        merchant_id,
-                        config,
-                    }))
-                }
-                Err(e) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["elimination_update_rule_config", "failure"])
-                        .inc();
-                    Err(e.into())
-                }
+                Ok(_) => Ok(Json(RuleConfigResponse {
+                    message: "Elimination Configuration updated successfully".to_string(),
+                    merchant_id,
+                    config,
+                })),
+                Err(e) => Err(e.into()),
             }
         }
         types::routing_configuration::ConfigVariant::DebitRouting(debit_config) => {
-            let name = format!("DEBIT_ROUTING_CONFIG_{}", mid);
+            let name = format!("DEBIT_ROUTING_CONFIG_{}", merchant);
             let serialized_config = serde_json::to_string(&debit_config)
                 .map_err(|_| error::RuleConfigurationError::StorageError)?;
 
@@ -487,22 +364,12 @@ pub async fn update_rule_config(
                 .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
             match result {
-                Ok(_) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["debit_routing_update_rule_config", "success"])
-                        .inc();
-                    Ok(Json(RuleConfigResponse {
-                        message: "Debit Routing Configuration updated successfully".to_string(),
-                        merchant_id,
-                        config,
-                    }))
-                }
-                Err(e) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["debit_routing_update_rule_config", "failure"])
-                        .inc();
-                    Err(e.into())
-                }
+                Ok(_) => Ok(Json(RuleConfigResponse {
+                    message: "Debit Routing Configuration updated successfully".to_string(),
+                    merchant_id,
+                    config,
+                })),
+                Err(e) => Err(e.into()),
             }
         }
     };
@@ -523,7 +390,6 @@ pub async fn update_rule_config(
             Some("rule_config_updated".to_string()),
         );
     }
-    timer.observe_duration();
     result
 }
 
@@ -534,12 +400,6 @@ pub async fn delete_rule_config(
         merchant, payload, ..
     }: ScopedJson<types::routing_configuration::FetchRoutingRule>,
 ) -> Result<Json<RuleConfigDeleteResponse>, error::ContainerError<error::RuleConfigurationError>> {
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["delete_rule_config"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["delete_rule_config"])
-        .inc();
     logger::debug!("Received rule delete request: {:?}", payload);
     let analytics_payload = payload.clone();
     let request_id = headers
@@ -549,36 +409,26 @@ pub async fn delete_rule_config(
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
 
-    let mid = merchant.as_str().to_string();
-    let analytics_mid = mid.clone();
-    let merchant_account = ETM::merchant_account::load_merchant_by_merchant_id(mid.clone())
-        .await
-        .ok_or(error::RuleConfigurationError::MerchantNotFound)?;
+    let analytics_mid = merchant.as_str().to_string();
+    let merchant_account =
+        ETM::merchant_account::load_merchant_by_merchant_id(merchant.as_str().to_string())
+            .await
+            .ok_or(error::RuleConfigurationError::MerchantNotFound)?;
 
     // Delete DB call for deleting the rule configuration
     let result = match payload.algorithm {
         types::routing_configuration::AlgorithmType::SuccessRate => {
-            let config_name = format!("SR_V3_INPUT_CONFIG_{}", mid);
+            let config_name = format!("SR_V3_INPUT_CONFIG_{}", merchant);
             let result = types::service_configuration::delete_config(config_name)
                 .await
                 .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
             match result {
-                Ok(_) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["sr_delete_rule_config", "success"])
-                        .inc();
-                    Ok(Json(RuleConfigDeleteResponse {
-                        message: "Success Rate Configuration deleted successfully".to_string(),
-                        merchant_id: mid,
-                    }))
-                }
-                Err(e) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["sr_delete_rule_config", "failure"])
-                        .inc();
-                    Err(e.into())
-                }
+                Ok(_) => Ok(Json(RuleConfigDeleteResponse {
+                    message: "Success Rate Configuration deleted successfully".to_string(),
+                    merchant_id: merchant.as_str().to_string(),
+                })),
+                Err(e) => Err(e.into()),
             }
         }
         types::routing_configuration::AlgorithmType::Elimination => {
@@ -586,59 +436,36 @@ pub async fn delete_rule_config(
                 .gatewaySuccessRateBasedDeciderInput
                 .is_empty()
             {
-                API_REQUEST_COUNTER
-                    .with_label_values(&["elimination_delete_rule_config", "failure"])
-                    .inc();
                 return Err(error::RuleConfigurationError::ConfigurationNotFound.into());
             }
 
             let result = types::merchant::merchant_account::update_merchant_account(
-                mid.clone(),
+                merchant.as_str().to_string(),
                 Some("".to_string()),
             ) // update to empty string
             .await
             .change_context(error::RuleConfigurationError::StorageError);
 
             match result {
-                Ok(_) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["elimination_delete_rule_config", "success"])
-                        .inc();
-                    Ok(Json(RuleConfigDeleteResponse {
-                        message: "Elimination Configuration deleted successfully".to_string(),
-                        merchant_id: mid,
-                    }))
-                }
-                Err(e) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["elimination_delete_rule_config", "failure"])
-                        .inc();
-                    Err(e.into())
-                }
+                Ok(_) => Ok(Json(RuleConfigDeleteResponse {
+                    message: "Elimination Configuration deleted successfully".to_string(),
+                    merchant_id: merchant.as_str().to_string(),
+                })),
+                Err(e) => Err(e.into()),
             }
         }
         types::routing_configuration::AlgorithmType::DebitRouting => {
-            let config_name = format!("DEBIT_ROUTING_CONFIG_{}", mid);
+            let config_name = format!("DEBIT_ROUTING_CONFIG_{}", merchant);
             let result = types::service_configuration::delete_config(config_name)
                 .await
                 .change_context(error::RuleConfigurationError::ConfigurationNotFound);
 
             match result {
-                Ok(_) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["debit_routing_delete_rule_config", "success"])
-                        .inc();
-                    Ok(Json(RuleConfigDeleteResponse {
-                        message: "Debit Routing Configuration deleted successfully".to_string(),
-                        merchant_id: mid,
-                    }))
-                }
-                Err(e) => {
-                    API_REQUEST_COUNTER
-                        .with_label_values(&["debit_routing_delete_rule_config", "failure"])
-                        .inc();
-                    Err(e.into())
-                }
+                Ok(_) => Ok(Json(RuleConfigDeleteResponse {
+                    message: "Debit Routing Configuration deleted successfully".to_string(),
+                    merchant_id: merchant.as_str().to_string(),
+                })),
+                Err(e) => Err(e.into()),
             }
         }
     };
@@ -660,6 +487,5 @@ pub async fn delete_rule_config(
             Some("rule_config_deleted".to_string()),
         );
     }
-    timer.observe_duration();
     result
 }

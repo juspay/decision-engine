@@ -542,7 +542,6 @@ pub async fn delete_cluster_override(
     MerchantFromPath(merchant): MerchantFromPath,
     Path((_, cluster_key)): Path<(String, String)>,
 ) -> Result<StatusCode, TextError> {
-    let merchant_id = merchant.as_str().to_string();
     let dims = ClusterDims::from_key(&cluster_key).ok_or((
         StatusCode::BAD_REQUEST,
         "cluster key must have 7 '|'-separated fields".to_string(),
@@ -550,6 +549,6 @@ pub async fn delete_cluster_override(
     overrides::delete_cluster(&merchant, &dims)
         .await
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
-    refresh_serving(&merchant_id).await;
+    refresh_serving(merchant.as_str()).await;
     Ok(StatusCode::NO_CONTENT)
 }
