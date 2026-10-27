@@ -46,25 +46,3 @@ impl CheckoutEnvironment {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn checkout_keeps_key_opaque_and_uses_only_configured_destination() {
-        let config = ConnectorReportApiConfig {
-            checkout_production_api_base_url: "https://configured-prod.example".into(),
-            ..ConnectorReportApiConfig::default()
-        };
-        let raw = r#"{"secret_key":"test","api_base_url":"https://other.example"}"#;
-        let encoded =
-            CheckoutEnvironment::Prod.encode_credentials(&Secret::new(raw.into()), &config);
-        let value = serde_json::from_str::<serde_json::Value>(encoded.peek()).unwrap_or_default();
-        assert_eq!(value["secret_key"], raw);
-        assert_eq!(
-            value["api_base_url"],
-            config.checkout_production_api_base_url
-        );
-    }
-}

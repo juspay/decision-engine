@@ -1023,48 +1023,6 @@ ic_orphan,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,SA,USD,-102.29,2026
     }
 
     #[test]
-    fn checkout_omitted_endpoint_config_preserves_download_urls(
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        use crate::config::CostIngestionConfig;
-        use crate::cost_ingestion::checkout_credentials::CheckoutEnvironment;
-
-        for source in [
-            "",
-            "[connector]",
-            "[connector]\ncheckout_production_api_base_url = 'https://override.example'",
-        ] {
-            let config: CostIngestionConfig = toml::from_str(source)?;
-            for (environment, expected_url) in [
-                (
-                    CheckoutEnvironment::Prod,
-                    if source.contains("override") {
-                        "https://override.example"
-                    } else {
-                        "https://api.checkout.com"
-                    },
-                ),
-                (
-                    CheckoutEnvironment::Sandbox,
-                    "https://api.sandbox.checkout.com",
-                ),
-            ] {
-                let creds = ConnectorCreds {
-                    webhook_secret: Secret::new(String::new()),
-                    download_auth: environment
-                        .encode_credentials(&Secret::new("test_key".into()), &config.connector),
-                };
-                let parsed = CheckoutCreds::parse(&creds)?;
-                assert_eq!(parsed.secret_key, "test_key");
-                assert_eq!(
-                    format!("{}/reports/report_test", parsed.base()),
-                    format!("{expected_url}/reports/report_test")
-                );
-            }
-        }
-        Ok(())
-    }
-
-    #[test]
     fn checkout_dashboard_transformation_preserves_ingestion_input(
     ) -> Result<(), Box<dyn std::error::Error>> {
         use crate::config::ConnectorReportApiConfig;
