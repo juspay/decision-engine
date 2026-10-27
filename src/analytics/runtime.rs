@@ -1,3 +1,5 @@
+use crate::logger;
+use error_stack::{Result, ResultExt};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -35,14 +37,12 @@ impl AnalyticsRuntime {
             Arc::new(
                 ClickHouseAnalyticsStore::new(config.clickhouse.clone())
                     .await
-                    .map_err(|_| {
-                        ConfigurationError::InvalidConfigurationValueError(
-                            "analytics.clickhouse".to_string(),
-                        )
-                    })?,
+                    .change_context(ConfigurationError::InvalidConfigurationValueError(
+                        "analytics.clickhouse".to_string(),
+                    ))?,
             )
         } else {
-            crate::logger::info!("analytics clickhouse disabled; using unavailable read store");
+            logger::info!("analytics clickhouse disabled; using unavailable read store");
             Arc::new(UnavailableAnalyticsReadStore)
         };
 
@@ -50,7 +50,7 @@ impl AnalyticsRuntime {
             match KafkaAnalyticsStore::new(config.kafka.clone()).await {
                 Ok(kafka_store) => Arc::new(kafka_store),
                 Err(error) => {
-                    crate::logger::warn!(
+                    logger::warn!(
                         ?error,
                         kafka_brokers = %config.kafka.brokers,
                         api_topic = %config.kafka.api_topic,
@@ -61,7 +61,7 @@ impl AnalyticsRuntime {
                 }
             }
         } else {
-            crate::logger::info!("analytics kafka disabled; using noop write store");
+            logger::info!("analytics kafka disabled; using noop write store");
             Arc::new(NoopAnalyticsWriteStore)
         };
 
@@ -106,11 +106,11 @@ impl AnalyticsRuntime {
             return;
         }
 
-        if self.domain_tx.try_send(event).is_err() {
+        if let Err(cause) = self.domain_tx.try_send(event) {
             ANALYTICS_EVENTS_DROPPED_TOTAL
                 .with_label_values(&["domain", "queue_full"])
                 .inc();
-            crate::logger::warn!("Dropping analytics domain event because the queue is full");
+            logger::warn!(error = %cause, "Dropping analytics domain event because the queue is full");
             return;
         }
 
@@ -122,11 +122,11 @@ impl AnalyticsRuntime {
             return;
         }
 
-        if self.api_tx.try_send(event).is_err() {
+        if let Err(cause) = self.api_tx.try_send(event) {
             ANALYTICS_EVENTS_DROPPED_TOTAL
                 .with_label_values(&["api", "queue_full"])
                 .inc();
-            crate::logger::warn!("Dropping analytics api event because the queue is full");
+            logger::warn!(error = %cause, "Dropping analytics api event because the queue is full");
             return;
         }
 
@@ -148,7 +148,7 @@ impl AnalyticsRuntime {
             while receiver.recv_many(&mut batch, PUBLISH_BATCH_SIZE).await > 0 {
                 update_depth("domain", &depth, -(batch.len() as isize));
                 if let Err(error) = write_store.persist_domain_events(&batch).await {
-                    crate::logger::warn!(error = %error, "Failed to publish analytics domain events");
+                    logger::warn!(error = %error, "Failed to publish analytics domain events");
                 }
                 batch.clear();
             }
@@ -164,7 +164,7 @@ impl AnalyticsRuntime {
             while receiver.recv_many(&mut batch, PUBLISH_BATCH_SIZE).await > 0 {
                 update_depth("api", &depth, -(batch.len() as isize));
                 if let Err(error) = write_store.persist_api_events(&batch).await {
-                    crate::logger::warn!(error = %error, "Failed to publish analytics api events");
+                    logger::warn!(error = %error, "Failed to publish analytics api events");
                 }
                 batch.clear();
             }

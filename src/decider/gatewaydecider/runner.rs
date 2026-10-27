@@ -190,7 +190,10 @@ pub fn fetch_emi_type(txnCardInfo: TxnCardInfo) -> Result<String, Vec<LogEntry>>
                             "Error while parsing emi_type value from JSON".to_string(),
                         )]),
                     },
-                    Err(_) => Err(vec![]),
+                    Err(cause) => {
+                        logger::error!(error = ?cause);
+                        Err(vec![])
+                    }
                 }
             }
         }
@@ -285,7 +288,7 @@ fn go_card_isin(
     //     Just extendedCardIsin -> (preview ETCa.isinText extendedCardIsin) <|> (.cardIsin) <$> mCardInfo
     //     Nothing -> (.cardIsin) <$> mCardInfo
     let extended_card_bin = utils::fetch_extended_card_bin(&txnCardInfo)
-        .map(|card_bin| to_isin(card_bin).ok())
+        .map(|card_bin| to_isin(card_bin).inspect_err(|error| { logger::error!(error = ?error, "Invalid extended card BIN; retaining existing fallback"); }).ok())
         .unwrap_or(None)
         .or_else(|| mCardInfo.clone().map(|ci| ci.card_isin));
     let card_sub_type_v = mCardInfo
@@ -1134,12 +1137,13 @@ pub async fn eval_script(
 }
 
 async fn handle_response(
-    response: Result<ResponseBody, ApiClientError>,
+    response: error_stack::Result<ResponseBody, ApiClientError>,
     priority_logic_tag: Option<String>,
 ) -> EvaluationResult {
     match response {
         Err(client_error) => {
-            let pl_resp = handle_client_error(client_error);
+            logger::error!(error = ?client_error, "Priority logic evaluation failed; retaining existing fallback");
+            let pl_resp = handle_client_error(client_error.current_context());
             let log_entries = pl_resp
                 .log
                 .unwrap_or_default()
@@ -1205,7 +1209,7 @@ async fn handle_success_response(
     EvaluationResult::PLResponse(pl_output, pl_data, log_entries, status)
 }
 
-fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
+fn handle_client_error(client_error: &ApiClientError) -> PLExecutorError {
     match client_error {
         ApiClientError::BadRequest(bytes) => PLExecutorError {
             error: true,
@@ -1214,7 +1218,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
             log: Some(vec![vec![
                 "Error".to_string(),
                 "Bad request".to_string(),
-                String::from_utf8_lossy(&bytes).to_string(),
+                String::from_utf8_lossy(bytes).to_string(),
             ]]),
         },
         ApiClientError::Unauthorized(bytes) => PLExecutorError {
@@ -1224,7 +1228,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
             log: Some(vec![vec![
                 "Error".to_string(),
                 "Unauthorized access".to_string(),
-                String::from_utf8_lossy(&bytes).to_string(),
+                String::from_utf8_lossy(bytes).to_string(),
             ]]),
         },
         ApiClientError::InternalServerError(bytes) => PLExecutorError {
@@ -1234,7 +1238,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
             log: Some(vec![vec![
                 "Error".to_string(),
                 "Internal server error".to_string(),
-                String::from_utf8_lossy(&bytes).to_string(),
+                String::from_utf8_lossy(bytes).to_string(),
             ]]),
         },
         ApiClientError::ResponseDecodingFailed => PLExecutorError {
@@ -1267,7 +1271,7 @@ fn handle_client_error(client_error: ApiClientError) -> PLExecutorError {
             log: Some(vec![vec![
                 "Error".to_string(),
                 format!("Unexpected error: {}", status_code),
-                String::from_utf8_lossy(&message).to_string(),
+                String::from_utf8_lossy(message).to_string(),
             ]]),
         },
         _ => PLExecutorError {

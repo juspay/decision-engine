@@ -1,4 +1,6 @@
+use crate::logger;
 use async_trait::async_trait;
+use error_stack::{Result, ResultExt};
 use masking::PeekInterface;
 use rdkafka::config::ClientConfig;
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
@@ -191,32 +193,18 @@ impl KafkaAnalyticsStore {
     pub async fn new(config: KafkaAnalyticsConfig) -> Result<Self, ConfigurationError> {
         let producer = build_client_config(&config)
             .create::<FutureProducer>()
-            .map_err(|error| {
-                crate::logger::error!(
-                    ?error,
-                    kafka_brokers = %config.brokers,
-                    api_topic = %config.api_topic,
-                    domain_topic = %config.domain_topic,
-                    "failed to create kafka analytics producer"
-                );
-                ConfigurationError::InvalidConfigurationValueError("analytics.kafka".to_string())
-            })?;
+            .change_context(ConfigurationError::InvalidConfigurationValueError(
+                "analytics.kafka".to_string(),
+            ))
+            .attach_printable("failed to create kafka analytics producer")?;
 
         producer
             .client()
             .fetch_metadata(None, Timeout::After(std::time::Duration::from_secs(5)))
-            .map_err(|error| {
-                crate::logger::error!(
-                    ?error,
-                    kafka_brokers = %config.brokers,
-                    api_topic = %config.api_topic,
-                    domain_topic = %config.domain_topic,
-                    "failed to fetch kafka metadata during analytics startup"
-                );
-                ConfigurationError::InvalidConfigurationValueError(
-                    "analytics.kafka.brokers".to_string(),
-                )
-            })?;
+            .change_context(ConfigurationError::InvalidConfigurationValueError(
+                "analytics.kafka.brokers".to_string(),
+            ))
+            .attach_printable("failed to fetch kafka metadata during analytics startup")?;
 
         Ok(Self { producer, config })
     }
@@ -224,7 +212,8 @@ impl KafkaAnalyticsStore {
     async fn send_api_event(&self, event: &ApiEvent) -> KafkaPublishOutcome {
         let payload = match serde_json::to_vec(&KafkaApiEventRow::from(event.clone())) {
             Ok(payload) => payload,
-            Err(_) => {
+            Err(cause) => {
+                logger::error!(error = ?cause);
                 return KafkaPublishOutcome::EncodingFailed;
             }
         };
@@ -236,7 +225,8 @@ impl KafkaAnalyticsStore {
     async fn send_domain_event(&self, event: &DomainAnalyticsEvent) -> KafkaPublishOutcome {
         let payload = match serde_json::to_vec(&KafkaDomainEventRow::from(event.clone())) {
             Ok(payload) => payload,
-            Err(_) => {
+            Err(cause) => {
+                logger::error!(error = ?cause);
                 return KafkaPublishOutcome::EncodingFailed;
             }
         };
@@ -307,7 +297,7 @@ impl AnalyticsWriteStore for KafkaAnalyticsStore {
                 .await;
         for (event, outcome) in events.iter().zip(outcomes) {
             if !outcome.is_success() {
-                crate::logger::warn!(
+                logger::warn!(
                     outcome = ?outcome,
                     event_id = event.event_id,
                     "Failed to publish analytics domain event"
@@ -322,7 +312,7 @@ impl AnalyticsWriteStore for KafkaAnalyticsStore {
             futures::future::join_all(events.iter().map(|event| self.send_api_event(event))).await;
         for (event, outcome) in events.iter().zip(outcomes) {
             if !outcome.is_success() {
-                crate::logger::warn!(
+                logger::warn!(
                     outcome = ?outcome,
                     event_id = event.event_id,
                     "Failed to publish analytics api event"

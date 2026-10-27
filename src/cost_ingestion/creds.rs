@@ -18,6 +18,7 @@
 //! rest with AES-256-GCM ([`GcmAes256`]) rather than hashed, and persisted as a base64 blob in the
 //! generic `service_configuration` key-value store — no new table.
 
+use error_stack::{Report, Result};
 use std::collections::HashMap;
 
 use base64::Engine;
@@ -103,9 +104,15 @@ fn sources_index_name(merchant_id: &str) -> String {
 pub async fn list_sources(merchant_id: &str) -> Result<Vec<SourceRef>, IngestError> {
     let stored = service_configuration::find_config_by_name(sources_index_name(merchant_id))
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+        .map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?;
     match stored.and_then(|c| c.value) {
-        Some(v) => serde_json::from_str(&v).map_err(|e| IngestError::Storage(e.to_string())),
+        Some(v) => serde_json::from_str(&v).map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        }),
         None => Ok(Vec::new()),
     }
 }
@@ -121,18 +128,27 @@ async fn add_source(merchant_id: &str, connector: &str, account: &str) -> Result
         return Ok(());
     }
     sources.push(entry);
-    let value = serde_json::to_string(&sources).map_err(|e| IngestError::Storage(e.to_string()))?;
+    let value = serde_json::to_string(&sources).map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     let name = sources_index_name(merchant_id);
     let exists = service_configuration::find_config_by_name(name.clone())
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?
+        .map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?
         .is_some();
     if exists {
         service_configuration::update_config(name, Some(value)).await
     } else {
         service_configuration::insert_config(name, Some(value)).await
     }
-    .map_err(|e| IngestError::Storage(e.to_string()))
+    .map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })
 }
 
 /// Remove a `(connector, account)` from the merchant's source index (idempotent). When the last
@@ -152,12 +168,21 @@ async fn remove_source(
     if sources.is_empty() {
         return service_configuration::delete_config(name)
             .await
-            .map_err(|e| IngestError::Storage(e.to_string()));
+            .map_err(|e| {
+                let context = IngestError::Storage(e.to_string());
+                Report::from(e).change_context(context)
+            });
     }
-    let value = serde_json::to_string(&sources).map_err(|e| IngestError::Storage(e.to_string()))?;
+    let value = serde_json::to_string(&sources).map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     service_configuration::update_config(name, Some(value))
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))
+        .map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })
 }
 
 /// Delete a settlement source: its encrypted credentials *and* its entry in the merchant's source
@@ -172,7 +197,10 @@ pub async fn delete_source(
 ) -> Result<(), IngestError> {
     service_configuration::delete_config(config_name(merchant_id, connector, account))
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+        .map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?;
     if is_pull_connector(connector) {
         remove_poll_source(merchant_id, connector, account).await?;
     }
@@ -211,9 +239,15 @@ fn poll_index_name(connector: &str) -> String {
 pub async fn list_poll_sources(connector: &str) -> Result<Vec<PollSource>, IngestError> {
     let stored = service_configuration::find_config_by_name(poll_index_name(connector))
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+        .map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?;
     let sources: Vec<PollSource> = match stored.and_then(|c| c.value) {
-        Some(v) => serde_json::from_str(&v).map_err(|e| IngestError::Storage(e.to_string()))?,
+        Some(v) => serde_json::from_str(&v).map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?,
         None => return Ok(Vec::new()),
     };
     // Entries written before the merchant became part of the key deserialize with an empty
@@ -263,25 +297,37 @@ async fn remove_poll_source(
     if sources.is_empty() {
         return service_configuration::delete_config(name)
             .await
-            .map_err(|e| IngestError::Storage(e.to_string()));
+            .map_err(|e| {
+                let context = IngestError::Storage(e.to_string());
+                Report::from(e).change_context(context)
+            });
     }
     write_poll_index(connector, &sources).await
 }
 
 /// Upsert the poll index for `connector` with `sources`.
 async fn write_poll_index(connector: &str, sources: &[PollSource]) -> Result<(), IngestError> {
-    let value = serde_json::to_string(sources).map_err(|e| IngestError::Storage(e.to_string()))?;
+    let value = serde_json::to_string(sources).map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     let name = poll_index_name(connector);
     let exists = service_configuration::find_config_by_name(name.clone())
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?
+        .map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?
         .is_some();
     if exists {
         service_configuration::update_config(name, Some(value)).await
     } else {
         service_configuration::insert_config(name, Some(value)).await
     }
-    .map_err(|e| IngestError::Storage(e.to_string()))
+    .map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })
 }
 
 /// On-the-wire shape of the encrypted blob (before AES). Secrets are peeked only here, at the
@@ -329,20 +375,24 @@ impl ConnectorCredsStore {
     /// Encrypt creds into a `"{current_id}:{base64}"` string (no DB). Split out so it is
     /// unit-testable without a database.
     fn seal(&self, merchant_id: &str, creds: &ConnectorCreds) -> Result<String, IngestError> {
-        let cipher = self
-            .ciphers
-            .get(&self.current_id)
-            .ok_or_else(|| IngestError::Crypto("current key missing from keyring".to_string()))?;
+        let cipher = self.ciphers.get(&self.current_id).ok_or_else(|| {
+            Report::new(IngestError::Crypto(
+                "current key missing from keyring".to_string(),
+            ))
+        })?;
         let blob = StoredCreds {
             merchant_id: merchant_id.to_string(),
             webhook_secret: creds.webhook_secret.peek().clone(),
             download_auth: creds.download_auth.peek().clone(),
         };
-        let plaintext =
-            serde_json::to_vec(&blob).map_err(|e| IngestError::Crypto(e.to_string()))?;
-        let ciphertext = cipher
-            .encrypt(plaintext)
-            .map_err(|e| IngestError::Crypto(format!("{e:?}")))?;
+        let plaintext = serde_json::to_vec(&blob).map_err(|e| {
+            let context = IngestError::Crypto(e.to_string());
+            Report::from(e).change_context(context)
+        })?;
+        let ciphertext = cipher.encrypt(plaintext).map_err(|e| {
+            let context = IngestError::Crypto(format!("{e:?}"));
+            Report::from(e).change_context(context)
+        })?;
         let encoded = base64::engine::general_purpose::STANDARD.encode(ciphertext);
         Ok(format!("{}:{}", self.current_id, encoded))
     }
@@ -350,20 +400,28 @@ impl ConnectorCredsStore {
     /// Inverse of [`seal`](Self::seal): reads the key-id prefix, decrypts with that key.
     fn open(&self, stored: &str) -> Result<ResolvedCreds, IngestError> {
         // Base64 (standard alphabet) never contains ':', so the first ':' cleanly splits the id.
-        let (key_id, encoded) = stored
-            .split_once(':')
-            .ok_or_else(|| IngestError::Crypto("stored credential missing key id".to_string()))?;
+        let (key_id, encoded) = stored.split_once(':').ok_or_else(|| {
+            Report::new(IngestError::Crypto(
+                "stored credential missing key id".to_string(),
+            ))
+        })?;
         let cipher = self.ciphers.get(key_id).ok_or_else(|| {
             IngestError::Crypto(format!("key '{key_id}' not in keyring (retired?)"))
         })?;
         let ciphertext = base64::engine::general_purpose::STANDARD
             .decode(encoded)
-            .map_err(|e| IngestError::Crypto(e.to_string()))?;
-        let plaintext = cipher
-            .decrypt(ciphertext)
-            .map_err(|e| IngestError::Crypto(format!("{e:?}")))?;
-        let blob: StoredCreds =
-            serde_json::from_slice(&plaintext).map_err(|e| IngestError::Crypto(e.to_string()))?;
+            .map_err(|e| {
+                let context = IngestError::Crypto(e.to_string());
+                Report::from(e).change_context(context)
+            })?;
+        let plaintext = cipher.decrypt(ciphertext).map_err(|e| {
+            let context = IngestError::Crypto(format!("{e:?}"));
+            Report::from(e).change_context(context)
+        })?;
+        let blob: StoredCreds = serde_json::from_slice(&plaintext).map_err(|e| {
+            let context = IngestError::Crypto(e.to_string());
+            Report::from(e).change_context(context)
+        })?;
         Ok(ResolvedCreds {
             merchant_id: blob.merchant_id,
             creds: ConnectorCreds {
@@ -385,14 +443,20 @@ impl ConnectorCredsStore {
         let value = self.seal(merchant_id, creds)?;
         let exists = service_configuration::find_config_by_name(name.clone())
             .await
-            .map_err(|e| IngestError::Storage(e.to_string()))?
+            .map_err(|e| {
+                let context = IngestError::Storage(e.to_string());
+                Report::from(e).change_context(context)
+            })?
             .is_some();
         if exists {
             service_configuration::update_config(name, Some(value)).await
         } else {
             service_configuration::insert_config(name, Some(value)).await
         }
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+        .map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?;
 
         // Record the source in the merchant's index so the dashboard can list it.
         add_source(merchant_id, connector, account).await?;
@@ -442,7 +506,10 @@ impl ConnectorCredsStore {
         let name = config_name(merchant_id, connector, account);
         let stored = service_configuration::find_config_by_name(name)
             .await
-            .map_err(|e| IngestError::Storage(e.to_string()))?;
+            .map_err(|e| {
+                let context = IngestError::Storage(e.to_string());
+                Report::from(e).change_context(context)
+            })?;
         match stored.and_then(|c| c.value) {
             Some(value) => Ok(Some(self.open(&value)?)),
             None => Ok(None),
@@ -608,7 +675,7 @@ mod tests {
         let without_v1 =
             ConnectorCredsStore::from_keyring("v2", &ring(&[("v2", "02".repeat(32))])).unwrap();
         let err = without_v1.open(&sealed_v1).unwrap_err();
-        assert!(matches!(err, IngestError::Crypto(_)));
+        assert!(matches!(err.current_context(), IngestError::Crypto(_)));
     }
 
     #[test]

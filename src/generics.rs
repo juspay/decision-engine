@@ -99,7 +99,7 @@ where
     <V as Insertable<T>>::Values: CanInsertInSingleQuery<Pg> + QueryFragment<Pg> + 'static,
     InsertStatement<T, <V as Insertable<T>>::Values>: AsQuery + ExecuteDsl<PgConnection, Pg> + Send,
 {
-    let conn = storage.get_conn().await.map_err(|_| MeshError::Others)?;
+    let conn = storage.get_conn().await.change_context(MeshError::Others)?;
     generic_insert_core::<T, _>(&conn, values).await
 }
 

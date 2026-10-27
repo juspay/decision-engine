@@ -1,4 +1,5 @@
 use crate::error::ApiError;
+use error_stack::Report;
 use serde::{Deserialize, Serialize, Serializer};
 use std::convert::TryFrom;
 use std::option::Option;
@@ -82,6 +83,8 @@ pub fn string_to_int_default_zero(input: &str) -> i32 {
     input.parse::<i32>().unwrap_or(0)
 }
 
-pub fn to_isin(isin: String) -> Result<Isin, ApiError> {
-    Isin::try_from(isin.as_str()).map_err(|_| ApiError::ParsingError("Invalid ISIN format"))
+pub fn to_isin(isin: String) -> error_stack::Result<Isin, ApiError> {
+    Isin::try_from(isin.as_str()).map_err(|cause| {
+        Report::new(ApiError::ParsingError("Invalid ISIN format")).attach_printable(cause)
+    })
 }

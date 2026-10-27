@@ -1,6 +1,7 @@
 use crate::euclid::ast::{Output, VolumeSplit};
 use crate::euclid::utils::sample_split_winner_first;
 use crate::euclid::{ast, types};
+use crate::logger;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt;
@@ -51,7 +52,7 @@ impl InterpreterBackend {
         };
 
         if ctx_value.is_none() {
-            crate::logger::debug!(
+            logger::debug!(
                 missing_context_key = %lookup_key,
                 condition_lhs = %comparison.lhs,
                 "Context key not found while evaluating condition, skipping rule"
@@ -168,19 +169,21 @@ impl InterpreterBackend {
     pub fn eval_program(
         program: &ast::Program,
         ctx: &types::Context,
-    ) -> Result<types::BackendOutput, types::InterpreterError> {
+    ) -> error_stack::Result<types::BackendOutput, types::InterpreterError> {
         for rule in &program.rules {
             let res = Self::eval_rule(rule, ctx, &program.globals)?;
 
             if res {
-                let evaluated_output =
-                    evaluate_output(&rule.output).map_err(|e| types::InterpreterError {
+                let evaluated_output = evaluate_output(&rule.output).map_err(|error| {
+                    let context = types::InterpreterError {
                         error_type: types::InterpreterErrorType::OutputEvaluationFailed(format!(
                             "{:?}",
-                            e
+                            error.current_context()
                         )),
                         metadata: HashMap::new(),
-                    })?;
+                    };
+                    error.change_context(context)
+                })?;
                 return Ok(types::BackendOutput {
                     rule_name: Some(rule.name.clone()),
                     output: rule.output.clone(),
@@ -190,11 +193,16 @@ impl InterpreterBackend {
         }
 
         // If no rule matched, evaluate default selection
-        let evaluated_output =
-            evaluate_output(&program.default_selection).map_err(|e| types::InterpreterError {
-                error_type: types::InterpreterErrorType::OutputEvaluationFailed(format!("{:?}", e)),
+        let evaluated_output = evaluate_output(&program.default_selection).map_err(|error| {
+            let context = types::InterpreterError {
+                error_type: types::InterpreterErrorType::OutputEvaluationFailed(format!(
+                    "{:?}",
+                    error.current_context()
+                )),
                 metadata: HashMap::new(),
-            })?;
+            };
+            error.change_context(context)
+        })?;
 
         Ok(types::BackendOutput {
             rule_name: None,
@@ -217,7 +225,7 @@ impl fmt::Display for RoutingError {
     }
 }
 impl Error for RoutingError {}
-type RoutingResult<T> = Result<T, RoutingError>;
+type RoutingResult<T> = error_stack::Result<T, RoutingError>;
 
 pub fn perform_volume_split(
     splits: Vec<VolumeSplit<ConnectorInfo>>,

@@ -1,3 +1,4 @@
+use crate::logger;
 use serde::{Deserialize, Serialize};
 // use db::eulermeshimpl::meshConfig;
 // use db::mesh::internal::*;
@@ -70,6 +71,6 @@ pub async fn getAllTokenBinInfoByTokenBins(token_bins: Vec<String>) -> Vec<Token
             dsl::token_bin.eq_any(token_bins),
         ).await {
             Ok(db_results) => db_results.into_iter().map(From::from).collect(),
-            Err(_) => Vec::new(), // Silently handle any errors by returning an empty vec
+            Err(cause) => { logger::error!(error = ?cause); Vec::new() }, // Silently handle any errors by returning an empty vec
         }
 }

@@ -3,7 +3,7 @@ use crate::storage::schema::routing_algorithm::dsl;
 #[cfg(feature = "postgres")]
 use crate::storage::schema_pg::routing_algorithm::dsl;
 use crate::{
-    error::ApiErrorResponse,
+    error::{ApiError, ApiErrorResponse},
     euclid::{
         ast::{ConnectorInfo, Output, ValueType},
         interpreter::{evaluate_output, InterpreterBackend},
@@ -226,7 +226,7 @@ pub(crate) async fn active_payment_experiment(
             return None;
         }
     };
-    match serde_json::from_str::<StaticRoutingAlgorithm>(&algorithm.algorithm_data).ok()? {
+    match serde_json::from_str::<StaticRoutingAlgorithm>(&algorithm.algorithm_data).inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok()? {
         StaticRoutingAlgorithm::AbTest(data) => Some((algorithm.id, data)),
         _ => None,
     }
@@ -259,7 +259,7 @@ async fn experiment_covering_payment(
             return None;
         }
     };
-    let data = serde_json::from_str::<StaticRoutingAlgorithm>(&experiment.algorithm_data).ok()?;
+    let data = serde_json::from_str::<StaticRoutingAlgorithm>(&experiment.algorithm_data).inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok()?;
     let StaticRoutingAlgorithm::AbTest(ab_data) = &data else {
         return None;
     };
@@ -437,7 +437,7 @@ fn serialize_routing_evaluate_error_analytics_details(
 fn validation_errors_payload(
     validation_errors: &[ValidationErrorDetails],
 ) -> Option<serde_json::Value> {
-    serde_json::to_value(ValidationErrorsPayload { validation_errors }).ok()
+    serde_json::to_value(ValidationErrorsPayload { validation_errors }).inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok()
 }
 
 /// The FIELD_VALIDATION_FAILED response shape of `routing_create`, for reuse by the other
@@ -532,7 +532,7 @@ pub async fn config_sr_dimensions(
         }
     };
 
-    if let Err(_) = result {
+    if let Err(error) = result {
         metrics::API_REQUEST_COUNTER
             .with_label_values(&["config_sr_dimensions", "failure"])
             .inc();
@@ -541,7 +541,7 @@ pub async fn config_sr_dimensions(
             "Failed to insert or update SR Dimension config for merchant: {}",
             mid
         );
-        return Err(ContainerError::from(EuclidErrors::StorageError));
+        return Err(error.into());
     }
     metrics::API_REQUEST_COUNTER
         .with_label_values(&["config_sr_dimensions", "success"])
@@ -567,7 +567,7 @@ pub async fn get_sr_dimensions(
         .change_context(EuclidErrors::StorageError)?;
     let config = stored
         .and_then(|c| c.value)
-        .and_then(|v| serde_json::from_str::<SrDimensionConfig>(&v).ok())
+        .and_then(|v| serde_json::from_str::<SrDimensionConfig>(&v).inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .unwrap_or(SrDimensionConfig {
             merchant_id,
             ..Default::default()
@@ -603,7 +603,7 @@ pub async fn routing_create(
     let state = get_tenant_app_state().await;
     let request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .map(str::to_string);
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
@@ -925,7 +925,8 @@ async fn resolve_active_algorithm(
                 modified_at: time::PrimitiveDateTime::MIN,
             })
         }
-        Err(_) => {
+        Err(error) => {
+            logger::debug!(error = ?error, "Routing algorithm cache lookup failed; loading from database");
             // Cache miss or stale entry — fetch from DB and back-fill
             fetch_algorithm_from_db_and_cache(state, created_by, algorithm_for).await
         }
@@ -1005,46 +1006,34 @@ async fn evaluate_algorithm_data(
         match algorithm_data {
             StaticRoutingAlgorithm::Single(conn) => {
                 let out_enum = Output::Single((**conn).clone());
-                let eval = evaluate_output(&out_enum).map_err(|_| {
-                    (
-                        EuclidErrors::FailedToEvaluateOutput(format!(
-                            "{}",
-                            StaticRoutingAlgorithm::Single(conn.clone())
-                        ))
-                        .into(),
-                        "preview_output_evaluation_failed",
-                    )
-                })?;
+                let eval = evaluate_output(&out_enum)
+                    .change_context(EuclidErrors::FailedToEvaluateOutput(format!(
+                        "{}",
+                        StaticRoutingAlgorithm::Single(conn.clone())
+                    )))
+                    .map_err(|error| (error.into(), "preview_output_evaluation_failed"))?;
                 (out_enum, eval, Some("straight_through_rule".into()))
             }
 
             StaticRoutingAlgorithm::Priority(connectors) => {
                 let out_enum = Output::Priority(connectors.clone());
-                let eval = evaluate_output(&out_enum).map_err(|_| {
-                    (
-                        EuclidErrors::FailedToEvaluateOutput(format!(
-                            "{}",
-                            StaticRoutingAlgorithm::Priority(connectors.clone())
-                        ))
-                        .into(),
-                        "preview_output_evaluation_failed",
-                    )
-                })?;
+                let eval = evaluate_output(&out_enum)
+                    .change_context(EuclidErrors::FailedToEvaluateOutput(format!(
+                        "{}",
+                        StaticRoutingAlgorithm::Priority(connectors.clone())
+                    )))
+                    .map_err(|error| (error.into(), "preview_output_evaluation_failed"))?;
                 (out_enum, eval, Some("priority_rule".into()))
             }
 
             StaticRoutingAlgorithm::VolumeSplit(splits) => {
                 let out_enum = Output::VolumeSplit(splits.clone());
-                let eval = evaluate_output(&out_enum).map_err(|_| {
-                    (
-                        EuclidErrors::FailedToEvaluateOutput(format!(
-                            "{}",
-                            StaticRoutingAlgorithm::VolumeSplit(splits.clone())
-                        ))
-                        .into(),
-                        "preview_output_evaluation_failed",
-                    )
-                })?;
+                let eval = evaluate_output(&out_enum)
+                    .change_context(EuclidErrors::FailedToEvaluateOutput(format!(
+                        "{}",
+                        StaticRoutingAlgorithm::VolumeSplit(splits.clone())
+                    )))
+                    .map_err(|error| (error.into(), "preview_output_evaluation_failed"))?;
                 (out_enum, eval, Some("volume_split_rule".into()))
             }
 
@@ -1054,11 +1043,10 @@ async fn evaluate_algorithm_data(
 
                 let mut ir = InterpreterBackend::eval_program(program, &ctx).map_err(|e| {
                     (
-                        EuclidErrors::InvalidRequest(format!(
+                        { let context = EuclidErrors::InvalidRequest(format!(
                             "Interpreter error: {:?}",
-                            e.error_type
-                        ))
-                        .into(),
+                            e.current_context().error_type
+                        )); ContainerError::from(e.change_context(context)) },
                         "preview_interpreter_failed",
                     )
                 })?;
@@ -1237,7 +1225,7 @@ pub async fn routing_evaluate(
 ) -> Result<Json<RoutingEvaluateResponse>, ContainerError<EuclidErrors>> {
     let request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .map(str::to_string);
     routing_evaluate_with_analytics(
         headers,
@@ -1493,7 +1481,7 @@ pub async fn routing_evaluate_batch(
     let state = get_tenant_app_state().await;
     let request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .map(str::to_string);
     let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
     let trace_id = crate::analytics::trace_id_from_headers(&headers);
@@ -1857,7 +1845,7 @@ fn record_routing_evaluate_preview_error(
     }
     let response_payload = error
         .downcast_ref::<ApiErrorResponse>()
-        .and_then(|payload| serde_json::to_value(payload).ok());
+        .and_then(|payload| serde_json::to_value(payload).inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok());
     let status = error
         .get_inner()
         .clone()
@@ -1985,7 +1973,7 @@ pub async fn activate_routing_rule(
         .db
         .get_conn()
         .await
-        .map_err(|_| EuclidErrors::StorageError)
+        .change_context(EuclidErrors::StorageError)
     {
         Ok(connection) => connection,
         Err(e) => {
@@ -2035,7 +2023,7 @@ pub async fn activate_routing_rule(
             .and(mapper_dsl::algorithm_for.eq(slot.clone())),
     )
     .await
-    .ok();
+    .inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok();
 
     if let Some(existing) = maybe_existing {
         if existing.routing_algorithm_id != payload.routing_algorithm_id {
@@ -2151,7 +2139,7 @@ pub async fn deactivate_routing_rule(
         .db
         .get_conn()
         .await
-        .map_err(|_| EuclidErrors::StorageError)
+        .change_context(EuclidErrors::StorageError)
     {
         Ok(connection) => connection,
         Err(e) => {
@@ -2193,7 +2181,7 @@ pub async fn deactivate_routing_rule(
             .and(mapper_dsl::routing_algorithm_id.eq(payload.routing_algorithm_id.clone())),
     )
     .await
-    .ok();
+    .inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok();
 
     // === Step 3: Delete the mapping if found (idempotent - return success if not found) ===
     if let Some(mapping) = existing_mapping {
@@ -2287,7 +2275,7 @@ fn changes_experiment_routing(
             ),
             other => serde_json::to_value(other),
         }
-        .ok()
+        .inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok()
     };
     routing_setup(existing) != routing_setup(updated)
 }
@@ -2305,7 +2293,7 @@ async fn ensure_experiment_has_no_recorded_payments(
                 .experiment_has_recorded_payments(merchant_id, experiment_id)
                 .await
         }
-        None => Err(crate::error::ApiError::DatabaseError),
+        None => Err(ApiError::DatabaseError.into()),
     };
     match recorded {
         Ok(false) => Ok(()),
@@ -2351,7 +2339,7 @@ pub async fn update_routing_rule(
             .db
             .get_conn()
             .await
-            .map_err(|_| EuclidErrors::StorageError)?;
+            .change_context(EuclidErrors::StorageError)?;
 
         // Only inactive experiments can be edited.
         ensure_routing_algorithm_inactive(
@@ -2498,7 +2486,7 @@ pub async fn delete_routing_rule(
             .db
             .get_conn()
             .await
-            .map_err(|_| EuclidErrors::StorageError)?;
+            .change_context(EuclidErrors::StorageError)?;
 
         // Only inactive experiments can be deleted.
         ensure_routing_algorithm_inactive(

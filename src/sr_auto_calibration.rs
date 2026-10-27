@@ -257,7 +257,10 @@ async fn merchants_for_flag(key: &str) -> Vec<String> {
             .into_iter()
             .map(|m| m.merchantId)
             .collect(),
-        Err(_) => Vec::new(),
+        Err(cause) => {
+            logger::error!(error = ?cause);
+            Vec::new()
+        }
     }
 }
 

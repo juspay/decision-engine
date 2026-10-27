@@ -4,6 +4,7 @@ use crate::analytics::models::{
 };
 use crate::analytics::service::format_range;
 use crate::error::ApiError;
+use error_stack::Result;
 use futures::future::try_join;
 
 use super::super::metrics;

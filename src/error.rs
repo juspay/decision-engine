@@ -1,3 +1,5 @@
+use crate::logger;
+use error_stack::Report;
 use std::string::FromUtf8Error;
 
 #[macro_use]
@@ -9,6 +11,11 @@ mod transforms;
 pub use container::*;
 pub use custom_error::*;
 use reqwest::StatusCode;
+
+/// An existing textual error message carried as an error-stack context.
+#[derive(Debug, thiserror::Error)]
+#[error("{0}")]
+pub struct ErrorMessage(pub String);
 
 #[derive(Debug, thiserror::Error)]
 pub enum ConfigurationError {
@@ -411,7 +418,7 @@ impl<T: axum::response::IntoResponse + error_stack::Context + Clone> axum::respo
     for ContainerError<T>
 {
     fn into_response(self) -> axum::response::Response {
-        crate::logger::error!(error = ?self.error, error_message = %self.error.current_context());
+        logger::error!(error = ?self.error, error_message = %self.error.current_context());
         self.error.current_context().clone().into_response()
     }
 }
@@ -449,7 +456,7 @@ impl ApiErrorResponse {
 //             Ok(inner_val) => Ok(inner_val),
 //             Err(inner_err) => {
 //                 let new_error: E1 = (*inner_err.current_context()).into();
-//                 crate::logger::error!(?inner_err);
+//                 logger::error!(?inner_err);
 //                 Err(inner_err.change_context(new_error))
 //             }
 //         };
@@ -468,25 +475,63 @@ impl axum::response::IntoResponse for ApiErrorResponse {
 pub(crate) fn text_error_response(
     status: StatusCode,
     message: impl Into<String>,
+    cause: Option<&dyn std::fmt::Debug>,
 ) -> axum::response::Response {
     use axum::response::IntoResponse;
     let message = message.into();
-    crate::logger::error!(error_message = %message, error_code = status.as_str(), "Request failed");
+    if let Some(cause) = cause {
+        logger::error!(
+            error = ?cause,
+            error_message = %message,
+            error_code = status.as_str(),
+            "Request failed"
+        );
+    } else {
+        logger::error!(error_message = %message, error_code = status.as_str(), "Request failed");
+    }
     (status, message).into_response()
 }
 
 /// Plain-text handler error logged at the response conversion boundary.
 #[derive(Debug)]
-pub struct TextError(pub StatusCode, pub String);
+pub struct TextError {
+    report: Report<TextErrorContext>,
+}
+
+#[derive(Debug, thiserror::Error)]
+#[error("{message}")]
+struct TextErrorContext {
+    status: StatusCode,
+    message: String,
+}
+
+impl TextError {
+    /// Preserve a report while retaining the endpoint's existing status and public message.
+    pub fn from_report<E: error_stack::Context>(
+        report: Report<E>,
+        status: StatusCode,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            report: report.change_context(TextErrorContext {
+                status,
+                message: message.into(),
+            }),
+        }
+    }
+}
 
 impl From<(StatusCode, String)> for TextError {
     fn from((status, message): (StatusCode, String)) -> Self {
-        Self(status, message)
+        Self {
+            report: Report::new(TextErrorContext { status, message }),
+        }
     }
 }
 
 impl axum::response::IntoResponse for TextError {
     fn into_response(self) -> axum::response::Response {
-        text_error_response(self.0, self.1)
+        let context = self.report.current_context();
+        text_error_response(context.status, &context.message, Some(&self.report))
     }
 }

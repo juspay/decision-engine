@@ -1,3 +1,4 @@
+use crate::logger;
 use std::sync::Arc;
 
 use axum::{
@@ -36,7 +37,8 @@ where
             Ok(axum::Json(payload)) => Ok(Self(payload)),
             Err(rejection) => {
                 let message = rejection.body_text();
-                crate::logger::error!(
+                logger::error!(
+                    error = ?rejection,
                     status_code = StatusCode::BAD_REQUEST.as_u16(),
                     error_code = crate::error::error_codes::TE_03,
                     error_message = %message,
@@ -100,7 +102,7 @@ where
             .get::<AuthContext>()
             .cloned()
             .ok_or_else(|| {
-                crate::logger::error!(
+                logger::error!(
                     error_message = "Analytics access requires JWT or API key authentication",
                     error_code = crate::error::error_codes::TE_03,
                     "Analytics authentication failed"

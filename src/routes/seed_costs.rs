@@ -210,7 +210,10 @@ pub async fn set_seed_costs(
     let entries = rows_to_entries(body.rows);
     seed_store::put_seed_table(&merchant_id, &entries)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        .map_err(|error| {
+            let message = error.to_string();
+            TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+        })?;
     Ok(Json(entries_to_rows(&entries)))
 }
 
@@ -221,7 +224,10 @@ pub async fn delete_seed_costs(
 ) -> Result<Json<Vec<SeedCostRow>>, TextError> {
     seed_store::delete_seed_table(&merchant_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        .map_err(|error| {
+            let message = error.to_string();
+            TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+        })?;
     let app_state = get_tenant_app_state().await;
     let entries =
         seed_store::effective_seed_entries(&merchant_id, &app_state.config.hypersense).await;

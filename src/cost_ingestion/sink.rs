@@ -8,6 +8,8 @@
 //! sink writes those `cost_daily_stats` buckets. See `scratch/inhouse-cost-architecture.md` §7 and
 //! `scratch/settlement-table-removal-worked-example.md`.
 
+use crate::logger;
+use error_stack::{Report, Result};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -109,9 +111,10 @@ async fn insert_chunk(
             "suuy": r.suuy,
             "syyuu": r.syyuu,
         });
-        body.push_str(
-            &serde_json::to_string(&obj).map_err(|e| IngestError::Storage(e.to_string()))?,
-        );
+        body.push_str(&serde_json::to_string(&obj).map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?);
         body.push('\n');
     }
 
@@ -126,16 +129,16 @@ async fn insert_chunk(
         req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
     }
 
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let resp = req.send().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(IngestError::Storage(format!(
-            "clickhouse insert failed ({status}): {text}"
-        )));
+        return Err(
+            IngestError::Storage(format!("clickhouse insert failed ({status}): {text}")).into(),
+        );
     }
     Ok(())
 }
@@ -175,9 +178,10 @@ async fn insert_bin_chunk(
             "card_product": r.card_product,
             "support_n": r.support_n,
         });
-        body.push_str(
-            &serde_json::to_string(&obj).map_err(|e| IngestError::Storage(e.to_string()))?,
-        );
+        body.push_str(&serde_json::to_string(&obj).map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?);
         body.push('\n');
     }
 
@@ -192,16 +196,17 @@ async fn insert_bin_chunk(
         req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
     }
 
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let resp = req.send().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         return Err(IngestError::Storage(format!(
             "clickhouse bin insert failed ({status}): {text}"
-        )));
+        ))
+        .into());
     }
     Ok(())
 }
@@ -230,14 +235,14 @@ pub async fn load_bin_product(cfg: &ClickHouseAnalyticsConfig) -> BinProductMap 
         Ok(r) => {
             let status = r.status();
             let body = r.text().await.unwrap_or_default();
-            crate::logger::warn!(
+            logger::warn!(
                 tag = "cost_ingestion",
                 "bin_product load failed ({status}): {body}"
             );
             return std::sync::Arc::new(HashMap::new());
         }
         Err(e) => {
-            crate::logger::warn!(tag = "cost_ingestion", "bin_product load failed: {e}");
+            logger::warn!(tag = "cost_ingestion", "bin_product load failed: {e}");
             return std::sync::Arc::new(HashMap::new());
         }
     };
@@ -285,16 +290,17 @@ pub async fn delete_ingestion_rows(
     if !cfg.user.is_empty() {
         req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
     }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let resp = req.send().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         return Err(IngestError::Storage(format!(
             "clickhouse delete staging failed ({status}): {text}"
-        )));
+        ))
+        .into());
     }
     Ok(())
 }

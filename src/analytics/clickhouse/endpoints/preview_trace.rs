@@ -1,5 +1,6 @@
 use crate::analytics::models::{PaymentAuditQuery, PaymentAuditResponse, PaymentAuditScope};
 use crate::error::ApiError;
+use error_stack::Result;
 
 pub async fn load(
     client: &clickhouse::Client,

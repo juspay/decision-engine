@@ -5,6 +5,7 @@
 //! what share of settled *volume* they cover. Everything else falls back to success-rate routing
 //! (§10), so `good_volume_pct` is the headline number.
 
+use error_stack::{Report, Result};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -137,21 +138,22 @@ pub async fn for_merchant(
         req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
     }
 
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let resp = req.send().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         return Err(IngestError::Storage(format!(
             "clickhouse coverage query failed ({status}): {text}"
-        )));
+        ))
+        .into());
     }
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let text = resp.text().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
 
     let f: Vec<&str> = text.trim().split('\t').collect();
     let u = |i: usize| -> u64 { f.get(i).and_then(|s| s.trim().parse().ok()).unwrap_or(0) };

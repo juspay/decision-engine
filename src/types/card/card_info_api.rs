@@ -173,8 +173,9 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
             record_lookup_failure("REQUEST_ERROR", "", &error_message);
             return None;
         }
-        Err(_) => {
+        Err(error) => {
             logger::warn!(
+                error = ?error,
                 tag = "cardInfoApi",
                 endpoint,
                 "timeout after {}ms for bin {}",
@@ -236,8 +237,9 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
 fn map_response_to_card_info(res: CardInfoResponse) -> Option<CardInfo> {
     let card_isin = match to_isin(res.card_bin.clone()) {
         Ok(isin) => isin,
-        Err(_) => {
+        Err(error) => {
             logger::warn!(
+                error = ?error,
                 tag = "cardInfoApi",
                 "unparsable card_bin {:?} from cards API",
                 res.card_bin

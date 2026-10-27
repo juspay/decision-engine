@@ -116,7 +116,8 @@ async fn clear_autopilot_sublevel_overrides(merchant_id: &str) -> usize {
         return 0;
     }
     cfg["subLevelInputConfig"] = serde_json::Value::Array(kept);
-    if update_config(name, Some(cfg.to_string())).await.is_err() {
+    if let Err(cause) = update_config(name, Some(cfg.to_string())).await {
+        logger::error!(error = ?cause);
         return 0;
     }
     removed

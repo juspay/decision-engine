@@ -77,12 +77,10 @@ pub async fn evaluate_rule_arm(
     let (output, evaluated_output, rule_name) = match arm_algorithm_data {
         StaticRoutingAlgorithm::Single(conn) => {
             let out_enum = Output::Single(*conn.clone());
-            let eval = evaluate_output(&out_enum).map_err(|_| {
-                ContainerError::from(EuclidErrors::FailedToEvaluateOutput(format!(
-                    "ab_test arm single: {}",
-                    conn.gateway_name
-                )))
-            })?;
+            let eval =
+                evaluate_output(&out_enum).change_context(EuclidErrors::FailedToEvaluateOutput(
+                    format!("ab_test arm single: {}", conn.gateway_name),
+                ))?;
             (
                 out_enum,
                 eval,
@@ -91,29 +89,26 @@ pub async fn evaluate_rule_arm(
         }
         StaticRoutingAlgorithm::Priority(connectors) => {
             let out_enum = Output::Priority(connectors.clone());
-            let eval = evaluate_output(&out_enum).map_err(|_| {
-                ContainerError::from(EuclidErrors::FailedToEvaluateOutput(
-                    "ab_test arm priority".into(),
-                ))
-            })?;
+            let eval = evaluate_output(&out_enum).change_context(
+                EuclidErrors::FailedToEvaluateOutput("ab_test arm priority".into()),
+            )?;
             (out_enum, eval, Some(format!("ab_test_{arm}_priority")))
         }
         StaticRoutingAlgorithm::VolumeSplit(splits) => {
             let out_enum = Output::VolumeSplit(splits.clone());
-            let eval = evaluate_output(&out_enum).map_err(|_| {
-                ContainerError::from(EuclidErrors::FailedToEvaluateOutput(
-                    "ab_test arm volume_split".into(),
-                ))
-            })?;
+            let eval = evaluate_output(&out_enum).change_context(
+                EuclidErrors::FailedToEvaluateOutput("ab_test arm volume_split".into()),
+            )?;
             (out_enum, eval, Some(format!("ab_test_{arm}_volume_split")))
         }
         StaticRoutingAlgorithm::Advanced(program) => {
             let ctx = Context::new(payload.parameters.clone());
             let mut ir = InterpreterBackend::eval_program(&program, &ctx).map_err(|e| {
-                ContainerError::from(EuclidErrors::InvalidRequest(format!(
+                let context = EuclidErrors::InvalidRequest(format!(
                     "AB test arm interpreter error: {:?}",
-                    e.error_type
-                )))
+                    e.current_context().error_type
+                ));
+                ContainerError::from(e.change_context(context))
             })?;
             apply_default_fallback(&mut ir, payload.fallback_output.as_deref());
 

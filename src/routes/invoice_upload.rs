@@ -94,7 +94,10 @@ pub async fn upload_invoice(
         &body,
     )
     .await
-    .map_err(|e| (StatusCode::UNPROCESSABLE_ENTITY, format!("{e:?}")))?;
+    .map_err(|error| {
+        let message = format!("{:?}", error.current_context());
+        TextError::from_report(error, StatusCode::UNPROCESSABLE_ENTITY, message)
+    })?;
 
     Ok(Json(InvoiceUploadResponse {
         merchant_id,
@@ -134,9 +137,10 @@ pub struct AddonDto {
 pub async fn list_addons(
     Path(merchant_id): Path<String>,
 ) -> Result<Json<Vec<AddonDto>>, TextError> {
-    let list = invoice::store::list(&merchant_id)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+    let list = invoice::store::list(&merchant_id).await.map_err(|error| {
+        let message = format!("{:?}", error.current_context());
+        TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+    })?;
     Ok(Json(
         list.into_iter()
             .map(|(connector, addon)| AddonDto { connector, addon })
@@ -152,7 +156,10 @@ pub async fn delete_addon(
     let connector = connector.to_lowercase();
     invoice::store::delete(&merchant_id, &connector)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(|error| {
+            let message = format!("{:?}", error.current_context());
+            TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+        })?;
     super::connector_fees::refresh_serving(&merchant_id).await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -165,6 +172,9 @@ pub async fn get_reconciliation(
     let cfg = clickhouse_config()?;
     let recon = invoice::reconcile_merchant(&cfg, &merchant_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(|error| {
+            let message = format!("{:?}", error.current_context());
+            TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+        })?;
     Ok(Json(recon))
 }

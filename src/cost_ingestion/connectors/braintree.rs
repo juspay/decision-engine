@@ -26,6 +26,7 @@
 //! architecture doc §7.7). Those three methods return a descriptive error until then; the parser
 //! (`parse_rows`) is complete and independently testable.
 
+use error_stack::Result;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -83,7 +84,7 @@ impl SettlementReportSource for BraintreeReportSource {
         // TODO(braintree-webhook): extract the merchant account token from the unverified
         // notification body once Braintree's report-ready webhook shape is confirmed. The report
         // itself carries it as `Merchant Account ID` (field 1); the webhook envelope is TBD.
-        Err(not_implemented("peek_account"))
+        Err(not_implemented("peek_account").into())
     }
 
     fn verify_and_parse_notification(
@@ -95,7 +96,7 @@ impl SettlementReportSource for BraintreeReportSource {
         // TODO(braintree-webhook): verify Braintree's webhook signature and extract the report
         // handle. Braintree signs webhooks with an `bt_signature`/`bt_payload` pair (public-key
         // scheme), unlike Adyen's body HMAC — confirm the report-notification variant before wiring.
-        Err(not_implemented("verify_and_parse_notification"))
+        Err(not_implemented("verify_and_parse_notification").into())
     }
 
     async fn download_report(
@@ -105,7 +106,7 @@ impl SettlementReportSource for BraintreeReportSource {
     ) -> Result<Bytes, IngestError> {
         // TODO(braintree-webhook): fetch the report using the merchant's stored download auth.
         // Reuse `http_client()` once the download URL/auth (API key vs. SFTP) is confirmed.
-        Err(not_implemented("download_report"))
+        Err(not_implemented("download_report").into())
     }
 
     fn parse_rows(
@@ -377,7 +378,7 @@ v1,sale,USD,25.00,,,venmo_account,0.00,0.15\n";
             .unwrap_err();
         let IngestError::MissingColumns {
             missing, required, ..
-        } = err
+        } = err.current_context()
         else {
             panic!("expected MissingColumns, got {err:?}");
         };

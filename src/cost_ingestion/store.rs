@@ -10,6 +10,7 @@ use async_bb8_diesel::AsyncRunQueryDsl;
 use chrono::Datelike;
 use diesel::associations::HasTable;
 use diesel::*;
+use error_stack::{Report, Result, ResultExt};
 
 #[cfg(feature = "mysql")]
 use crate::storage::schema::cost_ingestion::dsl;
@@ -75,7 +76,10 @@ pub async fn enqueue_pending(
             .and(dsl::notification_id.eq(Some(notification_id.to_string()))),
     )
     .await
-    .map_err(|e| IngestError::Storage(e.to_string()))?;
+    .map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
 
     if existing.is_some() {
         return Ok(false);
@@ -93,7 +97,10 @@ pub async fn enqueue_pending(
     };
     generics::generic_insert::<<CostIngestion as HasTable>::Table, _>(&app_state.db, new)
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+        .map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?;
     Ok(true)
 }
 
@@ -120,7 +127,10 @@ pub async fn create_manual(
     };
     generics::generic_insert::<<CostIngestion as HasTable>::Table, _>(&app_state.db, new)
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+        .map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?;
     Ok(id)
 }
 
@@ -147,7 +157,10 @@ pub async fn create_sample(
     };
     generics::generic_insert::<<CostIngestion as HasTable>::Table, _>(&app_state.db, new)
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+        .map_err(|e| {
+            let context = IngestError::Storage(e.to_string());
+            Report::from(e).change_context(context)
+        })?;
     Ok(id)
 }
 
@@ -157,11 +170,10 @@ pub async fn create_sample(
 /// here and is skipped.
 pub async fn claim_pending(limit: usize) -> Result<Vec<CostIngestion>, IngestError> {
     let app_state = get_tenant_app_state().await;
-    let conn = app_state
-        .db
-        .get_conn()
-        .await
-        .map_err(|_| IngestError::Storage("db connection".to_string()))?;
+    let conn = app_state.db.get_conn().await.map_err(|cause| {
+        let context = IngestError::Storage("db connection".to_string());
+        Report::from(cause).change_context(context)
+    })?;
 
     // Oldest-first, capped in SQL — a large backlog stays cheap and jobs are claimed in order.
     let pending: Vec<CostIngestion> = dsl::cost_ingestion
@@ -170,16 +182,18 @@ pub async fn claim_pending(limit: usize) -> Result<Vec<CostIngestion>, IngestErr
         .limit(limit as i64)
         .get_results_async(&*conn)
         .await
-        .map_err(|e| IngestError::Storage(format!("{e:?}")))?;
+        .map_err(|e| {
+            let context = IngestError::Storage(format!("{e:?}"));
+            Report::from(e).change_context(context)
+        })?;
 
     let now = crate::utils::date_time::now();
     let mut claimed = Vec::new();
     for row in pending.into_iter() {
-        let conn = app_state
-            .db
-            .get_conn()
-            .await
-            .map_err(|_| IngestError::Storage("db connection".to_string()))?;
+        let conn = app_state.db.get_conn().await.map_err(|cause| {
+            let context = IngestError::Storage("db connection".to_string());
+            Report::from(cause).change_context(context)
+        })?;
         let won = generics::generic_update_if_present::<<CostIngestion as HasTable>::Table, _, _>(
             &conn,
             dsl::id
@@ -192,7 +206,10 @@ pub async fn claim_pending(limit: usize) -> Result<Vec<CostIngestion>, IngestErr
             },
         )
         .await
-        .map_err(|e| IngestError::Storage(format!("{e:?}")))?;
+        .map_err(|e| {
+            let context = IngestError::Storage(format!("{e:?}"));
+            Report::from(e).change_context(context)
+        })?;
         if won == 1 {
             claimed.push(row);
         }
@@ -203,11 +220,10 @@ pub async fn claim_pending(limit: usize) -> Result<Vec<CostIngestion>, IngestErr
 /// Bump the staged-row counter the dashboard polls for progress.
 pub async fn update_progress(id: &str, staged_rows: i64) -> Result<(), IngestError> {
     let app_state = get_tenant_app_state().await;
-    let conn = app_state
-        .db
-        .get_conn()
-        .await
-        .map_err(|_| IngestError::Storage("db connection".to_string()))?;
+    let conn = app_state.db.get_conn().await.map_err(|cause| {
+        let context = IngestError::Storage("db connection".to_string());
+        Report::from(cause).change_context(context)
+    })?;
     generics::generic_update_if_present::<<CostIngestion as HasTable>::Table, _, _>(
         &conn,
         dsl::id.eq(id.to_string()),
@@ -217,18 +233,20 @@ pub async fn update_progress(id: &str, staged_rows: i64) -> Result<(), IngestErr
         },
     )
     .await
-    .map_err(|e| IngestError::Storage(format!("{e:?}")))?;
+    .map_err(|e| {
+        let context = IngestError::Storage(format!("{e:?}"));
+        Report::from(e).change_context(context)
+    })?;
     Ok(())
 }
 
 /// Mark a job `completed` and record its full outcome for history.
 pub async fn mark_completed(id: &str, c: &Completion) -> Result<(), IngestError> {
     let app_state = get_tenant_app_state().await;
-    let conn = app_state
-        .db
-        .get_conn()
-        .await
-        .map_err(|_| IngestError::Storage("db connection".to_string()))?;
+    let conn = app_state.db.get_conn().await.map_err(|cause| {
+        let context = IngestError::Storage("db connection".to_string());
+        Report::from(cause).change_context(context)
+    })?;
     let update = CostIngestionOutcomeUpdate {
         status: "completed".to_string(),
         staged_rows: c.staged_rows,
@@ -250,18 +268,20 @@ pub async fn mark_completed(id: &str, c: &Completion) -> Result<(), IngestError>
         update,
     )
     .await
-    .map_err(|e| IngestError::Storage(format!("{e:?}")))?;
+    .map_err(|e| {
+        let context = IngestError::Storage(format!("{e:?}"));
+        Report::from(e).change_context(context)
+    })?;
     Ok(())
 }
 
 /// Mark a job `failed`, recording the error for operators / the dashboard.
 pub async fn mark_failed(id: &str, error: &str) -> Result<(), IngestError> {
     let app_state = get_tenant_app_state().await;
-    let conn = app_state
-        .db
-        .get_conn()
-        .await
-        .map_err(|_| IngestError::Storage("db connection".to_string()))?;
+    let conn = app_state.db.get_conn().await.map_err(|cause| {
+        let context = IngestError::Storage("db connection".to_string());
+        Report::from(cause).change_context(context)
+    })?;
     generics::generic_update_if_present::<<CostIngestion as HasTable>::Table, _, _>(
         &conn,
         dsl::id.eq(id.to_string()),
@@ -272,7 +292,10 @@ pub async fn mark_failed(id: &str, error: &str) -> Result<(), IngestError> {
         },
     )
     .await
-    .map_err(|e| IngestError::Storage(format!("{e:?}")))?;
+    .map_err(|e| {
+        let context = IngestError::Storage(format!("{e:?}"));
+        Report::from(e).change_context(context)
+    })?;
     Ok(())
 }
 
@@ -286,14 +309,17 @@ pub async fn list_for_merchant(
         .db
         .get_conn()
         .await
-        .map_err(|_| IngestError::Storage("db connection".to_string()))?;
+        .change_context(IngestError::Storage("db connection".to_string()))?;
     let rows: Vec<CostIngestion> = dsl::cost_ingestion
         .filter(dsl::merchant_id.eq(merchant_id.to_string()))
         .order(dsl::created_at.desc())
         .limit(limit)
         .get_results_async(&*conn)
         .await
-        .map_err(|e| IngestError::Storage(format!("{e:?}")))?;
+        .map_err(|error| {
+            let context = IngestError::Storage(format!("{error:?}"));
+            Report::new(error).change_context(context)
+        })?;
     Ok(rows)
 }
 
@@ -310,7 +336,10 @@ pub async fn get_for_merchant(
             .and(dsl::merchant_id.eq(merchant_id.to_string())),
     )
     .await
-    .map_err(|e| IngestError::Storage(e.to_string()))
+    .map_err(|error| {
+        let context = IngestError::Storage(error.to_string());
+        Report::new(error).change_context(context)
+    })
 }
 
 /// Hard-delete an ingestion's history row, scoped to the merchant. Returns `true` if a row was
@@ -321,7 +350,7 @@ pub async fn delete(merchant_id: &str, id: &str) -> Result<bool, IngestError> {
         .db
         .get_conn()
         .await
-        .map_err(|_| IngestError::Storage("db connection".to_string()))?;
+        .change_context(IngestError::Storage("db connection".to_string()))?;
     let n = generics::generic_delete::<<CostIngestion as HasTable>::Table, _>(
         &conn,
         dsl::id
@@ -329,7 +358,10 @@ pub async fn delete(merchant_id: &str, id: &str) -> Result<bool, IngestError> {
             .and(dsl::merchant_id.eq(merchant_id.to_string())),
     )
     .await
-    .map_err(|e| IngestError::Storage(format!("{e:?}")))?;
+    .map_err(|error| {
+        let context = IngestError::Storage(format!("{error:?}"));
+        Report::new(error).change_context(context)
+    })?;
     Ok(n > 0)
 }
 

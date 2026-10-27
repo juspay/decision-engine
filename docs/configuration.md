@@ -38,6 +38,18 @@ log_format = "default"
 
 `log_format` accepts `"default"` (human-readable) or `"json"` (structured, recommended for prod).
 
+API error diagnostics preserve the underlying failure in server logs without changing
+the endpoint's HTTP status, response body, or content type. In JSON logs, inspect the
+`error` field for the error chain and use the request ID and route to correlate it
+with the request. Propagated failures carry an `error_stack::Report` through helpers
+and services without logging at each layer. The response boundary logs the full report
+once and builds the response from the existing public error context. Swallowed failures
+are logged where the existing fallback is chosen. Background tasks log failures at their
+own handling boundary and do not propagate them into the HTTP request.
+Authentication responses remain generic, while internal diagnostics
+distinguish JWT verification, revocation, admin-secret validation, and SSO-code failures.
+No additional log-level setting is needed for these error diagnostics.
+
 ### Metrics (OpenTelemetry push)
 
 ```toml

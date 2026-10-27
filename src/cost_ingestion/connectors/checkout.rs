@@ -58,6 +58,8 @@
 //!
 //! [`report_generated`]: https://www.checkout.com/docs/developer-resources/event-notifications/event-types/report_generated
 
+use crate::logger;
+use error_stack::{Report, Result};
 use std::collections::{HashMap, HashSet};
 use std::sync::OnceLock;
 use std::time::Duration;
@@ -122,7 +124,8 @@ impl CheckoutCreds {
         if key.is_empty() {
             return Err(IngestError::MalformedNotification(
                 "checkout download_auth: missing secret key".to_string(),
-            ));
+            )
+            .into());
         }
         Ok(Self {
             secret_key: key.to_string(),
@@ -233,7 +236,9 @@ impl SettlementReportSource for CheckoutReportSource {
     fn peek_account(&self, raw_body: &[u8]) -> Result<String, IngestError> {
         let event = parse_event(raw_body)?;
         account_id(&event).ok_or_else(|| {
-            IngestError::MalformedNotification("missing data.account.entity_id".to_string())
+            Report::new(IngestError::MalformedNotification(
+                "missing data.account.entity_id".to_string(),
+            ))
         })
     }
 
@@ -249,10 +254,12 @@ impl SettlementReportSource for CheckoutReportSource {
             .get("cko-signature")
             .and_then(|v| v.to_str().ok())
             .ok_or_else(|| {
-                IngestError::MalformedNotification("missing Cko-Signature header".to_string())
+                Report::new(IngestError::MalformedNotification(
+                    "missing Cko-Signature header".to_string(),
+                ))
             })?;
         if !verify_signature(raw_body, provided, secret.peek()) {
-            return Err(IngestError::SignatureMismatch);
+            return Err(IngestError::SignatureMismatch.into());
         }
 
         let event = parse_event(raw_body)?;
@@ -264,12 +271,15 @@ impl SettlementReportSource for CheckoutReportSource {
         if event_type != REPORT_GENERATED_EVENT {
             return Err(IngestError::MalformedNotification(format!(
                 "unexpected event type '{event_type}', expected {REPORT_GENERATED_EVENT}"
-            )));
+            ))
+            .into());
         }
 
-        let data = event
-            .get("data")
-            .ok_or_else(|| IngestError::MalformedNotification("missing data".to_string()))?;
+        let data = event.get("data").ok_or_else(|| {
+            Report::new(IngestError::MalformedNotification(
+                "missing data".to_string(),
+            ))
+        })?;
 
         // Only the Financial Actions report matches this connector's parser; any other scheduled
         // report shares the webhook but not the columns, so reject it rather than enqueue a job the
@@ -281,7 +291,7 @@ impl SettlementReportSource for CheckoutReportSource {
         if !is_financial_actions_report(report_type) {
             return Err(IngestError::MalformedNotification(format!(
                 "unsupported report_type '{report_type}' (checkout connector ingests Financial Actions only)"
-            )));
+            )).into());
         }
 
         // `report_id` (`rpt_…`) is the download handle passed back to `download_report`.
@@ -291,9 +301,9 @@ impl SettlementReportSource for CheckoutReportSource {
             .unwrap_or_default()
             .to_string();
         if report_ref.is_empty() {
-            return Err(IngestError::MalformedNotification(
-                "missing data.report_id".to_string(),
-            ));
+            return Err(
+                IngestError::MalformedNotification("missing data.report_id".to_string()).into(),
+            );
         }
 
         // The event id (`evt_…`) is the queue's replay-idempotency key; fall back to the report id.
@@ -328,9 +338,7 @@ impl SettlementReportSource for CheckoutReportSource {
         let cko = CheckoutCreds::parse(creds)?;
         let report_id = note.report_ref.trim();
         if report_id.is_empty() {
-            return Err(IngestError::Download(
-                "checkout: empty report id".to_string(),
-            ));
+            return Err(IngestError::Download("checkout: empty report id".to_string()).into());
         }
 
         // 1. Get report details → the file ids that make up this report.
@@ -341,19 +349,25 @@ impl SettlementReportSource for CheckoutReportSource {
             .header("Accept", "application/json")
             .send()
             .await
-            .map_err(|e| IngestError::Download(format!("checkout report details: {e}")))?;
+            .map_err(|e| {
+                let context = IngestError::Download(format!("checkout report details: {e}"));
+                Report::from(e).change_context(context)
+            })?;
         if !resp.status().is_success() {
             return Err(IngestError::Download(format!(
                 "checkout report details status {}",
                 resp.status()
-            )));
+            ))
+            .into());
         }
-        let body = resp
-            .bytes()
-            .await
-            .map_err(|e| IngestError::Download(e.to_string()))?;
-        let details: ReportDetailsResponse = serde_json::from_slice(&body)
-            .map_err(|e| IngestError::Download(format!("checkout report details parse: {e}")))?;
+        let body = resp.bytes().await.map_err(|e| {
+            let context = IngestError::Download(e.to_string());
+            Report::from(e).change_context(context)
+        })?;
+        let details: ReportDetailsResponse = serde_json::from_slice(&body).map_err(|e| {
+            let context = IngestError::Download(format!("checkout report details parse: {e}"));
+            Report::from(e).change_context(context)
+        })?;
         let file_ids: Vec<&str> = details
             .files
             .iter()
@@ -361,9 +375,7 @@ impl SettlementReportSource for CheckoutReportSource {
             .filter(|id| !id.is_empty())
             .collect();
         if file_ids.is_empty() {
-            return Err(IngestError::Download(
-                "checkout report has no files".to_string(),
-            ));
+            return Err(IngestError::Download("checkout report has no files".to_string()).into());
         }
 
         // 2. Download each CSV file. A report over 1M rows is split across files, each carrying its
@@ -378,17 +390,21 @@ impl SettlementReportSource for CheckoutReportSource {
                 .header("Accept", "text/csv")
                 .send()
                 .await
-                .map_err(|e| IngestError::Download(format!("checkout report file: {e}")))?;
+                .map_err(|e| {
+                    let context = IngestError::Download(format!("checkout report file: {e}"));
+                    Report::from(e).change_context(context)
+                })?;
             if !resp.status().is_success() {
                 return Err(IngestError::Download(format!(
                     "checkout report file status {}",
                     resp.status()
-                )));
+                ))
+                .into());
             }
-            let bytes = resp
-                .bytes()
-                .await
-                .map_err(|e| IngestError::Download(e.to_string()))?;
+            let bytes = resp.bytes().await.map_err(|e| {
+                let context = IngestError::Download(e.to_string());
+                Report::from(e).change_context(context)
+            })?;
             if i == 0 {
                 out.extend_from_slice(&bytes);
             } else {
@@ -531,7 +547,7 @@ impl SettlementReportSource for CheckoutReportSource {
         if incomplete > 0 {
             // Not an error: it's the expected shape of a date-ranged report's edges. Logged because
             // it's otherwise invisible — the ingestion's staged-row count just comes out lower.
-            crate::logger::warn!(
+            logger::warn!(
                 tag = "cost_ingest",
                 "checkout: dropped {incomplete} captured payment(s) whose interchange has not been \
                  billed yet (clearing falls outside this report window); their cost would read low"
@@ -544,7 +560,9 @@ impl SettlementReportSource for CheckoutReportSource {
 /// Parse the webhook body as JSON, or a typed error.
 fn parse_event(raw_body: &[u8]) -> Result<Value, IngestError> {
     serde_json::from_slice(raw_body).map_err(|e| {
-        IngestError::MalformedNotification(format!("checkout webhook body is not JSON: {e}"))
+        let context =
+            IngestError::MalformedNotification(format!("checkout webhook body is not JSON: {e}"));
+        Report::from(e).change_context(context)
     })
 }
 
@@ -886,7 +904,7 @@ ic_orphan,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,SA,USD,-102.29,2026
             .unwrap_err();
         let IngestError::MissingColumns {
             missing, required, ..
-        } = err
+        } = err.current_context()
         else {
             panic!("expected MissingColumns, got {err:?}");
         };
@@ -964,7 +982,9 @@ ic_orphan,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,SA,USD,-102.29,2026
         // No account at all -> a clear error.
         let bad = r#"{"data":{}}"#;
         assert!(matches!(
-            src.peek_account(bad.as_bytes()),
+            src.peek_account(bad.as_bytes())
+                .as_ref()
+                .map_err(|error| error.current_context()),
             Err(IngestError::MalformedNotification(_))
         ));
     }
@@ -990,12 +1010,16 @@ ic_orphan,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,SA,USD,-102.29,2026
         // Signed with a different key.
         let headers = headers_with_sig(&sign(EVENT.as_bytes(), "other_key"));
         assert!(matches!(
-            src.verify_and_parse_notification(&headers, EVENT.as_bytes(), &secret),
+            src.verify_and_parse_notification(&headers, EVENT.as_bytes(), &secret)
+                .as_ref()
+                .map_err(|error| error.current_context()),
             Err(IngestError::SignatureMismatch)
         ));
         // Missing header entirely.
         assert!(matches!(
-            src.verify_and_parse_notification(&HeaderMap::new(), EVENT.as_bytes(), &secret),
+            src.verify_and_parse_notification(&HeaderMap::new(), EVENT.as_bytes(), &secret)
+                .as_ref()
+                .map_err(|error| error.current_context()),
             Err(IngestError::MalformedNotification(_))
         ));
     }
@@ -1009,7 +1033,9 @@ ic_orphan,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,SA,USD,-102.29,2026
         let other = r#"{"type":"payment_approved","data":{"report_id":"rpt_x","report_type":"FinancialActions","account":{"entity_id":"ent_x"}}}"#;
         let h = headers_with_sig(&sign(other.as_bytes(), KEY));
         assert!(matches!(
-            src.verify_and_parse_notification(&h, other.as_bytes(), &secret),
+            src.verify_and_parse_notification(&h, other.as_bytes(), &secret)
+                .as_ref()
+                .map_err(|error| error.current_context()),
             Err(IngestError::MalformedNotification(_))
         ));
 
@@ -1017,7 +1043,9 @@ ic_orphan,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,SA,USD,-102.29,2026
         let payments = r#"{"type":"report_generated","data":{"report_id":"rpt_x","report_type":"Payments","account":{"entity_id":"ent_x"}}}"#;
         let h = headers_with_sig(&sign(payments.as_bytes(), KEY));
         assert!(matches!(
-            src.verify_and_parse_notification(&h, payments.as_bytes(), &secret),
+            src.verify_and_parse_notification(&h, payments.as_bytes(), &secret)
+                .as_ref()
+                .map_err(|error| error.current_context()),
             Err(IngestError::MalformedNotification(_))
         ));
     }
@@ -1061,7 +1089,9 @@ ic_orphan,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,SA,USD,-102.29,2026
             download_auth: Secret::new("   ".to_string()),
         };
         assert!(matches!(
-            CheckoutCreds::parse(&empty),
+            CheckoutCreds::parse(&empty)
+                .as_ref()
+                .map_err(|error| error.current_context()),
             Err(IngestError::MalformedNotification(_))
         ));
     }

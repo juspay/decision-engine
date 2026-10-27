@@ -2,8 +2,10 @@ use crate::analytics::events::DomainAnalyticsEvent;
 use crate::analytics::flow::{AnalyticsFlowContext, AnalyticsRoute};
 use crate::analytics::models::*;
 use crate::error;
+use crate::logger;
 use crate::metrics::{ANALYTICS_EVENT_COUNTER, ROUTING_DECISION_COUNTER, ROUTING_RULE_HIT_COUNTER};
 use axum::http::HeaderMap;
+use error_stack::Result;
 use serde::Serialize;
 use time::OffsetDateTime;
 
@@ -64,7 +66,7 @@ fn enqueue_domain_event(event: DomainAnalyticsEvent) {
     }))
     .is_err()
     {
-        crate::logger::warn!("Skipping analytics event after an unexpected capture failure");
+        logger::warn!("Skipping analytics event after an unexpected capture failure");
     }
 }
 

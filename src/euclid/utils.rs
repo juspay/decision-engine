@@ -6,6 +6,8 @@ use super::interpreter::RoutingError;
 use super::types::{AlgorithmType, BackendOutput, KeyDataType, StaticRoutingAlgorithm};
 use crate::error::ContainerError;
 use crate::euclid::types::{FieldValidationRules, KeyConfig, RoutingRule, TomlConfig};
+use crate::logger;
+use error_stack::ResultExt;
 use rand::distributions::WeightedIndex;
 use rand::prelude::*;
 use std::collections::HashMap;
@@ -217,7 +219,7 @@ pub fn validate_routing_rule(
                 Ok(ValidationResult::success())
             } else {
                 for error in &validation_errors {
-                    crate::logger::warn!(
+                    logger::warn!(
                         field = %error.field,
                         error_type = %error.error_type,
                         message = %error.message,
@@ -238,7 +240,7 @@ pub fn validate_routing_rule(
                 Ok(ValidationResult::success())
             } else {
                 for error in &validation_errors {
-                    crate::logger::warn!(
+                    logger::warn!(
                         field = %error.field,
                         error_type = %error.error_type,
                         message = %error.message,
@@ -624,15 +626,15 @@ pub fn validate_string_value(
 
 pub fn sample_split_winner_first<T>(
     mut splits: Vec<VolumeSplit<T>>,
-) -> Result<Vec<T>, RoutingError> {
+) -> error_stack::Result<Vec<T>, RoutingError> {
     let weights: Vec<u8> = splits.iter().map(|sp| sp.split).collect();
     let weighted_index =
-        WeightedIndex::new(weights).map_err(|_| RoutingError::VolumeSplitFailed)?;
+        WeightedIndex::new(weights).change_context(RoutingError::VolumeSplitFailed)?;
     let mut rng = rand::thread_rng();
     let idx = weighted_index.sample(&mut rng);
 
     if idx >= splits.len() {
-        return Err(RoutingError::VolumeSplitFailed);
+        return Err(RoutingError::VolumeSplitFailed.into());
     }
     let winner = splits.remove(idx);
     splits.insert(0, winner);
@@ -643,7 +645,7 @@ pub fn sample_split_winner_first<T>(
 pub fn apply_default_fallback(ir: &mut BackendOutput, fallback_output: Option<&[ConnectorInfo]>) {
     if ir.rule_name.is_none() {
         if let Some(fallback) = fallback_output.filter(|connectors| !connectors.is_empty()) {
-            crate::logger::debug!("Default fallback triggered: Overriding with fallback connector");
+            logger::debug!("Default fallback triggered: Overriding with fallback connector");
 
             ir.rule_name = Some("default_fallback".to_string());
             ir.output = Output::Priority(fallback.to_vec());

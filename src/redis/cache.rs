@@ -21,7 +21,7 @@ async fn set_to_memory_cache(prefixed_key: &str, value: &str, ttl_seconds: Optio
     match GLOBAL_CACHE.store(prefixed_key.to_string(), value.to_string(), ttl_seconds) {
         Ok(_) => {}
         Err(e) => {
-            crate::logger::warn!(
+            logger::warn!(
                 tag = "memory_cache_write_failed",
                 action = "memory_cache_write_failed",
                 "Failed to write cache for key: {}, error: {:?}",
@@ -55,7 +55,7 @@ async fn set_to_redis_cache(prefixed_key: &str, value: &str, ttl_seconds: i64) {
     {
         Ok(_) => {}
         Err(e) => {
-            crate::logger::warn!(
+            logger::warn!(
                 tag = "redis_cache_write_failed",
                 action = "redis_cache_write_failed",
                 "Failed to write Redis cache for key: {}, error: {:?}",
@@ -142,8 +142,9 @@ where
                 None => extractValue(cache_value),
             };
         }
-        Err(_) => {
+        Err(cause) => {
             logger::debug!(
+                error = ?cause,
                 tag = "memory_cache",
                 action = "miss",
                 "Memory cache miss for key: {}, checking Redis",
@@ -213,7 +214,10 @@ where
             set_to_memory_cache(&prefixed_key, "", ttl_seconds_u64).await;
             None
         }
-        Err(_) => None,
+        Err(cause) => {
+            logger::error!(error = ?cause);
+            None
+        }
     }
 }
 

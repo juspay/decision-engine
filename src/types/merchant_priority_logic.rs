@@ -1,4 +1,5 @@
 use crate::app::get_tenant_app_state;
+use crate::logger;
 #[cfg(feature = "mysql")]
 use crate::storage::schema::merchant_priority_logic::dsl;
 #[cfg(feature = "postgres")]
@@ -104,7 +105,10 @@ pub async fn find_all_priority_logic_by_merchant_pid(mpid: i64) -> Vec<MerchantP
     .await
     {
         Ok(db_results) => db_results.into_iter().map(From::from).collect(),
-        Err(_) => Vec::new(), // Silently handle any errors by returning an empty vector
+        Err(cause) => {
+            logger::error!(error = ?cause);
+            Vec::new()
+        } // Silently handle any errors by returning an empty vector
     }
 }
 
@@ -120,6 +124,9 @@ pub async fn find_priority_logic_by_id(mpl_id: String) -> Option<MerchantPriorit
     {
         Ok(Some(db_record)) => Some(MerchantPriorityLogic::from(db_record)),
         Ok(None) => None,
-        Err(_) => None, // Silently handle any errors by returning None
+        Err(cause) => {
+            logger::error!(error = ?cause);
+            None
+        } // Silently handle any errors by returning None
     }
 }

@@ -1,3 +1,4 @@
+use crate::logger;
 use std::sync::Arc;
 
 use crate::app::APP_STATE;
@@ -26,7 +27,7 @@ pub struct HealthRespPayload {
 
 /// '/health` API handler`
 pub async fn health() -> Json<HealthRespPayload> {
-    crate::logger::debug!("Health was called");
+    logger::debug!("Health was called");
     Json(HealthRespPayload {
         message: "Health is good".into(),
     })
@@ -36,7 +37,7 @@ pub async fn health() -> Json<HealthRespPayload> {
 pub async fn ready() -> (StatusCode, Json<HealthRespPayload>) {
     let app_state = APP_STATE.get().expect("GlobalAppState not set");
     let app_ready = app_state.is_ready();
-    crate::logger::debug!("Readiness check was called");
+    logger::debug!("Readiness check was called");
 
     if app_ready {
         (
@@ -78,9 +79,12 @@ pub enum HealthState {
 
 /// '/health/diagnostics` API handler`
 pub async fn diagnostics(TenantStateResolver(state): TenantStateResolver) -> Json<Diagnostics> {
-    crate::logger::info!("Health diagnostics was called");
+    logger::info!("Health diagnostics was called");
 
     let db_test_output = state.db.test().await;
+    if let Err(error) = &db_test_output {
+        logger::error!(error = ?error, "Database health diagnostics failed");
+    }
     let db_test_output_case_match = db_test_output.as_ref().map_err(|err| err.get_inner());
 
     let db_health = match db_test_output_case_match {

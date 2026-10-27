@@ -20,6 +20,7 @@
 use super::source::InvoiceSource;
 use super::types::{InvoiceLine, InvoiceSummary, LineKind, ParsedInvoice};
 use crate::cost_ingestion::types::IngestError;
+use error_stack::{Report, Result};
 
 pub struct AdyenInvoiceSource;
 
@@ -61,17 +62,20 @@ fn parse_csv(bytes: &[u8]) -> Result<ParsedInvoice, IngestError> {
 
     let header = rdr
         .byte_headers()
-        .map_err(|e| IngestError::Parse(e.to_string()))?
+        .map_err(|e| {
+            let context = IngestError::Parse(e.to_string());
+            Report::from(e).change_context(context)
+        })?
         .clone();
     let cols = Cols::resolve(&header)?;
 
     let mut lines = Vec::new();
     let mut currency = String::new();
     let mut record = csv::ByteRecord::new();
-    while rdr
-        .read_byte_record(&mut record)
-        .map_err(|e| IngestError::Parse(e.to_string()))?
-    {
+    while rdr.read_byte_record(&mut record).map_err(|e| {
+        let context = IngestError::Parse(e.to_string());
+        Report::from(e).change_context(context)
+    })? {
         let get = |i: usize| -> &str {
             record
                 .get(i)
@@ -149,8 +153,10 @@ fn parse_csv(bytes: &[u8]) -> Result<ParsedInvoice, IngestError> {
 /// European number format (`42.547,47`) is handled by [`parse_eu_amount`]. Validated against the
 /// real invoice NL202510036645 (see the test).
 fn parse_pdf(bytes: &[u8]) -> Result<ParsedInvoice, IngestError> {
-    let text = pdf_extract::extract_text_from_mem(bytes)
-        .map_err(|e| IngestError::Parse(format!("pdf text extraction failed: {e}")))?;
+    let text = pdf_extract::extract_text_from_mem(bytes).map_err(|e| {
+        let context = IngestError::Parse(format!("pdf text extraction failed: {e}"));
+        Report::from(e).change_context(context)
+    })?;
     parse_summary_text(&text)
 }
 
@@ -210,7 +216,8 @@ fn parse_summary_text(text: &str) -> Result<ParsedInvoice, IngestError> {
     if lines.is_empty() {
         return Err(IngestError::Parse(
             "no invoice summary lines found (unrecognized PDF layout)".to_string(),
-        ));
+        )
+        .into());
     }
 
     // Enrich from the page-2 "<count> Transaction fee EUR <turnover>" detail line: the transaction
@@ -330,12 +337,16 @@ impl Cols {
             header.iter().position(|h| h.eq_ignore_ascii_case(n))
         };
         // Either "Description" or "Type" carries the line label depending on the export variant.
-        let description = idx("Description")
-            .or_else(|| idx("Type"))
-            .ok_or_else(|| IngestError::Parse("invoice missing Description/Type column".into()))?;
+        let description = idx("Description").or_else(|| idx("Type")).ok_or_else(|| {
+            Report::new(IngestError::Parse(
+                "invoice missing Description/Type column".into(),
+            ))
+        })?;
         let amount = idx("Amount")
             .or_else(|| idx("Booked Amount"))
-            .ok_or_else(|| IngestError::Parse("invoice missing Amount column".into()))?;
+            .ok_or_else(|| {
+                Report::new(IngestError::Parse("invoice missing Amount column".into()))
+            })?;
         Ok(Self {
             description,
             amount,

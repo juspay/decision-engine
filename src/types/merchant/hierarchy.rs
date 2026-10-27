@@ -23,6 +23,9 @@
 //! ancestry and are never scopes. Ancestry is absent for standalone DE and for rows HS does not
 //! know about — absence is represented as `None`, never as a synthetic ID.
 
+use crate::generics::MeshError;
+use crate::logger;
+use error_stack::ResultExt;
 use serde::{Deserialize, Serialize};
 
 use crate::types::service_configuration::{find_config_by_name, insert_config, update_config};
@@ -83,9 +86,9 @@ struct InternalMetadata {
 /// this is read on the authorization path.
 pub fn from_internal_metadata(internal_metadata: Option<&str>) -> Option<Hierarchy> {
     let raw = internal_metadata?;
-    let value: serde_json::Value = serde_json::from_str(raw).ok()?;
+    let value: serde_json::Value = serde_json::from_str(raw).inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok()?;
     let node = value.get(HIERARCHY_METADATA_KEY)?;
-    serde_json::from_value(node.clone()).ok()
+    serde_json::from_value(node.clone()).inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok()
 }
 
 /// Ancestry of a loaded merchant account, or `None` when it has no HS parent.
@@ -100,7 +103,7 @@ pub fn merge_into_metadata(
     hierarchy: &Hierarchy,
 ) -> Result<String, serde_json::Error> {
     let mut envelope: InternalMetadata = existing
-        .and_then(|raw| serde_json::from_str(raw).ok())
+        .and_then(|raw| serde_json::from_str(raw).inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .unwrap_or_default();
     envelope.hierarchy = Some(hierarchy.clone());
     serde_json::to_string(&envelope)
@@ -158,21 +161,31 @@ pub fn merchant_key(hs_merchant_id: &str) -> String {
 /// Reads and deserializes one config-store entry, treating an unreadable value as absent for
 /// the same reason [`from_internal_metadata`] does.
 async fn read_entry<T: for<'de> Deserialize<'de>>(name: String) -> Option<T> {
-    let config = find_config_by_name(name).await.ok().flatten()?;
+    let config = find_config_by_name(name)
+        .await
+        .inspect_err(|cause| {
+            logger::error!(error = ?cause);
+        })
+        .ok()
+        .flatten()?;
     let raw = config.value?;
-    serde_json::from_str(&raw).ok()
+    serde_json::from_str(&raw)
+        .inspect_err(|cause| {
+            logger::error!(error = ?cause);
+        })
+        .ok()
 }
 
 /// Writes one config-store entry, inserting or updating as needed. `service_configuration`
 /// has no upsert primitive, so presence decides which single-table write runs.
-async fn write_entry<T: Serialize>(
-    name: String,
-    entry: &T,
-) -> error_stack::Result<(), crate::generics::MeshError> {
-    let value = serde_json::to_string(entry).map_err(|_| crate::generics::MeshError::Others)?;
+async fn write_entry<T: Serialize>(name: String, entry: &T) -> error_stack::Result<(), MeshError> {
+    let value = serde_json::to_string(entry).change_context(MeshError::Others)?;
 
     let exists = find_config_by_name(name.clone())
         .await
+        .inspect_err(|cause| {
+            logger::error!(error = ?cause);
+        })
         .ok()
         .flatten()
         .is_some();
@@ -196,23 +209,18 @@ pub async fn load_merchant(hs_merchant_id: &str) -> Option<MerchantEntry> {
     read_entry(merchant_key(hs_merchant_id)).await
 }
 
-pub async fn store_org_index(
-    entry: &OrgIndex,
-) -> error_stack::Result<(), crate::generics::MeshError> {
+pub async fn store_org_index(entry: &OrgIndex) -> error_stack::Result<(), MeshError> {
     write_entry(org_index_key(), entry).await
 }
 
-pub async fn store_org(
-    hs_org_id: &str,
-    entry: &OrgEntry,
-) -> error_stack::Result<(), crate::generics::MeshError> {
+pub async fn store_org(hs_org_id: &str, entry: &OrgEntry) -> error_stack::Result<(), MeshError> {
     write_entry(org_key(hs_org_id), entry).await
 }
 
 pub async fn store_merchant(
     hs_merchant_id: &str,
     entry: &MerchantEntry,
-) -> error_stack::Result<(), crate::generics::MeshError> {
+) -> error_stack::Result<(), MeshError> {
     write_entry(merchant_key(hs_merchant_id), entry).await
 }
 
@@ -295,7 +303,7 @@ pub async fn scopes_for_grant(grant: &ScopeGrant) -> Vec<GrantedScope> {
 
                 if scopes.len() >= MAX_GRANTED_SCOPES {
                     scopes.truncate(MAX_GRANTED_SCOPES);
-                    crate::logger::warn!(
+                    logger::warn!(
                         category = "HIERARCHY",
                         org_id = %grant.id,
                         cap = MAX_GRANTED_SCOPES,

@@ -9,6 +9,7 @@
 
 use crate::config::ClickHouseAnalyticsConfig;
 use crate::cost_ingestion::types::IngestError;
+use error_stack::Result;
 
 use super::pipeline::exec;
 use super::store;

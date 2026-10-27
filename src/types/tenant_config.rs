@@ -1,3 +1,5 @@
+use crate::logger;
+use error_stack::{Report, Result, ResultExt};
 use serde::{Deserialize, Serialize};
 // use db::eulermeshimpl::mesh_config;
 // use db::mesh::internal::*;
@@ -66,16 +68,16 @@ pub struct TenantConfig {
 }
 
 impl TryFrom<DBTenantConfig> for TenantConfig {
-    type Error = ApiError;
+    type Error = Report<ApiError>;
 
     fn try_from(db_tenant_config: DBTenantConfig) -> Result<Self, ApiError> {
         Ok(Self {
             id: text_to_tenant_config_id(db_tenant_config.id),
             _type: text_to_config_type(db_tenant_config._type)
-                .map_err(|_| ApiError::ParsingError("Invalid Config Type"))?,
+                .change_context(ApiError::ParsingError("Invalid Config Type"))?,
             moduleKey: db_tenant_config.module_key,
             moduleName: text_to_module_name(db_tenant_config.module_name)
-                .map_err(|_| ApiError::ParsingError("Invalid Module Name"))?,
+                .change_context(ApiError::ParsingError("Invalid Module Name"))?,
             tenantAccountId: db_tenant_config.tenant_account_id,
             configValue: db_tenant_config.config_value,
             filterDimension: db_tenant_config
@@ -84,7 +86,7 @@ impl TryFrom<DBTenantConfig> for TenantConfig {
                 .transpose()?,
             filterGroupId: db_tenant_config.filter_group_id,
             status: text_to_config_status(db_tenant_config.status)
-                .map_err(|_| ApiError::ParsingError("Invalid Config Status"))?,
+                .change_context(ApiError::ParsingError("Invalid Config Status"))?,
             countryCodeAlpha3: db_tenant_config
                 .country_code_alpha3
                 .map(|code| text_db_to_country_iso(code.as_str()))
@@ -149,9 +151,11 @@ pub async fn get_arr_active_tenant_config_by_tenant_id_module_name_module_key_an
             .and(dsl::status.eq(active_status_str)),
     ).await {
         Ok(db_results) => db_results.into_iter()
-                                    .filter_map(|db_record| TenantConfig::try_from(db_record).ok())
+                                    .filter_map(|db_record| TenantConfig::try_from(db_record)
+                                        .inspect_err(|cause| { logger::error!(error = ?cause); })
+                                        .ok())
                                     .collect(),
-        Err(_) => Vec::new(), // Silently handle any errors by returning an empty vec
+        Err(cause) => { logger::error!(error = ?cause); Vec::new() }, // Silently handle any errors by returning an empty vec
     }
 }
 
@@ -184,9 +188,11 @@ pub async fn get_arr_active_tenant_config_by_tenant_id_module_name_module_key_an
     ).await {
         Ok(db_results) => db_results
             .into_iter()
-            .filter_map(|db_record| TenantConfig::try_from(db_record).ok())
+            .filter_map(|db_record| TenantConfig::try_from(db_record)
+                                        .inspect_err(|cause| { logger::error!(error = ?cause); })
+                                        .ok())
             .collect(),
-        Err(_) => Vec::new(), // Silently handle any errors by returning empty vec
+        Err(cause) => { logger::error!(error = ?cause); Vec::new() }, // Silently handle any errors by returning empty vec
     }
 }
 
@@ -217,7 +223,15 @@ pub async fn get_tenant_config_by_tenant_id_and_module_name_and_module_key_and_t
     )
     .await
     {
-        Ok(Some(db_tenant_config)) => TenantConfig::try_from(db_tenant_config).ok(),
-        _ => None, // Silently return None on error or no result
+        Ok(Some(db_tenant_config)) => TenantConfig::try_from(db_tenant_config)
+            .inspect_err(|cause| {
+                logger::error!(error = ?cause);
+            })
+            .ok(),
+        Ok(None) => None,
+        Err(cause) => {
+            logger::error!(error = ?cause);
+            None
+        }
     }
 }

@@ -882,7 +882,10 @@ pub fn sample_from_beta_distribution(
         Ok(beta) => beta.sample(&mut rng),
         // Unreachable given the floors above. Returning the unsampled score keeps a future change
         // to the parameters from reintroducing a panic on the routing path.
-        Err(_) => gw_score,
+        Err(cause) => {
+            logger::error!(error = ?cause);
+            gw_score
+        }
     }
 }
 

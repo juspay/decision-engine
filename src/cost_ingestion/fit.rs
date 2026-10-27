@@ -12,6 +12,8 @@
 //! reports coverage for the validation gate. See `scratch/inhouse-cost-architecture.md` §3, §7 and
 //! `scratch/settlement-table-removal-worked-example.md`.
 
+use crate::logger;
+use error_stack::{Report, Result};
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -355,7 +357,7 @@ async fn refresh_segments(
     )
     .await
     {
-        crate::logger::warn!(tag = "cost_fit", "segment clear failed: {e}");
+        logger::warn!(tag = "cost_fit", "segment clear failed: {e}");
         return;
     }
 
@@ -368,7 +370,7 @@ async fn refresh_segments(
     {
         Ok(t) => t,
         Err(e) => {
-            crate::logger::warn!(tag = "cost_fit", "segment stats fetch failed: {e}");
+            logger::warn!(tag = "cost_fit", "segment stats fetch failed: {e}");
             return;
         }
     };
@@ -380,7 +382,7 @@ async fn refresh_segments(
     if let Err(e) =
         insert_segments(cfg, connector, account, merchant_id, report_date, &clusters).await
     {
-        crate::logger::warn!(tag = "cost_fit", "segment insert failed: {e}");
+        logger::warn!(tag = "cost_fit", "segment insert failed: {e}");
     }
 }
 
@@ -419,9 +421,10 @@ async fn insert_segments(
                 "gross_sum": s.vol,
                 "verdict": s.verdict.as_str(),
             });
-            body.push_str(
-                &serde_json::to_string(&obj).map_err(|e| IngestError::Storage(e.to_string()))?,
-            );
+            body.push_str(&serde_json::to_string(&obj).map_err(|e| {
+                let context = IngestError::Storage(e.to_string());
+                Report::from(e).change_context(context)
+            })?);
             body.push('\n');
         }
     }
@@ -436,16 +439,17 @@ async fn insert_segments(
     if !cfg.user.is_empty() {
         req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
     }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let resp = req.send().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         return Err(IngestError::Storage(format!(
             "clickhouse segment insert failed ({status}): {text}"
-        )));
+        ))
+        .into());
     }
     Ok(())
 }
@@ -595,7 +599,7 @@ pub async fn fit_snapshot(
                 (t, g)
             }
             Err(e) => {
-                crate::logger::warn!(
+                logger::warn!(
                     tag = "cost_ingestion",
                     "per-ingestion cluster summary failed for {}: {:?}",
                     ingestion_id,
@@ -632,20 +636,21 @@ async fn exec(
     if !cfg.user.is_empty() {
         req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
     }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let resp = req.send().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
-        return Err(IngestError::Storage(format!(
-            "clickhouse fit failed ({status}): {text}"
-        )));
+        return Err(
+            IngestError::Storage(format!("clickhouse fit failed ({status}): {text}")).into(),
+        );
     }
-    resp.text()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))
+    resp.text().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })
 }
 
 #[cfg(test)]

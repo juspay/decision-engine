@@ -116,9 +116,12 @@ impl KnownFeature {
 
         let conf = service_configuration::find_config_by_name(key.to_string())
             .await
+            .inspect_err(|cause| {
+                logger::error!(error = ?cause);
+            })
             .unwrap_or(None)
             .and_then(|c| c.value)
-            .and_then(|v| serde_json::from_str::<FeatureConf>(&v).ok());
+            .and_then(|v| serde_json::from_str::<FeatureConf>(&v).inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok());
 
         if let Some(conf) = conf {
             return crate::redis::feature::check_merchant_enabled(
@@ -203,7 +206,7 @@ fn with_merchant(
     enabled: bool,
 ) -> error_stack::Result<String, crate::generics::MeshError> {
     let mut conf: FeatureConf = current
-        .and_then(|v| serde_json::from_str(v).ok())
+        .and_then(|v| serde_json::from_str(v).inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .unwrap_or(FeatureConf {
             enableAll: false,
             enableAllRollout: None,
@@ -272,7 +275,7 @@ pub async fn get_debit_routing(
             .await
             .change_context(error::MerchantAccountConfigurationError::StorageError)?
             .and_then(|config| config.value)
-            .and_then(|value| value.parse::<bool>().ok())
+            .and_then(|value| value.parse::<bool>().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
             .unwrap_or(false);
 
         Ok(Json(DebitRoutingResponse {
@@ -353,7 +356,7 @@ pub async fn create_merchant_config(
 
     let provided = headers
         .get("x-admin-secret")
-        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.to_str().inspect_err(|cause| { logger::debug!(error = ?cause, "Optional API value conversion failed; retaining existing fallback"); }).ok())
         .unwrap_or("");
 
     if provided != global_config.admin_secret.secret.peek().as_str() {

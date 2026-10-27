@@ -5,6 +5,7 @@
 //! connector override and the learned model at decide time — see
 //! [`crate::cost_ingestion::serving::lookup`].
 
+use crate::logger;
 use std::collections::HashMap;
 
 use crate::custom_extractors::Json;
@@ -248,7 +249,10 @@ pub async fn list_cost_cluster_facets(
     };
     let facets = blended::cluster_facets(&cfg, &merchant_id, scope)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(|error| {
+            let message = format!("{:?}", error.current_context());
+            TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+        })?;
     Ok(Json(
         facets
             .into_iter()
@@ -295,9 +299,15 @@ pub async fn list_cost_clusters(
     let top: Vec<TopCluster> =
         blended::top_clusters(&cfg, &merchant_id, limit, scope, order, filter)
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+            .map_err(|error| {
+                let message = format!("{:?}", error.current_context());
+                TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+            })?;
     let overrides: HashMap<String, ClusterOverride> = overrides::list_clusters(&merchant_id)
         .await
+        .inspect_err(|cause| {
+            logger::error!(error = ?cause);
+        })
         .unwrap_or_default()
         .into_iter()
         .map(|o| (key_of_dims(&o.dims), o))
@@ -361,7 +371,7 @@ pub async fn list_cost_clusters(
     let segmented = match blended::segmented_clusters(&cfg, &merchant_id, scope).await {
         Ok(s) => s,
         Err(e) => {
-            crate::logger::warn!(
+            logger::warn!(
                 tag = "cost_clusters",
                 "segmented clusters unavailable: {:?}",
                 e
@@ -526,7 +536,10 @@ pub async fn set_cluster_override(
     };
     overrides::put_cluster(&merchant_id, &ov)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(|error| {
+            let message = format!("{:?}", error.current_context());
+            TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+        })?;
     refresh_serving(&merchant_id).await;
     Ok(Json(ov))
 }
@@ -541,7 +554,10 @@ pub async fn delete_cluster_override(
     ))?;
     overrides::delete_cluster(&merchant_id, &dims)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(|error| {
+            let message = format!("{:?}", error.current_context());
+            TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+        })?;
     refresh_serving(&merchant_id).await;
     Ok(StatusCode::NO_CONTENT)
 }

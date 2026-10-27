@@ -4,7 +4,7 @@ use aws_sdk_sesv2::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_sesv2::types::{Body, Content, Destination, EmailContent, Message};
 use aws_smithy_runtime::client::http::hyper_014::HyperClientBuilder;
 use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
-use error_stack::ResultExt;
+use error_stack::{Report, Result, ResultExt};
 use hyper_proxy::{Intercept, Proxy, ProxyConnector};
 
 use crate::config::AwsSesEmailConfig;
@@ -17,10 +17,7 @@ pub struct AwsSesEmailClient {
 }
 
 impl AwsSesEmailClient {
-    pub async fn new(
-        config: &AwsSesEmailConfig,
-        sender_email: String,
-    ) -> error_stack::Result<Self, EmailError> {
+    pub async fn new(config: &AwsSesEmailConfig, sender_email: String) -> Result<Self, EmailError> {
         let region = aws_sdk_sesv2::config::Region::new(config.region.clone());
 
         // Credential resolution uses no proxy — STS is reached over the VPC endpoint in the
@@ -88,10 +85,10 @@ fn build_proxied_http_client(
 ) -> Result<aws_smithy_runtime_api::client::http::SharedHttpClient, EmailError> {
     let proxy_uri = proxy_url
         .parse::<hyper014::Uri>()
-        .map_err(|_| EmailError::MissingConfig)?;
+        .change_context(EmailError::MissingConfig)?;
     let proxy = Proxy::new(Intercept::All, proxy_uri);
     let connector = ProxyConnector::from_proxy(hyper014::client::HttpConnector::new(), proxy)
-        .map_err(|_| EmailError::MissingConfig)?;
+        .change_context(EmailError::MissingConfig)?;
     Ok(HyperClientBuilder::new().build(connector))
 }
 
@@ -143,7 +140,7 @@ where
 
 #[async_trait::async_trait]
 impl EmailClient for AwsSesEmailClient {
-    async fn health_check(&self) -> error_stack::Result<(), EmailError> {
+    async fn health_check(&self) -> Result<(), EmailError> {
         // get_account() requires ses:GetAccount which send-only roles don't have.
         // Checking the sender identity requires only ses:GetEmailIdentity and directly
         // validates the address that will be used for sending.
@@ -154,14 +151,14 @@ impl EmailClient for AwsSesEmailClient {
             .await
             .map_err(|err| {
                 let detail = describe_sdk_error(&err);
-                error_stack::Report::new(err).attach_printable(detail)
+                Report::new(err).attach_printable(detail)
             })
             .change_context(EmailError::SendFailed)
             .attach_printable_lazy(|| format!("sender_email={}", self.sender_email))?;
         Ok(())
     }
 
-    async fn send_email(&self, message: EmailMessage) -> error_stack::Result<(), EmailError> {
+    async fn send_email(&self, message: EmailMessage) -> Result<(), EmailError> {
         let subject = Content::builder()
             .data(message.subject)
             .charset("UTF-8")
@@ -191,7 +188,7 @@ impl EmailClient for AwsSesEmailClient {
             .await
             .map_err(|err| {
                 let detail = describe_sdk_error(&err);
-                error_stack::Report::new(err).attach_printable(detail)
+                Report::new(err).attach_printable(detail)
             })
             .change_context(EmailError::SendFailed)
             .attach_printable_lazy(|| format!("sender_email={}", self.sender_email))?;

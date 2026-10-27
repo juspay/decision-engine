@@ -18,6 +18,7 @@ use axum::body::Bytes;
 use axum::extract::Path;
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::IntoResponse;
+use error_stack::{Report, Result};
 
 use crate::app::get_tenant_app_state;
 use crate::cost_ingestion::{store, ConnectorCredsStore, ConnectorRegistry, IngestError};
@@ -48,7 +49,7 @@ pub async fn settlement_webhook(
                 merchant_id,
                 e
             );
-            (status_for(&e), "rejected")
+            (status_for(e.current_context()), "rejected")
         }
     }
 }
@@ -76,7 +77,11 @@ async fn handle(
         &cfg.creds_encryption_current,
         &cfg.creds_encryption_keys,
     )
-    .ok_or_else(|| IngestError::Storage("credential encryption keyring not configured".into()))?;
+    .ok_or_else(|| {
+        Report::new(IngestError::Storage(
+            "credential encryption keyring not configured".into(),
+        ))
+    })?;
     let resolved = creds_store
         .get(merchant_id, connector, &account)
         .await?

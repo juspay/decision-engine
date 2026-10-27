@@ -25,6 +25,9 @@ pub async fn get_cost_coverage(
 
     let summary = coverage::for_merchant(&clickhouse, &merchant_id)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(|error| {
+            let message = format!("{:?}", error.current_context());
+            TextError::from_report(error, StatusCode::INTERNAL_SERVER_ERROR, message)
+        })?;
     Ok(Json(summary))
 }

@@ -1,3 +1,4 @@
+use error_stack::Result;
 use std::collections::HashMap;
 
 use clickhouse::Row;

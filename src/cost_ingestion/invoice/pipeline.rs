@@ -6,6 +6,8 @@
 //! key-value store. The one ClickHouse touch is *optional*: the settled-volume fallback for the
 //! amortization denominators when the invoice does not state its own turnover / transaction count.
 
+use crate::logger;
+use error_stack::{Report, Result};
 use masking::PeekInterface;
 
 use crate::config::ClickHouseAnalyticsConfig;
@@ -105,9 +107,9 @@ pub async fn ingest_invoice_bytes(
     // Serve the new add-on now rather than after the periodic tick (same as the report upload path).
     if let Err(e) = crate::cost_ingestion::serving::refresh_merchant(clickhouse, merchant_id).await
     {
-        crate::logger::warn!(
+        logger::warn!(
             tag = "invoice_ingest",
-            "serving refresh after invoice failed: {}",
+            "serving refresh after invoice failed: {:?}",
             e
         );
     }
@@ -246,18 +248,20 @@ pub(super) async fn exec(
     if !cfg.user.is_empty() {
         req = req.basic_auth(&cfg.user, cfg.password.as_ref().map(|p| p.peek().clone()));
     }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+    let resp = req.send().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })?;
     if !resp.status().is_success() {
         let status = resp.status();
         let text = resp.text().await.unwrap_or_default();
         return Err(IngestError::Storage(format!(
             "clickhouse invoice query failed ({status}): {text}"
-        )));
+        ))
+        .into());
     }
-    resp.text()
-        .await
-        .map_err(|e| IngestError::Storage(e.to_string()))
+    resp.text().await.map_err(|e| {
+        let context = IngestError::Storage(e.to_string());
+        Report::from(e).change_context(context)
+    })
 }

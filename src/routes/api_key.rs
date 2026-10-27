@@ -2,11 +2,13 @@ use crate::app::get_tenant_app_state;
 use crate::auth;
 use crate::custom_extractors::Json;
 use crate::error::{self, ApiKeyError};
+use crate::logger;
 use crate::storage::types::{MerchantApiKey, MerchantApiKeyNew, MerchantApiKeyRevoke};
 use crate::utils::date_time;
 use axum::extract::Path;
 use diesel::associations::HasTable;
 use diesel::ExpressionMethods;
+use error_stack::ResultExt;
 use serde::{Deserialize, Serialize};
 use time::PrimitiveDateTime;
 
@@ -89,7 +91,7 @@ pub async fn create_api_key(
     let app_state = get_tenant_app_state().await;
     crate::generics::generic_insert(&app_state.db, new_key)
         .await
-        .map_err(|_| ApiKeyError::CreationFailed)?;
+        .change_context(ApiKeyError::CreationFailed)?;
 
     Ok(Json(CreateApiKeyResponse {
         key_id,
@@ -112,7 +114,7 @@ pub async fn list_api_keys(
         MerchantApiKey,
     >(&app_state.db, dsl::merchant_id.eq(merchant_id))
     .await
-    .map_err(|_| ApiKeyError::StorageError)?;
+    .change_context(ApiKeyError::StorageError)?;
 
     Ok(Json(keys.into_iter().map(ApiKeyListItem::from).collect()))
 }
@@ -126,7 +128,7 @@ pub async fn revoke_api_key(
         .db
         .get_conn()
         .await
-        .map_err(|_| ApiKeyError::StorageError)?;
+        .change_context(ApiKeyError::StorageError)?;
 
     let revoke = MerchantApiKeyRevoke {
         #[cfg(feature = "mysql")]
@@ -141,7 +143,7 @@ pub async fn revoke_api_key(
         revoke,
     )
     .await
-    .map_err(|_| ApiKeyError::RevocationFailed)?;
+    .change_context(ApiKeyError::RevocationFailed)?;
 
     // Remove from Redis cache
     if let Ok(keys) = crate::generics::generic_find_all::<
@@ -150,10 +152,19 @@ pub async fn revoke_api_key(
         MerchantApiKey,
     >(&app_state.db, dsl::key_id.eq(key_id.clone()))
     .await
-    {
+    .inspect_err(|cause| {
+        logger::error!(error = ?cause);
+    }) {
         for key in keys {
             let cache_key = format!("api_key:{}", key.key_hash);
-            let _ = app_state.redis_conn.conn.delete_key(&cache_key).await;
+            let _ = app_state
+                .redis_conn
+                .conn
+                .delete_key(&cache_key)
+                .await
+                .inspect_err(|cause| {
+                    logger::error!(error = ?cause);
+                });
         }
     }
 
@@ -189,6 +200,9 @@ pub async fn insert_api_key_for_merchant(
     let app_state = get_tenant_app_state().await;
     match crate::generics::generic_insert(&app_state.db, new_key).await {
         Ok(_) => Some(raw_key),
-        Err(_) => None,
+        Err(error) => {
+            logger::error!(error = ?error);
+            None
+        }
     }
 }
