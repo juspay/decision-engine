@@ -492,11 +492,21 @@ impl Default for VolumeCommitmentConfig {
 }
 
 /// Server-owned report API endpoints for a connector, grouped by environment.
-#[derive(Clone, Debug, Default, serde::Deserialize)]
+/// Missing settings retain Checkout production and sandbox endpoints for existing deployments.
+#[derive(Clone, Debug, serde::Deserialize)]
 #[serde(default)]
 pub struct ConnectorReportApiConfig {
     pub checkout_production_api_base_url: String,
     pub checkout_sandbox_api_base_url: String,
+}
+
+impl Default for ConnectorReportApiConfig {
+    fn default() -> Self {
+        Self {
+            checkout_production_api_base_url: "https://api.checkout.com".to_string(),
+            checkout_sandbox_api_base_url: "https://api.sandbox.checkout.com".to_string(),
+        }
+    }
 }
 
 /// Configuration for the in-house cost-estimation settlement ingestion pipeline

@@ -9466,7 +9466,7 @@
             "type": "string",
             "enum": ["prod", "sandbox"],
             "default": "prod",
-            "description": "Checkout only. Selects the report API URL from cost_ingestion.connector server configuration; omitted means production. The backend stores the existing secret_key/api_base_url JSON internally."
+            "description": "Checkout only. Selects the report API URL from cost_ingestion.connector server configuration; omitted means production. Missing endpoint settings default to https://api.checkout.com and https://api.sandbox.checkout.com. The backend stores the existing secret_key/api_base_url JSON internally."
           }
         }
       },
