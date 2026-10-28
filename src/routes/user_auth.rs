@@ -29,8 +29,26 @@ const JWT_DENYLIST_PREFIX: &str = "jwt_revoked:";
 const HS_SSO_CODE_PREFIX: &str = "hs_sso_code:";
 const HS_SSO_CODE_TTL_SECONDS: i64 = 60;
 
+diesel::define_sql_function!(fn lower(x: diesel::sql_types::Text) -> diesel::sql_types::Text);
+
+/// An email as accounts are keyed: trimmed and lowercased. Every request that names an account by
+/// email is read through this, and lookups compare against `lower(email)`, so `Admin@x.com` and
+/// `admin@x.com` are one account — never a second one that the case-insensitive super-admin
+/// roster would also admit.
+fn normalize_email(email: &str) -> String {
+    email.trim().to_lowercase()
+}
+
+fn deserialize_email<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    String::deserialize(deserializer).map(|email| normalize_email(&email))
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SignupRequest {
+    #[serde(deserialize_with = "deserialize_email")]
     pub email: String,
     pub password: String,
     pub merchant_id: Option<String>,
@@ -38,6 +56,7 @@ pub struct SignupRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
+    #[serde(deserialize_with = "deserialize_email")]
     pub email: String,
     pub password: String,
 }
@@ -142,7 +161,7 @@ pub async fn signup(
         return Err(error::ContainerError::from(UserAuthError::Unauthorized));
     }
 
-    let existing = User::find_all(&app_state.db, dsl::email.eq(payload.email.clone()))
+    let existing = User::find_all(&app_state.db, lower(dsl::email).eq(payload.email.clone()))
         .await
         .change_error(UserAuthError::StorageError)?;
 
@@ -368,7 +387,7 @@ pub async fn login(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let mut users = User::find_all(&app_state.db, dsl::email.eq(payload.email.clone()))
+    let mut users = User::find_all(&app_state.db, lower(dsl::email).eq(payload.email.clone()))
         .await
         .change_error(UserAuthError::StorageError)?;
 
@@ -750,6 +769,7 @@ pub async fn change_password(
 
 #[derive(Debug, Deserialize)]
 pub struct InviteMemberRequest {
+    #[serde(deserialize_with = "deserialize_email")]
     pub email: String,
     pub role: Option<String>,
 }
@@ -835,7 +855,7 @@ pub async fn invite_member(
     .and_then(|m| m.merchant_name)
     .unwrap_or_else(|| claims.merchant_id.clone());
 
-    let existing_users = User::find_all(&app_state.db, dsl::email.eq(payload.email.clone()))
+    let existing_users = User::find_all(&app_state.db, lower(dsl::email).eq(payload.email.clone()))
         .await
         .change_error(UserAuthError::StorageError)?;
 
@@ -1277,6 +1297,7 @@ async fn fetch_user_merchants(
 
 #[derive(Debug, Deserialize)]
 pub struct ForgotPasswordRequest {
+    #[serde(deserialize_with = "deserialize_email")]
     pub email: String,
 }
 
@@ -1322,7 +1343,7 @@ pub async fn forgot_password(
 
     let app_state = get_tenant_app_state().await;
 
-    let mut users = User::find_all(&app_state.db, dsl::email.eq(payload.email.clone()))
+    let mut users = User::find_all(&app_state.db, lower(dsl::email).eq(payload.email.clone()))
         .await
         .change_error(UserAuthError::StorageError)?;
 
@@ -2261,6 +2282,25 @@ mod tests {
             &[],
             &claims_for(TOKEN_TYPE_STANDARD, "admin@example.com")
         ));
+    }
+
+    #[test]
+    fn an_email_in_any_case_names_the_same_account() {
+        for body in [
+            r#"{"email":"TEST@Gmail.com","password":"x"}"#,
+            r#"{"email":"  test@gmail.com ","password":"x"}"#,
+        ] {
+            let login: LoginRequest = serde_json::from_str(body).expect("request");
+            assert_eq!(login.email, "test@gmail.com");
+            let signup: SignupRequest = serde_json::from_str(body).expect("request");
+            assert_eq!(signup.email, "test@gmail.com");
+        }
+        let invite: InviteMemberRequest =
+            serde_json::from_str(r#"{"email":"Member@X.com"}"#).expect("request");
+        assert_eq!(invite.email, "member@x.com");
+        let forgot: ForgotPasswordRequest =
+            serde_json::from_str(r#"{"email":"Member@X.com"}"#).expect("request");
+        assert_eq!(forgot.email, "member@x.com");
     }
 
     #[test]
