@@ -5179,6 +5179,127 @@
           }
         }
       }
+    },
+    "/decide": {
+      "post": {
+        "operationId": "decide",
+        "tags": [
+          "Routing Rules"
+        ],
+        "summary": "Decide routing",
+        "description": "Evaluate the existing hybrid routing pipeline using the flat request contract. Existing rule evaluation, SR feature gates, A/B experiments and fallback behavior apply.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideRequest"
+              },
+              "example": {
+                "payment_id": "pay_demo",
+                "merchant_id": "pro_demo",
+                "order_amount": 1000,
+                "currency": "USD",
+                "payment_method_type": "card",
+                "payment_method_sub_type": "credit",
+                "authentication_type": null,
+                "capture_method": null,
+                "mandate_type": null,
+                "mandate_acceptance_type": null,
+                "setup_future_usage": null,
+                "transaction_initiator": null,
+                "surcharge_amount": null,
+                "business_country": null,
+                "billing_country": "US",
+                "business_label": null,
+                "card": {
+                  "card_isin": "001234",
+                  "card_extended_bin": "00123456",
+                  "card_network": "Visa",
+                  "card_type": "credit",
+                  "card_issuer": null,
+                  "card_issuing_country_code": "US",
+                  "card_subtype": null,
+                  "card_discovery": null,
+                  "card_switch_provider": null
+                },
+                "customer_device_platform": null,
+                "customer_device_type": null,
+                "customer_device_display_size": null,
+                "pay_later": null,
+                "wallet": null,
+                "upi": null,
+                "voucher": null,
+                "bank_redirect": null,
+                "bank_debit": null,
+                "bank_transfer": null,
+                "real_time_payment": null,
+                "gift_card": null,
+                "card_redirect": null,
+                "open_banking": null,
+                "mobile_payment": null,
+                "crypto": null,
+                "reward": null,
+                "network_token": null,
+                "metadata": {
+                  "segment": "premium"
+                },
+                "country": null,
+                "customer_id": null,
+                "routing_config": {
+                  "algorithm_for": "payment",
+                  "elimination_enabled": null,
+                  "enable_multi_objective": null,
+                  "ranking_algorithm": null,
+                  "eligible_connectors": [
+                    {
+                      "gateway_name": "worldpay",
+                      "payment_merchant_connector_id": "mca_wp"
+                    },
+                    {
+                      "gateway_name": "checkout",
+                      "payment_merchant_connector_id": "mca_cko"
+                    }
+                  ],
+                  "preferred_connectors": null
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Routing decision. Connector order and account IDs are preserved from hybrid routing. An account ID can be null when a legacy rule identifies only a gateway.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Missing required fields, unknown fields, incorrect JSON types, invalid routing input or an existing hybrid evaluation error."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "The authenticated session or API key cannot act on this merchant."
+          },
+          "500": {
+            "description": "Routing configuration or service unavailable."
+          }
+        }
+      }
     }
   },
   "components": {
@@ -9732,6 +9853,357 @@
               "type": "string"
             },
             "description": "Error codes as recorded (matched exactly)."
+          }
+        }
+      },
+      "DecideRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "payment_id",
+          "merchant_id",
+          "order_amount",
+          "currency",
+          "routing_config"
+        ],
+        "properties": {
+          "payment_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "order_amount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Amount in currency minor units; supplies both existing amount and payment_amount rule keys and the dynamic payment amount."
+          },
+          "currency": {
+            "type": "string",
+            "description": "Currency code, e.g. USD."
+          },
+          "payment_method_type": {
+            "type": "string",
+            "nullable": true,
+            "description": "Payment method family, e.g. card."
+          },
+          "payment_method_sub_type": {
+            "type": "string",
+            "nullable": true,
+            "description": "Payment method subtype, e.g. credit."
+          },
+          "authentication_type": {
+            "type": "string",
+            "nullable": true
+          },
+          "capture_method": {
+            "type": "string",
+            "nullable": true
+          },
+          "mandate_type": {
+            "type": "string",
+            "nullable": true
+          },
+          "mandate_acceptance_type": {
+            "type": "string",
+            "nullable": true
+          },
+          "setup_future_usage": {
+            "type": "string",
+            "nullable": true
+          },
+          "transaction_initiator": {
+            "type": "string",
+            "nullable": true
+          },
+          "surcharge_amount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "nullable": true,
+            "description": "Amount in currency minor units."
+          },
+          "business_country": {
+            "type": "string",
+            "nullable": true,
+            "description": "ISO 3166 alpha-2 country code."
+          },
+          "billing_country": {
+            "type": "string",
+            "nullable": true,
+            "description": "ISO 3166 alpha-2 country code."
+          },
+          "business_label": {
+            "type": "string",
+            "nullable": true
+          },
+          "card": {
+            "$ref": "#/components/schemas/DecideCard"
+          },
+          "customer_device_platform": {
+            "type": "string",
+            "nullable": true
+          },
+          "customer_device_type": {
+            "type": "string",
+            "nullable": true
+          },
+          "customer_device_display_size": {
+            "type": "string",
+            "nullable": true
+          },
+          "pay_later": {
+            "type": "string",
+            "nullable": true
+          },
+          "wallet": {
+            "type": "string",
+            "nullable": true
+          },
+          "upi": {
+            "type": "string",
+            "nullable": true
+          },
+          "voucher": {
+            "type": "string",
+            "nullable": true
+          },
+          "bank_redirect": {
+            "type": "string",
+            "nullable": true
+          },
+          "bank_debit": {
+            "type": "string",
+            "nullable": true
+          },
+          "bank_transfer": {
+            "type": "string",
+            "nullable": true
+          },
+          "real_time_payment": {
+            "type": "string",
+            "nullable": true
+          },
+          "gift_card": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_redirect": {
+            "type": "string",
+            "nullable": true
+          },
+          "open_banking": {
+            "type": "string",
+            "nullable": true
+          },
+          "mobile_payment": {
+            "type": "string",
+            "nullable": true
+          },
+          "crypto": {
+            "type": "string",
+            "nullable": true
+          },
+          "reward": {
+            "type": "string",
+            "nullable": true
+          },
+          "network_token": {
+            "type": "string",
+            "nullable": true
+          },
+          "metadata": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "country": {
+            "type": "string",
+            "nullable": true,
+            "description": "ISO 3166 alpha-2 country code."
+          },
+          "customer_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "routing_config": {
+            "$ref": "#/components/schemas/DecideRoutingConfig"
+          },
+          "merchant_id": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Routing scope previously supplied as created_by. Use the same identifier, including the HS profile ID where applicable."
+          }
+        }
+      },
+      "DecideCard": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "card_isin": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_extended_bin": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_network": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_type": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_issuer": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_issuing_country_code": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_subtype": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_discovery": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_switch_provider": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "nullable": true
+      },
+      "DecideRoutingConfig": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "algorithm_for",
+          "eligible_connectors"
+        ],
+        "properties": {
+          "algorithm_for": {
+            "type": "string",
+            "minLength": 1
+          },
+          "elimination_enabled": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "enable_multi_objective": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "ranking_algorithm": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "SR_BASED_ROUTING",
+              "PL_BASED_ROUTING",
+              "NTW_BASED_ROUTING",
+              "NTW_SR_HYBRID_ROUTING",
+              null
+            ]
+          },
+          "eligible_connectors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecideConnector"
+            }
+          },
+          "preferred_connectors": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "$ref": "#/components/schemas/DecideConnector"
+            }
+          }
+        }
+      },
+      "DecideConnector": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "gateway_name",
+          "payment_merchant_connector_id"
+        ],
+        "properties": {
+          "gateway_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "payment_merchant_connector_id": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      },
+      "DecideResultConnector": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "gateway_name",
+          "payment_merchant_connector_id"
+        ],
+        "properties": {
+          "gateway_name": {
+            "type": "string"
+          },
+          "payment_merchant_connector_id": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "DecideResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "evaluated_connectors",
+          "decision"
+        ],
+        "properties": {
+          "evaluated_connectors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecideResultConnector"
+            }
+          },
+          "decision": {
+            "$ref": "#/components/schemas/DecideDecision"
+          }
+        }
+      },
+      "DecideDecision": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "outcome",
+          "source",
+          "decision_id"
+        ],
+        "properties": {
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "routed",
+              "fallback",
+              "no_active_algorithm",
+              "no_eligible_connector"
+            ]
+          },
+          "source": {
+            "type": "string"
+          },
+          "decision_id": {
+            "type": "string",
+            "description": "The x-request-id associated with this evaluation."
           }
         }
       }

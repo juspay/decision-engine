@@ -1143,6 +1143,77 @@ impl From<(&RoutingRequest, Option<Self>)> for DomainDeciderRequestForApiCallV2 
 // write a function to transfer DomainDeciderRequestForApiCallV2 to DomainDeciderRequest
 
 impl DomainDeciderRequestForApiCallV2 {
+    pub fn from_decide(
+        request: &crate::types::decide::DecideRequest,
+        static_request: &RoutingRequest,
+    ) -> Result<Self, String> {
+        let mut dynamic = Self::from((static_request, None));
+        let info = &mut dynamic.payment_info;
+        info.amount = request.order_amount as f64;
+        info.payment_method = request
+            .payment_method_type
+            .clone()
+            .map(normalize_static_enum)
+            .unwrap_or_default();
+        info.payment_method_type = request
+            .payment_method_sub_type
+            .clone()
+            .map(normalize_static_enum)
+            .unwrap_or_else(|| "null".to_string());
+        info.currency = Currency::text_to_curr(&request.currency.to_ascii_uppercase())
+            .map_err(|_| "Invalid currency".to_string())?;
+        info.country = request
+            .country
+            .as_ref()
+            .or(request.billing_country.as_ref())
+            .or(request.business_country.as_ref())
+            .map(|country| {
+                CountryISO2::text_to_country(&country.to_ascii_uppercase())
+                    .map_err(|_| "Country fields must use ISO 3166 alpha-2 codes".to_string())
+            })
+            .transpose()?;
+        info.customer_id = request.customer_id.clone().map(ETCu::CustomerId);
+        if let Some(auth_type) = request.authentication_type.as_ref() {
+            info.auth_type = Some(
+                ETCa::txn_card_info::text_to_auth_type(&normalize_static_enum(auth_type.clone()))
+                    .map_err(|_| "Invalid authentication type".to_string())?,
+            );
+        }
+        if let Some(card) = &request.card {
+            info.card_isin = card.card_isin.clone().or(card.card_extended_bin.clone());
+            info.card_type = card.card_type.clone().and_then(|value| {
+                ETCa::card_type::CardType::try_from(normalize_static_enum(value)).ok()
+            });
+            info.card_issuer_bank_name = card.card_issuer.clone();
+            info.card_program = card.card_subtype.clone();
+            info.card_issuer_country = card.card_issuing_country_code.clone();
+            info.card_switch_provider = card
+                .card_switch_provider
+                .clone()
+                .or(card.card_network.clone())
+                .map(Secret::new);
+        }
+        info.preferred_connectors =
+            request
+                .routing_config
+                .preferred_connectors
+                .as_ref()
+                .map(|connectors| {
+                    connectors
+                        .iter()
+                        .map(crate::types::decide::DecideConnector::identifier)
+                        .collect()
+                });
+        dynamic.ranking_algorithm = request
+            .routing_config
+            .ranking_algorithm
+            .clone()
+            .or(dynamic.ranking_algorithm);
+        dynamic.elimination_enabled = request.routing_config.elimination_enabled;
+        dynamic.enable_multi_objective = request.routing_config.enable_multi_objective;
+        Ok(dynamic)
+    }
+
     pub fn payment_id(&self) -> &str {
         &self.payment_info.payment_id
     }

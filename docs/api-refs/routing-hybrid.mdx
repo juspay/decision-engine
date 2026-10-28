@@ -5,6 +5,8 @@ description: "Curl example for /routing/hybrid."
 
 # Hybrid Routing Evaluation
 
+For the unified payment payload, use [POST /decide](/api-reference/endpoint/decide). Both endpoints share the hybrid evaluator.
+
 `/routing/hybrid` evaluates the active rule path (`static_routing_request`) together with runtime SR/decision context (`dynamic_routing_request`) in one call. At least one of the two must be provided.
 
 - `static_routing_request` uses the same shape as [`/routing/evaluate`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-evaluate.mdx) (`created_by` + `parameters`).

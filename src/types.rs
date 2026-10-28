@@ -3,6 +3,7 @@ pub mod card;
 pub mod country;
 pub mod currency;
 pub mod customer;
+pub mod decide;
 pub mod emi_bank_code;
 pub mod feature;
 pub mod gateway;

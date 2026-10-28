@@ -280,6 +280,83 @@ export interface ExperimentTransactionsResponse {
   transactions: ExperimentTransaction[]
 }
 
+export interface DecideRequest {
+  payment_id: string
+  merchant_id: string
+  order_amount: number
+  currency: string
+  payment_method_type?: string | null
+  payment_method_sub_type?: string | null
+  authentication_type?: string | null
+  capture_method?: string | null
+  mandate_type?: string | null
+  mandate_acceptance_type?: string | null
+  setup_future_usage?: string | null
+  transaction_initiator?: string | null
+  surcharge_amount?: number | null
+  business_country?: string | null
+  billing_country?: string | null
+  business_label?: string | null
+  card?: DecideCard | null
+  customer_device_platform?: string | null
+  customer_device_type?: string | null
+  customer_device_display_size?: string | null
+  pay_later?: string | null
+  wallet?: string | null
+  upi?: string | null
+  voucher?: string | null
+  bank_redirect?: string | null
+  bank_debit?: string | null
+  bank_transfer?: string | null
+  real_time_payment?: string | null
+  gift_card?: string | null
+  card_redirect?: string | null
+  open_banking?: string | null
+  mobile_payment?: string | null
+  crypto?: string | null
+  reward?: string | null
+  network_token?: string | null
+  metadata?: Record<string, string> | null
+  country?: string | null
+  customer_id?: string | null
+  routing_config: DecideRoutingConfig
+}
+
+export interface DecideCard {
+  card_isin?: string | null
+  card_extended_bin?: string | null
+  card_network?: string | null
+  card_type?: string | null
+  card_issuer?: string | null
+  card_issuing_country_code?: string | null
+  card_subtype?: string | null
+  card_discovery?: string | null
+  card_switch_provider?: string | null
+}
+
+export interface DecideRoutingConfig {
+  algorithm_for: string
+  elimination_enabled?: boolean | null
+  enable_multi_objective?: boolean | null
+  ranking_algorithm?: 'SR_BASED_ROUTING' | 'PL_BASED_ROUTING' | 'NTW_BASED_ROUTING' | 'NTW_SR_HYBRID_ROUTING' | null
+  eligible_connectors: DecideConnector[]
+  preferred_connectors?: DecideConnector[] | null
+}
+
+export interface DecideConnector {
+  gateway_name: string
+  payment_merchant_connector_id: string
+}
+
+export interface DecideResponse {
+  evaluated_connectors: { gateway_name: string; payment_merchant_connector_id: string | null }[]
+  decision: {
+    outcome: 'routed' | 'fallback' | 'no_active_algorithm' | 'no_eligible_connector'
+    source: string
+    decision_id: string
+  }
+}
+
 export interface CreateRoutingRequest {
   name: string
   description: string
