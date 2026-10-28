@@ -477,6 +477,7 @@ impl Default for VolumeCommitmentConfig {
             server: Server {
                 host: "127.0.0.1".to_string(),
                 port: 9095,
+                routing_request_timeout_ms: default_routing_request_timeout_ms(),
             },
             main_server_url: "http://127.0.0.1:8080".to_string(),
             tick_secs: 30,
@@ -705,6 +706,14 @@ pub struct Limit {
 pub struct Server {
     pub host: String,
     pub port: u16,
+    /// Longest a routing hot-path request (decide, evaluate, hybrid, score update) may run before
+    /// it is answered with `504`. Bounds how long a slow Redis or database holds a connection.
+    #[serde(default = "default_routing_request_timeout_ms")]
+    pub routing_request_timeout_ms: u64,
+}
+
+fn default_routing_request_timeout_ms() -> u64 {
+    2000
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]

@@ -3043,11 +3043,10 @@ pub fn is_reset_eligible(
     threshold: f64,
     cached_gateway_score: GatewayScore,
 ) -> bool {
+    // Saturating, so a soft TTL longer than the clock reads as "not yet" rather than underflowing.
+    let reset_before = current_time_in_millis.saturating_sub(soft_ttl.unwrap_or(0.0) as u128);
     cached_gateway_score.score < threshold
-        && cached_gateway_score.lastResetTimestamp
-            < (current_time_in_millis - soft_ttl.unwrap_or(0.0) as u128)
-                .try_into()
-                .unwrap()
+        && cached_gateway_score.lastResetTimestamp < i64::try_from(reset_before).unwrap_or(i64::MAX)
 }
 pub fn get_reset_score(min_threshold: f64, penalty_factor: f64, max_allowed_failures: i32) -> f64 {
     let reduction_factor = 1.0 - (penalty_factor / 100.0);
@@ -3400,5 +3399,47 @@ mod sr_key_tests {
             "{gw_sr_v3_score_merchant_1_UNKNOWN_CARD_VISA_UNKNOWN"
         );
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod reset_eligibility_tests {
+    use super::is_reset_eligible;
+    use crate::types::gateway_routing_input::GatewayScore;
+
+    fn low_score_reset_at(last_reset: i64) -> GatewayScore {
+        GatewayScore {
+            timestamp: 0,
+            score: 0.1,
+            transactionCount: 0,
+            lastResetTimestamp: last_reset,
+        }
+    }
+
+    #[test]
+    fn a_soft_ttl_longer_than_the_clock_is_not_yet_eligible() {
+        // `now - ttl` underflowed here, then failed the conversion back to i64.
+        assert!(!is_reset_eligible(
+            Some(1e15),
+            1_000,
+            0.5,
+            low_score_reset_at(0)
+        ));
+    }
+
+    #[test]
+    fn a_low_score_reset_before_the_soft_ttl_is_eligible() {
+        assert!(is_reset_eligible(
+            Some(1_000.0),
+            10_000,
+            0.5,
+            low_score_reset_at(5_000)
+        ));
+        assert!(!is_reset_eligible(
+            Some(1_000.0),
+            10_000,
+            0.5,
+            low_score_reset_at(9_500)
+        ));
     }
 }

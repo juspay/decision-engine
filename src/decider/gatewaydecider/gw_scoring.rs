@@ -846,11 +846,25 @@ pub fn sample_from_binomial_distribution(
     merchant_bucket_size: i32,
     gw: String,
 ) -> f64 {
-    let gw_score = final_score_map.get(&gw).copied().unwrap_or(1.0);
-    let mut rng = rand::thread_rng();
-    let binomial = Binomial::new(merchant_bucket_size as u64, gw_score).unwrap();
-    let sample_value = binomial.sample(&mut rng);
-    sample_value as f64 / merchant_bucket_size as f64
+    // `Binomial::new` rejects a probability outside [0, 1] (NaN included), so the score is held to
+    // that range first; an absent or NaN score reads as 1.0, as an unseen gateway does.
+    let gw_score = final_score_map
+        .get(&gw)
+        .copied()
+        .filter(|score| !score.is_nan())
+        .unwrap_or(1.0)
+        .clamp(0.0, 1.0);
+    // A bucket of no transactions has nothing to sample; its expected value is the score itself.
+    let Ok(bucket_size) = u64::try_from(merchant_bucket_size) else {
+        return gw_score;
+    };
+    if bucket_size == 0 {
+        return gw_score;
+    }
+    match Binomial::new(bucket_size, gw_score) {
+        Ok(binomial) => binomial.sample(&mut rand::thread_rng()) as f64 / bucket_size as f64,
+        Err(_) => gw_score,
+    }
 }
 
 /// Draw a gateway's score from the Beta posterior over its success rate.
@@ -4230,6 +4244,29 @@ mod gw_scoring_pure_fn_tests {
         // instead of handing `Beta::new` a negative parameter.
         let draws = beta_draws(&score_map(&[("stripe", 0.5)]), -10, "stripe");
         assert_draws_vary(&draws, "negative bucket size");
+    }
+
+    #[test]
+    fn binomial_sampling_survives_out_of_range_scores_and_buckets() {
+        // Each of these used to reach `Binomial::new(..).unwrap()` with an argument it rejects, or
+        // divide by a zero bucket.
+        for (score, bucket) in [
+            (1.5, 100),
+            (-0.2, 100),
+            (f64::NAN, 100),
+            (0.5, 0),
+            (0.5, -10),
+        ] {
+            let sample = sample_from_binomial_distribution(
+                score_map(&[("stripe", score)]),
+                bucket,
+                "stripe".to_string(),
+            );
+            assert!(
+                (0.0..=1.0).contains(&sample),
+                "score {score}, bucket {bucket} sampled {sample}"
+            );
+        }
     }
 
     #[test]
