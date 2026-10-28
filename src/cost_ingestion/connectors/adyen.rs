@@ -5,7 +5,7 @@
 //! `gross`/`total_fee`. Everything Adyen-specific (report column names, the notification shape,
 //! the HMAC scheme, the download auth) is contained in this file.
 
-use super::common::{http_client, to_float};
+use super::common::{http_client_without_redirects, to_float};
 
 use async_trait::async_trait;
 use axum::http::HeaderMap;
@@ -39,6 +39,12 @@ use crate::cost_ingestion::types::{
 /// `Settled` rows, and `cost_daily_stats` is a `ReplacingMergeTree` keyed on the transaction day, so
 /// the newer report supersedes that day cleanly.
 const FEE_RECORD_TYPES: [&str; 1] = ["Settled"];
+
+/// The only notification that names a report to download.
+const REPORT_AVAILABLE: &str = "REPORT_AVAILABLE";
+
+/// Adyen serves report downloads from its own hosts (`ca-test.adyen.com`, `ca-live.adyen.com`).
+const ADYEN_DOMAIN: &str = "adyen.com";
 
 pub struct AdyenReportSource;
 
@@ -95,6 +101,12 @@ impl SettlementReportSource for AdyenReportSource {
             return Err(IngestError::SignatureMismatch);
         }
 
+        if item.get("eventCode").and_then(Value::as_str) != Some(REPORT_AVAILABLE) {
+            return Err(IngestError::MalformedNotification(
+                "not a REPORT_AVAILABLE notification".to_string(),
+            ));
+        }
+
         let account = item
             .get("merchantAccountCode")
             .and_then(Value::as_str)
@@ -123,6 +135,12 @@ impl SettlementReportSource for AdyenReportSource {
                 "no report reference in notification".to_string(),
             ));
         }
+        // `reason` is outside the HMAC payload, so a signed notification proves nothing about it.
+        if !is_adyen_report_url(&report_ref) {
+            return Err(IngestError::MalformedNotification(
+                "report URL is not an https Adyen URL".to_string(),
+            ));
+        }
 
         Ok(ReportNotification {
             notification_id,
@@ -142,8 +160,16 @@ impl SettlementReportSource for AdyenReportSource {
         // Report Service API key sent as `X-API-Key`. We store one string in `download_auth` and
         // disambiguate by the ':' — Basic auth is always "user:password"; an Adyen API key never
         // contains a colon, so a colon-less value is treated as the API key.
+        // The URL is held to Adyen's hosts here too, not only when the notification arrives, so a
+        // queued job can never send the merchant's report credentials anywhere else. Redirects are
+        // not followed for the same reason: `X-API-Key` would travel with them.
+        if !is_adyen_report_url(&note.report_ref) {
+            return Err(IngestError::Download(
+                "report URL is not an https Adyen URL".to_string(),
+            ));
+        }
         let auth = creds.download_auth.peek();
-        let request = http_client().get(&note.report_ref);
+        let request = http_client_without_redirects().get(&note.report_ref);
         let request = match auth.split_once(':') {
             Some((user, pass)) => request.basic_auth(user, Some(pass)),
             None => request.header("X-API-Key", auth),
@@ -384,6 +410,24 @@ fn verify_hmac(payload: &str, provided_b64: &str, hex_key: &str) -> bool {
         .is_ok()
 }
 
+/// Whether `raw` is an `https` URL on an Adyen host, with no userinfo or explicit port — the only
+/// place report credentials are sent.
+fn is_adyen_report_url(raw: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(raw) else {
+        return false;
+    };
+    url.scheme() == "https"
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && url.host_str().is_some_and(|host| {
+            host == ADYEN_DOMAIN
+                || host
+                    .strip_suffix(ADYEN_DOMAIN)
+                    .is_some_and(|sub| sub.ends_with('.'))
+        })
+}
+
 fn hex_decode(s: &str) -> Option<Vec<u8>> {
     if !s.len().is_multiple_of(2) {
         return None;
@@ -560,6 +604,78 @@ ref2,Settled,visastandarddebit,visa,FR,EUR,100.00,0.05,0.00,0.02,0.20,\"[{\"\"t\
         );
         // no rate (trimmed export): unresolved ⇒ abstains, exactly as today.
         assert_eq!(SettledFeeRow::resolve_funding("cartebancaire", None), "");
+    }
+
+    /// A notification signed with hex key `74657374` ("test"), as Adyen would sign it.
+    fn signed_notification(event_code: &str, reason: &str) -> Vec<u8> {
+        let mut item = serde_json::json!({
+            "pspReference": "PSP1",
+            "merchantAccountCode": "Acct",
+            "eventCode": event_code,
+            "success": "true",
+            "reason": reason,
+            "amount": { "value": 0, "currency": "EUR" },
+        });
+        let key = hmac::Key::new(hmac::HMAC_SHA256, b"test");
+        let sig = base64_encode(hmac::sign(&key, hmac_payload(&item).as_bytes()).as_ref());
+        item["additionalData"] = serde_json::json!({ "hmacSignature": sig });
+        serde_json::to_vec(&serde_json::json!({
+            "notificationItems": [{ "NotificationRequestItem": item }]
+        }))
+        .expect("notification")
+    }
+
+    fn parse(body: &[u8]) -> Result<ReportNotification, IngestError> {
+        AdyenReportSource::new().verify_and_parse_notification(
+            &HeaderMap::new(),
+            body,
+            &Secret::new("74657374".to_string()),
+        )
+    }
+
+    #[test]
+    fn a_report_notification_on_an_adyen_host_is_accepted() {
+        let url = "https://ca-test.adyen.com/reports/download/MerchantAccount/Acct/report.csv";
+        let note = parse(&signed_notification(REPORT_AVAILABLE, url)).expect("accepted");
+        assert_eq!(note.report_ref, url);
+        assert_eq!(note.notification_id, "PSP1");
+    }
+
+    #[test]
+    fn a_report_url_off_adyen_is_refused_though_signed() {
+        for url in [
+            "https://attacker.example/report.csv",
+            "https://adyen.com.attacker.example/report.csv",
+            "https://evil-adyen.com/report.csv",
+            "http://ca-test.adyen.com/report.csv",
+            "https://ca-test.adyen.com:8443/report.csv",
+            "https://user@ca-test.adyen.com/report.csv",
+            "not a url",
+        ] {
+            assert!(
+                matches!(
+                    parse(&signed_notification(REPORT_AVAILABLE, url)),
+                    Err(IngestError::MalformedNotification(_))
+                ),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_report_notifications_are_accepted() {
+        let url = "https://ca-test.adyen.com/reports/download/MerchantAccount/Acct/report.csv";
+        assert!(matches!(
+            parse(&signed_notification("AUTHORISATION", url)),
+            Err(IngestError::MalformedNotification(_))
+        ));
+    }
+
+    #[test]
+    fn adyen_hosts() {
+        assert!(is_adyen_report_url("https://adyen.com/x"));
+        assert!(is_adyen_report_url("https://ca-live.adyen.com/x"));
+        assert!(!is_adyen_report_url("https://notadyen.com/x"));
     }
 
     #[test]

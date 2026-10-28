@@ -20,6 +20,19 @@ pub(super) fn http_client() -> &'static reqwest::Client {
     })
 }
 
+/// Like [`http_client`], but never follows a redirect: for downloads that carry credentials in a
+/// header, which a redirect would forward to wherever it points.
+pub(super) fn http_client_without_redirects() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(DOWNLOAD_TIMEOUT)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .expect("failed to build the report download client")
+    })
+}
+
 /// A numeric report cell; blank or unparsable reads as `0`.
 pub(super) fn to_float(s: &str) -> f64 {
     s.trim().parse::<f64>().unwrap_or(0.0)
