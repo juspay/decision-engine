@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 // use db::eulermeshimpl::meshConfig;
 // use db::mesh::internal::*;
 use crate::app::get_tenant_app_state;
+use crate::generics::Repository;
 use crate::storage::types::TxnOffer as DBTxnOffer;
 use std::convert::From;
 use std::result::Result;
@@ -19,11 +20,7 @@ use crate::types::txn_details::types::{to_txn_detail_id, TxnDetailId};
 // use named::*;
 // use sequelize::{Clause, Term};
 // use test::quickcheck::Arbitrary;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::txn_offer::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::txn_offer::dsl;
-use diesel::associations::HasTable;
+use crate::storage::backend::schema::txn_offer::dsl;
 use diesel::*;
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
@@ -65,11 +62,7 @@ pub async fn getOffersDB(
     let txn_id_value = txn_id.0;
     let app_state = get_tenant_app_state().await;
     // Use Diesel's query builder to find all offers for the transaction
-    crate::generics::generic_find_all::<<DBTxnOffer as HasTable>::Table, _, DBTxnOffer>(
-        &app_state.db,
-        dsl::txn_detail_id.eq(txn_id_value),
-    )
-    .await
+    DBTxnOffer::find_all(&app_state.db, dsl::txn_detail_id.eq(txn_id_value)).await
 }
 
 pub async fn getOffers(txn_id: &TxnDetailId) -> Vec<TxnOffer> {

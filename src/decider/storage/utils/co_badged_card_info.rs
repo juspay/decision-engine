@@ -1,11 +1,8 @@
-#[cfg(feature = "mysql")]
-use crate::storage::schema::co_badged_cards_info_test::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::co_badged_cards_info_test::dsl;
+use crate::error;
+use crate::generics::Repository;
+use crate::storage::backend::schema::co_badged_cards_info_test::dsl;
 use crate::storage::types::CoBadgedCardInfo;
 use crate::utils::CustomResult;
-use crate::{error, generics};
-use diesel::associations::HasTable;
 use diesel::*;
 use error_stack::ResultExt;
 
@@ -15,7 +12,7 @@ pub async fn find_co_badged_cards_info_by_card_bin(
     app_state: &crate::app::TenantAppState,
     card_bin: i64,
 ) -> CustomResult<Vec<CoBadgedCardInfo>, error::StorageError> {
-    match generics::generic_find_all::<<CoBadgedCardInfo as HasTable>::Table, _, CoBadgedCardInfo>(
+    match CoBadgedCardInfo::find_all(
         &app_state.db,
         dsl::card_bin_min
             .le(card_bin)

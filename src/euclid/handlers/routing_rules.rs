@@ -1,7 +1,5 @@
-#[cfg(feature = "mysql")]
-use crate::storage::schema::routing_algorithm::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::routing_algorithm::dsl;
+use crate::generics::Repository;
+use crate::storage::backend::schema::routing_algorithm::dsl;
 use crate::{
     error::ApiErrorResponse,
     euclid::{
@@ -19,7 +17,6 @@ use crate::{
             normalize_rule_value_types, validate_routing_rule,
         },
     },
-    types::service_configuration::{find_config_by_name, upsert_config},
 };
 
 use crate::custom_extractors::{
@@ -186,11 +183,7 @@ async fn resolve_slot_experiment(
         }));
     }
 
-    let mapping = crate::generics::generic_find_one_optional::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(
+    let mapping = RoutingAlgorithmMapper::find_optional(
         &state.db,
         mapper_dsl::created_by
             .eq(merchant_id.to_string())
@@ -199,13 +192,11 @@ async fn resolve_slot_experiment(
     .await
     .change_context(EuclidErrors::StorageError)?;
     let experiment = match mapping {
-        Some(mapping) => crate::generics::generic_find_one_optional::<
-            <RoutingAlgorithm as HasTable>::Table,
-            _,
-            RoutingAlgorithm,
-        >(&state.db, dsl::id.eq(mapping.routing_algorithm_id))
-        .await
-        .change_context(EuclidErrors::StorageError)?,
+        Some(mapping) => {
+            RoutingAlgorithm::find_optional(&state.db, dsl::id.eq(mapping.routing_algorithm_id))
+                .await
+                .change_context(EuclidErrors::StorageError)?
+        }
         None => None,
     };
     cache_experiment_slot(state, merchant_id, algorithm_for, experiment.as_ref()).await;
@@ -496,13 +487,11 @@ pub async fn config_sr_dimensions(
         .into());
     }
 
-    let config = serde_json::to_string(&payload)
-        .change_context(EuclidErrors::FailedToSerializeJsonToString)?;
-    let name = format!("SR_DIMENSION_CONFIG_{}", merchant);
-
-    let result = upsert_config(name, Some(config))
-        .await
-        .change_context(EuclidErrors::StorageError);
+    let result = crate::types::service_configuration::upsert::<
+        crate::types::service_configuration::SrDimensions,
+    >(&merchant, &payload)
+    .await
+    .change_context(EuclidErrors::StorageError);
 
     if let Err(_) = result {
         logger::error!(
@@ -525,19 +514,17 @@ pub async fn config_sr_dimensions(
 pub async fn get_sr_dimensions(
     MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<SrDimensionConfig>, ContainerError<EuclidErrors>> {
-    let merchant_id = merchant.as_str().to_string();
-    let name = format!("SR_DIMENSION_CONFIG_{}", merchant_id);
-    let stored = find_config_by_name(name)
-        .await
-        .change_context(EuclidErrors::StorageError)?;
-    let config = stored
-        .and_then(|c| c.value)
-        .and_then(|v| serde_json::from_str::<SrDimensionConfig>(&v).ok())
-        .unwrap_or(SrDimensionConfig {
-            merchant_id,
-            ..Default::default()
-        });
-    Ok(Json(config))
+    use crate::types::service_configuration::{get, ConfigError, SrDimensions};
+    // A stored config that no longer parses is shown as unconfigured, so the selector still renders.
+    let stored = match get::<SrDimensions>(&merchant).await {
+        Ok(stored) => stored,
+        Err(error) if *error.current_context() == ConfigError::Invalid => None,
+        Err(error) => return Err(error.change_context(EuclidErrors::StorageError).into()),
+    };
+    Ok(Json(stored.unwrap_or(SrDimensionConfig {
+        merchant_id: merchant.as_str().to_string(),
+        ..Default::default()
+    })))
 }
 
 /// Hyperswitch SSO merchants route only through `/routing/hybrid`, so an experiment written from
@@ -708,10 +695,7 @@ async fn fetch_algorithm_from_db_and_cache(
     merchant_id: &str,
     algorithm_for: Option<&str>,
 ) -> Result<RoutingAlgorithm, ContainerError<EuclidErrors>> {
-    #[cfg(feature = "mysql")]
-    use crate::storage::schema::routing_algorithm_mapper::dsl as db_mapper_dsl;
-    #[cfg(feature = "postgres")]
-    use crate::storage::schema_pg::routing_algorithm_mapper::dsl as db_mapper_dsl;
+    use crate::storage::backend::schema::routing_algorithm_mapper::dsl as db_mapper_dsl;
 
     // The merchant can hold one mapper row per algorithm_for slot (payment, payout, 3DS,
     // volume_commitment). Callers that omit `algorithm_for` are on the legacy payment flow and
@@ -719,11 +703,7 @@ async fn fetch_algorithm_from_db_and_cache(
     let mapper_algorithm_for = algorithm_for
         .map(str::to_string)
         .unwrap_or_else(|| AlgorithmType::Payment.to_string());
-    let mapper_result = crate::generics::generic_find_one::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(
+    let mapper_result = RoutingAlgorithmMapper::find_one(
         &state.db,
         db_mapper_dsl::created_by
             .eq(merchant_id.to_string())
@@ -752,21 +732,18 @@ async fn fetch_algorithm_from_db_and_cache(
         }
     };
 
-    let algorithm = crate::generics::generic_find_one::<
-        <RoutingAlgorithm as HasTable>::Table,
-        _,
-        RoutingAlgorithm,
-    >(&state.db, dsl::id.eq(active_routing_algorithm_id.clone()))
-    .await
-    .inspect_err(|&e| {
-        logger::error!(
-            ?e,
-            "Failed to fetch RoutingAlgorithm for ID {:?}",
-            active_routing_algorithm_id
-        );
-    })
-    .change_context(EuclidErrors::StorageError)
-    .map_err(ContainerError::from)?;
+    let algorithm =
+        RoutingAlgorithm::find_one(&state.db, dsl::id.eq(active_routing_algorithm_id.clone()))
+            .await
+            .inspect_err(|&e| {
+                logger::error!(
+                    ?e,
+                    "Failed to fetch RoutingAlgorithm for ID {:?}",
+                    active_routing_algorithm_id
+                );
+            })
+            .change_context(EuclidErrors::StorageError)
+            .map_err(ContainerError::from)?;
 
     // Back-fill only the key shape this caller reads; never evict the legacy key here.
     cache_routing_algorithm_under_key(
@@ -1788,16 +1765,12 @@ fn record_routing_evaluate_preview_error(
     );
 }
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
+use crate::storage::backend::schema::routing_algorithm_mapper::dsl as mapper_dsl;
 
 /// Bump `modified_at` on activation of a volume contract — it anchors `test_minutes` cycles (see
 /// `volume_commitment::dsl::active_config`); other rule types keep it as a plain edit timestamp.
 async fn stamp_contract_activation(
-    #[cfg(feature = "mysql")] conn: &crate::storage::MysqlPoolConn,
-    #[cfg(feature = "postgres")] conn: &crate::storage::PgPoolConn,
+    conn: &crate::storage::backend::PoolConn,
     algorithm: &RoutingAlgorithm,
 ) -> Result<(), ContainerError<EuclidErrors>> {
     if algorithm.algorithm_for != AlgorithmType::VolumeCommitment.to_string() {

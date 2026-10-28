@@ -1,11 +1,11 @@
 use std::{borrow::Cow, time::Instant};
 
-use crate::custom_extractors::{ScopedJson, ScopedJsonRejection};
+use crate::custom_extractors::{RequestIds, ScopedJson, ScopedJsonRejection};
 use crate::euclid::types::ExperimentEndpoint;
 use crate::{
     analytics::{
-        global_request_id_from_headers, serialize_details, trace_id_from_headers,
-        AnalyticsFlowContext, AnalyticsRoute, ApiFlow, DomainAnalyticsEvent, FlowType,
+        serialize_details, AnalyticsFlowContext, AnalyticsRoute, ApiFlow, DomainAnalyticsEvent,
+        FlowType,
     },
     decider::gatewaydecider::{
         flow_new::decider_full_payload_hs_function,
@@ -235,13 +235,12 @@ pub async fn decide_gateway(
 ) -> Result<DecidedGateway, ErrorResponse> {
     let cpu_start = Instant::now();
 
-    let x_request_id = headers
-        .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("unknown")
-        .to_string();
-    let global_request_id = global_request_id_from_headers(&headers);
-    let trace_id = trace_id_from_headers(&headers);
+    let RequestIds {
+        request_id,
+        global_request_id,
+        trace_id,
+    } = RequestIds::from_headers(&headers);
+    let x_request_id = request_id.unwrap_or_else(|| "unknown".to_string());
     // Mask values by default and consolidate header diagnostics into one event.
     logger::debug!(
         tag = "DecideGateway",

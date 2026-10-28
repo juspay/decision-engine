@@ -1,4 +1,5 @@
 use crate::app::get_tenant_app_state;
+use crate::generics::Repository;
 use crate::types::country::country_iso::CountryISO;
 use crate::types::payment::payment_method::{to_payment_method_id, PaymentMethodId};
 use crate::types::payment_flow::*;
@@ -26,11 +27,7 @@ use crate::types::gateway_payment_flow::to_gateway_payment_flow_id;
 // use db::mesh::internal::{MeshError, find_all_rows};
 // use eulerhs::extra::combinators::to_domain_all;
 // use db::eulermeshimpl::mesh_config;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::gateway_payment_method_flow::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::gateway_payment_method_flow::dsl;
-use diesel::associations::HasTable;
+use crate::storage::backend::schema::gateway_payment_method_flow::dsl;
 use diesel::*;
 
 // #TODO type for nonempty text
@@ -146,11 +143,7 @@ pub async fn find_all_gpmf_by_gateway_payment_flow_payment_method_db(
     let pf_id_text = payment_flows_to_text(&pf_id);
 
     // Use Diesel's query builder with multiple conditions
-    crate::generics::generic_find_all::<
-        <DBGatewayPaymentMethodFlow as HasTable>::Table,
-        _,
-        DBGatewayPaymentMethodFlow,
-    >(
+    DBGatewayPaymentMethodFlow::find_all(
         &app_state.db,
         dsl::gateway
             .eq_any(gw_ls)
@@ -234,11 +227,7 @@ pub async fn find_all_gpmf_by_country_code_gw_pf_id_pmt_jbcid_db(
     let pmt_text = pmt;
 
     // Use Diesel's query builder with multiple conditions
-    crate::generics::generic_find_all::<
-        <DBGatewayPaymentMethodFlow as HasTable>::Table,
-        _,
-        DBGatewayPaymentMethodFlow,
-    >(
+    DBGatewayPaymentMethodFlow::find_all(
         &app_state.db,
         dsl::gateway
             .eq_any(gw_ls)

@@ -1,3 +1,4 @@
+use crate::generics::Repository;
 use serde::{Deserialize, Serialize};
 use std::option::Option;
 use std::string::String;
@@ -15,11 +16,7 @@ use crate::storage::types::{BitBool, UserEligibilityInfo as DBUserEligibilityInf
 use crate::error::ApiError;
 use crate::types::payment_flow::PaymentFlow;
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::user_eligibility_info::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::user_eligibility_info::dsl;
-use diesel::associations::HasTable;
+use crate::storage::backend::schema::user_eligibility_info::dsl;
 use diesel::*;
 
 use super::payment_flow::text_to_payment_flows;
@@ -138,11 +135,7 @@ pub async fn get_eligibility_info(
 ) -> Vec<UserEligibilityInfo> {
     // Use Diesel's query builder with multiple conditions
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_all::<
-        <DBUserEligibilityInfo as HasTable>::Table,
-        _,
-        DBUserEligibilityInfo,
-    >(
+    match DBUserEligibilityInfo::find_all(
         &app_state.db,
         dsl::identifier_value
             .eq_any(identifiers)

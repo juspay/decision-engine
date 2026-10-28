@@ -33,6 +33,8 @@
 //! Reports are discovered by polling Chase's reporting API and downloaded with OAuth credentials.
 //! Token and reports endpoints are server-configured; file URLs come from the reporting API.
 
+use super::common::{http_client, parse_us_date, to_float};
+use crate::cost_ingestion::card_network::chase_network_key;
 use std::collections::HashMap;
 use std::io::{BufReader, Read};
 use std::sync::{Mutex, OnceLock};
@@ -58,8 +60,6 @@ use crate::cost_ingestion::types::{
 /// `REFUND` rows are reversals whose signed amounts would distort the gross→fee regression, so they
 /// are skipped (mirrors Adyen's record-type and Braintree's transaction-type filter).
 const SALE_ACTION: &str = "SALE";
-
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// The report *type* the J.P. Morgan **Deposit details** preset report is delivered under. Deposit
 /// details carries the per-transaction split interchange/assessment fees plus every cluster
@@ -98,17 +98,6 @@ impl Default for ChaseReportSource {
     fn default() -> Self {
         Self::new()
     }
-}
-
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(DOWNLOAD_TIMEOUT)
-            .build()
-            .expect("failed to build chase report reqwest client")
-    })
 }
 
 /// Chase's OAuth + reporting-API access, carried inside the opaque [`ConnectorCreds::download_auth`]
@@ -337,14 +326,14 @@ impl SettlementReportSource for ChaseReportSource {
                 // calculation base) and is already positive for sales.
                 let gross = to_float(row.get(c.amount));
 
-                let network = normalize_network(row.get(c.method));
+                let network = chase_network_key(row.get(c.method));
                 // Reconcile funding: the interchange qualification code is authoritative about the
                 // fee tier, so it corrects a `Card Usage Type` that some exports stamp uniformly
                 // (every row `1`), which would otherwise price credit txns as debit.
                 let funding = reconcile_funding(row.get(c.usage), row.get(c.ic_code));
                 let wallet = row.get_opt(c.wallet);
                 let variant = build_variant(&network, &funding, wallet);
-                let txn_date = c.submission_date.and_then(|i| parse_date(row.get(i)));
+                let txn_date = c.submission_date.and_then(|i| parse_us_date(row.get(i)));
                 // POS when a terminal id is present, else online. Absent column ⇒ unknown ⇒ ecom.
                 let channel = match c.terminal {
                     Some(i) if !row.get(i).trim().is_empty() => "pos",
@@ -595,22 +584,6 @@ fn build_token_form(creds: &ChaseCreds, assertion: &str) -> Vec<(&'static str, S
     ]
 }
 
-/// Map a Chase `Payment Method Code` (MOP) onto the lowercased network ids the rest of the pipeline
-/// uses (matching Adyen/Braintree: `visa`, `mc`, `amex`, …). Unknown codes pass through lowercased
-/// so they still form their own consistent cluster rather than being dropped.
-fn normalize_network(code: &str) -> String {
-    match code.trim().to_uppercase().as_str() {
-        "" => String::new(),
-        "VI" => "visa".to_string(),
-        "MC" => "mc".to_string(),
-        "AX" => "amex".to_string(),
-        "DI" => "discover".to_string(),
-        "JC" => "jcb".to_string(),
-        "DC" => "diners".to_string(),
-        other => other.to_lowercase(),
-    }
-}
-
 /// Map Chase's `Card Usage Type` onto the canonical funding bucket: `1` = signature debit and
 /// `2` = PIN debit both fold to `debit`; `3` = credit; anything else is unknown (`""`).
 fn funding_from_usage_type(code: &str) -> String {
@@ -671,27 +644,6 @@ fn build_variant(network: &str, funding: &str, wallet: &str) -> String {
     } else {
         v
     }
-}
-
-/// Parse a money cell; blanks/garbage become `0.0` (mirrors Adyen's/Braintree's `to_float`).
-fn to_float(s: &str) -> f64 {
-    s.trim().parse::<f64>().unwrap_or(0.0)
-}
-
-/// Parse a Chase date cell (`Submission Date`), formatted US `M/D/YYYY` (e.g. `3/3/2025`). A
-/// 2-digit-year fallback is kept for safety. Blank/odd values yield `None`.
-fn parse_date(s: &str) -> Option<chrono::NaiveDate> {
-    let s = s.trim();
-    if s.is_empty() {
-        return None;
-    }
-    // Choose the year format by the last field's width so `%Y` doesn't read `25` as year 0025.
-    let fmt = match s.rsplit('/').next().map(str::len) {
-        Some(4) => "%m/%d/%Y",
-        Some(2) => "%m/%d/%y",
-        _ => return None,
-    };
-    chrono::NaiveDate::parse_from_str(s, fmt).ok()
 }
 
 /// Streams a J.P. Morgan preset report with its envelope stripped: a leading UTF-8 BOM, the
@@ -881,10 +833,10 @@ o2,ED,3,GB,GBP,EDBT,SALE,100,-1.00,-0.20\n";
 
     #[test]
     fn helpers() {
-        assert_eq!(normalize_network("VI"), "visa");
-        assert_eq!(normalize_network("mc"), "mc");
-        assert_eq!(normalize_network("AX"), "amex");
-        assert_eq!(normalize_network(""), "");
+        assert_eq!(chase_network_key("VI"), "visa");
+        assert_eq!(chase_network_key("mc"), "mc");
+        assert_eq!(chase_network_key("AX"), "amex");
+        assert_eq!(chase_network_key(""), "");
         assert_eq!(funding_from_usage_type("1"), "debit");
         assert_eq!(funding_from_usage_type("2"), "debit");
         assert_eq!(funding_from_usage_type("3"), "credit");
@@ -912,14 +864,14 @@ o2,ED,3,GB,GBP,EDBT,SALE,100,-1.00,-0.20\n";
         );
         assert_eq!(reconcile_funding("", ""), "", "no signal -> empty");
         assert_eq!(
-            parse_date("3/3/2025"),
+            parse_us_date("3/3/2025"),
             chrono::NaiveDate::from_ymd_opt(2025, 3, 3)
         );
         assert_eq!(
-            parse_date("12/21/2024"),
+            parse_us_date("12/21/2024"),
             chrono::NaiveDate::from_ymd_opt(2024, 12, 21)
         );
-        assert_eq!(parse_date(""), None);
+        assert_eq!(parse_us_date(""), None);
     }
 
     /// Shaped after J.P. Morgan's live `GET /api/v1/reports`: a `Requested` report (no

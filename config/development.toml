@@ -1094,7 +1094,10 @@ email_verification_enabled = false
 signup_requires_admin_secret = false
 # Local default keeps logout immediate; raise it to skip the denylist read per request.
 jwt_revocation_cache_ttl_ms = 0
-super_admin_emails = ["test@gmail.com"]
+# Super admins can enter and change any merchant, and this file is also the Helm chart's config, so
+# the roster ships empty. Set it per deployment (e2e injects one via
+# DECISION_ENGINE__USER_AUTH__SUPER_ADMIN_EMAILS).
+super_admin_emails = []
 
 [admin_secret]
 secret = "test_admin"

@@ -26,8 +26,8 @@
 //! architecture doc §7.7). Those three methods return a descriptive error until then; the parser
 //! (`parse_rows`) is complete and independently testable.
 
-use std::sync::OnceLock;
-use std::time::Duration;
+use super::common::{not_implemented, parse_us_date, to_float};
+use crate::cost_ingestion::card_network::network_key;
 
 use async_trait::async_trait;
 use axum::http::HeaderMap;
@@ -45,9 +45,6 @@ use crate::cost_ingestion::types::{
 /// would distort the gross→fee regression, so they're skipped (mirrors Adyen's record-type filter).
 const FEE_TRANSACTION_TYPES: [&str; 1] = ["sale"];
 
-#[allow(dead_code)] // used once download_report is implemented
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
-
 pub struct BraintreeReportSource;
 
 impl BraintreeReportSource {
@@ -62,17 +59,6 @@ impl Default for BraintreeReportSource {
     }
 }
 
-#[allow(dead_code)] // used once download_report is implemented
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(DOWNLOAD_TIMEOUT)
-            .build()
-            .expect("failed to build braintree report reqwest client")
-    })
-}
-
 #[async_trait]
 impl SettlementReportSource for BraintreeReportSource {
     fn connector(&self) -> &'static str {
@@ -83,7 +69,7 @@ impl SettlementReportSource for BraintreeReportSource {
         // TODO(braintree-webhook): extract the merchant account token from the unverified
         // notification body once Braintree's report-ready webhook shape is confirmed. The report
         // itself carries it as `Merchant Account ID` (field 1); the webhook envelope is TBD.
-        Err(not_implemented("peek_account"))
+        Err(not_implemented("braintree", "peek_account"))
     }
 
     fn verify_and_parse_notification(
@@ -95,7 +81,10 @@ impl SettlementReportSource for BraintreeReportSource {
         // TODO(braintree-webhook): verify Braintree's webhook signature and extract the report
         // handle. Braintree signs webhooks with an `bt_signature`/`bt_payload` pair (public-key
         // scheme), unlike Adyen's body HMAC — confirm the report-notification variant before wiring.
-        Err(not_implemented("verify_and_parse_notification"))
+        Err(not_implemented(
+            "braintree",
+            "verify_and_parse_notification",
+        ))
     }
 
     async fn download_report(
@@ -105,7 +94,7 @@ impl SettlementReportSource for BraintreeReportSource {
     ) -> Result<Bytes, IngestError> {
         // TODO(braintree-webhook): fetch the report using the merchant's stored download auth.
         // Reuse `http_client()` once the download URL/auth (API key vs. SFTP) is confirmed.
-        Err(not_implemented("download_report"))
+        Err(not_implemented("braintree", "download_report"))
     }
 
     fn parse_rows(
@@ -179,11 +168,11 @@ impl SettlementReportSource for BraintreeReportSource {
 
                 // Prefer the card brand; fall back to the debit network (pinless), then the instrument.
                 let network = {
-                    let brand = normalize_network(row.get(c.brand));
+                    let brand = network_key(row.get(c.brand));
                     if !brand.is_empty() {
                         brand
                     } else {
-                        let net = normalize_network(row.get_opt(c.network));
+                        let net = network_key(row.get_opt(c.network));
                         if !net.is_empty() {
                             net
                         } else {
@@ -193,7 +182,7 @@ impl SettlementReportSource for BraintreeReportSource {
                 };
                 let funding = funding_from_card_type(row.get(c.card_type));
                 let variant = build_variant(row.get(c.instrument), &network, &funding);
-                let txn_date = c.settle_date.and_then(|i| parse_date(row.get(i)));
+                let txn_date = c.settle_date.and_then(|i| parse_us_date(row.get(i)));
 
                 Ok(Some(SettledFeeRow {
                     txn_ref: row.get(c.txn).to_string(),
@@ -225,13 +214,6 @@ impl SettlementReportSource for BraintreeReportSource {
     }
 }
 
-/// Placeholder error for the not-yet-wired notification/download path.
-fn not_implemented(method: &str) -> IngestError {
-    IngestError::MalformedNotification(format!(
-        "braintree connector: {method} not yet implemented (webhook/download shape TBD)"
-    ))
-}
-
 /// Map Braintree's `Card Type` (`Credit` / `Debit` / `Unknown` / blank) onto the canonical funding
 /// bucket. Unlike Adyen (which sniffs the variant string) Braintree states funding explicitly.
 fn funding_from_card_type(card_type: &str) -> String {
@@ -239,21 +221,6 @@ fn funding_from_card_type(card_type: &str) -> String {
         "debit" => "debit".to_string(),
         "credit" => "credit".to_string(),
         _ => String::new(),
-    }
-}
-
-/// Canonicalize a Braintree card-brand / payment-network label to the lowercased network ids the
-/// rest of the pipeline uses (matching Adyen: `mc`, `visa`, `amex`, …). Empty in ⇒ empty out.
-fn normalize_network(raw: &str) -> String {
-    match raw.trim().to_lowercase().as_str() {
-        "" => String::new(),
-        "mastercard" | "master card" => "mc".to_string(),
-        "visa" => "visa".to_string(),
-        "american express" | "amex" => "amex".to_string(),
-        "discover" => "discover".to_string(),
-        "diners" | "diners club" => "diners".to_string(),
-        "jcb" => "jcb".to_string(),
-        other => other.replace(' ', ""),
     }
 }
 
@@ -272,28 +239,6 @@ fn build_variant(instrument: &str, network: &str, funding: &str) -> String {
     } else {
         inst.replace('_', "")
     }
-}
-
-/// Parse a money cell; blanks/garbage become `0.0` (mirrors Adyen's `to_float`).
-fn to_float(s: &str) -> f64 {
-    s.trim().parse::<f64>().unwrap_or(0.0)
-}
-
-/// Parse a Braintree date cell (`Settlement Date`). The report uses US `M/D/YYYY`, occasionally
-/// with a 2-digit year (`2/2/20`). Blank/odd values yield `None`.
-fn parse_date(s: &str) -> Option<chrono::NaiveDate> {
-    let s = s.trim();
-    if s.is_empty() {
-        return None;
-    }
-    // Choose the year format by the last field's width — `%Y` would otherwise greedily read a
-    // 2-digit `20` as year 0020.
-    let fmt = match s.rsplit('/').next().map(str::len) {
-        Some(4) => "%m/%d/%Y",
-        Some(2) => "%m/%d/%y",
-        _ => return None,
-    };
-    chrono::NaiveDate::parse_from_str(s, fmt).ok()
 }
 
 #[cfg(test)]
@@ -393,23 +338,23 @@ v1,sale,USD,25.00,,,venmo_account,0.00,0.15\n";
         assert_eq!(funding_from_card_type("Credit"), "credit");
         assert_eq!(funding_from_card_type("Unknown"), "");
         assert_eq!(funding_from_card_type(""), "");
-        assert_eq!(normalize_network("MasterCard"), "mc");
-        assert_eq!(normalize_network("American Express"), "amex");
-        assert_eq!(normalize_network("Visa"), "visa");
-        assert_eq!(normalize_network(""), "");
+        assert_eq!(network_key("MasterCard"), "mc");
+        assert_eq!(network_key("American Express"), "amex");
+        assert_eq!(network_key("Visa"), "visa");
+        assert_eq!(network_key(""), "");
     }
 
     #[test]
     fn date_parses_two_and_four_digit_years() {
         assert_eq!(
-            parse_date("2/23/2022"),
+            parse_us_date("2/23/2022"),
             chrono::NaiveDate::from_ymd_opt(2022, 2, 23)
         );
         assert_eq!(
-            parse_date("2/2/20"),
+            parse_us_date("2/2/20"),
             chrono::NaiveDate::from_ymd_opt(2020, 2, 2)
         );
-        assert_eq!(parse_date(""), None);
-        assert_eq!(parse_date("garbage"), None);
+        assert_eq!(parse_us_date(""), None);
+        assert_eq!(parse_us_date("garbage"), None);
     }
 }

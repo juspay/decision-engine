@@ -2,6 +2,7 @@ use crate::app::{get_tenant_app_state, APP_STATE};
 use crate::auth::{self, TOKEN_TYPE_HS_REDIRECT, TOKEN_TYPE_STANDARD, TOKEN_TYPE_SUPER_ADMIN_VIEW};
 use crate::custom_extractors::Json;
 use crate::error::{self, ContainerError, ResultContainerExt, UserAuthError};
+use crate::generics::Repository;
 use crate::storage::types::{
     MerchantAccountNew, NewUser, NewUserMerchant, User, UserEmailVerifiedUpdate, UserMerchant,
     UserMerchantIdUpdate,
@@ -17,15 +18,9 @@ use error_stack::ResultExt;
 use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::users::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::users::dsl;
+use crate::storage::backend::schema::users::dsl;
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::user_merchants::dsl as um_dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::user_merchants::dsl as um_dsl;
+use crate::storage::backend::schema::user_merchants::dsl as um_dsl;
 
 const JWT_DENYLIST_PREFIX: &str = "jwt_revoked:";
 
@@ -34,8 +29,26 @@ const JWT_DENYLIST_PREFIX: &str = "jwt_revoked:";
 const HS_SSO_CODE_PREFIX: &str = "hs_sso_code:";
 const HS_SSO_CODE_TTL_SECONDS: i64 = 60;
 
+diesel::define_sql_function!(fn lower(x: diesel::sql_types::Text) -> diesel::sql_types::Text);
+
+/// An email as accounts are keyed: trimmed and lowercased. Every request that names an account by
+/// email is read through this, and lookups compare against `lower(email)`, so `Admin@x.com` and
+/// `admin@x.com` are one account — never a second one that the case-insensitive super-admin
+/// roster would also admit.
+fn normalize_email(email: &str) -> String {
+    email.trim().to_lowercase()
+}
+
+fn deserialize_email<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    String::deserialize(deserializer).map(|email| normalize_email(&email))
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SignupRequest {
+    #[serde(deserialize_with = "deserialize_email")]
     pub email: String,
     pub password: String,
     pub merchant_id: Option<String>,
@@ -43,6 +56,7 @@ pub struct SignupRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
+    #[serde(deserialize_with = "deserialize_email")]
     pub email: String,
     pub password: String,
 }
@@ -147,12 +161,9 @@ pub async fn signup(
         return Err(error::ContainerError::from(UserAuthError::Unauthorized));
     }
 
-    let existing = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::email.eq(payload.email.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let existing = User::find_all(&app_state.db, lower(dsl::email).eq(payload.email.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
 
     if !existing.is_empty() {
         return Err(error::ContainerError::from(
@@ -181,16 +192,9 @@ pub async fn signup(
             return Err(error::ContainerError::from(UserAuthError::Forbidden));
         }
 
-        #[cfg(feature = "mysql")]
-        use crate::storage::schema::merchant_account::dsl as ma_dsl;
-        #[cfg(feature = "postgres")]
-        use crate::storage::schema_pg::merchant_account::dsl as ma_dsl;
+        use crate::storage::backend::schema::merchant_account::dsl as ma_dsl;
 
-        let existing_merchant = crate::generics::generic_find_all::<
-            <crate::storage::types::MerchantAccount as HasTable>::Table,
-            _,
-            crate::storage::types::MerchantAccount,
-        >(
+        let existing_merchant = crate::storage::types::MerchantAccount::find_all(
             &app_state.db,
             ma_dsl::merchant_id.eq(Some(merchant_id.clone())),
         )
@@ -383,12 +387,9 @@ pub async fn login(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::email.eq(payload.email.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let mut users = User::find_all(&app_state.db, lower(dsl::email).eq(payload.email.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
 
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
 
@@ -512,10 +513,7 @@ pub async fn create_merchant(
 
     // Update users.merchant_id to the newly created merchant
     {
-        #[cfg(feature = "mysql")]
-        use crate::storage::schema::users::dsl as u_dsl;
-        #[cfg(feature = "postgres")]
-        use crate::storage::schema_pg::users::dsl as u_dsl;
+        use crate::storage::backend::schema::users::dsl as u_dsl;
 
         let conn = &app_state
             .db
@@ -726,12 +724,9 @@ pub async fn change_password(
 
     let app_state = get_tenant_app_state().await;
 
-    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::user_id.eq(claims.sub.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let mut users = User::find_all(&app_state.db, dsl::user_id.eq(claims.sub.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
 
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
 
@@ -774,6 +769,7 @@ pub async fn change_password(
 
 #[derive(Debug, Deserialize)]
 pub struct InviteMemberRequest {
+    #[serde(deserialize_with = "deserialize_email")]
     pub email: String,
     pub role: Option<String>,
 }
@@ -846,16 +842,9 @@ pub async fn invite_member(
 
     let app_state = get_tenant_app_state().await;
 
-    #[cfg(feature = "mysql")]
-    use crate::storage::schema::merchant_account::dsl as ma_dsl;
-    #[cfg(feature = "postgres")]
-    use crate::storage::schema_pg::merchant_account::dsl as ma_dsl;
+    use crate::storage::backend::schema::merchant_account::dsl as ma_dsl;
 
-    let merchant_name = crate::generics::generic_find_all::<
-        <crate::storage::types::MerchantAccount as HasTable>::Table,
-        _,
-        crate::storage::types::MerchantAccount,
-    >(
+    let merchant_name = crate::storage::types::MerchantAccount::find_all(
         &app_state.db,
         ma_dsl::merchant_id.eq(Some(claims.merchant_id.clone())),
     )
@@ -866,22 +855,15 @@ pub async fn invite_member(
     .and_then(|m| m.merchant_name)
     .unwrap_or_else(|| claims.merchant_id.clone());
 
-    let existing_users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::email.eq(payload.email.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let existing_users = User::find_all(&app_state.db, lower(dsl::email).eq(payload.email.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
 
     let now = date_time::now();
 
     if let Some(existing_user) = existing_users.into_iter().next() {
         // Check if already a member
-        let existing_membership = crate::generics::generic_find_all::<
-            <UserMerchant as HasTable>::Table,
-            _,
-            UserMerchant,
-        >(
+        let existing_membership = UserMerchant::find_all(
             &app_state.db,
             um_dsl::user_id
                 .eq(existing_user.user_id.clone())
@@ -1033,25 +1015,21 @@ pub async fn list_members(
     let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
     let app_state = get_tenant_app_state().await;
 
-    let memberships =
-        crate::generics::generic_find_all::<<UserMerchant as HasTable>::Table, _, UserMerchant>(
-            &app_state.db,
-            um_dsl::merchant_id.eq(claims.merchant_id.clone()),
-        )
-        .await
-        .change_error(UserAuthError::StorageError)?;
+    let memberships = UserMerchant::find_all(
+        &app_state.db,
+        um_dsl::merchant_id.eq(claims.merchant_id.clone()),
+    )
+    .await
+    .change_error(UserAuthError::StorageError)?;
 
     let user_ids: Vec<String> = memberships.iter().map(|m| m.user_id.clone()).collect();
 
     let users = if user_ids.is_empty() {
         Vec::new()
     } else {
-        crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-            &app_state.db,
-            dsl::user_id.eq_any(user_ids),
-        )
-        .await
-        .change_error(UserAuthError::StorageError)?
+        User::find_all(&app_state.db, dsl::user_id.eq_any(user_ids))
+            .await
+            .change_error(UserAuthError::StorageError)?
     };
 
     let users_by_id: std::collections::HashMap<String, User> =
@@ -1173,12 +1151,9 @@ pub async fn me(
 
     let app_state = get_tenant_app_state().await;
 
-    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::user_id.eq(claims.user_id.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let mut users = User::find_all(&app_state.db, dsl::user_id.eq(claims.user_id.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
 
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
     // A session carrying a grant lists what that grant reaches; one without lists the user's own
@@ -1279,26 +1254,16 @@ async fn fetch_user_merchants(
     app_state: &crate::app::TenantAppState,
     user_id: &String,
 ) -> Result<Vec<MerchantInfo>, ContainerError<UserAuthError>> {
-    #[cfg(feature = "mysql")]
-    use crate::storage::schema::merchant_account::dsl as ma_dsl;
-    #[cfg(feature = "postgres")]
-    use crate::storage::schema_pg::merchant_account::dsl as ma_dsl;
+    use crate::storage::backend::schema::merchant_account::dsl as ma_dsl;
 
-    let user_merchant_rows = crate::generics::generic_find_all::<
-        <UserMerchant as HasTable>::Table,
-        _,
-        UserMerchant,
-    >(&app_state.db, um_dsl::user_id.eq(user_id.clone()))
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let user_merchant_rows =
+        UserMerchant::find_all(&app_state.db, um_dsl::user_id.eq(user_id.clone()))
+            .await
+            .change_error(UserAuthError::StorageError)?;
 
     let mut result = Vec::new();
     for um in user_merchant_rows {
-        let mut accounts = crate::generics::generic_find_all::<
-            <crate::storage::types::MerchantAccount as HasTable>::Table,
-            _,
-            crate::storage::types::MerchantAccount,
-        >(
+        let mut accounts = crate::storage::types::MerchantAccount::find_all(
             &app_state.db,
             ma_dsl::merchant_id.eq(Some(um.merchant_id.clone())),
         )
@@ -1332,6 +1297,7 @@ async fn fetch_user_merchants(
 
 #[derive(Debug, Deserialize)]
 pub struct ForgotPasswordRequest {
+    #[serde(deserialize_with = "deserialize_email")]
     pub email: String,
 }
 
@@ -1377,12 +1343,9 @@ pub async fn forgot_password(
 
     let app_state = get_tenant_app_state().await;
 
-    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::email.eq(payload.email.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let mut users = User::find_all(&app_state.db, lower(dsl::email).eq(payload.email.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
 
     let user = match users.pop() {
         Some(user) => user,
@@ -1967,12 +1930,9 @@ pub async fn exit_merchant(
 
     let app_state = get_tenant_app_state().await;
 
-    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::user_id.eq(claims.user_id.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let mut users = User::find_all(&app_state.db, dsl::user_id.eq(claims.user_id.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
 
     let merchants = fetch_user_merchants(&app_state, &user.user_id).await?;
@@ -2035,7 +1995,7 @@ pub struct MerchantLookupResult {
 const MERCHANT_LOOKUP_LIMIT: usize = 25;
 
 /// Minimum query length. A 1-character substring (e.g. "a" or "@") matches nearly every user and
-/// merchant, and `generic_find_all` has no DB-side LIMIT — so require a couple of characters to keep
+/// merchant, and `find_all` has no DB-side LIMIT — so require a couple of characters to keep
 /// a broad match from loading a huge row set. (Pushing a SQL LIMIT down is a follow-up.)
 const MERCHANT_LOOKUP_MIN_QUERY_LEN: usize = 2;
 
@@ -2078,10 +2038,7 @@ pub async fn lookup_merchants(
         return Ok(Json(vec![]));
     }
 
-    #[cfg(feature = "mysql")]
-    use crate::storage::schema::merchant_account::dsl as ma_dsl;
-    #[cfg(feature = "postgres")]
-    use crate::storage::schema_pg::merchant_account::dsl as ma_dsl;
+    use crate::storage::backend::schema::merchant_account::dsl as ma_dsl;
 
     // `.like`/`.ilike` live on different traits and only one backend has ILIKE, so the substring
     // predicates below are cfg-split; everything else is shared.
@@ -2097,40 +2054,27 @@ pub async fn lookup_merchants(
 
     // 1. Users whose email matches → the merchants they belong to.
     #[cfg(feature = "mysql")]
-    let matched_users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::email.like(pattern.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let matched_users = User::find_all(&app_state.db, dsl::email.like(pattern.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
     #[cfg(feature = "postgres")]
-    let matched_users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::email.ilike(pattern.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let matched_users = User::find_all(&app_state.db, dsl::email.ilike(pattern.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
 
     let matched_user_ids: Vec<String> = matched_users.into_iter().map(|u| u.user_id).collect();
 
     let people_memberships = if matched_user_ids.is_empty() {
         Vec::new()
     } else {
-        crate::generics::generic_find_all::<<UserMerchant as HasTable>::Table, _, UserMerchant>(
-            &app_state.db,
-            um_dsl::user_id.eq_any(matched_user_ids),
-        )
-        .await
-        .change_error(UserAuthError::StorageError)?
+        UserMerchant::find_all(&app_state.db, um_dsl::user_id.eq_any(matched_user_ids))
+            .await
+            .change_error(UserAuthError::StorageError)?
     };
 
     // 2. Merchants whose name matches, or whose ID is exactly the query.
     #[cfg(feature = "mysql")]
-    let matched_merchants = crate::generics::generic_find_all::<
-        <MerchantAccount as HasTable>::Table,
-        _,
-        MerchantAccount,
-    >(
+    let matched_merchants = MerchantAccount::find_all(
         &app_state.db,
         ma_dsl::merchant_name
             .like(pattern.clone())
@@ -2139,11 +2083,7 @@ pub async fn lookup_merchants(
     .await
     .change_error(UserAuthError::StorageError)?;
     #[cfg(feature = "postgres")]
-    let matched_merchants = crate::generics::generic_find_all::<
-        <MerchantAccount as HasTable>::Table,
-        _,
-        MerchantAccount,
-    >(
+    let matched_merchants = MerchantAccount::find_all(
         &app_state.db,
         ma_dsl::merchant_name
             .ilike(pattern.clone())
@@ -2175,11 +2115,7 @@ pub async fn lookup_merchants(
 
     // 3. Names for the result merchants, and the full membership of each (not just the matched
     // person) so the super-admin can confirm the target.
-    let name_rows = crate::generics::generic_find_all::<
-        <MerchantAccount as HasTable>::Table,
-        _,
-        MerchantAccount,
-    >(
+    let name_rows = MerchantAccount::find_all(
         &app_state.db,
         ma_dsl::merchant_id.eq_any(ordered_ids.iter().cloned().map(Some).collect::<Vec<_>>()),
     )
@@ -2200,13 +2136,12 @@ pub async fn lookup_merchants(
         })
         .collect();
 
-    let memberships =
-        crate::generics::generic_find_all::<<UserMerchant as HasTable>::Table, _, UserMerchant>(
-            &app_state.db,
-            um_dsl::merchant_id.eq_any(ordered_ids.clone()),
-        )
-        .await
-        .change_error(UserAuthError::StorageError)?;
+    let memberships = UserMerchant::find_all(
+        &app_state.db,
+        um_dsl::merchant_id.eq_any(ordered_ids.clone()),
+    )
+    .await
+    .change_error(UserAuthError::StorageError)?;
 
     let member_user_ids: Vec<String> = memberships
         .iter()
@@ -2217,12 +2152,9 @@ pub async fn lookup_merchants(
     let member_users = if member_user_ids.is_empty() {
         Vec::new()
     } else {
-        crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-            &app_state.db,
-            dsl::user_id.eq_any(member_user_ids),
-        )
-        .await
-        .change_error(UserAuthError::StorageError)?
+        User::find_all(&app_state.db, dsl::user_id.eq_any(member_user_ids))
+            .await
+            .change_error(UserAuthError::StorageError)?
     };
     let email_by_user_id: std::collections::HashMap<String, String> = member_users
         .into_iter()
@@ -2350,6 +2282,25 @@ mod tests {
             &[],
             &claims_for(TOKEN_TYPE_STANDARD, "admin@example.com")
         ));
+    }
+
+    #[test]
+    fn an_email_in_any_case_names_the_same_account() {
+        for body in [
+            r#"{"email":"TEST@Gmail.com","password":"x"}"#,
+            r#"{"email":"  test@gmail.com ","password":"x"}"#,
+        ] {
+            let login: LoginRequest = serde_json::from_str(body).expect("request");
+            assert_eq!(login.email, "test@gmail.com");
+            let signup: SignupRequest = serde_json::from_str(body).expect("request");
+            assert_eq!(signup.email, "test@gmail.com");
+        }
+        let invite: InviteMemberRequest =
+            serde_json::from_str(r#"{"email":"Member@X.com"}"#).expect("request");
+        assert_eq!(invite.email, "member@x.com");
+        let forgot: ForgotPasswordRequest =
+            serde_json::from_str(r#"{"email":"Member@X.com"}"#).expect("request");
+        assert_eq!(forgot.email, "member@x.com");
     }
 
     #[test]

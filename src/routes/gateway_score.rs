@@ -1,4 +1,5 @@
 use crate::custom_extractors::{Json, ScopedJson};
+use crate::types::service_configuration::MerchantConfig;
 use error_stack::ResultExt;
 use serde::{Deserialize, Serialize};
 
@@ -88,7 +89,7 @@ pub async fn reset_gateway_scores(
 async fn clear_autopilot_sublevel_overrides(merchant_id: &str) -> usize {
     use crate::types::service_configuration::{find_config_by_name, update_config};
 
-    let name = format!("SR_V3_INPUT_CONFIG_{merchant_id}");
+    let name = crate::types::service_configuration::SrV3Input::name(merchant_id);
     let value = match find_config_by_name(name.clone()).await {
         Ok(Some(cfg)) => cfg.value,
         _ => None,

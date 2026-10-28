@@ -4,10 +4,8 @@
 //! not found. Authentication looks keys up by hash instead, before any merchant is known; that
 //! lookup lives in the authenticate middleware.
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::merchant_api_keys::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::merchant_api_keys::dsl;
+use crate::generics::Repository;
+use crate::storage::backend::schema::merchant_api_keys::dsl;
 
 use diesel::{associations::HasTable, BoolExpressionMethods, ExpressionMethods};
 use error_stack::Report;
@@ -31,12 +29,9 @@ pub async fn insert(
 
 /// Every key the merchant has, active or revoked.
 pub async fn list(db: &Storage, merchant: &AuthorizedMerchant) -> StoreResult<Vec<MerchantApiKey>> {
-    generics::generic_find_all::<<MerchantApiKey as HasTable>::Table, _, MerchantApiKey>(
-        db,
-        dsl::merchant_id.eq(merchant.as_str().to_string()),
-    )
-    .await
-    .map_err(Report::new)
+    MerchantApiKey::find_all(db, dsl::merchant_id.eq(merchant.as_str().to_string()))
+        .await
+        .map_err(Report::new)
 }
 
 /// The merchant's key with this id.
@@ -45,7 +40,7 @@ pub async fn find(
     merchant: &AuthorizedMerchant,
     key_id: &str,
 ) -> StoreResult<Option<MerchantApiKey>> {
-    generics::generic_find_one_optional::<<MerchantApiKey as HasTable>::Table, _, MerchantApiKey>(
+    MerchantApiKey::find_optional(
         db,
         dsl::key_id
             .eq(key_id.to_string())
@@ -77,11 +72,8 @@ pub async fn revoke(db: &Storage, merchant: &AuthorizedMerchant, key_id: &str) -
 /// The merchant that owns a key, for a service caller revoking by key id alone. A session is
 /// authorized for its own merchant and never needs this.
 pub async fn owner_of(db: &Storage, key_id: &str) -> StoreResult<Option<String>> {
-    generics::generic_find_one_optional::<<MerchantApiKey as HasTable>::Table, _, MerchantApiKey>(
-        db,
-        dsl::key_id.eq(key_id.to_string()),
-    )
-    .await
-    .map(|key| key.map(|key| key.merchant_id))
-    .map_err(Report::new)
+    MerchantApiKey::find_optional(db, dsl::key_id.eq(key_id.to_string()))
+        .await
+        .map(|key| key.map(|key| key.merchant_id))
+        .map_err(Report::new)
 }

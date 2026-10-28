@@ -1,3 +1,4 @@
+use crate::generics::Repository;
 use diesel::*;
 use serde::{Deserialize, Serialize};
 use std::convert::TryFrom;
@@ -6,14 +7,10 @@ use time::PrimitiveDateTime;
 
 use crate::app::get_tenant_app_state;
 use crate::error::ApiError;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::merchant_config::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::merchant_config::dsl;
+use crate::storage::backend::schema::merchant_config::dsl;
 use crate::storage::types::MerchantConfig as DBMerchantConfig;
 use crate::types::merchant::id::{merchant_pid_to_text, MerchantPId};
 use crate::types::merchant_config::types::{ConfigCategory, ConfigName, ConfigStatus};
-use diesel::associations::HasTable;
 use diesel::ExpressionMethods;
 
 use super::types::{
@@ -58,12 +55,8 @@ pub async fn load_merchant_config_by_mpid_category_name_and_status(
 ) -> Option<MerchantConfig> {
     let app_state = get_tenant_app_state().await;
     let merchant_account_id_c = merchant_pid_to_text(merchant_account_id);
-    // Perform database query using Diesel's generic_find_one_optional
-    match crate::generics::generic_find_one_optional::<
-        <DBMerchantConfig as HasTable>::Table,
-        _,
-        DBMerchantConfig,
-    >(
+    // Perform database query using Diesel's find_optional
+    match DBMerchantConfig::find_optional(
         &app_state.db,
         dsl::merchant_account_id
             .eq(merchant_account_id_c)
@@ -83,13 +76,9 @@ pub async fn load_merchant_config_by_mpid_category_and_name(
     category: String,
     name: String,
 ) -> Option<MerchantConfig> {
-    // Perform query using Diesel with generic_find_one
+    // Perform query using Diesel with find_one
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_one::<
-        <DBMerchantConfig as HasTable>::Table,
-        _,
-        DBMerchantConfig,
-    >(
+    match DBMerchantConfig::find_one(
         &app_state.db,
         dsl::merchant_account_id
             .eq(merchant_account_id.0)
@@ -118,11 +107,7 @@ pub async fn load_arr_merchant_config_by_mpid_category_and_name(
         .collect();
     let merchant_account_id_c = merchant_pid_to_text(merchant_account_id);
 
-    match crate::generics::generic_find_all::<
-        <DBMerchantConfig as HasTable>::Table,
-        _,
-        DBMerchantConfig,
-    >(
+    match DBMerchantConfig::find_all(
         &app_state.db,
         dsl::merchant_account_id
             .eq(merchant_account_id_c)

@@ -4,6 +4,7 @@ use serde::{Deserialize, Serialize};
 // use control::category;
 use crate::app::get_tenant_app_state;
 use crate::error::ApiError;
+use crate::generics::Repository;
 use crate::storage::types::GatewayBankEmiSupportV2 as DBGatewayBankEmiSupportV2;
 use std::string::String;
 use std::vec::Vec;
@@ -15,11 +16,7 @@ use std::vec::Vec;
 // use sequelize::{Clause, Term};
 // use test::quickcheck::Arbitrary;
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::gateway_bank_emi_support_v2::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::gateway_bank_emi_support_v2::dsl;
-use diesel::associations::HasTable;
+use crate::storage::backend::schema::gateway_bank_emi_support_v2::dsl;
 use diesel::*;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -68,11 +65,7 @@ pub async fn get_gateway_bank_emi_support_v2_db(
     let app_state = get_tenant_app_state().await;
 
     // Use Diesel's query builder with multiple conditions
-    crate::generics::generic_find_all::<
-        <DBGatewayBankEmiSupportV2 as HasTable>::Table,
-        _,
-        DBGatewayBankEmiSupportV2,
-    >(
+    DBGatewayBankEmiSupportV2::find_all(
         &app_state.db,
         dsl::juspay_bank_code_id
             .eq(jbc_id)

@@ -1,5 +1,5 @@
 use crate::error::ApiError;
-use diesel::associations::HasTable;
+use crate::generics::Repository;
 use serde::{Deserialize, Serialize};
 // use db::eulermeshimpl::meshConfig;
 // use db::mesh::internal;
@@ -20,10 +20,7 @@ use crate::types::card::isin::{to_isin, Isin};
 // use named::*;
 // use optics::core::review;
 // use sequelize::{Clause, Term};
-#[cfg(feature = "mysql")]
-use crate::storage::schema::card_info::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::card_info::dsl;
+use crate::storage::backend::schema::card_info::dsl;
 use diesel::*;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Eq)]
@@ -106,16 +103,7 @@ impl TryFrom<DBCardInfo> for CardInfo {
 pub async fn getCardInfoByIsin(isin: Isin) -> Option<CardInfo> {
     // Try to find the card info by isin using diesel
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_one_optional::<
-        <DBCardInfo as HasTable>::Table,
-        _,
-        DBCardInfo
-    >(
-        &app_state.db,
-        dsl::card_isin.eq(isin.to_text()),
-    )
-    .await
-    {
+    match DBCardInfo::find_optional(&app_state.db, dsl::card_isin.eq(isin.to_text())).await {
         Ok(Some(db_card_info)) => match CardInfo::try_from(db_card_info) {
             Ok(card_info) => Some(card_info),
             Err(_) => None, // Silently handle any errors by returning None
@@ -128,7 +116,7 @@ pub async fn getCardInfoByIsin(isin: Isin) -> Option<CardInfo> {
 pub async fn getAllCardInfoByIsins(isin_list: Vec<Isin>) -> Vec<CardInfo> {
     // Try to find the card info by isin using diesel
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_all::<<DBCardInfo as HasTable>::Table, _, DBCardInfo>(
+    match DBCardInfo::find_all(
         &app_state.db,
         dsl::card_isin.eq_any(
             isin_list

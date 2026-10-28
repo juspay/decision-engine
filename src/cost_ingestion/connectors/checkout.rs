@@ -58,9 +58,9 @@
 //!
 //! [`report_generated`]: https://www.checkout.com/docs/developer-resources/event-notifications/event-types/report_generated
 
+use super::common::{http_client, to_float};
+use crate::cost_ingestion::card_network::network_key;
 use std::collections::{HashMap, HashSet};
-use std::sync::OnceLock;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use axum::http::HeaderMap;
@@ -79,19 +79,6 @@ use crate::cost_ingestion::types::{
 
 /// The `type` of the report-ready webhook event this connector handles.
 const REPORT_GENERATED_EVENT: &str = "report_generated";
-
-/// Cap on a report download (details + file fetches), mirroring the other connectors.
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
-
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(DOWNLOAD_TIMEOUT)
-            .build()
-            .expect("failed to build checkout report reqwest client")
-    })
-}
 
 /// Production Reports API host; overridable via the credential blob for sandbox/regional hosts.
 fn default_api_base() -> String {
@@ -476,7 +463,7 @@ impl SettlementReportSource for CheckoutReportSource {
                     entry.has_capture = true;
                     // Stamp metadata from the capture row (authoritative, always present here).
                     entry.txn_ref = pid.to_string();
-                    let network = normalize_network(row.get(c.payment_method));
+                    let network = network_key(row.get(c.payment_method));
                     let funding = funding_from_card_type(row.get(c.card_type));
                     entry.variant = build_variant(&network, &funding);
                     entry.card_network = network;
@@ -613,21 +600,6 @@ fn funding_from_card_type(card_type: &str) -> String {
     }
 }
 
-/// Canonicalize Checkout's `Payment Method` label (`VISA`, `MASTERCARD`, `AMEX`, …) to the
-/// lowercased network ids the rest of the pipeline uses (`visa`, `mc`, `amex`, …).
-fn normalize_network(raw: &str) -> String {
-    match raw.trim().to_lowercase().as_str() {
-        "" => String::new(),
-        "mastercard" | "master card" => "mc".to_string(),
-        "visa" => "visa".to_string(),
-        "american express" | "amex" => "amex".to_string(),
-        "discover" => "discover".to_string(),
-        "diners" | "diners club" => "diners".to_string(),
-        "jcb" => "jcb".to_string(),
-        other => other.replace(' ', ""),
-    }
-}
-
 /// Synthesize a `variant` cluster key. Checkout's report carries no scheme tier, so use
 /// `{network}{funding}` (e.g. `visacredit`); mirrors Braintree's card path.
 ///
@@ -655,11 +627,6 @@ fn normalize_card_category(raw: &str) -> String {
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
         None => String::new(),
     }
-}
-
-/// Parse a money cell; blanks/garbage become `0.0` (mirrors the other connectors' `to_float`).
-fn to_float(s: &str) -> f64 {
-    s.trim().parse::<f64>().unwrap_or(0.0)
 }
 
 /// Parse a Checkout date cell (`Processed On`), an ISO-8601 local timestamp
@@ -901,10 +868,10 @@ ic_orphan,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,SA,USD,-102.29,2026
         assert_eq!(funding_from_card_type("Debit"), "debit");
         assert_eq!(funding_from_card_type("Credit"), "credit");
         assert_eq!(funding_from_card_type(""), "");
-        assert_eq!(normalize_network("VISA"), "visa");
-        assert_eq!(normalize_network("MASTERCARD"), "mc");
-        assert_eq!(normalize_network("AMEX"), "amex");
-        assert_eq!(normalize_network(""), "");
+        assert_eq!(network_key("VISA"), "visa");
+        assert_eq!(network_key("MASTERCARD"), "mc");
+        assert_eq!(network_key("AMEX"), "amex");
+        assert_eq!(network_key(""), "");
         assert_eq!(build_variant("visa", "credit"), "visacredit");
         assert_eq!(
             parse_date("2026-07-09T18:07:06.844"),

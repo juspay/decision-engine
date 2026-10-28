@@ -2,6 +2,7 @@ use crate::app::APP_STATE;
 use crate::auth;
 use crate::custom_extractors::TenantStateResolver;
 use crate::error::{self, ContainerError};
+use crate::generics::Repository;
 use axum::body::Body;
 use axum::response::Response;
 use axum::{http::Request, http::StatusCode, middleware::Next};
@@ -17,13 +18,42 @@ type EndpointMetricsFn =
         Next,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response<Body>> + Send>>;
 
-/// The request metrics for one route, under `name` — the `endpoint` label the dashboards group by:
-/// `api_requests_total`, `api_latency_seconds`, and `api_requests_by_status` (`success` below
-/// `400`, `failure` otherwise). Attached where the route is registered, in `app.rs`:
+/// One method of a route, with its request metrics attached ([`endpoint`]). Every route is
+/// registered through it, so none goes unmeasured:
 ///
 /// ```ignore
-/// .route("/decide-gateway", post(decide_gateway).route_layer(endpoint("decide_gateway")))
+/// .route("/rule/create", metered!(post, rule_configuration::create_rule_config))
+/// .route("/merchant-account/:merchant_id", metered!(get, mac::get_merchant_config, "merchant_account_get"))
+/// .route("/seed-costs", metered!(get, seed_costs::get_seed_costs).merge(metered!(put, seed_costs::set_seed_costs)))
 /// ```
+///
+/// The endpoint is named after the handler, or explicitly where the dashboards already know the
+/// route by another name.
+macro_rules! metered {
+    ($method:ident, $($handler:ident)::+ $(,)?) => {
+        $crate::middleware::metered!($method, $($handler)::+, $crate::middleware::handler_name!($($handler)::+))
+    };
+    ($method:ident, $($handler:ident)::+, $name:expr $(,)?) => {
+        axum::routing::$method($($handler)::+).route_layer($crate::middleware::endpoint($name))
+    };
+}
+pub(crate) use metered;
+
+/// The last segment of a handler path, as a string: `routes::api_key::create_api_key` →
+/// `"create_api_key"`.
+macro_rules! handler_name {
+    ($last:ident) => {
+        stringify!($last)
+    };
+    ($head:ident :: $($rest:ident)::+) => {
+        $crate::middleware::handler_name!($($rest)::+)
+    };
+}
+pub(crate) use handler_name;
+
+/// The request metrics for one route, under `name` — the `endpoint` label the dashboards group by:
+/// `api_requests_total`, `api_latency_seconds`, and `api_requests_by_status` (`success` below
+/// `400`, `failure` otherwise). Routes attach it through `metered!`.
 ///
 /// As a route layer it runs inside authentication, so it times the handler and its extractors, not
 /// the credential check.
@@ -275,19 +305,11 @@ pub async fn authenticate(
 
     // Cache miss — query DB
     use crate::storage::types::MerchantApiKey;
-    use diesel::associations::HasTable;
 
-    #[cfg(feature = "mysql")]
-    use crate::storage::schema::merchant_api_keys::dsl;
-    #[cfg(feature = "postgres")]
-    use crate::storage::schema_pg::merchant_api_keys::dsl;
+    use crate::storage::backend::schema::merchant_api_keys::dsl;
 
-    let results = crate::generics::generic_find_all::<
-        <MerchantApiKey as HasTable>::Table,
-        _,
-        MerchantApiKey,
-    >(&tenant_state.db, dsl::key_hash.eq(key_hash.clone()))
-    .await;
+    let results =
+        MerchantApiKey::find_all(&tenant_state.db, dsl::key_hash.eq(key_hash.clone())).await;
 
     let key_record = match results {
         Ok(mut rows) => rows.pop(),
@@ -395,6 +417,34 @@ mod tests {
     async fn service_credentials_are_not_scoped() {
         let foreign = format!("/merchant-account/{FOREIGN}/seed-costs");
         assert_eq!(status(false, &foreign).await, StatusCode::OK);
+    }
+
+    #[test]
+    fn a_metered_route_is_named_after_its_handler() {
+        assert_eq!(
+            handler_name!(routes::api_key::create_api_key),
+            "create_api_key"
+        );
+        assert_eq!(handler_name!(overview), "overview");
+    }
+
+    #[tokio::test]
+    async fn a_metered_route_still_serves_its_handler() {
+        async fn made() -> (StatusCode, &'static str) {
+            (StatusCode::CREATED, "made")
+        }
+        let app = Router::new().route(
+            "/x",
+            metered!(post, made).merge(metered!(get, made, "explicit_name")),
+        );
+        for request in [Request::post("/x"), Request::get("/x")] {
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::empty()).expect("request"))
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::CREATED);
+        }
     }
 
     #[test]

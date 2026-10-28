@@ -12,6 +12,7 @@ use crate::analytics::{
 };
 use crate::custom_extractors::{AuthenticatedAnalyticsContext, TenantStateResolver};
 use crate::error;
+use crate::middleware::metered;
 use axum::extract::Query;
 use axum::Json;
 use serde::Deserialize;
@@ -117,27 +118,27 @@ fn payment_audit_query_from_params(
 
 pub fn serve() -> axum::Router<Arc<crate::tenant::GlobalAppState>> {
     axum::Router::<Arc<crate::tenant::GlobalAppState>>::new()
-        .route("/", axum::routing::get(overview))
-        .route("/overview", axum::routing::get(overview))
-        .route("/gateway-scores", axum::routing::get(gateway_scores))
-        .route("/decisions", axum::routing::get(decisions))
-        .route("/routing-stats", axum::routing::get(routing_stats))
-        .route("/cost-savings", axum::routing::get(cost_savings))
-        .route("/routing-events", axum::routing::get(routing_events))
-        .route("/log-summaries", axum::routing::get(log_summaries))
-        .route("/payment-audit", axum::routing::get(payment_audit))
+        .route("/", metered!(get, overview))
+        .route("/overview", metered!(get, overview))
+        .route("/gateway-scores", metered!(get, gateway_scores))
+        .route("/decisions", metered!(get, decisions))
+        .route("/routing-stats", metered!(get, routing_stats))
+        .route("/cost-savings", metered!(get, cost_savings))
+        .route("/routing-events", metered!(get, routing_events))
+        .route("/log-summaries", metered!(get, log_summaries))
+        .route("/payment-audit", metered!(get, payment_audit))
         .route(
             "/payment-audit/filter-options",
-            axum::routing::get(payment_audit_filter_options),
+            metered!(get, payment_audit_filter_options),
         )
-        .route("/preview-trace", axum::routing::get(preview_trace))
+        .route("/preview-trace", metered!(get, preview_trace))
         .route(
             "/experiment/:experiment_id/results",
-            axum::routing::get(experiment_results),
+            metered!(get, experiment_results),
         )
         .route(
             "/experiment/:experiment_id/transactions",
-            axum::routing::get(experiment_transactions),
+            metered!(get, experiment_transactions),
         )
 }
 

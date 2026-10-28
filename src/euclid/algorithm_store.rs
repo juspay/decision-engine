@@ -4,10 +4,8 @@
 //! algorithm or mapping is simply not found: ownership is part of the query rather than a comparison
 //! each caller has to remember.
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::{routing_algorithm::dsl, routing_algorithm_mapper::dsl as mapper_dsl};
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::{
+use crate::generics::Repository;
+use crate::storage::backend::schema::{
     routing_algorithm::dsl, routing_algorithm_mapper::dsl as mapper_dsl,
 };
 
@@ -31,7 +29,7 @@ pub async fn find(
     merchant: &AuthorizedMerchant,
     id: &str,
 ) -> StoreResult<RoutingAlgorithm> {
-    generics::generic_find_one::<<RoutingAlgorithm as HasTable>::Table, _, RoutingAlgorithm>(
+    RoutingAlgorithm::find_one(
         db,
         dsl::id
             .eq(id.to_string())
@@ -46,12 +44,9 @@ pub async fn list(
     db: &Storage,
     merchant: &AuthorizedMerchant,
 ) -> StoreResult<Vec<RoutingAlgorithm>> {
-    generics::generic_find_all::<<RoutingAlgorithm as HasTable>::Table, _, RoutingAlgorithm>(
-        db,
-        dsl::created_by.eq(merchant.as_str().to_string()),
-    )
-    .await
-    .map_err(Report::new)
+    RoutingAlgorithm::find_all(db, dsl::created_by.eq(merchant.as_str().to_string()))
+        .await
+        .map_err(Report::new)
 }
 
 /// The merchant's algorithms that occupy an active slot.
@@ -64,7 +59,7 @@ pub async fn list_active(
         .into_iter()
         .map(|mapping| mapping.routing_algorithm_id)
         .collect();
-    generics::generic_find_all::<<RoutingAlgorithm as HasTable>::Table, _, RoutingAlgorithm>(
+    RoutingAlgorithm::find_all(
         db,
         dsl::id
             .eq_any(ids)
@@ -131,13 +126,9 @@ pub async fn list_activations(
     db: &Storage,
     merchant: &AuthorizedMerchant,
 ) -> StoreResult<Vec<RoutingAlgorithmMapper>> {
-    generics::generic_find_all::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(db, mapper_dsl::created_by.eq(merchant.as_str().to_string()))
-    .await
-    .map_err(Report::new)
+    RoutingAlgorithmMapper::find_all(db, mapper_dsl::created_by.eq(merchant.as_str().to_string()))
+        .await
+        .map_err(Report::new)
 }
 
 /// The mapping occupying one of the merchant's slots, if any.
@@ -146,11 +137,7 @@ pub async fn find_slot(
     merchant: &AuthorizedMerchant,
     slot: &str,
 ) -> StoreResult<Option<RoutingAlgorithmMapper>> {
-    generics::generic_find_one_optional::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(
+    RoutingAlgorithmMapper::find_optional(
         db,
         mapper_dsl::created_by
             .eq(merchant.as_str().to_string())
@@ -166,11 +153,7 @@ pub async fn find_activation(
     merchant: &AuthorizedMerchant,
     algorithm_id: &str,
 ) -> StoreResult<Option<RoutingAlgorithmMapper>> {
-    generics::generic_find_one_optional::<
-        <RoutingAlgorithmMapper as HasTable>::Table,
-        _,
-        RoutingAlgorithmMapper,
-    >(
+    RoutingAlgorithmMapper::find_optional(
         db,
         mapper_dsl::created_by
             .eq(merchant.as_str().to_string())

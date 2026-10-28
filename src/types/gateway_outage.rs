@@ -1,4 +1,5 @@
 use crate::error::ApiError;
+use crate::generics::Repository;
 use serde::{Deserialize, Serialize};
 use time::PrimitiveDateTime;
 // use db::eulermeshimpl::meshConfig;
@@ -24,11 +25,7 @@ use crate::types::card::card_type::CardType;
 // use eulerhs::extra::aeson::aesonOmitNothingFields;
 use crate::storage::types::GatewayOutage as DBGatewayOutage;
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::gateway_outage::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::gateway_outage::dsl;
-use diesel::associations::HasTable;
+use crate::storage::backend::schema::gateway_outage::dsl;
 use diesel::*;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -129,7 +126,7 @@ pub async fn getPotentialGwOutagesDB(
 ) -> Result<Vec<DBGatewayOutage>, crate::generics::MeshError> {
     // Query gateway outages that are currently active
     let app_state = get_tenant_app_state().await;
-    crate::generics::generic_find_all::<<DBGatewayOutage as HasTable>::Table, _, DBGatewayOutage>(
+    DBGatewayOutage::find_all(
         &app_state.db,
         dsl::start_time
             .lt(time_now)

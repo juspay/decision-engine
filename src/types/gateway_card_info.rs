@@ -1,4 +1,5 @@
 use crate::app::get_tenant_app_state;
+use crate::generics::Repository;
 use crate::logger;
 use serde::{Deserialize, Serialize};
 // use db::euler_mesh_impl::mesh_config;
@@ -20,11 +21,7 @@ use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::gateway_card_info::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::gateway_card_info::dsl;
-use diesel::associations::HasTable;
+use crate::storage::backend::schema::gateway_card_info::dsl;
 use diesel::*;
 
 // use super::payment::payment_method::text_to_payment_method_type;
@@ -131,13 +128,7 @@ pub async fn get_all_by_mgci_ids(ids: Vec<GciPId>) -> Vec<GatewayCardInfo> {
     let id_values: Vec<i64> = ids.into_iter().map(|id| id.gciPId).collect();
     let app_state = get_tenant_app_state().await;
     // Execute the database query using Diesel
-    match crate::generics::generic_find_all::<
-        <DBGatewayCardInfo as HasTable>::Table,
-        _,
-        DBGatewayCardInfo,
-    >(&app_state.db, dsl::id.eq_any(id_values))
-    .await
-    {
+    match DBGatewayCardInfo::find_all(&app_state.db, dsl::id.eq_any(id_values)).await {
         Ok(db_results) => db_results
             .into_iter()
             .filter_map(|db_record: DBGatewayCardInfo| GatewayCardInfo::try_from(db_record).ok())
@@ -173,11 +164,7 @@ pub async fn get_enabled_gateway_card_info_for_gateways(
         card_bins.clone()
     );
     // Execute database query with three conditions
-    match crate::generics::generic_find_all::<
-        <DBGatewayCardInfo as HasTable>::Table,
-        _,
-        DBGatewayCardInfo,
-    >(
+    match DBGatewayCardInfo::find_all(
         &app_state.db,
         dsl::isin
             .eq_any(card_bins)

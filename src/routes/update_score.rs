@@ -1,4 +1,4 @@
-use crate::custom_extractors::{ScopedJson, ScopedJsonRejection};
+use crate::custom_extractors::{RequestIds, ScopedJson, ScopedJsonRejection};
 use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
 use crate::feedback::gateway_scoring_service::{
     check_and_update_gateway_score, invalid_request_error,
@@ -50,12 +50,10 @@ pub async fn update_score(
 
     // let req_headers = serde_json::to_string(&headers).unwrap_or("{}".to_string());
     let original_url = uri.to_string();
-    let x_request_id = headers
-        .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("unknown");
-    let global_request_id = crate::analytics::global_request_id_from_headers(&headers);
-    let trace_id = crate::analytics::trace_id_from_headers(&headers);
+    let ids = RequestIds::from_headers(&headers);
+    let x_request_id = ids.request_id.as_deref().unwrap_or("unknown");
+    let global_request_id = ids.global_request_id.clone();
+    let trace_id = ids.trace_id.clone();
     let start_time = std::time::Instant::now();
     let request_time = time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
@@ -112,7 +110,7 @@ pub async fn update_score(
                 latency = latency.to_string(),
                 request_cputime = cpu_time.to_string(),
                 x_request_id = x_request_id,
-                env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
+                env = crate::logger::env::app_env(),
                 action = "POST",
                 error_code = error_response.error_code.clone(),
                 error_message = error_response.error_message.clone(),
@@ -190,7 +188,7 @@ pub async fn update_score(
                     request_time = request_time,
                     query_params = query_params,
                     x_request_id = x_request_id,
-                    env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
+                    env = crate::logger::env::app_env(),
                     action = "POST",
                     error_code = error_response.error_code,
                     error_message = error_response.error_message,
@@ -276,7 +274,7 @@ pub async fn update_score(
                 bytes_allocated = bytes_allocated.to_string(),
                 x_request_id = x_request_id,
                 request_time = request_time,
-                env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
+                env = crate::logger::env::app_env(),
                 action = "POST",
                 req_body = format!("{:?}", payload.clone()),
                 category = "INCOMING_API",
@@ -315,7 +313,7 @@ pub async fn update_score(
                 request_cputime = cpu_time.to_string(),
                 query_params = query_params,
                 x_request_id = x_request_id,
-                env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
+                env = crate::logger::env::app_env(),
                 action = "POST",
                 error_code = error_response.error_code,
                 error_message = error_response.error_message,

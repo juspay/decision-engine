@@ -35,10 +35,6 @@ pub struct DebitRoutingResponse {
     pub debit_routing_enabled: bool,
 }
 
-fn debit_routing_config_name(merchant_id: &str) -> String {
-    format!("DEBIT_ROUTING_ENABLED_{}", merchant_id)
-}
-
 /// All merchant-level feature flags that can be toggled from the dashboard.
 /// Adding a new feature here is the only change needed on the backend.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, strum::EnumIter)]
@@ -248,13 +244,24 @@ pub async fn get_debit_routing(
             .await
             .ok_or(error::MerchantAccountConfigurationError::MerchantNotFound)?;
 
-        let config_name = debit_routing_config_name(&merchant_id);
-        let debit_routing_enabled = service_configuration::find_config_by_name(config_name)
-            .await
-            .change_context(error::MerchantAccountConfigurationError::StorageError)?
-            .and_then(|config| config.value)
-            .and_then(|value| value.parse::<bool>().ok())
-            .unwrap_or(false);
+        // Unset, or a value that is not `true`/`false`, reads as off.
+        let debit_routing_enabled = match service_configuration::get::<
+            service_configuration::DebitRoutingEnabled,
+        >(&merchant)
+        .await
+        {
+            Ok(enabled) => enabled.unwrap_or(false),
+            Err(error)
+                if *error.current_context() == service_configuration::ConfigError::Invalid =>
+            {
+                false
+            }
+            Err(error) => {
+                return Err(error
+                    .change_context(error::MerchantAccountConfigurationError::StorageError)
+                    .into())
+            }
+        };
 
         Ok(Json(DebitRoutingResponse {
             merchant_id,
@@ -358,12 +365,12 @@ pub async fn update_debit_routing(
         .await
         .ok_or(error::MerchantAccountConfigurationError::MerchantNotFound)?;
 
-    let config_name = debit_routing_config_name(&merchant_id);
-    let config_value = payload.enabled.to_string();
-
-    let result = service_configuration::upsert_config(config_name, Some(config_value))
-        .await
-        .change_context(error::MerchantAccountConfigurationError::StorageError);
+    let result = service_configuration::upsert::<service_configuration::DebitRoutingEnabled>(
+        &merchant,
+        &payload.enabled,
+    )
+    .await
+    .change_context(error::MerchantAccountConfigurationError::StorageError);
 
     result
         .map(|_| {
