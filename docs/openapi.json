@@ -5206,7 +5206,7 @@
               "example": {
                 "payment_id": "pay_demo",
                 "merchant_id": "pro_demo",
-                "order_amount": 1000,
+                "amount": 1000,
                 "currency": "USD",
                 "payment_method_type": "card",
                 "payment_method_sub_type": "credit",
@@ -9862,7 +9862,7 @@
         "required": [
           "payment_id",
           "merchant_id",
-          "order_amount",
+          "amount",
           "currency",
           "routing_config"
         ],
@@ -9871,7 +9871,7 @@
             "type": "string",
             "minLength": 1
           },
-          "order_amount": {
+          "amount": {
             "type": "integer",
             "minimum": 0,
             "maximum": 18446744073709551615,

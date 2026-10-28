@@ -21,8 +21,8 @@ function legacyRequest(request: DecideRequest) {
         gateway_id: c.payment_merchant_connector_id,
       })),
       parameters: {
-        amount: { type: 'number', value: request.order_amount },
-        payment_amount: { type: 'number', value: request.order_amount },
+        amount: { type: 'number', value: request.amount },
+        payment_amount: { type: 'number', value: request.amount },
         currency: { type: 'enum_variant', value: 'USD' },
         payment_method: { type: 'enum_variant', value: 'card' },
         payment_method_type: { type: 'enum_variant', value: 'credit' },
@@ -117,7 +117,10 @@ test.describe('Decide contract (API)', () => {
     for (const invalid of [
       { ...body, payment_type: 'normal' },
       { ...body, context: {} },
-      { ...body, order_amount: -1 },
+      { ...body, amount: -1 },
+      { ...body, amount: undefined },
+      { ...body, amount: undefined, order_amount: body.amount },
+      { ...body, order_amount: body.amount },
       { ...body, payment_id: undefined },
       { ...body, merchant_id: undefined },
       { ...body, routing_config: { ...body.routing_config, created_by: merchant.id } },

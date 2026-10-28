@@ -11,7 +11,7 @@ pub struct DecideRequest {
     pub payment_id: String,
     #[merchant]
     pub merchant_id: String,
-    pub order_amount: u64,
+    pub amount: u64,
     pub currency: String,
     pub payment_method_type: Option<String>,
     pub payment_method_sub_type: Option<String>,
@@ -100,7 +100,6 @@ impl DecideConnector {
 
 fn routing_key(key: &str) -> &str {
     match key {
-        "order_amount" => "amount",
         "payment_method_type" => "payment_method",
         "payment_method_sub_type" => "payment_method_type",
         "card_isin" => "card_bin",
@@ -205,8 +204,7 @@ impl DecideRequest {
                     parameters.insert(key.to_string(), Some(value));
                 }
             }
-            if let Some(value) = routing_value("payment_amount", &self.order_amount.into(), config)?
-            {
+            if let Some(value) = routing_value("payment_amount", &self.amount.into(), config)? {
                 parameters.insert("payment_amount".to_string(), Some(value));
             }
             if let Some(card) = fields.get("card").and_then(serde_json::Value::as_object) {
@@ -392,7 +390,7 @@ mod tests {
     fn decide_preserves_hybrid_defaults_for_an_equivalent_request(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let flat: DecideRequest = serde_json::from_value(json!({
-            "payment_id": "pay_1", "merchant_id": "pro_1", "order_amount": 100, "currency": "USD",
+            "payment_id": "pay_1", "merchant_id": "pro_1", "amount": 100, "currency": "USD",
             "payment_method_type": "card", "payment_method_sub_type": "credit",
             "routing_config": {"algorithm_for": "payment",
                 "eligible_connectors": [{"gateway_name": "stripe", "payment_merchant_connector_id": "mca_1"}]}
@@ -499,6 +497,7 @@ mod tests {
             "card_bin",
             "created_by",
             "payment_amount",
+            "order_amount",
             "udfs",
             "payment_metadata",
             "payment_source",
@@ -516,7 +515,7 @@ mod tests {
         }
         for value in [json!(-1), json!(1.2), json!("100")] {
             let mut request = baseline.clone();
-            request["order_amount"] = value;
+            request["amount"] = value;
             assert!(serde_json::from_value::<DecideRequest>(request).is_err());
         }
         let mut value = baseline.clone();
@@ -538,14 +537,12 @@ mod tests {
         request.metadata = Some(BTreeMap::from([
             ("amount".into(), "9999".into()),
             ("payment_amount".into(), "9999".into()),
-            ("order_amount".into(), "9999".into()),
             ("segment".into(), "premium".into()),
         ]));
         let actual = serde_json::to_value(request.to_hybrid_request(&config()?)?)?;
         let parameters = &actual["static_routing_request"]["parameters"];
         assert_eq!(parameters["amount"]["value"], 1000);
         assert_eq!(parameters["payment_amount"]["value"], 1000);
-        assert!(parameters.get("order_amount").is_none());
         assert_eq!(parameters["segment"]["value"]["value"], "premium");
         Ok(())
     }

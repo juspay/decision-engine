@@ -1149,7 +1149,7 @@ impl DomainDeciderRequestForApiCallV2 {
     ) -> Result<Self, String> {
         let mut dynamic = Self::from((static_request, None));
         let info = &mut dynamic.payment_info;
-        info.amount = request.order_amount as f64;
+        info.amount = request.amount as f64;
         info.payment_method = request
             .payment_method_type
             .clone()

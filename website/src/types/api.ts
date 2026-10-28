@@ -283,7 +283,7 @@ export interface ExperimentTransactionsResponse {
 export interface DecideRequest {
   payment_id: string
   merchant_id: string
-  order_amount: number
+  amount: number
   currency: string
   payment_method_type?: string | null
   payment_method_sub_type?: string | null
