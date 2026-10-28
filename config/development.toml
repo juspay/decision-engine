@@ -119,6 +119,8 @@ aws_region = ""
 [cost_ingestion.connector]
 checkout_production_api_base_url = "https://api.checkout.com"
 checkout_sandbox_api_base_url = "https://api.sandbox.checkout.com"
+chase_token_url = "https://idag2.jpmorganchase.com/adfs/oauth2/token"
+chase_reports_url = "https://api.reports.jpmorgan.com/api/v1/reports"
 
 [cost_ingestion.creds_encryption_keys]
 # key-id = AES-256 key (hex, 64 chars). Dev-only placeholder; per environment generate with

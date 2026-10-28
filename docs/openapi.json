@@ -9460,7 +9460,7 @@
           },
           "download_auth": {
             "type": "string",
-            "description": "For Checkout, the secret key is treated as an opaque credential; the API URL is selected from server configuration using environment. For Adyen, Basic auth as user:password or a Report Service API key (X-API-Key)."
+            "description": "For Checkout, the secret key is treated as an opaque credential; the API URL is selected from server configuration using environment. For Adyen, Basic auth as user:password or a Report Service API key (X-API-Key). For Chase, JSON authentication credentials; token_url and reports_url fields are ignored in favor of server configuration."
           },
           "environment": {
             "type": "string",

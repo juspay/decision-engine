@@ -1031,6 +1031,7 @@ ic_orphan,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,SA,USD,-102.29,2026
         let config = ConnectorReportApiConfig {
             checkout_production_api_base_url: "https://api.checkout.com".into(),
             checkout_sandbox_api_base_url: "https://api.sandbox.checkout.com".into(),
+            ..ConnectorReportApiConfig::default()
         };
         for (environment, expected_url) in [
             (Some("prod"), "https://api.checkout.com"),
