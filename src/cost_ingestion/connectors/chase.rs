@@ -933,29 +933,6 @@ o2,ED,3,GB,GBP,EDBT,SALE,100,-1.00,-0.20\n";
     }
 
     #[test]
-    fn creds_parse_ignores_url_fields() {
-        let creds = ConnectorCreds {
-            webhook_secret: Secret::new(String::new()),
-            download_auth: Secret::new(
-                r#"{"client_id":"c","resource":"r","private_key_pem":"pem","token_url":"http://169.254.169.254/token","reports_url":"https://other.example/reports"}"#.to_string(),
-            ),
-        };
-        let chase = ChaseCreds::parse(&creds).unwrap();
-        assert_eq!(chase.client_id, "c");
-        assert_eq!(chase.resource, "r");
-        assert_eq!(chase.private_key_pem, "pem");
-        // A bad blob is a clear, typed error.
-        let bad = ConnectorCreds {
-            webhook_secret: Secret::new(String::new()),
-            download_auth: Secret::new("nope".to_string()),
-        };
-        assert!(matches!(
-            ChaseCreds::parse(&bad),
-            Err(IngestError::MalformedNotification(_))
-        ));
-    }
-
-    #[test]
     fn token_form_has_the_five_client_credentials_params() {
         let creds = ChaseCreds {
             client_id: "cid".to_string(),

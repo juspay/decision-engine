@@ -97,7 +97,7 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
     setEditing(s)
     setConnector(s.connector)
     setAccount(s.account)
-    setEnvironment(s.connector === 'checkout' ? (s.environment ?? 'prod') : 'prod')
+    setEnvironment(s.environment ?? 'prod')
     setWebhookSecret('')
     setDownloadAuth('')
     setError(null)
@@ -139,8 +139,6 @@ export function ConnectorCredentialsForm({ merchantId }: { merchantId?: string }
             value={connector}
             onChange={(e) => {
               setConnector(e.target.value)
-              setEnvironment('prod')
-              resetSecrets()
               setError(null)
             }}
           >
