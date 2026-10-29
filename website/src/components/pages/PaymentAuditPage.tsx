@@ -101,6 +101,7 @@ function attributeLabel(field: PaymentAttributeField, value: string, labels: Rec
     .join(' ')
 }
 const ROUTE_OPTIONS = [
+  { value: 'decide', label: 'Decide' },
   { value: 'decide_gateway', label: 'Decide Gateway' },
   { value: 'update_gateway_score', label: 'Update Gateway' },
   { value: 'routing_evaluate', label: 'Rule Evaluate' },
@@ -689,12 +690,14 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
 
   const details = isRecord(event.details_json) ? event.details_json : {}
   const explicitResponse =
+    details.api_response ??
     details.response ??
     details.response_payload ??
     details.result ??
     details.output ??
     null
   const requestPayload =
+    details.api_request ??
     details.request ??
     details.request_payload ??
     details.input ??

@@ -657,6 +657,7 @@ fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
             "/routing/hybrid",
             metered!(post, routes::hybrid_routing::hybrid_routing_evaluate),
         )
+        .route("/decide", metered!(post, routes::decide::decide))
         .route(
             "/update-gateway-score",
             metered!(post, routes::update_gateway_score::update_gateway_score),
@@ -907,6 +908,17 @@ mod tests {
     use axum::body::Bytes;
 
     use super::parse_request_metadata;
+
+    #[test]
+    fn parse_request_metadata_supports_decide_scope() {
+        let captured = crate::analytics::CapturedBody {
+            bytes: Bytes::from_static(br#"{"payment_id":"pay_decide","merchant_id":"pro_decide","routing_config":{"algorithm_for":"payment"},"authentication_type":"three_ds"}"#),
+        };
+        let (merchant_id, payment_id, auth_type) = parse_request_metadata(&captured);
+        assert_eq!(merchant_id.as_deref(), Some("pro_decide"));
+        assert_eq!(payment_id.as_deref(), Some("pay_decide"));
+        assert_eq!(auth_type.as_deref(), Some("three_ds"));
+    }
 
     #[test]
     fn parse_request_metadata_supports_decide_gateway_shape() {

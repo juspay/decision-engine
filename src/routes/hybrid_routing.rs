@@ -18,6 +18,7 @@ use crate::euclid::types::ExperimentEndpoint;
 use crate::feedback::constants::kvRedis;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::redis::feature::is_feature_enabled;
+use crate::types::decide::{DecideRequest, DecideResponse};
 use crate::types::hybrid_routing::HybridRoutingRequest;
 use axum::response::IntoResponse;
 use serde::Serialize;
@@ -130,6 +131,10 @@ struct HybridRoutingSuccessDetail<'a> {
     request: &'a HybridRoutingRequest,
     response: &'a serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
+    api_request: Option<&'a DecideRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    api_response: Option<&'a serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     score_context: Option<&'a serde_json::Value>,
     selection_reason: &'a HybridDecisionSummary,
 }
@@ -137,6 +142,8 @@ struct HybridRoutingSuccessDetail<'a> {
 #[derive(Serialize)]
 struct HybridRoutingFailureDetail<'a> {
     request: &'a HybridRoutingRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    api_request: Option<&'a DecideRequest>,
     error: serde_json::Value,
 }
 
@@ -191,6 +198,19 @@ pub async fn hybrid_routing_evaluate(
     ids: RequestIds,
     ScopedJson { payload, .. }: ScopedJson<HybridRoutingRequest>,
 ) -> Result<axum::response::Response, ContainerError<EuclidErrors>> {
+    evaluate_routing(ids, payload, None).await
+}
+
+pub(crate) async fn evaluate_routing(
+    ids: RequestIds,
+    payload: HybridRoutingRequest,
+    decide_request: Option<DecideRequest>,
+) -> Result<axum::response::Response, ContainerError<EuclidErrors>> {
+    let route = if decide_request.is_some() {
+        AnalyticsRoute::Decide
+    } else {
+        AnalyticsRoute::RoutingHybrid
+    };
     let HybridRoutingRequest {
         mut static_routing_request,
         dynamic_routing_request,
@@ -198,9 +218,19 @@ pub async fn hybrid_routing_evaluate(
     if let Some(request) = static_routing_request.as_mut() {
         crate::routes::profile_connectors::transform_fallback(request).await?;
     }
-    let dynamic_routing_request = static_routing_request
-        .as_ref()
-        .map(|request| DomainDeciderRequestForApiCallV2::from((request, dynamic_routing_request)));
+    let dynamic_routing_request = if decide_request.is_some() {
+        dynamic_routing_request.map(|mut dynamic| {
+            dynamic.eligible_gateway_list = static_routing_request
+                .as_ref()
+                .and_then(|request| request.fallback_output.as_ref())
+                .map(|connectors| extract_gateway_identifiers(connectors));
+            dynamic
+        })
+    } else {
+        static_routing_request.as_ref().map(|request| {
+            DomainDeciderRequestForApiCallV2::from((request, dynamic_routing_request))
+        })
+    };
     let recorded_request = HybridRoutingRequest {
         static_routing_request: static_routing_request.clone(),
         dynamic_routing_request: dynamic_routing_request.clone(),
@@ -247,7 +277,7 @@ pub async fn hybrid_routing_evaluate(
 
     DomainAnalyticsEvent::record_request_hit(
         AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::RoutingHybridRequestHit),
-        AnalyticsRoute::RoutingHybrid,
+        route,
         merchant_id.clone(),
         payment_id.clone(),
         Some(request_id.clone()),
@@ -548,7 +578,7 @@ pub async fn hybrid_routing_evaluate(
     let record_failure = |error_code: String, error_message: String, error: serde_json::Value| {
         DomainAnalyticsEvent::record_error(
             AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::RoutingHybridError),
-            AnalyticsRoute::RoutingHybrid,
+            route,
             merchant_id.clone(),
             payment_id.clone(),
             Some(request_id.clone()),
@@ -560,6 +590,7 @@ pub async fn hybrid_routing_evaluate(
             error_message,
             serialize_details(&HybridRoutingFailureDetail {
                 request: &recorded_request,
+                api_request: decide_request.as_ref(),
                 error,
             }),
             Some("hybrid_failed".to_string()),
@@ -570,6 +601,13 @@ pub async fn hybrid_routing_evaluate(
     let api_result = match resolve() {
         Ok(Ok((res, summary))) => {
             let response_value = serde_json::Value::Object(res);
+            let api_response = if decide_request.is_some() {
+                let response = DecideResponse::from_hybrid(&response_value, request_id.clone())
+                    .map_err(|_| EuclidErrors::FailedToSerializeJsonToString)?;
+                Some(to_json_value_or_invalid(&response, "decide")?)
+            } else {
+                None
+            };
             crate::logger::debug!(decision_engine_success_response = ?response_value);
             DomainAnalyticsEvent::record_decision(
                 AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::RoutingHybridDecision),
@@ -577,11 +615,13 @@ pub async fn hybrid_routing_evaluate(
                 Some(summary.routing_approach.clone()),
                 summary.decided_gateway.clone(),
                 Some("success".to_string()),
-                AnalyticsRoute::RoutingHybrid,
+                route,
                 summary.priority_logic_tag.clone(),
                 serialize_details(&HybridRoutingSuccessDetail {
                     request: &recorded_request,
                     response: &response_value,
+                    api_request: decide_request.as_ref(),
+                    api_response: api_response.as_ref(),
                     score_context: summary.score_context.as_ref(),
                     selection_reason: &summary,
                 }),
@@ -597,7 +637,7 @@ pub async fn hybrid_routing_evaluate(
                 dynamic_request.map(|request| request.currency()),
                 dynamic_request.and_then(|request| request.country()),
             );
-            Ok(Json(response_value).into_response())
+            Ok(Json(api_response.unwrap_or(response_value)).into_response())
         }
         Ok(Err(failure)) => {
             record_failure(failure.error_code, failure.error_message, failure.error);

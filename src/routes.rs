@@ -5,6 +5,7 @@ pub mod connector_credentials;
 pub mod connector_fees;
 pub mod cost_clusters;
 pub mod cost_coverage;
+pub mod decide;
 pub mod decide_gateway;
 pub mod decision_gateway;
 pub mod gateway_score;
