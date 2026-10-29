@@ -13,7 +13,10 @@ use masking::Secret;
 use serde::{Deserialize, Serialize};
 
 use crate::app::get_tenant_app_state;
-use crate::cost_ingestion::{creds, ConnectorCreds, ConnectorCredsStore};
+use crate::cost_ingestion::{
+    checkout_credentials::CheckoutEnvironment, creds, ConnectorCreds, ConnectorCredsStore,
+    ConnectorRegistry,
+};
 use crate::error::RouteError;
 
 /// Longest connector account id accepted. With the merchant and connector ids it forms the stored
@@ -26,9 +29,12 @@ pub struct SetCredentialsRequest {
     pub account: String,
     /// Secret used to verify inbound webhook signatures.
     pub webhook_secret: String,
-    /// Credential used to authenticate report downloads. Either report-user Basic auth as
+    /// Checkout: plain secret key (sk_…). Adyen: report-user Basic auth as
     /// "user:password", or a Report Service API key on its own (sent as `X-API-Key`).
-    pub download_auth: String,
+    pub download_auth: Secret<String>,
+    /// Checkout only: omitted means production. The client cannot supply a report API URL.
+    #[serde(default)]
+    pub environment: Option<CheckoutEnvironment>,
 }
 
 #[derive(Debug, Serialize)]
@@ -45,6 +51,9 @@ pub async fn set_connector_credentials(
     Path((_, connector)): Path<(String, String)>,
     Json(body): Json<SetCredentialsRequest>,
 ) -> Result<Json<SetCredentialsResponse>, RouteError> {
+    ConnectorRegistry::with_builtins()
+        .get(&connector)
+        .map_err(|error| RouteError::bad_request(error.to_string()))?;
     // The account is part of the stored credential's name, which is length-limited.
     if body.account.chars().count() > MAX_ACCOUNT_LEN {
         return Err(RouteError::bad_request(format!(
@@ -54,6 +63,13 @@ pub async fn set_connector_credentials(
     let merchant_id = merchant.as_str().to_string();
     let app_state = get_tenant_app_state().await;
     let cfg = &app_state.config.cost_ingestion;
+    let download_auth = if connector == "checkout" {
+        body.environment
+            .unwrap_or_default()
+            .encode_credentials(&body.download_auth, &cfg.connector)
+    } else {
+        body.download_auth
+    };
     let store = ConnectorCredsStore::from_keyring(
         &cfg.creds_encryption_current,
         &cfg.creds_encryption_keys,
@@ -65,7 +81,7 @@ pub async fn set_connector_credentials(
 
     let new = ConnectorCreds {
         webhook_secret: Secret::new(body.webhook_secret),
-        download_auth: Secret::new(body.download_auth),
+        download_auth,
     };
     store
         .put(&connector, &body.account, &merchant, &new)
@@ -107,7 +123,7 @@ pub async fn list_connector_credentials(
         &cfg.creds_encryption_keys,
     ) {
         Some(store) => store
-            .list_masked(&merchant)
+            .list_masked(&merchant, cfg)
             .await
             .map(Json)
             .map_err(RouteError::internal),
@@ -123,6 +139,7 @@ pub async fn list_connector_credentials(
                         account: s.account,
                         webhook_secret_hint: "—".to_string(),
                         download_auth_hint: "—".to_string(),
+                        environment: None,
                     })
                     .collect(),
             ))

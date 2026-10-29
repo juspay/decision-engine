@@ -30,10 +30,8 @@
 //! line. [`EnvelopeReader`] strips that frame line-by-line so [`csv_reader::parse`] sees a plain CSV
 //! and memory stays flat for large reports.
 //!
-//! Notification/download is NOT yet implemented — Chase's report-ready webhook shape, signature
-//! scheme, and download transport (SFTP vs. API) still need to be confirmed. Those three methods
-//! return a descriptive error until then; the parser (`parse_rows`) is complete and independently
-//! testable.
+//! Reports are discovered by polling Chase's reporting API and downloaded with OAuth credentials.
+//! Token and reports endpoints are server-configured; file URLs come from the reporting API.
 
 use super::common::{http_client, parse_us_date, to_float};
 use crate::cost_ingestion::card_network::chase_network_key;
@@ -80,15 +78,6 @@ const TOKEN_REFRESH_SKEW: u64 = 300;
 /// Cap on pages followed when listing reports — a backstop against a runaway `next` cursor.
 const MAX_REPORT_PAGES: usize = 50;
 
-fn default_token_url() -> String {
-    "https://idag2.jpmorganchase.com/adfs/oauth2/token".to_string()
-}
-fn default_reports_url() -> String {
-    // Reporting API host (distinct from the report-files host `api.reports-files.jpmorgan.com`).
-    // Override for the mock (`api-mock.payments.jpmorgan.com`) or a local stub when testing.
-    "https://api.reports.jpmorgan.com/api/v1/reports".to_string()
-}
-
 /// Whether a `reportTypeNames` entry is the Submission details type, tolerant of the API's spacing
 /// (`"Submission details"`) vs the envelope's (`"SubmissionDetails"`).
 fn is_submission_details(name: &str) -> bool {
@@ -112,9 +101,8 @@ impl Default for ChaseReportSource {
 }
 
 /// Chase's OAuth + reporting-API access, carried inside the opaque [`ConnectorCreds::download_auth`]
-/// as a JSON blob (Chase has no webhook, so `webhook_secret` is unused). `token_url`/`reports_url`
-/// default to production but are overridable — point them at `api-mock.payments.jpmorgan.com` to
-/// run against J.P. Morgan's mock, which accepts any bearer token.
+/// as a JSON blob (Chase has no webhook, so `webhook_secret` is unused). Endpoints come only from
+/// server configuration; credential-supplied URL fields are ignored.
 #[derive(Debug, Clone, Deserialize)]
 struct ChaseCreds {
     /// OAuth client id issued by J.P. Morgan. Required for real auth; unused when `access_token` is
@@ -133,10 +121,6 @@ struct ChaseCreds {
     /// real J.P. Morgan auth.
     #[serde(default)]
     access_token: Option<String>,
-    #[serde(default = "default_token_url")]
-    token_url: String,
-    #[serde(default = "default_reports_url")]
-    reports_url: String,
 }
 
 impl ChaseCreds {
@@ -231,8 +215,9 @@ impl SettlementReportSource for ChaseReportSource {
         &self,
         creds: &ConnectorCreds,
     ) -> Result<Vec<ReadyReport>, IngestError> {
+        let app_state = crate::app::get_tenant_app_state().await;
         let chase = ChaseCreds::parse(creds)?;
-        list_ready_reports(&chase).await
+        list_ready_reports(&chase, &app_state.config.cost_ingestion.connector).await
     }
 
     /// Fetch a completed report's file. `note.report_ref` is the `reportDetails.url` captured at
@@ -243,8 +228,10 @@ impl SettlementReportSource for ChaseReportSource {
         creds: &ConnectorCreds,
         note: &ReportNotification,
     ) -> Result<Bytes, IngestError> {
+        let app_state = crate::app::get_tenant_app_state().await;
+        let config = &app_state.config.cost_ingestion.connector;
         let chase = ChaseCreds::parse(creds)?;
-        let token = oauth_token(&chase).await?;
+        let token = oauth_token(&chase, &config.chase_token_url).await?;
         let resp = http_client()
             .get(&note.report_ref)
             .bearer_auth(&token)
@@ -390,13 +377,16 @@ fn not_implemented(method: &str) -> IngestError {
 
 /// `GET /api/v1/reports`, following the `next`/`lastPage` cursor → all completed Submission details
 /// instances across pages.
-async fn list_ready_reports(creds: &ChaseCreds) -> Result<Vec<ReadyReport>, IngestError> {
-    let token = oauth_token(creds).await?;
+async fn list_ready_reports(
+    creds: &ChaseCreds,
+    config: &crate::config::ConnectorReportApiConfig,
+) -> Result<Vec<ReadyReport>, IngestError> {
+    let token = oauth_token(creds, &config.chase_token_url).await?;
     let mut out = Vec::new();
     let mut next: Option<String> = None;
     for _ in 0..MAX_REPORT_PAGES {
         let mut req = http_client()
-            .get(&creds.reports_url)
+            .get(&config.chase_reports_url)
             .bearer_auth(&token)
             .header("Accept", "application/json");
         // The cursor is passed as a request header (per the reporting API spec), not a query param.
@@ -492,7 +482,7 @@ fn parse_ts_date(s: &str) -> Option<NaiveDate> {
 
 /// Return a valid access token for `creds`, minting a new one only when the cache is empty/expired.
 /// Caching respects J.P. Morgan's token-request rate limit (tokens are valid ~8h).
-async fn oauth_token(creds: &ChaseCreds) -> Result<String, IngestError> {
+async fn oauth_token(creds: &ChaseCreds, token_url: &str) -> Result<String, IngestError> {
     // Local/mock testing: a pre-supplied token bypasses OAuth signing entirely.
     if let Some(tok) = creds.access_token.as_ref().filter(|t| !t.is_empty()) {
         return Ok(tok.clone());
@@ -500,10 +490,15 @@ async fn oauth_token(creds: &ChaseCreds) -> Result<String, IngestError> {
     if let Some(tok) = cached_token(&creds.client_id) {
         return Ok(tok);
     }
-    let assertion = build_client_assertion(creds, SystemTime::now(), &Uuid::new_v4().to_string())?;
+    let assertion = build_client_assertion(
+        creds,
+        token_url,
+        SystemTime::now(),
+        &Uuid::new_v4().to_string(),
+    )?;
     let form = build_token_form(creds, &assertion);
     let resp = http_client()
-        .post(&creds.token_url)
+        .post(token_url)
         .form(&form)
         .send()
         .await
@@ -558,6 +553,7 @@ fn store_token(client_id: &str, token: &TokenResponse) {
 /// to test; production passes `SystemTime::now()` and a fresh UUID.
 fn build_client_assertion(
     creds: &ChaseCreds,
+    token_url: &str,
     now: SystemTime,
     jti: &str,
 ) -> Result<String, IngestError> {
@@ -569,7 +565,7 @@ fn build_client_assertion(
     let mut payload = JwtPayload::new();
     payload.set_issuer(&creds.client_id);
     payload.set_subject(&creds.client_id);
-    payload.set_audience(vec![creds.token_url.clone()]);
+    payload.set_audience(vec![token_url.to_string()]);
     payload.set_issued_at(&now);
     payload.set_expires_at(&(now + ASSERTION_TTL));
     payload.set_jwt_id(jti);
@@ -937,37 +933,12 @@ o2,ED,3,GB,GBP,EDBT,SALE,100,-1.00,-0.20\n";
     }
 
     #[test]
-    fn creds_parse_applies_url_defaults() {
-        let creds = ConnectorCreds {
-            webhook_secret: Secret::new(String::new()),
-            download_auth: Secret::new(
-                r#"{"client_id":"c","resource":"r","private_key_pem":"pem"}"#.to_string(),
-            ),
-        };
-        let chase = ChaseCreds::parse(&creds).unwrap();
-        assert_eq!(chase.client_id, "c");
-        assert_eq!(chase.token_url, default_token_url());
-        assert_eq!(chase.reports_url, default_reports_url());
-        // A bad blob is a clear, typed error.
-        let bad = ConnectorCreds {
-            webhook_secret: Secret::new(String::new()),
-            download_auth: Secret::new("nope".to_string()),
-        };
-        assert!(matches!(
-            ChaseCreds::parse(&bad),
-            Err(IngestError::MalformedNotification(_))
-        ));
-    }
-
-    #[test]
     fn token_form_has_the_five_client_credentials_params() {
         let creds = ChaseCreds {
             client_id: "cid".to_string(),
             resource: "res".to_string(),
             private_key_pem: String::new(),
             access_token: None,
-            token_url: default_token_url(),
-            reports_url: default_reports_url(),
         };
         let form = build_token_form(&creds, "ASSERTION");
         assert_eq!(form.len(), 5);

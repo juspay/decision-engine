@@ -491,11 +491,35 @@ impl Default for VolumeCommitmentConfig {
     }
 }
 
+/// Server-owned report API endpoints for a connector, grouped by environment.
+/// Missing settings retain the connector production endpoints for existing deployments.
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct ConnectorReportApiConfig {
+    pub checkout_production_api_base_url: String,
+    pub checkout_sandbox_api_base_url: String,
+    pub chase_token_url: String,
+    pub chase_reports_url: String,
+}
+
+impl Default for ConnectorReportApiConfig {
+    fn default() -> Self {
+        Self {
+            checkout_production_api_base_url: "https://api.checkout.com".to_string(),
+            checkout_sandbox_api_base_url: "https://api.sandbox.checkout.com".to_string(),
+            chase_token_url: "https://idag2.jpmorganchase.com/adfs/oauth2/token".to_string(),
+            chase_reports_url: "https://api.reports.jpmorgan.com/api/v1/reports".to_string(),
+        }
+    }
+}
+
 /// Configuration for the in-house cost-estimation settlement ingestion pipeline
 /// (see `scratch/inhouse-cost-architecture.md` §7).
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(default)]
 pub struct CostIngestionConfig {
+    /// Connector settlement report API endpoints.
+    pub connector: ConnectorReportApiConfig,
     /// Key id used to encrypt *new* connector credentials. Must name a key present in
     /// `creds_encryption_keys`. Rotate by adding a new key there and pointing this at it —
     /// old keys stay in the ring so existing credentials still decrypt. Empty ⇒ storage disabled.
@@ -529,6 +553,7 @@ pub struct CostIngestionConfig {
 impl Default for CostIngestionConfig {
     fn default() -> Self {
         Self {
+            connector: ConnectorReportApiConfig::default(),
             creds_encryption_current: String::new(),
             creds_encryption_keys: std::collections::HashMap::new(),
             worker_enabled: false,

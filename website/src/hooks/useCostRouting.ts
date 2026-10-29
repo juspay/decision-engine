@@ -37,6 +37,8 @@ export interface CoverageSummary {
   report_date: string
 }
 
+export type CheckoutEnvironment = 'prod' | 'sandbox'
+
 export interface ConnectorSource {
   connector: string
   account: string
@@ -44,6 +46,7 @@ export interface ConnectorSource {
   webhook_secret_hint?: string
   /** Masked preview of the report-download auth ("reportuser:••••" or "••••a3f9"). */
   download_auth_hint?: string
+  environment?: CheckoutEnvironment
 }
 
 export interface SetCredentialsResponse {
@@ -476,7 +479,7 @@ export function useIngestionHistory(merchantId?: string) {
 export async function setConnectorCredentials(
   merchantId: string,
   connector: string,
-  body: { account: string; webhook_secret: string; download_auth: string },
+  body: { account: string; webhook_secret: string; download_auth: string; environment?: CheckoutEnvironment },
 ) {
   return apiPost<SetCredentialsResponse>(
     `/merchant-account/${merchantId}/connectors/${connector}/credentials`,
