@@ -47,9 +47,26 @@ const connector = (name: string) => {
 const candidates = (decision: any) => [decision.decided_gateway, ...decision.fallback_gateways].sort()
 
 /**
+ * Routes payments through `/decide`, charging those that land on `winner` and failing the rest, so
+ * `winner` scores highest. Fresh connectors all score the same and SR breaks the tie at random.
+ */
+async function trainScores(api: any, template: DecideRequest, winner: string) {
+  for (let i = 0; i < 12; i++) {
+    const body = { ...structuredClone(template), payment_id: factory.paymentId('train') }
+    const decided = (await api.raw('POST', '/decide', { body })).body.dynamic_routing?.decision?.decided_gateway
+    if (!decided) return
+    await api.raw('POST', '/update-gateway-score', { body: {
+      merchantId: template.merchant_id, gateway: decided, gatewayReferenceId: null, paymentId: body.payment_id,
+      status: decided === winner ? 'CHARGED' : 'FAILURE', enforceDynamicRoutingFailure: null,
+    } })
+  }
+}
+
+/**
  * A `/decide` response against the `/routing/hybrid` response for the same payment: the hybrid
- * sections match, and so does the decision they carry. SR configs here hedge 0%, so an SR decision
- * is deterministic too.
+ * sections match, and so does the decision they carry. SR configs here hedge 0% and scores are
+ * trained to one winner, so the SR decision is deterministic; fallbacks tied on score come back in
+ * either order, so they compare as a set.
  */
 function expectHybridParity(decide: any, hybrid: any) {
   expect(decide.static_routing).toEqual(hybrid.static_routing)
@@ -60,6 +77,7 @@ function expectHybridParity(decide: any, hybrid: any) {
   if (legacy) {
     expect(decision.decided_gateway).toBe(legacy.decided_gateway)
     expect(decision.routing_approach).toBe(legacy.routing_approach)
+    expect(decision.gateway_priority_map).toEqual(legacy.gateway_priority_map)
     expect(candidates(decision)).toEqual(candidates(legacy))
     expect(Boolean(decision.multi_objective_info)).toBe(Boolean(legacy.multi_objective_info))
     expect(decision.multi_objective_info?.outcome).toBe(legacy.multi_objective_info?.outcome)
@@ -93,6 +111,7 @@ test.describe('Decide parity with hybrid (API)', () => {
       const body = decideRequest(merchant.id)
       // adyen is a candidate the rule leaves out, so a rule-narrowed SR decision never names it.
       body.routing_config.eligible_connectors = ['stripe', 'checkout', 'adyen'].map(connector)
+      if (scenario.sr) await trainScores(api, body, 'stripe:mca_stripe')
       const response = await api.raw<DecideResponse>('POST', '/decide', { body })
       const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacyRequest(body) })
       expect(response.status).toBe(hybrid.status)
@@ -101,6 +120,7 @@ test.describe('Decide parity with hybrid (API)', () => {
       if (scenario.sr) {
         expect(response.body.dynamic_routing?.status).toBe('success')
         expect(response.body.decision.source).toBe(response.body.dynamic_routing!.decision!.routing_approach)
+        expect(response.body.dynamic_routing!.decision!.decided_gateway).toBe('stripe:mca_stripe')
         const expected = scenario.rule ? ['checkout:mca_checkout', 'stripe:mca_stripe'] : ['adyen:mca_adyen', 'checkout:mca_checkout', 'stripe:mca_stripe']
         expect(candidates(response.body.dynamic_routing!.decision)).toEqual(expected)
       } else {
@@ -111,15 +131,41 @@ test.describe('Decide parity with hybrid (API)', () => {
     })
   }
 
+  test('answers as hybrid does when cost overrides the SR head', async ({ api, merchant }) => {
+    await api.createSuccessRateConfig(merchant.id, { defaultHedgingPercent: 0 })
+    await api.setMerchantFeature(merchant.id, 'sr-routing', true)
+    await api.setMerchantFeature(merchant.id, 'cost-savings', true)
+    // Contract rates price PSPs by gateway name, so the candidates are named without an account.
+    const rate = (psp: string, markup_bps: number) => ({
+      psp, interchange_bps: 0, scheme_bps: 0, markup_bps, fixed: 0, is_default: true,
+    })
+    await api.raw('PUT', `/merchant-account/${merchant.id}/seed-costs`, {
+      body: { rows: [rate('stripe', 1500), rate('adyen', 20)] },
+    })
+    const body = decideRequest(merchant.id)
+    body.routing_config.eligible_connectors = [{ gateway_name: 'stripe' }, { gateway_name: 'adyen' }]
+    await trainScores(api, body, 'stripe')
+    const response = await api.raw<DecideResponse>('POST', '/decide', { body })
+    const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacyRequest(body) })
+    expectHybridParity(response.body, hybrid.body)
+    const info = response.body.dynamic_routing!.decision!.multi_objective_info!
+    expect(info.outcome).toBe('COST_WON')
+    expect(response.body.dynamic_routing!.decision!.decided_gateway).toBe('adyen')
+    const ranked = (i: any) => i.ranked.map((r: any) => [r.psp, r.costBps, r.isChosen])
+    expect(ranked(info)).toEqual(ranked(hybrid.body.dynamic_routing.decision.multi_objective_info))
+  })
+
   test('answers as hybrid does for connectors named without an account', async ({ api, merchant }) => {
     await api.createSuccessRateConfig(merchant.id, { defaultHedgingPercent: 0 })
     await api.setMerchantFeature(merchant.id, 'sr-routing', true)
     const body = decideRequest(merchant.id)
     body.routing_config.eligible_connectors = [{ gateway_name: 'stripe' }, { gateway_name: 'adyen' }]
+    await trainScores(api, body, 'stripe')
     const response = await api.raw<DecideResponse>('POST', '/decide', { body })
     const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacyRequest(body) })
     expectHybridParity(response.body, hybrid.body)
     expect(candidates(response.body.dynamic_routing!.decision)).toEqual(['adyen', 'stripe'])
+    expect(response.body.dynamic_routing!.decision!.decided_gateway).toBe('stripe')
   })
 })
 
