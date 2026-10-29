@@ -97,7 +97,7 @@ Send the same authentication and tenant headers used for `/routing/hybrid` (`Aut
 | `routing_config.eligible_connectors` | hybrid candidate/fallback input |
 | `payment_merchant_connector_id` | `gateway_id` / account-qualified dynamic connector |
 
-The required fields are `payment_id`, `merchant_id`, `amount`, `currency`, `routing_config.algorithm_for` and `routing_config.eligible_connectors`. Every input connector requires a nonempty `gateway_name` and `payment_merchant_connector_id`. Other fields may be omitted or null. Amounts are unsigned integers in minor units; BINs are strings and preserve leading zeros.
+The required fields are `payment_id`, `merchant_id`, `amount`, `currency`, `routing_config.algorithm_for` and `routing_config.eligible_connectors`. Every input connector requires a nonempty `gateway_name`. `payment_merchant_connector_id` is optional: when sent it must be nonempty, and when omitted or null the connector is named by its gateway alone, as a hybrid `fallback_output` entry without `gateway_id` is (rules then match it only by name, and success-rate scores are keyed by the gateway name). Other fields may be omitted or null. Amounts are unsigned integers in minor units; BINs are strings and preserve leading zeros.
 
 Country codes use ISO alpha-2 values. The adapter translates them to the configured country names for rule matching. Other configured enum values retain an exact match when available, otherwise a case-insensitive match. Existing rule schemas and stored configurations keep their current names.
 
@@ -116,8 +116,25 @@ The removed fields (`payment_type`, `transaction_type`, EMI fields, `internal_me
   ],
   "decision": {
     "outcome": "routed",
-    "source": "volume_split",
+    "source": "SR_SELECTION_V3_ROUTING",
     "decision_id": "req_123"
+  },
+  "static_routing": {
+    "status": "success",
+    "output": { "type": "priority", "connectors": [ ... ] },
+    "evaluated_output": [ ... ]
+  },
+  "dynamic_routing": {
+    "status": "success",
+    "decision": {
+      "decided_gateway": "worldpay:mca_wp",
+      "fallback_gateways": ["checkout:mca_cko"],
+      "routing_approach": "SR_SELECTION_V3_ROUTING",
+      "gateway_priority_map": { "worldpay:mca_wp": 0.94, "checkout:mca_cko": 0.91 },
+      "multi_objective_info": null,
+      "volume_steer_info": null
+    },
+    "fallback_connectors": null
   }
 }
 ```
@@ -126,4 +143,4 @@ The removed fields (`payment_type`, `transaction_type`, EMI fields, `internal_me
 
 The endpoint preserves hybrid's connector order, selection and errors. When there is no active rule, hybrid can still return the supplied candidates as a fallback. Existing hybrid candidate filtering still applies: a rule output outside the supplied candidate list falls back to eligible candidates. If a legacy rule returns only a gateway name, its response account ID is null. A dynamic success returns the same winning connector that hybrid puts in `evaluated_connectors`.
 
-The response omits the legacy static/dynamic diagnostic envelopes. Analytics retain those internal details, add the original `/decide` request and response, and identify the API route as `decide`. Decisions remain in the hybrid analytics and A/B experiment family.
+`static_routing` and `dynamic_routing` are the hybrid evaluator's own sections, unchanged, so a `/decide` caller reads the same rule result and SR decision (`fallback_gateways`, `gateway_priority_map`, `multi_objective_info`, `volume_steer_info`) that `/routing/hybrid` returns. Each is present exactly when `/routing/hybrid` would include it: `static_routing` is absent when static evaluation failed, and `dynamic_routing` is absent when SR did not run (the `sr-routing` setting is off or the A/B arm has no SR layer). Analytics record the internal hybrid request and response alongside the original `/decide` request and response, and identify the API route as `decide`. Decisions remain in the hybrid analytics and A/B experiment family.

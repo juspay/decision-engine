@@ -345,7 +345,8 @@ export interface DecideRoutingConfig {
 
 export interface DecideConnector {
   gateway_name: string
-  payment_merchant_connector_id: string
+  // Omitted or null names the connector by gateway alone, as a hybrid fallback entry without gateway_id.
+  payment_merchant_connector_id?: string | null
 }
 
 export interface DecideResponse {
@@ -355,6 +356,9 @@ export interface DecideResponse {
     source: string
     decision_id: string
   }
+  // The hybrid evaluator's own sections, unchanged: present exactly when /routing/hybrid includes them.
+  static_routing?: unknown
+  dynamic_routing?: { status: string; decision?: DecideGatewayResponse | null; fallback_connectors?: GatewayConnector[] | null }
 }
 
 export interface CreateRoutingRequest {

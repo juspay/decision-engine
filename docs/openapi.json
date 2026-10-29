@@ -10141,8 +10141,7 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "gateway_name",
-          "payment_merchant_connector_id"
+          "gateway_name"
         ],
         "properties": {
           "gateway_name": {
@@ -10151,7 +10150,9 @@
           },
           "payment_merchant_connector_id": {
             "type": "string",
-            "minLength": 1
+            "nullable": true,
+            "minLength": 1,
+            "description": "The connector account. Omit it (or send null) to name the connector by gateway alone, as a hybrid fallback_output entry without gateway_id does; scores are then keyed by the gateway name."
           }
         }
       },
@@ -10188,6 +10189,18 @@
           },
           "decision": {
             "$ref": "#/components/schemas/DecideDecision"
+          },
+          "static_routing": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/RoutingEvaluateResponse"
+              }
+            ],
+            "description": "The rule evaluation, exactly as `/routing/hybrid` returns it. Absent when static evaluation failed."
+          },
+          "dynamic_routing": {
+            "type": "object",
+            "description": "The SR decision, exactly as `/routing/hybrid` returns it: `{status, decision, fallback_connectors}`. `decision` carries `decided_gateway`, `fallback_gateways`, `routing_approach`, `gateway_priority_map`, `multi_objective_info` and `volume_steer_info`. Absent when SR did not run."
           }
         }
       },

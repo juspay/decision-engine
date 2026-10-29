@@ -79,21 +79,24 @@ pub struct DecideRoutingConfig {
 #[serde(deny_unknown_fields)]
 pub struct DecideConnector {
     pub gateway_name: String,
-    pub payment_merchant_connector_id: String,
+    /// The connector account. A connector named without one is matched and scored by its
+    /// gateway name alone, as a hybrid `fallback_output` entry without a `gateway_id` is.
+    #[serde(default)]
+    pub payment_merchant_connector_id: Option<String>,
 }
 
 impl DecideConnector {
     pub fn identifier(&self) -> String {
-        format!(
-            "{}:{}",
-            self.gateway_name, self.payment_merchant_connector_id
-        )
+        match &self.payment_merchant_connector_id {
+            Some(id) => format!("{}:{}", self.gateway_name, id),
+            None => self.gateway_name.clone(),
+        }
     }
 
     fn to_legacy(&self) -> ConnectorInfo {
         ConnectorInfo {
             gateway_name: self.gateway_name.clone(),
-            gateway_id: Some(self.payment_merchant_connector_id.clone()),
+            gateway_id: self.payment_merchant_connector_id.clone(),
         }
     }
 }
@@ -180,7 +183,10 @@ impl DecideRequest {
             .chain(self.routing_config.preferred_connectors.iter().flatten())
         {
             if connector.gateway_name.trim().is_empty()
-                || connector.payment_merchant_connector_id.trim().is_empty()
+                || connector
+                    .payment_merchant_connector_id
+                    .as_deref()
+                    .is_some_and(|id| id.trim().is_empty())
             {
                 return Err(
                     "Connector names and payment_merchant_connector_id must not be empty"
@@ -248,10 +254,18 @@ impl DecideRequest {
     }
 }
 
+/// The `/decide` answer. `evaluated_connectors` and `decision` summarise the call;
+/// `static_routing` and `dynamic_routing` are the hybrid evaluator's own sections, unchanged, so
+/// the rule result and the SR decision (fallbacks, scores, cost and volume steering) read the
+/// same as on `/routing/hybrid`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DecideResponse {
     pub evaluated_connectors: Vec<DecideResultConnector>,
     pub decision: DecideDecision,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub static_routing: Option<serde_json::Value>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dynamic_routing: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -316,6 +330,8 @@ impl DecideResponse {
                 source: source.to_string(),
                 decision_id,
             },
+            static_routing: value.get("static_routing").cloned(),
+            dynamic_routing: value.get("dynamic_routing").cloned(),
         })
     }
 }
@@ -558,6 +574,75 @@ mod tests {
         )?;
         assert_eq!(response.decision.outcome, "fallback");
         assert_eq!(response.decision.source, "eligible_connectors");
+        let serialized = serde_json::to_value(&response)?;
+        assert!(serialized.get("static_routing").is_none());
+        assert!(serialized.get("dynamic_routing").is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn decide_response_carries_the_hybrid_sections_unchanged() -> Result<(), serde_json::Error> {
+        let static_routing = json!({
+            "status": "success",
+            "output": {"type": "priority", "connectors": [{"gateway_name": "stripe", "gateway_id": "mca_1"}]},
+            "evaluated_output": [{"gateway_name": "stripe", "gateway_id": "mca_1"}]
+        });
+        let dynamic_routing = json!({
+            "status": "success",
+            "decision": {
+                "decided_gateway": "stripe:mca_1",
+                "fallback_gateways": ["adyen:mca_2"],
+                "routing_approach": "SR_SELECTION_V3_ROUTING",
+                "gateway_priority_map": {"stripe:mca_1": 0.9, "adyen:mca_2": 0.8},
+                "multi_objective_info": {"outcome": "AUTH_WON"}
+            },
+            "fallback_connectors": null
+        });
+        let response = DecideResponse::from_hybrid(
+            &json!({
+                "static_routing": static_routing,
+                "dynamic_routing": dynamic_routing,
+                "evaluated_connectors": [{"gateway_name": "stripe", "gateway_id": "mca_1"}]
+            }),
+            "req_1".into(),
+        )?;
+        let serialized = serde_json::to_value(&response)?;
+        assert_eq!(serialized["static_routing"], static_routing);
+        assert_eq!(serialized["dynamic_routing"], dynamic_routing);
+        assert_eq!(serialized["decision"]["source"], "SR_SELECTION_V3_ROUTING");
+        Ok(())
+    }
+
+    #[test]
+    fn decide_accepts_connectors_named_without_an_account_like_hybrid(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let flat: DecideRequest = serde_json::from_value(json!({
+            "payment_id": "pay_1", "merchant_id": "pro_1", "amount": 100, "currency": "USD",
+            "routing_config": {"algorithm_for": "payment",
+                "eligible_connectors": [{"gateway_name": "stripe"}, {"gateway_name": "adyen", "payment_merchant_connector_id": null}],
+                "preferred_connectors": [{"gateway_name": "adyen"}]}
+        }))?;
+        let mapped = serde_json::to_value(flat.to_hybrid_request(&config()?)?)?;
+        assert_eq!(
+            mapped["static_routing_request"]["fallback_output"],
+            json!([
+                {"gateway_name": "stripe", "gateway_id": null},
+                {"gateway_name": "adyen", "gateway_id": null}
+            ])
+        );
+        assert_eq!(
+            mapped["dynamic_routing_request"]["eligibleGatewayList"],
+            json!(["stripe", "adyen"])
+        );
+        assert_eq!(
+            mapped["dynamic_routing_request"]["paymentInfo"]["preferredConnectors"],
+            json!(["adyen"])
+        );
+
+        let mut blank = flat;
+        blank.routing_config.eligible_connectors[0].payment_merchant_connector_id =
+            Some(" ".into());
+        assert!(blank.to_hybrid_request(&config()?).is_err());
         Ok(())
     }
 

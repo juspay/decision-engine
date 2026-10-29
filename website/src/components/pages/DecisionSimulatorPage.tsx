@@ -25,9 +25,9 @@ import {
   type ContractRunTally,
 } from './VolumeCommitmentRunChart'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
-import { BlockedCommitment, DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RankedPsp, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
+import { BlockedCommitment, DecideGatewayResponse, DecideResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RankedPsp, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
-import { SIMULATION_ENDPOINTS, SimulationEndpoint, HybridRoutingResponse, decisionFromHybrid, hybridRuleParameters } from '../../features/routing/simulator/hybrid'
+import { SIMULATION_ENDPOINTS, SimulationEndpoint, decideRequestFor, decisionFromDecide, savedSimulationEndpoint } from '../../features/routing/simulator/decide'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import {
@@ -811,9 +811,7 @@ function loadExplorerState(scopeKey: string): ExplorerPersistedState {
         ...defaults.simulationConfig,
         ...(parsed.simulationConfig || {}),
         totalPayments: SIMULATION_TOTAL_PAYMENTS,
-        endpoint: SIMULATION_ENDPOINTS.some(e => e.value === parsed.simulationConfig?.endpoint)
-          ? parsed.simulationConfig!.endpoint
-          : defaults.simulationConfig.endpoint,
+        endpoint: savedSimulationEndpoint(parsed.simulationConfig?.endpoint) ?? defaults.simulationConfig.endpoint,
       },
       gatewaySimConfigs: parsed.gatewaySimConfigs || defaults.gatewaySimConfigs,
       errorInfo: { ...defaults.errorInfo, ...(parsed.errorInfo || {}) },
@@ -2556,23 +2554,21 @@ export function DecisionSimulatorPage() {
         eliminationEnabled: eliminationEnabled,
       }
 
-      const decideRes = endpoint === 'hybrid_routing'
-        ? decisionFromHybrid(await apiPost<HybridRoutingResponse>('/routing/hybrid', {
-          static_routing_request: {
-            created_by: effectiveMerchantId,
-            payment_id: paymentId,
-            parameters: hybridRuleParameters(routingKeysConfig, {
-              payment_method: paymentMethod,
-              payment_method_type: paymentMethodType,
-              card_network: cardBrand,
-              currency: formRef.current.currency,
-              authentication_type: form.auth_type,
-              amount,
-            }),
-            fallback_output: gateways.map(gateway_name => ({ gateway_name, gateway_id: null })),
-          },
-          dynamic_routing_request: decideRequest,
-        }))
+      const decideRes = endpoint === 'decide'
+        ? decisionFromDecide(await apiPost<DecideResponse>('/decide', decideRequestFor({
+          merchantId: effectiveMerchantId,
+          paymentId,
+          amount,
+          currency: formRef.current.currency,
+          paymentMethod,
+          paymentMethodType,
+          authType: form.auth_type,
+          cardNetwork: cardBrand,
+          cardProgram,
+          cardIssuerCountry,
+          gateways,
+          eliminationEnabled,
+        })))
         : await apiPost<DecideGatewayResponse>('/decide-gateway', decideRequest)
 
       const decidedGateway = decideRes.decided_gateway
@@ -3342,8 +3338,8 @@ export function DecisionSimulatorPage() {
     }
   }, [deferredSimulationResults])
 
-  // Each decision comes from cost, the static rule, or SR. On a hybrid run the rule answers
-  // whenever the dynamic half doesn't, and those were being counted as SR-based.
+  // Each decision comes from cost, the static rule, or SR. On a /decide run the rule answers
+  // whenever SR doesn't run; those decisions count as rule-based, not SR-based.
   const multiObjectiveStats = useMemo(() => {
     let costWon = 0
     let costSuccess = 0
@@ -3368,7 +3364,7 @@ export function DecisionSimulatorPage() {
         if (r.status === 'CHARGED') costSuccess++
         else costFailure++
       } else if (r.routingApproach === RULE_DECIDED_APPROACH) {
-        // On hybrid, the static rule produced the answer and SR never scored this payment.
+        // On /decide, the static rule produced the answer and SR never scored this payment.
         ruleBased++
         if (r.status === 'CHARGED') ruleSuccess++
         else ruleFailure++
@@ -3954,7 +3950,7 @@ export function DecisionSimulatorPage() {
             {showMoreInputs && (
               <div className="flex w-[170px] flex-col gap-1.5">
                 <SurfaceLabel>
-                  <span title="API each transaction is routed through. Hybrid routing also evaluates the active routing rule on the payment's attributes, and returns the rule output when Auth Rate routing doesn't run. Applies on the next run.">Endpoint</span>
+                  <span title="API each transaction is routed through. Decide also evaluates the active routing rule on the payment's attributes, and returns the rule output when Auth Rate routing doesn't run. Applies on the next run.">Endpoint</span>
                 </SurfaceLabel>
                 <select
                   value={simulationConfig.endpoint}
@@ -5036,7 +5032,7 @@ export function DecisionSimulatorPage() {
                           </span>
                         </p>
                       </div>
-                      {(simulationConfig.endpoint === 'hybrid_routing' || multiObjectiveStats.ruleBased > 0) && (
+                      {(simulationConfig.endpoint === 'decide' || multiObjectiveStats.ruleBased > 0) && (
                         <div className="flex min-w-0 flex-col gap-1.5">
                           <StatLabel label="Rule-based decisions" />
                           <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-700 dark:text-sky-400">
