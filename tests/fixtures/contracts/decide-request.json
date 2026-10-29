@@ -1,0 +1,69 @@
+{
+  "payment_id": "pay_demo",
+  "merchant_id": "pro_demo",
+  "amount": 1000,
+  "currency": "USD",
+  "payment_method_type": "card",
+  "payment_method_sub_type": "credit",
+  "authentication_type": null,
+  "capture_method": null,
+  "mandate_type": null,
+  "mandate_acceptance_type": null,
+  "setup_future_usage": null,
+  "transaction_initiator": null,
+  "surcharge_amount": null,
+  "business_country": null,
+  "billing_country": "US",
+  "business_label": null,
+  "card": {
+    "card_isin": "001234",
+    "card_extended_bin": "00123456",
+    "card_network": "Visa",
+    "card_type": "credit",
+    "card_issuer": null,
+    "card_issuing_country_code": "US",
+    "card_subtype": null,
+    "card_discovery": null,
+    "card_switch_provider": null
+  },
+  "customer_device_platform": null,
+  "customer_device_type": null,
+  "customer_device_display_size": null,
+  "pay_later": null,
+  "wallet": null,
+  "upi": null,
+  "voucher": null,
+  "bank_redirect": null,
+  "bank_debit": null,
+  "bank_transfer": null,
+  "real_time_payment": null,
+  "gift_card": null,
+  "card_redirect": null,
+  "open_banking": null,
+  "mobile_payment": null,
+  "crypto": null,
+  "reward": null,
+  "network_token": null,
+  "metadata": {
+    "segment": "premium"
+  },
+  "country": null,
+  "customer_id": null,
+  "routing_config": {
+    "algorithm_for": "payment",
+    "elimination_enabled": null,
+    "enable_multi_objective": null,
+    "ranking_algorithm": null,
+    "eligible_connectors": [
+      {
+        "gateway_name": "worldpay",
+        "payment_merchant_connector_id": "mca_wp"
+      },
+      {
+        "gateway_name": "checkout",
+        "payment_merchant_connector_id": "mca_cko"
+      }
+    ],
+    "preferred_connectors": null
+  }
+}

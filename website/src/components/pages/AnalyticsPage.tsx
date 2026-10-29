@@ -798,7 +798,7 @@ function HybridRoutingSplitCard({ split }: { split: AnalyticsHybridSplit | null 
           ) : (
             <EmptyState
               title="No hybrid decisions yet"
-              body="Calls to /routing/hybrid will appear here once they are recorded in this window."
+              body="Calls to /decide or /routing/hybrid will appear here once they are recorded in this window."
             />
           )}
         </CardBody>
