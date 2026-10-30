@@ -5,6 +5,8 @@ use crate::types::hybrid_routing::HybridRoutingRequest;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 
+pub mod response;
+
 #[derive(Debug, Clone, Serialize, Deserialize, crate::auth::MerchantScoped)]
 #[serde(deny_unknown_fields)]
 pub struct DecideRequest {
@@ -87,16 +89,27 @@ pub struct DecideConnector {
 
 impl DecideConnector {
     pub fn identifier(&self) -> String {
-        match &self.payment_merchant_connector_id {
-            Some(id) => format!("{}:{}", self.gateway_name, id),
-            None => self.gateway_name.clone(),
-        }
+        self.to_legacy().identifier()
+    }
+
+    /// Reads the decider's `"name:id"` identifier, or a bare `"name"`.
+    pub fn from_identifier(identifier: &str) -> Self {
+        ConnectorInfo::from_identifier(identifier).into()
     }
 
     fn to_legacy(&self) -> ConnectorInfo {
         ConnectorInfo {
             gateway_name: self.gateway_name.clone(),
             gateway_id: self.payment_merchant_connector_id.clone(),
+        }
+    }
+}
+
+impl From<ConnectorInfo> for DecideConnector {
+    fn from(connector: ConnectorInfo) -> Self {
+        Self {
+            gateway_name: connector.gateway_name,
+            payment_merchant_connector_id: connector.gateway_id,
         }
     }
 }
@@ -250,88 +263,6 @@ impl DecideRequest {
         Ok(HybridRoutingRequest {
             static_routing_request: Some(static_request),
             dynamic_routing_request: Some(dynamic),
-        })
-    }
-}
-
-/// The `/decide` answer. `evaluated_connectors` and `decision` summarise the call;
-/// `static_routing` and `dynamic_routing` are the hybrid evaluator's own sections, unchanged, so
-/// the rule result and the SR decision (fallbacks, scores, cost and volume steering) read the
-/// same as on `/routing/hybrid`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DecideResponse {
-    pub evaluated_connectors: Vec<DecideResultConnector>,
-    pub decision: DecideDecision,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub static_routing: Option<serde_json::Value>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub dynamic_routing: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DecideResultConnector {
-    pub gateway_name: String,
-    pub payment_merchant_connector_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DecideDecision {
-    pub outcome: String,
-    pub source: String,
-    pub decision_id: String,
-}
-
-impl DecideResponse {
-    pub fn from_hybrid(
-        value: &serde_json::Value,
-        decision_id: String,
-    ) -> Result<Self, serde_json::Error> {
-        let connectors: Vec<ConnectorInfo> =
-            serde_json::from_value(value["evaluated_connectors"].clone())?;
-        let static_status = value["static_routing"]["status"].as_str();
-        let dynamic_status = value["dynamic_routing"]["status"].as_str();
-        let outcome = if connectors.is_empty() {
-            if static_status == Some("no_active_algorithm") {
-                "no_active_algorithm"
-            } else {
-                "no_eligible_connector"
-            }
-        } else if dynamic_status == Some("fallback")
-            || (dynamic_status != Some("success")
-                && (static_status.is_none() || static_status == Some("no_active_algorithm")))
-        {
-            "fallback"
-        } else {
-            "routed"
-        };
-        let source = if dynamic_status == Some("success") {
-            value["dynamic_routing"]["decision"]["routing_approach"]
-                .as_str()
-                .unwrap_or("dynamic_routing")
-        } else if static_status == Some("no_active_algorithm") {
-            "no_active_algorithm"
-        } else if static_status.is_none() {
-            "eligible_connectors"
-        } else {
-            value["static_routing"]["output"]["type"]
-                .as_str()
-                .unwrap_or("static_routing")
-        };
-        Ok(Self {
-            evaluated_connectors: connectors
-                .into_iter()
-                .map(|connector| DecideResultConnector {
-                    gateway_name: connector.gateway_name,
-                    payment_merchant_connector_id: connector.gateway_id,
-                })
-                .collect(),
-            decision: DecideDecision {
-                outcome: outcome.to_string(),
-                source: source.to_string(),
-                decision_id,
-            },
-            static_routing: value.get("static_routing").cloned(),
-            dynamic_routing: value.get("dynamic_routing").cloned(),
         })
     }
 }
@@ -564,56 +495,6 @@ mod tests {
     }
 
     #[test]
-    fn decide_reports_raw_candidates_as_fallback_when_static_evaluation_failed(
-    ) -> Result<(), serde_json::Error> {
-        let response = DecideResponse::from_hybrid(
-            &json!({
-                "evaluated_connectors": [{"gateway_name": "stripe", "gateway_id": "mca_1"}]
-            }),
-            "req_1".into(),
-        )?;
-        assert_eq!(response.decision.outcome, "fallback");
-        assert_eq!(response.decision.source, "eligible_connectors");
-        let serialized = serde_json::to_value(&response)?;
-        assert!(serialized.get("static_routing").is_none());
-        assert!(serialized.get("dynamic_routing").is_none());
-        Ok(())
-    }
-
-    #[test]
-    fn decide_response_carries_the_hybrid_sections_unchanged() -> Result<(), serde_json::Error> {
-        let static_routing = json!({
-            "status": "success",
-            "output": {"type": "priority", "connectors": [{"gateway_name": "stripe", "gateway_id": "mca_1"}]},
-            "evaluated_output": [{"gateway_name": "stripe", "gateway_id": "mca_1"}]
-        });
-        let dynamic_routing = json!({
-            "status": "success",
-            "decision": {
-                "decided_gateway": "stripe:mca_1",
-                "fallback_gateways": ["adyen:mca_2"],
-                "routing_approach": "SR_SELECTION_V3_ROUTING",
-                "gateway_priority_map": {"stripe:mca_1": 0.9, "adyen:mca_2": 0.8},
-                "multi_objective_info": {"outcome": "AUTH_WON"}
-            },
-            "fallback_connectors": null
-        });
-        let response = DecideResponse::from_hybrid(
-            &json!({
-                "static_routing": static_routing,
-                "dynamic_routing": dynamic_routing,
-                "evaluated_connectors": [{"gateway_name": "stripe", "gateway_id": "mca_1"}]
-            }),
-            "req_1".into(),
-        )?;
-        let serialized = serde_json::to_value(&response)?;
-        assert_eq!(serialized["static_routing"], static_routing);
-        assert_eq!(serialized["dynamic_routing"], dynamic_routing);
-        assert_eq!(serialized["decision"]["source"], "SR_SELECTION_V3_ROUTING");
-        Ok(())
-    }
-
-    #[test]
     fn decide_accepts_connectors_named_without_an_account_like_hybrid(
     ) -> Result<(), Box<dyn std::error::Error>> {
         let flat: DecideRequest = serde_json::from_value(json!({
@@ -643,66 +524,6 @@ mod tests {
         blank.routing_config.eligible_connectors[0].payment_merchant_connector_id =
             Some(" ".into());
         assert!(blank.to_hybrid_request(&config()?).is_err());
-        Ok(())
-    }
-
-    #[test]
-    fn decide_response_preserves_connector_order_and_hybrid_fallbacks(
-    ) -> Result<(), Box<dyn std::error::Error>> {
-        for (static_status, dynamic, output, expected_outcome, expected_source) in [
-            (
-                "success",
-                Value::Null,
-                json!({"type": "priority"}),
-                "routed",
-                "priority",
-            ),
-            (
-                "no_active_algorithm",
-                Value::Null,
-                Value::Null,
-                "fallback",
-                "no_active_algorithm",
-            ),
-            (
-                "success",
-                json!({"status": "fallback"}),
-                json!({"type": "single"}),
-                "fallback",
-                "single",
-            ),
-            (
-                "success",
-                json!({"status": "success", "decision": {"routing_approach": "SR_SELECTION_V3_ROUTING"}}),
-                Value::Null,
-                "routed",
-                "SR_SELECTION_V3_ROUTING",
-            ),
-        ] {
-            let actual = DecideResponse::from_hybrid(
-                &json!({
-                    "static_routing": {"status": static_status, "output": output},
-                    "dynamic_routing": dynamic,
-                    "evaluated_connectors": [
-                        {"gateway_name": "stripe", "gateway_id": "mca_2"},
-                        {"gateway_name": "stripe", "gateway_id": "mca_1"},
-                        {"gateway_name": "checkout", "gateway_id": null}
-                    ]
-                }),
-                "req_1".into(),
-            )?;
-            assert_eq!(actual.decision.outcome, expected_outcome);
-            assert_eq!(actual.decision.source, expected_source);
-            assert_eq!(actual.decision.decision_id, "req_1");
-            assert_eq!(
-                serde_json::to_value(actual.evaluated_connectors)?,
-                json!([
-                    {"gateway_name": "stripe", "payment_merchant_connector_id": "mca_2"},
-                    {"gateway_name": "stripe", "payment_merchant_connector_id": "mca_1"},
-                    {"gateway_name": "checkout", "payment_merchant_connector_id": null}
-                ])
-            );
-        }
         Ok(())
     }
 }

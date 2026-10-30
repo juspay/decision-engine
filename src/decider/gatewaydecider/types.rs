@@ -1127,10 +1127,7 @@ impl From<(&RoutingRequest, Option<Self>)> for DomainDeciderRequestForApiCallV2 
             eligible_gateway_list: request.fallback_output.as_ref().map(|connectors| {
                 connectors
                     .iter()
-                    .map(|connector| match &connector.gateway_id {
-                        Some(gateway_id) => format!("{}:{}", connector.gateway_name, gateway_id),
-                        None => connector.gateway_name.clone(),
-                    })
+                    .map(crate::euclid::ast::ConnectorInfo::identifier)
                     .collect()
             }),
             ranking_algorithm: Some(RankingAlgorithm::SrBasedRouting),

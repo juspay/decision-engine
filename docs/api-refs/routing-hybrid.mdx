@@ -5,7 +5,7 @@ description: "Curl example for /routing/hybrid."
 
 # Hybrid Routing Evaluation
 
-New integrations should use [POST /decide](/api-reference/endpoint/decide), which runs the same evaluator and returns the same `static_routing` and `dynamic_routing` sections alongside its own summary.
+New integrations should use [POST /decide](/api-reference/endpoint/decide), which runs the same evaluation and carries every fact this response does in one ranked connector list and one section per routing layer. Its page maps each field of this response to its place in `/decide`.
 
 `/routing/hybrid` evaluates the active rule path (`static_routing_request`) together with runtime SR/decision context (`dynamic_routing_request`) in one call. At least one of the two must be provided.
 

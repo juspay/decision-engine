@@ -583,14 +583,14 @@ function _runDecide(merchantId, headers, idx) {
 
   const ok = check(res, {
     "status is 200": (r) => r.status === 200,
-    "has evaluated_connectors": (r) => {
-      try { const b = JSON.parse(r.body); return Array.isArray(b.evaluated_connectors) && b.evaluated_connectors.length > 0; }
+    "has connectors": (r) => {
+      try { const b = JSON.parse(r.body); return Array.isArray(b.connectors) && b.connectors.length > 0; }
       catch { return false; }
     },
     // A call that silently degrades to rule-only is a cheaper code path, so it must not
     // pass as a decide measurement.
-    "dynamic half ran": (r) => {
-      try { const b = JSON.parse(r.body); return b.dynamic_routing?.status === "success"; }
+    "success rate ran": (r) => {
+      try { const b = JSON.parse(r.body); return b.success_rate?.status === "applied"; }
       catch { return false; }
     },
   });
@@ -599,14 +599,15 @@ function _runDecide(merchantId, headers, idx) {
   if (res.status === 200) {
     try {
       const json = JSON.parse(res.body);
-      const decision = json.dynamic_routing?.decision;
-      const gw = json.evaluated_connectors?.[0]?.gateway_name;
+      const head = json.connectors?.[0];
+      const gw = head?.gateway_name;
       if (gw) {
         gatewaySelected.add(1, { gateway: gw });
         const status  = Math.random() < 0.85 ? "CHARGED" : "FAILURE";
         const fbBody  = JSON.stringify({
           merchantId,
-          gateway: decision?.decided_gateway || gw,
+          // The decider's identifier: "name:id", or the bare name without an account.
+          gateway: head.payment_merchant_connector_id ? `${gw}:${head.payment_merchant_connector_id}` : gw,
           paymentId,
           status,
         });
@@ -621,8 +622,8 @@ function _runDecide(merchantId, headers, idx) {
           if (__ENV.VERBOSE) console.error(`[VU ${__VU}] feedback ${fbRes.status}: ${fbRes.body?.substring(0, 200)}`);
         }
       }
-      // Pod time for the dynamic half only, as on hybrid. Round-trip is the whole-call number.
-      const podMs = decision?.latency;
+      // Pod time for the success-rate layer only, as on hybrid. Round-trip is the whole-call number.
+      const podMs = json.success_rate?.diagnostics?.latency_ms;
       if (typeof podMs === "number" && podMs >= 0) {
         serverLatency.add(podMs);
         networkLatency.add(Math.max(0, res.timings.duration - podMs));

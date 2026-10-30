@@ -27,7 +27,7 @@ import {
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import { BlockedCommitment, DecideGatewayResponse, DecideResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RankedPsp, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
-import { SIMULATION_ENDPOINTS, SimulationEndpoint, decideRequestFor, decisionFromDecide, savedSimulationEndpoint } from '../../features/routing/simulator/decide'
+import { RULE_DECIDED_APPROACH, SIMULATION_ENDPOINTS, SimulationEndpoint, decideRequestFor, savedSimulationEndpoint, simulatedDecisionFromDecide, simulatedDecisionFromDecideGateway } from '../../features/routing/simulator/decide'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import {
@@ -411,8 +411,6 @@ interface RuleEvaluateResponse {
   evaluated_output?: GatewayConnector[]
   eligible_connectors?: GatewayConnector[]
 }
-
-const RULE_DECIDED_APPROACH = 'RULE_OUTPUT'
 
 /**
  * Label and badge for a routing approach — one source for both the cell and the filter.
@@ -2554,8 +2552,8 @@ export function DecisionSimulatorPage() {
         eliminationEnabled: eliminationEnabled,
       }
 
-      const decideRes = endpoint === 'decide'
-        ? decisionFromDecide(await apiPost<DecideResponse>('/decide', decideRequestFor({
+      const decision = endpoint === 'decide'
+        ? simulatedDecisionFromDecide(await apiPost<DecideResponse>('/decide', decideRequestFor({
           merchantId: effectiveMerchantId,
           paymentId,
           amount,
@@ -2569,9 +2567,9 @@ export function DecisionSimulatorPage() {
           gateways,
           eliminationEnabled,
         })))
-        : await apiPost<DecideGatewayResponse>('/decide-gateway', decideRequest)
+        : simulatedDecisionFromDecideGateway(await apiPost<DecideGatewayResponse>('/decide-gateway', decideRequest))
 
-      const decidedGateway = decideRes.decided_gateway
+      const { decidedGateway, fallbackGateways } = decision
 
       const isSuccess = drawSuccess(decidedGateway)
       const failureMode = getGwFailureMode(decidedGateway)
@@ -2583,7 +2581,7 @@ export function DecisionSimulatorPage() {
       const retryable =
         smartRetryEnabledRef.current &&
         outcome === 'FAILURE' &&
-        decideRes.fallback_gateways.length > 0 &&
+        fallbackGateways.length > 0 &&
         Math.random() < SIM_RETRYABLE_FAILURE_SHARE
 
       await apiPost<UpdateScoreResponse>('/update-gateway-score', {
@@ -2600,7 +2598,7 @@ export function DecisionSimulatorPage() {
       let retryStatus: TransactionOutcome | undefined
 
       if (retryable) {
-        retryGateway = decideRes.fallback_gateways[0]
+        retryGateway = fallbackGateways[0]
         const retrySuccess = drawSuccess(retryGateway)
         const retryFailureMode = getGwFailureMode(retryGateway)
         retryStatus = retrySuccess ? 'CHARGED' : (retryFailureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')
@@ -2616,32 +2614,20 @@ export function DecisionSimulatorPage() {
         })
       }
 
-      const mo = decideRes.multi_objective_info ?? null
+      const { fallbackGateways: _fallbacks, ...decisionFields } = decision
       return {
+        ...decisionFields,
         paymentId,
-        decidedGateway,
         status: outcome,
         timestamp: new Date().toISOString(),
-        routingApproach: decideRes.routing_approach ?? null,
-        gatewayPriorityMap: decideRes.gateway_priority_map ?? null,
         retryGateway,
         retryStatus,
-        costSavedBps: mo?.costSavedBps ?? null,
-        costWon: mo?.outcome === 'COST_WON',
-        authWon: mo?.outcome === 'AUTH_WON',
-        headAuthRate: mo?.ranked?.find((r) => r.isSrHead)?.authRate ?? null,
-        chosenAuthRate: mo?.ranked?.find((r) => r.isChosen)?.authRate ?? null,
-        margin: mo?.margin ?? null,
-        evGapTop2: mo?.evGapTop2 ?? null,
         amount,
         currency: formRef.current.currency,
         cardNetwork: cardBrand,
         cardProgram,
         cardIssuerRegion: cardIssuerCountry,
         cardScenario: variant?.label,
-        steerOutcome: decideRes.volume_steer_info?.outcome ?? null,
-        steerSrHead: decideRes.volume_steer_info?.srHead ?? null,
-        steerBlocked: decideRes.volume_steer_info?.blocked ?? null,
       }
     }
 

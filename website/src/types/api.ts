@@ -349,16 +349,88 @@ export interface DecideConnector {
   payment_merchant_connector_id?: string | null
 }
 
+// The /decide answer. `connectors` is the order to try: the first is the choice, the rest the
+// retry order. Each routing layer has a section, null when that layer did not run. New values
+// may be added to the outcome enums.
 export interface DecideResponse {
-  evaluated_connectors: { gateway_name: string; payment_merchant_connector_id: string | null }[]
-  decision: {
-    outcome: 'routed' | 'fallback' | 'no_active_algorithm' | 'no_eligible_connector'
-    source: string
-    decision_id: string
-  }
-  // The hybrid evaluator's own sections, unchanged: present exactly when /routing/hybrid includes them.
-  static_routing?: unknown
-  dynamic_routing?: { status: string; decision?: DecideGatewayResponse | null; fallback_connectors?: GatewayConnector[] | null }
+  id: string
+  object: 'routing_decision'
+  payment_id: string
+  request_id: string
+  created_at: string
+  connectors: DecideConnector[]
+  outcome: DecideOutcome
+  rule: DecideRuleSection | null
+  success_rate: DecideSuccessRateSection | null
+  cost: DecideCostSection | null
+  volume_steering: DecideVolumeSteeringSection | null
+  debit_routing: DebitRoutingOutput | null
+  warnings: DecideWarning[]
+}
+
+export interface DecideOutcome {
+  type: 'routed' | 'fallback' | 'no_connector'
+  strategy: 'rule' | 'success_rate' | 'cost' | 'volume_commitment' | 'debit_network' | 'candidate_order' | 'none'
+  reason: string
+  message: string
+}
+
+export interface DecideWarning {
+  code: string
+  param: string | null
+  message: string
+}
+
+export interface DecideRuleSection {
+  status: 'matched' | 'default_selection' | 'no_active_rule'
+  // The algorithm's output by `type`, with connectors in the DecideConnector shape.
+  output: unknown
+  selected: DecideConnector[]
+  eligible: DecideConnector[]
+}
+
+export interface DecideConnectorScore extends DecideConnector {
+  score: number
+}
+
+export interface DecideSuccessRateSection {
+  status: 'applied' | 'failed'
+  approach: string | null
+  scores: DecideConnectorScore[]
+  scheduled_outage: boolean | null
+  diagnostics: Record<string, unknown> | null
+}
+
+export interface DecideRankedConnector extends DecideConnector {
+  auth_rate: number
+  cost_bps: number | null
+  cost_source: CostSource | null
+  cost_model: Record<string, string | number | null> | null
+  ev: number
+  is_sr_head: boolean
+  is_chosen: boolean
+}
+
+export interface DecideCostSection {
+  outcome: MultiObjectiveOutcome
+  reason: string
+  cost_saved_bps: number | null
+  qualified_count: number
+  margin: number
+  ev_gap_top2: number | null
+  ranked: DecideRankedConnector[]
+}
+
+export interface DecideVolumeSteeringSection {
+  outcome: VolumeSteerInfo['outcome']
+  reason: string
+  sr_head: DecideConnector | null
+  chosen: DecideConnector | null
+  sr_gap_conceded: number | null
+  steer_rate: number | null
+  steering_count: number
+  run_id: string | null
+  blocked: { connector: DecideConnector; gate: SteerBlock }[]
 }
 
 export interface CreateRoutingRequest {

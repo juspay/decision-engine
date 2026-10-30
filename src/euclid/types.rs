@@ -297,6 +297,29 @@ pub struct RoutingEvaluateResponse {
     pub output: serde_json::Value,
     pub evaluated_output: Vec<ConnectorInfo>,
     pub eligible_connectors: Vec<ConnectorInfo>,
+    /// Why `evaluated_output` holds what it does. `status` reports several of these as
+    /// `default_selection`; `/decide` reports each one by name.
+    #[serde(skip)]
+    pub selection: RuleSelection,
+}
+
+/// How the rule layer arrived at its connectors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RuleSelection {
+    /// A rule, or a single, priority or volume-split algorithm, chose the connectors.
+    Matched,
+    /// No rule matched and no candidates were supplied, so the algorithm's default selection
+    /// answered.
+    #[default]
+    DefaultSelection,
+    /// No rule matched, so the supplied candidates answered in their own order.
+    NoRuleMatched,
+    /// None of the connectors the rule chose were candidates, so the candidates answered.
+    OutputNotEligible,
+    /// Some connectors the rule chose were not candidates and were dropped.
+    OutputPartiallyEligible,
+    /// The merchant has no active algorithm, so the candidates answered.
+    NoActiveAlgorithm,
 }
 
 // #[derive(AsChangeset, Debug, Clone, Identifiable, Insertable, Queryable, Selectable)]

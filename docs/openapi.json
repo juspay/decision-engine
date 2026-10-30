@@ -10169,7 +10169,8 @@
           },
           "payment_merchant_connector_id": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "Null for a connector named without an account."
           }
         }
       },
@@ -10177,57 +10178,464 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "evaluated_connectors",
-          "decision"
+          "id",
+          "object",
+          "payment_id",
+          "request_id",
+          "created_at",
+          "connectors",
+          "outcome",
+          "rule",
+          "success_rate",
+          "cost",
+          "volume_steering",
+          "debit_routing",
+          "warnings"
         ],
         "properties": {
-          "evaluated_connectors": {
+          "id": {
+            "type": "string",
+            "description": "Unique per decision (`dec_` + a time-ordered UUID), so a retried payment's decisions stay apart."
+          },
+          "object": {
+            "type": "string",
+            "enum": [
+              "routing_decision"
+            ]
+          },
+          "payment_id": {
+            "type": "string"
+          },
+          "request_id": {
+            "type": "string",
+            "description": "The `x-request-id` of the call, or the one minted for it. Matches the response header."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "connectors": {
             "type": "array",
             "items": {
               "$ref": "#/components/schemas/DecideResultConnector"
-            }
+            },
+            "description": "The order to try connectors in: the first is the choice, the rest the retry order. Empty when no connector is left."
           },
-          "decision": {
-            "$ref": "#/components/schemas/DecideDecision"
+          "outcome": {
+            "$ref": "#/components/schemas/DecideOutcome"
           },
-          "static_routing": {
+          "rule": {
             "oneOf": [
               {
-                "$ref": "#/components/schemas/RoutingEvaluateResponse"
+                "$ref": "#/components/schemas/DecideRuleSection"
               }
             ],
-            "description": "The rule evaluation, exactly as `/routing/hybrid` returns it. Absent when static evaluation failed."
+            "nullable": true,
+            "description": "The rule layer's result. Null when it failed; a `warnings` entry then says why."
           },
-          "dynamic_routing": {
-            "type": "object",
-            "description": "The SR decision, exactly as `/routing/hybrid` returns it: `{status, decision, fallback_connectors}`. `decision` carries `decided_gateway`, `fallback_gateways`, `routing_approach`, `gateway_priority_map`, `multi_objective_info` and `volume_steer_info`. Absent when SR did not run."
+          "success_rate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DecideSuccessRateSection"
+              }
+            ],
+            "nullable": true,
+            "description": "Null when success-rate routing did not run (the `sr-routing` setting is off, or the A/B arm has no SR layer)."
+          },
+          "cost": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DecideCostSection"
+              }
+            ],
+            "nullable": true,
+            "description": "Null when the cost step did not run."
+          },
+          "volume_steering": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DecideVolumeSteeringSection"
+              }
+            ],
+            "nullable": true,
+            "description": "Null when no volume commitment was considered."
+          },
+          "debit_routing": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DebitRoutingOutput"
+              }
+            ],
+            "nullable": true
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecideWarning"
+            },
+            "description": "Problems the decision routed around. Routing problems never fail the call."
           }
         }
       },
-      "DecideDecision": {
+      "DecideOutcome": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "strategy",
+          "reason",
+          "message"
+        ],
+        "description": "How the order was reached. New values may be added to each enum; treat unknown values as their nearest documented meaning.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "routed",
+              "fallback",
+              "no_connector"
+            ]
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "rule",
+              "success_rate",
+              "cost",
+              "volume_commitment",
+              "debit_network",
+              "candidate_order",
+              "none"
+            ],
+            "description": "The layer that set the final order."
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "rule_matched",
+              "rule_default_selection",
+              "rule_output_partially_eligible",
+              "priority_logic",
+              "priority_logic_downtime",
+              "merchant_preference",
+              "experiment_rule",
+              "success_rate_ranked",
+              "success_rate_downtime",
+              "success_rate_exploration",
+              "decider_default",
+              "preferred_connector",
+              "cost_optimized",
+              "volume_commitment",
+              "debit_network_optimized",
+              "no_rule_matched",
+              "no_active_rule",
+              "rule_output_not_eligible",
+              "rule_input_invalid",
+              "success_rate_unavailable",
+              "no_eligible_connectors",
+              "no_active_rule_no_candidates"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "For people reading logs. Not stable; branch on `reason`."
+          }
+        }
+      },
+      "DecideWarning": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "param",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "rule_evaluation_failed",
+              "rule_output_not_eligible",
+              "rule_output_partially_eligible",
+              "success_rate_failed"
+            ]
+          },
+          "param": {
+            "type": "string",
+            "nullable": true
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "DecideRuleSection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "output",
+          "selected",
+          "eligible"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "matched",
+              "default_selection",
+              "no_active_rule"
+            ]
+          },
+          "output": {
+            "type": "object",
+            "description": "The algorithm's output by `type` (`straight_through`, `priority`, `volume_split`, `volume_split_priority`), laid out as in `RoutingEvaluateResponse.output` with connectors in the `DecideResultConnector` shape."
+          },
+          "selected": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecideResultConnector"
+            },
+            "description": "The connectors the rule layer chose, narrowed to the eligible ones."
+          },
+          "eligible": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecideResultConnector"
+            },
+            "description": "The connectors the payment method can use."
+          }
+        }
+      },
+      "DecideConnectorScore": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/DecideResultConnector"
+          },
+          {
+            "type": "object",
+            "required": [
+              "score"
+            ],
+            "properties": {
+              "score": {
+                "type": "number"
+              }
+            }
+          }
+        ]
+      },
+      "DecideSuccessRateSection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "approach",
+          "scores",
+          "scheduled_outage",
+          "diagnostics"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "failed"
+            ]
+          },
+          "approach": {
+            "type": "string",
+            "nullable": true,
+            "description": "The decider's routing approach, for example `SR_SELECTION_V3_ROUTING`."
+          },
+          "scores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecideConnectorScore"
+            },
+            "description": "Every scored connector, best first."
+          },
+          "scheduled_outage": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "diagnostics": {
+            "type": "object",
+            "nullable": true,
+            "description": "The decider's internals, for support: `head_before_downtime_check`, `reset_approach`, `dimension {value, level}`, `filter_wise_gateways`, `priority_logic {tag, output}`, `dynamic_mga_enabled`, `gateway_mga_id_map`, `rust_based_decider` and `latency_ms`. Not covered by compatibility guarantees."
+          }
+        }
+      },
+      "DecideRankedConnector": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/DecideResultConnector"
+          },
+          {
+            "type": "object",
+            "required": [
+              "auth_rate",
+              "cost_bps",
+              "cost_source",
+              "cost_model",
+              "ev",
+              "is_sr_head",
+              "is_chosen"
+            ],
+            "properties": {
+              "auth_rate": {
+                "type": "number"
+              },
+              "cost_bps": {
+                "type": "number",
+                "nullable": true
+              },
+              "cost_source": {
+                "type": "string",
+                "nullable": true,
+                "enum": [
+                  "IN_HOUSE",
+                  "SEED",
+                  "HYPERSENSE"
+                ]
+              },
+              "cost_model": {
+                "type": "object",
+                "nullable": true,
+                "description": "`brand`, `variant`, `issuer`, `ccy`, `ic_category`, `pct_bps`, `fixed_fee`."
+              },
+              "ev": {
+                "type": "number"
+              },
+              "is_sr_head": {
+                "type": "boolean"
+              },
+              "is_chosen": {
+                "type": "boolean"
+              }
+            }
+          }
+        ]
+      },
+      "DecideCostSection": {
         "type": "object",
         "additionalProperties": false,
         "required": [
           "outcome",
-          "source",
-          "decision_id"
+          "reason",
+          "cost_saved_bps",
+          "qualified_count",
+          "margin",
+          "ev_gap_top2",
+          "ranked"
         ],
         "properties": {
           "outcome": {
             "type": "string",
             "enum": [
-              "routed",
-              "fallback",
-              "no_active_algorithm",
-              "no_eligible_connector"
+              "COST_WON",
+              "AUTH_WON"
             ]
           },
-          "source": {
+          "reason": {
             "type": "string"
           },
-          "decision_id": {
+          "cost_saved_bps": {
+            "type": "number",
+            "nullable": true
+          },
+          "qualified_count": {
+            "type": "integer"
+          },
+          "margin": {
+            "type": "number"
+          },
+          "ev_gap_top2": {
+            "type": "number",
+            "nullable": true
+          },
+          "ranked": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecideRankedConnector"
+            },
+            "description": "Every connector ranked on expected value, best first."
+          }
+        }
+      },
+      "DecideVolumeSteeringSection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "outcome",
+          "reason",
+          "sr_head",
+          "chosen",
+          "sr_gap_conceded",
+          "steer_rate",
+          "steering_count",
+          "run_id",
+          "blocked"
+        ],
+        "properties": {
+          "outcome": {
             "type": "string",
-            "description": "The x-request-id associated with this evaluation."
+            "enum": [
+              "STEERED",
+              "SR_PREVAILED"
+            ]
+          },
+          "reason": {
+            "type": "string"
+          },
+          "sr_head": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DecideResultConnector"
+              }
+            ],
+            "nullable": true
+          },
+          "chosen": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DecideResultConnector"
+              }
+            ],
+            "nullable": true
+          },
+          "sr_gap_conceded": {
+            "type": "number",
+            "nullable": true
+          },
+          "steer_rate": {
+            "type": "number",
+            "nullable": true
+          },
+          "steering_count": {
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "blocked": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "connector",
+                "gate"
+              ],
+              "properties": {
+                "connector": {
+                  "$ref": "#/components/schemas/DecideResultConnector"
+                },
+                "gate": {
+                  "type": "string"
+                }
+              }
+            }
           }
         }
       }

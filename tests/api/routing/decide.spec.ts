@@ -43,8 +43,35 @@ const connector = (name: string) => {
   return { gateway_name, payment_merchant_connector_id: gateway_id! }
 }
 
-/** Every connector a decision names: the winner, then its fallbacks, as a set. */
-const candidates = (decision: any) => [decision.decided_gateway, ...decision.fallback_gateways].sort()
+/** A hybrid `{gateway_name, gateway_id}` connector in the `/decide` shape. */
+const fromLegacy = (c: any) => ({ gateway_name: c.gateway_name, payment_merchant_connector_id: c.gateway_id ?? null })
+
+/** A decider `"name:id"` (or bare `"name"`) identifier in the `/decide` shape. */
+const fromIdentifier = (identifier: string) => {
+  const split = identifier.indexOf(':')
+  return split < 0
+    ? { gateway_name: identifier, payment_merchant_connector_id: null }
+    : { gateway_name: identifier.slice(0, split), payment_merchant_connector_id: identifier.slice(split + 1) }
+}
+
+const identifierOf = (c: { gateway_name: string; payment_merchant_connector_id?: string | null }) =>
+  c.payment_merchant_connector_id ? `${c.gateway_name}:${c.payment_merchant_connector_id}` : c.gateway_name
+
+/** The identifiers a `/decide` answer names, as a set: fallbacks tied on score come back in either order. */
+const candidates = (response: DecideResponse) => response.connectors.map(identifierOf).sort()
+
+/** Renames the rule output's `gateway_id` keys, as `/decide` writes its `rule.output`. */
+const renameIds = (value: any): any => Array.isArray(value)
+  ? value.map(renameIds)
+  : value && typeof value === 'object'
+    ? Object.fromEntries(Object.entries(value).map(([key, v]) => [
+      'gateway_name' in value && key === 'gateway_id' ? 'payment_merchant_connector_id' : key, renameIds(v),
+    ]))
+    : value
+
+const RULE_STATUS: Record<string, string> = {
+  success: 'matched', default_selection: 'default_selection', no_active_algorithm: 'no_active_rule',
+}
 
 /**
  * Routes payments through `/decide`, charging those that land on `winner` and failing the rest, so
@@ -53,8 +80,9 @@ const candidates = (decision: any) => [decision.decided_gateway, ...decision.fal
 async function trainScores(api: any, template: DecideRequest, winner: string) {
   for (let i = 0; i < 12; i++) {
     const body = { ...structuredClone(template), payment_id: factory.paymentId('train') }
-    const decided = (await api.raw('POST', '/decide', { body })).body.dynamic_routing?.decision?.decided_gateway
-    if (!decided) return
+    const decision: DecideResponse = (await api.raw('POST', '/decide', { body })).body
+    if (decision.success_rate?.status !== 'applied') return
+    const decided = identifierOf(decision.connectors[0])
     await api.raw('POST', '/update-gateway-score', { body: {
       merchantId: template.merchant_id, gateway: decided, gatewayReferenceId: null, paymentId: body.payment_id,
       status: decided === winner ? 'CHARGED' : 'FAILURE', enforceDynamicRoutingFailure: null,
@@ -63,30 +91,59 @@ async function trainScores(api: any, template: DecideRequest, winner: string) {
 }
 
 /**
- * A `/decide` response against the `/routing/hybrid` response for the same payment: the hybrid
- * sections match, and so does the decision they carry. SR configs here hedge 0% and scores are
- * trained to one winner, so the SR decision is deterministic; fallbacks tied on score come back in
- * either order, so they compare as a set.
+ * The field map between the `/routing/hybrid` record and the `/decide` answer for the same
+ * payment: every fact the record carries is where `/decide` puts it. SR configs here hedge 0% and
+ * scores are trained to one winner, so the SR pick is deterministic.
  */
-function expectHybridParity(decide: any, hybrid: any) {
-  expect(decide.static_routing).toEqual(hybrid.static_routing)
-  expect(decide.dynamic_routing?.status).toBe(hybrid.dynamic_routing?.status)
-  expect(decide.dynamic_routing?.fallback_connectors).toEqual(hybrid.dynamic_routing?.fallback_connectors)
-  const decision = decide.dynamic_routing?.decision
-  const legacy = hybrid.dynamic_routing?.decision
-  if (legacy) {
-    expect(decision.decided_gateway).toBe(legacy.decided_gateway)
-    expect(decision.routing_approach).toBe(legacy.routing_approach)
-    expect(decision.gateway_priority_map).toEqual(legacy.gateway_priority_map)
-    expect(candidates(decision)).toEqual(candidates(legacy))
-    expect(Boolean(decision.multi_objective_info)).toBe(Boolean(legacy.multi_objective_info))
-    expect(decision.multi_objective_info?.outcome).toBe(legacy.multi_objective_info?.outcome)
+function expectFieldMapParity(decide: DecideResponse, hybrid: any) {
+  const rule = hybrid.static_routing
+  if (rule) {
+    expect(decide.rule).toEqual({
+      status: RULE_STATUS[rule.status],
+      output: renameIds(rule.output),
+      selected: rule.evaluated_output.map(fromLegacy),
+      eligible: rule.eligible_connectors.map(fromLegacy),
+    })
   } else {
-    expect(decision).toBeUndefined()
+    expect(decide.rule).toBeNull()
   }
-  expect(decide.evaluated_connectors).toEqual(hybrid.evaluated_connectors.map((c: any) => ({
-    gateway_name: c.gateway_name, payment_merchant_connector_id: c.gateway_id,
-  })))
+
+  const sr = hybrid.dynamic_routing
+  if (sr?.status === 'success') {
+    const legacy = sr.decision
+    expect(decide.connectors[0]).toEqual(fromIdentifier(legacy.decided_gateway))
+    expect(candidates(decide)).toEqual([legacy.decided_gateway, ...legacy.fallback_gateways].sort())
+    expect(decide.success_rate).toMatchObject({
+      status: 'applied', approach: legacy.routing_approach, scheduled_outage: legacy.is_scheduled_outage,
+    })
+    // Scores are live: the call in between can move them slightly, so they compare per connector
+    // within a tolerance.
+    const scores = Object.fromEntries(decide.success_rate!.scores.map(s => [identifierOf(s), s.score]))
+    const legacyScores: Record<string, number> = legacy.gateway_priority_map ?? {}
+    expect(Object.keys(scores).sort()).toEqual(Object.keys(legacyScores).sort())
+    for (const [identifier, score] of Object.entries(legacyScores)) {
+      expect(Math.abs(scores[identifier] - score)).toBeLessThan(0.05)
+    }
+    const cost = legacy.multi_objective_info
+    if (cost) {
+      expect(decide.cost).toMatchObject({
+        outcome: cost.outcome, reason: cost.reason, cost_saved_bps: cost.costSavedBps,
+        qualified_count: cost.qualifiedCount, margin: cost.margin,
+      })
+      expect(decide.cost!.ranked.map(r => [identifierOf(r), r.cost_bps, r.is_sr_head, r.is_chosen]))
+        .toEqual((cost.ranked ?? []).map((r: any) => [r.psp, r.costBps, r.isSrHead, r.isChosen]))
+    } else {
+      expect(decide.cost).toBeNull()
+    }
+    expect(Boolean(decide.volume_steering)).toBe(Boolean(legacy.volume_steer_info))
+    expect(Boolean(decide.debit_routing)).toBe(Boolean(legacy.debit_routing_output))
+  } else if (sr?.status === 'fallback') {
+    expect(decide.success_rate?.status).toBe('failed')
+    expect(decide.connectors).toEqual(sr.fallback_connectors.map(fromLegacy))
+  } else {
+    expect(decide.success_rate).toBeNull()
+    expect(decide.connectors).toEqual((hybrid.evaluated_connectors ?? []).map(fromLegacy))
+  }
 }
 
 test.describe('Decide parity with hybrid (API)', () => {
@@ -97,7 +154,7 @@ test.describe('Decide parity with hybrid (API)', () => {
     { name: 'rule + SR + cost', rule: true, sr: true, cost: true },
   ]
   for (const scenario of scenarios) {
-    test(`answers as hybrid does: ${scenario.name}`, async ({ api, merchant }) => {
+    test(`carries every hybrid fact: ${scenario.name}`, async ({ api, merchant }) => {
       await api.createSuccessRateConfig(merchant.id, { defaultHedgingPercent: 0 })
       if (scenario.rule) {
         const created = await api.createRoutingAlgorithm(factory.priorityRoutingPayload(merchant.id, {
@@ -115,23 +172,23 @@ test.describe('Decide parity with hybrid (API)', () => {
       const response = await api.raw<DecideResponse>('POST', '/decide', { body })
       const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacyRequest(body) })
       expect(response.status).toBe(hybrid.status)
-      expectHybridParity(response.body, hybrid.body)
+      expectFieldMapParity(response.body, hybrid.body)
+      expect(response.body.warnings).toEqual([])
 
       if (scenario.sr) {
-        expect(response.body.dynamic_routing?.status).toBe('success')
-        expect(response.body.decision.source).toBe(response.body.dynamic_routing!.decision!.routing_approach)
-        expect(response.body.dynamic_routing!.decision!.decided_gateway).toBe('stripe:mca_stripe')
+        expect(response.body.outcome).toMatchObject({ type: 'routed', strategy: 'success_rate', reason: 'success_rate_ranked' })
+        expect(identifierOf(response.body.connectors[0])).toBe('stripe:mca_stripe')
         const expected = scenario.rule ? ['checkout:mca_checkout', 'stripe:mca_stripe'] : ['adyen:mca_adyen', 'checkout:mca_checkout', 'stripe:mca_stripe']
-        expect(candidates(response.body.dynamic_routing!.decision)).toEqual(expected)
+        expect(candidates(response.body)).toEqual(expected)
+        expect(response.body.rule?.status).toBe(scenario.rule ? 'matched' : 'no_active_rule')
       } else {
-        expect(response.body.dynamic_routing).toBeUndefined()
-        expect(response.body.decision).toMatchObject({ outcome: 'routed', source: 'priority' })
-        expect(response.body.evaluated_connectors.map(c => c.gateway_name)).toEqual(['checkout', 'stripe'])
+        expect(response.body.outcome).toMatchObject({ type: 'routed', strategy: 'rule', reason: 'rule_matched' })
+        expect(response.body.connectors.map(c => c.gateway_name)).toEqual(['checkout', 'stripe'])
       }
     })
   }
 
-  test('answers as hybrid does when cost overrides the SR head', async ({ api, merchant }) => {
+  test('carries every hybrid fact when cost overrides the SR head', async ({ api, merchant }) => {
     await api.createSuccessRateConfig(merchant.id, { defaultHedgingPercent: 0 })
     await api.setMerchantFeature(merchant.id, 'sr-routing', true)
     await api.setMerchantFeature(merchant.id, 'cost-savings', true)
@@ -147,15 +204,18 @@ test.describe('Decide parity with hybrid (API)', () => {
     await trainScores(api, body, 'stripe')
     const response = await api.raw<DecideResponse>('POST', '/decide', { body })
     const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacyRequest(body) })
-    expectHybridParity(response.body, hybrid.body)
-    const info = response.body.dynamic_routing!.decision!.multi_objective_info!
-    expect(info.outcome).toBe('COST_WON')
-    expect(response.body.dynamic_routing!.decision!.decided_gateway).toBe('adyen')
-    const ranked = (i: any) => i.ranked.map((r: any) => [r.psp, r.costBps, r.isChosen])
-    expect(ranked(info)).toEqual(ranked(hybrid.body.dynamic_routing.decision.multi_objective_info))
+    expectFieldMapParity(response.body, hybrid.body)
+    expect(response.body.outcome).toMatchObject({
+      type: 'routed', strategy: 'cost', reason: 'cost_optimized', message: response.body.cost!.reason,
+    })
+    expect(response.body.cost!.outcome).toBe('COST_WON')
+    expect(response.body.connectors).toEqual([
+      { gateway_name: 'adyen', payment_merchant_connector_id: null },
+      { gateway_name: 'stripe', payment_merchant_connector_id: null },
+    ])
   })
 
-  test('answers as hybrid does for connectors named without an account', async ({ api, merchant }) => {
+  test('carries every hybrid fact for connectors named without an account', async ({ api, merchant }) => {
     await api.createSuccessRateConfig(merchant.id, { defaultHedgingPercent: 0 })
     await api.setMerchantFeature(merchant.id, 'sr-routing', true)
     const body = decideRequest(merchant.id)
@@ -163,9 +223,11 @@ test.describe('Decide parity with hybrid (API)', () => {
     await trainScores(api, body, 'stripe')
     const response = await api.raw<DecideResponse>('POST', '/decide', { body })
     const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacyRequest(body) })
-    expectHybridParity(response.body, hybrid.body)
-    expect(candidates(response.body.dynamic_routing!.decision)).toEqual(['adyen', 'stripe'])
-    expect(response.body.dynamic_routing!.decision!.decided_gateway).toBe('stripe')
+    expectFieldMapParity(response.body, hybrid.body)
+    expect(response.body.connectors).toEqual([
+      { gateway_name: 'stripe', payment_merchant_connector_id: null },
+      { gateway_name: 'adyen', payment_merchant_connector_id: null },
+    ])
   })
 })
 
@@ -178,13 +240,15 @@ test.describe('Decide contract (API)', () => {
     })
     const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacyRequest(body) })
     expect(response.status).toBe(200)
-    expect(response.body.evaluated_connectors).toEqual(hybrid.body.evaluated_connectors.map((c: any) => ({
-      gateway_name: c.gateway_name, payment_merchant_connector_id: c.gateway_id,
-    })))
-    expect(response.body.decision).toEqual({ outcome: 'fallback', source: 'no_active_algorithm', decision_id: requestId })
+    expectFieldMapParity(response.body, hybrid.body)
+    expect(response.body).toMatchObject({
+      object: 'routing_decision', payment_id: body.payment_id, request_id: requestId,
+      outcome: { type: 'fallback', strategy: 'candidate_order', reason: 'no_active_rule' },
+      success_rate: null, cost: null, volume_steering: null, debit_routing: null, warnings: [],
+    })
+    expect(response.body.id).toMatch(/^dec_[0-9a-f]{32}$/)
+    expect(Number.isNaN(Date.parse(response.body.created_at))).toBe(false)
     expect(response.headers['x-request-id']).toBe(requestId)
-    expect(response.body.static_routing).toEqual(hybrid.body.static_routing)
-    expect(response.body.dynamic_routing).toBeUndefined()
   })
 
   test('matches existing rules using renamed fields and nested card data', async ({ api, merchant }) => {
@@ -208,11 +272,11 @@ test.describe('Decide contract (API)', () => {
     })
     const response = await api.raw<DecideResponse>('POST', '/decide', { body })
     const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacyRequest(body) })
-    expect(response.body.evaluated_connectors).toEqual([
+    expectFieldMapParity(response.body, hybrid.body)
+    expect(response.body.connectors).toEqual([
       { gateway_name: selected.gateway_name, payment_merchant_connector_id: selected.gateway_id },
     ])
-    expect(hybrid.body.evaluated_connectors).toEqual([selected])
-    expect(response.body.decision.outcome).toBe('routed')
+    expect(response.body.outcome).toMatchObject({ type: 'routed', strategy: 'rule', reason: 'rule_matched' })
   })
 
   for (const enabled of [false, true]) {
@@ -230,17 +294,12 @@ test.describe('Decide contract (API)', () => {
       }]
       const response = await api.raw<DecideResponse>('POST', '/decide', { body })
       const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacyRequest(body) })
-      expect(response.body.evaluated_connectors).toEqual(hybrid.body.evaluated_connectors.map((c: any) => ({
-        gateway_name: c.gateway_name, payment_merchant_connector_id: c.gateway_id,
-      })))
-      expect(response.body.decision.outcome).toBe('routed')
-      if (enabled) {
-        expect(hybrid.body.dynamic_routing?.status).toBe('success')
-        expect(response.body.decision.source).toBe(hybrid.body.dynamic_routing.decision.routing_approach)
-      } else {
-        expect(hybrid.body.dynamic_routing).toBeUndefined()
-        expect(response.body.decision.source).toBe(hybrid.body.static_routing.output.type)
-      }
+      expectFieldMapParity(response.body, hybrid.body)
+      // With one candidate the decider has nothing to rank and keeps the default order.
+      expect(response.body.outcome).toMatchObject(enabled
+        ? { type: 'routed', strategy: 'candidate_order', reason: 'decider_default' }
+        : { type: 'routed', strategy: 'rule', reason: 'rule_matched' })
+      expect(response.body.success_rate?.status ?? null).toBe(enabled ? 'applied' : null)
     })
   }
 
@@ -273,11 +332,10 @@ test.describe('Decide contract (API)', () => {
     const response = await api.raw<DecideResponse>('POST', '/decide', { body })
     const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacy })
     expect(hybrid.body.static_routing).toBeUndefined()
-    expect(response.body.evaluated_connectors).toEqual(hybrid.body.evaluated_connectors.map((c: any) => ({
-      gateway_name: c.gateway_name, payment_merchant_connector_id: c.gateway_id,
-    })))
-    expect(response.body.decision.outcome).toBe('fallback')
-    expect(response.body.decision.source).toBe('eligible_connectors')
+    expectFieldMapParity(response.body, hybrid.body)
+    expect(response.body.outcome).toMatchObject({ type: 'fallback', strategy: 'candidate_order', reason: 'rule_input_invalid' })
+    // The rule error hybrid drops is reported.
+    expect(response.body.warnings).toEqual([expect.objectContaining({ code: 'rule_evaluation_failed', param: null })])
   })
 
   test('requires the same authentication as hybrid', async ({ api }) => {
@@ -310,8 +368,10 @@ test.describe('Decide contract (API)', () => {
     const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacyRequest(body), failOnStatusCode: false })
     expect(response.status).toBe(hybrid.status)
     expect(response.status).toBe(200)
-    expect(response.body.evaluated_connectors).toEqual(hybrid.body.evaluated_connectors)
-    expect(response.body.evaluated_connectors).toEqual([])
-    expect(response.body.decision.outcome).toBe('no_eligible_connector')
+    expectFieldMapParity(response.body, hybrid.body)
+    expect(response.body.connectors).toEqual([])
+    expect(response.body.outcome).toMatchObject({ type: 'no_connector', strategy: 'none', reason: 'no_eligible_connectors' })
+    // Without candidates, a missing rule is a rule-layer error, which hybrid drops and /decide reports.
+    expect(response.body.warnings).toEqual([expect.objectContaining({ code: 'rule_evaluation_failed' })])
   })
 })
