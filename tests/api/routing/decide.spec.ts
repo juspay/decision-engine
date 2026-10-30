@@ -246,7 +246,7 @@ test.describe('Decide contract (API)', () => {
     expect(response.status).toBe(200)
     expectFieldMapParity(response.body, hybrid.body)
     expect(response.body).toMatchObject({
-      object: 'routing_decision', payment_id: body.payment_id, request_id: requestId,
+      payment_id: body.payment_id, request_id: requestId,
       outcome: { type: 'fallback', strategy: 'candidate_order', reason: 'no_active_rule' },
       success_rate: null, cost: null, volume_steering: null, debit_routing: null, warnings: [],
     })
@@ -367,8 +367,11 @@ test.describe('Decide contract (API)', () => {
     expect(hybrid.body.static_routing).toBeUndefined()
     expectFieldMapParity(response.body, hybrid.body)
     expect(response.body.outcome).toMatchObject({ type: 'fallback', strategy: 'candidate_order', reason: 'rule_input_invalid' })
-    // The rule error hybrid drops is reported.
-    expect(response.body.warnings).toEqual([expect.objectContaining({ code: 'rule_evaluation_failed', param: null })])
+    // The rule error hybrid drops is reported, by the request's own field.
+    expect(response.body.warnings).toEqual([{
+      code: 'rule_input_invalid', param: 'payment_method_sub_type',
+      message: "'unrecognized_subtype' is not a configured value for payment_method_sub_type.",
+    }])
   })
 
   test('requires the same authentication as hybrid', async ({ api }) => {

@@ -356,7 +356,6 @@ export interface DecideConnector {
 // may be added to the outcome enums.
 export interface DecideResponse {
   id: string
-  object: 'routing_decision'
   payment_id: string
   request_id: string
   created_at: string

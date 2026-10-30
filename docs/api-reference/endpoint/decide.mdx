@@ -100,7 +100,6 @@ The removed fields (`transaction_type`, EMI fields, `internal_metadata`, `order_
 ```json
 {
   "id": "dec_0192f3a1c7e47b7f9d3e2a1b4c5d6e7f",
-  "object": "routing_decision",
   "payment_id": "pay_demo",
   "request_id": "req_123",
   "created_at": "2026-10-30T09:12:44.518Z",
@@ -186,7 +185,7 @@ The removed fields (`transaction_type`, EMI fields, `internal_metadata`, `order_
 
 Each routing layer has a section, null when that layer did not run: `rule` (null when the rule layer failed), `success_rate` (null when the `sr-routing` setting is off or the A/B arm has no SR layer; `status: failed` when the decider failed and the order fell back), `cost`, `volume_steering` and `debit_routing`. `success_rate.diagnostics` carries the decider's internals for support and is not covered by compatibility guarantees.
 
-`warnings` lists problems the decision routed around: `rule_evaluation_failed` (the rule could not be evaluated, for example an attribute value the rule configuration does not know), `rule_output_not_eligible` and `rule_output_partially_eligible` (the rule chose connectors outside `eligible_connectors`), and `success_rate_failed`. Routing problems never fail the call.
+`warnings` lists problems the decision routed around: `rule_input_invalid` (a request value the routing configuration does not allow; `param` names the request field, such as `card.card_network`, and there is one warning per invalid value), `rule_evaluation_failed` (the rule could not be evaluated for another reason), `rule_output_not_eligible` and `rule_output_partially_eligible` (the rule chose connectors outside `eligible_connectors`), and `success_rate_failed`. Routing problems never fail the call.
 
 `id` is unique per decision. `request_id` matches the `x-request-id` response header.
 

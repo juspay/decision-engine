@@ -3,7 +3,7 @@ use crate::euclid::ast::{ConnectorInfo, MetadataValue, ValueType};
 use crate::euclid::types::{KeyDataType, RoutingRequest, TomlConfig};
 use crate::types::hybrid_routing::HybridRoutingRequest;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 pub mod response;
 
@@ -178,7 +178,94 @@ fn routing_value(
     .ok_or_else(|| format!("Invalid value for routing field {key}"))
 }
 
+/// One rule parameter the request supplies, and the `/decide` field it came from.
+struct RuleParameter {
+    field: String,
+    key: String,
+    value: ValueType,
+}
+
+/// A request value the routing configuration does not allow, named by its `/decide` field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidRuleInput {
+    pub field: String,
+    pub value: String,
+}
+
 impl DecideRequest {
+    /// The rule parameters this request supplies, in the order a later one replaces an earlier
+    /// one of the same key.
+    fn rule_parameters(&self, config: &TomlConfig) -> Result<Vec<RuleParameter>, String> {
+        let value = serde_json::to_value(self).map_err(|error| error.to_string())?;
+        let Some(fields) = value.as_object() else {
+            return Ok(Vec::new());
+        };
+        let mut parameters = Vec::new();
+        let mut push = |field: String, key: &str, raw: &serde_json::Value| {
+            routing_value(key, raw, config).map(|value| {
+                if let Some(value) = value {
+                    parameters.push(RuleParameter {
+                        field,
+                        key: key.to_string(),
+                        value,
+                    });
+                }
+            })
+        };
+        for (field, raw) in fields {
+            if !matches!(
+                field.as_str(),
+                "merchant_id" | "routing_config" | "card" | "metadata"
+            ) {
+                push(field.clone(), routing_key(field), raw)?;
+            }
+        }
+        push("amount".to_string(), "payment_amount", &self.amount.into())?;
+        if let Some(card) = fields.get("card").and_then(serde_json::Value::as_object) {
+            for (field, raw) in card {
+                push(format!("card.{field}"), routing_key(field), raw)?;
+            }
+        }
+        for (key, value) in self.metadata.iter().flatten() {
+            if !fields.contains_key(key) && !config.keys.keys.contains_key(key) {
+                parameters.push(RuleParameter {
+                    field: format!("metadata.{key}"),
+                    key: key.clone(),
+                    value: ValueType::MetadataVariant(MetadataValue {
+                        key: key.clone(),
+                        value: value.clone(),
+                    }),
+                });
+            }
+        }
+        Ok(parameters)
+    }
+
+    /// Every enum value the routing configuration does not allow, by its `/decide` field. The rule
+    /// layer rejects a payment carrying any of them and the candidates answer instead; this names
+    /// them all in the request's own terms.
+    pub fn invalid_rule_inputs(&self, config: &TomlConfig) -> Vec<InvalidRuleInput> {
+        self.rule_parameters(config)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|parameter| match parameter.value {
+                ValueType::EnumVariant(value)
+                    if !crate::euclid::utils::is_valid_enum_value(
+                        config,
+                        &parameter.key,
+                        &value,
+                    ) =>
+                {
+                    Some(InvalidRuleInput {
+                        field: parameter.field,
+                        value,
+                    })
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn to_hybrid_request(&self, config: &TomlConfig) -> Result<HybridRoutingRequest, String> {
         for (name, value) in [
             ("payment_id", self.payment_id.as_str()),
@@ -211,44 +298,11 @@ impl DecideRequest {
             }
         }
 
-        let value = serde_json::to_value(self).map_err(|error| error.to_string())?;
-        let mut parameters = HashMap::new();
-        if let Some(fields) = value.as_object() {
-            for (key, value) in fields {
-                if matches!(
-                    key.as_str(),
-                    "merchant_id" | "routing_config" | "card" | "metadata"
-                ) {
-                    continue;
-                }
-                let key = routing_key(key);
-                if let Some(value) = routing_value(key, value, config)? {
-                    parameters.insert(key.to_string(), Some(value));
-                }
-            }
-            if let Some(value) = routing_value("payment_amount", &self.amount.into(), config)? {
-                parameters.insert("payment_amount".to_string(), Some(value));
-            }
-            if let Some(card) = fields.get("card").and_then(serde_json::Value::as_object) {
-                for (key, value) in card {
-                    let key = routing_key(key);
-                    if let Some(value) = routing_value(key, value, config)? {
-                        parameters.insert(key.to_string(), Some(value));
-                    }
-                }
-            }
-            for (key, value) in self.metadata.iter().flatten() {
-                if !fields.contains_key(key) && !config.keys.keys.contains_key(key) {
-                    parameters.insert(
-                        key.clone(),
-                        Some(ValueType::MetadataVariant(MetadataValue {
-                            key: key.clone(),
-                            value: value.clone(),
-                        })),
-                    );
-                }
-            }
-        }
+        let parameters = self
+            .rule_parameters(config)?
+            .into_iter()
+            .map(|parameter| (parameter.key, Some(parameter.value)))
+            .collect();
         let static_request = RoutingRequest {
             payment_id: Some(self.payment_id.clone()),
             created_by: self.merchant_id.clone(),
@@ -429,6 +483,37 @@ mod tests {
         assert_eq!(actual["eliminationEnabled"], false);
         assert_eq!(actual["enableMultiObjective"], true);
         assert_eq!(actual["rankingAlgorithm"], "NTW_SR_HYBRID_ROUTING");
+        Ok(())
+    }
+
+    #[test]
+    fn decide_names_every_invalid_rule_input_by_its_own_field(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let config = config()?;
+        assert_eq!(request()?.invalid_rule_inputs(&config), Vec::new());
+
+        let mut request = request()?;
+        request.payment_method_sub_type = Some("unrecognized_subtype".to_string());
+        if let Some(card) = request.card.as_mut() {
+            card.card_network = Some("VISAA".to_string());
+            // Case does not matter, as in rule matching.
+            card.card_type = Some("CREDIT".to_string());
+        }
+        let mut actual = request.invalid_rule_inputs(&config);
+        actual.sort_by(|left, right| left.field.cmp(&right.field));
+        assert_eq!(
+            actual,
+            vec![
+                InvalidRuleInput {
+                    field: "card.card_network".to_string(),
+                    value: "VISAA".to_string(),
+                },
+                InvalidRuleInput {
+                    field: "payment_method_sub_type".to_string(),
+                    value: "unrecognized_subtype".to_string(),
+                },
+            ]
+        );
         Ok(())
     }
 

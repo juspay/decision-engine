@@ -10185,7 +10185,6 @@
         "additionalProperties": false,
         "required": [
           "id",
-          "object",
           "payment_id",
           "request_id",
           "created_at",
@@ -10202,12 +10201,6 @@
           "id": {
             "type": "string",
             "description": "Unique per decision (`dec_` + a time-ordered UUID), so a retried payment's decisions stay apart."
-          },
-          "object": {
-            "type": "string",
-            "enum": [
-              "routing_decision"
-            ]
           },
           "payment_id": {
             "type": "string"
@@ -10360,6 +10353,7 @@
           "code": {
             "type": "string",
             "enum": [
+              "rule_input_invalid",
               "rule_evaluation_failed",
               "rule_output_not_eligible",
               "rule_output_partially_eligible",
@@ -10368,7 +10362,8 @@
           },
           "param": {
             "type": "string",
-            "nullable": true
+            "nullable": true,
+            "description": "The request field the warning is about, such as `card.card_network`, when there is one."
           },
           "message": {
             "type": "string"

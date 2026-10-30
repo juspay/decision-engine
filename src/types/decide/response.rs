@@ -8,7 +8,7 @@
 //! so the sections that hold them are snake_case copies. Types that already serialize in
 //! snake_case are reused as they are.
 
-use super::DecideConnector;
+use super::{DecideConnector, InvalidRuleInput};
 use crate::decider::gatewaydecider::multi_objective::{
     CostModel, CostSource, MultiObjectiveInfo, MultiObjectiveOutcome, PspSummary, RankedPsp,
 };
@@ -29,7 +29,6 @@ use std::collections::HashMap;
 pub struct DecideResponse {
     /// Unique per decision, so a retried payment's decisions stay apart.
     pub id: String,
-    pub object: &'static str,
     pub payment_id: String,
     /// The call's `x-request-id`, or the one minted for it.
     pub request_id: String,
@@ -238,11 +237,21 @@ impl Outcome {
 #[derive(Debug, Serialize)]
 pub struct Warning {
     pub code: &'static str,
-    pub param: Option<&'static str>,
+    /// The request field the warning is about, when there is one.
+    pub param: Option<String>,
     pub message: String,
 }
 
 impl Warning {
+    fn invalid_rule_input(input: InvalidRuleInput) -> Self {
+        let InvalidRuleInput { field, value } = input;
+        Self {
+            code: "rule_input_invalid",
+            message: format!("'{value}' is not a configured value for {field}."),
+            param: Some(field),
+        }
+    }
+
     fn for_selection(selection: RuleSelection) -> Option<Self> {
         let (code, message) = match selection {
             RuleSelection::OutputNotEligible => (
@@ -260,7 +269,7 @@ impl Warning {
         };
         Some(Self {
             code,
-            param: Some("routing_config.eligible_connectors"),
+            param: Some("routing_config.eligible_connectors".to_string()),
             message: message.to_string(),
         })
     }
@@ -707,8 +716,11 @@ impl From<DecidedGateway> for Layers {
 }
 
 impl DecideResponse {
+    /// `invalid_inputs` are the request values the routing configuration does not allow; they name
+    /// a failed rule layer's cause in the request's own fields.
     pub fn from_evaluation(
         evaluation: RoutingEvaluation,
+        invalid_inputs: Vec<InvalidRuleInput>,
         payment_id: String,
         request_id: String,
     ) -> Self {
@@ -721,12 +733,21 @@ impl DecideResponse {
         let selection = static_routing.as_ref().map(|response| response.selection);
         let rule_outcome = Outcome::of_rule(selection);
 
-        let mut warnings: Vec<Warning> = static_error
-            .map(|message| Warning {
+        // The rule layer stops at the first value it rejects and names it by its internal key, so
+        // the request's own invalid fields stand in for its error when there are any.
+        let rule_failure: Vec<Warning> = match static_error {
+            Some(_) if !invalid_inputs.is_empty() => invalid_inputs
+                .into_iter()
+                .map(Warning::invalid_rule_input)
+                .collect(),
+            Some(message) => vec![Warning {
                 code: "rule_evaluation_failed",
                 param: None,
                 message,
-            })
+            }],
+            None => Vec::new(),
+        };
+        let mut warnings: Vec<Warning> = rule_failure
             .into_iter()
             .chain(selection.and_then(Warning::for_selection))
             .collect();
@@ -783,7 +804,6 @@ impl DecideResponse {
 
         Self {
             id: format!("dec_{}", uuid::Uuid::now_v7().simple()),
-            object: "routing_decision",
             payment_id,
             request_id,
             created_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
@@ -825,8 +845,16 @@ mod tests {
     }
 
     fn decide(evaluation: RoutingEvaluation) -> Result<Value, serde_json::Error> {
+        decide_with(evaluation, Vec::new())
+    }
+
+    fn decide_with(
+        evaluation: RoutingEvaluation,
+        invalid_inputs: Vec<InvalidRuleInput>,
+    ) -> Result<Value, serde_json::Error> {
         serde_json::to_value(DecideResponse::from_evaluation(
             evaluation,
+            invalid_inputs,
             "pay_1".to_string(),
             "req_1".to_string(),
         ))
@@ -849,7 +877,6 @@ mod tests {
         })?;
         let stripe = json!({"gateway_name": "stripe", "payment_merchant_connector_id": "mca_s"});
         let adyen = json!({"gateway_name": "adyen", "payment_merchant_connector_id": "mca_a"});
-        assert_eq!(actual["object"], "routing_decision");
         assert!(actual["id"]
             .as_str()
             .is_some_and(|id| id.starts_with("dec_")));
@@ -1006,6 +1033,42 @@ mod tests {
         assert_eq!(
             actual["warnings"][0]["message"],
             "Invalid value for card_network"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn invalid_request_values_replace_the_rule_layer_error() -> Result<(), serde_json::Error> {
+        let actual = decide_with(
+            RoutingEvaluation {
+                static_routing: None,
+                static_error: Some(
+                    "Invalid enum value 'unrecognized_subtype' for key 'payment_method_type'"
+                        .to_string(),
+                ),
+                success_rate: SuccessRateOutcome::Skipped,
+                evaluated_connectors: Some(stripe_adyen()),
+            },
+            vec![
+                InvalidRuleInput {
+                    field: "payment_method_sub_type".to_string(),
+                    value: "unrecognized_subtype".to_string(),
+                },
+                InvalidRuleInput {
+                    field: "card.card_network".to_string(),
+                    value: "VISAA".to_string(),
+                },
+            ],
+        )?;
+        assert_eq!(actual["outcome"]["reason"], "rule_input_invalid");
+        assert_eq!(
+            actual["warnings"],
+            json!([
+                {"code": "rule_input_invalid", "param": "payment_method_sub_type",
+                 "message": "'unrecognized_subtype' is not a configured value for payment_method_sub_type."},
+                {"code": "rule_input_invalid", "param": "card.card_network",
+                 "message": "'VISAA' is not a configured value for card.card_network."}
+            ])
         );
         Ok(())
     }
