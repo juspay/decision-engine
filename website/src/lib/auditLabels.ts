@@ -41,6 +41,23 @@ export function isHybridFlow(flowType: string) {
   return flowType.startsWith('routing_hybrid_')
 }
 
+/**
+ * `/decide` and `/routing/hybrid` run the same evaluation and record the same flow types, so an
+ * evaluation event is named by its route (or, for its decision, its stage): the endpoint that
+ * answered.
+ */
+function isEvaluationEvent(event: Pick<PaymentAuditEvent, 'flow_type' | 'event_stage'>) {
+  return (
+    isHybridFlow(event.flow_type || '') ||
+    event.event_stage === 'hybrid_routed' ||
+    event.event_stage === 'decide_routed'
+  )
+}
+
+function evaluationLabel(event: Pick<PaymentAuditEvent, 'route' | 'event_stage'>) {
+  return event.route === 'decide' || event.event_stage === 'decide_routed' ? 'Decide' : 'Hybrid Routing'
+}
+
 export function isDecisionFlow(flowType: string) {
   return (
     (flowType.startsWith('decide_gateway_') || isHybridFlow(flowType)) && !isRuleHitFlow(flowType)
@@ -49,6 +66,7 @@ export function isDecisionFlow(flowType: string) {
 
 export function routeLabel(route?: string | null) {
   if (!route) return 'Unknown route'
+  if (route === 'decide') return 'Decide'
   if (route === 'decision_gateway' || route === 'decide_gateway') return 'Decide Gateway'
   if (route === 'update_gateway_score') return 'Update Gateway'
   if (route === 'routing_evaluate') return 'Rule Evaluate'
@@ -56,9 +74,10 @@ export function routeLabel(route?: string | null) {
   return humanizeAuditValue(route)
 }
 
-export function eventTypeLabel(eventType?: string | null) {
+export function eventTypeLabel(event: Pick<PaymentAuditEvent, 'flow_type' | 'route' | 'event_stage'>) {
+  const eventType = event.flow_type
   if (!eventType) return 'Unknown event'
-  if (isHybridFlow(eventType)) return 'Hybrid Routing'
+  if (isHybridFlow(eventType)) return evaluationLabel(event)
   if (eventType === 'decide_gateway_decision') return 'Decide Gateway'
   if (
     eventType === 'update_gateway_score_update' ||
@@ -73,7 +92,7 @@ export function eventTypeLabel(eventType?: string | null) {
 
 export function stageLabel(event: PaymentAuditEvent) {
   const flowType = flowTypeValue(event)
-  if (event.event_stage === 'hybrid_routed' || isHybridFlow(flowType)) return 'Hybrid Routing'
+  if (isEvaluationEvent(event)) return evaluationLabel(event)
   if (event.event_stage === 'gateway_decided') return 'Decide Gateway'
   if (event.event_stage === 'score_updated' || event.event_stage === 'score_skipped') return 'Update Gateway'
   if (event.event_stage === 'rule_applied') return 'Rule Evaluate'
@@ -89,7 +108,7 @@ export function stageLabel(event: PaymentAuditEvent) {
  */
 export function eventPhase(event: PaymentAuditEvent, previewPhase = 'Decision') {
   const flowType = flowTypeValue(event)
-  if (isHybridFlow(flowType) || event.event_stage === 'hybrid_routed') return 'Hybrid Routing'
+  if (isEvaluationEvent(event)) return evaluationLabel(event)
   if (isDecisionFlow(flowType) || event.event_stage === 'gateway_decided') return 'Decide Gateway'
   if (isRuleHitFlow(flowType) || event.event_stage === 'rule_applied') return 'Rule Evaluate'
   if (isUpdateFlow(flowType) || event.event_stage === 'score_updated') return 'Update Gateway'

@@ -249,6 +249,7 @@ pub fn payment_audit_stage_label(stage: String) -> String {
     match stage.as_str() {
         "gateway_decided" => "Decide Gateway".to_string(),
         "hybrid_routed" => "Hybrid Routing".to_string(),
+        "decide_routed" => "Decide".to_string(),
         "score_updated" | "score_skipped" => "Update Gateway".to_string(),
         "rule_applied" => "Rule Evaluate".to_string(),
         "preview_evaluated" => "Preview Result".to_string(),
@@ -260,4 +261,23 @@ pub fn payment_audit_route_label(route: String) -> String {
     AnalyticsRoute::from_stored_value(&route)
         .map(|route| route.payment_audit_label().to_string())
         .unwrap_or(route)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn each_endpoint_decision_stage_is_named_by_its_endpoint() {
+        assert_eq!(payment_audit_stage_label("decide_routed".into()), "Decide");
+        assert_eq!(
+            payment_audit_stage_label("hybrid_routed".into()),
+            "Hybrid Routing"
+        );
+        assert_eq!(payment_audit_route_label("decide".into()), "Decide");
+        assert_eq!(
+            payment_audit_route_label("routing_hybrid".into()),
+            "Hybrid Routing"
+        );
+    }
 }

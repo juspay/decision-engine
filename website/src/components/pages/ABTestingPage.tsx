@@ -422,8 +422,8 @@ function ControlArmSummary({ arm, source, runningExperimentName, algorithms, alg
             <span className="mb-1 flex items-center gap-1 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">
               SR settings
               <InfoHint text={source === 'current'
-                ? "Follows the merchant's Auth Rate routing, Autopilot and Cost savings settings. SR applies on /decide-gateway and on /routing/hybrid requests that include dynamic_routing_request."
-                : 'SR applies on /decide-gateway and on /routing/hybrid requests that include dynamic_routing_request.'} />
+                ? "Follows the merchant's Auth Rate routing, Autopilot and Cost savings settings. SR applies on /decide-gateway, /decide, and /routing/hybrid requests that include dynamic_routing_request."
+                : 'SR applies on /decide-gateway, /decide, and /routing/hybrid requests that include dynamic_routing_request.'} />
             </span>
             {arm.srStrategy ? (
               <>
@@ -1211,7 +1211,7 @@ function ExperimentDetailPanel({
         {!endpoint ? (
           <p className="text-sm italic text-slate-500">
             {hybridOnly
-              ? 'Both arms are identical on hybrid routing, so this experiment does not split its traffic.'
+              ? 'Both arms are identical on /decide and /routing/hybrid, so this experiment does not split its traffic.'
               : 'Both arms are identical on every selected endpoint, so this experiment does not split traffic.'}
           </p>
         ) : isLoading && !results ? (

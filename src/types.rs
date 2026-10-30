@@ -30,6 +30,7 @@ pub mod payment;
 pub mod payment_flow;
 pub mod payment_instrument;
 pub mod routing_configuration;
+pub mod routing_evaluation;
 pub mod service_configuration;
 pub mod source_object_id;
 pub mod tenant;

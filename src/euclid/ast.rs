@@ -177,6 +177,31 @@ pub struct ConnectorInfo {
     pub gateway_id: Option<String>,
 }
 
+impl ConnectorInfo {
+    /// The identifier the success-rate decider scores this connector by: `"name:id"`, or the
+    /// bare name for a connector without an account.
+    pub fn identifier(&self) -> String {
+        match &self.gateway_id {
+            Some(id) => format!("{}:{}", self.gateway_name, id),
+            None => self.gateway_name.clone(),
+        }
+    }
+
+    /// Reads an identifier written by [`Self::identifier`].
+    pub fn from_identifier(identifier: &str) -> Self {
+        match identifier.split_once(':') {
+            Some((gateway_name, id)) => Self {
+                gateway_name: gateway_name.to_string(),
+                gateway_id: Some(id.to_string()),
+            },
+            None => Self {
+                gateway_name: identifier.to_string(),
+                gateway_id: None,
+            },
+        }
+    }
+}
+
 impl fmt::Display for ConnectorInfo {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match &self.gateway_id {

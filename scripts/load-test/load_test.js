@@ -18,6 +18,8 @@
  *   RULE_BASED_ROUTING → POST /routing/evaluate (setup creates + activates a priority rule once)
  *   HYBRID_ROUTING     → POST /routing/hybrid   (rule narrows the candidates, SR picks among them;
  *                        needs the same priority rule plus the sr_routing_enabled feature flag)
+ *   DECIDE             → POST /decide           (the same evaluation as HYBRID_ROUTING, through the
+ *                        flat /decide request; same rule and feature flag)
  *
  * Never commit TOKEN values.
  */
@@ -36,7 +38,9 @@ const ALGORITHM = __ENV.ALGORITHM || "SR_BASED_ROUTING";
 // Think time between iterations. 0 lets each VU run flat out (saturation run).
 const SLEEP     = parseFloat(__ENV.SLEEP ?? "0.1");
 
-const VALID_ALGORITHMS = ["SR_BASED_ROUTING", "RULE_BASED_ROUTING", "HYBRID_ROUTING"];
+const VALID_ALGORITHMS = ["SR_BASED_ROUTING", "RULE_BASED_ROUTING", "HYBRID_ROUTING", "DECIDE"];
+// `/decide` and `/routing/hybrid` run the same rule-then-SR evaluation and need the same setup.
+const RULE_THEN_SR = ALGORITHM === "HYBRID_ROUTING" || ALGORITHM === "DECIDE";
 if (!VALID_ALGORITHMS.includes(ALGORITHM)) {
   throw new Error(`Unknown ALGORITHM="${ALGORITHM}". Valid: ${VALID_ALGORITHMS.join(", ")}`);
 }
@@ -137,10 +141,10 @@ const LOAD_TEST_EMAIL    = "loadtest@decision-engine.local";
 const LOAD_TEST_PASSWORD = "LoadTest#123456";
 const ADMIN_SECRET       = __ENV.ADMIN_SECRET || "test_admin";
 
-// Both the rule-only and the hybrid flow evaluate the active priority rule.
-const NEEDS_ROUTING_RULE = ALGORITHM === "RULE_BASED_ROUTING" || ALGORITHM === "HYBRID_ROUTING";
+// The rule-only, hybrid and decide flows all evaluate the active priority rule.
+const NEEDS_ROUTING_RULE = ALGORITHM === "RULE_BASED_ROUTING" || RULE_THEN_SR;
 
-// `/routing/hybrid` runs its dynamic half only when `sr_routing_enabled` covers the merchant;
+// `/routing/hybrid` and `/decide` run their dynamic half only when `sr_routing_enabled` covers the merchant;
 // without it the endpoint answers 200 with rule output alone and "dynamic half ran" fails.
 function _ensureSrRoutingEnabled(baseUrl, token, merchantId, jsonHeaders) {
   const authHeaders = { ...jsonHeaders, Authorization: `Bearer ${token}` };
@@ -157,7 +161,7 @@ function _ensureSrRoutingEnabled(baseUrl, token, merchantId, jsonHeaders) {
   // and would read as a surprisingly good result.
   fail(
     `Could not enable sr-routing for ${merchantId} (${res.status}): ${res.body}. ` +
-    `/routing/hybrid would skip its SR half and the measurement would be of the ` +
+    `${ALGORITHM} would skip its SR half and the measurement would be of the ` +
     `static fallback path.`
   );
 }
@@ -188,7 +192,7 @@ export function setup() {
     if (NEEDS_ROUTING_RULE) {
       _ensureRoutingRule(baseUrl, data.token, data.merchantId, jsonHeaders);
     }
-    if (ALGORITHM === "HYBRID_ROUTING") {
+    if (RULE_THEN_SR) {
       _ensureSrRoutingEnabled(baseUrl, data.token, data.merchantId, jsonHeaders);
     }
     return data;
@@ -202,7 +206,7 @@ export function setup() {
     if (NEEDS_ROUTING_RULE) {
       _ensureRoutingRule(baseUrl, data.token, data.merchantId, jsonHeaders);
     }
-    if (ALGORITHM === "HYBRID_ROUTING") {
+    if (RULE_THEN_SR) {
       _ensureSrRoutingEnabled(baseUrl, data.token, data.merchantId, jsonHeaders);
     }
     return data;
@@ -251,7 +255,7 @@ export function setup() {
   if (NEEDS_ROUTING_RULE) {
     _ensureRoutingRule(baseUrl, token, merchantId, jsonHeaders);
   }
-  if (ALGORITHM === "HYBRID_ROUTING") {
+  if (RULE_THEN_SR) {
     _ensureSrRoutingEnabled(baseUrl, token, merchantId, jsonHeaders);
   }
 
@@ -328,6 +332,8 @@ export default function (data) {
     _runRuleEvaluate(merchantId, headers, idx);
   } else if (ALGORITHM === "HYBRID_ROUTING") {
     _runHybrid(merchantId, headers, idx);
+  } else if (ALGORITHM === "DECIDE") {
+    _runDecide(merchantId, headers, idx);
   } else {
     _runSrDecide(merchantId, headers, idx);
   }
@@ -546,6 +552,89 @@ function _runHybrid(merchantId, headers, idx) {
   }
 }
 
+function _runDecide(merchantId, headers, idx) {
+  const ruleVariant = rulePayloads[idx];
+  const srVariant   = srPayloads[idx];
+  const paymentId   = `lt_dec_${Date.now()}_${__VU}_${__ITER}`;
+
+  // The payment HYBRID_ROUTING sends, as one flat request. No candidates: the rule's output is
+  // what SR ranks, as on hybrid.
+  const body = JSON.stringify({
+    payment_id:              paymentId,
+    merchant_id:             merchantId,
+    amount:                  ruleVariant.amount,
+    currency:                srVariant.currency,
+    authentication_type:     ruleVariant.authentication_type,
+    routing_config: {
+      algorithm_for:       "payment",
+      ranking_algorithm:   "SR_BASED_ROUTING",
+      elimination_enabled: false,
+      eligible_connectors: [],
+    },
+  });
+
+  decideReqs.add(1);
+  const res = http.post(
+    `${envDefaults.baseUrl}/decide`,
+    body,
+    { headers, tags: { name: "decide" } }
+  );
+  latencyTrend.add(res.timings.duration);
+
+  const ok = check(res, {
+    "status is 200": (r) => r.status === 200,
+    "has connectors": (r) => {
+      try { const b = JSON.parse(r.body); return Array.isArray(b.connectors) && b.connectors.length > 0; }
+      catch { return false; }
+    },
+    // A call that silently degrades to rule-only is a cheaper code path, so it must not
+    // pass as a decide measurement.
+    "success rate ran": (r) => {
+      try { const b = JSON.parse(r.body); return b.success_rate?.status === "applied"; }
+      catch { return false; }
+    },
+  });
+  successRate.add(ok);
+
+  if (res.status === 200) {
+    try {
+      const json = JSON.parse(res.body);
+      const head = json.connectors?.[0];
+      const gw = head?.gateway_name;
+      if (gw) {
+        gatewaySelected.add(1, { gateway: gw });
+        const status  = Math.random() < 0.85 ? "CHARGED" : "FAILURE";
+        const fbBody  = JSON.stringify({
+          merchantId,
+          // The decider's identifier: "name:id", or the bare name without an account.
+          gateway: head.payment_merchant_connector_id ? `${gw}:${head.payment_merchant_connector_id}` : gw,
+          paymentId,
+          status,
+        });
+        const fbRes = http.post(
+          `${envDefaults.baseUrl}/update-gateway-score`,
+          fbBody,
+          { headers, tags: { name: "feedback" }, responseCallback: http.expectedStatuses({ min: 200, max: 299 }) }
+        );
+        feedbackLatency.add(fbRes.timings.duration);
+        if (fbRes.status < 200 || fbRes.status >= 300) {
+          feedbackErrors.add(1);
+          if (__ENV.VERBOSE) console.error(`[VU ${__VU}] feedback ${fbRes.status}: ${fbRes.body?.substring(0, 200)}`);
+        }
+      }
+      // Pod time for the success-rate layer only, as on hybrid. Round-trip is the whole-call number.
+      const podMs = json.success_rate?.diagnostics?.latency_ms;
+      if (typeof podMs === "number" && podMs >= 0) {
+        serverLatency.add(podMs);
+        networkLatency.add(Math.max(0, res.timings.duration - podMs));
+      }
+    } catch (_) { gatewayErrors.add(1); }
+  } else {
+    gatewayErrors.add(1);
+    if (__ENV.VERBOSE) console.error(`[VU ${__VU}] DECIDE ${res.status}: ${res.body?.substring(0, 200)}`);
+  }
+}
+
 // ── Summary ───────────────────────────────────────────────────────────────────
 
 export function handleSummary(data) {
@@ -595,6 +684,7 @@ export function handleSummary(data) {
   const ENDPOINTS = {
     RULE_BASED_ROUTING: "/routing/evaluate",
     HYBRID_ROUTING:     "/routing/hybrid",
+    DECIDE:             "/decide",
     SR_BASED_ROUTING:   "/decide-gateway",
   };
   const endpoint = ENDPOINTS[ALGORITHM];

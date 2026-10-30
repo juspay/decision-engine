@@ -3,7 +3,9 @@ use crate::euclid::ast::{ConnectorInfo, MetadataValue, ValueType};
 use crate::euclid::types::{KeyDataType, RoutingRequest, TomlConfig};
 use crate::types::hybrid_routing::HybridRoutingRequest;
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
+
+pub mod response;
 
 #[derive(Debug, Clone, Serialize, Deserialize, crate::auth::MerchantScoped)]
 #[serde(deny_unknown_fields)]
@@ -19,6 +21,9 @@ pub struct DecideRequest {
     pub capture_method: Option<String>,
     pub mandate_type: Option<String>,
     pub mandate_acceptance_type: Option<String>,
+    /// The rule key of the same name: `non_mandate`, `setup_mandate`, `ppt_mandate`, … Rules route
+    /// mandate payments by it, such as a processor-token charge to the processor holding the token.
+    pub payment_type: Option<String>,
     pub setup_future_usage: Option<String>,
     pub transaction_initiator: Option<String>,
     pub surcharge_amount: Option<u64>,
@@ -79,21 +84,35 @@ pub struct DecideRoutingConfig {
 #[serde(deny_unknown_fields)]
 pub struct DecideConnector {
     pub gateway_name: String,
-    pub payment_merchant_connector_id: String,
+    /// The connector account. A connector named without one is matched and scored by its
+    /// gateway name alone, as a hybrid `fallback_output` entry without a `gateway_id` is.
+    #[serde(default)]
+    pub payment_merchant_connector_id: Option<String>,
 }
 
 impl DecideConnector {
     pub fn identifier(&self) -> String {
-        format!(
-            "{}:{}",
-            self.gateway_name, self.payment_merchant_connector_id
-        )
+        self.to_legacy().identifier()
+    }
+
+    /// Reads the decider's `"name:id"` identifier, or a bare `"name"`.
+    pub fn from_identifier(identifier: &str) -> Self {
+        ConnectorInfo::from_identifier(identifier).into()
     }
 
     fn to_legacy(&self) -> ConnectorInfo {
         ConnectorInfo {
             gateway_name: self.gateway_name.clone(),
-            gateway_id: Some(self.payment_merchant_connector_id.clone()),
+            gateway_id: self.payment_merchant_connector_id.clone(),
+        }
+    }
+}
+
+impl From<ConnectorInfo> for DecideConnector {
+    fn from(connector: ConnectorInfo) -> Self {
+        Self {
+            gateway_name: connector.gateway_name,
+            payment_merchant_connector_id: connector.gateway_id,
         }
     }
 }
@@ -159,7 +178,94 @@ fn routing_value(
     .ok_or_else(|| format!("Invalid value for routing field {key}"))
 }
 
+/// One rule parameter the request supplies, and the `/decide` field it came from.
+struct RuleParameter {
+    field: String,
+    key: String,
+    value: ValueType,
+}
+
+/// A request value the routing configuration does not allow, named by its `/decide` field.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct InvalidRuleInput {
+    pub field: String,
+    pub value: String,
+}
+
 impl DecideRequest {
+    /// The rule parameters this request supplies, in the order a later one replaces an earlier
+    /// one of the same key.
+    fn rule_parameters(&self, config: &TomlConfig) -> Result<Vec<RuleParameter>, String> {
+        let value = serde_json::to_value(self).map_err(|error| error.to_string())?;
+        let Some(fields) = value.as_object() else {
+            return Ok(Vec::new());
+        };
+        let mut parameters = Vec::new();
+        let mut push = |field: String, key: &str, raw: &serde_json::Value| {
+            routing_value(key, raw, config).map(|value| {
+                if let Some(value) = value {
+                    parameters.push(RuleParameter {
+                        field,
+                        key: key.to_string(),
+                        value,
+                    });
+                }
+            })
+        };
+        for (field, raw) in fields {
+            if !matches!(
+                field.as_str(),
+                "merchant_id" | "routing_config" | "card" | "metadata"
+            ) {
+                push(field.clone(), routing_key(field), raw)?;
+            }
+        }
+        push("amount".to_string(), "payment_amount", &self.amount.into())?;
+        if let Some(card) = fields.get("card").and_then(serde_json::Value::as_object) {
+            for (field, raw) in card {
+                push(format!("card.{field}"), routing_key(field), raw)?;
+            }
+        }
+        for (key, value) in self.metadata.iter().flatten() {
+            if !fields.contains_key(key) && !config.keys.keys.contains_key(key) {
+                parameters.push(RuleParameter {
+                    field: format!("metadata.{key}"),
+                    key: key.clone(),
+                    value: ValueType::MetadataVariant(MetadataValue {
+                        key: key.clone(),
+                        value: value.clone(),
+                    }),
+                });
+            }
+        }
+        Ok(parameters)
+    }
+
+    /// Every enum value the routing configuration does not allow, by its `/decide` field. The rule
+    /// layer rejects a payment carrying any of them and the candidates answer instead; this names
+    /// them all in the request's own terms.
+    pub fn invalid_rule_inputs(&self, config: &TomlConfig) -> Vec<InvalidRuleInput> {
+        self.rule_parameters(config)
+            .unwrap_or_default()
+            .into_iter()
+            .filter_map(|parameter| match parameter.value {
+                ValueType::EnumVariant(value)
+                    if !crate::euclid::utils::is_valid_enum_value(
+                        config,
+                        &parameter.key,
+                        &value,
+                    ) =>
+                {
+                    Some(InvalidRuleInput {
+                        field: parameter.field,
+                        value,
+                    })
+                }
+                _ => None,
+            })
+            .collect()
+    }
+
     pub fn to_hybrid_request(&self, config: &TomlConfig) -> Result<HybridRoutingRequest, String> {
         for (name, value) in [
             ("payment_id", self.payment_id.as_str()),
@@ -180,7 +286,10 @@ impl DecideRequest {
             .chain(self.routing_config.preferred_connectors.iter().flatten())
         {
             if connector.gateway_name.trim().is_empty()
-                || connector.payment_merchant_connector_id.trim().is_empty()
+                || connector
+                    .payment_merchant_connector_id
+                    .as_deref()
+                    .is_some_and(|id| id.trim().is_empty())
             {
                 return Err(
                     "Connector names and payment_merchant_connector_id must not be empty"
@@ -189,44 +298,11 @@ impl DecideRequest {
             }
         }
 
-        let value = serde_json::to_value(self).map_err(|error| error.to_string())?;
-        let mut parameters = HashMap::new();
-        if let Some(fields) = value.as_object() {
-            for (key, value) in fields {
-                if matches!(
-                    key.as_str(),
-                    "merchant_id" | "routing_config" | "card" | "metadata"
-                ) {
-                    continue;
-                }
-                let key = routing_key(key);
-                if let Some(value) = routing_value(key, value, config)? {
-                    parameters.insert(key.to_string(), Some(value));
-                }
-            }
-            if let Some(value) = routing_value("payment_amount", &self.amount.into(), config)? {
-                parameters.insert("payment_amount".to_string(), Some(value));
-            }
-            if let Some(card) = fields.get("card").and_then(serde_json::Value::as_object) {
-                for (key, value) in card {
-                    let key = routing_key(key);
-                    if let Some(value) = routing_value(key, value, config)? {
-                        parameters.insert(key.to_string(), Some(value));
-                    }
-                }
-            }
-            for (key, value) in self.metadata.iter().flatten() {
-                if !fields.contains_key(key) && !config.keys.keys.contains_key(key) {
-                    parameters.insert(
-                        key.clone(),
-                        Some(ValueType::MetadataVariant(MetadataValue {
-                            key: key.clone(),
-                            value: value.clone(),
-                        })),
-                    );
-                }
-            }
-        }
+        let parameters = self
+            .rule_parameters(config)?
+            .into_iter()
+            .map(|parameter| (parameter.key, Some(parameter.value)))
+            .collect();
         let static_request = RoutingRequest {
             payment_id: Some(self.payment_id.clone()),
             created_by: self.merchant_id.clone(),
@@ -244,78 +320,6 @@ impl DecideRequest {
         Ok(HybridRoutingRequest {
             static_routing_request: Some(static_request),
             dynamic_routing_request: Some(dynamic),
-        })
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DecideResponse {
-    pub evaluated_connectors: Vec<DecideResultConnector>,
-    pub decision: DecideDecision,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DecideResultConnector {
-    pub gateway_name: String,
-    pub payment_merchant_connector_id: Option<String>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DecideDecision {
-    pub outcome: String,
-    pub source: String,
-    pub decision_id: String,
-}
-
-impl DecideResponse {
-    pub fn from_hybrid(
-        value: &serde_json::Value,
-        decision_id: String,
-    ) -> Result<Self, serde_json::Error> {
-        let connectors: Vec<ConnectorInfo> =
-            serde_json::from_value(value["evaluated_connectors"].clone())?;
-        let static_status = value["static_routing"]["status"].as_str();
-        let dynamic_status = value["dynamic_routing"]["status"].as_str();
-        let outcome = if connectors.is_empty() {
-            if static_status == Some("no_active_algorithm") {
-                "no_active_algorithm"
-            } else {
-                "no_eligible_connector"
-            }
-        } else if dynamic_status == Some("fallback")
-            || (dynamic_status != Some("success")
-                && (static_status.is_none() || static_status == Some("no_active_algorithm")))
-        {
-            "fallback"
-        } else {
-            "routed"
-        };
-        let source = if dynamic_status == Some("success") {
-            value["dynamic_routing"]["decision"]["routing_approach"]
-                .as_str()
-                .unwrap_or("dynamic_routing")
-        } else if static_status == Some("no_active_algorithm") {
-            "no_active_algorithm"
-        } else if static_status.is_none() {
-            "eligible_connectors"
-        } else {
-            value["static_routing"]["output"]["type"]
-                .as_str()
-                .unwrap_or("static_routing")
-        };
-        Ok(Self {
-            evaluated_connectors: connectors
-                .into_iter()
-                .map(|connector| DecideResultConnector {
-                    gateway_name: connector.gateway_name,
-                    payment_merchant_connector_id: connector.gateway_id,
-                })
-                .collect(),
-            decision: DecideDecision {
-                outcome: outcome.to_string(),
-                source: source.to_string(),
-                decision_id,
-            },
         })
     }
 }
@@ -483,12 +487,62 @@ mod tests {
     }
 
     #[test]
+    fn decide_names_every_invalid_rule_input_by_its_own_field(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let config = config()?;
+        assert_eq!(request()?.invalid_rule_inputs(&config), Vec::new());
+
+        let mut request = request()?;
+        request.payment_method_sub_type = Some("unrecognized_subtype".to_string());
+        if let Some(card) = request.card.as_mut() {
+            card.card_network = Some("VISAA".to_string());
+            // Case does not matter, as in rule matching.
+            card.card_type = Some("CREDIT".to_string());
+        }
+        let mut actual = request.invalid_rule_inputs(&config);
+        actual.sort_by(|left, right| left.field.cmp(&right.field));
+        assert_eq!(
+            actual,
+            vec![
+                InvalidRuleInput {
+                    field: "card.card_network".to_string(),
+                    value: "VISAA".to_string(),
+                },
+                InvalidRuleInput {
+                    field: "payment_method_sub_type".to_string(),
+                    value: "unrecognized_subtype".to_string(),
+                },
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn decide_passes_payment_type_to_the_rule_key_of_the_same_name(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut request = request()?;
+        request.payment_type = Some("ppt_mandate".to_string());
+        let mapped = serde_json::to_value(request.to_hybrid_request(&config()?)?)?;
+        assert_eq!(
+            mapped["static_routing_request"]["parameters"]["payment_type"],
+            json!({"type": "enum_variant", "value": "ppt_mandate"})
+        );
+        // The decider's transaction type is a different field; a rule payment type leaves it
+        // unknown, as hybrid does.
+        let without = serde_json::to_value(self::request()?.to_hybrid_request(&config()?)?)?;
+        assert_eq!(
+            mapped["dynamic_routing_request"]["paymentInfo"]["paymentType"],
+            without["dynamic_routing_request"]["paymentInfo"]["paymentType"]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn decide_rejects_legacy_fields_and_incorrect_types() -> Result<(), Box<dyn std::error::Error>>
     {
         let baseline = serde_json::to_value(request()?)?;
         for key in [
             "context",
-            "payment_type",
             "is_emi",
             "emi_bank",
             "emi_tenure",
@@ -548,76 +602,35 @@ mod tests {
     }
 
     #[test]
-    fn decide_reports_raw_candidates_as_fallback_when_static_evaluation_failed(
-    ) -> Result<(), serde_json::Error> {
-        let response = DecideResponse::from_hybrid(
-            &json!({
-                "evaluated_connectors": [{"gateway_name": "stripe", "gateway_id": "mca_1"}]
-            }),
-            "req_1".into(),
-        )?;
-        assert_eq!(response.decision.outcome, "fallback");
-        assert_eq!(response.decision.source, "eligible_connectors");
-        Ok(())
-    }
-
-    #[test]
-    fn decide_response_preserves_connector_order_and_hybrid_fallbacks(
+    fn decide_accepts_connectors_named_without_an_account_like_hybrid(
     ) -> Result<(), Box<dyn std::error::Error>> {
-        for (static_status, dynamic, output, expected_outcome, expected_source) in [
-            (
-                "success",
-                Value::Null,
-                json!({"type": "priority"}),
-                "routed",
-                "priority",
-            ),
-            (
-                "no_active_algorithm",
-                Value::Null,
-                Value::Null,
-                "fallback",
-                "no_active_algorithm",
-            ),
-            (
-                "success",
-                json!({"status": "fallback"}),
-                json!({"type": "single"}),
-                "fallback",
-                "single",
-            ),
-            (
-                "success",
-                json!({"status": "success", "decision": {"routing_approach": "SR_SELECTION_V3_ROUTING"}}),
-                Value::Null,
-                "routed",
-                "SR_SELECTION_V3_ROUTING",
-            ),
-        ] {
-            let actual = DecideResponse::from_hybrid(
-                &json!({
-                    "static_routing": {"status": static_status, "output": output},
-                    "dynamic_routing": dynamic,
-                    "evaluated_connectors": [
-                        {"gateway_name": "stripe", "gateway_id": "mca_2"},
-                        {"gateway_name": "stripe", "gateway_id": "mca_1"},
-                        {"gateway_name": "checkout", "gateway_id": null}
-                    ]
-                }),
-                "req_1".into(),
-            )?;
-            assert_eq!(actual.decision.outcome, expected_outcome);
-            assert_eq!(actual.decision.source, expected_source);
-            assert_eq!(actual.decision.decision_id, "req_1");
-            assert_eq!(
-                serde_json::to_value(actual.evaluated_connectors)?,
-                json!([
-                    {"gateway_name": "stripe", "payment_merchant_connector_id": "mca_2"},
-                    {"gateway_name": "stripe", "payment_merchant_connector_id": "mca_1"},
-                    {"gateway_name": "checkout", "payment_merchant_connector_id": null}
-                ])
-            );
-        }
+        let flat: DecideRequest = serde_json::from_value(json!({
+            "payment_id": "pay_1", "merchant_id": "pro_1", "amount": 100, "currency": "USD",
+            "routing_config": {"algorithm_for": "payment",
+                "eligible_connectors": [{"gateway_name": "stripe"}, {"gateway_name": "adyen", "payment_merchant_connector_id": null}],
+                "preferred_connectors": [{"gateway_name": "adyen"}]}
+        }))?;
+        let mapped = serde_json::to_value(flat.to_hybrid_request(&config()?)?)?;
+        assert_eq!(
+            mapped["static_routing_request"]["fallback_output"],
+            json!([
+                {"gateway_name": "stripe", "gateway_id": null},
+                {"gateway_name": "adyen", "gateway_id": null}
+            ])
+        );
+        assert_eq!(
+            mapped["dynamic_routing_request"]["eligibleGatewayList"],
+            json!(["stripe", "adyen"])
+        );
+        assert_eq!(
+            mapped["dynamic_routing_request"]["paymentInfo"]["preferredConnectors"],
+            json!(["adyen"])
+        );
+
+        let mut blank = flat;
+        blank.routing_config.eligible_connectors[0].payment_merchant_connector_id =
+            Some(" ".into());
+        assert!(blank.to_hybrid_request(&config()?).is_err());
         Ok(())
     }
 }
