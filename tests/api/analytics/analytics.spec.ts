@@ -100,6 +100,30 @@ test.describe('Analytics API', () => {
     expect(ruleBased.body.results.some((row: any) => row.payment_id === seeded.decisionPaymentId)).toBe(false)
   })
 
+  test('records a /decide payment under its own route and stage, in the decision flow family', async ({
+    api,
+    merchant,
+  }) => {
+    test.setTimeout(120_000)
+    const paymentId = factory.paymentId('analytics_decide')
+    const decided = await api.raw('POST', '/decide', { body: {
+      payment_id: paymentId, merchant_id: merchant.id, amount: 1000, currency: 'USD',
+      payment_method_type: 'card', payment_method_sub_type: 'credit',
+      routing_config: { algorithm_for: 'payment', eligible_connectors: [{ gateway_name: 'stripe', payment_merchant_connector_id: 'mca_stripe' }] },
+    } })
+
+    const audit = await waitForAuditFlowType(api, paymentId, 'routing_hybrid_decision')
+    const event = audit.body.timeline.find((e: any) => e.flow_type === 'routing_hybrid_decision')
+    // The decision analytics select on the flow type, so /decide stays in the hybrid family;
+    // the route and stage say which endpoint answered.
+    expect(event.route).toBe('decide')
+    expect(event.event_stage).toBe('decide_routed')
+    expect(event.details_json?.api_response?.id).toBe(decided.body.id)
+    const summary = audit.body.results.find((row: any) => row.payment_id === paymentId)
+    expect(summary.latest_stage).toBe('Decide')
+    expect(summary.routes).toEqual(['Decide'])
+  })
+
   test('records a hybrid payment as one hybrid event plus its score update', async ({
     api,
     merchant,

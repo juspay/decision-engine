@@ -1353,7 +1353,7 @@ export function PaymentAuditPage() {
             />
             <label
               className={`${fieldClassName(filters.connectorMismatch === 'true')} flex cursor-pointer items-center gap-2`}
-              title="Only payments whose latest Decide Gateway or Hybrid Routing decision differs from a reported update connector."
+              title="Only payments whose latest Decide Gateway, Decide or Hybrid Routing decision differs from a reported update connector."
             >
               <input
                 type="checkbox"

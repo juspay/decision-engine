@@ -3977,7 +3977,7 @@ export function DecisionExplorerPage() {
                                     </p>
                                   </div>
                                   <Badge variant={badgeVariantForEvent(event)}>
-                                    {humanizeAuditValue(event.status) || eventTypeLabel(event.flow_type)}
+                                    {humanizeAuditValue(event.status) || eventTypeLabel(event)}
                                   </Badge>
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-2">
@@ -4210,7 +4210,7 @@ export function DecisionExplorerPage() {
                                     </p>
                                   </div>
                                   <Badge variant={badgeVariantForEvent(event)}>
-                                    {humanizeAuditValue(event.status) || eventTypeLabel(event.flow_type)}
+                                    {humanizeAuditValue(event.status) || eventTypeLabel(event)}
                                   </Badge>
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-2">

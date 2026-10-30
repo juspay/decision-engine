@@ -236,10 +236,16 @@ pub(crate) async fn evaluate(
         ) -> Result<Option<serde_json::Value>, ContainerError<EuclidErrors>>
         + Send,
 ) -> Result<axum::response::Response, ContainerError<EuclidErrors>> {
-    let route = if decide_request.is_some() {
-        AnalyticsRoute::Decide
+    // Both endpoints record the same flow types, which the decision analytics select on; the
+    // route and the stage say which endpoint answered.
+    let (route, routed_stage, failed_stage) = if decide_request.is_some() {
+        (AnalyticsRoute::Decide, "decide_routed", "decide_failed")
     } else {
-        AnalyticsRoute::RoutingHybrid
+        (
+            AnalyticsRoute::RoutingHybrid,
+            "hybrid_routed",
+            "hybrid_failed",
+        )
     };
     let HybridRoutingRequest {
         mut static_routing_request,
@@ -613,7 +619,7 @@ pub(crate) async fn evaluate(
                 api_request: decide_request.as_ref(),
                 error,
             }),
-            Some("hybrid_failed".to_string()),
+            Some(failed_stage.to_string()),
             auth_type.clone(),
         );
     };
@@ -643,7 +649,7 @@ pub(crate) async fn evaluate(
                 Some(request_id.clone()),
                 global_request_id.clone(),
                 trace_id.clone(),
-                Some("hybrid_routed".to_string()),
+                Some(routed_stage.to_string()),
                 payment_method_type.clone(),
                 payment_method.clone(),
                 auth_type.clone(),
