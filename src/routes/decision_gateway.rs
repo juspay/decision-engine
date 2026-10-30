@@ -149,13 +149,13 @@ where
 
             let merchant_id_txt = crate::types::merchant::id::merchant_id_to_text(merchant_id);
             tracing::Span::current().record("merchant_id", merchant_id_txt.clone());
-            jemalloc_ctl::epoch::advance().unwrap();
+            let _ = jemalloc_ctl::epoch::advance();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
 
             let result =
                 decider_full_payload_hs_function(payload.clone(), redis_comp_config_final).await;
 
-            jemalloc_ctl::epoch::advance().unwrap();
+            let _ = jemalloc_ctl::epoch::advance();
             let allocated_after = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
             let bytes_allocated = allocated_after.saturating_sub(allocated_before);
 

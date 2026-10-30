@@ -1269,7 +1269,12 @@ impl DomainDeciderRequestForApiCallV2 {
             .map(ToString::to_string)
     }
 
-    pub async fn to_domain_decider_request(&self) -> DomainDeciderRequest {
+    /// The domain request for this call, for `merchant_account` — the merchant the caller already
+    /// loaded and answered "not found" for, so the conversion itself cannot fail.
+    pub fn to_domain_decider_request(
+        &self,
+        merchant_account: ETM::merchant_account::MerchantAccount,
+    ) -> DomainDeciderRequest {
         DomainDeciderRequest {
             orderReference: ETO::Order {
                 id: ETO::id::to_order_prim_id(1),
@@ -1354,11 +1359,7 @@ impl DomainDeciderRequestForApiCallV2 {
                 authType: self.payment_info.auth_type.clone(),
                 partitionKey: None,
             },
-            merchantAccount: ETM::merchant_account::load_merchant_by_merchant_id(
-                self.merchant_id.clone(),
-            )
-            .await
-            .expect("Merchant account not found"),
+            merchantAccount: merchant_account,
             cardToken: None,
             txnType: None,
             shouldCreateMandate: None,
