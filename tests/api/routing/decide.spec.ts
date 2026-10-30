@@ -127,9 +127,12 @@ function expectFieldMapParity(decide: DecideResponse, hybrid: any) {
     const cost = legacy.multi_objective_info
     if (cost) {
       expect(decide.cost).toMatchObject({
-        outcome: cost.outcome, reason: cost.reason, cost_saved_bps: cost.costSavedBps,
+        outcome: cost.outcome, cost_saved_bps: cost.costSavedBps,
         qualified_count: cost.qualifiedCount, margin: cost.margin,
       })
+      // The reason quotes live auth rates, which can move between the two calls.
+      const masked = (reason: string) => reason.replace(/[0-9.]+/g, '#')
+      expect(masked(decide.cost!.reason)).toBe(masked(cost.reason))
       expect(decide.cost!.ranked.map(r => [identifierOf(r), r.cost_bps, r.is_sr_head, r.is_chosen]))
         .toEqual((cost.ranked ?? []).map((r: any) => [r.psp, r.costBps, r.isSrHead, r.isChosen]))
     } else {

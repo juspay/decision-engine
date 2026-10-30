@@ -479,9 +479,16 @@ pub(crate) async fn evaluate(
         .map(|connectors| extract_gateway_identifiers(connectors))
         .unwrap_or_default();
 
-    // Resolve the call to its evaluation plus the summary its audit event needs.
+    // Resolve the call to its evaluation, its audit record and the summary its audit event needs.
     let resolve = move || -> Result<
-        Result<(RoutingEvaluation, HybridDecisionSummary), HybridFailure>,
+        Result<
+            (
+                RoutingEvaluation,
+                serde_json::Map<String, serde_json::Value>,
+                HybridDecisionSummary,
+            ),
+            HybridFailure,
+        >,
         ContainerError<EuclidErrors>,
     > {
         let static_error = static_routing_error
@@ -574,15 +581,14 @@ pub(crate) async fn evaluate(
                 HybridDecisionSummary::static_only("skipped", static_connector_ids),
             ),
         };
-        Ok(Ok((
-            RoutingEvaluation {
-                static_routing: static_routing_response,
-                static_error,
-                success_rate: dynamic,
-                evaluated_connectors,
-            },
-            summary,
-        )))
+        let evaluation = RoutingEvaluation {
+            static_routing: static_routing_response,
+            static_error,
+            success_rate: dynamic,
+            evaluated_connectors,
+        };
+        let record = record_body(&evaluation)?;
+        Ok(Ok((evaluation, record, summary)))
     };
 
     let dynamic_request = recorded_request.dynamic_routing_request.as_ref();
@@ -613,8 +619,8 @@ pub(crate) async fn evaluate(
     };
 
     let api_result = match resolve() {
-        Ok(Ok((evaluation, summary))) => {
-            let response_value = serde_json::Value::Object(record_body(&evaluation)?);
+        Ok(Ok((evaluation, record, summary))) => {
+            let response_value = serde_json::Value::Object(record);
             let api_response = render(evaluation, request_id.clone())?;
             crate::logger::debug!(decision_engine_success_response = ?response_value);
             DomainAnalyticsEvent::record_decision(
