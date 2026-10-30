@@ -5214,6 +5214,7 @@
                 "capture_method": null,
                 "mandate_type": null,
                 "mandate_acceptance_type": null,
+                "payment_type": null,
                 "setup_future_usage": null,
                 "transaction_initiator": null,
                 "surcharge_amount": null,
@@ -9917,6 +9918,11 @@
           "mandate_acceptance_type": {
             "type": "string",
             "nullable": true
+          },
+          "payment_type": {
+            "type": "string",
+            "nullable": true,
+            "description": "The `payment_type` rule key: `normal`, `new_mandate`, `update_mandate`, `setup_mandate`, `recurring_mandate`, `non_mandate` or `ppt_mandate`. A rule that tests `payment_type` matches only when it is sent."
           },
           "setup_future_usage": {
             "type": "string",

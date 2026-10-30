@@ -33,6 +33,7 @@ function legacyRequest(request: DecideRequest) {
         billing_country: { type: 'enum_variant', value: 'UnitedStatesOfAmerica' },
         issuer_country: { type: 'enum_variant', value: 'UnitedStatesOfAmerica' },
         segment: { type: 'metadata_variant', value: { key: 'segment', value: 'premium' } },
+        ...(request.payment_type ? { payment_type: { type: 'enum_variant', value: request.payment_type } } : {}),
       },
     },
   }
@@ -282,6 +283,36 @@ test.describe('Decide contract (API)', () => {
     expect(response.body.outcome).toMatchObject({ type: 'routed', strategy: 'rule', reason: 'rule_matched' })
   })
 
+  test('routes mandate payments by payment_type as hybrid does', async ({ api, merchant }) => {
+    const tokenHolder = factory.gatewayConnector('checkout', 'mca_token_holder')
+    const rules = [{
+      name: 'Processor token', routing_type: 'priority', output: { priority: [tokenHolder] },
+      statements: [{ condition: [
+        { lhs: 'payment_type', comparison: 'equal', value: { type: 'enum_variant', value: 'ppt_mandate' }, metadata: {} },
+      ] }],
+    }]
+    const created = await api.createRoutingAlgorithm(factory.advancedRoutingPayload(merchant.id, { rules }))
+    await api.activateRoutingAlgorithm(merchant.id, created.body.rule_id)
+    const body = decideRequest(merchant.id)
+    body.routing_config.eligible_connectors.push({
+      gateway_name: tokenHolder.gateway_name, payment_merchant_connector_id: tokenHolder.gateway_id!,
+    })
+
+    body.payment_type = 'ppt_mandate'
+    const mandate = await api.raw<DecideResponse>('POST', '/decide', { body })
+    const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacyRequest(body) })
+    expectFieldMapParity(mandate.body, hybrid.body)
+    expect(mandate.body.outcome).toMatchObject({ type: 'routed', strategy: 'rule', reason: 'rule_matched' })
+    expect(mandate.body.connectors).toEqual([
+      { gateway_name: tokenHolder.gateway_name, payment_merchant_connector_id: tokenHolder.gateway_id },
+    ])
+
+    // A rule that tests payment_type cannot match a payment that does not send it.
+    body.payment_type = null
+    const unsent = await api.raw<DecideResponse>('POST', '/decide', { body })
+    expect(unsent.body.outcome).toMatchObject({ type: 'fallback', reason: 'no_rule_matched' })
+  })
+
   for (const enabled of [false, true]) {
     test(`preserves the hybrid SR gate when enabled=${enabled}`, async ({ api, merchant }) => {
       await api.createSuccessRateConfig(merchant.id)
@@ -309,7 +340,6 @@ test.describe('Decide contract (API)', () => {
   test('rejects removed fields, legacy connector IDs and missing required data', async ({ api, merchant }) => {
     const body = decideRequest(merchant.id)
     for (const invalid of [
-      { ...body, payment_type: 'normal' },
       { ...body, context: {} },
       { ...body, amount: -1 },
       { ...body, amount: undefined },

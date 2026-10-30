@@ -291,6 +291,8 @@ export interface DecideRequest {
   capture_method?: string | null
   mandate_type?: string | null
   mandate_acceptance_type?: string | null
+  // The payment_type rule key: non_mandate, setup_mandate, ppt_mandate, …
+  payment_type?: string | null
   setup_future_usage?: string | null
   transaction_initiator?: string | null
   surcharge_amount?: number | null

@@ -21,6 +21,9 @@ pub struct DecideRequest {
     pub capture_method: Option<String>,
     pub mandate_type: Option<String>,
     pub mandate_acceptance_type: Option<String>,
+    /// The rule key of the same name: `non_mandate`, `setup_mandate`, `ppt_mandate`, … Rules route
+    /// mandate payments by it, such as a processor-token charge to the processor holding the token.
+    pub payment_type: Option<String>,
     pub setup_future_usage: Option<String>,
     pub transaction_initiator: Option<String>,
     pub surcharge_amount: Option<u64>,
@@ -430,12 +433,31 @@ mod tests {
     }
 
     #[test]
+    fn decide_passes_payment_type_to_the_rule_key_of_the_same_name(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let mut request = request()?;
+        request.payment_type = Some("ppt_mandate".to_string());
+        let mapped = serde_json::to_value(request.to_hybrid_request(&config()?)?)?;
+        assert_eq!(
+            mapped["static_routing_request"]["parameters"]["payment_type"],
+            json!({"type": "enum_variant", "value": "ppt_mandate"})
+        );
+        // The decider's transaction type is a different field; a rule payment type leaves it
+        // unknown, as hybrid does.
+        let without = serde_json::to_value(self::request()?.to_hybrid_request(&config()?)?)?;
+        assert_eq!(
+            mapped["dynamic_routing_request"]["paymentInfo"]["paymentType"],
+            without["dynamic_routing_request"]["paymentInfo"]["paymentType"]
+        );
+        Ok(())
+    }
+
+    #[test]
     fn decide_rejects_legacy_fields_and_incorrect_types() -> Result<(), Box<dyn std::error::Error>>
     {
         let baseline = serde_json::to_value(request()?)?;
         for key in [
             "context",
-            "payment_type",
             "is_emi",
             "emi_bank",
             "emi_tenure",
