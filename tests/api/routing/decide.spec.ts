@@ -10,7 +10,36 @@ function decideRequest(merchantId: string): DecideRequest {
   }
 }
 
+/** ISO codes the specs send, and the country names the rule configuration uses for them. */
+const COUNTRY_NAMES: Record<string, string> = { US: 'UnitedStatesOfAmerica' }
+
+/**
+ * The `/routing/hybrid` request for the same payment: the rule parameters `/decide` derives from its
+ * body, plus the preferred connector, which hybrid only reads from its SR request.
+ */
 function legacyRequest(request: DecideRequest) {
+  const enumValue = (value?: string | null) => (value ? { type: 'enum_variant', value } : undefined)
+  const strValue = (value?: string | null) => (value ? { type: 'str_value', value } : undefined)
+  const country = (code?: string | null) => enumValue(code ? COUNTRY_NAMES[code.toUpperCase()] ?? code : null)
+  const card = request.card ?? {}
+  const parameters = Object.fromEntries(Object.entries({
+    amount: { type: 'number', value: request.amount },
+    payment_amount: { type: 'number', value: request.amount },
+    currency: enumValue(request.currency),
+    payment_method: enumValue(request.payment_method_type),
+    payment_method_type: enumValue(request.payment_method_sub_type),
+    payment_type: enumValue(request.payment_type),
+    billing_country: country(request.billing_country),
+    card_bin: strValue(card.card_isin),
+    extended_card_bin: strValue(card.card_extended_bin),
+    card_network: enumValue(card.card_network),
+    card_type: enumValue(card.card_type),
+    issuer_country: country(card.card_issuing_country_code),
+    ...Object.fromEntries(Object.entries(request.metadata ?? {}).map(([key, value]) => [
+      key, { type: 'metadata_variant', value: { key, value } },
+    ])),
+  }).filter(([, value]) => value !== undefined))
+  const preferred = request.routing_config.preferred_connectors ?? []
   return {
     static_routing_request: {
       created_by: request.merchant_id,
@@ -20,22 +49,14 @@ function legacyRequest(request: DecideRequest) {
         gateway_name: c.gateway_name,
         gateway_id: c.payment_merchant_connector_id ?? null,
       })),
-      parameters: {
-        amount: { type: 'number', value: request.amount },
-        payment_amount: { type: 'number', value: request.amount },
-        currency: { type: 'enum_variant', value: 'USD' },
-        payment_method: { type: 'enum_variant', value: 'card' },
-        payment_method_type: { type: 'enum_variant', value: 'credit' },
-        card_bin: { type: 'str_value', value: '001234' },
-        extended_card_bin: { type: 'str_value', value: '00123456' },
-        card_network: { type: 'enum_variant', value: 'Visa' },
-        card_type: { type: 'enum_variant', value: 'credit' },
-        billing_country: { type: 'enum_variant', value: 'UnitedStatesOfAmerica' },
-        issuer_country: { type: 'enum_variant', value: 'UnitedStatesOfAmerica' },
-        segment: { type: 'metadata_variant', value: { key: 'segment', value: 'premium' } },
-        ...(request.payment_type ? { payment_type: { type: 'enum_variant', value: request.payment_type } } : {}),
-      },
+      parameters,
     },
+    ...(preferred.length ? {
+      dynamic_routing_request: factory.srDecideGatewayRequest({
+        merchantId: request.merchant_id,
+        paymentInfo: { paymentId: request.payment_id, preferredConnectors: preferred.map(identifierOf) },
+      }),
+    } : {}),
   }
 }
 
@@ -139,6 +160,16 @@ function expectFieldMapParity(decide: DecideResponse, hybrid: any) {
     } else {
       expect(decide.cost).toBeNull()
     }
+    expect(decide.success_rate!.diagnostics).toMatchObject({
+      head_before_downtime_check: legacy.gateway_before_evaluation ? fromIdentifier(legacy.gateway_before_evaluation) : null,
+      reset_approach: legacy.reset_approach,
+      dimension: { value: legacy.routing_dimension, level: legacy.routing_dimension_level },
+      filter_wise_gateways: legacy.filter_wise_gateways,
+      priority_logic: { tag: legacy.priority_logic_tag },
+      dynamic_mga_enabled: legacy.is_dynamic_mga_enabled,
+      gateway_mga_id_map: legacy.gateway_mga_id_map,
+      rust_based_decider: legacy.is_rust_based_decider,
+    })
     expect(Boolean(decide.volume_steering)).toBe(Boolean(legacy.volume_steer_info))
     expect(Boolean(decide.debit_routing)).toBe(Boolean(legacy.debit_routing_output))
   } else if (sr?.status === 'fallback') {
@@ -361,7 +392,6 @@ test.describe('Decide contract (API)', () => {
     const body = decideRequest(merchant.id)
     body.payment_method_sub_type = 'unrecognized_subtype'
     const legacy = legacyRequest(body)
-    legacy.static_routing_request.parameters.payment_method_type.value = 'unrecognized_subtype'
     const response = await api.raw<DecideResponse>('POST', '/decide', { body })
     const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacy })
     expect(hybrid.body.static_routing).toBeUndefined()
@@ -409,5 +439,189 @@ test.describe('Decide contract (API)', () => {
     expect(response.body.outcome).toMatchObject({ type: 'no_connector', strategy: 'none', reason: 'no_eligible_connectors' })
     // Without candidates, a missing rule is a rule-layer error, which hybrid drops and /decide reports.
     expect(response.body.warnings).toEqual([expect.objectContaining({ code: 'rule_evaluation_failed' })])
+  })
+})
+
+test.describe('Decide scenarios (API)', () => {
+  const stripe = { gateway_name: 'stripe', payment_merchant_connector_id: 'mca_stripe' }
+  const adyen = { gateway_name: 'adyen', payment_merchant_connector_id: 'mca_adyen' }
+  const checkout = { gateway_name: 'checkout', payment_merchant_connector_id: 'mca_checkout' }
+
+  async function activate(api: any, merchantId: string, payload: any) {
+    const created = await api.createRoutingAlgorithm(payload)
+    await api.activateRoutingAlgorithm(merchantId, created.body.rule_id)
+  }
+
+  /** The same payment through `/decide` and `/routing/hybrid`. */
+  async function both(api: any, body: DecideRequest) {
+    const decide: { status: number; body: DecideResponse } = await api.raw('POST', '/decide', { body })
+    const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacyRequest(body) })
+    expect(decide.status).toBe(200)
+    return { decide: decide.body, hybrid: hybrid.body }
+  }
+
+  test('applies a card/credit sub-level override to credit payments only', async ({ api, merchant }) => {
+    // No hedging by default; the credit-card override hedges every payment.
+    await api.createSuccessRateConfig(merchant.id, {
+      defaultHedgingPercent: 0,
+      subLevelInputConfig: [{
+        paymentMethod: 'card', paymentMethodType: 'credit', hedgingPercent: 100, bucketSize: null, latencyThreshold: null,
+      }],
+    })
+    await api.setMerchantFeature(merchant.id, 'sr-routing', true)
+    const payment = (subType: string) => {
+      const body = decideRequest(merchant.id)
+      body.payment_method_sub_type = subType
+      body.card = { ...body.card, card_type: subType }
+      body.routing_config.eligible_connectors = [stripe, adyen]
+      return body
+    }
+
+    const credit = await both(api, payment('credit'))
+    expect(credit.decide.success_rate?.approach).toBe('SR_V3_HEDGING')
+    expect(credit.decide.outcome).toMatchObject({ type: 'routed', strategy: 'success_rate', reason: 'success_rate_exploration' })
+    expect(credit.hybrid.dynamic_routing.decision.routing_approach).toBe('SR_V3_HEDGING')
+
+    const debit = await both(api, payment('debit'))
+    expect(debit.decide.success_rate?.approach).toBe('SR_SELECTION_V3_ROUTING')
+    expect(debit.decide.outcome).toMatchObject({ type: 'routed', strategy: 'success_rate', reason: 'success_rate_ranked' })
+    expect(debit.hybrid.dynamic_routing.decision.routing_approach).toBe('SR_SELECTION_V3_ROUTING')
+
+    // Both endpoints score the payment under the same SR dimension.
+    for (const { decide, hybrid } of [credit, debit]) {
+      expect(decide.success_rate?.diagnostics).toMatchObject({
+        dimension: { value: hybrid.dynamic_routing.decision.routing_dimension, level: hybrid.dynamic_routing.decision.routing_dimension_level },
+      })
+    }
+
+    // The specific method sent as the category matches no override, and /decide says why.
+    const misplaced = payment('credit')
+    misplaced.payment_method_type = 'credit'
+    misplaced.payment_method_sub_type = null
+    const response = await api.raw<DecideResponse>('POST', '/decide', { body: misplaced })
+    expect(response.body.success_rate?.approach).not.toBe('SR_V3_HEDGING')
+    expect(response.body.warnings).toContainEqual(expect.objectContaining({ code: 'rule_input_invalid', param: 'payment_method_type' }))
+  })
+
+  test('writes each rule output type in the response connector shape', async ({ api, merchant }) => {
+    const body = decideRequest(merchant.id)
+    body.routing_config.eligible_connectors = [stripe, adyen]
+
+    await activate(api, merchant.id, factory.singleRoutingPayload(merchant.id, { gateway: 'stripe', gateway_id: 'mca_stripe' }))
+    let { decide, hybrid } = await both(api, body)
+    expectFieldMapParity(decide, hybrid)
+    expect(decide.rule?.output).toEqual({ type: 'straight_through', connector: stripe })
+    expect(decide.connectors).toEqual([stripe])
+
+    await activate(api, merchant.id, factory.volumeSplitRoutingPayload(merchant.id, {
+      data: [{ split: 100, output: factory.gatewayConnector('adyen') }, { split: 0, output: factory.gatewayConnector('stripe') }],
+    }))
+    ;({ decide, hybrid } = await both(api, body))
+    expectFieldMapParity(decide, hybrid)
+    expect(decide.rule?.output).toEqual({ type: 'volume_split', splits: [{ connector: adyen, split: 100 }, { connector: stripe, split: 0 }] })
+    expect(decide.connectors[0]).toEqual(adyen)
+    expect(decide.outcome).toMatchObject({ type: 'routed', strategy: 'rule', reason: 'rule_matched' })
+  })
+
+  test('falls back to the candidates when no advanced rule matches', async ({ api, merchant }) => {
+    await activate(api, merchant.id, factory.advancedRoutingPayload(merchant.id, {
+      rules: [{
+        name: 'Wallets', routing_type: 'priority', output: { priority: [factory.gatewayConnector('checkout')] },
+        statements: [{ condition: [{ lhs: 'payment_method', comparison: 'equal', value: { type: 'enum_variant', value: 'wallet' }, metadata: {} }] }],
+      }],
+    }))
+    const body = decideRequest(merchant.id)
+    body.routing_config.eligible_connectors = [stripe, adyen, checkout]
+    const { decide, hybrid } = await both(api, body)
+    expectFieldMapParity(decide, hybrid)
+    expect(decide.outcome).toMatchObject({ type: 'fallback', strategy: 'candidate_order', reason: 'no_rule_matched' })
+    expect(decide.connectors).toEqual([stripe, adyen, checkout])
+    expect(decide.warnings).toEqual([])
+  })
+
+  test('reports a rule output outside the candidates, wholly and partly', async ({ api, merchant }) => {
+    await activate(api, merchant.id, factory.priorityRoutingPayload(merchant.id, {
+      connectors: [factory.gatewayConnector('checkout'), factory.gatewayConnector('stripe')],
+    }))
+    const warning = (code: string) => ({ code, param: 'routing_config.eligible_connectors', message: expect.any(String) })
+
+    const partly = decideRequest(merchant.id)
+    partly.routing_config.eligible_connectors = [stripe, adyen]
+    let { decide, hybrid } = await both(api, partly)
+    expectFieldMapParity(decide, hybrid)
+    expect(decide.outcome).toMatchObject({ type: 'routed', strategy: 'rule', reason: 'rule_output_partially_eligible' })
+    expect(decide.connectors).toEqual([stripe])
+    expect(decide.warnings).toEqual([warning('rule_output_partially_eligible')])
+
+    const wholly = decideRequest(merchant.id)
+    wholly.routing_config.eligible_connectors = [adyen]
+    ;({ decide, hybrid } = await both(api, wholly))
+    expectFieldMapParity(decide, hybrid)
+    expect(decide.outcome).toMatchObject({ type: 'fallback', strategy: 'candidate_order', reason: 'rule_output_not_eligible' })
+    expect(decide.connectors).toEqual([adyen])
+    expect(decide.warnings).toEqual([warning('rule_output_not_eligible')])
+  })
+
+  test('names every invalid value by its own field', async ({ api, merchant }) => {
+    const body = decideRequest(merchant.id)
+    body.payment_method_sub_type = 'unrecognized_subtype'
+    body.card = { ...body.card, card_network: 'VISAA' }
+    const response = await api.raw<DecideResponse>('POST', '/decide', { body })
+    expect(response.body.outcome.reason).toBe('rule_input_invalid')
+    expect(response.body.connectors).toEqual(body.routing_config.eligible_connectors)
+    expect([...response.body.warnings].sort((a, b) => a.param!.localeCompare(b.param!))).toEqual([
+      { code: 'rule_input_invalid', param: 'card.card_network', message: "'VISAA' is not a configured value for card.card_network." },
+      { code: 'rule_input_invalid', param: 'payment_method_sub_type', message: "'unrecognized_subtype' is not a configured value for payment_method_sub_type." },
+    ])
+  })
+
+  test('matches configured values in any case', async ({ api, merchant }) => {
+    await activate(api, merchant.id, factory.advancedRoutingPayload(merchant.id, {
+      rules: [{
+        name: 'Credit cards', routing_type: 'priority', output: { priority: [factory.gatewayConnector('checkout')] },
+        statements: [{ condition: [
+          { lhs: 'payment_method', comparison: 'equal', value: { type: 'enum_variant', value: 'card' }, metadata: {} },
+          { lhs: 'payment_method_type', comparison: 'equal', value: { type: 'enum_variant', value: 'credit' }, metadata: {} },
+        ] }],
+      }],
+    }))
+    const body = decideRequest(merchant.id)
+    body.routing_config.eligible_connectors = [stripe, checkout]
+    body.payment_method_type = 'CARD'
+    body.payment_method_sub_type = 'Credit'
+    const response = await api.raw<DecideResponse>('POST', '/decide', { body })
+    expect(response.body.warnings).toEqual([])
+    expect(response.body.outcome).toMatchObject({ type: 'routed', reason: 'rule_matched' })
+    expect(response.body.connectors).toEqual([checkout])
+  })
+
+  test('rejects a country that is not an ISO code', async ({ api, merchant }) => {
+    const body = decideRequest(merchant.id)
+    body.billing_country = 'UnitedStatesOfAmerica'
+    const response = await api.raw('POST', '/decide', { body, failOnStatusCode: false })
+    expect(response.status).toBe(400)
+    expect(JSON.stringify(response.body)).toContain('ISO 3166 alpha-2')
+  })
+
+  test('routes to the preferred connector as hybrid does', async ({ api, merchant }) => {
+    await api.createSuccessRateConfig(merchant.id, { defaultHedgingPercent: 0 })
+    await api.setMerchantFeature(merchant.id, 'sr-routing', true)
+    const body = decideRequest(merchant.id)
+    body.routing_config.eligible_connectors = [stripe, adyen]
+    await trainScores(api, body, 'stripe:mca_stripe')
+    body.routing_config.preferred_connectors = [adyen]
+    const { decide, hybrid } = await both(api, body)
+    expectFieldMapParity(decide, hybrid)
+    expect(decide.connectors[0]).toEqual(adyen)
+    expect(decide.outcome).toMatchObject({ type: 'routed', strategy: 'success_rate', reason: 'preferred_connector' })
+  })
+
+  test('mints a new id for every decision of the same payment', async ({ api, merchant }) => {
+    const body = decideRequest(merchant.id)
+    const first = await api.raw<DecideResponse>('POST', '/decide', { body })
+    const second = await api.raw<DecideResponse>('POST', '/decide', { body })
+    expect(first.body.payment_id).toBe(second.body.payment_id)
+    expect(first.body.id).not.toBe(second.body.id)
+    expect(first.body.id).toMatch(/^dec_[0-9a-f]{32}$/)
   })
 })
