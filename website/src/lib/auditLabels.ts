@@ -42,9 +42,8 @@ export function isHybridFlow(flowType: string) {
 }
 
 /**
- * `/decide` and `/routing/hybrid` run the same evaluation and record the same flow types, so an
- * evaluation event is named by its route (or, for its decision, its stage): the endpoint that
- * answered.
+ * `/decide` and `/routing/hybrid` run the same evaluation and record the same flow types: both are
+ * Multi Objective routing. `routeLabel` names the endpoint that answered.
  */
 function isEvaluationEvent(event: Pick<PaymentAuditEvent, 'flow_type' | 'event_stage'>) {
   return (
@@ -54,9 +53,7 @@ function isEvaluationEvent(event: Pick<PaymentAuditEvent, 'flow_type' | 'event_s
   )
 }
 
-function evaluationLabel(event: Pick<PaymentAuditEvent, 'route' | 'event_stage'>) {
-  return event.route === 'decide' || event.event_stage === 'decide_routed' ? 'Decide' : 'Hybrid Routing'
-}
+const EVALUATION_LABEL = 'Multi Objective'
 
 export function isDecisionFlow(flowType: string) {
   return (
@@ -64,21 +61,42 @@ export function isDecisionFlow(flowType: string) {
   )
 }
 
+/** The endpoint each recorded route was called on: a route is shown as what the caller hit. */
+export const ROUTE_PATHS: Record<string, string> = {
+  decide: '/decide',
+  decide_gateway: '/decide-gateway',
+  routing_hybrid: '/routing/hybrid',
+  routing_evaluate: '/routing/evaluate',
+  update_gateway_score: '/update-gateway-score',
+  update_score: '/update-score',
+}
+
+/** `/analytics/overview` reports route hits under its own keys; each is shown as its endpoint. */
+const OVERVIEW_ROUTE_KEYS: Record<string, string> = {
+  '/decide': 'decide',
+  '/decide_gateway': 'decide_gateway',
+  '/routing_hybrid': 'routing_hybrid',
+  '/rule_evaluate': 'routing_evaluate',
+  '/update_gateway': 'update_gateway_score',
+}
+
+export function overviewRouteLabel(key: string) {
+  const route = OVERVIEW_ROUTE_KEYS[key]
+  return route ? ROUTE_PATHS[route] : key
+}
+
 export function routeLabel(route?: string | null) {
   if (!route) return 'Unknown route'
-  if (route === 'decide') return 'Decide'
-  if (route === 'decision_gateway' || route === 'decide_gateway') return 'Decide Gateway'
-  if (route === 'update_gateway_score') return 'Update Gateway'
-  if (route === 'routing_evaluate') return 'Rule Evaluate'
-  if (route === 'routing_hybrid') return 'Hybrid Routing'
+  const path = ROUTE_PATHS[route === 'decision_gateway' ? 'decide_gateway' : route]
+  if (path) return path
   return humanizeAuditValue(route)
 }
 
-export function eventTypeLabel(event: Pick<PaymentAuditEvent, 'flow_type' | 'route' | 'event_stage'>) {
+export function eventTypeLabel(event: Pick<PaymentAuditEvent, 'flow_type'>) {
   const eventType = event.flow_type
   if (!eventType) return 'Unknown event'
-  if (isHybridFlow(eventType)) return evaluationLabel(event)
-  if (eventType === 'decide_gateway_decision') return 'Decide Gateway'
+  if (isHybridFlow(eventType)) return EVALUATION_LABEL
+  if (eventType === 'decide_gateway_decision') return 'Auth Rate'
   if (
     eventType === 'update_gateway_score_update' ||
     eventType === 'update_gateway_score_score_snapshot' ||
@@ -92,8 +110,8 @@ export function eventTypeLabel(event: Pick<PaymentAuditEvent, 'flow_type' | 'rou
 
 export function stageLabel(event: PaymentAuditEvent) {
   const flowType = flowTypeValue(event)
-  if (isEvaluationEvent(event)) return evaluationLabel(event)
-  if (event.event_stage === 'gateway_decided') return 'Decide Gateway'
+  if (isEvaluationEvent(event)) return EVALUATION_LABEL
+  if (event.event_stage === 'gateway_decided') return 'Auth Rate'
   if (event.event_stage === 'score_updated' || event.event_stage === 'score_skipped') return 'Update Gateway'
   if (event.event_stage === 'rule_applied') return 'Rule Evaluate'
   if (event.event_stage === 'preview_evaluated' || isPreviewFlow(flowType)) return 'Decision Result'
@@ -108,8 +126,8 @@ export function stageLabel(event: PaymentAuditEvent) {
  */
 export function eventPhase(event: PaymentAuditEvent, previewPhase = 'Decision') {
   const flowType = flowTypeValue(event)
-  if (isEvaluationEvent(event)) return evaluationLabel(event)
-  if (isDecisionFlow(flowType) || event.event_stage === 'gateway_decided') return 'Decide Gateway'
+  if (isEvaluationEvent(event)) return EVALUATION_LABEL
+  if (isDecisionFlow(flowType) || event.event_stage === 'gateway_decided') return 'Auth Rate'
   if (isRuleHitFlow(flowType) || event.event_stage === 'rule_applied') return 'Rule Evaluate'
   if (isUpdateFlow(flowType) || event.event_stage === 'score_updated') return 'Update Gateway'
   if (isPreviewFlow(flowType) || event.event_stage === 'preview_evaluated') return previewPhase

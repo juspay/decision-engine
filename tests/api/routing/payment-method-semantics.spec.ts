@@ -238,8 +238,8 @@ test.describe('Payment method meaning (API)', () => {
       })
       expect(byMethod.body.total_results, p.pm).toBe(2)
       expect([...byMethod.body.results.map((row: any) => row.routes.join(','))].sort(), p.pm).toEqual([
-        'Decide Gateway',
-        'Hybrid Routing',
+        '/decide-gateway',
+        '/routing/hybrid',
       ])
       const byType = await api.raw('GET', '/analytics/payment-audit', {
         qs: { range: '1d', page: 1, payment_method_type: p.pmt },

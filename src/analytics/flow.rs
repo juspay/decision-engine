@@ -279,34 +279,34 @@ impl AnalyticsRoute {
     pub fn from_filter_value(value: &str) -> Option<Self> {
         let trimmed = value.trim();
         match trimmed {
-            "Decide" => Some(Self::Decide),
-            "Decide Gateway" => Some(Self::DecideGateway),
-            "Update Gateway" => Some(Self::UpdateGatewayScore),
-            "Update Score" => Some(Self::UpdateScore),
-            "Rule Evaluate" => Some(Self::RoutingEvaluate),
-            "Hybrid Routing" => Some(Self::RoutingHybrid),
-            "Routing Create" => Some(Self::RoutingCreate),
-            "Rule Config Create" => Some(Self::RuleConfigCreate),
-            "Rule Config Get" => Some(Self::RuleConfigGet),
-            "Rule Config Update" => Some(Self::RuleConfigUpdate),
-            "Rule Config Delete" => Some(Self::RuleConfigDelete),
+            "/decide" | "Decide" => Some(Self::Decide),
+            "/decide-gateway" | "Decide Gateway" => Some(Self::DecideGateway),
+            "/update-gateway-score" | "Update Gateway" => Some(Self::UpdateGatewayScore),
+            "/update-score" | "Update Score" => Some(Self::UpdateScore),
+            "/routing/evaluate" | "Rule Evaluate" => Some(Self::RoutingEvaluate),
+            "/routing/hybrid" | "Hybrid Routing" => Some(Self::RoutingHybrid),
+            "/routing/create" | "Routing Create" => Some(Self::RoutingCreate),
+            "/rule/create" | "Rule Config Create" => Some(Self::RuleConfigCreate),
+            "/rule/get" | "Rule Config Get" => Some(Self::RuleConfigGet),
+            "/rule/update" | "Rule Config Update" => Some(Self::RuleConfigUpdate),
+            "/rule/delete" | "Rule Config Delete" => Some(Self::RuleConfigDelete),
             _ => Self::from_stored_value(trimmed),
         }
     }
 
     pub const fn payment_audit_label(self) -> &'static str {
         match self {
-            Self::Decide => "Decide",
-            Self::DecideGateway => "Decide Gateway",
-            Self::UpdateGatewayScore => "Update Gateway",
-            Self::UpdateScore => "Update Score",
-            Self::RoutingEvaluate => "Rule Evaluate",
-            Self::RoutingHybrid => "Hybrid Routing",
-            Self::RoutingCreate => "Routing Create",
-            Self::RuleConfigCreate => "Rule Config Create",
-            Self::RuleConfigGet => "Rule Config Get",
-            Self::RuleConfigUpdate => "Rule Config Update",
-            Self::RuleConfigDelete => "Rule Config Delete",
+            Self::Decide => "/decide",
+            Self::DecideGateway => "/decide-gateway",
+            Self::UpdateGatewayScore => "/update-gateway-score",
+            Self::UpdateScore => "/update-score",
+            Self::RoutingEvaluate => "/routing/evaluate",
+            Self::RoutingHybrid => "/routing/hybrid",
+            Self::RoutingCreate => "/routing/create",
+            Self::RuleConfigCreate => "/rule/create",
+            Self::RuleConfigGet => "/rule/get",
+            Self::RuleConfigUpdate => "/rule/update",
+            Self::RuleConfigDelete => "/rule/delete",
         }
     }
 
@@ -554,6 +554,18 @@ mod tests {
         assert_eq!(
             AnalyticsRoute::from_filter_value("Hybrid Routing"),
             Some(AnalyticsRoute::RoutingHybrid)
+        );
+        assert_eq!(
+            AnalyticsRoute::from_filter_value("/routing/hybrid"),
+            Some(AnalyticsRoute::RoutingHybrid)
+        );
+        assert_eq!(
+            AnalyticsRoute::from_filter_value("/decide"),
+            Some(AnalyticsRoute::Decide)
+        );
+        assert_eq!(
+            AnalyticsRoute::from_filter_value("/decide-gateway"),
+            Some(AnalyticsRoute::DecideGateway)
         );
     }
 

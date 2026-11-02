@@ -18,6 +18,7 @@ import {
 } from 'recharts'
 import { CheckCircle2, ChevronRight, RefreshCw } from 'lucide-react'
 import { fetcher } from '../../lib/api'
+import { overviewRouteLabel } from '../../lib/auditLabels'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import {
@@ -79,20 +80,21 @@ type RoutingFilters = {
 }
 
 const ANALYTICS_VIEW_TABS = [
-  { value: 'hybrid', label: 'Hybrid Routing' },
-  { value: 'multi_objective', label: 'Multi-objective' },
+  { value: 'multi_objective', label: 'Multi Objective' },
+  { value: 'auth_rate', label: 'Auth Rate' },
   { value: 'rule_based', label: 'Rule based / Volume based' },
   { value: 'volume_commitments', label: 'Volume commitments', gate: 'volume-contracts' },
 ] as const satisfies readonly { value: string; label: string; gate?: ReleasedFeature }[]
 
 type AnalyticsView = (typeof ANALYTICS_VIEW_TABS)[number]['value']
-const DEFAULT_ANALYTICS_VIEW: AnalyticsView = 'hybrid'
+const DEFAULT_ANALYTICS_VIEW: AnalyticsView = 'multi_objective'
 
 function unhandledView(view: never): null {
   console.warn(`Analytics view has no panel: ${String(view)}`)
   return null
 }
 
+// The `routing_kind` the analytics API takes: `hybrid` is the /decide + /routing/hybrid event family.
 type AnalyticsRoutingKindValue = 'multi_objective' | 'hybrid'
 
 type PreviewTraceKey = readonly [
@@ -733,7 +735,7 @@ function HybridRoutingSplitCard({ split }: { split: AnalyticsHybridSplit | null 
     return [
       {
         key: 'dynamic',
-        label: 'Multi-objective decided',
+        label: 'Auth Rate decided',
         count: split.dynamic_success,
         color: '#22c55e',
         hint: 'The dynamic decider scored the shortlist and picked the winner.',
@@ -840,13 +842,6 @@ function HybridRoutingSplitCard({ split }: { split: AnalyticsHybridSplit | null 
   )
 }
 
-function analyticsRouteLabel(route: string) {
-  if (route === '/decide_gateway') return 'Decide Gateway'
-  if (route === '/routing_hybrid') return 'Hybrid Routing'
-  if (route === '/update_gateway') return 'Update Gateway'
-  if (route === '/rule_evaluate') return 'Rule Evaluate'
-  return route
-}
 
 function authRateColor(rate: number) {
   if (rate >= 0.85) return 'text-emerald-700 dark:text-emerald-400'
@@ -1034,10 +1029,11 @@ export function AnalyticsPage() {
 
   const costCurrency = 'USD'
 
-  // The hybrid tab reads the same metrics as the multi-objective tab, only over
+  // The Multi Objective tab (/decide and /routing/hybrid) reads the same metrics as the Auth Rate
+  // tab (/decide-gateway), only over
   // `routing_hybrid_*` events. Everything below is shared; only this key changes.
-  const routingKind: AnalyticsRoutingKindValue = view === 'hybrid' ? 'hybrid' : 'multi_objective'
-  const isDecisionView = view === 'multi_objective' || view === 'hybrid'
+  const routingKind: AnalyticsRoutingKindValue = view === 'multi_objective' ? 'hybrid' : 'multi_objective'
+  const isDecisionView = view === 'multi_objective' || view === 'auth_rate'
 
   const overviewUrl =
     activeQueryWindow
@@ -1135,7 +1131,7 @@ export function AnalyticsPage() {
   useEffect(() => {
     const revalidateCurrentView = () => {
       void overview.mutate()
-      if (view === 'multi_objective' || view === 'hybrid') {
+      if (view === 'multi_objective' || view === 'auth_rate') {
         void routing.mutate()
         void filteredRouting.mutate()
         return
@@ -1245,6 +1241,7 @@ export function AnalyticsPage() {
 
   const routeHits = useMemo(() => {
     const fallback = [
+      { route: '/decide', count: 0 },
       { route: '/decide_gateway', count: 0 },
       { route: '/routing_hybrid', count: 0 },
       { route: '/update_gateway', count: 0 },
@@ -1256,16 +1253,14 @@ export function AnalyticsPage() {
       count: overview.data?.route_hits.find((row) => row.route === item.route)?.count || 0,
     }))
   }, [overview.data])
-  // Each decision tab counts only its own entry point: `/decide_gateway` hits on the
-  // multi-objective tab, `/routing/hybrid` hits on the hybrid tab. Score feedback is shared.
-  const decisionRouteKey = view === 'hybrid' ? '/routing_hybrid' : '/decide_gateway'
-  const decisionRouteHits = useMemo(
-    () =>
-      routeHits.filter(
-        (item) => item.route === decisionRouteKey || item.route === '/update_gateway',
-      ),
-    [routeHits, decisionRouteKey],
-  )
+  // Each decision tab counts only its own entry points: `/decide` and `/routing/hybrid` on the
+  // Multi Objective tab, `/decide-gateway` on the Auth Rate tab. Score feedback is shared.
+  const decisionRouteHits = useMemo(() => {
+    const entryPoints = view === 'multi_objective' ? ['/decide', '/routing_hybrid'] : ['/decide_gateway']
+    return routeHits.filter(
+      (item) => entryPoints.includes(item.route) || item.route === '/update_gateway',
+    )
+  }, [routeHits, view])
   // From reported outcomes, not the SR score store — that holds one merchant-wide estimate over
   // the model's fixed window, so every view read the same number.
   const authRateCounts = overview.data?.auth_rate
@@ -1867,7 +1862,7 @@ export function AnalyticsPage() {
               <Card key={item.route} className="!rounded-2xl">
                 <CardBody>
                   <p className="text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">
-                    {analyticsRouteLabel(item.route)}
+                    {overviewRouteLabel(item.route)}
                   </p>
                   <p className="mt-2 text-[34px] font-semibold tabular-nums text-slate-950 dark:text-white leading-[42px]">
                     {formatNumber(item.count, 0)}
@@ -1912,7 +1907,7 @@ export function AnalyticsPage() {
             onToggle={() => setRoutingAlignmentOpen((value) => !value)}
           />
 
-          {view === 'hybrid' ? (
+          {view === 'multi_objective' ? (
             <HybridRoutingSplitCard split={overview.data?.hybrid_split ?? null} />
           ) : null}
 

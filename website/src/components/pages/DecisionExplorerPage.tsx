@@ -487,7 +487,7 @@ function summaryBadgeVariant(status?: string | null): 'blue' | 'green' | 'purple
 }
 
 function phaseBadgeVariant(phase: string): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
-  if (phase === 'Decide Gateway') return 'blue'
+  if (phase === 'Auth Rate') return 'blue'
   if (phase === 'Rule Evaluate') return 'purple'
   if (phase === 'Decision') return 'purple'
   if (phase === 'Update Gateway') return 'green'

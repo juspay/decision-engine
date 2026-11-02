@@ -79,10 +79,11 @@ function srLabel(config: SrConfigOverride): string {
   return SR_STRATEGY_LABELS[srStrategyOf(config)]
 }
 
-// Decision Audit view that holds an endpoint's trail.
+// Decision Audit view that holds an endpoint's trail; Multi Objective holds both /decide and
+// /routing/hybrid, where a `hybrid_routing` experiment runs.
 const AUDIT_ROUTING_KIND: Record<ExperimentEndpoint, string> = {
-  hybrid_routing: 'hybrid',
-  decide_gateway: 'multi_objective',
+  hybrid_routing: 'multi_objective',
+  decide_gateway: 'auth_rate',
   evaluate: 'rule_based',
 }
 

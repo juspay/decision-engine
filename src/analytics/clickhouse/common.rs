@@ -247,9 +247,8 @@ impl DecisionShape {
 
 pub fn payment_audit_stage_label(stage: String) -> String {
     match stage.as_str() {
-        "gateway_decided" => "Decide Gateway".to_string(),
-        "hybrid_routed" => "Hybrid Routing".to_string(),
-        "decide_routed" => "Decide".to_string(),
+        "gateway_decided" => "Auth Rate".to_string(),
+        "hybrid_routed" | "decide_routed" => "Multi Objective".to_string(),
         "score_updated" | "score_skipped" => "Update Gateway".to_string(),
         "rule_applied" => "Rule Evaluate".to_string(),
         "preview_evaluated" => "Preview Result".to_string(),
@@ -268,16 +267,27 @@ mod tests {
     use super::*;
 
     #[test]
-    fn each_endpoint_decision_stage_is_named_by_its_endpoint() {
-        assert_eq!(payment_audit_stage_label("decide_routed".into()), "Decide");
+    fn decisions_are_staged_by_routing_kind_and_routed_by_endpoint_path() {
+        assert_eq!(
+            payment_audit_stage_label("decide_routed".into()),
+            "Multi Objective"
+        );
+        assert_eq!(
+            payment_audit_stage_label("gateway_decided".into()),
+            "Auth Rate"
+        );
         assert_eq!(
             payment_audit_stage_label("hybrid_routed".into()),
-            "Hybrid Routing"
+            "Multi Objective"
         );
-        assert_eq!(payment_audit_route_label("decide".into()), "Decide");
+        assert_eq!(payment_audit_route_label("decide".into()), "/decide");
+        assert_eq!(
+            payment_audit_route_label("decide_gateway".into()),
+            "/decide-gateway"
+        );
         assert_eq!(
             payment_audit_route_label("routing_hybrid".into()),
-            "Hybrid Routing"
+            "/routing/hybrid"
         );
     }
 }

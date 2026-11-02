@@ -10,7 +10,7 @@ import {
 /**
  * Port of cypress/e2e/ui/analytics-page.cy.js.
  *
- * The Analytics page has independent views — hybrid, multi-objective
+ * The Analytics page has independent views — Multi Objective, Auth Rate
  * (success-rate routing), and rule/volume based — and the toggle between them is the thing worth
  * guarding: each reads a different set of endpoints (or the same ones over a different flow type),
  * so a regression in one is invisible while looking at the other.
@@ -44,11 +44,11 @@ test.describe('Analytics UI', () => {
     await expect(authedPage.getByRole('heading', { level: 1, name: 'Analytics' })).toBeVisible()
 
     await viewMenuTrigger(authedPage).click()
-    await expect(viewMenuItem(authedPage, 'Multi-objective')).toBeVisible()
+    await expect(viewMenuItem(authedPage, 'Auth Rate')).toBeVisible()
     await expect(viewMenuItem(authedPage, 'Rule based / Volume based')).toBeVisible()
 
-    await viewMenuItem(authedPage, 'Multi-objective').click()
-    await expect(authedPage).toHaveURL(/view=multi_objective/)
+    await viewMenuItem(authedPage, 'Auth Rate').click()
+    await expect(authedPage).toHaveURL(/view=auth_rate/)
 
     // Change the window and force a reload of both panels.
     await authedPage.getByRole('button', { name: '1w', exact: true }).click()
@@ -58,7 +58,7 @@ test.describe('Analytics UI', () => {
     await overview
     await routingStats
 
-    await expect(authedPage.getByText('Decide Gateway')).toBeVisible({ timeout: 30_000 })
+    await expect(authedPage.getByText('/decide-gateway')).toBeVisible({ timeout: 30_000 })
 
     // Switching views must swap in the rule-based panel.
     await selectAnalyticsView(authedPage, 'Rule based / Volume based')
@@ -66,11 +66,11 @@ test.describe('Analytics UI', () => {
   })
 
   /**
-   * The hybrid tab reads the same metrics as multi-objective, only over `routing_hybrid_*`
+   * The Multi Objective tab (/decide and /routing/hybrid) reads the same metrics as Auth Rate, only over `routing_hybrid_*`
    * events — so the regression it guards is the query never switching flow type, which looks
    * like an empty tab rather than an error.
    */
-  test('hybrid tab reports hybrid decisions the multi-objective tab does not count', async ({
+  test('Multi Objective tab reports hybrid decisions the Auth Rate tab does not count', async ({
     api,
     authedPage,
     merchant,
@@ -87,13 +87,15 @@ test.describe('Analytics UI', () => {
     await authedPage.goto('/analytics')
     await hybridOverview
 
-    // The rule-based half of the call, which the multi-objective tab has no card for.
+    // The rule-based half of the call, which the Auth Rate tab has no card for.
     await expect(authedPage.getByText('Static vs dynamic outcome')).toBeVisible({ timeout: 30_000 })
     await expect(authedPage.getByText('Rule-shortlisted connectors')).toBeVisible()
-    // The decision card counts hybrid calls rather than /decide_gateway ones.
-    await expect(authedPage.getByText('Decide Gateway')).toHaveCount(0)
+    // The decision card counts /decide and /routing/hybrid calls rather than /decide-gateway ones.
+    await expect(authedPage.getByText('/routing/hybrid').first()).toBeVisible()
+    await expect(authedPage.getByText('/decide', { exact: true }).first()).toBeVisible()
+    await expect(authedPage.getByText('/decide-gateway')).toHaveCount(0)
     await expect(authedPage).not.toHaveURL(/view=/)
-    await selectAnalyticsView(authedPage, 'Multi-objective')
-    await expect(authedPage).toHaveURL(/view=multi_objective/)
+    await selectAnalyticsView(authedPage, 'Auth Rate')
+    await expect(authedPage).toHaveURL(/view=auth_rate/)
   })
 })
