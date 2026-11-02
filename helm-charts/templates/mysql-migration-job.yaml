@@ -37,28 +37,38 @@ spec:
       {{- end }}
       containers:
         - name: migration
-          image: "debian:stable-slim"
+          image: "{{ .Values.dbMigration.mysql.image.repository }}:{{ .Values.dbMigration.mysql.image.tag }}"
           imagePullPolicy: {{ .Values.dbMigration.mysql.image.pullPolicy }}
+          securityContext:
+            {{- include "decision-engine.containerSecurityContext" (dict "global" .Values.securityContext "component" .Values.dbMigration.mysql.securityContext) | nindent 12 }}
+          workingDir: /work
           env:
+            - name: HOME
+              value: /work
             - name: MYSQL_ROOT_PASSWORD
               value: {{ .Values.mysql.auth.rootPassword | quote }}
           command:
             - /bin/sh
             - -c
             - |
-              # Download and execute SQL scripts
-              apt-get update && apt-get install -y curl default-mysql-client
+              # Download and execute SQL scripts (mysql client and curl ship with the image)
               version={{ .Values.image.version }}
               host={{ include "decision-engine.mysqlHost" . }}
               db_name={{ .Values.mysql.auth.database  }}
               {{- range $url := .Values.dbMigration.mysql.scriptUrls }}
               echo "Downloading {{ $url }}"
-              curl -sSL "{{ $url }}" -o /tmp/init.sql
-              if [ -f /tmp/init.sql ]; then
-                mysql --host="$host" -u root -p"$MYSQL_ROOT_PASSWORD" -e "SOURCE /tmp/init.sql" $db_name
+              curl -sSL "{{ $url }}" -o /work/init.sql
+              if [ -f /work/init.sql ]; then
+                mysql --host="$host" -u root -p"$MYSQL_ROOT_PASSWORD" -e "SOURCE /work/init.sql" $db_name
               else
-                echo "Error: /tmp/init.sql not found"
+                echo "Error: /work/init.sql not found"
                 exit 1
               fi
               {{- end }}
+          volumeMounts:
+            - name: work
+              mountPath: /work
+      volumes:
+        - name: work
+          emptyDir: {}
 {{- end }}

@@ -29,7 +29,7 @@ spec:
       containers:
         - name: groovy-runner
           securityContext:
-            {{- toYaml (merge (deepCopy (.Values.groovyRunner.securityContext | default dict)) .Values.securityContext) | nindent 12 }}
+            {{- include "decision-engine.containerSecurityContext" (dict "global" .Values.securityContext "component" .Values.groovyRunner.securityContext) | nindent 12 }}
           image: "{{ .Values.groovyRunner.image.repository }}:{{ .Values.groovyRunner.image.version | default "latest" }}"
           imagePullPolicy: {{ .Values.groovyRunner.image.pullPolicy }}
           ports:
