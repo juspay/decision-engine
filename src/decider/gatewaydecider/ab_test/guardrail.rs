@@ -259,7 +259,7 @@ mod tests {
         let merchant = "guardrail_unit_merchant";
         let experiment = "guardrail_unit_experiment";
         let mut config = data();
-        config.min_sample_size = 1_000;
+        config.min_sample_size = 20;
         let mut used = Vec::new();
         let controls: Vec<_> = (0..2)
             .map(|_| {

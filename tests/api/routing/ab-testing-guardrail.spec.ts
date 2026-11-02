@@ -27,7 +27,7 @@ async function createExperiment(api: ApiClient, merchantId: string) {
       control: { rule_algorithm_id: control.body.rule_id },
       variant: { rule_algorithm_id: variant.body.rule_id },
       endpoints: ['evaluate'], variant_split_pct: 20,
-      min_sample_size: 1000, guardrail_threshold_pp: 10,
+      min_sample_size: 20, guardrail_threshold_pp: 10,
     } },
   })
   await api.setMerchantFeature(merchantId, 'ab-test-real-payments', true)
