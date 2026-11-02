@@ -34,14 +34,30 @@ initContainers:
     repository: public.ecr.aws/docker/library/busybox
     tag: "1.28"
     pullPolicy: IfNotPresent
+  # The busybox wait containers only open TCP connections, so they run as nobody.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    seccompProfile:
+      type: RuntimeDefault
 
-securityContext: {}
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
+# Applied to the decision-engine and groovy-runner containers, merged with each
+# component's own `securityContext` (which pins its UID). The kubelet refuses to
+# start either container as root. readOnlyRootFilesystem additionally needs an
+# emptyDir at /tmp (report uploads stream there).
+securityContext:
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
 
 service:
   type: ClusterIP
@@ -87,6 +103,10 @@ affinity: {}
 
 # Decision Engine configurations
 decisionEngine:
+  # Matches the image's USER; pinned here so older images that predate it also run unprivileged.
+  securityContext:
+    runAsUser: 10001
+    runAsGroup: 10001
   # Set to false to use PostgreSQL instead of MySQL
   useMySQL: false
   # Set to true to enable PostgreSQL support
@@ -193,6 +213,10 @@ redis:
 # Groovy Runner configuration
 groovyRunner:
   enabled: true
+  # The image's `groovy` user, which owns /home/groovy.
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
   image:
     repository: "ghcr.io/juspay/decision-engine/groovy-runner"
     version: "v1.4"
