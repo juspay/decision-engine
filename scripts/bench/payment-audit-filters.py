@@ -119,9 +119,10 @@ def capture(params):
 
 
 def captured(run_id, window, case_index):
-    """An earlier run's queries for one case, in order: its first uncapped replay of each."""
+    """An earlier run's queries for one case, in order: the first replay of each, under whichever
+    profile that run used."""
     rows = query_log(
-        f"log_comment LIKE 'bench-{run_id}-{window}-{case_index}-uncapped-%-0' AND type = 'QueryFinish'"
+        f"log_comment LIKE 'bench-{run_id}-{window}-{case_index}-%-%-0' AND type != 'QueryStart'"
     )
     by_index = {}
     for row in rows:

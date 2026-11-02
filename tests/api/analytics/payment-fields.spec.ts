@@ -72,6 +72,16 @@ test.describe('Payment audit payment field filter (API)', () => {
     expect(await listed({ card_bin: '555555', 'metadata.segment': 'basic' })).toEqual([decideBasic])
     expect(await listed({ card_bin: '424242', 'metadata.segment': 'basic' })).toEqual([])
 
+    // The totals come with the page; a page past the last still reports them.
+    const fields = JSON.stringify({ card_bin: '424242' })
+    const first = await api.raw('GET', '/analytics/payment-audit', { qs: { range: '1h', page_size: 1, payment_fields: fields } })
+    const beyond = await api.raw('GET', '/analytics/payment-audit', { qs: { range: '1h', page: 99, page_size: 1, payment_fields: fields } })
+    expect(first.body.results).toHaveLength(1)
+    expect(first.body.total_results).toBe(3)
+    expect(beyond.body.results).toHaveLength(0)
+    expect(beyond.body.total_results).toBe(3)
+    expect(beyond.body.total_success).toBe(first.body.total_success)
+
     // A matched payment keeps its whole trail: the filter selects payments, not events.
     const response = await api.raw('GET', '/analytics/payment-audit', {
       qs: { range: '1h', payment_id: decidePremium, payment_fields: JSON.stringify({ card_bin: '424242' }) },

@@ -56,6 +56,9 @@ struct CountRow {
 #[derive(Debug, Clone, Deserialize, Row)]
 struct PageKeyRow {
     payment_key: u64,
+    total_results: u64,
+    total_success: u64,
+    total_failure: u64,
 }
 
 /// One per-payment aggregate a summary query can compute.
@@ -164,8 +167,15 @@ const ROW_AGGREGATES: &[Aggregate] = &[
 /// What the count reads: the outcome it splits totals by.
 const COUNT_AGGREGATES: &[Aggregate] = &[Aggregate::Outcome];
 
-/// What choosing a page reads: the page's sort keys.
-const PAGE_KEY_AGGREGATES: &[Aggregate] = &[Aggregate::LastSeen, Aggregate::EventCount];
+/// What choosing a page reads: the page's sort keys, and the outcome its totals split by.
+const PAGE_KEY_AGGREGATES: &[Aggregate] = &[
+    Aggregate::LastSeen,
+    Aggregate::EventCount,
+    Aggregate::Outcome,
+];
+
+/// The list's totals: matching payments, and those that succeeded and failed.
+type Totals = (usize, usize, usize);
 
 impl Aggregate {
     /// The state column this aggregate merges from `analytics_payment_audit_summary_buckets`.
@@ -410,17 +420,6 @@ fn payment_selection_filters(
         }
         predicates.push(Some(FilterClause::new(bounds, binds)));
     }
-    // Payment fields parse stored requests, so they read only the events that store one.
-    predicates.extend(payment.fields.iter().map(|field| {
-        Some(FilterClause::new(
-            format!(
-                "{} AND {}",
-                payment_request_events_filter().predicate(),
-                payment_field_match(field).predicate()
-            ),
-            payment_field_match(field).binds().to_vec(),
-        ))
-    }));
 
     connector_mismatch_filter(query, scope)
         .into_iter()
@@ -430,7 +429,73 @@ fn payment_selection_filters(
                 .flatten()
                 .map(|predicate| payments_with(query, scope, predicate)),
         )
+        .chain(payment_fields_selection(query, scope))
         .collect()
+}
+
+/// The payments carrying every payment field's value, from one scan: each request-storing event
+/// in scope is parsed once and tested against every field, and a payment matches when each field
+/// matched on one of its events. A subquery per field would parse every request once per field.
+fn payment_fields_selection(
+    query: &PaymentAuditQuery,
+    scope: PaymentAuditScope,
+) -> Option<FilterClause> {
+    let fields = &query.payment_filters.fields;
+    if fields.is_empty() {
+        return None;
+    }
+    let matches: Vec<FilterClause> = fields.iter().map(payment_field_match).collect();
+    let mut scope_filters = payment_audit_summary_scope_filters(query, scope);
+    scope_filters.push(FilterClause::raw("notEmpty(ifNull(lookup_key, ''))"));
+    scope_filters.push(payment_request_events_filter());
+
+    // Each event's match per field, as columns `field_0`, `field_1`, …
+    let columns = matches
+        .iter()
+        .enumerate()
+        .map(|(index, matched)| format!("{} AS field_{index}", matched.predicate()))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let conditions = scope_filters
+        .iter()
+        .map(FilterClause::predicate)
+        .collect::<Vec<_>>()
+        .join(" AND ");
+    let binds = matches
+        .iter()
+        .chain(&scope_filters)
+        .flat_map(|clause| clause.binds().iter().cloned())
+        .collect();
+    let events = SqlFragment::with_binds(
+        format!(
+            "(SELECT {PAYMENT_KEY_SQL} AS payment_key, {columns} FROM {DOMAIN_TABLE} WHERE {conditions})"
+        ),
+        binds,
+    );
+
+    let field_names = (0..fields.len()).map(|index| format!("field_{index}"));
+    let mut payments = BoundQueryBuilder::from_fragment(events);
+    payments.add_select("payment_key");
+    // Named apart from the event columns, which the WHERE below reads.
+    payments.extend_selects(
+        field_names
+            .clone()
+            .map(|name| format!("max({name}) AS has_{name}")),
+    );
+    payments.add_filter(FilterClause::raw(
+        field_names.clone().collect::<Vec<_>>().join(" OR "),
+    ));
+    payments.add_group_by("payment_key");
+
+    let mut matched = subquery(payments.into_fragment());
+    matched.add_select("payment_key");
+    matched.add_filter(FilterClause::raw(
+        field_names
+            .map(|name| format!("has_{name}"))
+            .collect::<Vec<_>>()
+            .join(" AND "),
+    ));
+    Some(payment_key_in(matched.into_fragment()))
 }
 
 /// The pre-aggregated path: one row per payment, merged across every `summary_kind` the payment
@@ -622,11 +687,12 @@ fn map_rows(rows: Vec<AuditSummaryRow>) -> Vec<PaymentAuditSummary> {
         .collect()
 }
 
-pub async fn count(
+/// The totals alone: for a page past the last, whose query returns no row to carry them.
+async fn count(
     client: &clickhouse::Client,
     query: &PaymentAuditQuery,
     scope: PaymentAuditScope,
-) -> Result<(usize, usize, usize), ApiError> {
+) -> Result<Totals, ApiError> {
     let aggregates = with_filter_aggregates(query, COUNT_AGGREGATES);
     let mut builder = subquery(summary_fragment(query, scope, &aggregates, None));
     builder.add_select("count() AS total_results");
@@ -647,36 +713,67 @@ pub async fn count(
     ))
 }
 
-/// The payment keys on the requested page, in page order. Carries only the sort keys and the
-/// filtered flags, so the grouping holds a few numbers per payment.
+/// The payment keys on the requested page, in page order, and the totals over every matching
+/// payment, from one grouping: the totals are window functions over the matches, computed before
+/// the page is cut. `None` totals when the page is past the last.
+///
+/// The filters, a payment field's request parsing above all, are evaluated once for both.
 async fn load_page_keys(
     client: &clickhouse::Client,
     query: &PaymentAuditQuery,
     scope: PaymentAuditScope,
-) -> Result<Vec<u64>, ApiError> {
+) -> Result<(Vec<u64>, Option<Totals>), ApiError> {
+    let rows = fetch_all::<PageKeyRow>(page_keys_query(query, scope).build(client)).await?;
+    let totals = rows.first().map(|row| {
+        (
+            row.total_results as usize,
+            row.total_success as usize,
+            row.total_failure as usize,
+        )
+    });
+    Ok((
+        rows.into_iter().map(|row| row.payment_key).collect(),
+        totals,
+    ))
+}
+
+fn page_keys_query(query: &PaymentAuditQuery, scope: PaymentAuditScope) -> BoundQueryBuilder {
     let aggregates = with_filter_aggregates(query, PAGE_KEY_AGGREGATES);
     let mut builder = subquery(summary_fragment(query, scope, &aggregates, None));
     builder.add_select("payment_key");
+    builder.add_select("count() OVER () AS total_results");
+    builder.add_select(format!(
+        "countIf({} = 'success') OVER () AS total_success",
+        outcome_sql()
+    ));
+    builder.add_select(format!(
+        "countIf({} = 'failure') OVER () AS total_failure",
+        outcome_sql()
+    ));
     builder.extend_filters(outer_summary_filters(query));
     builder.add_order_by(OrderClause::desc("last_seen_ms"));
     builder.add_order_by(OrderClause::desc("event_count"));
     builder.add_order_by(OrderClause::asc("payment_key"));
     builder.set_limit(Some(query.page_size as u64));
     builder.set_offset(Some(((query.page - 1) * query.page_size) as u64));
-    let rows = fetch_all::<PageKeyRow>(builder.build(client)).await?;
-    Ok(rows.into_iter().map(|row| row.payment_key).collect())
+    builder
 }
 
-/// One page of summaries: the page's keys first, then the full row aggregates for those keys
-/// alone.
-pub async fn load_page(
+/// One page of the list and its totals: the page's keys and the totals first, then the full row
+/// aggregates for those keys alone.
+pub async fn load_list(
     client: &clickhouse::Client,
     query: &PaymentAuditQuery,
     scope: PaymentAuditScope,
-) -> Result<Vec<PaymentAuditSummary>, ApiError> {
-    let keys = load_page_keys(client, query, scope).await?;
+) -> Result<(Totals, Vec<PaymentAuditSummary>), ApiError> {
+    let (keys, totals) = load_page_keys(client, query, scope).await?;
+    let totals = match totals {
+        Some(totals) => totals,
+        None if query.page <= 1 => (0, 0, 0),
+        None => count(client, query, scope).await?,
+    };
     if keys.is_empty() {
-        return Ok(Vec::new());
+        return Ok((totals, Vec::new()));
     }
 
     let mut builder = subquery(summary_fragment(query, scope, ROW_AGGREGATES, Some(&keys)));
@@ -709,7 +806,7 @@ pub async fn load_page(
             .copied()
             .unwrap_or(usize::MAX)
     });
-    Ok(map_rows(rows))
+    Ok((totals, map_rows(rows)))
 }
 
 pub async fn load_exact(
@@ -959,8 +1056,8 @@ mod tests {
             [
                 Aggregate::LastSeen,
                 Aggregate::EventCount,
-                Aggregate::RoutingFamilies,
-                Aggregate::Outcome
+                Aggregate::Outcome,
+                Aggregate::RoutingFamilies
             ]
         );
 
@@ -1014,13 +1111,38 @@ mod tests {
         assert_eq!(filters.len(), 3);
         for filter in filters {
             let predicate = filter.predicate();
-            assert!(
-                predicate
-                    .starts_with("cityHash64(assumeNotNull(lookup_key)) IN (SELECT cityHash64("),
-                "{predicate}"
-            );
+            // The selected column is the payment key, computed directly or as `payment_key`.
+            let computed = predicate
+                .starts_with("cityHash64(assumeNotNull(lookup_key)) IN (SELECT cityHash64(");
+            let named = predicate
+                .starts_with("cityHash64(assumeNotNull(lookup_key)) IN (SELECT payment_key FROM")
+                && predicate.contains("cityHash64(assumeNotNull(lookup_key)) AS payment_key");
+            assert!(computed || named, "{predicate}");
             assert_eq!(predicate.matches('?').count(), filter.binds().len());
         }
+    }
+
+    /// The page's keys and the totals come from one grouping, so each filter, a payment field's
+    /// request parsing above all, is evaluated once per search rather than once for the count
+    /// and again for the page.
+    #[test]
+    fn one_query_chooses_the_page_and_counts_the_matches() {
+        use crate::analytics::models::{PaymentField, PaymentFieldFilter};
+        let mut query = payment_audit_query();
+        query.payment_filters.fields = vec![PaymentFieldFilter {
+            field: PaymentField::Metadata("segment".into()),
+            values: vec!["premium".into()],
+        }];
+        let sql = super::page_keys_query(&query, PaymentAuditScope::All)
+            .into_fragment()
+            .sql()
+            .to_string();
+        assert!(sql.contains("count() OVER () AS total_results"), "{sql}");
+        assert!(sql.contains("OVER () AS total_success"));
+        assert!(sql.contains("OVER () AS total_failure"));
+        // The field's subquery reads both paymentInfo paths once.
+        assert_eq!(sql.matches("'paymentInfo', 'metadata'").count(), 2);
+        assert!(sql.contains("LIMIT"));
     }
 
     /// The count and the page's keys group every payment in the window, so each holds only
@@ -1094,14 +1216,17 @@ mod tests {
         ];
         assert!(!super::payment_audit_needs_raw_rows(&query));
         let merged = summary_fragment(&query, PaymentAuditScope::All, COUNT_AGGREGATES, None);
-        // One payment-key set per field, so a payment must carry both.
+        // One scan for both fields: each event is tested against both, and a payment must
+        // have matched each on one of its events.
+        let sql = merged.sql();
         assert_eq!(
-            merged
-                .sql()
-                .matches("cityHash64(assumeNotNull(lookup_key)) IN (SELECT")
+            sql.matches("cityHash64(assumeNotNull(lookup_key)) IN (SELECT payment_key")
                 .count(),
-            2
+            1
         );
+        assert!(sql.contains("AS field_0") && sql.contains("AS field_1"));
+        assert!(sql.contains("WHERE field_0 OR field_1 GROUP BY payment_key"));
+        assert!(sql.contains("WHERE has_field_0 AND has_field_1"));
         assert_eq!(merged.sql().matches('?').count(), merged.binds().len());
 
         query.routing_kind = Some(PaymentAuditRoutingKind::AuthRate);
@@ -1109,9 +1234,9 @@ mod tests {
         assert!(raw.sql().contains(DOMAIN_TABLE));
         assert_eq!(
             raw.sql()
-                .matches("cityHash64(assumeNotNull(lookup_key)) IN (SELECT")
+                .matches("cityHash64(assumeNotNull(lookup_key)) IN (SELECT payment_key")
                 .count(),
-            2
+            1
         );
         assert_eq!(raw.sql().matches('?').count(), raw.binds().len());
     }
