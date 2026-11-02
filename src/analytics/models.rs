@@ -678,17 +678,6 @@ impl PaymentAuditPaymentFilters {
             .map(str::to_string)
             .collect()
     }
-
-    /// Whether any filter reads a payment attribute the pre-aggregated summaries don't carry.
-    pub fn reads_payment_attributes(&self) -> bool {
-        !self.currency.is_empty()
-            || !self.payment_method.is_empty()
-            || !self.payment_method_type.is_empty()
-            || !self.card_network.is_empty()
-            || !self.auth_type.is_empty()
-            || self.min_amount.is_some()
-            || self.max_amount.is_some()
-    }
 }
 
 impl PaymentAuditQuery {

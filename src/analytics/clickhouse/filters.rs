@@ -190,8 +190,6 @@ pub fn payment_audit_needs_raw_rows(query: &PaymentAuditQuery) -> bool {
             query.routing_kind,
             Some(PaymentAuditRoutingKind::AuthRate | PaymentAuditRoutingKind::DebitRouting)
         )
-        // Currency, payment method, amount and the like live on raw routing decisions only.
-        || query.payment_filters.reads_payment_attributes()
 }
 
 /// The bit a payment's aggregated `routing_families` carries for each event family it produced

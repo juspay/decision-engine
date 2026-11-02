@@ -18,7 +18,10 @@ peak; "scanned" is the merchant's rows in the partitions the window touches.
   API_KEY=DE_... MERCHANT_ID=bench_audit scripts/bench/payment-audit-filters.py
 
 Optional env: BASE_URL, END_MS (default: the merchant's last event), WINDOWS ("15m 1h 1d 7d"),
-RUNS (5), PROFILES ("uncapped sandbox"), CLICKHOUSE (the clickhouse-client command).
+RUNS (5), PROFILES ("uncapped sandbox"), CASES (indices into CASES), CLICKHOUSE (the
+clickhouse-client command), and
+REPLAY_RUN (a run id printed by an earlier run): replay that run's captured queries instead of
+calling the server, to compare an earlier build with this one on the same data.
 """
 import json
 import os
@@ -34,6 +37,9 @@ BASE_URL = os.environ.get("BASE_URL", "http://localhost:8080")
 API_KEY = os.environ["API_KEY"]
 MERCHANT_ID = os.environ["MERCHANT_ID"]
 RUNS = int(os.environ.get("RUNS", "5"))
+REPLAY_RUN = os.environ.get("REPLAY_RUN")
+# Which of CASES to run, by index (default: all), e.g. "0 1 4".
+ONLY_CASES = {int(index) for index in os.environ.get("CASES", "").split()}
 WINDOWS = os.environ.get("WINDOWS", "15m 1h 1d 7d").split()
 PROFILES = os.environ.get("PROFILES", "uncapped sandbox").split()
 CLICKHOUSE = shlex.split(
@@ -112,6 +118,17 @@ def capture(params):
     return status, wall_ms, queries
 
 
+def captured(run_id, window, case_index):
+    """An earlier run's queries for one case, in order: its first uncapped replay of each."""
+    rows = query_log(
+        f"log_comment LIKE 'bench-{run_id}-{window}-{case_index}-uncapped-%-0' AND type = 'QueryFinish'"
+    )
+    by_index = {}
+    for row in rows:
+        by_index.setdefault(row["query"], None)
+    return list(by_index)
+
+
 def replay(query, settings, tag):
     """One run of a captured query; its cost from the query log."""
     ch("SYSTEM DROP MARK CACHE")
@@ -140,6 +157,7 @@ def main():
         or scalar(f"SELECT max(created_at_ms) FROM analytics_domain_events WHERE merchant_id = '{MERCHANT_ID}'")
     ) + 1
     run_id = int(time.time())
+    print(f"run {run_id}" + (f", replaying run {REPLAY_RUN}" if REPLAY_RUN else ""))
     header = f"{'window':>6} {'events':>9} {'scanned':>9}  {'case':<36} {'profile':<9} {'api ms':>7} {'p50 ms':>7} {'p95 ms':>7} {'peak mem':>10} {'rows read':>10} {'read':>10}  result"
     print(header)
     for window in WINDOWS:
@@ -152,8 +170,13 @@ def main():
             f"FROM analytics_domain_events WHERE {in_window})"
         )
         for case_index, (name, filters) in enumerate(CASES):
+            if ONLY_CASES and case_index not in ONLY_CASES:
+                continue
             params = {"range": "1h", "start_ms": start_ms, "end_ms": end_ms, "page": 1, "page_size": 20, **filters}
-            status, wall_ms, queries = capture(params)
+            if REPLAY_RUN:
+                status, wall_ms, queries = 200, 0, captured(REPLAY_RUN, window, case_index)
+            else:
+                status, wall_ms, queries = capture(params)
             for profile in PROFILES:
                 settings = SANDBOX_SETTINGS if profile == "sandbox" else {}
                 p50 = p95 = peak = rows_read = bytes_read = 0

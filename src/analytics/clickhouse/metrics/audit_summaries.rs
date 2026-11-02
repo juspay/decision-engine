@@ -30,6 +30,7 @@ use super::super::time::effective_payment_audit_window_bounds;
 struct AuditSummaryRow {
     #[serde(alias = "resolved_lookup_key")]
     lookup_key: String,
+    payment_key: u64,
     payment_id: Option<String>,
     request_id: Option<String>,
     #[serde(alias = "resolved_merchant_id")]
@@ -54,13 +55,15 @@ struct CountRow {
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct PageKeyRow {
-    lookup_key: String,
+    payment_key: u64,
 }
 
 /// One per-payment aggregate a summary query can compute.
 ///
 /// ClickHouse holds every selected aggregate for every payment in the window while it groups, so
-/// each query names only the aggregates it returns or filters on.
+/// the count and the page's keys hold only fixed-size numbers per payment (see `Grouping`); the
+/// lists (`Gateways`, `Routes`) are built for the page's payments alone. Filters on what a
+/// payment carried select payments per event instead (`payment_selection_filters`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Aggregate {
     PaymentId,
@@ -74,20 +77,25 @@ enum Aggregate {
     LatestStage,
     Gateways,
     Routes,
-    Statuses,
-    FlowTypes,
+    /// Whether any attempt succeeded (bit 1) or failed terminally (bit 2): all the outcome reads.
+    Outcome,
     /// The event families as a bitmask, which is all a routing-kind filter reads.
     RoutingFamilies,
-    ErrorCodes,
-    // Payment attributes, carried by routing decisions. The summary buckets don't hold them, so a
-    // query filtering on one reads raw rows (`payment_audit_needs_raw_rows`).
-    Currencies,
-    PaymentMethods,
-    PaymentMethodTypes,
-    CardNetworks,
-    AuthTypes,
-    Amount,
 }
+
+/// How a summary groups events into payments.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Grouping {
+    /// By a 64-bit hash of the payment's lookup key: 8 bytes per payment instead of the key's
+    /// text, for the count and the page's keys, which group every payment in the window.
+    PaymentKey,
+    /// By the lookup key itself, for the page's rows, which carry it.
+    LookupKey,
+}
+
+/// The payment key: `cityHash64` of the lookup key. Two payments in one merchant's window share
+/// a key with a probability around n²/2⁶⁵ (5·10⁻¹⁰ for 140k payments).
+const PAYMENT_KEY_SQL: &str = "cityHash64(assumeNotNull(lookup_key))";
 
 /// A routing decision's payment amount: the decider request's on `/decide-gateway`, either half's
 /// on `/routing/hybrid`. 0 on events that carry none.
@@ -108,19 +116,32 @@ fn status_array_sql(statuses: &[TxnStatus]) -> String {
     )
 }
 
-/// A payment's outcome from its aggregated `statuses`: success if any attempt succeeded, failure
-/// if one failed terminally and none succeeded, pending otherwise. Routing events' own
-/// `success`/`failure` statuses (the API call's result) are not payment statuses and never match.
-pub(crate) fn outcome_sql() -> String {
-    outcome_of("statuses")
-}
-
-/// [`outcome_sql`] over any expression yielding the payment's statuses array.
-fn outcome_of(statuses: &str) -> String {
+/// An event's (or a summary bucket's) outcome flags from its statuses: bit 1 when one is a
+/// success, bit 2 when one is a terminal failure. Routing events' own `success`/`failure`
+/// statuses (the API call's result) are not payment statuses and never match.
+fn outcome_flags_of(statuses: &str) -> String {
     format!(
-        "multiIf(hasAny({statuses}, {}), 'success', hasAny({statuses}, {}), 'failure', 'pending')",
+        "(hasAny({statuses}, {}) + 2 * hasAny({statuses}, {}))",
         status_array_sql(&txn_success_states()),
         status_array_sql(&txn_failure_states()),
+    )
+}
+
+/// The raw events' outcome flags, combined per payment.
+fn raw_outcome_flags_sql() -> String {
+    format!("groupBitOr({})", outcome_flags_of("[ifNull(status, '')]"))
+}
+
+/// A payment's outcome from its `outcome_flags`: success if any attempt succeeded, failure if one
+/// failed terminally and none succeeded, pending otherwise.
+pub(crate) fn outcome_sql() -> String {
+    outcome_of("outcome_flags")
+}
+
+/// [`outcome_sql`] over any expression yielding the payment's outcome flags.
+fn outcome_of(flags: &str) -> String {
+    format!(
+        "multiIf(bitAnd({flags}, 1) != 0, 'success', bitAnd({flags}, 2) != 0, 'failure', 'pending')"
     )
 }
 
@@ -137,22 +158,14 @@ const ROW_AGGREGATES: &[Aggregate] = &[
     Aggregate::LatestStage,
     Aggregate::Gateways,
     Aggregate::Routes,
-    Aggregate::Statuses,
+    Aggregate::Outcome,
 ];
 
-/// What the count reads: the window overlap and the statuses it splits totals by outcome.
-const COUNT_AGGREGATES: &[Aggregate] = &[
-    Aggregate::FirstSeen,
-    Aggregate::LastSeen,
-    Aggregate::Statuses,
-];
+/// What the count reads: the outcome it splits totals by.
+const COUNT_AGGREGATES: &[Aggregate] = &[Aggregate::Outcome];
 
-/// What choosing a page reads: the window overlap and the page's sort keys.
-const PAGE_KEY_AGGREGATES: &[Aggregate] = &[
-    Aggregate::FirstSeen,
-    Aggregate::LastSeen,
-    Aggregate::EventCount,
-];
+/// What choosing a page reads: the page's sort keys.
+const PAGE_KEY_AGGREGATES: &[Aggregate] = &[Aggregate::LastSeen, Aggregate::EventCount];
 
 impl Aggregate {
     /// The state column this aggregate merges from `analytics_payment_audit_summary_buckets`.
@@ -169,17 +182,8 @@ impl Aggregate {
             Self::LatestStage => "latest_stage_state",
             Self::Gateways => "gateways_state",
             Self::Routes => "routes_state",
-            Self::Statuses => "statuses_state",
-            Self::FlowTypes => "flow_types_state",
+            Self::Outcome => "statuses_state",
             Self::RoutingFamilies => "summary_kind",
-            Self::ErrorCodes => "error_codes_state",
-            // Not in the buckets; a query reading these takes the raw path (see the variants).
-            Self::Currencies
-            | Self::PaymentMethods
-            | Self::PaymentMethodTypes
-            | Self::CardNetworks
-            | Self::AuthTypes
-            | Self::Amount => "lookup_key",
         }
     }
 
@@ -200,24 +204,15 @@ impl Aggregate {
             Self::Routes => {
                 "arrayFilter(value -> value != '', groupUniqArrayMerge(routes_state)) AS routes"
             }
-            Self::Statuses => {
-                "arrayFilter(value -> value != '', groupUniqArrayMerge(statuses_state)) AS statuses"
-            }
-            Self::FlowTypes => {
-                "arrayFilter(value -> value != '', groupUniqArrayMerge(flow_types_state)) AS flow_types"
+            // Each bucket's statuses are reduced to their flags before grouping, so no
+            // payment's set of statuses is ever merged.
+            Self::Outcome => {
+                return Cow::Owned(format!(
+                    "groupBitOr({}) AS outcome_flags",
+                    outcome_flags_of("finalizeAggregation(statuses_state)")
+                ))
             }
             Self::RoutingFamilies => return Cow::Owned(summary_routing_families_sql()),
-            Self::ErrorCodes => {
-                "arrayFilter(value -> value != '', groupUniqArrayMerge(error_codes_state)) AS error_codes"
-            }
-            // Never merged: a query reading payment attributes takes the raw path. Empty values
-            // keep the SQL valid if that ever changes.
-            Self::Currencies => "CAST([] AS Array(String)) AS currencies",
-            Self::PaymentMethods => "CAST([] AS Array(String)) AS payment_methods",
-            Self::PaymentMethodTypes => "CAST([] AS Array(String)) AS payment_method_types",
-            Self::CardNetworks => "CAST([] AS Array(String)) AS card_networks",
-            Self::AuthTypes => "CAST([] AS Array(String)) AS auth_types",
-            Self::Amount => "toFloat64(0) AS amount",
         })
     }
 
@@ -229,18 +224,11 @@ impl Aggregate {
             Self::RequestId => Some("request_id"),
             Self::MerchantId => Some("merchant_id"),
             Self::FirstSeen | Self::LastSeen | Self::EventCount => None,
-            Self::LatestStatus | Self::Statuses => Some("status"),
+            Self::LatestStatus | Self::Outcome => Some("status"),
             Self::LatestGateway | Self::Gateways => Some("gateway"),
             Self::LatestStage => Some("event_stage"),
             Self::Routes => Some("route"),
-            Self::FlowTypes | Self::RoutingFamilies => Some("flow_type"),
-            Self::ErrorCodes => Some("error_code"),
-            Self::Currencies => Some("currency"),
-            Self::PaymentMethods => Some("payment_method"),
-            Self::PaymentMethodTypes => Some("payment_method_type"),
-            Self::CardNetworks => Some("card_network"),
-            Self::AuthTypes => Some("auth_type"),
-            Self::Amount => Some("details"),
+            Self::RoutingFamilies => Some("flow_type"),
         }
     }
 
@@ -261,34 +249,10 @@ impl Aggregate {
             Self::Routes => {
                 "arrayFilter(value -> value != '', groupUniqArray(ifNull(route, ''))) AS routes"
             }
-            Self::Statuses => {
-                "arrayFilter(value -> value != '', groupUniqArray(ifNull(status, ''))) AS statuses"
-            }
-            Self::FlowTypes => {
-                "arrayFilter(value -> value != '', groupUniqArray(flow_type)) AS flow_types"
+            Self::Outcome => {
+                return Cow::Owned(format!("{} AS outcome_flags", raw_outcome_flags_sql()))
             }
             Self::RoutingFamilies => return Cow::Owned(raw_routing_families_sql()),
-            Self::ErrorCodes => {
-                "arrayFilter(value -> value != '', groupUniqArray(ifNull(error_code, ''))) AS error_codes"
-            }
-            // Lower-cased so filters ignore case. A hybrid request without a payment method type
-            // records the string `null`, which is no value.
-            Self::Currencies => {
-                "arrayFilter(value -> value NOT IN ('', 'null'), groupUniqArray(lowerUTF8(ifNull(currency, '')))) AS currencies"
-            }
-            Self::PaymentMethods => {
-                "arrayFilter(value -> value NOT IN ('', 'null'), groupUniqArray(lowerUTF8(ifNull(payment_method, '')))) AS payment_methods"
-            }
-            Self::PaymentMethodTypes => {
-                "arrayFilter(value -> value NOT IN ('', 'null'), groupUniqArray(lowerUTF8(ifNull(payment_method_type, '')))) AS payment_method_types"
-            }
-            Self::CardNetworks => {
-                "arrayFilter(value -> value NOT IN ('', 'null'), groupUniqArray(lowerUTF8(ifNull(card_network, '')))) AS card_networks"
-            }
-            Self::AuthTypes => {
-                "arrayFilter(value -> value NOT IN ('', 'null'), groupUniqArray(lowerUTF8(ifNull(auth_type, '')))) AS auth_types"
-            }
-            Self::Amount => return Cow::Owned(format!("max({EVENT_AMOUNT_SQL}) AS amount")),
         })
     }
 }
@@ -298,29 +262,11 @@ fn with_filter_aggregates(query: &PaymentAuditQuery, base: &[Aggregate]) -> Vec<
     let routing_kind_filters = query
         .routing_kind
         .is_some_and(|kind| !payment_audit_routing_kind_filters(kind).is_empty());
-    let payment = &query.payment_filters;
     let filtered = [
-        (!query.gateway.is_empty(), Aggregate::Gateways),
-        (!query.route.is_empty(), Aggregate::Routes),
-        (query.status.is_some(), Aggregate::Statuses),
-        (query.flow_type.is_some(), Aggregate::FlowTypes),
         (routing_kind_filters, Aggregate::RoutingFamilies),
-        (!query.error_code.is_empty(), Aggregate::ErrorCodes),
-        (!payment.outcome.is_empty(), Aggregate::Statuses),
-        (!payment.currency.is_empty(), Aggregate::Currencies),
         (
-            !payment.payment_method.is_empty(),
-            Aggregate::PaymentMethods,
-        ),
-        (
-            !payment.payment_method_type.is_empty(),
-            Aggregate::PaymentMethodTypes,
-        ),
-        (!payment.card_network.is_empty(), Aggregate::CardNetworks),
-        (!payment.auth_type.is_empty(), Aggregate::AuthTypes),
-        (
-            payment.min_amount.is_some() || payment.max_amount.is_some(),
-            Aggregate::Amount,
+            !query.payment_filters.outcome.is_empty(),
+            Aggregate::Outcome,
         ),
     ];
 
@@ -371,43 +317,119 @@ fn connector_mismatch_filter(
     )));
     payments.add_group_by("lookup_key");
     let mut mismatches = subquery(payments.into_fragment());
-    mismatches.add_select("lookup_key");
+    mismatches.add_select(PAYMENT_KEY_SQL);
     mismatches.add_filter(FilterClause::raw("notEmpty(decided_gateway)"));
     // Hybrid can record `gateway:mca_id` while feedback records just `gateway`.
     // Provider names also arrive in mixed case; account suffixes alone are not mismatches.
     mismatches.add_filter(FilterClause::raw(
         "arrayExists(gateway -> lowerUTF8(splitByChar(':', gateway)[1]) != lowerUTF8(splitByChar(':', decided_gateway)[1]), update_gateways)",
     ));
-    let fragment = mismatches.into_fragment();
+    Some(payment_key_in(mismatches.into_fragment()))
+}
+
+/// `payment's key IN (<keys the fragment selects>)`. A set of 8-byte keys, however many payments
+/// match.
+fn payment_key_in(keys: SqlFragment) -> FilterClause {
+    FilterClause::new(
+        format!("{PAYMENT_KEY_SQL} IN ({})", keys.sql()),
+        keys.binds().to_vec(),
+    )
+}
+
+/// The payments with an event in scope matching `predicate`.
+fn payments_with(
+    query: &PaymentAuditQuery,
+    scope: PaymentAuditScope,
+    predicate: FilterClause,
+) -> FilterClause {
+    let mut payments = BoundQueryBuilder::new(DOMAIN_TABLE);
+    payments.add_select(PAYMENT_KEY_SQL);
+    payments.extend_filters(payment_audit_summary_scope_filters(query, scope));
+    payments.add_filter(FilterClause::raw("notEmpty(ifNull(lookup_key, ''))"));
+    payments.add_filter(predicate);
+    payment_key_in(payments.into_fragment())
+}
+
+/// `column IN (values)`, or with `lowercase`, the same ignoring case.
+fn any_of(column: &str, values: &[String], lowercase: bool) -> Option<FilterClause> {
+    if values.is_empty() {
+        return None;
+    }
+    let (column, placeholder) = if lowercase {
+        (format!("lowerUTF8(ifNull({column}, ''))"), "lowerUTF8(?)")
+    } else {
+        (column.to_string(), "?")
+    };
     Some(FilterClause::new(
-        format!("lookup_key IN ({})", fragment.sql()),
-        fragment.binds().to_vec(),
+        format!(
+            "{column} IN ({})",
+            vec![placeholder; values.len()].join(", ")
+        ),
+        values.iter().cloned().map(BindArg::from).collect(),
     ))
 }
 
-/// Filters that select payments by what their events carried, each a `lookup_key IN (…)` over the
-/// window's raw events so the payment's whole trail stays in its summary: the connector mismatch,
-/// and one per payment field (a payment must carry every field's value).
+/// Filters that select payments by what their events carried: a payment matches when any of its
+/// events in scope does, and keeps its whole trail. Each is a payment-key set over the window's
+/// raw events, so no payment's values are collected to test them. A payment must pass every
+/// filter; several values of one filter match a payment carrying any of them.
 fn payment_selection_filters(
     query: &PaymentAuditQuery,
     scope: PaymentAuditScope,
 ) -> Vec<FilterClause> {
-    let fields = query.payment_filters.fields.iter().map(|field| {
-        let mut payments = BoundQueryBuilder::new(DOMAIN_TABLE);
-        payments.add_select("assumeNotNull(lookup_key)");
-        payments.extend_filters(payment_audit_timeline_filters(query, scope));
-        payments.add_filter(FilterClause::raw("notEmpty(ifNull(lookup_key, ''))"));
-        payments.add_filter(payment_request_events_filter());
-        payments.add_filter(payment_field_match(field));
-        let fragment = payments.into_fragment();
-        FilterClause::new(
-            format!("lookup_key IN ({})", fragment.sql()),
-            fragment.binds().to_vec(),
-        )
-    });
+    let payment = &query.payment_filters;
+    let mut predicates = vec![
+        any_of("gateway", &query.gateway, false),
+        any_of("route", &query.route, false),
+        any_of("error_code", &query.error_code, false),
+        query
+            .status
+            .as_ref()
+            .map(|status| FilterClause::eq("status", status.clone())),
+        query
+            .flow_type
+            .as_ref()
+            .map(|flow_type| FilterClause::eq("flow_type", flow_type.clone())),
+        // Attributes match ignoring case.
+        any_of("currency", &payment.currency, true),
+        any_of("payment_method", &payment.payment_method, true),
+        any_of("payment_method_type", &payment.payment_method_type, true),
+        any_of("card_network", &payment.card_network, true),
+        any_of("auth_type", &payment.auth_type, true),
+    ];
+    // The bounds are inclusive and read the routing decision's amount; events without one
+    // (score updates, rule evaluations without an amount) never match.
+    if payment.min_amount.is_some() || payment.max_amount.is_some() {
+        let mut bounds = format!("{EVENT_AMOUNT_SQL} > 0");
+        let mut binds = Vec::new();
+        for (bound, operator) in [(payment.min_amount, ">="), (payment.max_amount, "<=")] {
+            if let Some(bound) = bound {
+                bounds.push_str(&format!(" AND {EVENT_AMOUNT_SQL} {operator} ?"));
+                binds.push(bound.into());
+            }
+        }
+        predicates.push(Some(FilterClause::new(bounds, binds)));
+    }
+    // Payment fields parse stored requests, so they read only the events that store one.
+    predicates.extend(payment.fields.iter().map(|field| {
+        Some(FilterClause::new(
+            format!(
+                "{} AND {}",
+                payment_request_events_filter().predicate(),
+                payment_field_match(field).predicate()
+            ),
+            payment_field_match(field).binds().to_vec(),
+        ))
+    }));
+
     connector_mismatch_filter(query, scope)
         .into_iter()
-        .chain(fields)
+        .chain(
+            predicates
+                .into_iter()
+                .flatten()
+                .map(|predicate| payments_with(query, scope, predicate)),
+        )
         .collect()
 }
 
@@ -422,25 +444,79 @@ fn merged_summary_fragment(
     query: &PaymentAuditQuery,
     scope: PaymentAuditScope,
     aggregates: &[Aggregate],
-    lookup_keys: Option<&[String]>,
+    page: Option<&[u64]>,
 ) -> SqlFragment {
     let mut source = BoundQueryBuilder::new(PAYMENT_AUDIT_SUMMARY_BUCKET_TABLE);
     source.add_select("lookup_key");
     source.extend_selects(aggregates.iter().map(|aggregate| aggregate.state_column()));
     source.extend_filters(payment_audit_summary_bucket_filters(query, scope));
-    if lookup_keys.is_none() {
-        source.extend_filters(payment_selection_filters(query, scope));
-    }
-    source.extend_filters(lookup_keys.and_then(|keys| FilterClause::in_list("lookup_key", keys)));
+    // A bucket is 15 minutes, so the first and last can reach past the window; a payment is in
+    // the window when one of its buckets has events inside it.
+    let (start_ms, end_ms) = effective_payment_audit_window_bounds(query);
+    source.add_filter(FilterClause::lte(
+        "finalizeAggregation(first_seen_ms_state)",
+        end_ms,
+    ));
+    source.add_filter(FilterClause::gte(
+        "finalizeAggregation(last_seen_ms_state)",
+        start_ms,
+    ));
+    source.extend_filters(page_filter(query, scope, page));
+    group(
+        source.into_fragment(),
+        aggregates,
+        page,
+        Aggregate::merged_sql,
+    )
+}
 
-    let mut builder = subquery(source.into_fragment());
-    builder.add_select("lookup_key");
+/// The selection filters, or for a page's rows, those payments alone.
+fn page_filter(
+    query: &PaymentAuditQuery,
+    scope: PaymentAuditScope,
+    page: Option<&[u64]>,
+) -> Vec<FilterClause> {
+    match page {
+        None => payment_selection_filters(query, scope),
+        Some(keys) => vec![FilterClause::new(
+            format!(
+                "{PAYMENT_KEY_SQL} IN ({})",
+                vec!["?"; keys.len()].join(", ")
+            ),
+            keys.iter().copied().map(BindArg::U64).collect(),
+        )],
+    }
+}
+
+/// Groups `source` rows into payments: by payment key when choosing the page (`page` is
+/// `None`), by lookup key for the page's rows.
+fn group(
+    source: SqlFragment,
+    aggregates: &[Aggregate],
+    page: Option<&[u64]>,
+    aggregate_sql: fn(Aggregate) -> Cow<'static, str>,
+) -> SqlFragment {
+    let grouping = match page {
+        None => Grouping::PaymentKey,
+        Some(_) => Grouping::LookupKey,
+    };
+    let mut builder = subquery(source);
+    match grouping {
+        Grouping::PaymentKey => {
+            builder.add_select(format!("{PAYMENT_KEY_SQL} AS payment_key"));
+            builder.add_group_by("payment_key");
+        }
+        Grouping::LookupKey => {
+            builder.add_select("assumeNotNull(lookup_key) AS lookup_key");
+            builder.add_select(format!("{PAYMENT_KEY_SQL} AS payment_key"));
+            builder.add_group_by("lookup_key");
+        }
+    }
     builder.extend_selects(
         aggregates
             .iter()
-            .map(|aggregate| aggregate.merged_sql().into_owned()),
+            .map(|aggregate| aggregate_sql(*aggregate).into_owned()),
     );
-    builder.add_group_by("lookup_key");
     builder.into_fragment()
 }
 
@@ -448,7 +524,7 @@ fn raw_summary_fragment(
     query: &PaymentAuditQuery,
     scope: PaymentAuditScope,
     aggregates: &[Aggregate],
-    lookup_keys: Option<&[String]>,
+    page: Option<&[u64]>,
 ) -> SqlFragment {
     let mut columns = vec!["lookup_key", "created_at_ms"];
     for column in aggregates
@@ -460,38 +536,27 @@ fn raw_summary_fragment(
         }
     }
 
+    // Every row is an event inside the window, so each payment here is in it.
     let mut source = BoundQueryBuilder::new(DOMAIN_TABLE);
     source.extend_selects(columns);
     source.extend_filters(payment_audit_summary_scope_filters(query, scope));
-    if lookup_keys.is_none() {
-        source.extend_filters(payment_selection_filters(query, scope));
-    }
     source.add_filter(FilterClause::raw("lookup_key IS NOT NULL"));
     source.add_filter(FilterClause::raw("lookup_key != ''"));
-    source.extend_filters(lookup_keys.and_then(|keys| FilterClause::in_list("lookup_key", keys)));
-
-    let mut builder = subquery(source.into_fragment());
-    builder.add_select("assumeNotNull(lookup_key) AS lookup_key");
-    builder.extend_selects(
-        aggregates
-            .iter()
-            .map(|aggregate| aggregate.raw_sql().into_owned()),
-    );
-    builder.add_group_by("lookup_key");
-    builder.into_fragment()
+    source.extend_filters(page_filter(query, scope, page));
+    group(source.into_fragment(), aggregates, page, Aggregate::raw_sql)
 }
 
 fn summary_fragment(
     query: &PaymentAuditQuery,
     scope: PaymentAuditScope,
     aggregates: &[Aggregate],
-    lookup_keys: Option<&[String]>,
+    page: Option<&[u64]>,
 ) -> SqlFragment {
     if payment_audit_needs_raw_rows(query) {
-        return raw_summary_fragment(query, scope, aggregates, lookup_keys);
+        return raw_summary_fragment(query, scope, aggregates, page);
     }
 
-    merged_summary_fragment(query, scope, aggregates, lookup_keys)
+    merged_summary_fragment(query, scope, aggregates, page)
 }
 
 fn exact_lookup_filter(lookup_key: &str) -> FilterClause {
@@ -501,64 +566,17 @@ fn exact_lookup_filter(lookup_key: &str) -> FilterClause {
     )
 }
 
+/// Filters on a payment's grouped flags. Everything else that narrows the list selects payments
+/// per event (`payment_selection_filters`), and the window is checked per bucket or event.
 fn outer_summary_filters(query: &PaymentAuditQuery) -> Vec<FilterClause> {
-    let (start_ms, end_ms) = effective_payment_audit_window_bounds(query);
-    let mut filters = vec![
-        FilterClause::lte("first_seen_ms", end_ms),
-        FilterClause::gte("last_seen_ms", start_ms),
-    ];
-
-    if let Some(lookup_key) = crate::analytics::derive_lookup_key(
-        query.payment_id.as_deref(),
-        query.request_id.as_deref(),
-    ) {
-        filters.push(FilterClause::eq("lookup_key", lookup_key));
-    }
-    // A payment matches when it went through any of the selected gateways / routes.
-    for (values, aggregate) in [(&query.gateway, "gateways"), (&query.route, "routes")] {
-        if !values.is_empty() {
-            let placeholders = vec!["?"; values.len()].join(", ");
-            filters.push(FilterClause::new(
-                format!("hasAny({aggregate}, [{placeholders}])"),
-                values.iter().cloned().map(BindArg::from).collect(),
-            ));
-        }
-    }
-    if let Some(status) = &query.status {
-        filters.push(FilterClause::new(
-            "has(statuses, ?)",
-            vec![status.clone().into()],
-        ));
-    }
-    if let Some(flow_type) = &query.flow_type {
-        filters.push(FilterClause::new(
-            "has(flow_types, ?)",
-            vec![flow_type.clone().into()],
-        ));
-    }
+    let mut filters = Vec::new();
     if let Some(kind) = query.routing_kind {
         filters.extend(payment_audit_routing_kind_filters(kind));
     }
-    // The lookup summary table intentionally does not carry routing_approach state.
-    // When routing_approach is included or excluded, callers use raw_summary_fragment instead.
-    if !query.error_code.is_empty() {
-        let placeholders = vec!["?"; query.error_code.len()].join(", ");
-        filters.push(FilterClause::new(
-            format!("hasAny(error_codes, [{placeholders}])"),
-            query
-                .error_code
-                .iter()
-                .cloned()
-                .map(BindArg::from)
-                .collect(),
-        ));
-    }
-
-    let payment = &query.payment_filters;
-    if !payment.outcome.is_empty() {
+    let outcomes = &query.payment_filters.outcome;
+    if !outcomes.is_empty() {
         // Enum labels, not user input, so they are safe to inline.
-        let outcomes = payment
-            .outcome
+        let outcomes = outcomes
             .iter()
             .map(|outcome| format!("'{}'", outcome.as_str()))
             .collect::<Vec<_>>()
@@ -568,30 +586,6 @@ fn outer_summary_filters(query: &PaymentAuditQuery) -> Vec<FilterClause> {
             outcome_sql()
         )));
     }
-    // Attribute values aggregate lower-cased, so the match ignores case. Several values for one
-    // attribute match a payment carrying any of them.
-    for (values, aggregate) in [
-        (&payment.currency, "currencies"),
-        (&payment.payment_method, "payment_methods"),
-        (&payment.payment_method_type, "payment_method_types"),
-        (&payment.card_network, "card_networks"),
-        (&payment.auth_type, "auth_types"),
-    ] {
-        if !values.is_empty() {
-            let placeholders = vec!["lowerUTF8(?)"; values.len()].join(", ");
-            filters.push(FilterClause::new(
-                format!("hasAny({aggregate}, [{placeholders}])"),
-                values.iter().cloned().map(BindArg::from).collect(),
-            ));
-        }
-    }
-    if let Some(min_amount) = payment.min_amount {
-        filters.push(FilterClause::new("amount >= ?", vec![min_amount.into()]));
-    }
-    if let Some(max_amount) = payment.max_amount {
-        filters.push(FilterClause::new("amount <= ?", vec![max_amount.into()]));
-    }
-
     filters
 }
 
@@ -653,24 +647,24 @@ pub async fn count(
     ))
 }
 
-/// The lookup keys on the requested page, in page order. Carries only the sort keys and the
-/// filtered aggregates, so the grouping holds a few numbers per payment.
+/// The payment keys on the requested page, in page order. Carries only the sort keys and the
+/// filtered flags, so the grouping holds a few numbers per payment.
 async fn load_page_keys(
     client: &clickhouse::Client,
     query: &PaymentAuditQuery,
     scope: PaymentAuditScope,
-) -> Result<Vec<String>, ApiError> {
+) -> Result<Vec<u64>, ApiError> {
     let aggregates = with_filter_aggregates(query, PAGE_KEY_AGGREGATES);
     let mut builder = subquery(summary_fragment(query, scope, &aggregates, None));
-    builder.add_select("lookup_key");
+    builder.add_select("payment_key");
     builder.extend_filters(outer_summary_filters(query));
     builder.add_order_by(OrderClause::desc("last_seen_ms"));
     builder.add_order_by(OrderClause::desc("event_count"));
-    builder.add_order_by(OrderClause::asc("lookup_key"));
+    builder.add_order_by(OrderClause::asc("payment_key"));
     builder.set_limit(Some(query.page_size as u64));
     builder.set_offset(Some(((query.page - 1) * query.page_size) as u64));
     let rows = fetch_all::<PageKeyRow>(builder.build(client)).await?;
-    Ok(rows.into_iter().map(|row| row.lookup_key).collect())
+    Ok(rows.into_iter().map(|row| row.payment_key).collect())
 }
 
 /// One page of summaries: the page's keys first, then the full row aggregates for those keys
@@ -688,6 +682,7 @@ pub async fn load_page(
     let mut builder = subquery(summary_fragment(query, scope, ROW_AGGREGATES, Some(&keys)));
     builder.extend_selects([
         "lookup_key",
+        "payment_key",
         "payment_id",
         "request_id",
         "merchant_id",
@@ -703,14 +698,14 @@ pub async fn load_page(
     builder.add_select(format!("{} AS outcome", outcome_sql()));
     let mut rows = fetch_all::<AuditSummaryRow>(builder.build(client)).await?;
 
-    let position: HashMap<&str, usize> = keys
+    let position: HashMap<u64, usize> = keys
         .iter()
         .enumerate()
-        .map(|(index, key)| (key.as_str(), index))
+        .map(|(index, key)| (*key, index))
         .collect();
     rows.sort_by_key(|row| {
         position
-            .get(row.lookup_key.as_str())
+            .get(&row.payment_key)
             .copied()
             .unwrap_or(usize::MAX)
     });
@@ -747,6 +742,8 @@ pub async fn load_exact(
     ));
     builder.extend_selects([
         "assumeNotNull(any(lookup_key)) AS lookup_key".to_string(),
+        // `lookup_key` is the alias above, already aggregated.
+        format!("{PAYMENT_KEY_SQL} AS payment_key"),
         "argMax(payment_id, created_at_ms) AS payment_id".to_string(),
         "argMax(request_id, created_at_ms) AS request_id".to_string(),
         "any(merchant_id) AS merchant_id".to_string(),
@@ -760,11 +757,8 @@ pub async fn load_exact(
             .to_string(),
         "arrayFilter(value -> value != '', groupUniqArray(ifNull(route, ''))) AS routes"
             .to_string(),
-        // Computed in place: an extra `statuses` column would misalign the row.
-        format!(
-            "{} AS outcome",
-            outcome_of("groupUniqArray(ifNull(status, ''))")
-        ),
+        // Computed in place: an extra `outcome_flags` column would misalign the row.
+        format!("{} AS outcome", outcome_of(&raw_outcome_flags_sql())),
     ]);
     let rows = fetch_all::<AuditSummaryRow>(builder.build(client)).await?;
     Ok(map_rows(rows))
@@ -779,7 +773,8 @@ mod tests {
 
     use super::{
         exact_lookup_filter, merged_summary_fragment, outer_summary_filters, raw_summary_fragment,
-        summary_fragment, with_filter_aggregates, Aggregate, COUNT_AGGREGATES, ROW_AGGREGATES,
+        summary_fragment, with_filter_aggregates, Aggregate, COUNT_AGGREGATES, PAGE_KEY_AGGREGATES,
+        ROW_AGGREGATES,
     };
 
     fn payment_audit_query() -> PaymentAuditQuery {
@@ -818,9 +813,14 @@ mod tests {
         assert!(!sql.contains("FINAL"));
         assert!(sql.contains("sumMerge(event_count_state) AS event_count"));
         assert!(sql.contains("groupUniqArrayMerge(gateways_state)) AS gateways"));
-        assert!(sql.contains("GROUP BY lookup_key"));
+        // Every kind's buckets of a payment merge into one row per payment key.
+        assert!(sql.contains("GROUP BY payment_key"));
         assert!(!sql.contains("summary_kind"));
-        assert_eq!(fragment.binds().len(), 3, "merchant + bucket window bounds");
+        assert_eq!(
+            fragment.binds().len(),
+            5,
+            "merchant + bucket window bounds + the window per bucket"
+        );
     }
 
     #[test]
@@ -866,7 +866,13 @@ mod tests {
         // and statuses match case-sensitively.
         assert!(!success.contains("'success'"));
         assert!(!failure.contains("'failure'"));
-        assert!(super::outcome_sql().contains(&success));
+        let flags = super::outcome_flags_of("statuses");
+        assert!(flags.contains(&success) && flags.contains(&failure));
+        // A payment's outcome reads only its flags: success wins over a failed attempt.
+        assert_eq!(
+            super::outcome_sql(),
+            "multiIf(bitAnd(outcome_flags, 1) != 0, 'success', bitAnd(outcome_flags, 2) != 0, 'failure', 'pending')"
+        );
     }
 
     #[test]
@@ -876,7 +882,7 @@ mod tests {
             crate::analytics::models::PaymentAuditOutcome::Failure,
             crate::analytics::models::PaymentAuditOutcome::Pending,
         ];
-        assert!(with_filter_aggregates(&query, &[]).contains(&Aggregate::Statuses));
+        assert!(with_filter_aggregates(&query, &[]).contains(&Aggregate::Outcome));
         assert!(summary_fragment(&query, PaymentAuditScope::All, &[], None)
             .sql()
             .contains(PAYMENT_AUDIT_SUMMARY_BUCKET_TABLE));
@@ -886,37 +892,43 @@ mod tests {
     }
 
     #[test]
-    fn payment_attribute_filters_read_raw_rows_and_match_per_payment() {
+    fn payment_attribute_filters_select_payments_per_event_on_the_summary_path() {
         let mut query = payment_audit_query();
         query.payment_filters.currency = vec!["USD".to_string(), "eur".to_string()];
         query.payment_filters.min_amount = Some(50.0);
         query.payment_filters.max_amount = Some(150.0);
 
-        let aggregates = with_filter_aggregates(&query, COUNT_AGGREGATES);
-        assert!(aggregates.contains(&Aggregate::Currencies));
-        assert!(aggregates.contains(&Aggregate::Amount));
-
-        let fragment = summary_fragment(&query, PaymentAuditScope::All, &aggregates, None);
-        assert!(fragment.sql().contains(DOMAIN_TABLE));
-        assert!(fragment.sql().contains("AS currencies"));
-        assert!(fragment.sql().contains("max(greatest("));
-        // Matched on the aggregate, not on each event: the payment's other events stay.
-        assert!(!fragment.sql().contains("currency = ?"));
-
-        let filters = outer_summary_filters(&query);
-        let predicates: Vec<&str> = filters.iter().map(|f| f.predicate()).collect();
-        let currencies = filters
-            .iter()
-            .find(|f| f.predicate().starts_with("hasAny(currencies"))
-            .expect("currency filter");
-        // Either currency matches; one bind per value.
+        // No per-payment lists: the count still groups only the outcome flags.
         assert_eq!(
-            currencies.predicate(),
-            "hasAny(currencies, [lowerUTF8(?), lowerUTF8(?)])"
+            with_filter_aggregates(&query, COUNT_AGGREGATES),
+            COUNT_AGGREGATES
         );
-        assert_eq!(currencies.binds().len(), 2);
-        assert!(predicates.contains(&"amount >= ?"));
-        assert!(predicates.contains(&"amount <= ?"));
+        assert!(!super::payment_audit_needs_raw_rows(&query));
+        let fragment = summary_fragment(&query, PaymentAuditScope::All, COUNT_AGGREGATES, None);
+        assert!(fragment.sql().contains(PAYMENT_AUDIT_SUMMARY_BUCKET_TABLE));
+        assert!(!fragment.sql().contains("AS currencies"));
+
+        let filters = super::payment_selection_filters(&query, PaymentAuditScope::All);
+        let currency = filters
+            .iter()
+            .find(|f| f.predicate().contains("lowerUTF8(ifNull(currency, ''))"))
+            .expect("currency filter");
+        // A payment-key set over events carrying either currency, ignoring case.
+        assert!(currency
+            .predicate()
+            .starts_with("cityHash64(assumeNotNull(lookup_key)) IN (SELECT cityHash64("));
+        assert!(currency
+            .predicate()
+            .contains("lowerUTF8(ifNull(currency, '')) IN (lowerUTF8(?), lowerUTF8(?))"));
+        let amount = filters
+            .iter()
+            .find(|f| f.predicate().contains("greatest("))
+            .expect("amount filter");
+        assert!(amount.predicate().contains("> 0 AND greatest("));
+        assert_eq!(
+            amount.predicate().matches('?').count(),
+            amount.binds().len()
+        );
     }
 
     #[test]
@@ -927,20 +939,30 @@ mod tests {
             COUNT_AGGREGATES
         );
 
+        // Gateway and status select payments per event, adding nothing to the grouping.
         query.gateway = vec!["adyen".to_string()];
         query.status = Some("FAILURE".to_string());
         query.routing_kind = Some(PaymentAuditRoutingKind::RuleBased);
+        query.payment_filters.outcome =
+            vec![crate::analytics::models::PaymentAuditOutcome::Failure];
         let aggregates = with_filter_aggregates(&query, ROW_AGGREGATES);
         assert_eq!(
             aggregates
                 .iter()
-                .filter(|aggregate| **aggregate == Aggregate::Gateways)
+                .filter(|aggregate| **aggregate == Aggregate::Outcome)
                 .count(),
             1
         );
-        assert!(aggregates.contains(&Aggregate::Statuses));
         assert!(aggregates.contains(&Aggregate::RoutingFamilies));
-        assert!(!aggregates.contains(&Aggregate::FlowTypes));
+        assert_eq!(
+            with_filter_aggregates(&query, PAGE_KEY_AGGREGATES),
+            [
+                Aggregate::LastSeen,
+                Aggregate::EventCount,
+                Aggregate::RoutingFamilies,
+                Aggregate::Outcome
+            ]
+        );
 
         // Debit routing filters on raw routing_approach, not on the aggregated families.
         query.routing_kind = Some(PaymentAuditRoutingKind::DebitRouting);
@@ -951,15 +973,19 @@ mod tests {
 
     #[test]
     fn page_rows_are_read_for_the_page_keys_only() {
-        let keys = vec!["pay_1".to_string(), "pay_2".to_string()];
+        let keys = [11_u64, 22];
         let merged = merged_summary_fragment(
             &payment_audit_query(),
             PaymentAuditScope::All,
             ROW_AGGREGATES,
             Some(&keys),
         );
-        assert!(merged.sql().contains("lookup_key IN (?, ?)"));
-        assert_eq!(merged.binds().len(), 5);
+        assert!(merged
+            .sql()
+            .contains("cityHash64(assumeNotNull(lookup_key)) IN (?, ?)"));
+        // The page's rows carry the lookup key itself.
+        assert!(merged.sql().contains("GROUP BY lookup_key"));
+        assert_eq!(merged.sql().matches('?').count(), merged.binds().len());
 
         let raw = raw_summary_fragment(
             &payment_audit_query(),
@@ -967,7 +993,64 @@ mod tests {
             ROW_AGGREGATES,
             Some(&keys),
         );
-        assert!(raw.sql().contains("lookup_key IN (?, ?)"));
+        assert!(raw
+            .sql()
+            .contains("cityHash64(assumeNotNull(lookup_key)) IN (?, ?)"));
+    }
+
+    /// Each selection is a set of payment keys compared with the payment's key: a set of lookup
+    /// keys would compare text with a number and match nothing.
+    #[test]
+    fn every_payment_selection_compares_payment_keys() {
+        use crate::analytics::models::{PaymentField, PaymentFieldFilter};
+        let mut query = payment_audit_query();
+        query.payment_filters.connector_mismatch = true;
+        query.gateway = vec!["adyen".to_string()];
+        query.payment_filters.fields = vec![PaymentFieldFilter {
+            field: PaymentField::RoutingKey("card_bin".into()),
+            values: vec!["424242".into()],
+        }];
+        let filters = super::payment_selection_filters(&query, PaymentAuditScope::All);
+        assert_eq!(filters.len(), 3);
+        for filter in filters {
+            let predicate = filter.predicate();
+            assert!(
+                predicate
+                    .starts_with("cityHash64(assumeNotNull(lookup_key)) IN (SELECT cityHash64("),
+                "{predicate}"
+            );
+            assert_eq!(predicate.matches('?').count(), filter.binds().len());
+        }
+    }
+
+    /// The count and the page's keys group every payment in the window, so each holds only
+    /// fixed-size values per payment: an 8-byte key, flags and numbers, never a list or the
+    /// lookup key's text.
+    #[test]
+    fn choosing_the_page_holds_fixed_size_values_per_payment() {
+        let mut query = payment_audit_query();
+        query.gateway = vec!["adyen".to_string()];
+        query.payment_filters.currency = vec!["USD".to_string()];
+        for (aggregates, path) in [
+            (with_filter_aggregates(&query, COUNT_AGGREGATES), "merged"),
+            (
+                with_filter_aggregates(&query, PAGE_KEY_AGGREGATES),
+                "merged",
+            ),
+        ] {
+            let sql = summary_fragment(&query, PaymentAuditScope::All, &aggregates, None)
+                .sql()
+                .to_string();
+            assert!(sql.contains("GROUP BY payment_key"), "{path}: {sql}");
+            assert!(!sql.contains("groupUniqArray"), "{path}: {sql}");
+        }
+        query.routing_kind = Some(PaymentAuditRoutingKind::AuthRate);
+        let raw = summary_fragment(&query, PaymentAuditScope::All, COUNT_AGGREGATES, None)
+            .sql()
+            .to_string();
+        assert!(raw.contains(DOMAIN_TABLE));
+        assert!(raw.contains("GROUP BY payment_key"));
+        assert!(!raw.contains("groupUniqArray"));
     }
 
     #[test]
@@ -980,7 +1063,11 @@ mod tests {
             None,
         );
         assert!(fragment.sql().contains("summary_kind IN (?, ?)"));
-        assert_eq!(fragment.binds().len(), 5, "merchant + window + two kinds");
+        assert_eq!(
+            fragment.binds().len(),
+            7,
+            "merchant + window + two kinds + the window per bucket"
+        );
         let preview = merged_summary_fragment(
             &payment_audit_query(),
             PaymentAuditScope::Preview,
@@ -988,7 +1075,7 @@ mod tests {
             None,
         );
         assert!(preview.sql().contains("summary_kind IN (?)"));
-        assert_eq!(preview.binds().len(), 4);
+        assert_eq!(preview.binds().len(), 6);
     }
 
     #[test]
@@ -1007,14 +1094,25 @@ mod tests {
         ];
         assert!(!super::payment_audit_needs_raw_rows(&query));
         let merged = summary_fragment(&query, PaymentAuditScope::All, COUNT_AGGREGATES, None);
-        // One `lookup_key IN (…)` per field, so a payment must carry both.
-        assert_eq!(merged.sql().matches("lookup_key IN (SELECT").count(), 2);
+        // One payment-key set per field, so a payment must carry both.
+        assert_eq!(
+            merged
+                .sql()
+                .matches("cityHash64(assumeNotNull(lookup_key)) IN (SELECT")
+                .count(),
+            2
+        );
         assert_eq!(merged.sql().matches('?').count(), merged.binds().len());
 
         query.routing_kind = Some(PaymentAuditRoutingKind::AuthRate);
         let raw = summary_fragment(&query, PaymentAuditScope::All, COUNT_AGGREGATES, None);
         assert!(raw.sql().contains(DOMAIN_TABLE));
-        assert_eq!(raw.sql().matches("lookup_key IN (SELECT").count(), 2);
+        assert_eq!(
+            raw.sql()
+                .matches("cityHash64(assumeNotNull(lookup_key)) IN (SELECT")
+                .count(),
+            2
+        );
         assert_eq!(raw.sql().matches('?').count(), raw.binds().len());
     }
 
@@ -1098,9 +1196,10 @@ mod tests {
             &payment_audit_query(),
             PaymentAuditScope::All,
             ROW_AGGREGATES,
-            None,
+            Some(&[7]),
         );
         assert!(fragment.sql().contains("AS lookup_key"));
+        assert!(fragment.sql().contains("AS payment_key"));
         assert!(fragment.sql().contains("AS merchant_id"));
         assert!(!fragment.sql().contains("resolved_lookup_key"));
         assert!(!fragment.sql().contains("resolved_merchant_id"));
@@ -1116,22 +1215,21 @@ mod tests {
         assert_eq!(filter.binds().len(), 5);
     }
 
+    /// A payment is in the window when one of its buckets has events inside it, checked on each
+    /// bucket, so no payment carries a first-seen time just for the check. The grouped query
+    /// filters only on the payment's flags.
     #[test]
-    fn outer_filters_use_lookup_key_for_exact_request_filters() {
+    fn the_window_is_checked_per_bucket_and_the_grouping_filters_only_flags() {
         let mut query = payment_audit_query();
-        query.request_id = Some("req_123".to_string());
-        let predicates = outer_summary_filters(&query)
-            .into_iter()
-            .map(|filter| filter.predicate().to_string())
-            .collect::<Vec<_>>();
-        assert!(predicates
-            .iter()
-            .any(|predicate| predicate == "lookup_key = ?"));
-        assert!(predicates
-            .iter()
-            .any(|predicate| predicate == "first_seen_ms <= ?"));
-        assert!(predicates
-            .iter()
-            .any(|predicate| predicate == "last_seen_ms >= ?"));
+        query.gateway = vec!["adyen".to_string()];
+        query.payment_filters.currency = vec!["USD".to_string()];
+        assert!(outer_summary_filters(&query).is_empty());
+
+        let sql = merged_summary_fragment(&query, PaymentAuditScope::All, COUNT_AGGREGATES, None)
+            .sql()
+            .to_string();
+        assert!(sql.contains("finalizeAggregation(first_seen_ms_state) <= ?"));
+        assert!(sql.contains("finalizeAggregation(last_seen_ms_state) >= ?"));
+        assert!(!sql.contains("minMerge(first_seen_ms_state)"));
     }
 }

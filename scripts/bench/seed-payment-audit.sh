@@ -176,6 +176,14 @@ FROM (${source_rows}) WHERE summary_kind != ''
 GROUP BY merchant_id, effective_lookup_key, summary_kind;
 SQL
 
+# Merge the merchant's partitions fully, so every run reads the same layout: a month of
+# long-lived data is merged, and freshly inserted parts (each a slice of time ClickHouse can skip
+# whole) would flatter the results.
+echo "Merging the seeded partitions..."
+for partition in $(ch -q "SELECT DISTINCT partition FROM system.parts WHERE active AND table = 'analytics_domain_events' AND partition IN (SELECT DISTINCT toString(toYYYYMM(created_at)) FROM analytics_domain_events WHERE merchant_id = '${MERCHANT_ID}')"); do
+  ch -q "OPTIMIZE TABLE analytics_domain_events PARTITION ${partition} FINAL"
+done
+
 ch <<SQL
 SELECT 'events', count(), formatReadableSize(sum(length(details))),
     formatReadableSize(sumIf(length(details), flow_type = 'routing_hybrid_decision') / countIf(flow_type = 'routing_hybrid_decision'))
