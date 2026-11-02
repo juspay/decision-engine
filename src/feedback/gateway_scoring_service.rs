@@ -454,12 +454,8 @@ pub const SCORE_UPDATE_SKIPPED: &str = "Skipped";
 pub async fn check_and_update_gateway_score_(
     api_payload: FT::UpdateScorePayload,
 ) -> Result<String, T::ErrorResponse> {
-    // Account the payment's outcome against the A/B guardrail before any early return. The
-    // guardrail only needs payment_id, merchant_id, and the outcome; it does not depend on
-    // gateway scoring data or GSM lookups, so it must not be gated on either. Keeping it here
-    // records the outcome even when:
-    //   (a) the GSM scoring filter skips gateway penalisation, or
-    //   (b) GatewayScoringData is absent from Redis (expired/not cached).
+    // Before any early return, because the guardrail needs only the payment's outcome and must
+    // not be gated on the GSM scoring filter or on GatewayScoringData still being cached.
     let is_success = is_transaction_success(api_payload.status.clone());
     if is_success || is_transaction_failure(api_payload.status.clone()) {
         let experiments_to_stop =

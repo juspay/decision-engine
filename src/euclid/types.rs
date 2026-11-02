@@ -161,7 +161,7 @@ pub struct ABTestData {
     /// Minimum transactions to collect before reporting a significance verdict.
     pub min_sample_size: u32,
     /// Disable the variant for new payments when its auth rate drops more than this many pp
-    /// below control, after the minimum sample size is reached on a participating endpoint.
+    /// below control, once a tenth of the sample target has resolved.
     pub guardrail_threshold_pp: f64,
     /// SR overrides for a single-strategy `sr_routing` variant arm.
     #[serde(skip_serializing_if = "Option::is_none")]

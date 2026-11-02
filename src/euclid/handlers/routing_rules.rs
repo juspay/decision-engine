@@ -1964,8 +1964,7 @@ pub(crate) async fn stop_breached_payment_experiment(
     experiment_id: &str,
 ) -> Result<(), String> {
     let state = get_tenant_app_state().await;
-    // Internal work: the guardrail only names merchant/experiment pairs the decider itself
-    // recorded while routing.
+    // Internal work, since the guardrail only names pairs the decider recorded while routing.
     let merchant = crate::auth::AuthorizedMerchant::internal(merchant_id);
     let payment = AlgorithmType::Payment.to_string();
     let slot = experiment_slot(&payment);
@@ -1974,7 +1973,7 @@ pub(crate) async fn stop_breached_payment_experiment(
         .map_err(|e| format!("{e:?}"))?;
     if !deleted {
         // A previous attempt may have deleted the mapping but failed to update Redis. Retry the
-        // cache write only when the slot is empty; never hide a replacement experiment.
+        // cache write only when the slot is empty, never hiding a replacement experiment.
         let active = algorithm_store::find_slot(&state.db, &merchant, &slot)
             .await
             .map_err(|e| format!("{e:?}"))?;

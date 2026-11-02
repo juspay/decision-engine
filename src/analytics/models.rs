@@ -819,8 +819,8 @@ pub enum ExperimentVerdict {
     /// Variant is statistically significantly worse than control.
     VariantLoses,
     /// Completed-payment auth rate dropped beyond the query's guardrail threshold, even if the
-    /// significance sample target has not been reached. Payment feedback deactivates an active
-    /// experiment only after its saved minimum resolved sample size is reached.
+    /// significance sample target has not been reached. Reporting a breach here warns earlier
+    /// than the live stop, which waits for a tenth of the target to resolve.
     GuardrailBreached,
 }
 

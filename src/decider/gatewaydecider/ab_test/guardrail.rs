@@ -9,9 +9,12 @@ use crate::euclid::types::{ABTestData, ExperimentEndpoint};
 use crate::logger;
 
 static GUARDRAILS: Lazy<Mutex<Guardrails>> = Lazy::new(|| Mutex::new(Guardrails::default()));
-// Match the existing per-payment in-flight retention. Expiration is checked on traffic, so no
-// worker is needed and running experiments do not retain every payment ID indefinitely.
+// Pruned on traffic, not by a worker, so a long experiment doesn't retain every payment id.
 const PAYMENT_RETENTION: Duration = Duration::from_secs(3600);
+// Share of the merchant's sample target that must resolve before the guardrail can stop an
+// experiment. A safety stop should react long before a significance verdict, but not on the first
+// few payments, where one binary outcome swings an arm's rate by tens of points.
+const GUARDRAIL_SAMPLE_PCT: u32 = 10;
 
 #[derive(Default)]
 struct Guardrails {
@@ -20,6 +23,7 @@ struct Guardrails {
 
 struct Experiment {
     threshold_pp: f64,
+    min_resolved: u64,
     breached: bool,
     stop_completed: bool,
     payments: HashMap<String, Payment>,
@@ -31,6 +35,7 @@ impl Experiment {
     fn new(data: &ABTestData) -> Self {
         Self {
             threshold_pp: data.guardrail_threshold_pp,
+            min_resolved: (data.min_sample_size / GUARDRAIL_SAMPLE_PCT) as u64,
             breached: false,
             stop_completed: false,
             payments: HashMap::new(),
@@ -54,7 +59,7 @@ impl Experiment {
 
 struct Payment {
     side: ArmSide,
-    // None: routed, no outcome. Some(false): failed; a retry may succeed. Some(true): succeeded.
+    // None is routed without an outcome, Some(false) failed but may retry, Some(true) succeeded.
     endpoints: HashMap<ExperimentEndpoint, Option<bool>>,
 }
 
@@ -72,8 +77,13 @@ impl EndpointCounts {
         }
     }
 
-    fn breached(&self, threshold_pp: f64) -> bool {
-        if self.control.transactions == 0 || self.variant.transactions == 0 {
+    fn breached(&self, threshold_pp: f64, min_resolved: u64) -> bool {
+        // Both arms need a rate to compare, and the merchant's share of the target has to have
+        // resolved before that comparison means anything.
+        if self.control.transactions == 0
+            || self.variant.transactions == 0
+            || self.control.transactions + self.variant.transactions < min_resolved
+        {
             return false;
         }
         let control_rate = self.control.successes as f64 / self.control.transactions as f64;
@@ -158,9 +168,8 @@ pub fn record_decision(
     }
 }
 
-/// Update net auth rate on every feedback and return experiments that need durable deactivation.
-/// Duplicate callbacks and a failure followed by a success count at most one success per payment
-/// and endpoint. A breached experiment remains pending until deactivation succeeds.
+/// Update net auth rate on feedback and return experiments needing durable deactivation. At most
+/// one success counts per payment and endpoint. A breached experiment stays pending until stopped.
 pub fn record_outcome(merchant_id: &str, payment_id: &str, is_success: bool) -> Vec<String> {
     let mut guardrails = lock();
     let Some(experiments) = guardrails.merchants.get_mut(merchant_id) else {
@@ -180,7 +189,9 @@ pub fn record_outcome(merchant_id: &str, payment_id: &str, is_success: bool) -> 
                     arm.successes += 1;
                     *outcome = Some(true);
                 }
-                if !experiment.breached && counts.breached(experiment.threshold_pp) {
+                if !experiment.breached
+                    && counts.breached(experiment.threshold_pp, experiment.min_resolved)
+                {
                     experiment.breached = true;
                     logger::warn!(merchant_id = %merchant_id, experiment_id = %experiment_id,
                         endpoint = endpoint.as_str(), threshold_pp = experiment.threshold_pp,
