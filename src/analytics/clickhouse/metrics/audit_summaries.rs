@@ -20,8 +20,8 @@ use super::super::common::{
 use super::super::filters::{
     payment_audit_needs_raw_rows, payment_audit_routing_kind_filters,
     payment_audit_summary_bucket_filters, payment_audit_summary_scope_filters,
-    payment_audit_timeline_filters, payment_field_match, raw_routing_families_sql,
-    summary_routing_families_sql,
+    payment_audit_timeline_filters, payment_field_match, payment_request_events_filter,
+    raw_routing_families_sql, summary_routing_families_sql,
 };
 use super::super::query::{BindArg, BoundQueryBuilder, FilterClause, OrderClause, SqlFragment};
 use super::super::time::effective_payment_audit_window_bounds;
@@ -397,6 +397,7 @@ fn payment_selection_filters(
         payments.add_select("assumeNotNull(lookup_key)");
         payments.extend_filters(payment_audit_timeline_filters(query, scope));
         payments.add_filter(FilterClause::raw("notEmpty(ifNull(lookup_key, ''))"));
+        payments.add_filter(payment_request_events_filter());
         payments.add_filter(payment_field_match(field));
         let fragment = payments.into_fragment();
         FilterClause::new(
@@ -1015,6 +1016,36 @@ mod tests {
         assert!(raw.sql().contains(DOMAIN_TABLE));
         assert_eq!(raw.sql().matches("lookup_key IN (SELECT").count(), 2);
         assert_eq!(raw.sql().matches('?').count(), raw.binds().len());
+    }
+
+    /// What bounds a payment field's cost: it parses stored requests only for the window's
+    /// request-carrying events in the window's monthly partitions. Each of these predicates must
+    /// stay in its subquery; the benchmark in `scripts/bench/payment-audit-filters.py` measures
+    /// what they save.
+    #[test]
+    fn a_payment_field_parses_requests_only_inside_the_window() {
+        use crate::analytics::models::{PaymentField, PaymentFieldFilter};
+        let mut query = payment_audit_query();
+        query.payment_filters.fields = vec![PaymentFieldFilter {
+            field: PaymentField::RoutingKey("card_bin".into()),
+            values: vec!["424242".into()],
+        }];
+        let filters = super::payment_selection_filters(&query, PaymentAuditScope::All);
+        let [field] = filters.as_slice() else {
+            panic!("one filter per payment field, got {}", filters.len());
+        };
+        let subquery = field.predicate();
+        for bound in [
+            "created_at_ms >= ?",
+            "created_at_ms <= ?",
+            // The partition column, so months outside the window are skipped.
+            "created_at >= fromUnixTimestamp64Milli",
+            "created_at <= fromUnixTimestamp64Milli",
+            "merchant_id = ?",
+            "flow_type IN ('decide_gateway_decision'",
+        ] {
+            assert!(subquery.contains(bound), "{bound} missing from {subquery}");
+        }
     }
 
     #[test]

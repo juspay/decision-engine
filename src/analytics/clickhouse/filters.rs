@@ -1,5 +1,5 @@
 use crate::analytics::flow::{
-    AnalyticsRoute, SUMMARY_KIND_DYNAMIC, SUMMARY_KIND_HYBRID, SUMMARY_KIND_PREVIEW,
+    AnalyticsRoute, FlowType, SUMMARY_KIND_DYNAMIC, SUMMARY_KIND_HYBRID, SUMMARY_KIND_PREVIEW,
 };
 use crate::analytics::models::{
     AnalyticsQuery, PaymentAuditQuery, PaymentAuditRoutingKind, PaymentAuditScope, PaymentField,
@@ -291,6 +291,24 @@ fn rule_parameter_sql(parameters: &str) -> (String, usize) {
         ),
         3,
     )
+}
+
+/// The events that store a routing request: `/decide-gateway` decisions, `/decide` and
+/// `/routing/hybrid` decisions and errors, and `/routing/evaluate` results. Score updates and
+/// request hits, most of a payment's events, are skipped before any request is parsed.
+pub fn payment_request_events_filter() -> FilterClause {
+    let flow_types = [
+        FlowType::DecideGatewayDecision,
+        FlowType::RoutingHybridDecision,
+        FlowType::RoutingHybridError,
+    ]
+    .into_iter()
+    .chain(PAYMENT_AUDIT_PREVIEW_FLOW_TYPES.iter().copied())
+    .collect::<Vec<_>>();
+    FilterClause::raw(format!(
+        "flow_type IN {}",
+        static_flow_type_in_sql(&flow_types)
+    ))
 }
 
 /// Matches an event whose request carried the field's value, ignoring case. Rule parameters are
@@ -698,6 +716,24 @@ mod tests {
             values: vec!["eu".into()],
         });
         assert!(!label.predicate().contains("paymentInfo"));
+    }
+
+    #[test]
+    fn payment_fields_parse_only_events_that_store_a_request() {
+        let predicate = super::payment_request_events_filter()
+            .predicate()
+            .to_string();
+        for flow_type in [
+            "decide_gateway_decision",
+            "routing_hybrid_decision",
+            "routing_hybrid_error",
+            "routing_evaluate_advanced",
+        ] {
+            assert!(predicate.contains(flow_type), "{flow_type}");
+        }
+        for flow_type in ["update_gateway_score_update", "routing_hybrid_request_hit"] {
+            assert!(!predicate.contains(flow_type), "{flow_type}");
+        }
     }
 
     #[test]
