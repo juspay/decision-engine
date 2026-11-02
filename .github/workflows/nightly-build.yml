@@ -49,6 +49,11 @@ jobs:
           SHORT_SHA="${GITHUB_SHA::7}"
           BUILT_AT=$(TZ=Asia/Kolkata date '+%Y-%m-%d %H:%M:%S IST')
 
+          # Exact lookup of refs/tags/<name> on origin (no regex: tag names contain dots).
+          remote_tag_exists() {
+            git ls-remote --exit-code --tags origin "refs/tags/$1" >/dev/null 2>&1
+          }
+
           if [[ "$GITHUB_REF_NAME" == "main" ]]; then
             IS_MAIN=true
             # Date-based tag (YYYY.MM.DD format)
@@ -61,7 +66,7 @@ jobs:
 
             # If the date tag already points at another commit, append the run number
             TAG_NAME="${BASE_TAG}"
-            if git ls-remote --tags origin | grep -q "refs/tags/${BASE_TAG}$"; then
+            if remote_tag_exists "${BASE_TAG}"; then
               git fetch origin "refs/tags/${BASE_TAG}:refs/tags/${BASE_TAG}" 2>/dev/null || true
               EXISTING_SHA=$(git rev-parse "refs/tags/${BASE_TAG}^{commit}" 2>/dev/null || echo "")
               if [[ "$EXISTING_SHA" == "$GITHUB_SHA" ]]; then
@@ -85,14 +90,23 @@ jobs:
             fi
             # Image tags allow only [A-Za-z0-9_.-] and cannot start with '.' or '-'.
             BRANCH_SLUG=$(printf '%s' "$GITHUB_REF_NAME" | sed -e 's#[^A-Za-z0-9._-]#-#g' -e 's#^[.-]*##')
+            # A branch made only of unsafe characters (e.g. "+") sanitizes to nothing.
+            BRANCH_SLUG="${BRANCH_SLUG:-branch}"
             TAG_NAME="${BRANCH_SLUG}-${TAG_SUFFIX}"
+            # nightly-* (nightly-latest and the dated tags) belongs to main. Image
+            # pushes for TAG_NAME are not gated on is_main, so a branch "nightly"
+            # with suffix "latest" would otherwise overwrite nightly-latest.
+            if [[ "$TAG_NAME" == nightly-* ]]; then
+              echo "Error: tag '${TAG_NAME}' is in the nightly-* namespace reserved for main builds. Rename the branch or build from main."
+              exit 1
+            fi
             # Longest derived image tag is "groovy-runner-<tag>" (14 chars + tag), registry limit 128.
             if (( ${#TAG_NAME} > 114 )); then
               echo "Error: tag '${TAG_NAME}' is ${#TAG_NAME} characters; branch name + suffix must be at most 114."
               exit 1
             fi
             # Never silently rename or move a branch build: fail if the name is taken by another commit.
-            if git ls-remote --tags origin | grep -q "refs/tags/${TAG_NAME}$"; then
+            if remote_tag_exists "${TAG_NAME}"; then
               git fetch origin "refs/tags/${TAG_NAME}:refs/tags/${TAG_NAME}" 2>/dev/null || true
               EXISTING_SHA=$(git rev-parse "refs/tags/${TAG_NAME}^{commit}" 2>/dev/null || echo "")
               if [[ "$EXISTING_SHA" == "$GITHUB_SHA" ]]; then
