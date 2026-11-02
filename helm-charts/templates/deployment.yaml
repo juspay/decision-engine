@@ -64,7 +64,7 @@ spec:
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
-            {{- toYaml (merge (deepCopy (.Values.decisionEngine.securityContext | default dict)) .Values.securityContext) | nindent 12 }}
+            {{- include "decision-engine.containerSecurityContext" (dict "global" .Values.securityContext "component" .Values.decisionEngine.securityContext) | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.version | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
