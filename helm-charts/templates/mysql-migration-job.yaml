@@ -31,6 +31,8 @@ spec:
         - name: wait-for-mysql
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
           imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.initContainers.securityContext | nindent 12 }}
           command: ['sh', '-c', 'until nc -z {{ include "decision-engine.mysqlHost" . }} 3306; do echo waiting for mysql; sleep 2; done;']
       {{- end }}
       containers:
