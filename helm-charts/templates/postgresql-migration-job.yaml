@@ -41,6 +41,8 @@ spec:
         - name: wait-for-postgresql
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
           imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.initContainers.securityContext | nindent 12 }}
           command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} 5432; do echo waiting for postgresql; sleep 2; done;']
       {{- end }}
       containers:

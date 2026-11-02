@@ -82,7 +82,8 @@ RUN set -o errexit -o nounset \
     && ln --symbolic "${GROOVY_HOME}/bin/groovysh" /usr/bin/groovysh \
     && ln --symbolic "${GROOVY_HOME}/bin/java2groovy" /usr/bin/java2groovy
 
-USER groovy
+# Numeric so Kubernetes can verify `runAsNonRoot`; 1000 is the groovy user created above.
+USER 1000:1000
 
 WORKDIR /app
 
