@@ -93,7 +93,7 @@ test.describe('Analytics API', () => {
       'update_gateway_score_update',
       'routing_evaluate_advanced',
     ])
-    const multi = await waitForAuditListing(api, seeded.decisionPaymentId, { routing_kind: 'multi_objective' })
+    const multi = await waitForAuditListing(api, seeded.decisionPaymentId, { routing_kind: 'auth_rate' })
     expect(multi.body.results.find((row: any) => row.payment_id === seeded.decisionPaymentId).event_count).toBe(3)
     expect(multi.body.results.some((row: any) => row.payment_id === seeded.previewPaymentId)).toBe(false)
     const ruleBased = await waitForAuditListing(api, seeded.previewPaymentId!, { routing_kind: 'rule_based' })
@@ -120,8 +120,17 @@ test.describe('Analytics API', () => {
     expect(event.event_stage).toBe('decide_routed')
     expect(event.details_json?.api_response?.id).toBe(decided.body.id)
     const summary = audit.body.results.find((row: any) => row.payment_id === paymentId)
-    expect(summary.latest_stage).toBe('Decide')
-    expect(summary.routes).toEqual(['Decide'])
+    expect(summary.latest_stage).toBe('Multi Objective')
+    expect(summary.routes).toEqual(['/decide'])
+
+    // Routing-type filter: /decide is Multi Objective, with /routing/hybrid.
+    const decideListing = await waitForAuditListing(api, paymentId, { routing_kind: 'multi_objective' })
+    expect(decideListing.body.routing_kind).toBe('multi_objective')
+    for (const routingKind of ['auth_rate', 'rule_based']) {
+      const listing = await api.raw('GET', '/analytics/payment-audit', { qs: { range: '1h', routing_kind: routingKind } })
+      expect(listing.status, routingKind).toBe(200)
+      expect(listing.body.results.some((entry: any) => entry.payment_id === paymentId), routingKind).toBe(false)
+    }
   })
 
   test('records a hybrid payment as one hybrid event plus its score update', async ({
@@ -162,12 +171,15 @@ test.describe('Analytics API', () => {
     expect(hybridEvent.details_json?.selection_reason?.dynamic_status).toBe('success')
     expect(byType.update_gateway_score_update.event_stage).toBe('score_updated')
 
-    // Routing-type filter over the list: hybrid lists it, the other kinds do not.
-    const hybridListing = await waitForAuditListing(api, seeded.paymentId, { routing_kind: 'hybrid' })
-    expect(hybridListing.body.routing_kind).toBe('hybrid')
+    // Routing-type filter over the list: Multi Objective lists it (as does the `hybrid` value it
+    // replaced), the other kinds do not.
+    const hybridListing = await waitForAuditListing(api, seeded.paymentId, { routing_kind: 'multi_objective' })
+    expect(hybridListing.body.routing_kind).toBe('multi_objective')
+    const legacyListing = await waitForAuditListing(api, seeded.paymentId, { routing_kind: 'hybrid' })
+    expect(legacyListing.body.routing_kind).toBe('multi_objective')
     const row = hybridListing.body.results.find((entry: any) => entry.payment_id === seeded.paymentId)
     expect(row.event_count).toBe(2)
-    for (const routingKind of ['multi_objective', 'rule_based', 'debit_routing']) {
+    for (const routingKind of ['auth_rate', 'rule_based', 'debit_routing']) {
       const listing = await api.raw('GET', '/analytics/payment-audit', {
         qs: { range: '1h', routing_kind: routingKind },
         failOnStatusCode: false,

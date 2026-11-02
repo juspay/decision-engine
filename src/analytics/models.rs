@@ -453,10 +453,12 @@ impl PaymentAuditScope {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum PaymentAuditRoutingKind {
+    /// Multi Objective: `/decide` and `/routing/hybrid`, the endpoint it replaces.
     MultiObjective,
+    /// `/decide-gateway` without debit routing.
+    AuthRate,
     RuleBased,
     DebitRouting,
-    Hybrid,
 }
 
 impl PaymentAuditRoutingKind {
@@ -465,10 +467,11 @@ impl PaymentAuditRoutingKind {
             .map(|value| value.trim().to_ascii_lowercase())
             .as_deref()
         {
-            Some("multi_objective") => Some(Self::MultiObjective),
+            // `hybrid` named the view before `/decide` joined it.
+            Some("multi_objective" | "hybrid") => Some(Self::MultiObjective),
+            Some("auth_rate") => Some(Self::AuthRate),
             Some("rule_based") => Some(Self::RuleBased),
             Some("debit_routing") => Some(Self::DebitRouting),
-            Some("hybrid") => Some(Self::Hybrid),
             _ => None,
         }
     }
@@ -476,9 +479,9 @@ impl PaymentAuditRoutingKind {
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::MultiObjective => "multi_objective",
+            Self::AuthRate => "auth_rate",
             Self::RuleBased => "rule_based",
             Self::DebitRouting => "debit_routing",
-            Self::Hybrid => "hybrid",
         }
     }
 }
@@ -556,6 +559,112 @@ pub struct PaymentAuditPaymentFilters {
     pub auth_type: Vec<String>,
     pub min_amount: Option<f64>,
     pub max_amount: Option<f64>,
+    /// Routing keys and metadata keys, each matching a payment whose requests carried its value;
+    /// a payment must match all of them.
+    #[serde(default)]
+    pub fields: Vec<PaymentFieldFilter>,
+}
+
+/// A payment field the audit list narrows by, as it was sent on any routing request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaymentFieldFilter {
+    pub field: PaymentField,
+    /// The value, plus its configured routing name where requests carry one (an ISO country
+    /// code's country name). Matched ignoring case.
+    pub values: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "name", rename_all = "snake_case")]
+pub enum PaymentField {
+    /// A configured routing key, such as `card_bin` or `billing_country`.
+    RoutingKey(String),
+    /// A key of the request's metadata, sent as `metadata.<key>`.
+    Metadata(String),
+}
+
+impl PaymentFieldFilter {
+    const METADATA_PREFIX: &'static str = "metadata.";
+
+    /// The `payment_fields` param: a JSON object of field names to values, such as
+    /// `{"card_bin":"424242","metadata.segment":"premium"}`. A field is a routing key the
+    /// configuration defines (other than a numeric one: amounts filter by `min_amount` /
+    /// `max_amount`) or `metadata.<key>`.
+    pub fn parse_all(
+        raw: Option<&str>,
+        keys: &std::collections::BTreeMap<String, crate::euclid::types::KeyConfig>,
+    ) -> Result<Vec<Self>, &'static str> {
+        let Some(raw) = raw.map(str::trim).filter(|raw| !raw.is_empty()) else {
+            return Ok(Vec::new());
+        };
+        let fields: serde_json::Map<String, serde_json::Value> = serde_json::from_str(raw)
+            .map_err(|_| "payment_fields must be a JSON object of field names to values")?;
+        fields
+            .into_iter()
+            .map(|(name, value)| {
+                let value = match value {
+                    serde_json::Value::String(text) => text.trim().to_string(),
+                    serde_json::Value::Number(number) => number.to_string(),
+                    _ => return Err("payment_fields values must be text"),
+                };
+                if value.is_empty() {
+                    return Err("payment_fields values must not be empty");
+                }
+                Self::parse(&name, value, keys)
+            })
+            .collect()
+    }
+
+    fn parse(
+        name: &str,
+        value: String,
+        keys: &std::collections::BTreeMap<String, crate::euclid::types::KeyConfig>,
+    ) -> Result<Self, &'static str> {
+        use crate::euclid::types::KeyDataType;
+
+        if let Some(key) = name.strip_prefix(Self::METADATA_PREFIX) {
+            let valid = !key.is_empty()
+                && key.len() <= 64
+                && key
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
+            if !valid {
+                return Err(
+                    "payment_fields metadata keys must be letters, digits, '_', '-' or '.'",
+                );
+            }
+            return Ok(Self {
+                field: PaymentField::Metadata(key.to_string()),
+                values: vec![value],
+            });
+        }
+        match keys.get(name).map(|config| &config.data_type) {
+            None | Some(KeyDataType::Udf) => {
+                Err("payment_fields names a field that is not a routing key or metadata.<key>")
+            }
+            Some(KeyDataType::Integer) => {
+                Err("payment_fields cannot filter numeric fields; use min_amount and max_amount")
+            }
+            Some(_) => {
+                let country_name = matches!(
+                    name,
+                    "billing_country" | "business_country" | "issuer_country"
+                )
+                .then(|| {
+                    crate::types::country::routing_names::routing_country_name(
+                        &value.to_ascii_uppercase(),
+                    )
+                })
+                .flatten();
+                let mut values = vec![value];
+                values.extend(country_name.map(str::to_string));
+                Ok(Self {
+                    field: PaymentField::RoutingKey(name.to_string()),
+                    values,
+                })
+            }
+        }
+    }
 }
 
 impl PaymentAuditPaymentFilters {
@@ -1188,12 +1297,85 @@ mod payment_audit_filter_tests {
         );
     }
 
+    fn routing_keys() -> std::collections::BTreeMap<String, crate::euclid::types::KeyConfig> {
+        serde_json::from_value(serde_json::json!({
+            "card_bin": {"type": "str_value"},
+            "billing_country": {"type": "enum", "values": "India, UnitedStatesOfAmerica"},
+            "amount": {"type": "integer"},
+            "metadata": {"type": "udf"},
+        }))
+        .unwrap_or_default()
+    }
+
+    #[test]
+    fn payment_fields_name_routing_keys_or_metadata_keys() {
+        use super::{PaymentField, PaymentFieldFilter};
+        let parsed = PaymentFieldFilter::parse_all(
+            Some(
+                r#"{"card_bin": " 424242 ", "billing_country": "us", "metadata.segment": "premium"}"#,
+            ),
+            &routing_keys(),
+        );
+        assert_eq!(
+            parsed,
+            Ok(vec![
+                PaymentFieldFilter {
+                    field: PaymentField::RoutingKey("card_bin".into()),
+                    values: vec!["424242".into()],
+                },
+                PaymentFieldFilter {
+                    field: PaymentField::RoutingKey("billing_country".into()),
+                    // The ISO code, and the country name rule parameters carry.
+                    values: vec!["us".into(), "UnitedStatesOfAmerica".into()],
+                },
+                PaymentFieldFilter {
+                    field: PaymentField::Metadata("segment".into()),
+                    values: vec!["premium".into()],
+                },
+            ])
+        );
+        assert_eq!(
+            PaymentFieldFilter::parse_all(None, &routing_keys()),
+            Ok(Vec::new())
+        );
+        assert_eq!(
+            PaymentFieldFilter::parse_all(Some(" "), &routing_keys()),
+            Ok(Vec::new())
+        );
+    }
+
+    #[test]
+    fn payment_fields_reject_what_they_cannot_match() {
+        use super::PaymentFieldFilter;
+        for raw in [
+            "card_bin=424242",
+            r#"["card_bin"]"#,
+            r#"{"card_bni": "424242"}"#,
+            r#"{"amount": "100"}"#,
+            r#"{"metadata": "x"}"#,
+            r#"{"metadata.": "x"}"#,
+            r#"{"metadata.a'b": "x"}"#,
+            r#"{"card_bin": ""}"#,
+            r#"{"card_bin": {"value": "424242"}}"#,
+        ] {
+            assert!(
+                PaymentFieldFilter::parse_all(Some(raw), &routing_keys()).is_err(),
+                "{raw}"
+            );
+        }
+    }
+
     #[test]
     fn routing_kind_parses_the_dashboard_filter_values_and_ignores_the_rest() {
         assert_eq!(
             PaymentAuditRoutingKind::from_query(Some("multi_objective")),
             Some(PaymentAuditRoutingKind::MultiObjective)
         );
+        assert_eq!(
+            PaymentAuditRoutingKind::from_query(Some("auth_rate")),
+            Some(PaymentAuditRoutingKind::AuthRate)
+        );
+        assert_eq!(PaymentAuditRoutingKind::from_query(Some("decide")), None);
         assert_eq!(
             PaymentAuditRoutingKind::from_query(Some("RULE_BASED")),
             Some(PaymentAuditRoutingKind::RuleBased)
@@ -1204,12 +1386,15 @@ mod payment_audit_filter_tests {
         );
         assert_eq!(
             PaymentAuditRoutingKind::from_query(Some("hybrid")),
-            Some(PaymentAuditRoutingKind::Hybrid)
+            Some(PaymentAuditRoutingKind::MultiObjective)
         );
         assert_eq!(PaymentAuditRoutingKind::from_query(Some("")), None);
         assert_eq!(PaymentAuditRoutingKind::from_query(Some("tabs")), None);
         assert_eq!(PaymentAuditRoutingKind::from_query(None), None);
-        assert_eq!(PaymentAuditRoutingKind::Hybrid.as_str(), "hybrid");
+        assert_eq!(
+            PaymentAuditRoutingKind::MultiObjective.as_str(),
+            "multi_objective"
+        );
     }
 
     #[test]

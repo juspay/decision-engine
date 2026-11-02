@@ -18,7 +18,8 @@ Common query parameters:
 | `page`, `page_size` | paginated list endpoints |
 | `gateway`, `status`, `route`, `flow_type`, `routing_approach`, `exclude_routing_approach` | filters |
 | `scope` | `all`, `dynamic`, `preview` |
-| `routing_kind` | `multi_objective`, `rule_based`, `debit_routing`, `hybrid` |
+| `routing_kind` | `multi_objective` (`/decide` and `/routing/hybrid`), `auth_rate` (`/decide-gateway`), `rule_based`, `debit_routing`; `hybrid` reads as `multi_objective` |
+| `payment_fields` | payment audit: JSON object of routing keys or `metadata.<key>` to values |
 | `payment_id` | exact payment lookup for audit and trace views |
 | `error_code` | failure filtering |
 
@@ -132,7 +133,7 @@ curl "$BASE_URL/analytics/payment-audit?range=1d&gateway=stripe&status=success&p
 ```
 
 ```bash
-curl "$BASE_URL/analytics/payment-audit?range=1d&routing_kind=hybrid" \
+curl "$BASE_URL/analytics/payment-audit?range=1d&routing_kind=multi_objective" \
   --header "$AUTH_HEADER" \
   --header "$TENANT_HEADER"
 ```

@@ -29,6 +29,8 @@ interface SingleProps extends CommonProps {
   onChange: (value: string) => void
   disabled?: boolean
   dataCy?: string
+  /** Shown while nothing is selected. */
+  placeholder?: string
 }
 
 interface MultipleProps extends CommonProps {
@@ -200,7 +202,7 @@ export function SearchableSelect(props: SearchableSelectProps) {
 
     listStyle = { className: 'max-h-52 overflow-y-auto py-0.5' }
   } else {
-    const { value, onChange, disabled = false } = props
+    const { value, onChange, disabled = false, placeholder = 'select...' } = props
     const selectedLabel = labelOf(value)
 
     trigger = (
@@ -217,7 +219,7 @@ export function SearchableSelect(props: SearchableSelectProps) {
         style={{ backgroundImage: 'none', display: 'flex', alignItems: 'center' }}
         data-value={value}
       >
-        <span className="min-w-0 truncate text-left">{selectedLabel || <span className="text-slate-500">select...</span>}</span>
+        <span className="min-w-0 truncate text-left">{selectedLabel || <span className="text-slate-500">{placeholder}</span>}</span>
         <ChevronDown
           size={11}
           className={`shrink-0 text-slate-500 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}

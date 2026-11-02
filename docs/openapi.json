@@ -1130,6 +1130,16 @@
             }
           },
           {
+            "name": "payment_fields",
+            "in": "query",
+            "required": false,
+            "description": "Payment audit only: a JSON object of payment field names to values; a payment must carry every value, matched case-insensitively. A field is a routing key from `/config/routing-keys` (other than a numeric one) or `metadata.<key>`, read from every endpoint's stored request. An unknown field returns 400.",
+            "schema": {
+              "type": "string",
+              "example": "{\"card_bin\":\"424242\",\"metadata.segment\":\"premium\"}"
+            }
+          },
+          {
             "name": "flow_type",
             "in": "query",
             "required": false,
@@ -1181,11 +1191,12 @@
             "name": "routing_kind",
             "in": "query",
             "required": false,
-            "description": "List only payments whose trail holds this kind of event (the dashboard's Routing type filter).",
+            "description": "List only payments whose trail holds this kind of event (the dashboard's Routing type filter): `multi_objective` (`/decide` and `/routing/hybrid`), `auth_rate` (`/decide-gateway` without debit routing), `rule_based` (`/routing/evaluate`) or `debit_routing`. `hybrid`, the older name, reads as `multi_objective`.",
             "schema": {
               "type": "string",
               "enum": [
                 "multi_objective",
+                "auth_rate",
                 "rule_based",
                 "debit_routing",
                 "hybrid"

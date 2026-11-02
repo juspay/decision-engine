@@ -20,7 +20,8 @@ use super::super::common::{
 use super::super::filters::{
     payment_audit_needs_raw_rows, payment_audit_routing_kind_filters,
     payment_audit_summary_bucket_filters, payment_audit_summary_scope_filters,
-    payment_audit_timeline_filters, raw_routing_families_sql, summary_routing_families_sql,
+    payment_audit_timeline_filters, payment_field_match, raw_routing_families_sql,
+    summary_routing_families_sql,
 };
 use super::super::query::{BindArg, BoundQueryBuilder, FilterClause, OrderClause, SqlFragment};
 use super::super::time::effective_payment_audit_window_bounds;
@@ -384,6 +385,31 @@ fn connector_mismatch_filter(
     ))
 }
 
+/// Filters that select payments by what their events carried, each a `lookup_key IN (…)` over the
+/// window's raw events so the payment's whole trail stays in its summary: the connector mismatch,
+/// and one per payment field (a payment must carry every field's value).
+fn payment_selection_filters(
+    query: &PaymentAuditQuery,
+    scope: PaymentAuditScope,
+) -> Vec<FilterClause> {
+    let fields = query.payment_filters.fields.iter().map(|field| {
+        let mut payments = BoundQueryBuilder::new(DOMAIN_TABLE);
+        payments.add_select("assumeNotNull(lookup_key)");
+        payments.extend_filters(payment_audit_timeline_filters(query, scope));
+        payments.add_filter(FilterClause::raw("notEmpty(ifNull(lookup_key, ''))"));
+        payments.add_filter(payment_field_match(field));
+        let fragment = payments.into_fragment();
+        FilterClause::new(
+            format!("lookup_key IN ({})", fragment.sql()),
+            fragment.binds().to_vec(),
+        )
+    });
+    connector_mismatch_filter(query, scope)
+        .into_iter()
+        .chain(fields)
+        .collect()
+}
+
 /// The pre-aggregated path: one row per payment, merged across every `summary_kind` the payment
 /// produced (rule preview, hybrid, dynamic), so a hybrid payment's rule-evaluate, decide-gateway
 /// and score-update events read as one trail. It reads the 15-minute summary buckets that overlap
@@ -402,7 +428,7 @@ fn merged_summary_fragment(
     source.extend_selects(aggregates.iter().map(|aggregate| aggregate.state_column()));
     source.extend_filters(payment_audit_summary_bucket_filters(query, scope));
     if lookup_keys.is_none() {
-        source.extend_filters(connector_mismatch_filter(query, scope));
+        source.extend_filters(payment_selection_filters(query, scope));
     }
     source.extend_filters(lookup_keys.and_then(|keys| FilterClause::in_list("lookup_key", keys)));
 
@@ -437,7 +463,7 @@ fn raw_summary_fragment(
     source.extend_selects(columns);
     source.extend_filters(payment_audit_summary_scope_filters(query, scope));
     if lookup_keys.is_none() {
-        source.extend_filters(connector_mismatch_filter(query, scope));
+        source.extend_filters(payment_selection_filters(query, scope));
     }
     source.add_filter(FilterClause::raw("lookup_key IS NOT NULL"));
     source.add_filter(FilterClause::raw("lookup_key != ''"));
@@ -965,6 +991,33 @@ mod tests {
     }
 
     #[test]
+    fn payment_fields_select_payments_on_both_summary_paths_without_reading_raw_rows() {
+        use crate::analytics::models::{PaymentField, PaymentFieldFilter};
+        let mut query = payment_audit_query();
+        query.payment_filters.fields = vec![
+            PaymentFieldFilter {
+                field: PaymentField::RoutingKey("card_bin".into()),
+                values: vec!["424242".into()],
+            },
+            PaymentFieldFilter {
+                field: PaymentField::Metadata("segment".into()),
+                values: vec!["premium".into()],
+            },
+        ];
+        assert!(!super::payment_audit_needs_raw_rows(&query));
+        let merged = summary_fragment(&query, PaymentAuditScope::All, COUNT_AGGREGATES, None);
+        // One `lookup_key IN (…)` per field, so a payment must carry both.
+        assert_eq!(merged.sql().matches("lookup_key IN (SELECT").count(), 2);
+        assert_eq!(merged.sql().matches('?').count(), merged.binds().len());
+
+        query.routing_kind = Some(PaymentAuditRoutingKind::AuthRate);
+        let raw = summary_fragment(&query, PaymentAuditScope::All, COUNT_AGGREGATES, None);
+        assert!(raw.sql().contains(DOMAIN_TABLE));
+        assert_eq!(raw.sql().matches("lookup_key IN (SELECT").count(), 2);
+        assert_eq!(raw.sql().matches('?').count(), raw.binds().len());
+    }
+
+    #[test]
     fn summary_fragment_reads_raw_rows_only_for_routing_approach_kinds() {
         let mut query = payment_audit_query();
         let sql = |query: &PaymentAuditQuery| {
@@ -974,7 +1027,7 @@ mod tests {
         };
         assert!(sql(&query).contains(PAYMENT_AUDIT_SUMMARY_BUCKET_TABLE));
 
-        query.routing_kind = Some(PaymentAuditRoutingKind::Hybrid);
+        query.routing_kind = Some(PaymentAuditRoutingKind::MultiObjective);
         assert!(sql(&query).contains(PAYMENT_AUDIT_SUMMARY_BUCKET_TABLE));
 
         query.routing_kind = Some(PaymentAuditRoutingKind::DebitRouting);
@@ -982,7 +1035,7 @@ mod tests {
         assert!(debit.contains(DOMAIN_TABLE));
         assert!(!debit.contains(PAYMENT_AUDIT_SUMMARY_BUCKET_TABLE));
 
-        query.routing_kind = Some(PaymentAuditRoutingKind::MultiObjective);
+        query.routing_kind = Some(PaymentAuditRoutingKind::AuthRate);
         assert!(sql(&query).contains(DOMAIN_TABLE));
     }
 

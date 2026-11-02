@@ -1,4 +1,6 @@
-use crate::analytics::models::{PaymentAuditOutcome, PaymentAuditPaymentFilters};
+use crate::analytics::models::{
+    PaymentAuditOutcome, PaymentAuditPaymentFilters, PaymentFieldFilter,
+};
 use crate::analytics::{
     cost_savings as fetch_cost_savings, decisions as fetch_decisions,
     experiment_results as fetch_experiment_results,
@@ -16,6 +18,7 @@ use crate::middleware::metered;
 use axum::extract::Query;
 use axum::Json;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -50,6 +53,8 @@ pub struct AnalyticsQueryParams {
     pub max_amount: Option<f64>,
     /// Payment audit only: compare routing decisions with reported update connectors.
     pub connector_mismatch: Option<bool>,
+    /// Payment audit only: a JSON object of routing keys or `metadata.<key>` names to values.
+    pub payment_fields: Option<String>,
 }
 
 fn analytics_query_from_params(
@@ -76,10 +81,19 @@ fn analytics_query_from_params(
 }
 
 fn payment_audit_query_from_params(
+    state: &crate::app::TenantAppState,
     merchant_id: String,
     params: &AnalyticsQueryParams,
-) -> PaymentAuditQuery {
-    PaymentAuditQuery::from_request(
+) -> Result<PaymentAuditQuery, error::ContainerError<error::ApiError>> {
+    let no_keys = BTreeMap::new();
+    let routing_keys = state
+        .config
+        .routing_config
+        .as_ref()
+        .map_or(&no_keys, |config| &config.keys.keys);
+    let fields = PaymentFieldFilter::parse_all(params.payment_fields.as_deref(), routing_keys)
+        .map_err(error::ApiError::ValidationError)?;
+    Ok(PaymentAuditQuery::from_request(
         merchant_id,
         params.range.clone(),
         params.start_ms,
@@ -113,7 +127,8 @@ fn payment_audit_query_from_params(
         auth_type: PaymentAuditPaymentFilters::values(params.auth_type.as_deref()),
         min_amount: params.min_amount,
         max_amount: params.max_amount,
-    })
+        fields,
+    }))
 }
 
 pub fn serve() -> axum::Router<Arc<crate::tenant::GlobalAppState>> {
@@ -216,7 +231,7 @@ pub async fn payment_audit(
     AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> Result<Json<crate::analytics::PaymentAuditResponse>, error::ContainerError<error::ApiError>> {
-    let query = payment_audit_query_from_params(auth_context.merchant_id.clone(), &params);
+    let query = payment_audit_query_from_params(&state, auth_context.merchant_id.clone(), &params)?;
     Ok(Json(fetch_payment_audit(&state, &query).await?))
 }
 
@@ -228,7 +243,7 @@ pub async fn payment_audit_filter_options(
     Query(params): Query<AnalyticsQueryParams>,
 ) -> Result<Json<crate::analytics::PaymentAuditFilterOptions>, error::ContainerError<error::ApiError>>
 {
-    let query = payment_audit_query_from_params(auth_context.merchant_id.clone(), &params);
+    let query = payment_audit_query_from_params(&state, auth_context.merchant_id.clone(), &params)?;
     Ok(Json(
         fetch_payment_audit_filter_options(&state, &query).await?,
     ))
@@ -239,7 +254,7 @@ pub async fn preview_trace(
     AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> Result<Json<crate::analytics::PaymentAuditResponse>, error::ContainerError<error::ApiError>> {
-    let query = payment_audit_query_from_params(auth_context.merchant_id.clone(), &params);
+    let query = payment_audit_query_from_params(&state, auth_context.merchant_id.clone(), &params)?;
     Ok(Json(fetch_preview_trace(&state, &query).await?))
 }
 
