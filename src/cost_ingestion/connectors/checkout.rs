@@ -990,6 +990,7 @@ ic_orphan,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,SA,USD,-102.29,2026
     }
 
     #[test]
+    #[allow(clippy::panic_in_result_fn)]
     fn checkout_dashboard_transformation_preserves_ingestion_input(
     ) -> Result<(), Box<dyn std::error::Error>> {
         use crate::config::ConnectorReportApiConfig;
