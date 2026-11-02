@@ -32,16 +32,32 @@ initContainers:
   enabled: true
   busybox:
     repository: public.ecr.aws/docker/library/busybox
-    tag: "1.28"
+    tag: "1.37"
     pullPolicy: IfNotPresent
+  # The busybox wait containers only open TCP connections, so they run as nobody.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    seccompProfile:
+      type: RuntimeDefault
 
-securityContext: {}
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
+# Applied to the decision-engine and groovy-runner containers, merged with each
+# component's own `securityContext` (which pins its UID). The kubelet refuses to
+# start either container as root. readOnlyRootFilesystem additionally needs an
+# emptyDir at /tmp (report uploads stream there).
+securityContext:
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
 
 service:
   type: ClusterIP
@@ -87,6 +103,10 @@ affinity: {}
 
 # Decision Engine configurations
 decisionEngine:
+  # Matches the image's USER; pinned here so older images that predate it also run unprivileged.
+  securityContext:
+    runAsUser: 10001
+    runAsGroup: 10001
   # Set to false to use PostgreSQL instead of MySQL
   useMySQL: false
   # Set to true to enable PostgreSQL support
@@ -193,6 +213,10 @@ redis:
 # Groovy Runner configuration
 groovyRunner:
   enabled: true
+  # The image's `groovy` user, which owns /home/groovy.
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
   image:
     repository: "ghcr.io/juspay/decision-engine/groovy-runner"
     version: "v1.4"
@@ -217,6 +241,11 @@ dbMigration:
   # PostgreSQL migrations
   postgresql:
     enabled: true
+    # rust:latest has no unprivileged user; any non-root UID works because
+    # HOME, CARGO_HOME, TMPDIR and the working directory all live on an emptyDir.
+    securityContext:
+      runAsUser: 10001
+      runAsGroup: 10001
     image:
       repository: "postgres"
       tag: "latest"
@@ -226,8 +255,15 @@ dbMigration:
   # MySQL migrations (not used with PostgreSQL)
   mysql:
     enabled: false
+    # Ships the mysql client and curl, so nothing is installed at runtime.
     image:
+      repository: mysql
+      tag: "8.4"
       pullPolicy: IfNotPresent
+    # The image's `mysql` user.
+    securityContext:
+      runAsUser: 999
+      runAsGroup: 999
     scriptUrls:
       - https://raw.githubusercontent.com/juspay/decision-engine/431b1b2/migrations/00000000000000_diesel_initial_setup/up.sql
       - https://raw.githubusercontent.com/juspay/decision-engine/431b1b2/migrations/2025-04-23-103603_add_routing_algorithm_mapper_table/up.sql

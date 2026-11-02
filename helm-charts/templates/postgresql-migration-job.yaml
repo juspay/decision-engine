@@ -41,13 +41,29 @@ spec:
         - name: wait-for-postgresql
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
           imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.initContainers.securityContext | nindent 12 }}
           command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} 5432; do echo waiting for postgresql; sleep 2; done;']
       {{- end }}
       containers:
         - name: migration
           image: rust:latest
           imagePullPolicy: {{ .Values.dbMigration.postgresql.image.pullPolicy }}
+          securityContext:
+            {{- include "decision-engine.containerSecurityContext" (dict "global" .Values.securityContext "component" .Values.dbMigration.postgresql.securityContext) | nindent 12 }}
+          # Everything the job writes (source tarball, cargo registry and the
+          # installed diesel/just binaries) goes to this emptyDir, not to the
+          # root-owned /usr/local/cargo.
+          workingDir: /work
           env:
+            - name: HOME
+              value: /work
+            - name: CARGO_HOME
+              value: /work/cargo
+            - name: TMPDIR
+              value: /work/tmp
+            - name: PATH
+              value: /work/cargo/bin:/usr/local/cargo/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
             - name: PGPASSWORD
               value: {{ .Values.postgresql.auth.password | quote }}
             - name: DATABASE_URL
@@ -56,6 +72,7 @@ spec:
             - /bin/sh
             - -c
             - |-
+             mkdir -p "$CARGO_HOME" "$TMPDIR"
              version={{ .Values.image.version }}
              database_url = "postgresql://{{ .Values.postgresql.auth.username }}:{{ .Values.postgresql.auth.password }}@{{ include "decision-engine.postgresqlHost" . }}:5432/{{ .Values.postgresql.auth.database}}"
              echo "INFO: Starting migration process for version: $version"
@@ -89,8 +106,12 @@ spec:
           volumeMounts:
             - name: migration-script
               mountPath: /app/config
+            - name: work
+              mountPath: /work
       volumes:
         - name: migration-script
           configMap:
             name: {{ include "decision-engine.postgresqlMigrationName" . }}-script
+        - name: work
+          emptyDir: {}
 {{- end }}

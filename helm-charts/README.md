@@ -101,6 +101,8 @@ helm delete my-release
 | `imagePullSecrets`  | Image pull secrets                                                                    | `[]`            |
 | `nameOverride`      | Override the name of the chart                                                        | `""`            |
 | `fullnameOverride`  | Override the full name of the application                                             | `""`            |
+| `securityContext`   | Container security context for decision-engine, groovy-runner and the migration jobs (non-root, no privilege escalation, all capabilities dropped) | see `values.yaml` |
+| `initContainers.securityContext` | Security context for the busybox wait-for init containers (runs as `nobody`) | see `values.yaml` |
 
 ### Decision Engine Configuration
 
@@ -125,6 +127,7 @@ helm delete my-release
 | `decisionEngine.apiClient.poolMaxIdlePerHost` | API client pool max idle per host                       | `10`            |
 | `decisionEngine.apiClient.identity`        | API client identity                                        | `""`            |
 | `decisionEngine.routingConfig.enabled`     | Enable routing config                                      | `true`          |
+| `decisionEngine.securityContext`           | Overrides `securityContext` key by key for this container (an explicit `false` wins) | `runAsUser: 10001, runAsGroup: 10001` |
 
 ### PostgreSQL Configuration
 
@@ -183,6 +186,7 @@ The chart can wire Decision Engine to external Kafka and ClickHouse analytics in
 | `groovyRunner.healthcheck.periodSeconds` | Groovy Runner health check period                         | `5`             |
 | `groovyRunner.healthcheck.timeoutSeconds` | Groovy Runner health check timeout                       | `5`             |
 | `groovyRunner.healthcheck.failureThreshold` | Groovy Runner health check failure threshold           | `5`             |
+| `groovyRunner.securityContext`          | Overrides `securityContext` key by key for this container (an explicit `false` wins) | `runAsUser: 1000, runAsGroup: 1000` |
 
 ### Database Migration Configuration
 
@@ -195,7 +199,11 @@ The chart can wire Decision Engine to external Kafka and ClickHouse analytics in
 | `dbMigration.postgresql.image.pullPolicy` | PostgreSQL migration image pull policy                     | `"IfNotPresent"` |
 | `dbMigration.postgresql.migrations.path`  | PostgreSQL migrations path                                 | `"/app/migrations_pg"` |
 | `dbMigration.postgresql.initSqlScript`    | PostgreSQL initial SQL script                              | `"-- This will be the initial migration script"` |
+| `dbMigration.postgresql.securityContext`  | Overrides `securityContext` for the PostgreSQL migration container (writes only to an emptyDir at `/work`) | `runAsUser: 10001, runAsGroup: 10001` |
 | `dbMigration.mysql.enabled`               | Enable MySQL migration                                     | `false`         |
+| `dbMigration.mysql.image.repository`      | MySQL migration image repository (must ship the `mysql` client and `curl`) | `"mysql"` |
+| `dbMigration.mysql.image.tag`             | MySQL migration image tag                                  | `"8.4"`        |
+| `dbMigration.mysql.securityContext`       | Overrides `securityContext` for the MySQL migration container | `runAsUser: 999, runAsGroup: 999` |
 
 ### Routing Config Configuration
 

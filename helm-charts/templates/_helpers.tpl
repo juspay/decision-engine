@@ -209,3 +209,18 @@ Define the MySQL hostname
 {{- .Values.mysql.hostname | default (printf "%s-mysql" .Release.Name) }}
 {{- end }}
 {{- end }}
+
+{{/*
+Container securityContext: the chart-wide .Values.securityContext with the
+component's own keys laid over it. Keys are set one by one rather than with
+merge/mergeOverwrite, because those treat an explicit `false` as empty and
+would let a global `true` win over a component's `false`.
+Usage: include "decision-engine.containerSecurityContext" (dict "global" .Values.securityContext "component" .Values.x.securityContext)
+*/}}
+{{- define "decision-engine.containerSecurityContext" -}}
+{{- $sc := deepCopy (.global | default dict) -}}
+{{- range $key, $value := (.component | default dict) }}
+{{- $_ := set $sc $key $value }}
+{{- end }}
+{{- toYaml $sc }}
+{{- end }}
