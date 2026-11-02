@@ -32,20 +32,21 @@ spec:
         - name: wait-for-postgresql
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
           imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
-          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} 5432; do echo waiting for postgresql; sleep 2; done;']
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} {{ .Values.postgresql.port }}; do echo waiting for postgresql; sleep 2; done;']
         {{- end }}
         {{- if .Values.decisionEngine.useMySQL }}
         - name: wait-for-mysql
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
           imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
-          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.mysqlHost" . }} 3306; do echo waiting for mysql; sleep 2; done;']
+          command: ['sh', '-c', 'until nc -z {{ include "decision-engine.mysqlHost" . }} {{ .Values.mysql.port }}; do echo waiting for mysql; sleep 2; done;']
         {{- end }}
       {{- end }}
       containers:
         - name: routing-config
-          image: "{{ .Values.routingConfig.image.repository }}:{{ .Values.routingConfig.image.tag }}"
+          image: "{{ required "routingConfig.image.repository must contain a script to run" .Values.routingConfig.image.repository }}:{{ required "routingConfig.image.tag is required" .Values.routingConfig.image.tag }}"
           imagePullPolicy: {{ .Values.routingConfig.image.pullPolicy }}
-          command: {{ .Values.routingConfig.command }}
+          command:
+            {{- toYaml .Values.routingConfig.command | nindent 12 }}
           {{- if .Values.routingConfig.configVolume.enabled }}
           volumeMounts:
             - name: routing-config-volume
@@ -56,7 +57,7 @@ spec:
             - name: DB_HOST
               value: {{ include "decision-engine.postgresqlHost" . | quote }}
             - name: DB_PORT
-              value: "5432"
+              value: {{ .Values.postgresql.port | quote }}
             - name: DB_USER
               value: {{ .Values.postgresql.auth.username | quote }}
             - name: DB_PASSWORD
@@ -70,13 +71,13 @@ spec:
             - name: DB_HOST
               value: {{ include "decision-engine.mysqlHost" . | quote }}
             - name: DB_PORT
-              value: "3306"
+              value: {{ .Values.mysql.port | quote }}
             - name: DB_USER
               value: {{ .Values.mysql.auth.username | default "root" | quote }}
             - name: DB_PASSWORD
-              value: {{ .Values.mysql.auth.password | default "root" | quote }}
+              value: {{ .Values.mysql.auth.rootPassword | quote }}
             - name: DB_NAME
-              value: {{ .Values.mysql.auth.database | default "jdb" | quote }}
+              value: {{ .Values.mysql.auth.database | quote }}
             - name: DB_TYPE
               value: "mysql"
             {{- end }}

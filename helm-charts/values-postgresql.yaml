@@ -1,4 +1,4 @@
-# Test values for PostgreSQL migration
+# PostgreSQL profile. Matches the chart defaults, kept as an explicit example.
 decisionEngine:
   useMySQL: false
   usePostgreSQL: true
@@ -11,7 +11,6 @@ postgresql:
     password: "db_pass"
     database: "decision_engine_db"
 
-# Configure database migration
 dbMigration:
   enabled: true
   postgresql:
