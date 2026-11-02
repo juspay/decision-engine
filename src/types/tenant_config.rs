@@ -2,6 +2,7 @@ use serde::{Deserialize, Serialize};
 // use db::eulermeshimpl::mesh_config;
 // use db::mesh::internal::*;
 use crate::error::ApiError;
+use crate::generics::Repository;
 // use eulerhs::language::MonadFlow;
 use crate::app::get_tenant_app_state;
 use crate::storage::types::TenantConfig as DBTenantConfig;
@@ -12,11 +13,7 @@ use crate::storage::types::TenantConfig as DBTenantConfig;
 // use ghc::generics::Generic;
 // use ghc::typelits::KnownSymbol;
 // use named::*;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::tenant_config::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::tenant_config::dsl;
-use diesel::associations::HasTable;
+use crate::storage::backend::schema::tenant_config::dsl;
 use diesel::*;
 use std::option::Option;
 use std::string::String;
@@ -136,21 +133,21 @@ pub async fn get_arr_active_tenant_config_by_tenant_id_module_name_module_key_an
     let active_status_str = config_status_to_text(&ConfigStatus::ACTIVE);
 
     // Use Diesel's query builder with multiple conditions
-    match crate::generics::generic_find_all::<
-        <DBTenantConfig as HasTable>::Table,
-        _,
-        DBTenantConfig
-    >(
+    match DBTenantConfig::find_all(
         &app_state.db,
-        dsl::tenant_account_id.eq(t_id)
+        dsl::tenant_account_id
+            .eq(t_id)
             .and(dsl::module_name.eq(module_name_str))
             .and(dsl::module_key.eq(m_key))
             .and(dsl::tenant_type.eq_any(config_type_strs))
             .and(dsl::status.eq(active_status_str)),
-    ).await {
-        Ok(db_results) => db_results.into_iter()
-                                    .filter_map(|db_record| TenantConfig::try_from(db_record).ok())
-                                    .collect(),
+    )
+    .await
+    {
+        Ok(db_results) => db_results
+            .into_iter()
+            .filter_map(|db_record| TenantConfig::try_from(db_record).ok())
+            .collect(),
         Err(_) => Vec::new(), // Silently handle any errors by returning an empty vec
     }
 }
@@ -168,20 +165,19 @@ pub async fn get_arr_active_tenant_config_by_tenant_id_module_name_module_key_an
     let config_type_strs: Vec<String> = arr_config_type.iter().map(config_type_to_text).collect();
     let country_code_str = country_iso_to_text(country_code);
 
-    // Perform query using Diesel's generic_find_all
-    match crate::generics::generic_find_all::<
-        <DBTenantConfig as HasTable>::Table,
-        _,
-        DBTenantConfig
-    >(
+    // Perform query using Diesel's find_all
+    match DBTenantConfig::find_all(
         &app_state.db,
-        dsl::tenant_account_id.eq(t_id)
+        dsl::tenant_account_id
+            .eq(t_id)
             .and(dsl::module_name.eq(module_name_str))
             .and(dsl::module_key.eq(m_key))
             .and(dsl::tenant_type.eq_any(config_type_strs))
             .and(dsl::status.eq(config_status_to_text(&ConfigStatus::ACTIVE)))
             .and(dsl::country_code_alpha3.eq(Some(country_code_str))),
-    ).await {
+    )
+    .await
+    {
         Ok(db_results) => db_results
             .into_iter()
             .filter_map(|db_record| TenantConfig::try_from(db_record).ok())
@@ -202,11 +198,7 @@ pub async fn get_tenant_config_by_tenant_id_and_module_name_and_module_key_and_t
     let config_status_str = config_status_to_text(&ConfigStatus::ACTIVE);
     let app_state = get_tenant_app_state().await;
     // Use Diesel's query builder for querying the database
-    match crate::generics::generic_find_one_optional::<
-        <DBTenantConfig as HasTable>::Table,
-        _,
-        DBTenantConfig,
-    >(
+    match DBTenantConfig::find_optional(
         &app_state.db,
         dsl::tenant_account_id
             .eq(t_id)

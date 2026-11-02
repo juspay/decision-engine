@@ -202,7 +202,7 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<CardInfo> 
             upstream_request_id,
             upstream_code,
             upstream_message,
-            response_body = body_snippet.as_deref().unwrap_or(""),
+            upstream_response_body = body_snippet.as_deref().unwrap_or(""),
             "non-2xx for bin {}: {}",
             bin,
             status,

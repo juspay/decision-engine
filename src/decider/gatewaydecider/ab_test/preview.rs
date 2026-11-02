@@ -1,10 +1,8 @@
 //! Rule-layer evaluation of an A/B arm for `/routing/evaluate` and the static half of
 //! `/routing/hybrid`. The SR layer is applied by the decider intercept in interceptor.rs.
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::routing_algorithm::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::routing_algorithm::dsl;
+use crate::generics::Repository;
+use crate::storage::backend::schema::routing_algorithm::dsl;
 
 use crate::{
     error::ContainerError,
@@ -16,7 +14,7 @@ use crate::{
         utils::apply_default_fallback,
     },
 };
-use diesel::{associations::HasTable, ExpressionMethods};
+use diesel::ExpressionMethods;
 use error_stack::ResultExt;
 
 pub struct AbTestArmOutput {
@@ -56,13 +54,9 @@ pub async fn evaluate_rule_arm(
     };
 
     // Static arm: fetch the arm's algorithm from DB and evaluate it.
-    let arm_algorithm = crate::generics::generic_find_one::<
-        <RoutingAlgorithm as HasTable>::Table,
-        _,
-        RoutingAlgorithm,
-    >(db, dsl::id.eq(arm_algorithm_id.to_string()))
-    .await
-    .change_context(EuclidErrors::StorageError)?;
+    let arm_algorithm = RoutingAlgorithm::find_one(db, dsl::id.eq(arm_algorithm_id.to_string()))
+        .await
+        .change_context(EuclidErrors::StorageError)?;
 
     let arm_algorithm_data: StaticRoutingAlgorithm =
         serde_json::from_str(&arm_algorithm.algorithm_data).map_err(|e| {

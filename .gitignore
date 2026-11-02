@@ -28,3 +28,6 @@ scripts/load-test/k6_timeseries.json
 # Python bytecode from scripts/
 __pycache__/
 *.pyc
+
+# Local infra state from `nix run .#infra` and npm prefix from `nix develop`
+.nix-infra/

@@ -49,6 +49,9 @@ pub fn setup(
             }
 
             config::LogFormat::Json => {
+                // Reports format their own fields before JSON serialization; disabling
+                // subscriber ANSI alone does not remove their bold/italic escapes.
+                error_stack::Report::set_color_mode(error_stack::fmt::ColorMode::None);
                 let formatting_layer =
                     FormattingLayer::new(service_name, console_writer).with_filter(console_filter);
 

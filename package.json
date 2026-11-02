@@ -19,6 +19,6 @@
   },
   "dependencies": {
     "typescript": "^6.0.3",
-    "uuid": "^9.0.1"
+    "uuid": "^11.1.1"
   }
 }

@@ -1,4 +1,3 @@
-use axum::body::{to_bytes, Body, Bytes};
 use axum::http::StatusCode;
 
 use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
@@ -36,10 +35,12 @@ pub enum RequestBodyError {
     Read(axum::Error),
 }
 
-pub async fn read_request_body(body: Body) -> Result<Bytes, RequestBodyError> {
-    to_bytes(body, usize::MAX)
-        .await
-        .map_err(RequestBodyError::Read)
+impl std::fmt::Display for RequestBodyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Read(error) => error.fmt(f),
+        }
+    }
 }
 
 impl RequestBodyError {
@@ -77,5 +78,27 @@ impl RequestBodyError {
     pub fn analytics_code_and_message(&self) -> (String, &'static str) {
         let spec = self.kind().spec();
         (spec.status.as_u16().to_string(), spec.error_message)
+    }
+}
+
+impl From<crate::auth::MerchantScopeViolation> for ErrorResponse {
+    fn from(violation: crate::auth::MerchantScopeViolation) -> Self {
+        let status = violation.status().as_u16().to_string();
+        let message = violation.message().to_string();
+        Self {
+            status: status.clone(),
+            error_code: status,
+            error_message: message.clone(),
+            priority_logic_tag: None,
+            routing_approach: None,
+            filter_wise_gateways: None,
+            error_info: UnifiedError {
+                code: "MERCHANT_SCOPE_VIOLATION".to_string(),
+                user_message: message.clone(),
+                developer_message: message,
+            },
+            priority_logic_output: None,
+            is_dynamic_mga_enabled: false,
+        }
     }
 }

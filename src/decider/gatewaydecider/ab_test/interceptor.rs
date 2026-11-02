@@ -1,7 +1,7 @@
 use super::arms;
 use super::config::{self, AbTestConfig};
 use super::guardrail;
-use super::outcome::{self, ExperimentAssignment};
+use super::outcome::{CostOutcome, ExperimentAssignment};
 use crate::analytics::{serialize_details, AnalyticsFlowContext, ApiFlow, FlowType};
 use crate::decider::gatewaydecider::types::DomainDeciderRequestForApiCallV2;
 use crate::euclid::types::ExperimentEndpoint;
@@ -20,15 +20,17 @@ pub enum AbTestIntercept {
     },
 }
 
-/// Emit a routing-time `RoutingEvaluateAbTest` event so the rule-based Decision Audit
-/// shows the actual decision details (arm, endpoint, layers, gateway) rather than just the
-/// thin outcome event emitted later by outcome::emit_if_in_flight.
+/// Emit a routing-time `RoutingEvaluateAbTest` event: the decision the experiment results
+/// attribute to the arm (arm, endpoint, layers, gateway, cost and amount). The payment's outcome
+/// is joined to it later from the score updates reported for the same payment.
 pub fn emit_routing_event(
     payment_id: &str,
     merchant_id: &str,
     assignment: &ExperimentAssignment,
     projection: &arms::ArmProjection,
     gateway: Option<&str>,
+    cost: &CostOutcome,
+    amount: Option<f64>,
 ) {
     guardrail::record_decision(
         merchant_id,
@@ -51,6 +53,10 @@ pub fn emit_routing_event(
         "sr_config": projection.sr,
         "preview_kind": "routing_evaluate_ab_test",
         "routing_source": "real_payment_intercept",
+        "cost_saved_bps": cost.cost_saved_bps,
+        "chosen_cost_bps": cost.chosen_cost_bps,
+        "margin": cost.margin,
+        "amount": amount,
     }));
 
     crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
@@ -151,17 +157,8 @@ pub async fn intercept(
         return AbTestIntercept::Disabled;
     }
 
-    // Keep outcome tracking ready before routing. The caller emits the routing event after
-    // the decider returns, when the selected gateway is known, without waiting for feedback.
-    outcome::store_inflight(
-        payment_id,
-        &assignment,
-        None,
-        false,
-        Some(dreq.payment_info.amount),
-    )
-    .await;
-
+    // The caller emits the routing event after the decider returns, when the selected gateway
+    // and its cost are known.
     AbTestIntercept::SrArm {
         projection: plan.projection,
         experiment: assignment,

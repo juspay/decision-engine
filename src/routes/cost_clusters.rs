@@ -5,11 +5,13 @@
 //! connector override and the learned model at decide time — see
 //! [`crate::cost_ingestion::serving::lookup`].
 
+use crate::custom_extractors::MerchantFromPath;
+
 use std::collections::HashMap;
 
+use crate::custom_extractors::Json;
 use axum::extract::{Path, Query, RawQuery};
 use axum::http::StatusCode;
-use axum::Json;
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Iso8601;
 
@@ -17,7 +19,8 @@ use crate::cost_ingestion::blended::{
     self, ClusterFilter, ClusterOrder, ClusterScope, ClusterSegment, TopCluster,
 };
 use crate::cost_ingestion::overrides::{self, ClusterDims, ClusterOverride};
-use crate::routes::connector_fees::{clickhouse_config, refresh_serving};
+use crate::error::RouteError;
+use crate::routes::connector_fees::refresh_serving;
 
 /// How many top clusters to surface by default (top by GMV) when the caller asks for none.
 const DEFAULT_LIMIT: u32 = 10;
@@ -235,10 +238,11 @@ pub struct ApiClusterFacet {
 /// autosuggestions. Scoped exactly like the cluster list, so a snapshot view only suggests values
 /// that occur in that snapshot.
 pub async fn list_cost_cluster_facets(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
     Query(q): Query<TopClustersQuery>,
-) -> Result<Json<Vec<ApiClusterFacet>>, (StatusCode, String)> {
-    let cfg = clickhouse_config()?;
+) -> Result<Json<Vec<ApiClusterFacet>>, RouteError> {
+    let merchant_id = merchant.as_str().to_string();
+    let cfg = super::global_config()?.analytics.clickhouse.clone();
     let scope = ClusterScope {
         connector: q.connector.as_deref(),
         account: q.account.as_deref(),
@@ -247,7 +251,7 @@ pub async fn list_cost_cluster_facets(
     };
     let facets = blended::cluster_facets(&cfg, &merchant_id, scope)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
     Ok(Json(
         facets
             .into_iter()
@@ -266,12 +270,13 @@ pub async fn list_cost_cluster_facets(
 /// `report_date` pins one exact ingestion's segments. Unscoped is merchant-wide. Overrides are merged
 /// in; in the unscoped view an overridden segment stays visible even if it drops out of the top set.
 pub async fn list_cost_clusters(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
     Query(q): Query<TopClustersQuery>,
     RawQuery(raw): RawQuery,
-) -> Result<Json<Vec<ClusterFee>>, (StatusCode, String)> {
+) -> Result<Json<Vec<ClusterFee>>, RouteError> {
+    let merchant_id = merchant.as_str().to_string();
     let filters = ClusterFilterQuery::from_raw(raw.as_deref());
-    let cfg = clickhouse_config()?;
+    let cfg = super::global_config()?.analytics.clickhouse.clone();
     let limit = q.limit.unwrap_or(DEFAULT_LIMIT).clamp(1, MAX_LIMIT);
 
     let scope = ClusterScope {
@@ -294,8 +299,8 @@ pub async fn list_cost_clusters(
     let top: Vec<TopCluster> =
         blended::top_clusters(&cfg, &merchant_id, limit, scope, order, filter)
             .await
-            .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
-    let overrides: HashMap<String, ClusterOverride> = overrides::list_clusters(&merchant_id)
+            .map_err(RouteError::internal)?;
+    let overrides: HashMap<String, ClusterOverride> = overrides::list_clusters(&merchant)
         .await
         .unwrap_or_default()
         .into_iter()
@@ -497,22 +502,22 @@ pub struct SetClusterOverrideRequest {
 
 /// `PUT /merchant-account/:merchant_id/cost-clusters/:cluster_key/fee-override`
 pub async fn set_cluster_override(
-    Path((merchant_id, cluster_key)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, cluster_key)): Path<(String, String)>,
     Json(body): Json<SetClusterOverrideRequest>,
-) -> Result<Json<ClusterOverride>, (StatusCode, String)> {
+) -> Result<Json<ClusterOverride>, RouteError> {
+    let merchant_id = merchant.as_str().to_string();
     if !body.pct_bps.is_finite()
         || !body.fixed.is_finite()
         || body.pct_bps < 0.0
         || body.fixed < 0.0
     {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "pct_bps and fixed must be finite and non-negative".to_string(),
+        return Err(RouteError::bad_request(
+            "pct_bps and fixed must be finite and non-negative",
         ));
     }
-    let dims = ClusterDims::from_key(&cluster_key).ok_or((
-        StatusCode::BAD_REQUEST,
-        "cluster key must have 7 '|'-separated fields".to_string(),
+    let dims = ClusterDims::from_key(&cluster_key).ok_or(RouteError::bad_request(
+        "cluster key must have 7 '|'-separated fields",
     ))?;
     let ov = ClusterOverride {
         dims,
@@ -522,24 +527,24 @@ pub async fn set_cluster_override(
             .format(&Iso8601::DEFAULT)
             .unwrap_or_default(),
     };
-    overrides::put_cluster(&merchant_id, &ov)
+    overrides::put_cluster(&merchant, &ov)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
     refresh_serving(&merchant_id).await;
     Ok(Json(ov))
 }
 
 /// `DELETE /merchant-account/:merchant_id/cost-clusters/:cluster_key/fee-override`
 pub async fn delete_cluster_override(
-    Path((merchant_id, cluster_key)): Path<(String, String)>,
-) -> Result<StatusCode, (StatusCode, String)> {
-    let dims = ClusterDims::from_key(&cluster_key).ok_or((
-        StatusCode::BAD_REQUEST,
-        "cluster key must have 7 '|'-separated fields".to_string(),
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, cluster_key)): Path<(String, String)>,
+) -> Result<StatusCode, RouteError> {
+    let dims = ClusterDims::from_key(&cluster_key).ok_or(RouteError::bad_request(
+        "cluster key must have 7 '|'-separated fields",
     ))?;
-    overrides::delete_cluster(&merchant_id, &dims)
+    overrides::delete_cluster(&merchant, &dims)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
-    refresh_serving(&merchant_id).await;
+        .map_err(RouteError::internal)?;
+    refresh_serving(merchant.as_str()).await;
     Ok(StatusCode::NO_CONTENT)
 }

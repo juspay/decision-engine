@@ -53,8 +53,8 @@ function srConfigData(overrides = {}) {
     defaultHedgingPercent: 5,
     subLevelInputConfig: [
       {
-        paymentMethodType: 'upi',
-        paymentMethod: 'upi_collect',
+        paymentMethod: 'upi',
+        paymentMethodType: 'upi_collect',
         bucketSize: 250,
         hedgingPercent: 1,
         latencyThreshold: null,
@@ -96,8 +96,8 @@ function paymentInfo(overrides = {}) {
     isEmi: false,
     emiBank: null,
     emiTenure: null,
-    paymentMethodType: 'UPI',
-    paymentMethod: 'UPI_PAY',
+    paymentMethod: 'UPI',
+    paymentMethodType: 'UPI_COLLECT',
     paymentSource: null,
     authType: null,
     cardIssuerBankName: null,

@@ -51,6 +51,8 @@ export TENANT_HEADER="x-tenant-id: public"
   - `routing_approach` (query, optional, string)
   - `exclude_routing_approach` (query, optional, string)
   - `error_code` (query, optional, string)
+  - `connector_mismatch` (query, optional, boolean, default `false`) — only payments whose latest
+    Decide Gateway or Hybrid Routing decision differs from a reported update connector.
 - Body: Optional query parameters include `range`, `page`, `page_size`, `payment_id`, `gateway`, `status`, `route`, `flow_type`, `routing_approach`, `exclude_routing_approach`, and `error_code`. Use `payment_id` for exact lookup; request IDs are event-level identifiers and may not map to payment summary search in every flow.
 
 ## Example
@@ -70,6 +72,27 @@ curl "$BASE_URL/analytics/payment-audit?range=1d&payment_id=pay_sr_001" \
   --header "$AUTH_HEADER" \
   --header "$TENANT_HEADER"
 ```
+
+### Connector mismatches
+
+```bash
+curl "$BASE_URL/analytics/payment-audit?range=1d&connector_mismatch=true" \
+  --header "$AUTH_HEADER" \
+  --header "$TENANT_HEADER"
+```
+
+The Decision Audit page's **Connector mismatches only** toggle applies this filter to its existing
+results, connector badges, counts, and pagination. Clicking a result opens the full payment timeline,
+including every connector reported to `/update-gateway-score`.
+
+The comparison uses the latest known `/decide-gateway` or `/routing/hybrid` decision in the selected
+window. At least one reported update connector must differ. Matching updates remain in the payment's
+summary and timeline. Updates whose scoring was skipped or failed count as reported updates; score
+snapshots and legacy `/update-score` events do not. Payments without both a known decision and an
+update are excluded. Connector names compare without case or account suffixes (`adyen:mca_id` and
+`ADYEN` match); original identifiers remain visible in the audit. The filter combines with the
+existing routing and payment filters. Like other list filters, it does not restrict an exact ID
+lookup, which returns the complete retained trace.
 
 ### Debit routing audit
 

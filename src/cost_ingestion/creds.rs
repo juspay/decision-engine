@@ -29,6 +29,7 @@ use crate::crypto::encryption_manager::{
 };
 use crate::types::service_configuration;
 
+use super::checkout_credentials::CheckoutEnvironment;
 use super::types::{ConnectorCreds, IngestError};
 
 /// A resolved settlement source: the credentials plus the merchant they belong to.
@@ -68,6 +69,9 @@ pub struct MaskedSource {
     pub webhook_secret_hint: String,
     /// Basic auth shows the user (`"reportuser:••••"`); an API key shows its tail (`"••••a3f9"`).
     pub download_auth_hint: String,
+    /// Checkout environment only; omitted when credentials cannot be read.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub environment: Option<CheckoutEnvironment>,
 }
 
 /// Mask a secret to a recognizable hint: bullets followed by the last 4 characters. Fully masked
@@ -100,7 +104,10 @@ fn sources_index_name(merchant_id: &str) -> String {
 }
 
 /// List the `(connector, account)` sources a merchant has configured (no secrets).
-pub async fn list_sources(merchant_id: &str) -> Result<Vec<SourceRef>, IngestError> {
+pub async fn list_sources(
+    merchant: &crate::auth::AuthorizedMerchant,
+) -> Result<Vec<SourceRef>, IngestError> {
+    let merchant_id = merchant.as_str();
     let stored = service_configuration::find_config_by_name(sources_index_name(merchant_id))
         .await
         .map_err(|e| IngestError::Storage(e.to_string()))?;
@@ -111,8 +118,13 @@ pub async fn list_sources(merchant_id: &str) -> Result<Vec<SourceRef>, IngestErr
 }
 
 /// Record a `(connector, account)` in the merchant's source index (idempotent).
-async fn add_source(merchant_id: &str, connector: &str, account: &str) -> Result<(), IngestError> {
-    let mut sources = list_sources(merchant_id).await?;
+async fn add_source(
+    merchant: &crate::auth::AuthorizedMerchant,
+    connector: &str,
+    account: &str,
+) -> Result<(), IngestError> {
+    let merchant_id = merchant.as_str();
+    let mut sources = list_sources(merchant).await?;
     let entry = SourceRef {
         connector: connector.to_string(),
         account: account.to_string(),
@@ -123,26 +135,20 @@ async fn add_source(merchant_id: &str, connector: &str, account: &str) -> Result
     sources.push(entry);
     let value = serde_json::to_string(&sources).map_err(|e| IngestError::Storage(e.to_string()))?;
     let name = sources_index_name(merchant_id);
-    let exists = service_configuration::find_config_by_name(name.clone())
+    service_configuration::upsert_config(name, Some(value))
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?
-        .is_some();
-    if exists {
-        service_configuration::update_config(name, Some(value)).await
-    } else {
-        service_configuration::insert_config(name, Some(value)).await
-    }
-    .map_err(|e| IngestError::Storage(e.to_string()))
+        .map_err(|e| IngestError::Storage(e.to_string()))
 }
 
 /// Remove a `(connector, account)` from the merchant's source index (idempotent). When the last
 /// source goes, the index row is dropped entirely rather than left as an empty `[]`.
 async fn remove_source(
-    merchant_id: &str,
+    merchant: &crate::auth::AuthorizedMerchant,
     connector: &str,
     account: &str,
 ) -> Result<(), IngestError> {
-    let mut sources = list_sources(merchant_id).await?;
+    let merchant_id = merchant.as_str();
+    let mut sources = list_sources(merchant).await?;
     let before = sources.len();
     sources.retain(|s| !(s.connector == connector && s.account == account));
     if sources.len() == before {
@@ -168,15 +174,16 @@ async fn remove_source(
 pub async fn delete_source(
     connector: &str,
     account: &str,
-    merchant_id: &str,
+    merchant: &crate::auth::AuthorizedMerchant,
 ) -> Result<(), IngestError> {
+    let merchant_id = merchant.as_str();
     service_configuration::delete_config(config_name(merchant_id, connector, account))
         .await
         .map_err(|e| IngestError::Storage(e.to_string()))?;
     if is_pull_connector(connector) {
         remove_poll_source(merchant_id, connector, account).await?;
     }
-    remove_source(merchant_id, connector, account).await
+    remove_source(merchant, connector, account).await
 }
 
 /// `service_configuration.name` under which a `(merchant_id, connector, account)`'s encrypted creds
@@ -272,16 +279,9 @@ async fn remove_poll_source(
 async fn write_poll_index(connector: &str, sources: &[PollSource]) -> Result<(), IngestError> {
     let value = serde_json::to_string(sources).map_err(|e| IngestError::Storage(e.to_string()))?;
     let name = poll_index_name(connector);
-    let exists = service_configuration::find_config_by_name(name.clone())
+    service_configuration::upsert_config(name, Some(value))
         .await
-        .map_err(|e| IngestError::Storage(e.to_string()))?
-        .is_some();
-    if exists {
-        service_configuration::update_config(name, Some(value)).await
-    } else {
-        service_configuration::insert_config(name, Some(value)).await
-    }
-    .map_err(|e| IngestError::Storage(e.to_string()))
+        .map_err(|e| IngestError::Storage(e.to_string()))
 }
 
 /// On-the-wire shape of the encrypted blob (before AES). Secrets are peeked only here, at the
@@ -378,24 +378,18 @@ impl ConnectorCredsStore {
         &self,
         connector: &str,
         account: &str,
-        merchant_id: &str,
+        merchant: &crate::auth::AuthorizedMerchant,
         creds: &ConnectorCreds,
     ) -> Result<(), IngestError> {
+        let merchant_id = merchant.as_str();
         let name = config_name(merchant_id, connector, account);
         let value = self.seal(merchant_id, creds)?;
-        let exists = service_configuration::find_config_by_name(name.clone())
+        service_configuration::upsert_config(name, Some(value))
             .await
-            .map_err(|e| IngestError::Storage(e.to_string()))?
-            .is_some();
-        if exists {
-            service_configuration::update_config(name, Some(value)).await
-        } else {
-            service_configuration::insert_config(name, Some(value)).await
-        }
-        .map_err(|e| IngestError::Storage(e.to_string()))?;
+            .map_err(|e| IngestError::Storage(e.to_string()))?;
 
         // Record the source in the merchant's index so the dashboard can list it.
-        add_source(merchant_id, connector, account).await?;
+        add_source(merchant, connector, account).await?;
 
         // Pull connectors also go in a per-connector poll index so the background poller can find
         // every source to sweep, across merchants, without a prefix scan.
@@ -407,24 +401,47 @@ impl ConnectorCredsStore {
 
     /// List a merchant's configured sources with masked credential previews. Decrypts each blob to
     /// derive the hint, but only ever returns the masked form — never a full secret.
-    pub async fn list_masked(&self, merchant_id: &str) -> Result<Vec<MaskedSource>, IngestError> {
-        let sources = list_sources(merchant_id).await?;
+    pub async fn list_masked(
+        &self,
+        merchant: &crate::auth::AuthorizedMerchant,
+        config: &crate::config::CostIngestionConfig,
+    ) -> Result<Vec<MaskedSource>, IngestError> {
+        let sources = list_sources(merchant).await?;
         let mut out = Vec::with_capacity(sources.len());
         for s in sources {
             // A missing/undecryptable blob still lists the source, just without hints.
-            let (webhook_secret_hint, download_auth_hint) =
-                match self.get(merchant_id, &s.connector, &s.account).await {
-                    Ok(Some(r)) => (
-                        mask_secret(r.creds.webhook_secret.peek()),
-                        mask_download_auth(r.creds.download_auth.peek()),
-                    ),
-                    _ => ("—".to_string(), "—".to_string()),
+            let (webhook_secret_hint, download_auth_hint, environment) =
+                match self.get(merchant, &s.connector, &s.account).await {
+                    Ok(Some(r)) => {
+                        let raw = r.creds.download_auth.peek();
+                        let (hint, environment) = if s.connector == "checkout" {
+                            let value = serde_json::from_str::<serde_json::Value>(raw).ok();
+                            let key = value
+                                .as_ref()
+                                .and_then(|v| v.get("secret_key"))
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or(raw);
+                            (
+                                mask_secret(key),
+                                CheckoutEnvironment::from_credentials(raw, &config.connector),
+                            )
+                        } else {
+                            (mask_download_auth(raw), None)
+                        };
+                        (
+                            mask_secret(r.creds.webhook_secret.peek()),
+                            hint,
+                            environment,
+                        )
+                    }
+                    _ => ("—".to_string(), "—".to_string(), None),
                 };
             out.push(MaskedSource {
                 connector: s.connector,
                 account: s.account,
                 webhook_secret_hint,
                 download_auth_hint,
+                environment,
             });
         }
         Ok(out)
@@ -435,10 +452,11 @@ impl ConnectorCredsStore {
     /// key and are never returned here.
     pub async fn get(
         &self,
-        merchant_id: &str,
+        merchant: &crate::auth::AuthorizedMerchant,
         connector: &str,
         account: &str,
     ) -> Result<Option<ResolvedCreds>, IngestError> {
+        let merchant_id = merchant.as_str();
         let name = config_name(merchant_id, connector, account);
         let stored = service_configuration::find_config_by_name(name)
             .await
@@ -452,7 +470,7 @@ impl ConnectorCredsStore {
 
 /// Decode an even-length hex string to bytes; `None` on any non-hex character or odd length.
 fn hex_decode(s: &str) -> Option<Vec<u8>> {
-    if s.len() % 2 != 0 {
+    if !s.len().is_multiple_of(2) {
         return None;
     }
     (0..s.len())

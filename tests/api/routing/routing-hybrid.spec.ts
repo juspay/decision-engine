@@ -57,15 +57,53 @@ test.describe('Hybrid routing (API)', () => {
             payment_method: { type: 'enum_variant', value: 'card' },
             amount: { type: 'number', value: 100 },
           },
-          fallback_output: [factory.gatewayConnector('stripe')],
+          fallback_output: [factory.gatewayConnector('stripe'), factory.gatewayConnector('checkout')],
         },
       },
     })
 
     expect(r.status).toBe(200)
     expect(r.body.static_routing).toBeTruthy()
-    // The configured rule wins over the fallback.
-    expect(r.body.evaluated_connectors.map((c: any) => c.gateway_name)).toContain('checkout')
+    expect(r.body.static_routing.status).toBe('success')
+    // The configured rule wins over the fallback: only its connector comes back, not the
+    // fallback's own order with stripe first.
+    expect(r.body.evaluated_connectors.map((c: any) => c.gateway_name)).toEqual(['checkout'])
+  })
+
+  /**
+   * A rule keeps naming the connector account it was written against, even after that account is
+   * disabled or dropped from the profile -- and then it is missing from the caller's candidate
+   * set. Answering with it would send the caller somewhere it cannot route, so the fallback
+   * answers instead and the status stops claiming a rule hit.
+   */
+  test('answers with the fallback when the rule names a connector the caller cannot route to', async ({
+    api,
+    merchant,
+  }) => {
+    const m = merchant.id
+    const created = await api.createRoutingAlgorithm(
+      factory.singleRoutingPayload(m, { name: factory.ruleName('hybrid_fallback'), gateway: 'checkout' }),
+    )
+    await api.activateRoutingAlgorithm(m, created.body.rule_id)
+
+    const r = await api.raw('POST', '/routing/hybrid', {
+      failOnStatusCode: false,
+      body: {
+        static_routing_request: {
+          created_by: m,
+          parameters: {
+            payment_method: { type: 'enum_variant', value: 'card' },
+            amount: { type: 'number', value: 100 },
+          },
+          // No checkout here: the account the rule points at is not routable for this payment.
+          fallback_output: [factory.gatewayConnector('stripe')],
+        },
+      },
+    })
+
+    expect(r.status).toBe(200)
+    expect(r.body.static_routing.status).toBe('default_selection')
+    expect(r.body.evaluated_connectors.map((c: any) => c.gateway_name)).toEqual(['stripe'])
   })
 
   /**

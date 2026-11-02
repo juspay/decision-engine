@@ -29,24 +29,12 @@ pub fn record_fields_from_header(request: &Request<Body>) -> tracing::Span {
         method = %request.method(),
         uri = %request.uri(),
         version = ?request.version(),
-        tenant_id = tracing::field::Empty,
-        udf_order_id = tracing::field::Empty,
-        udf_customer_id = tracing::field::Empty,
-        udf_txn_uuid = tracing::field::Empty,
-        txn_uuid = tracing::field::Empty,
         "x-request-id" = tracing::field::Empty,
         "x-global-request-id" = tracing::field::Empty,
         merchant_id = tracing::field::Empty,
-        is_art_enabled = tracing::field::Empty,
-        is_audit_trail_log = tracing::field::Empty,
-        "euler-request-id" = tracing::field::Empty,
+        payment_id = tracing::field::Empty,
         tenant_id = tracing::field::Empty,
-        tenant_name = tracing::field::Empty,
         schema_version = tracing::field::Empty,
-        tag = tracing::field::Empty,
-        config_version = tracing::field::Empty,
-        sdk_session_span = tracing::field::Empty,
-        cell_selector = tracing::field::Empty,
     );
 
     let headers = request.headers();
@@ -58,21 +46,10 @@ pub fn record_fields_from_header(request: &Request<Body>) -> tracing::Span {
     };
 
     record_field(consts::X_TENANT_ID, "tenant_id");
-    record_field(consts::UDF_ORDER_ID, "udf_order_id");
-    record_field(consts::UDF_CUSTOMER_ID, "udf_customer_id");
-    record_field(consts::UDF_TXN_UUID, "udf_txn_uuid");
+    record_field("x-merchant-id", "merchant_id");
     record_field(consts::X_REQUEST_ID, "x-request-id");
     record_field(consts::X_GLOBAL_REQUEST_ID, "x-global-request-id");
-    record_field(consts::EULER_REQUEST_ID, "euler-request-id");
-    record_field(consts::X_SESSION_ID, "sdk_session_span");
-    record_field(consts::X_CELL_SELECTOR, "cell_selector");
-    record_field(consts::X_ART_RECORDING, "is_art_enabled");
-    span.record("is_audit_trail_log", "false");
     span.record("schema_version", "V2");
-    span.record("tenant_name", "JUSPAY");
-    span.record("tenant_id", "JUSPAY");
-    span.record("tag", "euler_logs");
-    span.record("config_version", 4872);
 
     span
 }

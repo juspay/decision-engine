@@ -3,6 +3,7 @@ use super::types::RankingAlgorithm;
 use super::types::UnifiedError;
 use crate::app::get_tenant_app_state;
 use crate::decider::network_decider;
+use crate::types::service_configuration::MerchantConfig;
 use serde_json::json;
 use serde_json::Value as AValue;
 use std::collections::HashMap;
@@ -211,9 +212,12 @@ pub async fn decider_full_payload_hs_function(
                 assignment,
                 projection,
                 None,
+                &super::ab_test::CostOutcome::default(),
+                Some(dreq_.payment_info.amount),
             );
         }
-        let config_name = format!("DEBIT_ROUTING_ENABLED_{}", dreq_.merchant_id);
+        let config_name =
+            crate::types::service_configuration::DebitRoutingEnabled::name(&dreq_.merchant_id);
         let debit_routing_enabled = service_configuration::find_config_by_name(config_name)
             .await
             .ok()
@@ -241,7 +245,7 @@ pub async fn decider_full_payload_hs_function(
                     code: crate::error::error_codes::TE_05.to_string(),
                     user_message: "Debit routing is not enabled for this merchant".to_string(),
                     developer_message: format!(
-                        "Merchant {} does not have debit routing enabled. Enable it via the /merchant-account/:merchant-id/debit-routing API.",
+                        "Merchant {} does not have debit routing enabled. Enable it via the /merchant-account/:merchant_id/debit-routing API.",
                         dreq_.merchant_id
                     ),
                 },
@@ -270,29 +274,19 @@ pub async fn decider_full_payload_hs_function(
         )
         .await;
 
+        // The routing event carries the decided gateway and the multi-objective cost outcome, so
+        // the experiment results can attribute cost per arm. Cost is empty when the arm ran
+        // auth-only.
         if let Some((assignment, projection)) = &ab_test_experiment {
+            let decided = result.as_ref().ok();
+            let mo = decided.and_then(|d| d.multi_objective_info.as_ref());
             super::ab_test::interceptor::emit_routing_event(
                 dreq_.payment_id(),
                 &dreq_.merchant_id,
                 assignment,
                 projection,
-                result
-                    .as_ref()
-                    .ok()
-                    .map(|decided| decided.decided_gateway.as_str()),
-            );
-        }
-
-        // Cost measurement: for an SR-arm A/B payment, enrich the inflight record with the
-        // decided gateway + multi-objective cost outcome so the later outcome event can
-        // attribute cost per arm. No-op (aside from gateway backfill) when the arm ran auth-only.
-        if let (Ok(decided), Some((assignment, _))) = (&result, &ab_test_experiment) {
-            let mo = decided.multi_objective_info.as_ref();
-            super::ab_test::record_cost_outcome(
-                dreq_.payment_id(),
-                assignment,
-                Some(decided.decided_gateway.as_str()),
-                super::ab_test::outcome::CostOutcome {
+                decided.map(|d| d.decided_gateway.as_str()),
+                &super::ab_test::CostOutcome {
                     cost_saved_bps: mo.and_then(|m| m.cost_saved_bps),
                     chosen_cost_bps: mo.and_then(|m| {
                         m.ranked
@@ -303,8 +297,7 @@ pub async fn decider_full_payload_hs_function(
                     margin: mo.map(|m| m.margin),
                 },
                 Some(dreq_.payment_info.amount),
-            )
-            .await;
+            );
         }
 
         result
@@ -362,7 +355,7 @@ fn handle_enforced_gateway(gateway_list: Option<Vec<String>>) -> Option<Vec<Stri
 /// gate. Falls back to [`multi_objective::DEFAULT_MARGIN`] when unset.
 pub async fn load_margin(merchant_id: &str) -> f64 {
     let read = || async {
-        let key = format!("SR_V3_INPUT_CONFIG_{}", merchant_id);
+        let key = crate::types::service_configuration::SrV3Input::name(merchant_id);
         let row = service_configuration::find_config_by_name(key)
             .await
             .ok()??;
@@ -382,7 +375,7 @@ pub async fn load_margin(merchant_id: &str) -> f64 {
 /// its noise floor. Falls back to [`C::DEFAULT_SR_V3_BASED_BUCKET_SIZE`] when unset.
 pub async fn load_srv3_default_bucket_size(merchant_id: &str) -> i32 {
     let read = || async {
-        let key = format!("SR_V3_INPUT_CONFIG_{}", merchant_id);
+        let key = crate::types::service_configuration::SrV3Input::name(merchant_id);
         let row = service_configuration::find_config_by_name(key)
             .await
             .ok()??;
@@ -702,8 +695,7 @@ pub async fn run_decider_flow(
             //     letting the "Turn cost on" experiment run cost off on control and on in variant,
             //   - else if the request explicitly sets `enableMultiObjective`, honor it (per-request
             //     override), otherwise
-            //   - fall back to the merchant's cost-savings feature flag (which still reads
-            //     the pre-rename key for merchants that have not drained across yet).
+            //   - fall back to the merchant's `cost_savings_enabled` feature flag.
             // The feature flag is the primary rollout switch, so a caller that omits the field
             // must not silently lose multi-objective routing.
             let multi_obj_on = match decider_flow
@@ -716,7 +708,12 @@ pub async fn run_decider_flow(
                 None => match enable_multi_objective_override {
                     Some(b) => b,
                     None => {
-                        multi_objective::algorithm::is_cost_savings_enabled(&merchant_id_text).await
+                        is_feature_enabled(
+                            multi_objective::COST_SAVINGS_FEATURE_FLAG.to_string(),
+                            merchant_id_text.clone(),
+                            kvRedis(),
+                        )
+                        .await
                     }
                 },
             };

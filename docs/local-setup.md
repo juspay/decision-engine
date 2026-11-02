@@ -15,7 +15,7 @@ This is the canonical local startup guide for Decision Engine.
 
 Required for source runs:
 
-- Rust 1.85+
+- Rust 1.88+
 - PostgreSQL or MySQL
 - Redis
 - [`just`](https://just.systems) — required for PostgreSQL source runs (`just migrate-pg`); MySQL can use `diesel migration run` directly
@@ -109,6 +109,22 @@ started itself. To keep infra running after exit:
 ONECLICK_KEEP_INFRA=1 ./oneclick.sh
 ```
 
+### Without Docker (Nix)
+
+On machines without Docker, such as NixOS dev boxes, the flake runs the same infrastructure as plain processes, with the same ports, credentials, Kafka topics and ClickHouse init scripts. Prometheus is not included.
+
+```bash
+# Terminal 1: Postgres, Redis, Kafka, ClickHouse, Mailpit and the OpenTelemetry collector
+nix run .#infra
+
+# Terminal 2: toolchain + tools, then the usual bring-up
+nix develop
+npm install -g mint   # once; the docs preview CLI, installed under .nix-infra/
+./oneclick.sh
+```
+
+`oneclick.sh` finds every service already healthy and skips Docker Compose. State lives in `.nix-infra/` (set `DE_INFRA_DIR` to move it); delete it for a clean slate.
+
 ### API Only
 
 ```bash
@@ -118,8 +134,13 @@ docker compose --profile postgres-ghcr up -d
 ### API + Dashboard + Docs
 
 ```bash
-docker compose --profile dashboard-postgres-ghcr up -d
+docker compose --profile dashboard-postgres-ghcr up -d --build
 ```
+
+All `dashboard-*` profiles build the frontend from the current `website` source inside Docker,
+including profiles that pull the API image from GHCR. No host Node.js installation or prebuilt
+`website/dist` is required. After changing frontend source, rerun the command with `--build`;
+restarting containers alone does not rebuild the dashboard.
 
 ### With Monitoring
 

@@ -19,6 +19,10 @@ curl "$BASE_URL/analytics/experiment/routing_a1b2c3d4-1111-2222-3333-44445555666
 
 Optional query parameters: `start_ms`, `end_ms`, `min_sample_size`, `guardrail_threshold_pp`, `evaluation_margin` — override the experiment's stored thresholds for an ad-hoc window or sensitivity check.
 
+`start_ms` / `end_ms` select payments by when they were routed. A payment's outcome comes from the statuses reported for it on `/update-gateway-score` and counts however late it arrives, even after `end_ms`.
+
+`auth_rate`, `first_attempt_auth_rate` and `net_ev_bps` are over **resolved** payments: those with a success or failure reported (`success_count + failure_count`). `transaction_count` also includes payments still awaiting a terminal status, which no rate counts as a failure.
+
 `endpoint` (`hybrid_routing`, `decide_gateway` or `evaluate`) restricts the results to one endpoint. An experiment applies different arm layers on each endpoint, so the arms measure a different change on each — read results one endpoint at a time rather than pooled. Omitting it reads every endpoint together. Events recorded before endpoint tagging are counted under `decide_gateway`. The transactions endpoint below accepts the same `endpoint` parameter.
 
 ```json
@@ -65,7 +69,7 @@ Optional query parameters: `start_ms`, `end_ms`, `min_sample_size`, `guardrail_t
 
 | Verdict | Meaning |
 | --- | --- |
-| `collecting_data` | At least one arm hasn't reached `min_sample_size` yet. |
+| `collecting_data` | Fewer than `min_sample_size` resolved payments across both arms, or an arm has none yet. |
 | `not_significant` | Enough data, but the difference isn't statistically significant. |
 | `variant_wins` | Variant significantly outperforms control on net expected value. |
 | `variant_loses` | Variant significantly underperforms control. |

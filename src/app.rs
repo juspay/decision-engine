@@ -5,7 +5,6 @@ use axum::{
     extract::{Request, State},
     middleware::{self, Next},
     response::Response,
-    routing::{delete, get, post, put},
 };
 use axum_server::{tls_rustls::RustlsConfig, Handle};
 use error_stack::ResultExt;
@@ -16,6 +15,8 @@ use tokio::sync::OnceCell as TokioOnceCell;
 use tower::ServiceBuilder;
 use tower_http::trace as tower_trace;
 
+use crate::euclid::handlers::routing_rules;
+use crate::middleware::metered;
 use crate::{
     api_client::ApiClient,
     config::{self, GlobalConfig, TenantConfig},
@@ -58,37 +59,51 @@ async fn ensure_request_id(mut request: Request<Body>, next: Next) -> Response {
     response
 }
 
-/// Counts every response to a route this service defines by route, method and status code and logs each 4xx/5xx with its request id; runs outermost so the auth layer's 401/403s are covered too.
+/// Count responses for matched routes without emitting an additional failure event.
 async fn record_api_response(request: Request<Body>, next: Next) -> Response {
-    // Only supported APIs carry a matched route; axum answers unknown paths itself, before this layer.
+    // Keep metric labels bounded to registered routes; unmatched requests still get completion logs.
     let route = request
         .extensions()
         .get::<axum::extract::MatchedPath>()
         .map(|path| path.as_str().to_owned());
     let method = request.method().to_string();
-    let started_at = Instant::now();
     let response = next.run(request).await;
     if let Some(route) = route {
         let status = response.status();
         crate::metrics::API_RESPONSE_COUNTER
             .with_label_values(&[route.as_str(), method.as_str(), status.as_str()])
             .inc();
-        if status.is_client_error() || status.is_server_error() {
-            // One flat, greppable line per failure carrying the id the client received, so a count on the dashboard turns into request ids in the logs.
-            let request_id = response
-                .headers()
-                .get(storage::consts::X_REQUEST_ID)
-                .and_then(|value| value.to_str().ok())
-                .unwrap_or("unknown");
-            let latency_ms = started_at.elapsed().as_millis() as u64;
-            if status.is_server_error() {
-                logger::error!(route = %route, method = %method, status_code = status.as_u16(), request_id = %request_id, latency_ms, "api_response_failed");
-            } else {
-                logger::warn!(route = %route, method = %method, status_code = status.as_u16(), request_id = %request_id, latency_ms, "api_response_failed");
-            }
-        }
     }
     response
+}
+
+/// Generate IDs before tracing and keep request logs outside authentication.
+fn with_request_logging<S>(router: axum::Router<S>) -> axum::Router<S>
+where
+    S: Clone + Send + Sync + 'static,
+{
+    let middleware = ServiceBuilder::new()
+        .layer(middleware::from_fn(ensure_request_id))
+        .layer(
+            tower_trace::TraceLayer::new_for_http()
+                .make_span_with(|request: &Request<_>| utils::record_fields_from_header(request))
+                .on_request(tower_trace::DefaultOnRequest::new().level(tracing::Level::INFO))
+                .on_response(
+                    |response: &Response, latency: std::time::Duration, span: &tracing::Span| {
+                        span.in_scope(|| {
+                            logger::info!(
+                                status_code = response.status().as_u16(),
+                                latency_ms = latency.as_millis() as u64,
+                                "finished processing request"
+                            );
+                        });
+                    },
+                )
+                // Application errors are logged at their source; completion records status.
+                .on_failure(()),
+        )
+        .layer(middleware::from_fn(record_api_response));
+    router.layer(middleware)
 }
 
 fn generate_request_id_header_value() -> HeaderValue {
@@ -337,6 +352,442 @@ impl TenantAppState {
 /// The server responsible for the custodian APIs and main open_router APIs this will perform all storage, retrieval and
 /// deletion operation
 ///
+/// Routes that act on one merchant. Every request authenticates (a dashboard session, a merchant
+/// api key, or the admin secret on behalf of a merchant), and a session is held to its own
+/// merchant: by [`custom_middleware::enforce_merchant_scope`] for the `:merchant_id` path
+/// parameter, and by the [`crate::auth::AuthorizedMerchant`] each handler resolves before it
+/// reaches per-merchant storage.
+fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
+    axum::Router::new()
+        .route(
+            "/routing/create",
+            metered!(post, routing_rules::routing_create),
+        )
+        .route(
+            "/routing/activate",
+            metered!(post, routing_rules::activate_routing_rule),
+        )
+        .route(
+            "/routing/deactivate",
+            metered!(post, routing_rules::deactivate_routing_rule),
+        )
+        .route(
+            "/routing/update",
+            metered!(post, routing_rules::update_routing_rule),
+        )
+        // Rule deletion is disabled for parity with the Hyperswitch dashboard, which
+        // cannot delete routing rules yet (juspay/hyperswitch-control-center#5495,
+        // item 4). Re-enable by uncommenting once both dashboards can offer it.
+        // .route(
+        //     "/routing/delete",
+        //     metered!(post, routing_rules::delete_routing_rule),
+        // )
+        .route(
+            "/routing/list/:merchant_id",
+            metered!(post, routing_rules::list_all_routing_algorithm_id),
+        )
+        .route(
+            "/routing/list/active/:merchant_id",
+            metered!(post, routing_rules::list_active_routing_algorithm),
+        )
+        .route(
+            "/routing/evaluate",
+            metered!(post, routing_rules::routing_evaluate),
+        )
+        .route(
+            "/routing/evaluate/batch",
+            metered!(post, routing_rules::routing_evaluate_batch),
+        )
+        .route(
+            "/decision_gateway",
+            metered!(post, routes::decision_gateway::decision_gateway),
+        )
+        .route(
+            "/rule/create",
+            metered!(post, routes::rule_configuration::create_rule_config),
+        )
+        .route(
+            "/rule/get",
+            metered!(post, routes::rule_configuration::get_rule_config),
+        )
+        .route(
+            "/rule/update",
+            metered!(post, routes::rule_configuration::update_rule_config),
+        )
+        .route(
+            "/rule/delete",
+            metered!(post, routes::rule_configuration::delete_rule_config),
+        )
+        .route(
+            "/merchant-account/:merchant_id",
+            metered!(
+                get,
+                routes::merchant_account_config::get_merchant_config,
+                "merchant_account_get"
+            ),
+        )
+        .route(
+            "/merchant-account/:merchant_id",
+            metered!(
+                delete,
+                routes::merchant_account_config::delete_merchant_config,
+                "merchant_account_delete"
+            ),
+        )
+        .route(
+            "/merchant-account/:merchant_id/debit-routing",
+            metered!(
+                get,
+                routes::merchant_account_config::get_debit_routing,
+                "merchant_debit_routing_get"
+            ),
+        )
+        .route(
+            "/merchant-account/:merchant_id/connectors",
+            metered!(
+                get,
+                routes::connector_credentials::list_connector_credentials
+            ),
+        )
+        .route(
+            "/merchant-account/:merchant_id/connectors/:connector/credentials",
+            metered!(
+                post,
+                routes::connector_credentials::set_connector_credentials
+            ),
+        )
+        .route(
+            "/merchant-account/:merchant_id/connectors/:connector/credentials/:account",
+            metered!(
+                delete,
+                routes::connector_credentials::delete_connector_credentials
+            ),
+        )
+        .route(
+            "/merchant-account/:merchant_id/connectors/:connector/report",
+            // Monthly settlement reports run to several GB. The handler streams the body to disk
+            // and parses in batches (O(batch) RAM), so lift the body cap to the same hard limit it
+            // enforces itself. DefaultBodyLimit otherwise errors the stream at its default.
+            metered!(post, routes::report_upload::upload_report).layer(
+                axum::extract::DefaultBodyLimit::max(routes::report_upload::MAX_UPLOAD_BYTES),
+            ),
+        )
+        .route(
+            // Header preflight: the dashboard posts only the first few KB of the merchant's file to
+            // check it parses before committing to a multi-GB upload. Cap the body accordingly —
+            // anything larger is a client bug, and the handler stops reading at the cap anyway.
+            "/merchant-account/:merchant_id/connectors/:connector/report/validate-headers",
+            metered!(post, routes::report_upload::validate_report_headers).layer(
+                axum::extract::DefaultBodyLimit::max(
+                    crate::cost_ingestion::preflight::HEADER_SAMPLE_BYTES,
+                ),
+            ),
+        )
+        .route(
+            // Which connectors support report ingestion, straight off the registry — the dashboard's
+            // connector picker reads this instead of keeping its own list.
+            "/cost-ingestion/connectors",
+            metered!(get, routes::report_upload::list_ingest_connectors),
+        )
+        .route(
+            // Preview a *candidate* column mapping: what the merchant's rows actually become under
+            // it. Small JSON body (a mapping + a file sample), so the default body limit applies.
+            "/merchant-account/:merchant_id/connectors/:connector/report/preview",
+            metered!(post, routes::report_upload::preview_column_mapping),
+        )
+        .route(
+            // A settlement source's saved column mapping, applied to every future ingestion of it.
+            "/merchant-account/:merchant_id/connectors/:connector/report/column-mapping",
+            metered!(get, routes::report_upload::get_column_mapping)
+                .merge(metered!(put, routes::report_upload::set_column_mapping))
+                .merge(metered!(
+                    delete,
+                    routes::report_upload::delete_column_mapping
+                )),
+        )
+        .route(
+            // "Use a sample file": run a curated demo report (fetched from configured URL) through
+            // the same pipeline, so a merchant without a report file can still exercise the flow.
+            "/merchant-account/:merchant_id/connectors/:connector/report/sample",
+            metered!(post, routes::report_upload::run_sample_report),
+        )
+        .route(
+            "/merchant-account/:merchant_id/connectors/:connector/invoice",
+            // Invoices are small (a few hundred lines): buffered and processed synchronously, so the
+            // computed cost add-on is returned in the response. Cap the body to reject a settlement
+            // report accidentally uploaded here.
+            metered!(post, routes::invoice_upload::upload_invoice).layer(
+                axum::extract::DefaultBodyLimit::max(routes::invoice_upload::MAX_INVOICE_BYTES),
+            ),
+        )
+        .route(
+            "/merchant-account/:merchant_id/connectors/:connector/invoice-addon",
+            metered!(delete, routes::invoice_upload::delete_addon),
+        )
+        .route(
+            "/merchant-account/:merchant_id/invoice-addons",
+            metered!(get, routes::invoice_upload::list_addons),
+        )
+        .route(
+            "/merchant-account/:merchant_id/invoice-reconciliation",
+            metered!(get, routes::invoice_upload::get_reconciliation),
+        )
+        .route(
+            "/merchant-account/:merchant_id/connector-fees",
+            metered!(get, routes::connector_fees::list_connector_fees),
+        )
+        .route(
+            "/merchant-account/:merchant_id/connectors/:connector/fee-override",
+            metered!(put, routes::connector_fees::set_fee_override).merge(metered!(
+                delete,
+                routes::connector_fees::delete_fee_override
+            )),
+        )
+        .route(
+            "/merchant-account/:merchant_id/cost-clusters",
+            metered!(get, routes::cost_clusters::list_cost_clusters),
+        )
+        .route(
+            "/merchant-account/:merchant_id/cost-cluster-facets",
+            metered!(get, routes::cost_clusters::list_cost_cluster_facets),
+        )
+        .route(
+            "/merchant-account/:merchant_id/cost-clusters/:cluster-key/fee-override",
+            metered!(put, routes::cost_clusters::set_cluster_override).merge(metered!(
+                delete,
+                routes::cost_clusters::delete_cluster_override
+            )),
+        )
+        .route(
+            "/merchant-account/:merchant_id/seed-costs",
+            metered!(get, routes::seed_costs::get_seed_costs)
+                .merge(metered!(put, routes::seed_costs::set_seed_costs))
+                .merge(metered!(delete, routes::seed_costs::delete_seed_costs)),
+        )
+        .route(
+            "/merchant-account/:merchant_id/seed-costs/simulate",
+            metered!(post, routes::seed_costs::simulate_seed_costs),
+        )
+        .route(
+            "/merchant-account/:merchant_id/cost-coverage",
+            metered!(get, routes::cost_coverage::get_cost_coverage),
+        )
+        .route(
+            "/merchant-account/:merchant_id/volume-commitment/dashboard",
+            metered!(get, routes::volume_commitment::get_dashboard),
+        )
+        .route(
+            "/merchant-account/:merchant_id/volume-commitment/projection",
+            metered!(get, routes::volume_commitment::get_projection),
+        )
+        .route(
+            "/merchant-account/:merchant_id/volume-commitment/impact",
+            metered!(get, routes::volume_commitment::get_impact),
+        )
+        .route(
+            "/merchant-account/:merchant_id/volume-commitment/samples",
+            metered!(get, routes::volume_commitment::get_samples),
+        )
+        // Called by the volume-commitment scheduler when a merchant's forecast comes due. Behind
+        // the same auth as any other write, and the handler narrows further: the admin secret
+        // (which the scheduler presents) may run anything, a session or api key only its own
+        // merchant, and the every-merchant sweep is admin-only.
+        .route(
+            "/volume-commitment/run-forecast",
+            metered!(post, routes::volume_commitment::run_forecast),
+        )
+        .route(
+            "/merchant-account/:merchant_id/cost-ingestions",
+            metered!(get, routes::report_upload::list_ingestions),
+        )
+        .route(
+            "/merchant-account/:merchant_id/cost-ingestions/:ingestion-id",
+            metered!(delete, routes::report_upload::delete_ingestion),
+        )
+        .route(
+            "/merchant-account/:merchant_id/cost-price-changes",
+            metered!(get, routes::report_upload::list_price_changes),
+        )
+        .route(
+            "/merchant-account/:merchant_id/debit-routing",
+            metered!(
+                post,
+                routes::merchant_account_config::update_debit_routing,
+                "merchant_debit_routing_update"
+            ),
+        )
+        .route(
+            "/merchant-account/:merchant_id/features",
+            metered!(
+                get,
+                routes::merchant_account_config::get_merchant_features,
+                "merchant_features_get"
+            ),
+        )
+        .route(
+            "/merchant-account/:merchant_id/features/:feature",
+            metered!(
+                post,
+                routes::merchant_account_config::update_merchant_feature,
+                "merchant_feature_update"
+            ),
+        )
+        .route(
+            "/config-sr-dimension",
+            metered!(post, routing_rules::config_sr_dimensions),
+        )
+        .route(
+            "/config-sr-dimension/:merchant_id",
+            metered!(get, routing_rules::get_sr_dimensions),
+        )
+        .route(
+            "/config/routing-keys",
+            metered!(get, routing_rules::get_routing_config),
+        )
+        .route("/gsm/options", metered!(get, routes::gsm::gsm_options))
+        .route(
+            "/update-score",
+            metered!(post, routes::update_score::update_score),
+        )
+        .route(
+            "/decide-gateway",
+            metered!(post, routes::decide_gateway::decide_gateway),
+        )
+        .route(
+            "/routing/hybrid",
+            metered!(post, routes::hybrid_routing::hybrid_routing_evaluate),
+        )
+        .route("/decide", metered!(post, routes::decide::decide))
+        .route(
+            "/update-gateway-score",
+            metered!(post, routes::update_gateway_score::update_gateway_score),
+        )
+        .route(
+            "/gateway-score/reset",
+            metered!(post, routes::gateway_score::reset_gateway_scores),
+        )
+        .route(
+            "/api-key/create",
+            metered!(post, routes::api_key::create_api_key),
+        )
+        .route(
+            "/api-key/list/:merchant_id",
+            metered!(get, routes::api_key::list_api_keys),
+        )
+        .route(
+            "/api-key/:key_id",
+            metered!(delete, routes::api_key::revoke_api_key),
+        )
+        .nest("/analytics", routes::analytics::serve())
+        // Ordering matters: layers run outermost-first, so `authenticate` (added last) runs before
+        // `enforce_merchant_scope` (added here, inner). The scope guard therefore sees the
+        // `AuthContext` that `authenticate` inserts, and rejects a per-merchant session reaching
+        // across to another merchant's `:merchant_id` route.
+        .layer(middleware::from_fn(
+            custom_middleware::enforce_merchant_scope,
+        ))
+        .layer(middleware::from_fn(custom_middleware::authenticate))
+}
+
+/// Deployment-level routes for service callers such as Hyperswitch: provisioning merchants,
+/// syncing the org hierarchy, and handing a merchant session to the dashboard. Only the admin
+/// secret reaches them, checked once by [`custom_middleware::require_admin_secret`].
+fn admin_routes() -> axum::Router<Arc<GlobalAppState>> {
+    axum::Router::new()
+        .route(
+            "/merchant-account/create",
+            metered!(
+                post,
+                routes::merchant_account_config::create_merchant_config,
+                "merchant_account_create"
+            ),
+        )
+        .route(
+            "/admin/hierarchy/reconcile",
+            metered!(post, routes::hierarchy::reconcile_hierarchy),
+        )
+        .route(
+            "/admin/profiles/:profile_id/connectors",
+            metered!(post, routes::profile_connectors::replace_profile_connectors),
+        )
+        .route(
+            "/admin/hierarchy/sync",
+            metered!(post, routes::hierarchy::sync_hierarchy),
+        )
+        .route(
+            "/auth/admin/merchant-token",
+            metered!(post, routes::user_auth::admin_merchant_token),
+        )
+        .route_layer(middleware::from_fn(custom_middleware::require_admin_secret))
+}
+
+/// Routes that take no deployment credential. The account routes sign users in and manage their
+/// own sessions, verifying the dashboard JWT in the handler; the settlement webhook is
+/// authenticated by the connector's signature.
+fn public_routes() -> axum::Router<Arc<GlobalAppState>> {
+    axum::Router::new()
+        .route(
+            "/webhooks/settlement/:merchant_id/:connector",
+            metered!(post, routes::settlement_webhook::settlement_webhook),
+        )
+        .route("/auth/signup", metered!(post, routes::user_auth::signup))
+        .route("/auth/login", metered!(post, routes::user_auth::login))
+        .route("/auth/logout", metered!(post, routes::user_auth::logout))
+        .route("/auth/me", metered!(get, routes::user_auth::me))
+        .route(
+            "/auth/merchants",
+            metered!(get, routes::user_auth::list_merchants),
+        )
+        .route(
+            "/auth/switch-merchant",
+            metered!(post, routes::user_auth::switch_merchant),
+        )
+        .route(
+            "/auth/super-admin/enter-merchant",
+            metered!(post, routes::user_auth::enter_merchant),
+        )
+        .route(
+            "/auth/super-admin/exit",
+            metered!(post, routes::user_auth::exit_merchant),
+        )
+        .route(
+            "/auth/super-admin/lookup",
+            metered!(post, routes::user_auth::lookup_merchants),
+        )
+        .route(
+            "/onboarding/merchant",
+            metered!(post, routes::user_auth::create_merchant),
+        )
+        .route(
+            "/merchant/members",
+            metered!(get, routes::user_auth::list_members),
+        )
+        .route(
+            "/merchant/members/invite",
+            metered!(post, routes::user_auth::invite_member),
+        )
+        .route(
+            "/auth/verify-email",
+            metered!(get, routes::user_auth::verify_email),
+        )
+        .route(
+            "/auth/forgot-password",
+            metered!(post, routes::user_auth::forgot_password),
+        )
+        .route(
+            "/auth/reset-password",
+            metered!(post, routes::user_auth::reset_password),
+        )
+        .route(
+            "/auth/change-password",
+            metered!(post, routes::user_auth::change_password),
+        )
+        .route(
+            "/auth/admin/merchant-token/exchange",
+            metered!(post, routes::user_auth::exchange_merchant_token),
+        )
+}
+
 pub async fn server_builder(
     global_app_state: Arc<GlobalAppState>,
 ) -> Result<(), error::ConfigurationError>
@@ -392,385 +843,19 @@ where
         handle_clone.shutdown(); // Trigger axum_server shutdown
     });
 
-    // Routes that require API key authentication
-    let protected_router = axum::Router::new()
-        .route(
-            "/routing/create",
-            axum::routing::post(crate::euclid::handlers::routing_rules::routing_create),
-        )
-        .route(
-            "/routing/activate",
-            axum::routing::post(crate::euclid::handlers::routing_rules::activate_routing_rule),
-        )
-        .route(
-            "/routing/deactivate",
-            axum::routing::post(crate::euclid::handlers::routing_rules::deactivate_routing_rule),
-        )
-        .route(
-            "/routing/update",
-            axum::routing::post(crate::euclid::handlers::routing_rules::update_routing_rule),
-        )
-        // Rule deletion is disabled for parity with the Hyperswitch dashboard, which
-        // cannot delete routing rules yet (juspay/hyperswitch-control-center#5495,
-        // item 4). Re-enable by uncommenting once both dashboards can offer it.
-        // .route(
-        //     "/routing/delete",
-        //     axum::routing::post(crate::euclid::handlers::routing_rules::delete_routing_rule),
-        // )
-        .route(
-            "/routing/list/:created_by",
-            axum::routing::post(
-                crate::euclid::handlers::routing_rules::list_all_routing_algorithm_id,
-            ),
-        )
-        .route(
-            "/routing/list/active/:created_by",
-            axum::routing::post(
-                crate::euclid::handlers::routing_rules::list_active_routing_algorithm,
-            ),
-        )
-        .route(
-            "/routing/evaluate",
-            axum::routing::post(crate::euclid::handlers::routing_rules::routing_evaluate),
-        )
-        .route(
-            "/routing/evaluate/batch",
-            axum::routing::post(crate::euclid::handlers::routing_rules::routing_evaluate_batch),
-        )
-        .route(
-            "/decision_gateway",
-            post(routes::decision_gateway::decision_gateway),
-        )
-        .route(
-            "/rule/create",
-            post(routes::rule_configuration::create_rule_config),
-        )
-        .route(
-            "/rule/get",
-            post(routes::rule_configuration::get_rule_config),
-        )
-        .route(
-            "/rule/update",
-            post(routes::rule_configuration::update_rule_config),
-        )
-        .route(
-            "/rule/delete",
-            post(routes::rule_configuration::delete_rule_config),
-        )
-        .route(
-            "/merchant-account/:merchant-id",
-            get(routes::merchant_account_config::get_merchant_config),
-        )
-        .route(
-            "/merchant-account/:merchant-id",
-            delete(routes::merchant_account_config::delete_merchant_config),
-        )
-        .route(
-            "/merchant-account/:merchant-id/debit-routing",
-            get(routes::merchant_account_config::get_debit_routing),
-        )
-        .route(
-            "/merchant-account/:merchant-id/connectors",
-            get(routes::connector_credentials::list_connector_credentials),
-        )
-        .route(
-            "/merchant-account/:merchant-id/connectors/:connector/credentials",
-            post(routes::connector_credentials::set_connector_credentials),
-        )
-        .route(
-            "/merchant-account/:merchant-id/connectors/:connector/credentials/:account",
-            delete(routes::connector_credentials::delete_connector_credentials),
-        )
-        .route(
-            "/merchant-account/:merchant-id/connectors/:connector/report",
-            // Monthly settlement reports run to several GB. The handler streams the body to disk
-            // and parses in batches (O(batch) RAM), so lift the body cap to the same hard limit it
-            // enforces itself. DefaultBodyLimit otherwise errors the stream at its default.
-            post(routes::report_upload::upload_report).layer(axum::extract::DefaultBodyLimit::max(
-                routes::report_upload::MAX_UPLOAD_BYTES,
-            )),
-        )
-        .route(
-            // Header preflight: the dashboard posts only the first few KB of the merchant's file to
-            // check it parses before committing to a multi-GB upload. Cap the body accordingly —
-            // anything larger is a client bug, and the handler stops reading at the cap anyway.
-            "/merchant-account/:merchant-id/connectors/:connector/report/validate-headers",
-            post(routes::report_upload::validate_report_headers).layer(
-                axum::extract::DefaultBodyLimit::max(
-                    crate::cost_ingestion::preflight::HEADER_SAMPLE_BYTES,
-                ),
-            ),
-        )
-        .route(
-            // Which connectors support report ingestion, straight off the registry — the dashboard's
-            // connector picker reads this instead of keeping its own list.
-            "/cost-ingestion/connectors",
-            get(routes::report_upload::list_ingest_connectors),
-        )
-        .route(
-            // Preview a *candidate* column mapping: what the merchant's rows actually become under
-            // it. Small JSON body (a mapping + a file sample), so the default body limit applies.
-            "/merchant-account/:merchant-id/connectors/:connector/report/preview",
-            post(routes::report_upload::preview_column_mapping),
-        )
-        .route(
-            // A settlement source's saved column mapping, applied to every future ingestion of it.
-            "/merchant-account/:merchant-id/connectors/:connector/report/column-mapping",
-            get(routes::report_upload::get_column_mapping)
-                .put(routes::report_upload::set_column_mapping)
-                .delete(routes::report_upload::delete_column_mapping),
-        )
-        .route(
-            // "Use a sample file": run a curated demo report (fetched from configured URL) through
-            // the same pipeline, so a merchant without a report file can still exercise the flow.
-            "/merchant-account/:merchant-id/connectors/:connector/report/sample",
-            post(routes::report_upload::run_sample_report),
-        )
-        .route(
-            "/merchant-account/:merchant-id/connectors/:connector/invoice",
-            // Invoices are small (a few hundred lines): buffered and processed synchronously, so the
-            // computed cost add-on is returned in the response. Cap the body to reject a settlement
-            // report accidentally uploaded here.
-            post(routes::invoice_upload::upload_invoice).layer(
-                axum::extract::DefaultBodyLimit::max(routes::invoice_upload::MAX_INVOICE_BYTES),
-            ),
-        )
-        .route(
-            "/merchant-account/:merchant-id/connectors/:connector/invoice-addon",
-            delete(routes::invoice_upload::delete_addon),
-        )
-        .route(
-            "/merchant-account/:merchant-id/invoice-addons",
-            get(routes::invoice_upload::list_addons),
-        )
-        .route(
-            "/merchant-account/:merchant-id/invoice-reconciliation",
-            get(routes::invoice_upload::get_reconciliation),
-        )
-        .route(
-            "/merchant-account/:merchant-id/connector-fees",
-            get(routes::connector_fees::list_connector_fees),
-        )
-        .route(
-            "/merchant-account/:merchant-id/connectors/:connector/fee-override",
-            put(routes::connector_fees::set_fee_override)
-                .delete(routes::connector_fees::delete_fee_override),
-        )
-        .route(
-            "/merchant-account/:merchant-id/cost-clusters",
-            get(routes::cost_clusters::list_cost_clusters),
-        )
-        .route(
-            "/merchant-account/:merchant-id/cost-cluster-facets",
-            get(routes::cost_clusters::list_cost_cluster_facets),
-        )
-        .route(
-            "/merchant-account/:merchant-id/cost-clusters/:cluster-key/fee-override",
-            put(routes::cost_clusters::set_cluster_override)
-                .delete(routes::cost_clusters::delete_cluster_override),
-        )
-        .route(
-            "/merchant-account/:merchant-id/seed-costs",
-            get(routes::seed_costs::get_seed_costs)
-                .put(routes::seed_costs::set_seed_costs)
-                .delete(routes::seed_costs::delete_seed_costs),
-        )
-        .route(
-            "/merchant-account/:merchant-id/seed-costs/simulate",
-            post(routes::seed_costs::simulate_seed_costs),
-        )
-        .route(
-            "/merchant-account/:merchant-id/cost-coverage",
-            get(routes::cost_coverage::get_cost_coverage),
-        )
-        .route(
-            "/merchant-account/:merchant-id/volume-commitment/dashboard",
-            get(routes::volume_commitment::get_dashboard),
-        )
-        .route(
-            "/merchant-account/:merchant-id/volume-commitment/projection",
-            get(routes::volume_commitment::get_projection),
-        )
-        .route(
-            "/merchant-account/:merchant-id/volume-commitment/impact",
-            get(routes::volume_commitment::get_impact),
-        )
-        .route(
-            "/merchant-account/:merchant-id/volume-commitment/samples",
-            get(routes::volume_commitment::get_samples),
-        )
-        // Called by the volume-commitment scheduler when a merchant's forecast comes due. Behind
-        // the same auth as any other write, and the handler narrows further: the admin secret
-        // (which the scheduler presents) may run anything, a session or api key only its own
-        // merchant, and the every-merchant sweep is admin-only.
-        .route(
-            "/volume-commitment/run-forecast",
-            post(routes::volume_commitment::run_forecast),
-        )
-        .route(
-            "/merchant-account/:merchant-id/cost-ingestions",
-            get(routes::report_upload::list_ingestions),
-        )
-        .route(
-            "/merchant-account/:merchant-id/cost-ingestions/:ingestion-id",
-            delete(routes::report_upload::delete_ingestion),
-        )
-        .route(
-            "/merchant-account/:merchant-id/cost-price-changes",
-            get(routes::report_upload::list_price_changes),
-        )
-        .route(
-            "/merchant-account/:merchant-id/debit-routing",
-            post(routes::merchant_account_config::update_debit_routing),
-        )
-        .route(
-            "/merchant-account/:merchant-id/features",
-            get(routes::merchant_account_config::get_merchant_features),
-        )
-        .route(
-            "/merchant-account/:merchant-id/features/:feature",
-            post(routes::merchant_account_config::update_merchant_feature),
-        )
-        .route(
-            "/config-sr-dimension",
-            axum::routing::post(crate::euclid::handlers::routing_rules::config_sr_dimensions),
-        )
-        .route(
-            "/config-sr-dimension/:merchant_id",
-            axum::routing::get(crate::euclid::handlers::routing_rules::get_sr_dimensions),
-        )
-        .route(
-            "/config/routing-keys",
-            axum::routing::get(crate::euclid::handlers::routing_rules::get_routing_config),
-        )
-        .route("/gsm/options", get(routes::gsm::gsm_options))
-        .route("/update-score", post(routes::update_score::update_score))
-        .route(
-            "/decide-gateway",
-            post(routes::decide_gateway::decide_gateway),
-        )
-        .route(
-            "/routing/hybrid",
-            post(routes::hybrid_routing::hybrid_routing_evaluate),
-        )
-        .route(
-            "/update-gateway-score",
-            post(routes::update_gateway_score::update_gateway_score),
-        )
-        .route(
-            "/gateway-score/reset",
-            post(routes::gateway_score::reset_gateway_scores),
-        )
-        .route("/api-key/create", post(routes::api_key::create_api_key))
-        .route(
-            "/api-key/list/:merchant_id",
-            get(routes::api_key::list_api_keys),
-        )
-        .route("/api-key/:key_id", delete(routes::api_key::revoke_api_key))
-        .nest("/analytics", routes::analytics::serve())
-        .layer(middleware::from_fn(custom_middleware::authenticate));
-
-    // Routes that do not require authentication (public)
-    let public_router = axum::Router::new()
-        .route(
-            "/merchant-account/create",
-            post(routes::merchant_account_config::create_merchant_config),
-        )
-        .route(
-            "/admin/hierarchy/reconcile",
-            post(routes::hierarchy::reconcile_hierarchy),
-        )
-        .route(
-            "/admin/hierarchy/sync",
-            post(routes::hierarchy::sync_hierarchy),
-        )
-        .route(
-            "/webhooks/settlement/:merchant_id/:connector",
-            post(routes::settlement_webhook::settlement_webhook),
-        )
-        .route("/auth/signup", post(routes::user_auth::signup))
-        .route("/auth/login", post(routes::user_auth::login))
-        .route("/auth/logout", post(routes::user_auth::logout))
-        .route("/auth/me", get(routes::user_auth::me))
-        .route("/auth/merchants", get(routes::user_auth::list_merchants))
-        .route(
-            "/auth/switch-merchant",
-            post(routes::user_auth::switch_merchant),
-        )
-        .route(
-            "/auth/super-admin/enter-merchant",
-            post(routes::user_auth::enter_merchant),
-        )
-        .route(
-            "/auth/super-admin/exit",
-            post(routes::user_auth::exit_merchant),
-        )
-        .route(
-            "/auth/super-admin/lookup",
-            post(routes::user_auth::lookup_merchants),
-        )
-        .route(
-            "/onboarding/merchant",
-            post(routes::user_auth::create_merchant),
-        )
-        .route("/merchant/members", get(routes::user_auth::list_members))
-        .route(
-            "/merchant/members/invite",
-            post(routes::user_auth::invite_member),
-        )
-        .route("/auth/verify-email", get(routes::user_auth::verify_email))
-        .route(
-            "/auth/forgot-password",
-            post(routes::user_auth::forgot_password),
-        )
-        .route(
-            "/auth/reset-password",
-            post(routes::user_auth::reset_password),
-        )
-        .route(
-            "/auth/change-password",
-            post(routes::user_auth::change_password),
-        )
-        .route(
-            "/auth/admin/merchant-token",
-            post(routes::user_auth::admin_merchant_token),
-        )
-        .route(
-            "/auth/admin/merchant-token/exchange",
-            post(routes::user_auth::exchange_merchant_token),
-        );
-
     let router = axum::Router::new()
-        .merge(protected_router)
-        .merge(public_router);
+        .merge(merchant_routes())
+        .merge(admin_routes())
+        .merge(public_routes());
 
-    let middleware = ServiceBuilder::new()
-        .layer(middleware::from_fn(record_api_response))
-        .layer(middleware::from_fn(ensure_request_id))
-        .layer(middleware::from_fn_with_state(
-            global_app_state.clone(),
-            capture_api_event,
-        ))
-        .layer(
-            tower_trace::TraceLayer::new_for_http()
-                .make_span_with(|request: &Request<_>| utils::record_fields_from_header(request))
-                .on_request(tower_trace::DefaultOnRequest::new().level(tracing::Level::INFO))
-                .on_response(
-                    tower_trace::DefaultOnResponse::new()
-                        .level(tracing::Level::INFO)
-                        .latency_unit(tower_http::LatencyUnit::Micros),
-                )
-                .on_failure(
-                    tower_trace::DefaultOnFailure::new()
-                        .latency_unit(tower_http::LatencyUnit::Micros)
-                        .level(tracing::Level::ERROR),
-                ),
-        );
-
-    let router = router
-        .nest("/health", routes::health::serve())
-        .layer(middleware)
-        .with_state(global_app_state.clone());
+    let router =
+        router
+            .nest("/health", routes::health::serve())
+            .layer(middleware::from_fn_with_state(
+                global_app_state.clone(),
+                capture_api_event,
+            ));
+    let router = with_request_logging(router).with_state(global_app_state.clone());
 
     logger::info!(
         category = "SERVER",
@@ -823,6 +908,17 @@ mod tests {
     use axum::body::Bytes;
 
     use super::parse_request_metadata;
+
+    #[test]
+    fn parse_request_metadata_supports_decide_scope() {
+        let captured = crate::analytics::CapturedBody {
+            bytes: Bytes::from_static(br#"{"payment_id":"pay_decide","merchant_id":"pro_decide","routing_config":{"algorithm_for":"payment"},"authentication_type":"three_ds"}"#),
+        };
+        let (merchant_id, payment_id, auth_type) = parse_request_metadata(&captured);
+        assert_eq!(merchant_id.as_deref(), Some("pro_decide"));
+        assert_eq!(payment_id.as_deref(), Some("pay_decide"));
+        assert_eq!(auth_type.as_deref(), Some("three_ds"));
+    }
 
     #[test]
     fn parse_request_metadata_supports_decide_gateway_shape() {

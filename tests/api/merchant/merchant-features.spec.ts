@@ -1,4 +1,6 @@
-import { test, expect } from '../../fixtures/test'
+import { test, expect, factory } from '../../fixtures/test'
+import { ApiClient } from '../../fixtures/api-client'
+import { ensureDashboardSession } from '../../fixtures/session'
 
 /**
  * Merchant feature flags + debit-routing toggle. These are operator-facing switches that gate real
@@ -36,5 +38,39 @@ test.describe('Merchant features & debit routing (API)', () => {
     expect(off.status).toBe(200)
     get = await api.raw('GET', path)
     expect(get.body.debit_routing_enabled).toBe(false)
+  })
+
+  test('toggling a feature for many merchants at once keeps every toggle', async ({ request }) => {
+    // Every merchant's flag for a feature lives in one shared row. Concurrent toggles must each
+    // land, not overwrite one another and silently flip the feature back for some merchant.
+    const merchants = await Promise.all(
+      Array.from({ length: 8 }, async (_, i) => {
+        const client = new ApiClient(request)
+        const id = factory.merchantId(`feature_race_${i}`)
+        await client.ensureMerchantAccount(id)
+        await ensureDashboardSession(client, id)
+        return { id, client }
+      }),
+    )
+
+    try {
+      await Promise.all(
+        merchants.map(({ id, client }) =>
+          client.setMerchantFeature(id, 'ab-test-real-payments', true),
+        ),
+      )
+
+      for (const { id, client } of merchants) {
+        const r = await client.getMerchantFeatures(id)
+        const flag = r.body.features.find((f: any) => f.feature === 'ab-test-real-payments')
+        expect(flag?.enabled, id).toBe(true)
+      }
+    } finally {
+      await Promise.all(
+        merchants.map(({ id, client }) =>
+          client.deleteMerchantAccount(id, { failOnStatusCode: false }),
+        ),
+      )
+    }
   })
 })

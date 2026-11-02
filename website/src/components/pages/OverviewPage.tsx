@@ -144,7 +144,7 @@ function EmptyWorkspace() {
 
 type RuleConfigResponse = {
   merchant_id: string
-  config: RuleConfig
+  config: RuleConfig | null
 }
 
 export function OverviewPage() {

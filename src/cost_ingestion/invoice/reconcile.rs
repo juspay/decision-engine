@@ -38,9 +38,10 @@ pub struct Reconciliation {
 /// subtotal (the invoice didn't state one) is skipped — there is nothing to tie back to.
 pub async fn reconcile_merchant(
     cfg: &ClickHouseAnalyticsConfig,
-    merchant_id: &str,
+    merchant: &crate::auth::AuthorizedMerchant,
 ) -> Result<Vec<Reconciliation>, IngestError> {
-    let addons = store::list(merchant_id).await?;
+    let merchant_id = merchant.as_str();
+    let addons = store::list(merchant).await?;
     let mut out = Vec::new();
     for (connector, a) in addons {
         let Some(subtotal) = a.subtotal_ex_tax.filter(|s| *s > 0.0) else {

@@ -10,14 +10,20 @@ The dashboard is available in the `dashboard-*` Docker Compose profiles.
 Example:
 
 ```bash
-COMPOSE_PROFILES= docker compose --profile dashboard-postgres-ghcr up -d
+COMPOSE_PROFILES= docker compose --profile dashboard-postgres-ghcr up -d --build
 ```
 
 Then open:
 
 - `http://localhost:8081/dashboard/`
 
-The dashboard is served by Nginx from the built assets in `website/dist`. This docs page intentionally lives at `/dashboard-guide` — `/dashboard/` is reserved for the React app itself.
+All `dashboard-*` profiles build the dashboard from the current `website` source inside Docker. Nginx serves the generated assets packaged in the dashboard image; it does not mount the host's `website/dist`. No host Node.js installation or prebuilt assets are required.
+
+After changing frontend source, rerun the startup command with `--build`. Restarting containers alone does not rebuild the dashboard.
+
+The Docker build sets `VITE_DASHBOARD_BASE_PATH=/dashboard/` and `VITE_API_BASE_PATH=/decision-engine-api`. Nginx strips `/decision-engine-api/` when forwarding dashboard API requests to the backend.
+
+This docs page intentionally lives at `/dashboard-guide` — `/dashboard/` is reserved for the React app itself.
 
 ## What It Includes
 
@@ -37,7 +43,7 @@ Based on the React routes in `website/src/App.tsx`, the dashboard exposes:
 - `/dashboard/audit`
 
 For source-run Vite development, the same React routes are mounted at `http://localhost:5173/`.
-For external production hosting, the preferred route is `/decision-engine/` with API traffic proxied through `/decision-engine-api/*`.
+Outside Docker, production builds default to `/decision-engine/` with API traffic under `/decision-engine/api/*`. Production hosts must proxy that API prefix to the backend. Set `VITE_DASHBOARD_BASE_PATH` and `VITE_API_BASE_PATH` at build time to use different paths.
 
 ## Docs And API In The Same Profile
 

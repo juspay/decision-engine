@@ -845,8 +845,8 @@ pub async fn eliminationV2RewardFactor(
         }
         None => {
             logger::info!("ELIMINATION_V2_VALUES_NOT_FOUND:ALPHA:PMT_PM_TXNOBJECTTYPE_SOURCEOBJECT {:?} {:?} {:?} {:?}",
-                    txn_card_info.paymentMethodType,
-                    if txn_card_info.paymentMethod.is_empty() { "Nothing".to_string() } else { txn_card_info.paymentMethod.clone() },
+                    txn_card_info.instrument.method_code(),
+                    if txn_card_info.instrument.method_type_code().is_empty() { "Nothing".to_string() } else { txn_card_info.instrument.method_type_code().into_owned() },
                     txn_detail.txnObjectType,
                     txn_detail.sourceObject.as_ref().map_or_else(|| "Nothing".to_string(), |s| s.clone()),
                 );

@@ -56,7 +56,7 @@ test.describe('Decide Gateway (API)', () => {
       factory.srDecideGatewayRequest({
         merchantId: merchant.id,
         eligibleGatewayList: ['stripe', 'adyen'],
-        paymentInfo: { paymentMethodType: 'CARD', paymentMethod: 'VISA' },
+        paymentInfo: { paymentMethod: 'CARD', paymentMethodType: 'CREDIT' },
       }),
     )
 

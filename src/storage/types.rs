@@ -7,11 +7,8 @@ use diesel::sql_types::Bit;
 #[cfg(feature = "postgres")]
 use diesel::sql_types::Bool;
 
-#[cfg(feature = "mysql")]
-use super::schema;
-#[cfg(feature = "postgres")]
-use super::schema_pg;
 use crate::decider::gatewaydecider::utils::mask_secret_option;
+use crate::storage::backend::{schema, Db};
 #[cfg(feature = "mysql")]
 use diesel::mysql::Mysql;
 #[cfg(feature = "postgres")]
@@ -32,8 +29,7 @@ use std::io::Write;
 use time::PrimitiveDateTime;
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::card_brand_routes))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::card_brand_routes))]
+#[diesel(table_name = schema::card_brand_routes)]
 pub struct CardBrandRoutes {
     pub id: i64,
     pub card_brand: String,
@@ -45,8 +41,7 @@ pub struct CardBrandRoutes {
 }
 
 #[derive(Debug, Clone, Queryable, Deserialize, Identifiable, Serialize, Selectable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::card_info, primary_key(card_isin), check_for_backend(diesel::mysql::Mysql)))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::card_info, primary_key(card_isin), check_for_backend(Pg)))]
+#[diesel(table_name = schema::card_info, primary_key(card_isin), check_for_backend(Db))]
 pub struct CardInfo {
     pub card_isin: String,
     pub card_switch_provider: String,
@@ -59,8 +54,7 @@ pub struct CardInfo {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable, Deserialize, Serialize, Selectable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::emi_bank_code))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::emi_bank_code))]
+#[diesel(table_name = schema::emi_bank_code)]
 pub struct EmiBankCode {
     pub id: i64,
     pub emi_bank: String,
@@ -69,8 +63,7 @@ pub struct EmiBankCode {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable, Serialize, Selectable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::feature))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::feature))]
+#[diesel(table_name = schema::feature)]
 pub struct Feature {
     #[cfg(feature = "mysql")]
     pub id: i64,
@@ -82,8 +75,7 @@ pub struct Feature {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::gateway_bank_emi_support))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::gateway_bank_emi_support))]
+#[diesel(table_name = schema::gateway_bank_emi_support)]
 pub struct GatewayBankEmiSupport {
     pub id: i64,
     pub gateway: String,
@@ -93,8 +85,7 @@ pub struct GatewayBankEmiSupport {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::gateway_bank_emi_support_v2))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::gateway_bank_emi_support_v2))]
+#[diesel(table_name = schema::gateway_bank_emi_support_v2)]
 pub struct GatewayBankEmiSupportV2 {
     pub id: i64,
     pub version: i64,
@@ -111,8 +102,7 @@ pub struct GatewayBankEmiSupportV2 {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable, Serialize, Selectable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::gateway_card_info))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::gateway_card_info))]
+#[diesel(table_name = schema::gateway_card_info)]
 pub struct GatewayCardInfo {
     pub id: i64,
     pub isin: Option<String>,
@@ -126,8 +116,7 @@ pub struct GatewayCardInfo {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::gateway_outage))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::gateway_outage))]
+#[diesel(table_name = schema::gateway_outage)]
 pub struct GatewayOutage {
     pub id: String,
     pub version: i32,
@@ -146,8 +135,7 @@ pub struct GatewayOutage {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::gateway_payment_method_flow))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::gateway_payment_method_flow))]
+#[diesel(table_name = schema::gateway_payment_method_flow)]
 pub struct GatewayPaymentMethodFlow {
     pub id: String,
     pub gateway_payment_flow_id: String,
@@ -169,8 +157,8 @@ pub struct GatewayPaymentMethodFlow {
 #[derive(
     Clone, Debug, Queryable, Identifiable, Selectable, serde::Deserialize, serde::Serialize,
 )]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::co_badged_cards_info_test))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::co_badged_cards_info_test, check_for_backend(Pg)))]
+#[diesel(table_name = schema::co_badged_cards_info_test)]
+#[cfg_attr(feature = "postgres", diesel(check_for_backend(Pg)))]
 pub struct CoBadgedCardInfo {
     /// The unique identifier for the co-badged card info
     pub id: String,
@@ -225,8 +213,7 @@ impl CoBadgedCardInfo {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::isin_routes))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::isin_routes))]
+#[diesel(table_name = schema::isin_routes)]
 pub struct IsinRoutes {
     pub id: i64,
     pub isin: String,
@@ -238,8 +225,7 @@ pub struct IsinRoutes {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::issuer_routes))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::issuer_routes))]
+#[diesel(table_name = schema::issuer_routes)]
 pub struct IssuerRoutes {
     pub id: i64,
     pub issuer: String,
@@ -251,8 +237,7 @@ pub struct IssuerRoutes {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::juspay_bank_code))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::juspay_bank_code))]
+#[diesel(table_name = schema::juspay_bank_code)]
 pub struct JuspayBankCode {
     pub id: i64,
     pub bank_code: String,
@@ -260,8 +245,7 @@ pub struct JuspayBankCode {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_account))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_account))]
+#[diesel(table_name = schema::merchant_account)]
 pub struct MerchantAccount {
     pub id: i64,
     pub merchant_id: Option<String>,
@@ -289,8 +273,7 @@ pub struct MerchantAccount {
 }
 
 #[derive(Debug, Clone, Insertable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_account))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_account))]
+#[diesel(table_name = schema::merchant_account)]
 pub struct MerchantAccountNew {
     pub merchant_id: Option<String>,
     pub merchant_name: Option<String>,
@@ -302,8 +285,7 @@ pub struct MerchantAccountNew {
 }
 
 #[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_account))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_account))]
+#[diesel(table_name = schema::merchant_account)]
 pub struct MerchantAccountUpdate {
     pub gateway_success_rate_based_decider_input: Option<String>,
 }
@@ -313,8 +295,7 @@ pub struct MerchantAccountUpdate {
 /// cannot touch routing configuration. `AsChangeset` skips `None` fields, so a sync that
 /// carries no profile name leaves the stored one alone.
 #[derive(AsChangeset, Debug, Clone)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_account))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_account))]
+#[diesel(table_name = schema::merchant_account)]
 pub struct MerchantAccountHierarchyUpdate {
     pub internal_metadata: Option<String>,
     pub merchant_name: Option<String>,
@@ -323,8 +304,7 @@ pub struct MerchantAccountHierarchyUpdate {
 /// One settlement-report ingestion — the unified queue + progress + history row (`cost_ingestion`).
 /// Field order matches the schema column order (diesel `Queryable` maps by position).
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::cost_ingestion))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::cost_ingestion))]
+#[diesel(table_name = schema::cost_ingestion)]
 pub struct CostIngestion {
     pub id: String,
     pub merchant_id: String,
@@ -355,8 +335,7 @@ pub struct CostIngestion {
 /// claims, `processing` for manual uploads that run immediately); progress/outcome columns and
 /// timestamps take DB defaults.
 #[derive(Debug, Clone, Insertable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::cost_ingestion))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::cost_ingestion))]
+#[diesel(table_name = schema::cost_ingestion)]
 pub struct CostIngestionNew {
     /// Client-generated UUIDv7 primary key (`storage::utils::generate_uuid`). Set at insert so the
     /// caller already holds the id — no read-back needed.
@@ -373,8 +352,7 @@ pub struct CostIngestionNew {
 /// Status-transition changeset (claim / fail). `last_error` is `Option`, so `None` leaves the
 /// column untouched (diesel skips `None` in `AsChangeset`).
 #[derive(Debug, Clone, AsChangeset)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::cost_ingestion))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::cost_ingestion))]
+#[diesel(table_name = schema::cost_ingestion)]
 pub struct CostIngestionStatusUpdate {
     pub status: String,
     pub last_error: Option<String>,
@@ -383,8 +361,7 @@ pub struct CostIngestionStatusUpdate {
 
 /// Live-progress changeset: bump the staged-row counter the dashboard polls.
 #[derive(Debug, Clone, AsChangeset)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::cost_ingestion))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::cost_ingestion))]
+#[diesel(table_name = schema::cost_ingestion)]
 pub struct CostIngestionProgressUpdate {
     pub staged_rows: i64,
     pub updated_at: PrimitiveDateTime,
@@ -393,8 +370,7 @@ pub struct CostIngestionProgressUpdate {
 /// Completion changeset: mark done and record the ingested report's full shape for history. Every
 /// field is set on success (all `Some`); nullable columns are `Option` only to match the schema.
 #[derive(Debug, Clone, AsChangeset)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::cost_ingestion))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::cost_ingestion))]
+#[diesel(table_name = schema::cost_ingestion)]
 pub struct CostIngestionOutcomeUpdate {
     pub status: String,
     pub staged_rows: i64,
@@ -412,8 +388,7 @@ pub struct CostIngestionOutcomeUpdate {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_config))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_config))]
+#[diesel(table_name = schema::merchant_config)]
 pub struct MerchantConfig {
     pub id: String,
     pub merchant_account_id: i64,
@@ -426,8 +401,7 @@ pub struct MerchantConfig {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_gateway_account))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_gateway_account))]
+#[diesel(table_name = schema::merchant_gateway_account)]
 pub struct MerchantGatewayAccount {
     pub id: i64,
     pub account_details: String,
@@ -444,8 +418,7 @@ pub struct MerchantGatewayAccount {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_gateway_account_sub_info))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_gateway_account_sub_info))]
+#[diesel(table_name = schema::merchant_gateway_account_sub_info)]
 pub struct MerchantGatewayAccountSubInfo {
     pub id: i64,
     pub merchant_gateway_account_id: i64,
@@ -457,8 +430,7 @@ pub struct MerchantGatewayAccountSubInfo {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_gateway_card_info))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_gateway_card_info))]
+#[diesel(table_name = schema::merchant_gateway_card_info)]
 pub struct MerchantGatewayCardInfo {
     pub id: i64,
     pub disabled: BitBool,
@@ -469,8 +441,7 @@ pub struct MerchantGatewayCardInfo {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_gateway_payment_method_flow))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_gateway_payment_method_flow))]
+#[diesel(table_name = schema::merchant_gateway_payment_method_flow)]
 pub struct MerchantGatewayPaymentMethodFlow {
     pub id: i64,
     pub gateway_payment_method_flow_id: String,
@@ -585,8 +556,7 @@ impl FromSql<Bool, Pg> for BitBoolWrite {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_iframe_preferences))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_iframe_preferences))]
+#[diesel(table_name = schema::merchant_iframe_preferences)]
 pub struct MerchantIframePreferences {
     pub id: i64,
     pub merchant_id: String,
@@ -598,8 +568,7 @@ pub struct MerchantIframePreferences {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_priority_logic))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_priority_logic))]
+#[diesel(table_name = schema::merchant_priority_logic)]
 pub struct MerchantPriorityLogic {
     pub id: String,
     pub version: i64,
@@ -615,8 +584,7 @@ pub struct MerchantPriorityLogic {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::payment_method))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::payment_method))]
+#[diesel(table_name = schema::payment_method)]
 pub struct PaymentMethod {
     pub id: i64,
     pub date_created: PrimitiveDateTime,
@@ -632,8 +600,7 @@ pub struct PaymentMethod {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::service_configuration))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::service_configuration))]
+#[diesel(table_name = schema::service_configuration)]
 pub struct ServiceConfiguration {
     pub id: i64,
     pub name: String,
@@ -644,8 +611,7 @@ pub struct ServiceConfiguration {
 }
 
 #[derive(Debug, Clone, Insertable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::service_configuration))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::service_configuration))]
+#[diesel(table_name = schema::service_configuration)]
 pub struct ServiceConfigurationNew {
     pub name: String,
     pub value: Option<String>,
@@ -655,15 +621,13 @@ pub struct ServiceConfigurationNew {
 }
 
 #[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::service_configuration))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::service_configuration))]
+#[diesel(table_name = schema::service_configuration)]
 pub struct ServiceConfigurationUpdate {
     pub value: Option<String>,
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::tenant_config))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::tenant_config))]
+#[diesel(table_name = schema::tenant_config)]
 pub struct TenantConfig {
     pub id: String,
     pub _type: String,
@@ -678,8 +642,7 @@ pub struct TenantConfig {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::tenant_config_filter))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::tenant_config_filter))]
+#[diesel(table_name = schema::tenant_config_filter)]
 pub struct TenantConfigFilter {
     pub id: String,
     pub filter_group_id: String,
@@ -689,8 +652,7 @@ pub struct TenantConfigFilter {
 }
 
 #[derive(Debug, Clone, Queryable, Deserialize, Identifiable, Serialize, Selectable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::token_bin_info, primary_key(token_bin), check_for_backend(diesel::mysql::Mysql)))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::token_bin_info, primary_key(token_bin), check_for_backend(diesel::pg::Pg)))]
+#[diesel(table_name = schema::token_bin_info, primary_key(token_bin), check_for_backend(Db))]
 pub struct TokenBinInfo {
     pub token_bin: String,
     pub card_bin: String,
@@ -700,8 +662,7 @@ pub struct TokenBinInfo {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable, Serialize)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::txn_card_info))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::txn_card_info))]
+#[diesel(table_name = schema::txn_card_info)]
 pub struct TxnCardInfo {
     pub id: i64,
     pub txn_id: String,
@@ -721,8 +682,7 @@ pub struct TxnCardInfo {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::txn_detail))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::txn_detail))]
+#[diesel(table_name = schema::txn_detail)]
 pub struct TxnDetail {
     pub id: i64,
     pub order_id: String,
@@ -756,8 +716,7 @@ pub struct TxnDetail {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::txn_offer))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::txn_offer))]
+#[diesel(table_name = schema::txn_offer)]
 pub struct TxnOffer {
     pub id: i64,
     pub version: i64,
@@ -768,8 +727,7 @@ pub struct TxnOffer {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::txn_offer_detail))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::txn_offer_detail))]
+#[diesel(table_name = schema::txn_offer_detail)]
 pub struct TxnOfferDetail {
     pub id: String,
     pub txn_detail_id: String,
@@ -783,8 +741,7 @@ pub struct TxnOfferDetail {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::user_eligibility_info))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::user_eligibility_info))]
+#[diesel(table_name = schema::user_eligibility_info)]
 pub struct UserEligibilityInfo {
     pub id: String,
     pub flow_type: String,
@@ -795,8 +752,7 @@ pub struct UserEligibilityInfo {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable, Serialize, Deserialize)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_api_keys))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_api_keys))]
+#[diesel(table_name = schema::merchant_api_keys)]
 pub struct MerchantApiKey {
     #[cfg(feature = "mysql")]
     pub id: i64,
@@ -815,8 +771,7 @@ pub struct MerchantApiKey {
 }
 
 #[derive(Debug, Clone, Insertable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_api_keys))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_api_keys))]
+#[diesel(table_name = schema::merchant_api_keys)]
 pub struct MerchantApiKeyNew {
     pub key_id: String,
     pub merchant_id: String,
@@ -831,8 +786,7 @@ pub struct MerchantApiKeyNew {
 }
 
 #[derive(Debug, Clone, AsChangeset)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::merchant_api_keys))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::merchant_api_keys))]
+#[diesel(table_name = schema::merchant_api_keys)]
 pub struct MerchantApiKeyRevoke {
     #[cfg(feature = "mysql")]
     pub is_active: i8,
@@ -841,8 +795,7 @@ pub struct MerchantApiKeyRevoke {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable, Serialize, Deserialize)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::users))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::users))]
+#[diesel(table_name = schema::users)]
 pub struct User {
     pub id: i64,
     pub user_id: String,
@@ -862,8 +815,7 @@ pub struct User {
 }
 
 #[derive(Debug, Clone, Insertable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::users))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::users))]
+#[diesel(table_name = schema::users)]
 pub struct NewUser {
     pub user_id: String,
     pub email: String,
@@ -882,8 +834,7 @@ pub struct NewUser {
 }
 
 #[derive(Debug, Clone, Identifiable, Queryable, Serialize, Deserialize)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::user_merchants))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::user_merchants))]
+#[diesel(table_name = schema::user_merchants)]
 pub struct UserMerchant {
     pub id: i64,
     pub user_id: String,
@@ -893,8 +844,7 @@ pub struct UserMerchant {
 }
 
 #[derive(Debug, Clone, Insertable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::user_merchants))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::user_merchants))]
+#[diesel(table_name = schema::user_merchants)]
 pub struct NewUserMerchant {
     pub user_id: String,
     pub merchant_id: String,
@@ -903,15 +853,13 @@ pub struct NewUserMerchant {
 }
 
 #[derive(AsChangeset, Debug)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::users))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::users))]
+#[diesel(table_name = schema::users)]
 pub struct UserMerchantIdUpdate {
     pub merchant_id: Option<String>,
 }
 
 #[derive(AsChangeset, Debug)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::users))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::users))]
+#[diesel(table_name = schema::users)]
 pub struct UserEmailVerifiedUpdate {
     #[cfg(feature = "mysql")]
     pub email_verified: i8,
@@ -920,8 +868,7 @@ pub struct UserEmailVerifiedUpdate {
 }
 
 #[derive(AsChangeset, Debug)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::users))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::users))]
+#[diesel(table_name = schema::users)]
 pub struct UserPasswordUpdate {
     pub password_hash: String,
 }
@@ -929,8 +876,7 @@ pub struct UserPasswordUpdate {
 /// Written when a password reset completes: consuming a reset token proves control of the
 /// mailbox, which is the same thing a verification link proves, so the reset settles both.
 #[derive(AsChangeset, Debug)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::users))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::users))]
+#[diesel(table_name = schema::users)]
 pub struct UserPasswordResetUpdate {
     pub password_hash: String,
     #[cfg(feature = "mysql")]

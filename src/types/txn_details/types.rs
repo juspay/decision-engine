@@ -491,7 +491,7 @@ where
         .transpose()
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, crate::auth::MerchantScoped)]
 pub struct SafeTxnDetail {
     #[serde(rename = "id")]
     pub id: Option<String>,
@@ -506,6 +506,7 @@ pub struct SafeTxnDetail {
     pub dateCreated: Option<OffsetDateTime>,
     #[serde(rename = "addToLocker")]
     pub addToLocker: Option<bool>,
+    #[merchant]
     #[serde(rename = "merchantId")]
     pub merchantId: MerchantId,
     pub gateway: Option<String>,
@@ -600,7 +601,7 @@ pub fn convert_safe_txn_detail_to_txn_detail(
         txnAmountBreakup: safe_detail.txnAmountBreakup,
     })
 }
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, crate::auth::MerchantScoped)]
 pub struct TxnDetail {
     #[serde(rename = "id")]
     pub id: TxnDetailId,
@@ -617,6 +618,7 @@ pub struct TxnDetail {
     pub txnType: Option<String>,
     #[serde(rename = "addToLocker")]
     pub addToLocker: Option<bool>,
+    #[merchant]
     #[serde(rename = "merchantId")]
     pub merchantId: MerchantId,
     #[serde(rename = "gateway")]

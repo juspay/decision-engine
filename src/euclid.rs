@@ -1,3 +1,4 @@
+pub mod algorithm_store;
 pub mod ast;
 pub mod cgraph;
 pub mod errors;

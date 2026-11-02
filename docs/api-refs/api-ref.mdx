@@ -150,7 +150,7 @@ curl "$BASE_URL/analytics/overview?range=1d" \
 | Network + SR hybrid | `NTW_SR_HYBRID_ROUTING` | [Hybrid routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-hybrid-routing.mdx) |
 
 <Info>
-  **Multi-objective (cost-aware) routing** is not a `rankingAlgorithm` value. It is a post-step on success-rate scoring, toggled per request with `enableMultiObjective` or per merchant with the `multi_objective_routing_enabled` feature flag. When active, responses carry a `multi_objective_info` block. See [Multi-objective routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-multi-objective.mdx).
+  **Multi-objective (cost-aware) routing** is not a `rankingAlgorithm` value. It is a post-step on success-rate scoring, toggled per request with `enableMultiObjective` or per merchant with the `cost_savings_enabled` feature flag. When active, responses carry a `multi_objective_info` block. See [Multi-objective routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-multi-objective.mdx).
 </Info>
 
 ## Advanced capabilities

@@ -3,6 +3,10 @@ name: ci-pr
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  # The merge queue runs the same jobs on the PR combined with the latest main, so a PR doesn't
+  # need updating with main itself, and `CI Gate` reports for the queue as it does for the PR.
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   contents: read
@@ -34,6 +38,10 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
+          # In the merge queue there is no PR to list files from: compare the queued commit with
+          # the main it was built on. Both are empty, so unset, on a pull request.
+          base: ${{ github.event.merge_group.base_sha }}
+          ref: ${{ github.event.merge_group.head_sha }}
           filters: |
             # Everything the E2E job builds, boots or runs. Listed wide on purpose: an extra run
             # costs a runner, a missed one costs a regression that reaches main.

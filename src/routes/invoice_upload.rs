@@ -8,6 +8,8 @@
 //! invoice is small — a few hundred lines — so it is buffered and processed synchronously, and the
 //! computed add-on is returned in the response.
 
+use crate::custom_extractors::MerchantFromPath;
+
 use axum::body::Bytes;
 use axum::extract::{Path, Query};
 use axum::http::StatusCode;
@@ -15,8 +17,7 @@ use axum::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::cost_ingestion::invoice::{self, StoredAddon};
-
-use super::connector_fees::clickhouse_config;
+use crate::error::RouteError;
 
 /// Upper bound on an uploaded invoice. Invoices are small; this rejects an accidental report upload
 /// to the wrong endpoint before parsing.
@@ -68,31 +69,33 @@ pub struct InvoiceUploadResponse {
 
 /// `POST /merchant-account/:merchant_id/connectors/:connector/invoice?account=…[&invoice_ref=…]`
 pub async fn upload_invoice(
-    Path((merchant_id, connector)): Path<(String, String)>,
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, connector)): Path<(String, String)>,
     Query(params): Query<InvoiceParams>,
     body: Bytes, // buffered: invoices are small
-) -> Result<Json<InvoiceUploadResponse>, (StatusCode, String)> {
+) -> Result<Json<InvoiceUploadResponse>, RouteError> {
+    let merchant_id = merchant.as_str().to_string();
     if body.is_empty() {
-        return Err((StatusCode::BAD_REQUEST, "empty invoice body".to_string()));
+        return Err(RouteError::bad_request("empty invoice body"));
     }
     if body.len() > MAX_INVOICE_BYTES {
-        return Err((
+        return Err(RouteError::new(
             StatusCode::PAYLOAD_TOO_LARGE,
             format!("invoice exceeds {MAX_INVOICE_BYTES} byte limit"),
         ));
     }
 
-    let cfg = clickhouse_config()?;
+    let cfg = super::global_config()?.analytics.clickhouse.clone();
     let outcome = invoice::ingest_invoice_bytes(
         &cfg,
         &connector,
         &params.account,
-        &merchant_id,
+        &merchant,
         params.invoice_ref.as_deref().unwrap_or(""),
         &body,
     )
     .await
-    .map_err(|e| (StatusCode::UNPROCESSABLE_ENTITY, format!("{e:?}")))?;
+    .map_err(|e| RouteError::new(StatusCode::UNPROCESSABLE_ENTITY, e.to_string()))?;
 
     Ok(Json(InvoiceUploadResponse {
         merchant_id,
@@ -130,11 +133,11 @@ pub struct AddonDto {
 
 /// `GET /merchant-account/:merchant_id/invoice-addons` — the invoice add-ons in effect.
 pub async fn list_addons(
-    Path(merchant_id): Path<String>,
-) -> Result<Json<Vec<AddonDto>>, (StatusCode, String)> {
-    let list = invoice::store::list(&merchant_id)
+    MerchantFromPath(merchant): MerchantFromPath,
+) -> Result<Json<Vec<AddonDto>>, RouteError> {
+    let list = invoice::store::list(&merchant)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
     Ok(Json(
         list.into_iter()
             .map(|(connector, addon)| AddonDto { connector, addon })
@@ -145,12 +148,14 @@ pub async fn list_addons(
 /// `DELETE /merchant-account/:merchant_id/connectors/:connector/invoice-addon` — drop the add-on and
 /// revert this merchant's served models to the learned-only cost.
 pub async fn delete_addon(
-    Path((merchant_id, connector)): Path<(String, String)>,
-) -> Result<StatusCode, (StatusCode, String)> {
+    MerchantFromPath(merchant): MerchantFromPath,
+    Path((_, connector)): Path<(String, String)>,
+) -> Result<StatusCode, RouteError> {
+    let merchant_id = merchant.as_str().to_string();
     let connector = connector.to_lowercase();
-    invoice::store::delete(&merchant_id, &connector)
+    invoice::store::delete(&merchant, &connector)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
     super::connector_fees::refresh_serving(&merchant_id).await;
     Ok(StatusCode::NO_CONTENT)
 }
@@ -158,11 +163,11 @@ pub async fn delete_addon(
 /// `GET /merchant-account/:merchant_id/invoice-reconciliation` — tie each stored add-on back to its
 /// invoice: coverage before/after and the remaining residual (architecture "Step 2").
 pub async fn get_reconciliation(
-    Path(merchant_id): Path<String>,
-) -> Result<Json<Vec<invoice::Reconciliation>>, (StatusCode, String)> {
-    let cfg = clickhouse_config()?;
-    let recon = invoice::reconcile_merchant(&cfg, &merchant_id)
+    MerchantFromPath(merchant): MerchantFromPath,
+) -> Result<Json<Vec<invoice::Reconciliation>>, RouteError> {
+    let cfg = super::global_config()?.analytics.clickhouse.clone();
+    let recon = invoice::reconcile_merchant(&cfg, &merchant)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, format!("{e:?}")))?;
+        .map_err(RouteError::internal)?;
     Ok(Json(recon))
 }

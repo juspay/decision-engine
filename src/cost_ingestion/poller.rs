@@ -124,8 +124,10 @@ async fn poll_source(
     account: &str,
 ) -> Result<(), super::IngestError> {
     let connector = source.connector();
+    // A source from the poll index, polled on Decision Engine's own schedule.
+    let merchant = crate::auth::AuthorizedMerchant::internal(merchant_id);
     let resolved = creds_store
-        .get(merchant_id, connector, account)
+        .get(&merchant, connector, account)
         .await?
         .ok_or_else(|| {
             super::IngestError::Storage(format!(
@@ -142,7 +144,7 @@ async fn poll_source(
         let created = store::enqueue_pending(
             connector,
             account,
-            merchant_id,
+            &merchant,
             &report.report_id,
             &report.report_ref,
             "poll",

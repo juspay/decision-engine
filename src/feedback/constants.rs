@@ -5,6 +5,7 @@
 // use eulerhs::prelude::*;
 // use utils::config::service_configuration as SC;
 use crate::redis::types as SC;
+use crate::types::service_configuration::MerchantConfig;
 use serde::{Deserialize, Serialize};
 
 // Converted data types
@@ -98,7 +99,7 @@ pub struct SrV3InputConfig(pub String);
 
 impl SC::ServiceConfigKey for SrV3InputConfig {
     fn get_key(&self) -> String {
-        format!("SR_V3_INPUT_CONFIG_{}", self.0)
+        crate::types::service_configuration::SrV3Input::name(&self.0)
     }
 }
 

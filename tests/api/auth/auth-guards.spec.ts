@@ -132,4 +132,27 @@ test.describe('Auth guards (API)', () => {
 
     await api.cleanupTestData(id)
   })
+
+  test('signup cannot attach a new account to an existing merchant without the admin secret', async ({
+    api,
+    merchant,
+  }) => {
+    const existing = factory.merchantId('guard_signup')
+    await api.ensureMerchantAccount(existing)
+
+    const anon = api.anonymous()
+    const attach = await anon.raw('POST', '/auth/signup', {
+      failOnStatusCode: false,
+      body: {
+        email: `${factory.merchantId('newuser')}@example.com`,
+        password: 'Password123!',
+        merchant_id: existing,
+      },
+    })
+
+    expect([401, 403]).toContain(attach.status)
+    expect(attach.body?.token).toBeUndefined()
+
+    await api.cleanupTestData(existing)
+  })
 })

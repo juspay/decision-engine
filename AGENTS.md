@@ -92,9 +92,18 @@ Choose the startup path based on task intent:
 - deployment review: Helm and compose manifests
 - API behavior inspection: route code plus health/startup verification
 
+## Adding an Endpoint
+
+Every route follows one auth pattern; the full guide is the module docs of `src/auth/scope.rs`.
+
+- Register it in its caller's route group in `src/app.rs`: `merchant_routes()`, `admin_routes()` (admin secret only) or `public_routes()` (routes that authenticate themselves).
+- Register each method with `metered!(post, routes::module::handler)` (combine methods on one path with `.merge(metered!(…))`); it records `api_requests_total`, `api_latency_seconds` and `api_requests_by_status` under the handler's name, which the prod dashboards group by `endpoint`. Pass a name as a third argument only to keep one the dashboards already use. Handlers record no request metrics themselves.
+- Take the merchant from an extractor, never by calling `auth::authorize` in the handler: `MerchantFromPath` for a `:merchant_id` path parameter (the only spelling), `ScopedJson<T>` for a body whose type derives `MerchantScoped` with `#[merchant]` on each merchant field.
+- Per-merchant storage takes the resulting `AuthorizedMerchant` and filters every query by it.
+
 ## Coding Expectations
 
-- Rust edition is 2021; MSRV in `Cargo.toml` is `1.85.0`
+- Rust edition is 2021; MSRV in `Cargo.toml` is `1.88.0`
 - `unsafe` is forbidden
 - Treat clippy warnings around `unwrap`, `expect`, `panic`, `todo`, and `unimplemented` as meaningful design constraints
 - Verify both DB tracks when changing shared core logic; do not assume only one backend is affected

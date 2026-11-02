@@ -84,6 +84,7 @@ use super::types::{
 };
 use crate::feedback::gateway_elimination_scoring::flow::getTTLForKey;
 use crate::types::payment::payment_method_type_const::*;
+use crate::types::payment_instrument::PaymentMethod;
 use std::collections::HashMap as MP;
 use std::iter::Iterator;
 use std::option::Option;
@@ -222,8 +223,18 @@ pub async fn scoring_flow(
             txn_detail.txnId
             );
     } else {
-        let pmt = decider_flow.get().dpTxnCardInfo.paymentMethodType.clone();
-        let pm = decider_flow.get().dpTxnCardInfo.paymentMethod.clone();
+        let pmt = decider_flow
+            .get()
+            .dpTxnCardInfo
+            .instrument
+            .method_code()
+            .to_string();
+        let pm = decider_flow
+            .get()
+            .dpTxnCardInfo
+            .instrument
+            .method_type_code()
+            .into_owned();
         let maybe_source_object = decider_flow.get().dpTxnDetail.sourceObject.clone();
 
         let pmt_str = pmt.clone();
@@ -521,7 +532,12 @@ pub async fn get_cached_scores_based_on_srv3(
     gateway_scoring_data: GatewayScoringData,
 ) -> GatewayScoreMap {
     let merchant = decider_flow.get().dpMerchantAccount.clone();
-    let pmt = decider_flow.get().dpTxnCardInfo.paymentMethodType.clone();
+    let pmt = decider_flow
+        .get()
+        .dpTxnCardInfo
+        .instrument
+        .method_code()
+        .to_string();
     let order_ref = decider_flow.get().dpOrder.clone();
     let pmt_str = pmt;
     let functional_gateways = getGws(decider_flow);
@@ -1232,7 +1248,7 @@ fn check_scheduled_outage(
         |x: ETM::id::MerchantId, y: ETM::id::MerchantId| x == y,
         Some(merchant_id.clone()),
         scheduled_outage.merchantId.clone(),
-    ) && if txn_card_info.paymentMethodType == UPI {
+    ) && if txn_card_info.instrument.is(PaymentMethod::Upi) {
         schedule_equal_to(
             |x, y| x == y,
             txn_detail.sourceObject.clone(),
@@ -1241,12 +1257,12 @@ fn check_scheduled_outage(
     } else {
         schedule_equal_to(
             |x, y| x == y,
-            Some(txn_card_info.paymentMethod.clone()),
+            Some(txn_card_info.instrument.method_type_code().into_owned()),
             scheduled_outage.paymentMethod.clone(),
         )
     } && schedule_equal_to(
         |x, y| x == y,
-        Some(txn_card_info.paymentMethodType.clone()),
+        Some(txn_card_info.instrument.method_code().to_string()),
         scheduled_outage.paymentMethodType.clone(),
     ) && schedule_equal_to(
         |jbc, outage_bank| {
@@ -1313,30 +1329,32 @@ fn check_scheduled_outage_metadata(
                 |x: _, y| x == Some(y),
                 Some(None),
                 scheduled_outage_metadata.flowType.clone(),
-            ) && match txn_card_info.paymentMethodType.as_str() {
-                CARD => schedule_equal_to(
+            ) && match txn_card_info.instrument.method() {
+                PaymentMethod::Card => schedule_equal_to(
                     |x, y| x == y,
                     txn_card_info.card_type.clone(),
                     scheduled_outage_metadata.cardType.clone(),
                 ),
-                UPI => txn_card_info
-                    .paymentSource
-                    .as_ref()
-                    .is_some_and(|payment_source| {
-                        if payment_source.peek().contains('@') {
-                            false
-                        } else {
-                            schedule_equal_to(
-                                |x, y| x.peek() == &y,
-                                Some(payment_source.clone()),
-                                scheduled_outage_metadata.app.clone(),
-                            ) && schedule_equal_to(
-                                |x, y| x.peek() == &y,
-                                Some(payment_source.clone()),
-                                scheduled_outage_metadata.handle.clone(),
-                            )
-                        }
-                    }),
+                PaymentMethod::Upi => {
+                    txn_card_info
+                        .paymentSource
+                        .as_ref()
+                        .is_some_and(|payment_source| {
+                            if payment_source.peek().contains('@') {
+                                false
+                            } else {
+                                schedule_equal_to(
+                                    |x, y| x.peek() == &y,
+                                    Some(payment_source.clone()),
+                                    scheduled_outage_metadata.app.clone(),
+                                ) && schedule_equal_to(
+                                    |x, y| x.peek() == &y,
+                                    Some(payment_source.clone()),
+                                    scheduled_outage_metadata.handle.clone(),
+                                )
+                            }
+                        })
+                }
                 _ => true,
             }
         }
@@ -2154,8 +2172,8 @@ async fn get_elimination_v2_threshold(
             tag="scoringFlow",
             action = "scoringFlow",
             "Elimination V2 values not found: Threshold: PMT: {:?} PM: {:?} TxnObjectType: {:?} SourceObject: {:?}",
-            txn_card_info.paymentMethodType,
-            txn_card_info.paymentMethod,
+            txn_card_info.instrument.method_code(),
+            txn_card_info.instrument.method_type_code(),
             txn_detail.txnObjectType,
             txn_detail.sourceObject.as_ref().unwrap_or(&"Nothing".to_string())
         );
@@ -2182,17 +2200,18 @@ pub async fn get_sr1_and_sr2_and_n(
     Option<String>,
     ConfigSource,
 )> {
-    let pmt = &txn_card_info.paymentMethodType;
-    let pm = if txn_card_info.paymentMethodType == UPI {
+    let pmt = &txn_card_info.instrument.method_code().to_string();
+    let pm = if txn_card_info.instrument.is(PaymentMethod::Upi) {
         txn_detail.sourceObject.clone()
     } else {
-        Some(txn_card_info.paymentMethod.clone())
+        Some(txn_card_info.instrument.method_type_code().into_owned())
     };
     let txn_obj_type = match txn_detail.txnObjectType {
         Some(obj_type) => obj_type.to_text().to_string(),
         None => return None,
     };
     let _card_type = txn_card_info.card_type.clone();
+    let is_card = txn_card_info.instrument.is(PaymentMethod::Card);
 
     match m_gateway_success_rate_merchant_input {
         None => {
@@ -2204,6 +2223,7 @@ pub async fn get_sr1_and_sr2_and_n(
                 None,
                 is_gri_enabled_for_elimination,
                 gateway_reference_id,
+                is_card,
             )
             .await
         }
@@ -2221,6 +2241,7 @@ pub async fn get_sr1_and_sr2_and_n(
                 inputs.cloned(),
                 is_gri_enabled_for_elimination,
                 gateway_reference_id.clone(),
+                is_card,
             )
             .await;
 
@@ -2638,9 +2659,9 @@ pub async fn update_gateway_score_based_on_success_rate(
         );
 
         let payment_method_type = if Utils::is_card_transaction(&txn_card_info) {
-            CARD
+            std::borrow::Cow::Borrowed(CARD)
         } else {
-            txn_card_info.paymentMethodType.as_str()
+            txn_card_info.instrument.method_code()
         };
 
         let enabled_payment_method_types = gateway_success_rate_merchant_input
@@ -3464,6 +3485,7 @@ pub fn route_random_traffic(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub async fn filter_using_redis(
     merchant_id: String,
     pmt: String,
@@ -3472,6 +3494,7 @@ pub async fn filter_using_redis(
     inputs: Option<Vec<ETGRI::EliminationSuccessRateInput>>,
     is_gri_enabled_for_elimination: bool,
     gateway_reference_id: Option<String>,
+    is_card: bool,
 ) -> Option<(
     f64,
     f64,
@@ -3494,6 +3517,7 @@ pub async fn filter_using_redis(
         gateway_reference_id.clone(),
         inputs_vec.clone(),
         None,
+        is_card,
     )
     .await
     .or(filter_using_redis_upto(
@@ -3507,6 +3531,7 @@ pub async fn filter_using_redis(
         gateway_reference_id.clone(),
         inputs_vec.clone(),
         None,
+        is_card,
     )
     .await)
     .or(filter_using_redis_upto(
@@ -3520,6 +3545,7 @@ pub async fn filter_using_redis(
         gateway_reference_id,
         inputs_vec,
         None,
+        is_card,
     )
     .await)
 }
@@ -3535,6 +3561,7 @@ async fn filter_using_redis_upto(
     gateway_reference_id: Option<String>,
     inputs: Vec<ETGRI::EliminationSuccessRateInput>,
     card_type: Option<String>,
+    is_card: bool,
 ) -> Option<(
     f64,
     f64,
@@ -3564,6 +3591,7 @@ async fn filter_using_redis_upto(
                 card_type,
                 is_gri_enabled_for_elimination,
                 gateway_reference_id.clone(),
+                is_card,
             )
             .await
         }
@@ -3594,6 +3622,8 @@ async fn filter_using_redis_upto(
     }
 }
 
+/// `is_card` (the payment method is `CARD`) picks the card key shape.
+#[allow(clippy::too_many_arguments)]
 pub async fn get_metric_entry_data(
     merchant_id: String,
     pmt: String,
@@ -3602,9 +3632,10 @@ pub async fn get_metric_entry_data(
     card_type: Option<String>,
     isGriEnabledForElimination: bool,
     gatewayReferenceId: Option<String>,
+    is_card: bool,
 ) -> Option<MetricEntry> {
     let aggregate_key = construct_aggregate_key(&merchant_id);
-    let dim_key = construct_dimension_key(&pmt, &m_pm, &txn_obj_type, &card_type);
+    let dim_key = construct_dimension_key(is_card, &pmt, &m_pm, &txn_obj_type, &card_type);
 
     if isGriEnabledForElimination && gatewayReferenceId.is_some() {
         let gri_dim_key = format!(
@@ -3619,12 +3650,13 @@ pub async fn get_metric_entry_data(
 }
 
 fn construct_dimension_key(
+    is_card: bool,
     pmt: &str,
     m_pm: &Option<String>,
     txn_obj_type: &str,
     card_type: &Option<String>,
 ) -> Option<String> {
-    if pmt == CARD {
+    if is_card {
         Some(format!(
             "{}_{}_{}_{}",
             txn_obj_type,

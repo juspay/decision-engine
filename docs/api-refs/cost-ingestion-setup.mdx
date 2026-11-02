@@ -95,6 +95,8 @@ curl --location "$BASE_URL/webhooks/settlement/merchant_demo/adyen" \
 
 The handler ACKs immediately and enqueues the report for background processing — download, parse, and re-fit all happen asynchronously in the ingest worker, so the connector always gets a fast response. A bad signature returns `401`; an unrecognized connector or malformed payload returns `400`.
 
+For Adyen, only `REPORT_AVAILABLE` notifications are accepted, and the report URL they carry must be an `https` URL on an `adyen.com` host. Any other event, or a URL elsewhere, returns `400`. Subscribe this endpoint to report notifications only. The download does not follow redirects.
+
 <Note>
   The URL carries your `merchant_id` because a connector's notification names only its own account (for Adyen, the `merchantAccountCode`) — never your Decision Engine merchant. Registering another merchant's id gets a caller nowhere without that merchant's signing secret, since the path only selects which stored `webhook_secret` the signature is checked against.
 </Note>

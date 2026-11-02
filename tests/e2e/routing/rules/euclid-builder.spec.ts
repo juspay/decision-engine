@@ -395,6 +395,79 @@ test.describe('Rule Builder — UI interactions', () => {
     })
   })
 
+  test.describe('Rule reordering', () => {
+    /** Name two blocks so the assertions read against the rules themselves, not their positions. */
+    async function seedTwoRules(euclidPage: EuclidRuleBuilder): Promise<void> {
+      await euclidPage.addRuleBlock()
+      await euclidPage.addRuleBlock()
+      await euclidPage.setRuleName(0, 'alpha')
+      await euclidPage.setRuleName(1, 'beta')
+    }
+
+    test('shows a drag handle on every rule block', async () => {
+      await seedTwoRules(euclid)
+
+      await expect(euclid.ruleDragHandle(0)).toBeVisible()
+      await expect(euclid.ruleDragHandle(1)).toBeVisible()
+    })
+
+    test('moves a rule above its predecessor with the keyboard', async ({ sharedPage }) => {
+      await seedTwoRules(euclid)
+
+      await euclid.moveRuleBlock(1, 'up')
+
+      await expect(sharedPage.getByPlaceholder('Rule name').nth(0)).toHaveValue('beta')
+      await expect(sharedPage.getByPlaceholder('Rule name').nth(1)).toHaveValue('alpha')
+    })
+
+    test('moves a rule by dragging its grip', async ({ sharedPage }) => {
+      await seedTwoRules(euclid)
+
+      // closestCenter compares the dragged block's rect against its neighbours', so the pointer
+      // has to travel the distance between the two blocks' centres, not merely into the one above.
+      const handle = await euclid.ruleDragHandle(1).boundingBox()
+      const first = await euclid.ruleBlock(0).boundingBox()
+      const second = await euclid.ruleBlock(1).boundingBox()
+      expect(handle && first && second).toBeTruthy()
+      const delta = (first!.y + first!.height / 2) - (second!.y + second!.height / 2)
+
+      await sharedPage.mouse.move(handle!.x + handle!.width / 2, handle!.y + handle!.height / 2)
+      await sharedPage.mouse.down()
+      // Intermediate moves are required: one jump would be a single pointermove, and dnd-kit needs
+      // travel past the sensor's 4px activation distance before it starts tracking the drag.
+      await sharedPage.mouse.move(
+        handle!.x + handle!.width / 2,
+        handle!.y + handle!.height / 2 + delta,
+        { steps: 12 },
+      )
+      await sharedPage.mouse.up()
+
+      await expect(sharedPage.getByPlaceholder('Rule name').nth(0)).toHaveValue('beta')
+      await expect(sharedPage.getByPlaceholder('Rule name').nth(1)).toHaveValue('alpha')
+    })
+
+    test('keeps the evaluation-order hints tied to position, not to the rule', async ({ sharedPage }) => {
+      await seedTwoRules(euclid)
+
+      await euclid.moveRuleBlock(1, 'up')
+
+      await expect(euclid.ruleBlock(0).getByText('(Highest priority matching check)')).toBeVisible()
+      await expect(euclid.ruleBlock(1).getByText('(Checked if rule 1 does not match)')).toBeVisible()
+      await expect(sharedPage.getByText('(Highest priority matching check)')).toHaveCount(1)
+    })
+
+    test('leaves the order alone when a rule is dropped where it started', async ({ sharedPage }) => {
+      await seedTwoRules(euclid)
+
+      await euclid.ruleDragHandle(0).focus()
+      await sharedPage.keyboard.press(' ')
+      await sharedPage.keyboard.press('Escape')
+
+      await expect(sharedPage.getByPlaceholder('Rule name').nth(0)).toHaveValue('alpha')
+      await expect(sharedPage.getByPlaceholder('Rule name').nth(1)).toHaveValue('beta')
+    })
+  })
+
   test.describe('Validation', () => {
     test('blocks submission and shows an error when rule name is empty', async ({ sharedPage }) => {
       await expect(sharedPage.getByPlaceholder('my-rule')).toHaveValue('')

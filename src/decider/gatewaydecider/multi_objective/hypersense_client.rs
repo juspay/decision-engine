@@ -602,7 +602,7 @@ async fn fallback_lookup_costs(
     // skipping the token fetch, network round-trip, and the live model cache. The merchant's
     // edited contract rates (if any) supersede the config default — see `seed_store`.
     if cfg.use_seed_costs {
-        let entries = super::seed_store::effective_seed_entries(merchant_id, cfg).await;
+        let entries = super::seed_store::seed_entries_for_routing(merchant_id, cfg).await;
         return super::seed_costs::lookup_seed_costs(&entries, cluster, psps);
     }
 

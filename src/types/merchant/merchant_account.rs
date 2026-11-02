@@ -1,3 +1,4 @@
+use crate::generics::Repository;
 use crate::utils::date_time;
 use serde::{Deserialize, Serialize};
 // use db::eulermeshimpl::{mesh_config, throw_missing_tenant_error, throw_tenant_mismatch_error, default_tenant_account_id};
@@ -17,10 +18,7 @@ use crate::types::merchant::id::{to_merchant_id, to_merchant_pid, MerchantId, Me
 // use eulerhs::extra::combinators::to_domain_all;
 // use eulerhs::language::{MonadFlow, log_error, throw_exception, get_option_local, TenantConfigObj, TenantConfig};
 // use eulerhs::prelude::{bool, from_maybe, when};
-#[cfg(feature = "mysql")]
-use crate::storage::schema::merchant_account::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::merchant_account::dsl;
+use crate::storage::backend::schema::merchant_account::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 use std::cmp::PartialEq;
@@ -36,11 +34,12 @@ pub struct EnableTokenization {
     pub enable_issuer_tokenization: bool,
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize, crate::auth::MerchantScoped)]
 pub struct MerchantAccount {
     // #[serde(rename = "id")]
     pub id: MerchantPId,
     // #[serde(rename = "merchantId")]
+    #[merchant]
     pub merchantId: MerchantId,
     // #[serde(rename = "country")]
     pub country: Option<String>,
@@ -111,8 +110,9 @@ impl Debug for MerchantAccount {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, crate::auth::MerchantScoped)]
 pub struct MerchantAccountCreateRequest {
+    #[merchant]
     pub merchant_id: String,
     pub gateway_success_rate_based_decider_input: Option<String>,
 }
@@ -229,6 +229,14 @@ impl TryFrom<DBMerchantAccount> for MerchantAccount {
 //     unimplemented!()
 // }
 
+/// The account of a merchant the request is authorized for. `None` for one that was never created:
+/// a service caller may name any merchant.
+pub async fn load_authorized(
+    merchant: &crate::auth::AuthorizedMerchant,
+) -> Option<MerchantAccount> {
+    load_merchant_by_merchant_id(merchant.as_str().to_string()).await
+}
+
 pub async fn load_merchant_by_merchant_id(merchant_id: String) -> Option<MerchantAccount> {
     let cache_key = format!("merchant_acct_{}", merchant_id);
 
@@ -237,18 +245,13 @@ pub async fn load_merchant_by_merchant_id(merchant_id: String) -> Option<Merchan
     }
 
     let app_state = get_tenant_app_state().await;
-    let result = match crate::generics::generic_find_all::<
-        <DBMerchantAccount as HasTable>::Table,
-        _,
-        DBMerchantAccount,
-    >(&app_state.db, dsl::merchant_id.eq(merchant_id))
-    .await
-    {
-        Ok(mut db_results) => db_results
-            .pop()
-            .and_then(|db_merchant| MerchantAccount::try_from(db_merchant).ok()),
-        Err(_) => None,
-    };
+    let result =
+        match DBMerchantAccount::find_all(&app_state.db, dsl::merchant_id.eq(merchant_id)).await {
+            Ok(mut db_results) => db_results
+                .pop()
+                .and_then(|db_merchant| MerchantAccount::try_from(db_merchant).ok()),
+            Err(_) => None,
+        };
 
     if let Some(ref merchant) = result {
         let ttl = app_state.config.cache_config.service_config_ttl as u64;
@@ -264,7 +267,7 @@ pub async fn insert_merchant_account<T>(
 where
     MerchantAccountNew: TryFrom<T>,
 {
-    // Perform the query using Diesel's generic_find_all
+    // Perform the query using Diesel's find_all
     let app_state = get_tenant_app_state().await;
 
     let config =
@@ -299,12 +302,8 @@ pub async fn load_all_merchant_accounts() -> Result<Vec<MerchantAccount>, crate:
 {
     let app_state = get_tenant_app_state().await;
 
-    let db_results = crate::generics::generic_find_all::<
-        <DBMerchantAccount as HasTable>::Table,
-        _,
-        DBMerchantAccount,
-    >(&app_state.db, dsl::merchant_id.is_not_null())
-    .await?;
+    let db_results =
+        DBMerchantAccount::find_all(&app_state.db, dsl::merchant_id.is_not_null()).await?;
 
     Ok(db_results
         .into_iter()
@@ -321,13 +320,10 @@ pub async fn update_merchant_hierarchy(
     let app_state = get_tenant_app_state().await;
 
     // Read-modify-write so a sibling key written by another consumer survives the write.
-    let existing = crate::generics::generic_find_all::<
-        <DBMerchantAccount as HasTable>::Table,
-        _,
-        DBMerchantAccount,
-    >(&app_state.db, dsl::merchant_id.eq(merchant_id.clone()))
-    .await?
-    .pop();
+    let existing =
+        DBMerchantAccount::find_all(&app_state.db, dsl::merchant_id.eq(merchant_id.clone()))
+            .await?
+            .pop();
 
     let existing_metadata = existing.and_then(|account| account.internal_metadata);
 

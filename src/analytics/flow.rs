@@ -61,6 +61,7 @@ impl ApiFlow {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FlowType {
+    Decide,
     DecideGateway,
     UpdateGatewayScore,
     UpdateScoreLegacy,
@@ -136,6 +137,7 @@ pub enum FlowType {
 impl FlowType {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Decide => "decide",
             Self::DecideGateway => "decide_gateway",
             Self::UpdateGatewayScore => "update_gateway_score",
             Self::UpdateScoreLegacy => "update_score_legacy",
@@ -227,6 +229,7 @@ impl AnalyticsFlowContext {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalyticsRoute {
+    Decide,
     DecideGateway,
     UpdateGatewayScore,
     UpdateScore,
@@ -242,6 +245,7 @@ pub enum AnalyticsRoute {
 impl AnalyticsRoute {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Decide => "decide",
             Self::DecideGateway => "decide_gateway",
             Self::UpdateGatewayScore => "update_gateway_score",
             Self::UpdateScore => "update_score",
@@ -257,6 +261,7 @@ impl AnalyticsRoute {
 
     pub fn from_stored_value(value: &str) -> Option<Self> {
         match value {
+            "decide" => Some(Self::Decide),
             "decision_gateway" | "decide_gateway" => Some(Self::DecideGateway),
             "update_gateway_score" => Some(Self::UpdateGatewayScore),
             "update_score" => Some(Self::UpdateScore),
@@ -274,6 +279,7 @@ impl AnalyticsRoute {
     pub fn from_filter_value(value: &str) -> Option<Self> {
         let trimmed = value.trim();
         match trimmed {
+            "Decide" => Some(Self::Decide),
             "Decide Gateway" => Some(Self::DecideGateway),
             "Update Gateway" => Some(Self::UpdateGatewayScore),
             "Update Score" => Some(Self::UpdateScore),
@@ -290,6 +296,7 @@ impl AnalyticsRoute {
 
     pub const fn payment_audit_label(self) -> &'static str {
         match self {
+            Self::Decide => "Decide",
             Self::DecideGateway => "Decide Gateway",
             Self::UpdateGatewayScore => "Update Gateway",
             Self::UpdateScore => "Update Score",
@@ -305,6 +312,7 @@ impl AnalyticsRoute {
 
     pub const fn overview_label(self) -> Option<&'static str> {
         match self {
+            Self::Decide => Some("/decide"),
             Self::DecideGateway => Some("/decide_gateway"),
             Self::UpdateGatewayScore => Some("/update_gateway"),
             Self::RoutingEvaluate => Some("/rule_evaluate"),
@@ -319,6 +327,10 @@ pub fn classify_request(method: &Method, path: &str) -> Option<AnalyticsFlowCont
     let segments = split_path(normalized_path);
 
     match (method.as_str(), segments.as_slice()) {
+        ("POST", ["decide"]) => Some(AnalyticsFlowContext::new(
+            ApiFlow::DynamicRouting,
+            FlowType::Decide,
+        )),
         ("POST", ["decide-gateway"]) => Some(AnalyticsFlowContext::new(
             ApiFlow::DynamicRouting,
             FlowType::DecideGateway,
@@ -547,6 +559,22 @@ mod tests {
 
     #[test]
     fn classifies_dynamic_routing_routes() {
+        assert_eq!(
+            classify_request(&Method::POST, "/decide"),
+            Some(AnalyticsFlowContext::new(
+                ApiFlow::DynamicRouting,
+                FlowType::Decide
+            ))
+        );
+        assert_eq!(
+            AnalyticsRoute::from_filter_value("Decide"),
+            Some(AnalyticsRoute::Decide)
+        );
+        assert_eq!(
+            AnalyticsRoute::from_stored_value("decide"),
+            Some(AnalyticsRoute::Decide)
+        );
+        assert_eq!(classify_request(&Method::GET, "/decide"), None);
         assert_eq!(
             classify_request(&Method::POST, "/decide-gateway"),
             Some(AnalyticsFlowContext::new(

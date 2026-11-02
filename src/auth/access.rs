@@ -20,11 +20,11 @@ use axum::http::Method;
 /// Entries are matched against the *routed path pattern*, never the request URL, so no path
 /// parameter can be crafted to resemble one of these.
 const READ_ONLY_POST_ROUTES: &[&str] = &[
-    "/routing/list/:created_by",
-    "/routing/list/active/:created_by",
+    "/routing/list/:merchant_id",
+    "/routing/list/active/:merchant_id",
     "/routing/evaluate",
     "/rule/get",
-    "/merchant-account/:merchant-id/seed-costs/simulate",
+    "/merchant-account/:merchant_id/seed-costs/simulate",
 ];
 
 /// The permission a request needs.
@@ -90,7 +90,7 @@ mod tests {
     fn a_shared_path_is_classified_by_method_not_by_name() {
         // `/merchant-account/:id/seed-costs` answers GET, PUT and DELETE. Allowing the read must
         // not carry the writes with it.
-        let path = Some("/merchant-account/:merchant-id/seed-costs");
+        let path = Some("/merchant-account/:merchant_id/seed-costs");
         assert_eq!(
             required_permission(&Method::GET, path),
             Permission::RoutingRead

@@ -1,8 +1,9 @@
 use crate::analytics::clickhouse::common::STATIC_ROUTING_APPROACH;
 use crate::analytics::{
-    global_request_id_from_headers, serialize_details, trace_id_from_headers, AnalyticsFlowContext,
-    AnalyticsRoute, ApiFlow, DomainAnalyticsEvent, FlowType,
+    serialize_details, AnalyticsFlowContext, AnalyticsRoute, ApiFlow, DomainAnalyticsEvent,
+    FlowType,
 };
+use crate::custom_extractors::{Json, RequestIds, ScopedJson};
 use crate::decider::gatewaydecider::flow_new::{
     decider_full_payload_hs_function, store_scoring_context_without_decider,
 };
@@ -17,8 +18,9 @@ use crate::euclid::types::ExperimentEndpoint;
 use crate::feedback::constants::kvRedis;
 use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
 use crate::redis::feature::is_feature_enabled;
+use crate::types::decide::{DecideRequest, DecideResponse};
 use crate::types::hybrid_routing::HybridRoutingRequest;
-use axum::{response::IntoResponse, Json};
+use axum::response::IntoResponse;
 use serde::Serialize;
 use std::time::Instant;
 
@@ -129,6 +131,10 @@ struct HybridRoutingSuccessDetail<'a> {
     request: &'a HybridRoutingRequest,
     response: &'a serde_json::Value,
     #[serde(skip_serializing_if = "Option::is_none")]
+    api_request: Option<&'a DecideRequest>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    api_response: Option<&'a serde_json::Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     score_context: Option<&'a serde_json::Value>,
     selection_reason: &'a HybridDecisionSummary,
 }
@@ -136,6 +142,8 @@ struct HybridRoutingSuccessDetail<'a> {
 #[derive(Serialize)]
 struct HybridRoutingFailureDetail<'a> {
     request: &'a HybridRoutingRequest,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    api_request: Option<&'a DecideRequest>,
     error: serde_json::Value,
 }
 
@@ -187,35 +195,58 @@ struct HybridFailure {
 
 #[axum::debug_handler]
 pub async fn hybrid_routing_evaluate(
-    headers: axum::http::HeaderMap,
-    Json(payload): Json<HybridRoutingRequest>,
+    ids: RequestIds,
+    ScopedJson { payload, .. }: ScopedJson<HybridRoutingRequest>,
 ) -> Result<axum::response::Response, ContainerError<EuclidErrors>> {
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["hybrid_routing_evaluate"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["hybrid_routing_evaluate"])
-        .inc();
+    evaluate_routing(ids, payload, None).await
+}
 
+pub(crate) async fn evaluate_routing(
+    ids: RequestIds,
+    payload: HybridRoutingRequest,
+    decide_request: Option<DecideRequest>,
+) -> Result<axum::response::Response, ContainerError<EuclidErrors>> {
+    let route = if decide_request.is_some() {
+        AnalyticsRoute::Decide
+    } else {
+        AnalyticsRoute::RoutingHybrid
+    };
     let HybridRoutingRequest {
-        static_routing_request,
+        mut static_routing_request,
         dynamic_routing_request,
     } = payload;
-    let dynamic_routing_request = static_routing_request
-        .as_ref()
-        .map(|request| DomainDeciderRequestForApiCallV2::from((request, dynamic_routing_request)));
+    if let Some(request) = static_routing_request.as_mut() {
+        crate::routes::profile_connectors::transform_fallback(request).await?;
+    }
+    let dynamic_routing_request = if decide_request.is_some() {
+        dynamic_routing_request.map(|mut dynamic| {
+            dynamic.eligible_gateway_list = static_routing_request
+                .as_ref()
+                .and_then(|request| request.fallback_output.as_ref())
+                .map(|connectors| extract_gateway_identifiers(connectors));
+            dynamic
+        })
+    } else {
+        static_routing_request.as_ref().map(|request| {
+            DomainDeciderRequestForApiCallV2::from((request, dynamic_routing_request))
+        })
+    };
     let recorded_request = HybridRoutingRequest {
         static_routing_request: static_routing_request.clone(),
         dynamic_routing_request: dynamic_routing_request.clone(),
     };
 
-    let request_id = headers
-        .get(crate::storage::consts::X_REQUEST_ID)
-        .and_then(|value| value.to_str().ok())
-        .map(str::to_string)
-        .unwrap_or_else(crate::analytics::next_event_id);
-    let global_request_id = global_request_id_from_headers(&headers);
-    let trace_id = trace_id_from_headers(&headers);
+    // Both halves and the audit event share one request id, minted when the caller sent none.
+    let ids = RequestIds {
+        request_id: Some(
+            ids.request_id
+                .unwrap_or_else(crate::analytics::next_event_id),
+        ),
+        ..ids
+    };
+    let request_id = ids.request_id.clone().unwrap_or_default();
+    let global_request_id = ids.global_request_id.clone();
+    let trace_id = ids.trace_id.clone();
 
     let merchant_id = dynamic_routing_request
         .as_ref()
@@ -233,13 +264,20 @@ pub async fn hybrid_routing_evaluate(
                 .as_ref()
                 .and_then(|request| request.payment_id.clone())
         });
+    let span = tracing::Span::current();
+    if let Some(value) = merchant_id.as_deref().filter(|value| !value.is_empty()) {
+        span.record("merchant_id", value);
+    }
+    if let Some(value) = payment_id.as_deref().filter(|value| !value.is_empty()) {
+        span.record("payment_id", value);
+    }
     let auth_type = dynamic_routing_request
         .as_ref()
         .and_then(|request| request.auth_type());
 
     DomainAnalyticsEvent::record_request_hit(
         AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::RoutingHybridRequestHit),
-        AnalyticsRoute::RoutingHybrid,
+        route,
         merchant_id.clone(),
         payment_id.clone(),
         Some(request_id.clone()),
@@ -309,16 +347,31 @@ pub async fn hybrid_routing_evaluate(
 
                 // The decider half records the experiment decision when it runs; otherwise the
                 // rule output is the decision and is recorded here.
-                match routing_evaluate_with_analytics(
-                    headers.clone(),
+                // The static half is measured on its own, as the dynamic half's outcome is below;
+                // the request as a whole is measured by its route's `endpoint` layer.
+                const STATIC_HALF: &str = "hybrid_routing_evaluate_static";
+                API_REQUEST_TOTAL_COUNTER
+                    .with_label_values(&[STATIC_HALF])
+                    .inc();
+                let timer = API_LATENCY_HISTOGRAM
+                    .with_label_values(&[STATIC_HALF])
+                    .start_timer();
+                let result = routing_evaluate_with_analytics(
+                    ids.clone(),
                     Json(req),
                     RoutingEvaluateAnalyticsFlows::routing_hybrid(),
-                    Some(request_id.clone()),
                     ExperimentEndpoint::HybridRouting,
                     !run_dynamic_routing,
                 )
-                .await
-                {
+                .await;
+                timer.observe_duration();
+                API_REQUEST_COUNTER
+                    .with_label_values(&[
+                        STATIC_HALF,
+                        if result.is_ok() { "success" } else { "failure" },
+                    ])
+                    .inc();
+                match result {
                     Ok(response) => (Some(response.0), None, fallback_gateways),
                     Err(err) => (None, Some(err), fallback_gateways),
                 }
@@ -360,12 +413,6 @@ pub async fn hybrid_routing_evaluate(
                     ExperimentEndpoint::HybridRouting,
                 )
                 .await;
-                API_REQUEST_COUNTER
-                    .with_label_values(&[
-                        "hybrid_routing_evaluate_dynamic",
-                        if result.is_ok() { "success" } else { "failure" },
-                    ])
-                    .inc();
                 Some(result)
             } else {
                 crate::logger::debug!(
@@ -525,10 +572,13 @@ pub async fn hybrid_routing_evaluate(
     };
 
     let dynamic_request = recorded_request.dynamic_routing_request.as_ref();
+    let (payment_method, payment_method_type) = dynamic_request
+        .map(|request| request.instrument().analytics_columns())
+        .unwrap_or_default();
     let record_failure = |error_code: String, error_message: String, error: serde_json::Value| {
         DomainAnalyticsEvent::record_error(
             AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::RoutingHybridError),
-            AnalyticsRoute::RoutingHybrid,
+            route,
             merchant_id.clone(),
             payment_id.clone(),
             Some(request_id.clone()),
@@ -540,19 +590,24 @@ pub async fn hybrid_routing_evaluate(
             error_message,
             serialize_details(&HybridRoutingFailureDetail {
                 request: &recorded_request,
+                api_request: decide_request.as_ref(),
                 error,
             }),
             Some("hybrid_failed".to_string()),
             auth_type.clone(),
         );
-        API_REQUEST_COUNTER
-            .with_label_values(&["hybrid_routing_evaluate", "failure"])
-            .inc();
     };
 
     let api_result = match resolve() {
         Ok(Ok((res, summary))) => {
             let response_value = serde_json::Value::Object(res);
+            let api_response = if decide_request.is_some() {
+                let response = DecideResponse::from_hybrid(&response_value, request_id.clone())
+                    .map_err(|_| EuclidErrors::FailedToSerializeJsonToString)?;
+                Some(to_json_value_or_invalid(&response, "decide")?)
+            } else {
+                None
+            };
             crate::logger::debug!(decision_engine_success_response = ?response_value);
             DomainAnalyticsEvent::record_decision(
                 AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::RoutingHybridDecision),
@@ -560,11 +615,13 @@ pub async fn hybrid_routing_evaluate(
                 Some(summary.routing_approach.clone()),
                 summary.decided_gateway.clone(),
                 Some("success".to_string()),
-                AnalyticsRoute::RoutingHybrid,
+                route,
                 summary.priority_logic_tag.clone(),
                 serialize_details(&HybridRoutingSuccessDetail {
                     request: &recorded_request,
                     response: &response_value,
+                    api_request: decide_request.as_ref(),
+                    api_response: api_response.as_ref(),
                     score_context: summary.score_context.as_ref(),
                     selection_reason: &summary,
                 }),
@@ -573,17 +630,14 @@ pub async fn hybrid_routing_evaluate(
                 global_request_id.clone(),
                 trace_id.clone(),
                 Some("hybrid_routed".to_string()),
-                dynamic_request.map(|request| request.payment_method_type().to_string()),
-                dynamic_request.map(|request| request.payment_method().to_string()),
+                payment_method_type.clone(),
+                payment_method.clone(),
                 auth_type.clone(),
                 dynamic_request.and_then(|request| request.card_network()),
                 dynamic_request.map(|request| request.currency()),
                 dynamic_request.and_then(|request| request.country()),
             );
-            API_REQUEST_COUNTER
-                .with_label_values(&["hybrid_routing_evaluate", "success"])
-                .inc();
-            Ok(Json(response_value).into_response())
+            Ok(Json(api_response.unwrap_or(response_value)).into_response())
         }
         Ok(Err(failure)) => {
             record_failure(failure.error_code, failure.error_message, failure.error);
@@ -599,6 +653,5 @@ pub async fn hybrid_routing_evaluate(
             Err(err)
         }
     };
-    timer.observe_duration();
     api_result
 }

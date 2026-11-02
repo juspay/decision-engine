@@ -1,9 +1,6 @@
 use super::ast::ConnectorInfo;
 use crate::euclid::ast::{Output, Program, ValueType};
-#[cfg(feature = "mysql")]
-use crate::storage::schema;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg;
+use crate::storage::backend::schema;
 use diesel::prelude::AsChangeset;
 use diesel::Identifiable;
 use diesel::Insertable;
@@ -29,7 +26,7 @@ pub enum DataType {
     GlobalRef,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, crate::auth::MerchantScoped)]
 pub struct RoutingRule {
     pub rule_id: Option<String>,
     pub name: String,
@@ -37,6 +34,7 @@ pub struct RoutingRule {
     /// string, which is what the column requires.
     #[serde(default)]
     pub description: Option<String>,
+    #[merchant]
     pub created_by: String,
     pub algorithm: StaticRoutingAlgorithm,
     #[serde(default)]
@@ -196,9 +194,10 @@ pub enum AlgorithmType {
     VolumeCommitment,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, crate::auth::MerchantScoped)]
 pub struct RoutingRequest {
     pub payment_id: Option<String>,
+    #[merchant]
     pub created_by: String,
     pub fallback_output: Option<Vec<ConnectorInfo>>,
     pub parameters: HashMap<String, Option<ValueType>>,
@@ -218,8 +217,9 @@ pub struct RoutingBatchEntry {
 
 /// Evaluates the caller's active algorithm against several parameter sets in one round
 /// trip. The algorithm is resolved and parsed once; results are positional.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct RoutingBatchRequest {
+    #[merchant]
     pub created_by: String,
     pub fallback_output: Option<Vec<ConnectorInfo>>,
     /// Transaction type whose active rule should be evaluated; absent keeps the
@@ -270,11 +270,15 @@ impl RoutingDictionaryRecord {
     }
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Default, Clone, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped,
+)]
 pub struct SrDimensionConfig {
+    #[merchant]
     pub merchant_id: String,
     pub paymentInfo: SrDimensionInfo,
 }
+
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SrDimensionInfo {
     pub udfs: Vec<i32>,
@@ -307,8 +311,7 @@ pub struct RoutingEvaluateResponse {
     Queryable,
     Selectable,
 )]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm))]
+#[diesel(table_name = schema::routing_algorithm)]
 pub struct RoutingAlgorithm {
     pub id: String,
     pub created_by: String,
@@ -359,8 +362,7 @@ impl From<RoutingAlgorithm> for JsonifiedRoutingAlgorithm {
 #[derive(
     AsChangeset, Insertable, Debug, serde::Serialize, serde::Deserialize, Identifiable, Queryable,
 )]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm_mapper))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm_mapper))]
+#[diesel(table_name = schema::routing_algorithm_mapper)]
 #[diesel(primary_key(id))]
 pub struct RoutingAlgorithmMapper {
     pub id: i32,
@@ -370,8 +372,7 @@ pub struct RoutingAlgorithmMapper {
 }
 
 #[derive(Insertable, Debug, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm_mapper))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm_mapper))]
+#[diesel(table_name = schema::routing_algorithm_mapper)]
 pub struct RoutingAlgorithmMapperNew {
     pub created_by: String,
     pub routing_algorithm_id: String,
@@ -388,30 +389,34 @@ impl RoutingAlgorithmMapperNew {
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct ActivateRoutingConfigRequest {
+    #[merchant]
     pub created_by: String,
     pub routing_algorithm_id: String,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct DeactivateRoutingConfigRequest {
+    #[merchant]
     pub created_by: String,
     pub routing_algorithm_id: String,
 }
 
 /// Delete an existing routing algorithm (e.g. an A/B experiment). Only permitted while the
 /// algorithm is inactive.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct DeleteRoutingConfigRequest {
+    #[merchant]
     pub created_by: String,
     pub routing_algorithm_id: String,
 }
 
 /// Edit an existing (inactive) routing algorithm in place — updates its name/description and
 /// algorithm definition without minting a new id.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct UpdateRoutingConfigRequest {
+    #[merchant]
     pub created_by: String,
     pub routing_algorithm_id: String,
     pub name: String,
@@ -421,8 +426,7 @@ pub struct UpdateRoutingConfigRequest {
 }
 
 #[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm_mapper))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm_mapper))]
+#[diesel(table_name = schema::routing_algorithm_mapper)]
 pub struct RoutingAlgorithmMapperUpdate {
     pub routing_algorithm_id: String,
     pub algorithm_for: String,
@@ -563,6 +567,30 @@ pub struct KeysConfig {
     /// field dropdown changed on every restart.
     #[serde(flatten)]
     pub keys: BTreeMap<String, KeyConfig>,
+}
+
+impl KeysConfig {
+    /// Sets the keys that name payment methods from the code's vocabulary, replacing any the
+    /// config file declares, so the rule engine, the dashboard and request checks agree. See
+    /// [`crate::types::payment_instrument::payment_method_routing_keys`].
+    pub fn with_payment_method_keys(mut self) -> Self {
+        for (key, values) in crate::types::payment_instrument::payment_method_routing_keys() {
+            self.keys.insert(
+                key,
+                KeyConfig {
+                    data_type: KeyDataType::Enum,
+                    values: Some(values.join(", ")),
+                    min_value: None,
+                    max_value: None,
+                    min_length: None,
+                    max_length: None,
+                    exact_length: None,
+                    regex: None,
+                },
+            );
+        }
+        self
+    }
 }
 
 /// The complete TOML configuration structure

@@ -58,9 +58,9 @@
 //!
 //! [`report_generated`]: https://www.checkout.com/docs/developer-resources/event-notifications/event-types/report_generated
 
+use super::common::{http_client, to_float};
+use crate::cost_ingestion::card_network::network_key;
 use std::collections::{HashMap, HashSet};
-use std::sync::OnceLock;
-use std::time::Duration;
 
 use async_trait::async_trait;
 use axum::http::HeaderMap;
@@ -79,19 +79,6 @@ use crate::cost_ingestion::types::{
 
 /// The `type` of the report-ready webhook event this connector handles.
 const REPORT_GENERATED_EVENT: &str = "report_generated";
-
-/// Cap on a report download (details + file fetches), mirroring the other connectors.
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
-
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(DOWNLOAD_TIMEOUT)
-            .build()
-            .expect("failed to build checkout report reqwest client")
-    })
-}
 
 /// Production Reports API host; overridable via the credential blob for sandbox/regional hosts.
 fn default_api_base() -> String {
@@ -476,7 +463,7 @@ impl SettlementReportSource for CheckoutReportSource {
                     entry.has_capture = true;
                     // Stamp metadata from the capture row (authoritative, always present here).
                     entry.txn_ref = pid.to_string();
-                    let network = normalize_network(row.get(c.payment_method));
+                    let network = network_key(row.get(c.payment_method));
                     let funding = funding_from_card_type(row.get(c.card_type));
                     entry.variant = build_variant(&network, &funding);
                     entry.card_network = network;
@@ -613,21 +600,6 @@ fn funding_from_card_type(card_type: &str) -> String {
     }
 }
 
-/// Canonicalize Checkout's `Payment Method` label (`VISA`, `MASTERCARD`, `AMEX`, …) to the
-/// lowercased network ids the rest of the pipeline uses (`visa`, `mc`, `amex`, …).
-fn normalize_network(raw: &str) -> String {
-    match raw.trim().to_lowercase().as_str() {
-        "" => String::new(),
-        "mastercard" | "master card" => "mc".to_string(),
-        "visa" => "visa".to_string(),
-        "american express" | "amex" => "amex".to_string(),
-        "discover" => "discover".to_string(),
-        "diners" | "diners club" => "diners".to_string(),
-        "jcb" => "jcb".to_string(),
-        other => other.replace(' ', ""),
-    }
-}
-
 /// Synthesize a `variant` cluster key. Checkout's report carries no scheme tier, so use
 /// `{network}{funding}` (e.g. `visacredit`); mirrors Braintree's card path.
 ///
@@ -655,11 +627,6 @@ fn normalize_card_category(raw: &str) -> String {
         Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
         None => String::new(),
     }
-}
-
-/// Parse a money cell; blanks/garbage become `0.0` (mirrors the other connectors' `to_float`).
-fn to_float(s: &str) -> f64 {
-    s.trim().parse::<f64>().unwrap_or(0.0)
 }
 
 /// Parse a Checkout date cell (`Processed On`), an ISO-8601 local timestamp
@@ -901,10 +868,10 @@ ic_orphan,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,SA,USD,-102.29,2026
         assert_eq!(funding_from_card_type("Debit"), "debit");
         assert_eq!(funding_from_card_type("Credit"), "credit");
         assert_eq!(funding_from_card_type(""), "");
-        assert_eq!(normalize_network("VISA"), "visa");
-        assert_eq!(normalize_network("MASTERCARD"), "mc");
-        assert_eq!(normalize_network("AMEX"), "amex");
-        assert_eq!(normalize_network(""), "");
+        assert_eq!(network_key("VISA"), "visa");
+        assert_eq!(network_key("MASTERCARD"), "mc");
+        assert_eq!(network_key("AMEX"), "amex");
+        assert_eq!(network_key(""), "");
         assert_eq!(build_variant("visa", "credit"), "visacredit");
         assert_eq!(
             parse_date("2026-07-09T18:07:06.844"),
@@ -1020,6 +987,64 @@ ic_orphan,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,SA,USD,-102.29,2026
             src.verify_and_parse_notification(&h, payments.as_bytes(), &secret),
             Err(IngestError::MalformedNotification(_))
         ));
+    }
+
+    #[test]
+    fn checkout_dashboard_transformation_preserves_ingestion_input(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        use crate::config::ConnectorReportApiConfig;
+        use crate::routes::connector_credentials::SetCredentialsRequest;
+
+        let config = ConnectorReportApiConfig {
+            checkout_production_api_base_url: "https://api.checkout.com".into(),
+            checkout_sandbox_api_base_url: "https://api.sandbox.checkout.com".into(),
+            ..ConnectorReportApiConfig::default()
+        };
+        for (environment, expected_url) in [
+            (Some("prod"), "https://api.checkout.com"),
+            (Some("sandbox"), "https://api.sandbox.checkout.com"),
+            (None, "https://api.checkout.com"),
+        ] {
+            // The new dashboard request carries only the key and environment.
+            let mut payload = serde_json::json!({
+                "account": "ent_test",
+                "webhook_secret": "webhook_test",
+                "download_auth": "sk_test_key",
+            });
+            if let Some(environment) = environment {
+                payload["environment"] = serde_json::json!(environment);
+            }
+            let request: SetCredentialsRequest = serde_json::from_value(payload)?;
+            let transformed = ConnectorCreds {
+                webhook_secret: Secret::new(request.webhook_secret),
+                download_auth: request
+                    .environment
+                    .unwrap_or_default()
+                    .encode_credentials(&request.download_auth, &config),
+            };
+
+            // This is the credential JSON that ingestion received before the UI change.
+            let previous_json = serde_json::json!({
+                "secret_key": "sk_test_key",
+                "api_base_url": expected_url,
+            });
+            let previous = ConnectorCreds {
+                webhook_secret: Secret::new("webhook_test".into()),
+                download_auth: Secret::new(previous_json.to_string()),
+            };
+            let stored_json: serde_json::Value =
+                serde_json::from_str(transformed.download_auth.peek())?;
+            assert_eq!(stored_json, previous_json);
+            let before = CheckoutCreds::parse(&previous)?;
+            let after = CheckoutCreds::parse(&transformed)?;
+            assert_eq!(after.secret_key, before.secret_key);
+            assert_eq!(after.base(), before.base());
+            assert_eq!(
+                transformed.webhook_secret.peek(),
+                previous.webhook_secret.peek()
+            );
+        }
+        Ok(())
     }
 
     #[test]

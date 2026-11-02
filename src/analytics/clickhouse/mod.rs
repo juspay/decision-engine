@@ -135,6 +135,13 @@ impl AnalyticsReadStore for ClickHouseAnalyticsStore {
         endpoints::payment_audit::load(&self.client, query, query.scope).await
     }
 
+    async fn payment_audit_filter_options(
+        &self,
+        query: &PaymentAuditQuery,
+    ) -> Result<PaymentAuditFilterOptions, ApiError> {
+        metrics::audit_filter_options::load(&self.client, query).await
+    }
+
     async fn preview_trace(
         &self,
         query: &PaymentAuditQuery,

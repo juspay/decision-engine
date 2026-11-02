@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
-import { ChevronDown } from 'lucide-react'
+import { ChevronDown, X } from 'lucide-react'
 import { useCloseOnFrameBlur } from '../../hooks/useCloseOnFrameBlur'
 
 interface Option {
@@ -8,55 +8,74 @@ interface Option {
   label: string
 }
 
-interface SearchableSelectProps {
-  value: string
-  onChange: (value: string) => void
+/** Matches the list's `max-w-[320px]`. */
+const LIST_MAX_WIDTH = 320
+
+interface CommonProps {
   options: Option[]
   className?: string
   /**
-   * Replaces the compact `cond-select` trigger styling entirely — pass a full
-   * input-style class set (padding, border, text size) to render the trigger
-   * like a regular form field. The trigger becomes block-level full-width and
-   * the label no longer truncates at 10rem.
+   * Replaces the trigger's default styling entirely — pass a full input-style class set (padding,
+   * border, text size) to render the trigger like a regular form field. The chevron is drawn here.
    */
   triggerClassName?: string
+  /** Called when the list closes, e.g. to act on a whole selection at once rather than on every toggle. */
+  onClose?: () => void
+}
+
+interface SingleProps extends CommonProps {
+  multiple?: false
+  value: string
+  onChange: (value: string) => void
   disabled?: boolean
   dataCy?: string
 }
 
-export function SearchableSelect({
-  value,
-  onChange,
-  options,
-  className = '',
-  triggerClassName,
-  disabled = false,
-  dataCy,
-}: SearchableSelectProps) {
+interface MultipleProps extends CommonProps {
+  multiple: true
+  values: string[]
+  onChange: (values: string[]) => void
+  placeholder?: string
+  /** One-line summary ("Card +1") instead of a chip per value, so the trigger keeps its height. */
+  compact?: boolean
+}
+
+export type SearchableSelectProps = SingleProps | MultipleProps
+
+/**
+ * A trigger that opens a searchable list in a portal. Single-select closes on pick and lists options
+ * alphabetically; `multiple` toggles values with checkboxes, keeps the list open and keeps the
+ * caller's option order.
+ */
+export function SearchableSelect(props: SearchableSelectProps) {
+  const { options, className = '', triggerClassName, onClose } = props
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState('')
   const [dropdownStyle, setDropdownStyle] = useState<React.CSSProperties>({})
-  const triggerRef = useRef<HTMLButtonElement>(null)
+  const triggerRef = useRef<HTMLElement>(null)
   const dropdownRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
-  const selectedLabel = options.find(o => o.value === value)?.label ?? value
-
-  const filtered = (query
+  const matching = query
     ? options.filter(o =>
         o.label.toLowerCase().includes(query.toLowerCase()) ||
         o.value.toLowerCase().includes(query.toLowerCase())
       )
     : options
-  ).slice().sort((a, b) => a.label.localeCompare(b.label))
+  const filtered = props.multiple
+    ? matching
+    : matching.slice().sort((a, b) => a.label.localeCompare(b.label))
 
   function openDropdown() {
     const rect = triggerRef.current?.getBoundingClientRect()
     if (!rect) return
+    // The list is up to LIST_MAX_WIDTH wide; near the right edge it opens leftwards from the
+    // trigger's right edge instead of running off-screen.
+    const fitsRightwards = rect.left + Math.max(rect.width, LIST_MAX_WIDTH) <= window.innerWidth
     setDropdownStyle({
       position: 'fixed',
       top: rect.bottom + 4,
-      left: rect.left,
+      ...(fitsRightwards ? { left: rect.left } : { right: window.innerWidth - rect.right }),
       minWidth: rect.width,
       zIndex: 9999,
     })
@@ -71,15 +90,12 @@ export function SearchableSelect({
     if (!open) return
     function onOutside(e: MouseEvent) {
       const target = e.target as Node
-      if (
-        !triggerRef.current?.contains(target) &&
-        !dropdownRef.current?.contains(target)
-      ) {
+      if (!triggerRef.current?.contains(target) && !dropdownRef.current?.contains(target)) {
         close()
       }
     }
-    // Listens on the document rather than the search input, so Escape still closes the list once
-    // focus has moved off the input.
+    // Listens on the document rather than the search input: focus moves to an option button as soon
+    // as one is toggled, and Escape has to close the list from there too.
     function onKey(e: KeyboardEvent) {
       if (e.key === 'Escape') close()
     }
@@ -93,23 +109,106 @@ export function SearchableSelect({
 
   useCloseOnFrameBlur(open, close)
 
+  // Read through a ref: the outside-click and Escape listeners are bound when the list opens and
+  // would otherwise call the onClose of that render, before any toggles.
+  const onCloseRef = useRef(onClose)
+  onCloseRef.current = onClose
+
   function close() {
     setOpen(false)
     setQuery('')
+    onCloseRef.current?.()
   }
 
-  function select(val: string) {
-    onChange(val)
-    close()
-  }
+  const toggleOpen = () => (open ? close() : openDropdown())
+  const labelOf = (v: string) => options.find(o => o.value === v)?.label ?? v
 
-  return (
-    <div className={`relative ${className || (triggerClassName ? 'block' : 'inline-block')}`} data-cy={dataCy}>
+  let trigger: React.ReactNode
+  let renderOption: (o: Option) => React.ReactNode
+  let listStyle: { className: string; style?: React.CSSProperties }
+
+  if (props.multiple) {
+    const { values, onChange, placeholder = 'Select…', compact = false } = props
+    const remove = (val: string, e: React.MouseEvent) => {
+      e.stopPropagation()
+      onChange(values.filter(v => v !== val))
+    }
+
+    trigger = (
+      <div
+        ref={triggerRef as React.RefObject<HTMLDivElement>}
+        onClick={toggleOpen}
+        className={
+          triggerClassName
+            ? `flex min-w-0 cursor-pointer items-center gap-1 ${triggerClassName}`
+            : 'flex w-full min-w-0 cursor-pointer flex-wrap items-center gap-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm dark:border-[#222226]'
+        }
+      >
+        {values.length === 0 && (
+          <span className={compact ? 'min-w-0 truncate' : 'text-slate-500'}>{placeholder}</span>
+        )}
+        {compact && values.length > 0 && (
+          <span className="min-w-0 truncate" title={values.map(labelOf).join(', ')}>
+            {labelOf(values[0])}
+            {values.length > 1 ? ` +${values.length - 1}` : ''}
+          </span>
+        )}
+        {!compact && values.map(v => (
+          <span
+            key={v}
+            className="flex items-center gap-1 rounded-md bg-brand-100 dark:bg-brand-500/20 border border-brand-200 dark:border-brand-500/40 px-1.5 py-0.5 font-medium text-brand-700 dark:text-brand-300"
+          >
+            {labelOf(v)}
+            <button
+              type="button"
+              onClick={(e) => remove(v, e)}
+              className="text-brand-600 hover:text-brand-600 dark:hover:text-brand-200"
+            >
+              <X size={10} />
+            </button>
+          </span>
+        ))}
+        {/* Always drawn, so a styled trigger still reads as a dropdown. */}
+        <ChevronDown
+          size={triggerClassName ? 14 : 11}
+          className={`ml-auto shrink-0 text-slate-400 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
+        />
+      </div>
+    )
+
+    renderOption = (o) => {
+      const checked = values.includes(o.value)
+      return (
+        <button
+          key={o.value}
+          type="button"
+          data-value={o.value}
+          onClick={() => onChange(checked ? values.filter(v => v !== o.value) : [...values, o.value])}
+          className={`flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm transition-colors hover:bg-slate-50 dark:hover:bg-[#1c1c24] ${checked ? 'text-brand-600 dark:text-brand-400' : 'text-slate-700 dark:text-[#c8d0de]'}`}
+        >
+          <span className={`flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border ${checked ? 'border-brand-500 bg-brand-500 text-white' : 'border-slate-300 dark:border-[#3a4258]'}`}>
+            {checked && (
+              <svg viewBox="0 0 8 8" className="h-2 w-2 fill-current">
+                <path d="M1 4l2 2 4-4" stroke="currentColor" strokeWidth="1.5" fill="none" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            )}
+          </span>
+          {o.label}
+        </button>
+      )
+    }
+
+    listStyle = { className: 'max-h-52 overflow-y-auto py-0.5' }
+  } else {
+    const { value, onChange, disabled = false } = props
+    const selectedLabel = labelOf(value)
+
+    trigger = (
       <button
-        ref={triggerRef}
+        ref={triggerRef as React.RefObject<HTMLButtonElement>}
         type="button"
         disabled={disabled}
-        onClick={() => open ? close() : openDropdown()}
+        onClick={toggleOpen}
         className={
           triggerClassName
             ? `flex w-full items-center justify-between gap-2 text-left ${triggerClassName}`
@@ -124,6 +223,37 @@ export function SearchableSelect({
           className={`shrink-0 text-slate-500 transition-transform duration-150 ${open ? 'rotate-180' : ''}`}
         />
       </button>
+    )
+
+    renderOption = (o) => (
+      <button
+        key={o.value}
+        type="button"
+        data-value={o.value}
+        onClick={() => { onChange(o.value); close() }}
+        className={`w-full px-3 py-2.5 text-left text-sm transition-colors hover:bg-slate-50 dark:hover:bg-[#1c1c24] ${
+          o.value === value
+            ? 'text-brand-600 dark:text-brand-400 font-medium bg-brand-50/50 dark:bg-brand-900/10'
+            : ''
+        }`}
+      >
+        {o.label}
+      </button>
+    )
+
+    listStyle = {
+      className: 'overflow-y-auto py-0.5',
+      style: { maxHeight: `${Math.min(filtered.length * 32 + 8, 272)}px` },
+    }
+  }
+
+  const wrapperClass = props.multiple
+    ? `relative ${className}`
+    : `relative ${className || (triggerClassName ? 'block' : 'inline-block')}`
+
+  return (
+    <div className={wrapperClass} data-cy={props.multiple ? undefined : props.dataCy}>
+      {trigger}
 
       {open && createPortal(
         <div
@@ -141,28 +271,11 @@ export function SearchableSelect({
               className="w-full rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1.5 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226] dark:bg-[#0f0f11]"
             />
           </div>
-          <div
-            className="overflow-y-auto py-0.5"
-            style={{ maxHeight: `${Math.min(filtered.length * 32 + 8, 272)}px` }}
-          >
+          <div className={listStyle.className} style={listStyle.style}>
             {filtered.length === 0 ? (
               <p className="px-3 py-2.5 text-sm text-slate-500">No matches</p>
             ) : (
-              filtered.map(o => (
-                <button
-                  key={o.value}
-                  type="button"
-                  data-value={o.value}
-                  onClick={() => select(o.value)}
-                  className={`w-full px-3 py-2.5 text-left text-sm transition-colors hover:bg-slate-50 dark:hover:bg-[#1c1c24] ${
-                    o.value === value
-                      ? 'text-brand-600 dark:text-brand-400 font-medium bg-brand-50/50 dark:bg-brand-900/10'
-                      : ''
-                  }`}
-                >
-                  {o.label}
-                </button>
-              ))
+              filtered.map(renderOption)
             )}
           </div>
         </div>,

@@ -10,15 +10,16 @@
 //! cleanly onto the dashboard's editable table. Rows are (de)normalized to/from the nested
 //! `Vec<SeedCostEntry>` the resolver consumes.
 
-use axum::extract::Path;
-use axum::http::StatusCode;
-use axum::Json;
+use crate::custom_extractors::MerchantFromPath;
+
+use crate::custom_extractors::Json;
 use serde::{Deserialize, Serialize};
 
 use crate::app::get_tenant_app_state;
 use crate::config::{fee_components, SeedCostEntry, SeedCostTier, SeedFeeModel};
 use crate::decider::gatewaydecider::multi_objective::cluster_key::ClusterKey;
 use crate::decider::gatewaydecider::multi_objective::{seed_costs, seed_store};
+use crate::error::RouteError;
 
 /// One row of the merchant's seed table: a PSP's fee for one card scenario, split into the contract
 /// components (interchange / scheme / markup, all bps) plus the flat `fixed` per-transaction fee.
@@ -167,14 +168,13 @@ fn rows_to_entries(rows: Vec<SeedCostRow>) -> Vec<SeedCostEntry> {
         .collect()
 }
 
-/// `GET /merchant-account/:merchant-id/seed-costs` — the merchant's editable contract-rate table
+/// `GET /merchant-account/:merchant_id/seed-costs` — the merchant's editable contract-rate table
 /// (their saved edits, else the config default).
 pub async fn get_seed_costs(
-    Path(merchant_id): Path<String>,
-) -> Result<Json<Vec<SeedCostRow>>, (StatusCode, String)> {
+    MerchantFromPath(merchant): MerchantFromPath,
+) -> Result<Json<Vec<SeedCostRow>>, RouteError> {
     let app_state = get_tenant_app_state().await;
-    let entries =
-        seed_store::effective_seed_entries(&merchant_id, &app_state.config.hypersense).await;
+    let entries = seed_store::effective_seed_entries(&merchant, &app_state.config.hypersense).await;
     Ok(Json(entries_to_rows(&entries)))
 }
 
@@ -183,45 +183,40 @@ pub struct SaveSeedCostsRequest {
     pub rows: Vec<SeedCostRow>,
 }
 
-/// `PUT /merchant-account/:merchant-id/seed-costs` — replace the merchant's whole table.
+/// `PUT /merchant-account/:merchant_id/seed-costs` — replace the merchant's whole table.
 pub async fn set_seed_costs(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
     Json(body): Json<SaveSeedCostsRequest>,
-) -> Result<Json<Vec<SeedCostRow>>, (StatusCode, String)> {
+) -> Result<Json<Vec<SeedCostRow>>, RouteError> {
     for r in &body.rows {
         if r.psp.trim().is_empty() {
-            return Err((
-                StatusCode::BAD_REQUEST,
-                "each row must name a PSP".to_string(),
-            ));
+            return Err(RouteError::bad_request("each row must name a PSP"));
         }
         for v in [r.interchange_bps, r.scheme_bps, r.markup_bps, r.fixed] {
             if !v.is_finite() || v < 0.0 {
-                return Err((
-                    StatusCode::BAD_REQUEST,
-                    "fee components and fixed fee must be finite and non-negative".to_string(),
+                return Err(RouteError::bad_request(
+                    "fee components and fixed fee must be finite and non-negative",
                 ));
             }
         }
     }
     let entries = rows_to_entries(body.rows);
-    seed_store::put_seed_table(&merchant_id, &entries)
+    seed_store::put_seed_table(&merchant, &entries)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        .map_err(RouteError::internal)?;
     Ok(Json(entries_to_rows(&entries)))
 }
 
-/// `DELETE /merchant-account/:merchant-id/seed-costs` — clear edits, reverting to the config
+/// `DELETE /merchant-account/:merchant_id/seed-costs` — clear edits, reverting to the config
 /// default; returns the default table.
 pub async fn delete_seed_costs(
-    Path(merchant_id): Path<String>,
-) -> Result<Json<Vec<SeedCostRow>>, (StatusCode, String)> {
-    seed_store::delete_seed_table(&merchant_id)
+    MerchantFromPath(merchant): MerchantFromPath,
+) -> Result<Json<Vec<SeedCostRow>>, RouteError> {
+    seed_store::delete_seed_table(&merchant)
         .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e))?;
+        .map_err(RouteError::internal)?;
     let app_state = get_tenant_app_state().await;
-    let entries =
-        seed_store::effective_seed_entries(&merchant_id, &app_state.config.hypersense).await;
+    let entries = seed_store::effective_seed_entries(&merchant, &app_state.config.hypersense).await;
     Ok(Json(entries_to_rows(&entries)))
 }
 
@@ -259,22 +254,18 @@ pub struct SimulateRow {
     pub cost_amount: f64,
 }
 
-/// `POST /merchant-account/:merchant-id/seed-costs/simulate` — price the candidate PSPs for one
+/// `POST /merchant-account/:merchant_id/seed-costs/simulate` — price the candidate PSPs for one
 /// (currency, scenario, amount) using the merchant's configured seed table, via the exact tier
 /// resolver the decide path uses. This is the lightweight cost preview beside the editor.
 pub async fn simulate_seed_costs(
-    Path(merchant_id): Path<String>,
+    MerchantFromPath(merchant): MerchantFromPath,
     Json(body): Json<SimulateRequest>,
-) -> Result<Json<Vec<SimulateRow>>, (StatusCode, String)> {
+) -> Result<Json<Vec<SimulateRow>>, RouteError> {
     if !body.amount.is_finite() || body.amount <= 0.0 {
-        return Err((
-            StatusCode::BAD_REQUEST,
-            "amount must be a positive number".to_string(),
-        ));
+        return Err(RouteError::bad_request("amount must be a positive number"));
     }
     let app_state = get_tenant_app_state().await;
-    let entries =
-        seed_store::effective_seed_entries(&merchant_id, &app_state.config.hypersense).await;
+    let entries = seed_store::effective_seed_entries(&merchant, &app_state.config.hypersense).await;
 
     let cluster = ClusterKey {
         amount: Some(body.amount),
