@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag_suffix:
-        description: 'Optional tag suffix (e.g., "rc1" for nightly-2026.07.21-rc1)'
+        description: 'Build name. On main: optional suffix (e.g. "rc1" → nightly-2026.07.21-rc1). On any other branch: required; the tag becomes <branch>-<name> (e.g. feat/x + rc1 → feat-x-rc1).'
         required: false
         type: string
 
@@ -25,6 +25,8 @@ jobs:
     outputs:
       tag_name: ${{ steps.create_tag.outputs.tag_name }}
       short_sha: ${{ steps.create_tag.outputs.short_sha }}
+      # Only main builds move `nightly-latest` and get a GitHub release.
+      is_main: ${{ steps.create_tag.outputs.is_main }}
       built_at: ${{ steps.create_tag.outputs.built_at }}
     steps:
       - name: Checkout repository
@@ -37,50 +39,93 @@ jobs:
         env:
           TAG_SUFFIX: ${{ github.event.inputs.tag_suffix }}
         run: |
-          # Generate date-based tag (YYYY.MM.DD format)
-          DATE_TAG=$(TZ=Asia/Kolkata date +%Y.%m.%d)
-          
           # Validate tag suffix against allowed charset (alphanumeric, dash, dot, underscore only)
-          if [[ -n "$TAG_SUFFIX" ]]; then
-            if [[ ! "$TAG_SUFFIX" =~ ^[a-zA-Z0-9._-]+$ ]]; then
-              echo "Error: tag_suffix contains invalid characters. Only alphanumeric, dash, dot, and underscore are allowed."
-              echo "Provided: $TAG_SUFFIX"
-              exit 1
-            fi
-            BASE_TAG="nightly-${DATE_TAG}-${TAG_SUFFIX}"
-          else
-            BASE_TAG="nightly-${DATE_TAG}"
+          if [[ -n "$TAG_SUFFIX" && ! "$TAG_SUFFIX" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+            echo "Error: tag_suffix contains invalid characters. Only alphanumeric, dash, dot, and underscore are allowed."
+            echo "Provided: $TAG_SUFFIX"
+            exit 1
           fi
-          
+
           SHORT_SHA="${GITHUB_SHA::7}"
           BUILT_AT=$(TZ=Asia/Kolkata date '+%Y-%m-%d %H:%M:%S IST')
-          
-          # Check if base tag exists remotely and points to different commit
-          # If so, append run number to make it unique
-          TAG_NAME="${BASE_TAG}"
-          if git ls-remote --tags origin | grep -q "refs/tags/${BASE_TAG}$"; then
-            # Tag exists remotely, check if it points to current commit
-            git fetch origin "refs/tags/${BASE_TAG}:refs/tags/${BASE_TAG}" 2>/dev/null || true
-            EXISTING_SHA=$(git rev-parse "refs/tags/${BASE_TAG}^{commit}" 2>/dev/null || echo "")
-            
-            if [[ "$EXISTING_SHA" == "$GITHUB_SHA" ]]; then
-              echo "✓ Tag ${BASE_TAG} already exists and points to current commit ${SHORT_SHA}"
-              echo "  Reusing existing tag. Builds will update images."
+
+          # Exact lookup of refs/tags/<name> on origin (no regex: tag names contain dots).
+          remote_tag_exists() {
+            git ls-remote --exit-code --tags origin "refs/tags/$1" >/dev/null 2>&1
+          }
+
+          if [[ "$GITHUB_REF_NAME" == "main" ]]; then
+            IS_MAIN=true
+            # Date-based tag (YYYY.MM.DD format)
+            DATE_TAG=$(TZ=Asia/Kolkata date +%Y.%m.%d)
+            if [[ -n "$TAG_SUFFIX" ]]; then
+              BASE_TAG="nightly-${DATE_TAG}-${TAG_SUFFIX}"
             else
-              # Tag exists but points to different commit, append run number
-              TAG_NAME="${BASE_TAG}-run${GITHUB_RUN_NUMBER}"
-              echo "⚠ Tag ${BASE_TAG} exists but points to different commit"
-              echo "  Creating unique tag: ${TAG_NAME}"
+              BASE_TAG="nightly-${DATE_TAG}"
+            fi
+
+            # If the date tag already points at another commit, append the run number
+            TAG_NAME="${BASE_TAG}"
+            if remote_tag_exists "${BASE_TAG}"; then
+              git fetch origin "refs/tags/${BASE_TAG}:refs/tags/${BASE_TAG}" 2>/dev/null || true
+              EXISTING_SHA=$(git rev-parse "refs/tags/${BASE_TAG}^{commit}" 2>/dev/null || echo "")
+              if [[ "$EXISTING_SHA" == "$GITHUB_SHA" ]]; then
+                echo "✓ Tag ${BASE_TAG} already exists and points to current commit ${SHORT_SHA}"
+                echo "  Reusing existing tag. Builds will update images."
+              else
+                TAG_NAME="${BASE_TAG}-run${GITHUB_RUN_NUMBER}"
+                echo "⚠ Tag ${BASE_TAG} exists but points to different commit"
+                echo "  Creating unique tag: ${TAG_NAME}"
+              fi
+            else
+              echo "✓ Tag ${BASE_TAG} does not exist remotely. Will create new tag."
             fi
           else
-            echo "✓ Tag ${BASE_TAG} does not exist remotely. Will create new tag."
+            IS_MAIN=false
+            # Branch builds (e.g. hotfix bases) are named after the branch plus
+            # the provided name, so the image says what it was built from.
+            if [[ -z "$TAG_SUFFIX" ]]; then
+              echo "Error: tag_suffix is required when building from a branch other than main (got branch: ${GITHUB_REF_NAME})."
+              exit 1
+            fi
+            # Image tags allow only [A-Za-z0-9_.-] and cannot start with '.' or '-'.
+            BRANCH_SLUG=$(printf '%s' "$GITHUB_REF_NAME" | sed -e 's#[^A-Za-z0-9._-]#-#g' -e 's#^[.-]*##')
+            # A branch made only of unsafe characters (e.g. "+") sanitizes to nothing.
+            BRANCH_SLUG="${BRANCH_SLUG:-branch}"
+            TAG_NAME="${BRANCH_SLUG}-${TAG_SUFFIX}"
+            # nightly-* (nightly-latest and the dated tags) belongs to main. Image
+            # pushes for TAG_NAME are not gated on is_main, so a branch "nightly"
+            # with suffix "latest" would otherwise overwrite nightly-latest.
+            if [[ "$TAG_NAME" == nightly-* ]]; then
+              echo "Error: tag '${TAG_NAME}' is in the nightly-* namespace reserved for main builds. Rename the branch or build from main."
+              exit 1
+            fi
+            # Longest derived image tag is "groovy-runner-<tag>" (14 chars + tag), registry limit 128.
+            if (( ${#TAG_NAME} > 114 )); then
+              echo "Error: tag '${TAG_NAME}' is ${#TAG_NAME} characters; branch name + suffix must be at most 114."
+              exit 1
+            fi
+            # Never silently rename or move a branch build: fail if the name is taken by another commit.
+            if remote_tag_exists "${TAG_NAME}"; then
+              git fetch origin "refs/tags/${TAG_NAME}:refs/tags/${TAG_NAME}" 2>/dev/null || true
+              EXISTING_SHA=$(git rev-parse "refs/tags/${TAG_NAME}^{commit}" 2>/dev/null || echo "")
+              if [[ "$EXISTING_SHA" == "$GITHUB_SHA" ]]; then
+                echo "✓ Tag ${TAG_NAME} already exists and points to current commit ${SHORT_SHA}. Rebuilding images."
+              else
+                echo "Error: tag ${TAG_NAME} already exists at ${EXISTING_SHA::7}, not ${SHORT_SHA}. Use a different tag_suffix."
+                exit 1
+              fi
+            else
+              echo "✓ Branch build tag: ${TAG_NAME}"
+            fi
           fi
-          
+
           # Output the final tag name
-          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
-          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
-          echo "built_at=${BUILT_AT}" >> $GITHUB_OUTPUT
-          echo "final_tag=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "built_at=${BUILT_AT}" >> "$GITHUB_OUTPUT"
+          echo "final_tag=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "is_main=${IS_MAIN}" >> "$GITHUB_OUTPUT"
           
           # Create tag locally (will be pushed after successful builds)
           git config user.name "github-actions[bot]"
@@ -129,7 +174,7 @@ jobs:
           images: ghcr.io/${{ github.repository }}/postgres
           tags: |
             type=raw,value=${{ needs.create-tag.outputs.tag_name }}
-            type=raw,value=nightly-latest
+            type=raw,value=nightly-latest,enable=${{ needs.create-tag.outputs.is_main == 'true' }}
 
       - name: Build and push Postgres Docker image
         uses: docker/build-push-action@v5
@@ -183,7 +228,7 @@ jobs:
           images: ghcr.io/${{ github.repository }}
           tags: |
             type=raw,value=${{ needs.create-tag.outputs.tag_name }}
-            type=raw,value=nightly-latest
+            type=raw,value=nightly-latest,enable=${{ needs.create-tag.outputs.is_main == 'true' }}
 
       - name: Build and push MySQL Docker image
         uses: docker/build-push-action@v5
@@ -227,10 +272,12 @@ jobs:
             ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-amd64 \
             ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-arm64
 
-          # Create manifest for nightly-latest
-          docker buildx imagetools create --tag ghcr.io/${{ github.repository }}/postgres:nightly-latest \
-            ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-amd64 \
-            ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-arm64
+          # Create manifest for nightly-latest (main builds only)
+          if [[ "${{ needs.create-tag.outputs.is_main }}" == "true" ]]; then
+            docker buildx imagetools create --tag ghcr.io/${{ github.repository }}/postgres:nightly-latest \
+              ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-amd64 \
+              ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-arm64
+          fi
 
           # Flat alias on the root image for single-repository registries
           # (e.g. a central ECR repo), where the sub-image name has to be
@@ -265,10 +312,12 @@ jobs:
             ghcr.io/${{ github.repository }}:${TAG_NAME}-linux-amd64 \
             ghcr.io/${{ github.repository }}:${TAG_NAME}-linux-arm64
           
-          # Create manifest for nightly-latest
-          docker buildx imagetools create --tag ghcr.io/${{ github.repository }}:nightly-latest \
-            ghcr.io/${{ github.repository }}:${TAG_NAME}-linux-amd64 \
-            ghcr.io/${{ github.repository }}:${TAG_NAME}-linux-arm64
+          # Create manifest for nightly-latest (main builds only)
+          if [[ "${{ needs.create-tag.outputs.is_main }}" == "true" ]]; then
+            docker buildx imagetools create --tag ghcr.io/${{ github.repository }}:nightly-latest \
+              ghcr.io/${{ github.repository }}:${TAG_NAME}-linux-amd64 \
+              ghcr.io/${{ github.repository }}:${TAG_NAME}-linux-arm64
+          fi
 
   build-groovy-image:
     needs: create-tag
@@ -300,7 +349,7 @@ jobs:
           images: ghcr.io/${{ github.repository }}/groovy-runner
           tags: |
             type=raw,value=${{ needs.create-tag.outputs.tag_name }}
-            type=raw,value=nightly-latest
+            type=raw,value=nightly-latest,enable=${{ needs.create-tag.outputs.is_main == 'true' }}
 
       - name: Build and push Groovy Docker image
         uses: docker/build-push-action@v5
@@ -311,7 +360,7 @@ jobs:
           platforms: linux/amd64,linux/arm64
           tags: |
             ghcr.io/${{ github.repository }}/groovy-runner:${{ needs.create-tag.outputs.tag_name }}
-            ghcr.io/${{ github.repository }}/groovy-runner:nightly-latest
+            ${{ needs.create-tag.outputs.is_main == 'true' && format('ghcr.io/{0}/groovy-runner:nightly-latest', github.repository) || '' }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=nightly-groovy
           cache-to: type=gha,scope=nightly-groovy,mode=max
@@ -328,6 +377,8 @@ jobs:
 
   create-release:
     needs: [create-tag, create-postgres-manifest, create-mysql-manifest, build-groovy-image]
+    # Branch (hotfix) builds get a tag and images but no GitHub release.
+    if: needs.create-tag.outputs.is_main == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -375,7 +426,14 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   push-tag:
-    needs: [create-tag, create-release]
+    needs: [create-tag, create-postgres-manifest, create-mysql-manifest, build-groovy-image, create-release]
+    # create-release is skipped for branch builds, so check the image jobs directly.
+    if: >-
+      !cancelled() &&
+      needs.create-postgres-manifest.result == 'success' &&
+      needs.create-mysql-manifest.result == 'success' &&
+      needs.build-groovy-image.result == 'success' &&
+      (needs.create-release.result == 'success' || needs.create-release.result == 'skipped')
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -423,7 +481,9 @@ jobs:
         run: |
           echo "Nightly build completed successfully!"
           echo "Tag: ${{ needs.create-tag.outputs.tag_name }}"
-          echo "Release: https://github.com/${{ github.repository }}/releases/tag/${{ needs.create-tag.outputs.tag_name }}"
+          if [[ "${{ needs.create-tag.outputs.is_main }}" == "true" ]]; then
+            echo "Release: https://github.com/${{ github.repository }}/releases/tag/${{ needs.create-tag.outputs.tag_name }}"
+          fi
           echo "Images are available at:"
           echo "  - ghcr.io/${{ github.repository }}/postgres:${{ needs.create-tag.outputs.tag_name }}"
           echo "  - ghcr.io/${{ github.repository }}:${{ needs.create-tag.outputs.tag_name }}"
