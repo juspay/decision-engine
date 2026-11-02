@@ -21,7 +21,8 @@ Optional env: BASE_URL, END_MS (default: the merchant's last event), WINDOWS ("1
 RUNS (5), PROFILES ("uncapped sandbox"), CASES (indices into CASES), CLICKHOUSE (the
 clickhouse-client command), and
 REPLAY_RUN (a run id printed by an earlier run): replay that run's captured queries instead of
-calling the server, to compare an earlier build with this one on the same data.
+calling the server, to compare an earlier build with this one on the same data, and
+REPLAY_MERCHANT (the merchant that run used, when it differs from MERCHANT_ID).
 """
 import json
 import os
@@ -38,6 +39,7 @@ API_KEY = os.environ["API_KEY"]
 MERCHANT_ID = os.environ["MERCHANT_ID"]
 RUNS = int(os.environ.get("RUNS", "5"))
 REPLAY_RUN = os.environ.get("REPLAY_RUN")
+REPLAY_MERCHANT = os.environ.get("REPLAY_MERCHANT")
 # Which of CASES to run, by index (default: all), e.g. "0 1 4".
 ONLY_CASES = {int(index) for index in os.environ.get("CASES", "").split()}
 WINDOWS = os.environ.get("WINDOWS", "15m 1h 1d 7d").split()
@@ -126,7 +128,10 @@ def captured(run_id, window, case_index):
     )
     by_index = {}
     for row in rows:
-        by_index.setdefault(row["query"], None)
+        query = row["query"]
+        if REPLAY_MERCHANT:
+            query = query.replace(f"'{REPLAY_MERCHANT}'", f"'{MERCHANT_ID}'")
+        by_index.setdefault(query, None)
     return list(by_index)
 
 

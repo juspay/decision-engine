@@ -56,6 +56,11 @@ struct CountRow {
 #[derive(Debug, Clone, Deserialize, Row)]
 struct PageKeyRow {
     payment_key: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, Row)]
+struct PageKeyWithTotalsRow {
+    payment_key: u64,
     total_results: u64,
     total_success: u64,
     total_failure: u64,
@@ -167,12 +172,8 @@ const ROW_AGGREGATES: &[Aggregate] = &[
 /// What the count reads: the outcome it splits totals by.
 const COUNT_AGGREGATES: &[Aggregate] = &[Aggregate::Outcome];
 
-/// What choosing a page reads: the page's sort keys, and the outcome its totals split by.
-const PAGE_KEY_AGGREGATES: &[Aggregate] = &[
-    Aggregate::LastSeen,
-    Aggregate::EventCount,
-    Aggregate::Outcome,
-];
+/// What choosing a page reads: the page's sort keys. Carrying the totals adds the outcome.
+const PAGE_KEY_AGGREGATES: &[Aggregate] = &[Aggregate::LastSeen, Aggregate::EventCount];
 
 /// The list's totals: matching payments, and those that succeeded and failed.
 type Totals = (usize, usize, usize);
@@ -687,7 +688,8 @@ fn map_rows(rows: Vec<AuditSummaryRow>) -> Vec<PaymentAuditSummary> {
         .collect()
 }
 
-/// The totals alone: for a page past the last, whose query returns no row to carry them.
+/// The totals alone: when the page's query doesn't carry them (see [`totals_with_page`]), or for a
+/// page past the last, whose query returns no row to carry them.
 async fn count(
     client: &clickhouse::Client,
     query: &PaymentAuditQuery,
@@ -713,17 +715,27 @@ async fn count(
     ))
 }
 
-/// The payment keys on the requested page, in page order, and the totals over every matching
-/// payment, from one grouping: the totals are window functions over the matches, computed before
-/// the page is cut. `None` totals when the page is past the last.
-///
-/// The filters, a payment field's request parsing above all, are evaluated once for both.
+/// Whether the page's query carries the totals too. Its totals are window functions over every
+/// matching payment, so the query holds them all until the page is cut: about 7 MiB more at 630k
+/// payments than a separate count. That pays only when the filters are costly to evaluate twice,
+/// which a payment field's request parsing is; otherwise the count is a second, lighter query.
+fn totals_with_page(query: &PaymentAuditQuery) -> bool {
+    !query.payment_filters.fields.is_empty()
+}
+
+/// The payment keys on the requested page, in page order, and with [`totals_with_page`], the
+/// totals over every matching payment from the same grouping (`None` for a page past the last).
 async fn load_page_keys(
     client: &clickhouse::Client,
     query: &PaymentAuditQuery,
     scope: PaymentAuditScope,
 ) -> Result<(Vec<u64>, Option<Totals>), ApiError> {
-    let rows = fetch_all::<PageKeyRow>(page_keys_query(query, scope).build(client)).await?;
+    let builder = page_keys_query(query, scope);
+    if !totals_with_page(query) {
+        let rows = fetch_all::<PageKeyRow>(builder.build(client)).await?;
+        return Ok((rows.into_iter().map(|row| row.payment_key).collect(), None));
+    }
+    let rows = fetch_all::<PageKeyWithTotalsRow>(builder.build(client)).await?;
     let totals = rows.first().map(|row| {
         (
             row.total_results as usize,
@@ -738,18 +750,24 @@ async fn load_page_keys(
 }
 
 fn page_keys_query(query: &PaymentAuditQuery, scope: PaymentAuditScope) -> BoundQueryBuilder {
-    let aggregates = with_filter_aggregates(query, PAGE_KEY_AGGREGATES);
+    let with_totals = totals_with_page(query);
+    let mut aggregates = with_filter_aggregates(query, PAGE_KEY_AGGREGATES);
+    if with_totals && !aggregates.contains(&Aggregate::Outcome) {
+        aggregates.push(Aggregate::Outcome);
+    }
     let mut builder = subquery(summary_fragment(query, scope, &aggregates, None));
     builder.add_select("payment_key");
-    builder.add_select("count() OVER () AS total_results");
-    builder.add_select(format!(
-        "countIf({} = 'success') OVER () AS total_success",
-        outcome_sql()
-    ));
-    builder.add_select(format!(
-        "countIf({} = 'failure') OVER () AS total_failure",
-        outcome_sql()
-    ));
+    if with_totals {
+        builder.add_select("count() OVER () AS total_results");
+        builder.add_select(format!(
+            "countIf({} = 'success') OVER () AS total_success",
+            outcome_sql()
+        ));
+        builder.add_select(format!(
+            "countIf({} = 'failure') OVER () AS total_failure",
+            outcome_sql()
+        ));
+    }
     builder.extend_filters(outer_summary_filters(query));
     builder.add_order_by(OrderClause::desc("last_seen_ms"));
     builder.add_order_by(OrderClause::desc("event_count"));
@@ -769,7 +787,8 @@ pub async fn load_list(
     let (keys, totals) = load_page_keys(client, query, scope).await?;
     let totals = match totals {
         Some(totals) => totals,
-        None if query.page <= 1 => (0, 0, 0),
+        // The page's query carried the totals and returned no row: nothing matches.
+        None if totals_with_page(query) && query.page <= 1 => (0, 0, 0),
         None => count(client, query, scope).await?,
     };
     if keys.is_empty() {
@@ -1056,8 +1075,8 @@ mod tests {
             [
                 Aggregate::LastSeen,
                 Aggregate::EventCount,
-                Aggregate::Outcome,
-                Aggregate::RoutingFamilies
+                Aggregate::RoutingFamilies,
+                Aggregate::Outcome
             ]
         );
 
@@ -1122,13 +1141,21 @@ mod tests {
         }
     }
 
-    /// The page's keys and the totals come from one grouping, so each filter, a payment field's
-    /// request parsing above all, is evaluated once per search rather than once for the count
-    /// and again for the page.
+    /// With a payment field, the page's keys and the totals come from one grouping, so the
+    /// request parsing runs once per search. Without one, the totals are a separate count, which
+    /// holds less than window functions over every matching payment.
     #[test]
-    fn one_query_chooses_the_page_and_counts_the_matches() {
+    fn one_query_chooses_the_page_and_counts_the_matches_when_fields_are_costly() {
         use crate::analytics::models::{PaymentField, PaymentFieldFilter};
         let mut query = payment_audit_query();
+        query.gateway = vec!["adyen".to_string()];
+        let light = super::page_keys_query(&query, PaymentAuditScope::All)
+            .into_fragment()
+            .sql()
+            .to_string();
+        assert!(!light.contains("OVER ()"), "{light}");
+        assert!(!light.contains("outcome_flags"), "{light}");
+
         query.payment_filters.fields = vec![PaymentFieldFilter {
             field: PaymentField::Metadata("segment".into()),
             values: vec!["premium".into()],

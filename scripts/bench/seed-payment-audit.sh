@@ -163,18 +163,24 @@ states="minState(created_at_ms), maxState(created_at_ms), sumState(toUInt64(1)),
     groupUniqArrayState(ifNull(gateway, '')), groupUniqArrayState(ifNull(route, '')),
     groupUniqArrayState(ifNull(status, '')), groupUniqArrayState(flow_type),
     groupUniqArrayState(ifNull(error_code, ''))"
-ch <<SQL
+# One day at a time, as the live pipeline writes small batches: the summaries are aggregate
+# states, which ClickHouse merges across inserts, and one statement over every payment would need
+# memory for all of them at once.
+for day in $(seq 0 $((DAYS - 1))); do
+  day_rows="${source_rows} AND created_at_ms >= $((start_ms + day * 86400000)) AND created_at_ms < $((start_ms + (day + 1) * 86400000))"
+  ch <<SQL
 INSERT INTO analytics_payment_audit_summary_buckets
 SELECT merchant_id, effective_lookup_key, summary_kind,
     toStartOfFifteenMinutes(fromUnixTimestamp64Milli(created_at_ms)) AS bucket_start, ${states}
-FROM (${source_rows}) WHERE summary_kind != ''
+FROM (${day_rows}) WHERE summary_kind != ''
 GROUP BY merchant_id, effective_lookup_key, summary_kind, bucket_start;
 
 INSERT INTO analytics_payment_audit_lookup_summaries
 SELECT merchant_id, effective_lookup_key, summary_kind, ${states}
-FROM (${source_rows}) WHERE summary_kind != ''
+FROM (${day_rows}) WHERE summary_kind != ''
 GROUP BY merchant_id, effective_lookup_key, summary_kind;
 SQL
+done
 
 # Merge the merchant's partitions fully, so every run reads the same layout: a month of
 # long-lived data is merged, and freshly inserted parts (each a slice of time ClickHouse can skip
