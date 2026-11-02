@@ -101,6 +101,8 @@ helm delete my-release
 | `imagePullSecrets`  | Image pull secrets                                                                    | `[]`            |
 | `nameOverride`      | Override the name of the chart                                                        | `""`            |
 | `fullnameOverride`  | Override the full name of the application                                             | `""`            |
+| `securityContext`   | Container security context for decision-engine and groovy-runner (non-root, no privilege escalation, all capabilities dropped) | see `values.yaml` |
+| `initContainers.securityContext` | Security context for the busybox wait-for init containers (runs as `nobody`) | see `values.yaml` |
 
 ### Decision Engine Configuration
 
@@ -125,6 +127,7 @@ helm delete my-release
 | `decisionEngine.apiClient.poolMaxIdlePerHost` | API client pool max idle per host                       | `10`            |
 | `decisionEngine.apiClient.identity`        | API client identity                                        | `""`            |
 | `decisionEngine.routingConfig.enabled`     | Enable routing config                                      | `true`          |
+| `decisionEngine.securityContext`           | Merged over `securityContext` for this container           | `runAsUser: 10001, runAsGroup: 10001` |
 
 ### PostgreSQL Configuration
 
@@ -183,6 +186,7 @@ The chart can wire Decision Engine to external Kafka and ClickHouse analytics in
 | `groovyRunner.healthcheck.periodSeconds` | Groovy Runner health check period                         | `5`             |
 | `groovyRunner.healthcheck.timeoutSeconds` | Groovy Runner health check timeout                       | `5`             |
 | `groovyRunner.healthcheck.failureThreshold` | Groovy Runner health check failure threshold           | `5`             |
+| `groovyRunner.securityContext`          | Merged over `securityContext` for this container           | `runAsUser: 1000, runAsGroup: 1000` |
 
 ### Database Migration Configuration
 
