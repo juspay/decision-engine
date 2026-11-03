@@ -524,6 +524,14 @@ export function ScopeSwitcher() {
                             } leading-[18px]`}
                           >
                             {labels.profile}
+                            {/* The merchant listed among its own profiles: named as such, so it
+                                does not read as a repeat of the group header above it. */}
+                            {deMerchants.has(scope.merchant_id) && (
+                              <span className="font-normal text-slate-500 dark:text-slate-400">
+                                {' '}
+                                · merchant
+                              </span>
+                            )}
                           </span>
                           <span className="shrink-0 font-mono text-[11px] text-slate-500 dark:text-slate-400 leading-4">
                             {shortId(scope.merchant_id)}
