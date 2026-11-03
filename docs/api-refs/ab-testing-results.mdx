@@ -9,7 +9,7 @@ Once an experiment (see [Create An Experiment](https://github.com/juspay/decisio
 
 ## Experiment Results
 
-Runs a statistical significance test (two-sample z-test on expected value, or plain auth-rate when the experiment is auth-only) between the control and variant arms.
+Runs a statistical significance test (two-sample z-test on expected value, or plain auth-rate when the experiment is auth-only) between control and each variant. With several variants, each comparison runs at `0.05 / number of variants` (Bonferroni, returned as `significance_level`), so the chance of any false verdict across the experiment stays at 5%; confidence intervals use the same level.
 
 ```bash
 curl "$BASE_URL/analytics/experiment/routing_a1b2c3d4-1111-2222-3333-444455556666/results" \
@@ -17,7 +17,9 @@ curl "$BASE_URL/analytics/experiment/routing_a1b2c3d4-1111-2222-3333-44445555666
   --header "$TENANT_HEADER"
 ```
 
-Optional query parameters: `start_ms`, `end_ms`, `min_sample_size`, `guardrail_threshold_pp`, `evaluation_margin` — override the experiment's stored thresholds for an ad-hoc window or sensitivity check.
+Optional query parameters: `start_ms`, `end_ms`, `min_sample_size`, `guardrail_threshold_pp`, `evaluation_margin` — override the experiment's stored thresholds for an ad-hoc window or sensitivity check. `variants` (comma-separated variant ids, e.g. `variants=rule_b,sr_cost`) sets which variants are reported, in what order, and how many the significance level is corrected for — pass the experiment's ids so a variant with no traffic yet still counts. Omitted, the variants are read from the recorded payments.
+
+`variants` holds one entry per variant: its `metrics` (same shape as `control`) with its own `delta_pp`, `p_value`, `confidence_interval`, `verdict` and `net_delta_bps` against control. `min_sample_size` applies to each comparison (control plus that variant). The top-level `variant`, `delta_pp`, `p_value`, `confidence_interval`, `verdict` and `net_delta_bps` repeat the first variant's comparison for single-variant clients.
 
 `start_ms` / `end_ms` select payments by when they were routed. A payment's outcome comes from the statuses reported for it on `/update-gateway-score` and counts however late it arrives, even after `end_ms`.
 
@@ -55,6 +57,17 @@ Optional query parameters: `start_ms`, `end_ms`, `min_sample_size`, `guardrail_t
     "avg_cost_saved_bps": 32.3,
     "net_ev_bps": 17944.0
   },
+  "variants": [
+    {
+      "metrics": { "arm": "variant", "transaction_count": 1204, "success_count": 1101, "failure_count": 103, "auth_rate": 0.914, "first_attempt_auth_rate": 0.887, "total_cost_saved": 962.3, "avg_latency_ms": 6.5, "avg_chosen_cost_bps": 150.1, "avg_cost_saved_bps": 32.3, "net_ev_bps": 17944.0 },
+      "delta_pp": -2.6,
+      "p_value": 0.031,
+      "confidence_interval": [-4.9, -0.3],
+      "verdict": "variant_wins",
+      "net_delta_bps": 284.0
+    }
+  ],
+  "significance_level": 0.05,
   "delta_pp": -2.6,
   "p_value": 0.031,
   "confidence_interval": [-4.9, -0.3],
@@ -69,7 +82,7 @@ Optional query parameters: `start_ms`, `end_ms`, `min_sample_size`, `guardrail_t
 
 | Verdict | Meaning |
 | --- | --- |
-| `collecting_data` | Fewer than `min_sample_size` resolved payments across both arms, or an arm has none yet. |
+| `collecting_data` | Fewer than `min_sample_size` resolved payments across control and the variant, or either has none yet. |
 | `not_significant` | Enough data, but the difference isn't statistically significant. |
 | `variant_wins` | Variant significantly outperforms control on net expected value. |
 | `variant_loses` | Variant significantly underperforms control. |

@@ -50,7 +50,7 @@ pub enum StaticRoutingAlgorithm {
     Priority(Vec<ConnectorInfo>),
     VolumeSplit(Vec<super::ast::VolumeSplit<ConnectorInfo>>),
     Advanced(Program),
-    AbTest(ABTestData),
+    AbTest(Box<ABTestData>),
     /// Volume-commitment contract configuration — a stored document, not an evaluable
     /// algorithm. Must ride the `algorithm_for = "volume_commitment"` slot (validated), so the
     /// payment/payout/3DS evaluate paths never see it.

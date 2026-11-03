@@ -4107,6 +4107,15 @@
             "schema": {
               "type": "number"
             }
+          },
+          {
+            "name": "variants",
+            "in": "query",
+            "required": false,
+            "description": "The experiment's variant ids, comma-separated, in order. Sets which variants are reported and how many the significance level is corrected for. Omitted, the variants are read from the recorded payments.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -8762,6 +8771,55 @@
           }
         }
       },
+      "ExperimentVariantComparison": {
+        "type": "object",
+        "description": "One variant's results and how it compares with control.",
+        "properties": {
+          "metrics": {
+            "$ref": "#/components/schemas/ExperimentArmMetrics"
+          },
+          "delta_pp": {
+            "type": "number",
+            "format": "double",
+            "description": "Variant minus control auth rate, in percentage points."
+          },
+          "p_value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Compared with significance_level, not 0.05."
+          },
+          "confidence_interval": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "collecting_data",
+              "not_significant",
+              "variant_wins",
+              "variant_loses",
+              "guardrail_breached"
+            ]
+          },
+          "net_delta_bps": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
       "ExperimentResultsResponse": {
         "type": "object",
         "properties": {
@@ -8774,8 +8832,21 @@
           "control": {
             "$ref": "#/components/schemas/ExperimentArmMetrics"
           },
+          "variants": {
+            "type": "array",
+            "description": "Every variant compared with control, in the experiment's order.",
+            "items": {
+              "$ref": "#/components/schemas/ExperimentVariantComparison"
+            }
+          },
+          "significance_level": {
+            "type": "number",
+            "format": "double",
+            "description": "Per-comparison significance level: 0.05 divided by the number of variants (Bonferroni)."
+          },
           "variant": {
-            "$ref": "#/components/schemas/ExperimentArmMetrics"
+            "$ref": "#/components/schemas/ExperimentArmMetrics",
+            "description": "The first variant's metrics, kept for single-variant clients; read variants."
           },
           "delta_pp": {
             "type": "number",

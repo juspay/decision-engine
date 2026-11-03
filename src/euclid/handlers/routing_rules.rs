@@ -218,7 +218,7 @@ pub(crate) async fn active_payment_experiment(
         }
     };
     match serde_json::from_str::<StaticRoutingAlgorithm>(&algorithm.algorithm_data).ok()? {
-        StaticRoutingAlgorithm::AbTest(data) => Some((algorithm.id, data)),
+        StaticRoutingAlgorithm::AbTest(data) => Some((algorithm.id, *data)),
         _ => None,
     }
 }
@@ -2182,7 +2182,7 @@ fn changes_experiment_routing(
     let routing_setup = |algorithm: &StaticRoutingAlgorithm| {
         match algorithm {
             StaticRoutingAlgorithm::AbTest(data) => serde_json::to_value(
-                StaticRoutingAlgorithm::AbTest(crate::euclid::types::ABTestData {
+                StaticRoutingAlgorithm::AbTest(Box::new(crate::euclid::types::ABTestData {
                     min_sample_size: 0,
                     guardrail_threshold_pp: 0.0,
                     // Display names and guardrail stops don't change how a payment is assigned.
@@ -2196,8 +2196,8 @@ fn changes_experiment_routing(
                             })
                             .collect()
                     }),
-                    ..data.clone()
-                }),
+                    ..(**data).clone()
+                })),
             ),
             other => serde_json::to_value(other),
         }

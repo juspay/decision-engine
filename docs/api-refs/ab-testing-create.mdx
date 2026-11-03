@@ -71,11 +71,40 @@ Response is the standard routing-algorithm create response:
 | Field | Type | Meaning |
 | --- | --- | --- |
 | `control` | object | Control arm layers — see [Arm](#arm). |
-| `variant` | object | Variant arm layers. |
+| `variants` | array, optional | One or more [variants](#variant), each compared with control. When present, `variant`, `variant_algorithm_id`, `variant_sr_config` and `variant_split_pct` must be left out. |
+| `variant` | object | Single-variant format: the one variant's arm layers. Its decisions are recorded under the arm id `variant`. |
 | `endpoints` | array, optional | Endpoints the experiment splits traffic on: any of `hybrid_routing`, `decide_gateway`, `evaluate`. Omitted means all three. Experiments saved from a Hyperswitch SSO dashboard session are always scoped to `["hybrid_routing"]`. |
-| `variant_split_pct` | integer, 1–49 | Percentage of traffic sent to the variant arm. Capped below 50 so the variant is always the minority arm. |
+| `variant_split_pct` | integer, 1–50 | Single-variant format: percentage of traffic sent to the variant arm. |
 | `min_sample_size` | integer | Transactions each arm needs before results are considered statistically meaningful. |
-| `guardrail_threshold_pp` | number | Auto-pause guardrail: if the variant's auth rate drops this many percentage points below control, the experiment result is marked `GuardrailBreached`. |
+| `guardrail_threshold_pp` | number | Guardrail: when a variant's auth rate on completed payments drops this many percentage points below control, that variant stops (see [Guardrail](#guardrail)) and its results are marked `guardrail_breached`. |
+
+### Variant
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | string | 1–32 lowercase letters, digits, `_` or `-`; unique within the experiment and not `control`. Decisions are recorded under it as `variant_arm`. |
+| `name` | string, optional | Display name. |
+| `split_pct` | integer, ≥ 1 | Percentage of traffic sent to this variant. All variants together take at most 50%, so control keeps the majority. |
+| `rule_algorithm_id`, `sr` | | The variant's [arm](#arm) layers, inline. |
+| `stopped` | boolean | Set by the guardrail; not sent on create. |
+
+An experiment has at most 5 variants. Each variant must apply different layers from control, and from every other variant, on at least one selected endpoint.
+
+```json
+"data": {
+  "control": { "rule_algorithm_id": "routing_control" },
+  "variants": [
+    { "id": "rule_b", "name": "Rule B", "split_pct": 15, "rule_algorithm_id": "routing_b" },
+    { "id": "sr_cost", "name": "SR + cost", "split_pct": 15, "sr": { "enable_multi_objective": true } }
+  ],
+  "min_sample_size": 5000,
+  "guardrail_threshold_pp": 3
+}
+```
+
+### Guardrail
+
+Each variant is compared with control on its own. When a variant breaches the guardrail, it stops: its payments are no longer recorded and are routed like payments the experiment doesn't cover, while the other variants keep running. The stopped variant is marked `"stopped": true` in the stored definition. When the last running variant breaches (always the case for a single-variant experiment), the whole experiment is deactivated. Activating the experiment again clears `stopped` and starts a new observation period.
 
 ### Arm
 
@@ -142,9 +171,9 @@ An experiment is active beside the merchant's active routing rule, not in its pl
 
 ## How Traffic Is Split
 
-Arm assignment is deterministic per payment: `payment_id` is hashed and taken modulo 100 against `variant_split_pct`, so retries of the same payment — and calls to different endpoints for the same payment — always land in the same arm. `/routing/hybrid` uses the dynamic request's `payment_id` for its static half when the static request carries none.
+Arm assignment is deterministic per payment: `payment_id` is hashed and taken modulo 100. Variants own consecutive buckets in list order (the first `[0, split₁)`, the next `[split₁, split₁ + split₂)`, …) and control owns the rest; the single-variant format's variant owns `[0, variant_split_pct)`. A stopped variant keeps its buckets, so stopping one never moves payments between the others. Assignment is the same for retries of the same payment, so retries of the same payment — and calls to different endpoints for the same payment — always land in the same arm. `/routing/hybrid` uses the dynamic request's `payment_id` for its static half when the static request carries none.
 
-Traffic on an endpoint is split only when the endpoint is in `endpoints` **and** the two arms differ once reduced to that endpoint's layers. Everywhere else payments aren't covered by the experiment: they're routed by the active rule and the merchant's SR settings and aren't recorded, so an experiment that changes only rules does not run an A/A test on `/decide-gateway`.
+A variant's traffic on an endpoint is split only when the endpoint is in `endpoints`, the variant is running, **and** it differs from control once reduced to that endpoint's layers. Control's payments are recorded on an endpoint where at least one variant is split. Everywhere else payments aren't covered by the experiment: they're routed by the active rule and the merchant's SR settings and aren't recorded, so an experiment that changes only rules does not run an A/A test on `/decide-gateway`.
 
 Decisions are recorded for the experiment's results only when the merchant feature `ab-test-real-payments` is enabled — see [Merchant Features](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/merchant-features.mdx) — and the request carries a `payment_id`. Each recorded decision is tagged with its endpoint, and [results](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-results.mdx) are read per endpoint. With the feature off, every endpoint ignores the experiment and routes by the active rule.
 
