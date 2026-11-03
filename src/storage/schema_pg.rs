@@ -272,6 +272,18 @@ diesel::table! {
         description -> Nullable<Varchar>,
         is_active -> Bool,
         created_at -> Timestamp,
+        authz_version -> Int8,
+    }
+}
+
+diesel::table! {
+    api_key_merchants (key_id, merchant_id) {
+        key_id -> Varchar,
+        merchant_id -> Varchar,
+        status -> Varchar,
+        permissions -> Nullable<Text>,
+        authz_version -> Int8,
+        created_at -> Timestamp,
     }
 }
 
@@ -601,6 +613,7 @@ diesel::table! {
 }
 
 diesel::allow_tables_to_appear_in_same_query!(
+    api_key_merchants,
     card_brand_routes,
     card_info,
     co_badged_cards_info_test,

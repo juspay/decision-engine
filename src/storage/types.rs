@@ -768,6 +768,20 @@ pub struct MerchantApiKey {
     #[cfg(feature = "postgres")]
     pub is_active: bool,
     pub created_at: PrimitiveDateTime,
+    pub authz_version: i64,
+}
+
+/// A credential's explicit merchant grant. NULL permissions are reserved for legacy unrestricted
+/// single-merchant keys; shared-key issuance will require explicit permissions before using this.
+#[derive(Debug, Clone, Identifiable, Queryable, Insertable)]
+#[diesel(table_name = schema::api_key_merchants, primary_key(key_id, merchant_id))]
+pub struct ApiKeyMerchant {
+    pub key_id: String,
+    pub merchant_id: String,
+    pub status: String,
+    pub permissions: Option<String>,
+    pub authz_version: i64,
+    pub created_at: PrimitiveDateTime,
 }
 
 #[derive(Debug, Clone, Insertable)]
