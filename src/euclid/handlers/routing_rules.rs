@@ -1014,10 +1014,14 @@ async fn evaluate_algorithm_data(
             }
 
             StaticRoutingAlgorithm::AbTest(ab_data) => {
-                use crate::decider::gatewaydecider::ab_test::{arms, outcome, preview};
+                use crate::decider::gatewaydecider::ab_test::{guardrail, outcome, preview};
 
                 let payment_id = payload.payment_id.as_deref().unwrap_or("");
-                let plan = arms::plan(ab_data, experiment_endpoint, payment_id);
+                let plan = if crate::decider::gatewaydecider::ab_test::config::is_enabled(&payload.created_by).await && !payment_id.is_empty() {
+                    guardrail::plan(&payload.created_by, &algorithm.id, ab_data, experiment_endpoint, payment_id)
+                } else {
+                    crate::decider::gatewaydecider::ab_test::arms::plan(ab_data, experiment_endpoint, payment_id)
+                };
                 logger::debug!(
                     "A/B test routing evaluate: payment_id={:?} endpoint={} arm={} in_experiment={} rule={:?}",
                     payload.payment_id,
@@ -1866,6 +1870,11 @@ pub async fn activate_routing_rule(
         let occupant = algorithm_store::find_slot(&state.db, &merchant, &slot)
             .await
             .change_context(EuclidErrors::StorageError)?;
+        // The experiment leaving the slot, when a different algorithm replaces it.
+        let replaced = occupant
+            .as_ref()
+            .map(|mapping| mapping.routing_algorithm_id.clone())
+            .filter(|id| *id != algorithm.id);
         let changed = match occupant {
             // Already active with the same algorithm: only the cache TTL is refreshed.
             Some(mapping) if mapping.routing_algorithm_id == algorithm.id => false,
@@ -1885,6 +1894,20 @@ pub async fn activate_routing_rule(
 
         if changed {
             stamp_contract_activation(&conn, &algorithm).await?;
+            if is_experiment {
+                // A deliberate activation starts a new guardrail observation period, for the
+                // experiment taking the slot and for the one it displaced.
+                if let Some(previous) = replaced.as_deref() {
+                    crate::decider::gatewaydecider::ab_test::guardrail::reset(
+                        merchant.as_str(),
+                        previous,
+                    );
+                }
+                crate::decider::gatewaydecider::ab_test::guardrail::reset(
+                    merchant.as_str(),
+                    &algorithm.id,
+                );
+            }
         }
         cache_activated_algorithm(&state, merchant.as_str(), &algorithm, is_experiment).await;
         if changed {
@@ -1934,6 +1957,8 @@ pub async fn deactivate_routing_rule(
             algorithm.id,
             merchant
         );
+        // A deliberate deactivation ends the guardrail's observation period.
+        crate::decider::gatewaydecider::ab_test::guardrail::reset(merchant.as_str(), &algorithm.id);
         invalidate_routing_algorithm_cache(&state, merchant.as_str()).await;
         clear_volume_commitment_plan(&algorithm.algorithm_for, merchant.as_str()).await;
         Ok::<_, ContainerError<EuclidErrors>>(())
@@ -1941,6 +1966,56 @@ pub async fn deactivate_routing_rule(
 
     let outcome = run.await;
     outcome
+}
+
+/// Stop only the experiment that breached its guardrail. The regular routing rule remains active.
+/// The conditional delete cannot remove a replacement experiment activated in the meantime.
+pub(crate) async fn stop_breached_payment_experiment(
+    merchant_id: &str,
+    experiment_id: &str,
+    run: u64,
+) -> Result<(), String> {
+    let state = get_tenant_app_state().await;
+    // Internal work, since the guardrail only names pairs the decider recorded while routing.
+    let merchant = crate::auth::AuthorizedMerchant::internal(merchant_id);
+    let payment = AlgorithmType::Payment.to_string();
+    let slot = experiment_slot(&payment);
+    let deleted = algorithm_store::vacate_slot_holding(&state.db, &merchant, &slot, experiment_id)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    if !deleted {
+        // A previous attempt may have deleted the mapping but failed to update Redis. Retry the
+        // cache write only when the slot is empty, never hiding a replacement experiment.
+        let active = algorithm_store::find_slot(&state.db, &merchant, &slot)
+            .await
+            .map_err(|e| format!("{e:?}"))?;
+        if active.is_some() {
+            crate::decider::gatewaydecider::ab_test::guardrail::mark_stopped(
+                merchant_id,
+                experiment_id,
+                run,
+            );
+            return Ok(());
+        }
+    }
+    // Drop the cached slot rather than publishing an empty one. A concurrent activation may have
+    // just installed a replacement experiment, and writing "none" here would hide it until the
+    // entry expired. Dropping the key only costs the next read a database lookup, which back-fills
+    // whatever is actually active. Retry on later feedback if Redis is unavailable.
+    let key = experiment_cache_key(merchant_id, &payment);
+    state
+        .redis_conn
+        .delete_key(&key)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    crate::decider::gatewaydecider::ab_test::guardrail::mark_stopped(
+        merchant_id,
+        experiment_id,
+        run,
+    );
+    logger::warn!(merchant_id = %merchant_id, experiment_id = %experiment_id,
+        "A/B experiment stopped after guardrail breach");
+    Ok(())
 }
 
 /// Guard for the edit/delete flows: reject the operation if this algorithm is the merchant's

@@ -454,6 +454,32 @@ pub const SCORE_UPDATE_SKIPPED: &str = "Skipped";
 pub async fn check_and_update_gateway_score_(
     api_payload: FT::UpdateScorePayload,
 ) -> Result<String, T::ErrorResponse> {
+    // Before any early return, because the guardrail needs only the payment's outcome and must
+    // not be gated on the GSM scoring filter or on GatewayScoringData still being cached.
+    let is_success = is_transaction_success(api_payload.status.clone());
+    if is_success || is_transaction_failure(api_payload.status.clone()) {
+        let experiments_to_stop =
+            crate::decider::gatewaydecider::ab_test::guardrail::record_outcome(
+                &api_payload.merchant_id,
+                &api_payload.payment_id,
+                is_success,
+            );
+        for breached in experiments_to_stop {
+            if let Err(error) =
+                crate::euclid::handlers::routing_rules::stop_breached_payment_experiment(
+                    &api_payload.merchant_id,
+                    &breached.experiment_id,
+                    breached.run,
+                )
+                .await
+            {
+                logger::error!(merchant_id = %api_payload.merchant_id,
+                    experiment_id = %breached.experiment_id, error = %error,
+                    "Failed to stop breached A/B experiment; later payment feedback will retry");
+            }
+        }
+    }
+
     // GSM-based scoring filter: skip penalization for failures where the gateway
     // is healthy (user/issuer-originated errors). Gated per merchant so it can be
     // rolled back instantly without a deploy.

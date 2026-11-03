@@ -916,7 +916,9 @@ pub enum ExperimentVerdict {
     VariantWins,
     /// Variant is statistically significantly worse than control.
     VariantLoses,
-    /// Variant auth rate dropped beyond the guardrail threshold — merchant should pause.
+    /// Completed-payment auth rate dropped beyond the query's guardrail threshold, even if the
+    /// significance sample target has not been reached. Reporting a breach here warns earlier
+    /// than the live stop, which waits for a tenth of the target to resolve.
     GuardrailBreached,
 }
 

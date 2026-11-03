@@ -225,3 +225,27 @@ pub async fn vacate(
     .map(|_| ())
     .map_err(Report::new)
 }
+
+/// Empty the merchant's slot only while it still holds this algorithm, so a replacement activated
+/// in the meantime is left in place. `false` when the slot held something else, or nothing.
+pub async fn vacate_slot_holding(
+    db: &Storage,
+    merchant: &AuthorizedMerchant,
+    slot: &str,
+    algorithm_id: &str,
+) -> StoreResult<bool> {
+    let conn = db.get_conn().await.map_err(Report::new)?;
+    match generics::generic_delete::<<RoutingAlgorithmMapper as HasTable>::Table, _>(
+        &conn,
+        mapper_dsl::created_by
+            .eq(merchant.as_str().to_string())
+            .and(mapper_dsl::algorithm_for.eq(slot.to_string()))
+            .and(mapper_dsl::routing_algorithm_id.eq(algorithm_id.to_string())),
+    )
+    .await
+    {
+        Ok(_) => Ok(true),
+        Err(MeshError::NoRowstoDelete) => Ok(false),
+        Err(e) => Err(Report::new(e)),
+    }
+}
