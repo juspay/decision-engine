@@ -2,6 +2,7 @@ import org.codehaus.groovy.control.CompilerConfiguration
 import org.codehaus.groovy.control.customizers.SecureASTCustomizer
 import org.kohsuke.groovy.sandbox.SandboxTransformer
 import org.kohsuke.groovy.sandbox.GroovyValueFilter
+import org.kohsuke.groovy.sandbox.GroovyInterceptor
 import com.sun.net.httpserver.HttpServer
 import java.lang.reflect.Array
 import groovy.json.JsonSlurper
@@ -53,9 +54,7 @@ class App {
                     println("Context: ${context.dump()}")
 
                     try {
-                        def closure = dslBuilderService.evaluateScript(log, "gatewayPriorityLogic", merchantId, script)
-                        closure.delegate = context
-                        closure()
+                        dslBuilderService.evaluateScript(log, "gatewayPriorityLogic", merchantId, script, context)
                     } catch (IndexOutOfBoundsException e) {
                         http.sendResponseHeaders(400, 0)
                         log.error("IndexOutOfBoundsException while trying to execute custom gateway priority logic for order ${orderInfo?.orderId}", e)
@@ -143,9 +142,7 @@ class App {
                     log.info("Context: " + context.dump())
 
                     try {
-                        def closure = dslBuilderService.evaluateScript(log, "gatewayPriorityLogic", merchantId, script)
-                        closure.delegate = context
-                        closure()
+                        dslBuilderService.evaluateScript(log, "gatewayPriorityLogic", merchantId, script, context)
                     }
                     catch (RuntimeException e) {
                         log.error("Exception while trying to execute custom gateway priority logic for order", e)
@@ -298,7 +295,7 @@ class DslBuilderService {
     private class CustomScriptSandbox extends GroovyValueFilter {
         @Override
         Object filter(Object o) {
-            if (o instanceof Collection || o instanceof Map || o instanceof Number)
+            if (o instanceof Collection || o instanceof Map || o instanceof Number || o instanceof GString)
                 return o;
             if (o == null || ALLOWED_TYPES.contains(o.class) || ALLOWED_TYPES.contains(o))
                 return o;
@@ -313,9 +310,21 @@ class DslBuilderService {
                 Character,
                 String,
                 Array,
-                System,
-                Random
+                Random,
+                Math,
+                Date
         ] as Set
+
+        // `System` itself is not an allowed type; only reading the clock is
+        // permitted, for scripts that call it directly instead of using the
+        // `currentTimeMillis` field on the context.
+        @Override
+        Object onStaticCall(GroovyInterceptor.Invoker invoker, Class receiver, String method, Object... args) throws Throwable {
+            if (receiver == System && method == "currentTimeMillis" && args.length == 0) {
+                return invoker.call(receiver, method)
+            }
+            return super.onStaticCall(invoker, receiver, method, args)
+        }
     }
 
     public ThreadSafeLRUMap scriptCache
@@ -334,16 +343,22 @@ class DslBuilderService {
         shell = new GroovyShell(compilerConfig)
     }
 
-    public def evaluateScript(Log log, String cacheDomain, String cacheID, String snippet) {
+    // Compiles the snippet into a closure and invokes it with `context` as the
+    // delegate. The closure must run while the value filter is registered: the
+    // filter is thread-local and only applies to calls made while it is active.
+    public def evaluateScript(Log log, String cacheDomain, String cacheID, String snippet, Context context) {
         def code = "{->${snippet}\n}"
 
         def sandbox = new CustomScriptSandbox()
         try {
             sandbox.register()
             Script script = getScript(cacheDomain, cacheID, code)
+            Closure closure
             synchronized (script) {
-                return script.run()
+                closure = (Closure) script.run()
             }
+            closure.delegate = context
+            return closure()
         } catch (RuntimeException e) {
             log.error("exception while running script", e)
             throw e
