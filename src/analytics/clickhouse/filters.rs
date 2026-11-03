@@ -255,6 +255,7 @@ fn payment_info_field(routing_key: &str) -> Option<&'static str> {
     Some(match routing_key {
         "card_bin" => "cardIsin",
         "card_type" => "cardType",
+        "card_network" => "cardSwitchProvider",
         "issuer_country" => "cardIssuerCountry",
         "issuer_name" => "cardIssuerBankName",
         "billing_country" => "country",
@@ -279,16 +280,28 @@ const RULE_PARAMETER_PATHS: [&str; 2] = [
     "'request', 'parameters'",
 ];
 
-/// One rule parameter's value as text: an enum, string or number value as it was sent, or a
-/// metadata variant's value. The parameter's name is the next bind.
-fn rule_parameter_sql(parameters: &str) -> (String, usize) {
-    let value = format!("assumeNotNull(details), {parameters}, ?, 'value'");
-    (
-        format!(
-            "if(JSONType({value}) = 'Object', JSONExtractString({value}, 'value'), trim(BOTH '\"' FROM JSONExtractRaw({value})))"
+/// One rule parameter's value as text, read only from parameters of the field's kind: a metadata
+/// variant's value for a metadata field, and an enum, string or number value as it was sent for a
+/// routing key. A parameter of the other kind reads as empty, which no value matches. Every
+/// placeholder is the parameter's name; the second item is how many there are.
+fn rule_parameter_sql(parameters: &str, field: &PaymentField) -> (String, usize) {
+    let parameter = format!("assumeNotNull(details), {parameters}, ?");
+    let is_metadata = format!("JSONExtractString({parameter}, 'type') = 'metadata_variant'");
+    match field {
+        PaymentField::Metadata(_) => (
+            format!("if({is_metadata}, JSONExtractString({parameter}, 'value', 'value'), '')"),
+            2,
         ),
-        3,
-    )
+        PaymentField::RoutingKey(_) => {
+            let value = format!("{parameter}, 'value'");
+            (
+                format!(
+                    "if({is_metadata}, '', if(JSONType({value}) = 'Object', JSONExtractString({value}, 'value'), trim(BOTH '\"' FROM JSONExtractRaw({value}))))"
+                ),
+                4,
+            )
+        }
+    }
 }
 
 /// The events that store a routing request: `/decide-gateway` decisions, `/decide` and
@@ -320,7 +333,7 @@ pub fn payment_field_match(filter: &PaymentFieldFilter) -> FilterClause {
     let mut candidates = Vec::new();
     let mut binds = Vec::new();
     for parameters in RULE_PARAMETER_PATHS {
-        let (sql, name_binds) = rule_parameter_sql(parameters);
+        let (sql, name_binds) = rule_parameter_sql(parameters, &filter.field);
         candidates.push(sql);
         binds.extend(std::iter::repeat_n(
             BindArg::from(name.as_str()),
@@ -714,6 +727,43 @@ mod tests {
             values: vec!["eu".into()],
         });
         assert!(!label.predicate().contains("paymentInfo"));
+        // card_network is the decider's cardSwitchProvider.
+        let network = super::payment_field_match(&PaymentFieldFilter {
+            field: PaymentField::RoutingKey("card_network".into()),
+            values: vec!["visa".into()],
+        });
+        assert!(network
+            .predicate()
+            .contains("'paymentInfo', 'cardSwitchProvider'"));
+    }
+
+    #[test]
+    fn a_payment_field_reads_only_rule_parameters_of_its_kind() {
+        use crate::analytics::models::{PaymentField, PaymentFieldFilter};
+        let metadata = super::payment_field_match(&PaymentFieldFilter {
+            field: PaymentField::Metadata("currency".into()),
+            values: vec!["USD".into()],
+        });
+        let routing_key = super::payment_field_match(&PaymentFieldFilter {
+            field: PaymentField::RoutingKey("currency".into()),
+            values: vec!["USD".into()],
+        });
+        let is_metadata = "'type') = 'metadata_variant', ";
+        // A metadata field reads a metadata variant's value, and nothing from other parameters.
+        assert!(metadata
+            .predicate()
+            .contains(&format!("{is_metadata}JSONExtractString(")));
+        assert!(metadata.predicate().contains("'value', 'value'), '')"));
+        // A routing key reads nothing from a metadata variant.
+        assert!(routing_key
+            .predicate()
+            .contains(&format!("{is_metadata}'', ")));
+        for clause in [&metadata, &routing_key] {
+            assert_eq!(
+                clause.predicate().matches('?').count(),
+                clause.binds().len()
+            );
+        }
     }
 
     #[test]

@@ -30,6 +30,7 @@ test.describe('Payment audit payment field filter (API)', () => {
         parameters: {
           payment_method: { type: 'enum_variant', value: 'card' },
           card_bin: { type: 'str_value', value: '424242' },
+          currency: { type: 'enum_variant', value: 'USD' },
           segment: { type: 'metadata_variant', value: { key: 'segment', value: 'premium' } },
         },
         fallback_output: [factory.gatewayConnector('stripe')],
@@ -38,7 +39,7 @@ test.describe('Payment audit payment field filter (API)', () => {
     expect(hybrid.status).toBe(200)
     const gateway = await api.decideGateway(factory.srDecideGatewayRequest({
       merchantId: merchant.id, eligibleGatewayList: ['stripe'],
-      paymentInfo: { paymentId: gatewayPremium, cardIsin: '424242', metadata: JSON.stringify({ segment: 'premium' }) },
+      paymentInfo: { paymentId: gatewayPremium, cardIsin: '424242', cardSwitchProvider: 'VISA', metadata: JSON.stringify({ segment: 'premium' }) },
     }))
     expect(gateway.status).toBe(200)
 
@@ -71,6 +72,11 @@ test.describe('Payment audit payment field filter (API)', () => {
     // Several fields: a payment must carry all of them.
     expect(await listed({ card_bin: '555555', 'metadata.segment': 'basic' })).toEqual([decideBasic])
     expect(await listed({ card_bin: '424242', 'metadata.segment': 'basic' })).toEqual([])
+    // /decide-gateway carries the card network as cardSwitchProvider.
+    expect(await listed({ card_network: 'visa' })).toEqual([gatewayPremium])
+    // A metadata field reads only metadata: the currency rule parameter isn't metadata.currency.
+    expect(await listed({ currency: 'USD' })).toContain(hybridPremium)
+    expect(await listed({ 'metadata.currency': 'USD' })).toEqual([])
 
     // The totals come with the page; a page past the last still reports them.
     const fields = JSON.stringify({ card_bin: '424242' })
