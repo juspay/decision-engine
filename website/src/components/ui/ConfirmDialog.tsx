@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { Button } from './Button'
 
 interface ConfirmDialogProps {
@@ -39,7 +40,9 @@ export function ConfirmDialog({
 
   if (!open) return null
 
-  return (
+  // Rendered at the document root: inside the page it would sit in the content column's stacking
+  // context, below the sidebar, and its backdrop could not cover it.
+  return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div
         className="absolute inset-0 bg-black/40 backdrop-blur-[2px]"
@@ -61,6 +64,7 @@ export function ConfirmDialog({
           </Button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   )
 }

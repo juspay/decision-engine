@@ -255,8 +255,6 @@ pub enum ApiKeyError {
     Forbidden,
     #[error("Hyperswitch accounts do not use API keys")]
     HyperswitchSession,
-    #[error("API keys are created on the merchant, and cover all of its profiles")]
-    ProfileKey,
 }
 
 impl axum::response::IntoResponse for ApiKeyError {
@@ -282,15 +280,6 @@ impl axum::response::IntoResponse for ApiKeyError {
                 .into_response(),
             Self::Forbidden | Self::HyperswitchSession => (
                 hyper::StatusCode::FORBIDDEN,
-                crate::error::ApiErrorResponse::new(
-                    crate::error::error_codes::TE_04,
-                    self.to_string(),
-                    None,
-                ),
-            )
-                .into_response(),
-            Self::ProfileKey => (
-                hyper::StatusCode::BAD_REQUEST,
                 crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     self.to_string(),

@@ -70,14 +70,9 @@ pub async fn create_api_key(
     }: ScopedJson<CreateApiKeyRequest>,
 ) -> Result<Json<CreateApiKeyResponse>, error::ContainerError<ApiKeyError>> {
     ensure_key_manager(session.as_deref())?;
-    // A key on the merchant already covers its profiles, so one on a profile would only be a
-    // narrower copy the dashboard has nowhere to show.
-    if crate::types::merchant::merchant_account::load_authorized(&merchant)
-        .await
-        .is_some_and(|account| account.parentMerchantId.is_some())
-    {
-        return Err(ApiKeyError::ProfileKey.into());
-    }
+    // Keys live on the merchant and cover its profiles, so one asked for from a profile is created
+    // on its merchant; the response names the merchant it belongs to.
+    let merchant = auth::key_holder(&merchant).await;
     let created = mint_api_key(&merchant, payload.description)
         .await
         .ok_or(ApiKeyError::CreationFailed)?;
@@ -88,6 +83,8 @@ pub async fn create_api_key(
 pub async fn list_api_keys(
     MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<Vec<ApiKeyListItem>>, error::ContainerError<ApiKeyError>> {
+    // A profile lists its merchant's keys: they are the ones that work for it.
+    let merchant = auth::key_holder(&merchant).await;
     let app_state = get_tenant_app_state().await;
     let keys = api_keys::list(&app_state.db, &merchant)
         .await
@@ -104,10 +101,11 @@ pub async fn revoke_api_key(
     ensure_key_manager(session.as_deref())?;
     let app_state = get_tenant_app_state().await;
 
-    // The route names no merchant. A session revokes among its own merchant's keys; the admin-secret
-    // lane (no session) acts for whichever merchant owns the key.
+    // The route names no merchant. A session revokes among its own merchant's keys — a profile's
+    // merchant's, for a session on a profile; the admin-secret lane (no session) acts for whichever
+    // merchant owns the key.
     let merchant = match auth::session_merchant(session.as_deref()) {
-        Some(merchant) => merchant,
+        Some(merchant) => auth::key_holder(&merchant).await,
         None => {
             let owner = api_keys::owner_of(&app_state.db, &key_id)
                 .await

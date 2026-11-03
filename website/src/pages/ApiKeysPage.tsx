@@ -7,6 +7,7 @@ import { useMerchantStore } from '../store/merchantStore'
 import { Card, CardBody, CardHeader } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 
 import { PageHeading } from '../components/ui/PageHeading'
 interface ApiKeyListItem {
@@ -50,8 +51,8 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
-/** Why this page offers no keys to manage: they live on another merchant, or in Hyperswitch. */
-function KeysElsewhere({ children }: { children: React.ReactNode }) {
+/** A line of context above the keys: whose keys they are, and what they reach. */
+function KeysNote({ children }: { children: React.ReactNode }) {
   return (
     <Card>
       <CardBody>
@@ -75,8 +76,10 @@ function Code({ children }: { children: React.ReactNode }) {
 export function ApiKeysPage() {
   const { merchantId } = useMerchantStore()
   const { merchant, isProfile, isHyperswitch, isAdmin } = useMerchantScope()
-  // Keys live on the merchant and cover its profiles, so a profile has none of its own to list.
-  const keysHere = !isProfile && !isHyperswitch
+  // On a profile, every call below is answered with its merchant's keys: the only ones there are,
+  // and the ones that work for it.
+  const merchantName = merchantLabel(merchant, 'this merchant')
+
   const [description, setDescription] = useState('')
   const [creating, setCreating] = useState(false)
   const [newKey, setNewKey] = useState<CreateApiKeyResponse | null>(null)
@@ -84,9 +87,10 @@ export function ApiKeysPage() {
   const [revokingId, setRevokingId] = useState<string | null>(null)
   const [revokeError, setRevokeError] = useState<string | null>(null)
   const [revokedIds, setRevokedIds] = useState<Set<string>>(new Set())
+  const [confirmRevoke, setConfirmRevoke] = useState<ApiKeyListItem | null>(null)
 
   const { data: keys, mutate } = useSWR<ApiKeyListItem[]>(
-    merchantId && keysHere ? `/api-key/list/${merchantId}` : null,
+    merchantId && !isHyperswitch ? `/api-key/list/${merchantId}` : null,
     fetcher,
   )
 
@@ -136,28 +140,9 @@ export function ApiKeysPage() {
     return (
       <div className="space-y-6">
         {heading}
-        <KeysElsewhere>
+        <KeysNote>
           <p>Hyperswitch accounts do not use API keys. Hyperswitch calls Decision Engine directly.</p>
-        </KeysElsewhere>
-      </div>
-    )
-  }
-
-  if (isProfile) {
-    const name = merchantLabel(merchant, 'its merchant')
-    return (
-      <div className="space-y-6">
-        {heading}
-        <KeysElsewhere>
-          <p>
-            API keys are managed on <span className="font-medium text-slate-800 dark:text-white">{name}</span>.
-            Every {name} key works for this profile. Switch to {name} to create or revoke one.
-          </p>
-          <p>
-            To route with this profile's rules, send <Code>merchant_id</Code> <Code>{merchant?.merchant_id}</Code>{' '}
-            and <Code>profile_id</Code> <Code>{merchantId}</Code>.
-          </p>
-        </KeysElsewhere>
+        </KeysNote>
       </div>
     )
   }
@@ -166,13 +151,25 @@ export function ApiKeysPage() {
     <div className="space-y-6">
       {heading}
 
-      <KeysElsewhere>
+      <KeysNote>
         <p>
-          A key works for this merchant and every one of its profiles, including profiles added later.
-          Name the profile in each request with <Code>profile_id</Code>.
-          {!isAdmin && ' Only admins can create or revoke keys.'}
+          {isProfile ? (
+            <>
+              These are <span className="font-medium text-slate-800 dark:text-white">{merchantName}</span>'s
+              keys. A key works for {merchantName} and every one of its profiles, including this one.
+            </>
+          ) : (
+            'A key works for this merchant and every one of its profiles, including profiles added later.'
+          )}{' '}
+          Name the profile in each request with <Code>profile_id</Code>
+          {isProfile && (
+            <>
+              {' '}(<Code>{merchantId}</Code> for this one)
+            </>
+          )}
+          .{!isAdmin && ' Only admins can create or revoke keys.'}
         </p>
-      </KeysElsewhere>
+      </KeysNote>
 
       {/* Create new key */}
       {isAdmin && (
@@ -265,7 +262,7 @@ export function ApiKeysPage() {
                         size="sm"
                         variant="danger"
                         disabled={revokingId === key.key_id}
-                        onClick={() => handleRevoke(key.key_id)}
+                        onClick={() => setConfirmRevoke(key)}
                       >
                         <Trash2 size={12} />
                         {revokingId === key.key_id ? 'Revoking…' : 'Revoke'}
@@ -279,6 +276,21 @@ export function ApiKeysPage() {
           )}
         </CardBody>
       </Card>
+
+      <ConfirmDialog
+        open={confirmRevoke !== null}
+        title="Revoke API key?"
+        description={`${confirmRevoke?.key_prefix ?? ''}…${
+          confirmRevoke?.description ? ` (${confirmRevoke.description})` : ''
+        } stops working immediately for ${merchantName} and all of its profiles. Requests using it will be rejected. This cannot be undone.`}
+        confirmLabel="Revoke key"
+        variant="danger"
+        onCancel={() => setConfirmRevoke(null)}
+        onConfirm={() => {
+          if (confirmRevoke) handleRevoke(confirmRevoke.key_id)
+          setConfirmRevoke(null)
+        }}
+      />
     </div>
   )
 }

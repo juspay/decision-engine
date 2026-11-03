@@ -60,7 +60,7 @@ curl --location "$BASE_URL/api-key/create" \
 ## Notes
 
 - The raw API key is usually returned only once. Store it securely.
-- A key works for its merchant and every one of the merchant's [profiles](/merchant-profiles). Naming a profile as `merchant_id` returns `400`.
+- A key works for its merchant and every one of the merchant's [profiles](/merchant-profiles). Naming a profile as `merchant_id` creates the key on its merchant, which the response's `merchant_id` names.
 - Only merchant admins can create keys from the dashboard. Hyperswitch sessions can't create keys.
 - Use `x-api-key: <api_key>` as `AUTH_HEADER` for backend-to-backend examples.
 

@@ -49,7 +49,7 @@ curl "$BASE_URL/decide" \
 
 `profile_id` is accepted by `/decide`, `/update-gateway-score`, and `/decide-gateway` (as `profileId`, in that endpoint's camelCase). Configuration endpoints take the profile id wherever they take a `merchant_id`.
 
-API keys can't be created on a profile. Revoking a merchant's key revokes it for every profile.
+A profile has no keys of its own. Listing, creating or revoking keys from a profile acts on its merchant's keys, so the dashboard's API Keys page shows the same keys on the merchant and on each profile. Revoking a merchant's key revokes it for every profile.
 
 ## Members
 

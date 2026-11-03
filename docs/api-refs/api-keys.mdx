@@ -7,7 +7,7 @@ description: "Curl examples for creating, listing, and revoking Decision Engine 
 
 API keys are intended for service-to-service traffic. Use the returned `api_key` value as `x-api-key` for protected endpoints.
 
-A key belongs to a merchant and works for that merchant and every one of its [profiles](/merchant-profiles), including profiles added later. Keys can't be created on a profile.
+A key belongs to a merchant and works for that merchant and every one of its [profiles](/merchant-profiles), including profiles added later. A profile has no keys of its own: listing, creating or revoking keys from a profile acts on its merchant's keys.
 
 Only merchant admins can create or revoke keys from the dashboard (`403` for members). Sessions handed over from Hyperswitch can't create or revoke keys, because Hyperswitch calls Decision Engine with the admin secret. An existing API key and the admin secret can still create and revoke keys.
 
@@ -34,7 +34,7 @@ curl --location "$BASE_URL/api-key/create" \
 }
 ```
 
-Naming a profile as `merchant_id` returns `400`: create the key on its merchant instead.
+Naming a profile as `merchant_id` creates the key on its merchant. The response's `merchant_id` names that merchant.
 
 ## List API Keys
 

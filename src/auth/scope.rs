@@ -253,6 +253,16 @@ async fn parent_of(merchant_id: &str) -> Option<String> {
         .and_then(|account| account.parentMerchantId)
 }
 
+/// The merchant that holds the API keys for `merchant`: its parent when it is a profile, which has
+/// none of its own, and otherwise itself. Authorization for a profile carries this one step up for
+/// managing keys only — never for acting on the parent's routing.
+pub async fn key_holder(merchant: &AuthorizedMerchant) -> AuthorizedMerchant {
+    match parent_of(merchant.as_str()).await {
+        Some(parent) => AuthorizedMerchant(parent),
+        None => merchant.clone(),
+    }
+}
+
 /// The merchant a session is authorized for, for a route that names no merchant of its own (such as
 /// revoking an api key by id). `None` for a service credential, which has no merchant of its own.
 pub fn session_merchant(session: Option<&AuthContext>) -> Option<AuthorizedMerchant> {
