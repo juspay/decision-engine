@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
+import { useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { useAuthStore, type MerchantInfo } from '../../store/authStore'
 import { useMerchantStore } from '../../store/merchantStore'
@@ -15,9 +16,9 @@ interface CreateMerchantResponse {
 }
 
 /**
- * Names and creates a sub-merchant of `parent`, then moves the session onto it — its routing is
- * what the user will configure next. A dialog over the current page rather than a page of its own:
- * it is one field, asked in the middle of other work.
+ * Names and creates a sub-merchant of `parent`, then moves the session onto it and opens its
+ * overview — its routing is what the user will configure next. A dialog over the current page
+ * rather than a page of its own: it is one field, asked in the middle of other work.
  */
 export function AddSubMerchantDialog({
   parent,
@@ -26,6 +27,7 @@ export function AddSubMerchantDialog({
   parent: MerchantInfo
   onClose: () => void
 }) {
+  const navigate = useNavigate()
   const updateMerchant = useAuthStore((s) => s.updateMerchant)
   const setMerchantId = useMerchantStore((s) => s.setMerchantId)
   const [name, setName] = useState('')
@@ -56,6 +58,7 @@ export function AddSubMerchantDialog({
       updateMerchant(res.token, res.merchant_id, res.merchants)
       setMerchantId(res.merchant_id)
       onClose()
+      navigate('/')
     } catch (err) {
       setError(apiErrorMessage(err))
       setCreating(false)
@@ -81,7 +84,7 @@ export function AddSubMerchantDialog({
           ref={inputRef}
           value={name}
           onChange={(e) => setName(e.target.value)}
-          placeholder={`e.g. ${parentName} India`}
+          placeholder={`e.g. ${parentName} US`}
           aria-label="Sub-merchant name"
           className="mt-4 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-500 focus:border-brand-500 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-white"
         />
