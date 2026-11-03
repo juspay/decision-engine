@@ -104,16 +104,30 @@ export interface ExperimentArm {
   sr?: SrConfigOverride
 }
 
+/** One variant of a multi-variant experiment: its arm layers, id and traffic share. */
+export interface ExperimentVariant extends ExperimentArm {
+  /** Recorded as `variant_arm` in analytics. Unique within the experiment, never `control`. */
+  id: string
+  name?: string
+  split_pct: number
+  /** Set when the guardrail stopped this variant while the others kept running. */
+  stopped?: boolean
+}
+
 export interface ABTestAlgorithmData {
-  /** Layered arms. When present they define the experiment and the single-strategy fields are ignored. */
+  /** Layered control arm. When present it defines control and the single-strategy control fields are ignored. */
   control?: ExperimentArm
+  /** Variants compared with control. When present every single-variant field is ignored. */
+  variants?: ExperimentVariant[]
+  /** Single-variant format: the one variant, recorded as `variant`. */
   variant?: ExperimentArm
   /** Endpoints the experiment splits traffic on. Absent means every endpoint. */
   endpoints?: ExperimentEndpoint[]
   /** Single-strategy arm format: 'sr_routing' or a saved algorithm id. */
   control_algorithm_id?: string
   variant_algorithm_id?: string
-  variant_split_pct: number
+  /** Single-variant format: the variant's traffic share. */
+  variant_split_pct?: number
   min_sample_size: number
   guardrail_threshold_pp: number
   variant_sr_config?: SrConfigOverride
@@ -252,10 +266,25 @@ export interface ExperimentArmMetrics {
   net_ev_bps: number | null
 }
 
+/** One variant's results compared with control. */
+export interface ExperimentVariantComparison {
+  metrics: ExperimentArmMetrics
+  delta_pp: number
+  p_value: number | null
+  confidence_interval: [number, number] | null
+  verdict: ExperimentVerdict
+  net_delta_bps: number | null
+}
+
 export interface ExperimentResultsResponse {
   experiment_id: string
   merchant_id: string
   control: ExperimentArmMetrics
+  /** Every variant compared with control, in the experiment's order. */
+  variants: ExperimentVariantComparison[]
+  /** Per-comparison significance level after the Bonferroni correction (0.05 / variant count). */
+  significance_level: number
+  /** First variant only; kept for single-variant clients. */
   variant: ExperimentArmMetrics
   delta_pp: number
   p_value: number | null

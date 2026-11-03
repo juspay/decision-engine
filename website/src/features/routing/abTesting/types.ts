@@ -39,6 +39,22 @@ export interface ArmLayersForm {
 
 export const EMPTY_ARM: ArmLayersForm = { ruleAlgorithmId: '', srStrategy: '' }
 
+/** One variant in the form. */
+export interface VariantForm {
+  /** Recorded as the variant's `variant_arm`; kept when an experiment is edited or duplicated. */
+  id: string
+  name: string
+  /** Only used in algorithm_comparison mode. */
+  layers: ArmLayersForm
+  /** Only used in sr_config_tuning mode. */
+  srConfig: SrConfigOverrideForm
+  splitPct: number
+}
+
+/** Each variant's share of traffic, as the form allows it. */
+export const MIN_VARIANT_PCT = 5
+export const MAX_VARIANT_PCT = 30
+
 /**
  * Where the control arm comes from:
  * - `current`: the merchant's current routing setup, read when the experiment is created
@@ -64,14 +80,13 @@ export interface ABTestFormValues {
   controlSource: ControlSource
   /** Only used in algorithm_comparison mode, when `controlSource` is not `current`. */
   control: ArmLayersForm
-  variant: ArmLayersForm
+  /** One or more variants, each compared with control. In sr_config_tuning mode control always
+   * uses the live SR config. */
+  variants: VariantForm[]
   /** Endpoints the experiment splits traffic on. */
   endpoints: ExperimentEndpoint[]
-  variantSplitPct: number
   minSampleSize: number
   guardrailThresholdPp: number
-  /** Only used in sr_config_tuning mode. Control always uses the live SR config. */
-  variantSrConfig: SrConfigOverrideForm
 }
 
 export interface SrConfigOverridePayload {
@@ -87,11 +102,16 @@ export interface ExperimentArmPayload {
   sr?: SrConfigOverridePayload
 }
 
+export interface ExperimentVariantPayload extends ExperimentArmPayload {
+  id: string
+  name: string
+  split_pct: number
+}
+
 export interface ABTestAlgorithmPayload {
   control: ExperimentArmPayload
-  variant: ExperimentArmPayload
+  variants: ExperimentVariantPayload[]
   endpoints: ExperimentEndpoint[]
-  variant_split_pct: number
   min_sample_size: number
   guardrail_threshold_pp: number
 }

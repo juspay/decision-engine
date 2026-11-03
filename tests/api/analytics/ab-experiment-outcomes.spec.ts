@@ -118,7 +118,8 @@ function routingEvent(
   merchantId: string,
   experimentId: string,
   paymentId: string,
-  arm: Arm,
+  // `control`, `variant`, or a multi-variant experiment's variant id.
+  arm: string,
   atMs: number,
   extra: Record<string, unknown> = {},
 ) {
@@ -189,6 +190,42 @@ function expectedArm(scripts: typeof OUTCOME_SCRIPTS) {
 
 test.describe('A/B experiment outcomes (API)', () => {
   test.setTimeout(90_000)
+
+  test('each variant of a multi-variant experiment is compared with control', async ({
+    api,
+    merchant,
+    request,
+  }) => {
+    const m = merchant.id
+    // Results are read from the recorded routing events alone, so the experiment id only has to
+    // match them.
+    const experimentId = factory.ruleName('ab_multi_variant')
+    const routedAt = Date.now() - 60_000
+    const arms = ['control', 'rule_a', 'rule_b']
+    const payments = arms.flatMap((arm, a) =>
+      [0, 1].map((i) => ({ arm, paymentId: factory.paymentId(`multi_${arm}_${i}`), at: routedAt + a * 10 + i })),
+    )
+    await clickhouseInsert(
+      request,
+      'analytics_domain_events',
+      payments.map((p) => routingEvent(m, experimentId, p.paymentId, p.arm, p.at)),
+    )
+    for (const p of payments) await sendStatuses(api, m, p.paymentId, 'stripe', ['CHARGED'])
+
+    // rule_c is configured but recorded nothing; it is still reported and still counts toward the
+    // correction.
+    const settled = await poll(
+      () => results(api, experimentId, { start_ms: routedAt - DAY_MS, endpoint: 'evaluate', variants: 'rule_a,rule_b,rule_c' }),
+      (r) => r.body.control?.success_count === 2 && r.body.variants?.every((v: any) => v.metrics.arm === 'rule_c' || v.metrics.success_count === 2),
+      { message: 'multi-variant outcomes were not attributed', timeout: INGEST_TIMEOUT },
+    )
+    expect(settled.body.variants.map((v: any) => v.metrics.arm)).toEqual(['rule_a', 'rule_b', 'rule_c'])
+    expect(settled.body.significance_level).toBeCloseTo(0.05 / 3, 12)
+    expect(settled.body.variants[2].metrics.transaction_count).toBe(0)
+    // The single-variant fields mirror the first variant.
+    expect(settled.body.variant.arm).toBe('rule_a')
+    expect(settled.body.verdict).toBe(settled.body.variants[0].verdict)
+  })
 
   test('a webhook arriving days after routing is attributed to its arm', async ({
     api,

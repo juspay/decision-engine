@@ -29,7 +29,7 @@ pub struct AbTestArmOutput {
 /// Returns the routing output, evaluated connectors, rule name, and the flow type the preview
 /// event is recorded under.
 pub async fn evaluate_rule_arm(
-    side: super::ArmSide,
+    side: &super::ArmSide,
     rule_algorithm_id: Option<&str>,
     payload: &RoutingRequest,
     db: &crate::storage::Storage,

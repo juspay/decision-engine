@@ -1,5 +1,5 @@
 import { ABTestAlgorithmData, RoutingAlgorithm } from '../../types/api'
-import { resolvedArm } from '../../features/routing/abTesting/arms'
+import { resolvedControl, resolvedVariants } from '../../features/routing/abTesting/arms'
 import { RuleBreakdown } from '../routing/euclid/RuleBreakdown'
 import {
   summarizeConditions, summarizeDestination, destinationGateways,
@@ -20,7 +20,7 @@ function abTestArmIds(active: RoutingAlgorithm[]): Set<string> {
   const d = abTest && ((abTest.algorithm_data || abTest.algorithm)?.data as ABTestAlgorithmData | undefined)
   if (!d) return new Set()
   return new Set(
-    [resolvedArm(d, 'control').rule_algorithm_id, resolvedArm(d, 'variant').rule_algorithm_id].filter(Boolean) as string[],
+    [resolvedControl(d), ...resolvedVariants(d).map(v => v.arm)].map(arm => arm.rule_algorithm_id).filter(Boolean) as string[],
   )
 }
 

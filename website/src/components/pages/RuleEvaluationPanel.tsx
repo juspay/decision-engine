@@ -12,7 +12,7 @@ import {
   GatewayConnector,
   RoutingAlgorithm,
 } from '../../types/api'
-import { resolvedArm } from '../../features/routing/abTesting/arms'
+import { resolvedControl, resolvedVariants } from '../../features/routing/abTesting/arms'
 import { ChevronDown, ChevronUp, Code, Play, Plus, Trash2 } from 'lucide-react'
 
 import { Notice } from '../ui/Notice'
@@ -219,18 +219,20 @@ export function RuleEvaluationPanel({
 
     if (!source && activeAbTest) {
       const abData = (activeAbTest.algorithm_data || activeAbTest.algorithm)?.data as ABTestAlgorithmData | undefined
-      // Try control arm first, then variant — an arm without a rule layer has no saved algorithm to extract from.
-      const controlRuleId = abData && resolvedArm(abData, 'control').rule_algorithm_id
-      const variantRuleId = abData && resolvedArm(abData, 'variant').rule_algorithm_id
-      const controlAlgo = controlRuleId ? allAlgorithms.find(a => a.id === controlRuleId) : undefined
-      const variantAlgo = variantRuleId ? allAlgorithms.find(a => a.id === variantRuleId) : undefined
-
-      if (controlAlgo && extractRuleParams(controlAlgo, routingKeysConfig).length > 0) {
-        source = controlAlgo
-        sourceSuffix = ' (control arm)'
-      } else if (variantAlgo && extractRuleParams(variantAlgo, routingKeysConfig).length > 0) {
-        source = variantAlgo
-        sourceSuffix = ' (variant arm)'
+      // Try control arm first, then each variant — an arm without a rule layer has no saved algorithm to extract from.
+      const candidates = abData
+        ? [
+          { ruleId: resolvedControl(abData).rule_algorithm_id, suffix: ' (control arm)' },
+          ...resolvedVariants(abData).map(v => ({ ruleId: v.arm.rule_algorithm_id, suffix: ` (${v.name} arm)` })),
+        ]
+        : []
+      for (const { ruleId, suffix } of candidates) {
+        const algo = ruleId ? allAlgorithms.find(a => a.id === ruleId) : undefined
+        if (algo && extractRuleParams(algo, routingKeysConfig).length > 0) {
+          source = algo
+          sourceSuffix = suffix
+          break
+        }
       }
     }
 

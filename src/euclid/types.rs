@@ -139,12 +139,47 @@ impl ExperimentArm {
 /// algorithm.
 pub const SR_ROUTING_ARM_ID: &str = "sr_routing";
 
+/// Arm id the single-variant format records its variant under.
+pub const LEGACY_VARIANT_ARM_ID: &str = "variant";
+/// Arm id the control arm is recorded under. No variant may use it.
+pub const CONTROL_ARM_ID: &str = "control";
+/// Most variants one experiment may run beside its control.
+pub const MAX_EXPERIMENT_VARIANTS: usize = 5;
+/// Most traffic all variants together may take, so control always keeps the majority.
+pub const MAX_TOTAL_VARIANT_SPLIT_PCT: u32 = 50;
+
+/// One variant of a multi-variant experiment: an arm, its id and its share of traffic.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ExperimentVariant {
+    /// Stable id the variant's decisions are recorded under (`variant_arm` in analytics). Unique
+    /// within the experiment and never `control`.
+    pub id: String,
+    /// Display name. Absent shows the id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Percentage of traffic routed to this variant.
+    pub split_pct: u8,
+    #[serde(flatten)]
+    pub arm: ExperimentArm,
+    /// Set when the auth-rate guardrail stopped this variant while the experiment kept running.
+    /// Its payments are then routed by the live setup, untracked, like payments the experiment
+    /// doesn't cover. A deliberate activation clears it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stopped: bool,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ABTestData {
-    /// Layered arms. When present they define the experiment and the single-strategy fields
-    /// below are ignored.
+    /// Layered control arm. When present it defines control and the single-strategy control
+    /// fields below are ignored.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control: Option<ExperimentArm>,
+    /// Variants compared against control, each with its own traffic share. When present they
+    /// define the experiment's variants and every single-variant field (`variant`,
+    /// `variant_algorithm_id`, `variant_sr_config`, `variant_split_pct`) is ignored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variants: Option<Vec<ExperimentVariant>>,
+    /// Single-variant format: the one layered variant arm, recorded as `variant`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variant: Option<ExperimentArm>,
     /// Endpoints the experiment splits traffic on. Absent means every endpoint.
@@ -156,12 +191,13 @@ pub struct ABTestData {
     pub control_algorithm_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variant_algorithm_id: Option<String>,
-    /// Percentage of traffic routed to the variant arm (1–49).
+    /// Single-variant format: percentage of traffic routed to the variant arm (1–49).
+    #[serde(default)]
     pub variant_split_pct: u8,
     /// Minimum transactions to collect before reporting a significance verdict.
     pub min_sample_size: u32,
-    /// Disable the variant for new payments when its auth rate drops more than this many pp
-    /// below control, once a tenth of the sample target has resolved.
+    /// Stop a variant for new payments when its auth rate drops more than this many pp below
+    /// control, once a tenth of the sample target has resolved.
     pub guardrail_threshold_pp: f64,
     /// SR overrides for a single-strategy `sr_routing` variant arm.
     #[serde(skip_serializing_if = "Option::is_none")]

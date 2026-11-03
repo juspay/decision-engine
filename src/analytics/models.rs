@@ -862,7 +862,7 @@ pub struct PaymentAuditFilterOptions {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentAuditExperiment {
     pub experiment_id: String,
-    /// `control` or `variant`.
+    /// `control`, or the id of the variant (`variant` for single-variant experiments).
     pub arm: String,
     /// The endpoint that routed it under the experiment: `hybrid_routing`, `decide_gateway` or
     /// `evaluate`.
@@ -922,31 +922,57 @@ pub enum ExperimentVerdict {
     GuardrailBreached,
 }
 
+/// One variant's results and how it compares with control.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExperimentVariantComparison {
+    /// The variant's id and metrics (`metrics.arm` is the id).
+    pub metrics: ExperimentArmMetrics,
+    /// Auth rate delta in percentage points (variant - control). Context metric — the verdict
+    /// comes from the EV z-test.
+    pub delta_pp: f64,
+    /// Two-tailed p-value of the EV z-test against control on the per-transaction value
+    /// distribution. For auth-only comparisons (saved ≡ 0 on both arms) this is exactly the
+    /// (unpooled) two-proportion auth z-test. Compared with `significance_level`, not 0.05.
+    pub p_value: Option<f64>,
+    /// Confidence interval on the tested delta at `1 − significance_level`. Units match what the
+    /// UI displays: bps of EV delta for cost experiments, auth percentage points for auth-only
+    /// ones.
+    pub confidence_interval: Option<(f64, f64)>,
+    pub verdict: ExperimentVerdict,
+    /// EV delta in bps of ticket (variant − control), valued at `evaluation_margin`. The verdict
+    /// metric when at least one arm of the experiment ran multi-objective; `None` for auth-only
+    /// experiments, which are judged on the auth z-test instead.
+    pub net_delta_bps: Option<f64>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExperimentResultsResponse {
     pub experiment_id: String,
     pub merchant_id: String,
     pub control: ExperimentArmMetrics,
+    /// Every variant compared with control, in the experiment's order.
+    pub variants: Vec<ExperimentVariantComparison>,
+    /// Per-comparison significance level: 0.05 divided by the number of variants (Bonferroni), so
+    /// the chance of any false "wins"/"loses" across all variants stays at 5%.
+    pub significance_level: f64,
+    /// The first variant's metrics. Kept for single-variant clients; read `variants`.
     pub variant: ExperimentArmMetrics,
-    /// Auth rate delta in percentage points (variant - control). Context metric — the verdict
-    /// comes from the EV z-test.
+    /// The first variant's `delta_pp`. Kept for single-variant clients; read `variants`.
     pub delta_pp: f64,
-    /// Two-tailed p-value of the EV z-test on the per-transaction value distribution. For
-    /// auth-only experiments (saved ≡ 0 on both arms) this is exactly the (unpooled)
-    /// two-proportion auth z-test.
+    /// The first variant's `p_value`. Kept for single-variant clients; read `variants`.
     pub p_value: Option<f64>,
-    /// 95% CI on the tested delta. Units match what the UI displays: bps of EV delta for cost
-    /// experiments, auth percentage points for auth-only experiments.
+    /// The first variant's `confidence_interval`. Kept for single-variant clients; read
+    /// `variants`.
     pub confidence_interval: Option<(f64, f64)>,
+    /// The first variant's `verdict`. Kept for single-variant clients; read `variants`.
     pub verdict: ExperimentVerdict,
-    /// Min sample size from experiment config; used to show progress.
+    /// Min sample size from experiment config; used to show progress. Each comparison needs this
+    /// many resolved payments across control and that variant.
     pub min_sample_size: u32,
-    /// EV delta in bps of ticket (variant − control), valued at `evaluation_margin`. The verdict
-    /// metric when at least one arm ran multi-objective; `None` for auth-only experiments
-    /// (no cost data on either arm), which are judged on the auth z-test instead.
+    /// The first variant's `net_delta_bps`. Kept for single-variant clients; read `variants`.
     pub net_delta_bps: Option<f64>,
     /// The common business margin (fraction of ticket, net of baseline processing fees) used to
-    /// value both arms' EV.
+    /// value every arm's EV.
     pub evaluation_margin: f64,
 }
 
@@ -963,6 +989,9 @@ pub struct ExperimentResultsQuery {
     /// Restricts results to one endpoint. An experiment applies different layers per endpoint,
     /// so arms are only comparable within one. `None` reads every endpoint together.
     pub endpoint: Option<crate::euclid::types::ExperimentEndpoint>,
+    /// The experiment's variant ids in order. Variants that have recorded nothing yet still count
+    /// toward the Bonferroni correction. Empty reads the variants from the recorded payments.
+    pub variant_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
