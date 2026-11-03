@@ -358,9 +358,9 @@ pub struct ExperimentResultsParams {
     pub evaluation_margin: Option<f64>,
     /// `hybrid_routing`, `decide_gateway` or `evaluate`. Omitted → every endpoint.
     pub endpoint: Option<crate::euclid::types::ExperimentEndpoint>,
-    /// The experiment's variant ids, comma-separated, in order. Sets which variants are reported
-    /// and how many the significance level is corrected for. Omitted → the variants the recorded
-    /// payments name.
+    /// Variant ids to report, comma-separated, in order. The significance level is corrected for
+    /// these and for every other variant that recorded payments. Omitted → the variants the
+    /// recorded payments name.
     pub variants: Option<String>,
 }
 

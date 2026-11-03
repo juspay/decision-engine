@@ -4112,7 +4112,7 @@
             "name": "variants",
             "in": "query",
             "required": false,
-            "description": "The experiment's variant ids, comma-separated, in order. Sets which variants are reported and how many the significance level is corrected for. Omitted, the variants are read from the recorded payments.",
+            "description": "Variant ids to report, comma-separated, in order. The significance level is corrected for these and for every other variant that recorded payments. Omitted, the variants named by the recorded payments are reported.",
             "schema": {
               "type": "string"
             }
@@ -8781,7 +8781,7 @@
           "delta_pp": {
             "type": "number",
             "format": "double",
-            "description": "Variant minus control auth rate, in percentage points."
+            "description": "Variant minus control auth rate, in percentage points; 0 until both arms have a resolved payment."
           },
           "p_value": {
             "type": [
@@ -8842,7 +8842,7 @@
           "significance_level": {
             "type": "number",
             "format": "double",
-            "description": "Per-comparison significance level: 0.05 divided by the number of variants (Bonferroni)."
+            "description": "Per-comparison significance level: 0.05 divided by the number of variants compared (Bonferroni): every requested variant and every variant that recorded payments."
           },
           "variant": {
             "$ref": "#/components/schemas/ExperimentArmMetrics",

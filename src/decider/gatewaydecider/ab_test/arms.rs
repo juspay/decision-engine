@@ -683,6 +683,8 @@ mod tests {
         // `stopped` is only written once the guardrail sets it.
         let stored = serde_json::to_value(&data).unwrap();
         assert!(stored["variants"][0].get("stopped").is_none());
+        // The single-variant split is not written for multi-variant experiments.
+        assert!(stored.get("variant_split_pct").is_none());
     }
 
     #[test]

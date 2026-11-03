@@ -241,20 +241,39 @@ pub async fn load(
     Ok(build_response(query, &rows))
 }
 
-/// The variants to report, in order: the experiment's configured ids, then any other non-control
-/// arm the payments were recorded under. With neither, the single-variant `variant` arm.
-fn reported_variant_ids(query: &ExperimentResultsQuery, rows: &[ArmRow]) -> Vec<String> {
-    let mut ids: Vec<String> = Vec::new();
-    let recorded = rows.iter().map(|row| &row.arm);
-    for id in query.variant_ids.iter().chain(recorded) {
-        if id != CONTROL_ARM_ID && !id.is_empty() && !ids.contains(id) {
-            ids.push(id.clone());
+/// Variant ids in order, without control, blanks or repeats.
+fn distinct_variant_ids<'a>(ids: impl Iterator<Item = &'a String>) -> Vec<String> {
+    let mut distinct: Vec<String> = Vec::new();
+    for id in ids {
+        if id != CONTROL_ARM_ID && !id.is_empty() && !distinct.contains(id) {
+            distinct.push(id.clone());
         }
     }
+    distinct
+}
+
+/// The variants to report, in order: the requested ids when the query names any, otherwise every
+/// non-control arm the payments were recorded under. With neither, the single-variant `variant`
+/// arm.
+fn reported_variant_ids(query: &ExperimentResultsQuery, rows: &[ArmRow]) -> Vec<String> {
+    let mut ids = if query.variant_ids.is_empty() {
+        distinct_variant_ids(rows.iter().map(|row| &row.arm))
+    } else {
+        distinct_variant_ids(query.variant_ids.iter())
+    };
     if ids.is_empty() {
         ids.push(LEGACY_VARIANT_ARM_ID.to_string());
     }
     ids
+}
+
+/// How many comparisons the significance level is corrected for: every requested variant and
+/// every variant that recorded payments, so leaving a variant out of the query never loosens the
+/// level the others are judged at.
+fn compared_variant_count(query: &ExperimentResultsQuery, rows: &[ArmRow]) -> usize {
+    let requested = query.variant_ids.iter();
+    let recorded = rows.iter().map(|row| &row.arm);
+    distinct_variant_ids(requested.chain(recorded)).len().max(1)
 }
 
 fn build_response(query: &ExperimentResultsQuery, rows: &[ArmRow]) -> ExperimentResultsResponse {
@@ -281,12 +300,18 @@ fn build_response(query: &ExperimentResultsQuery, rows: &[ArmRow]) -> Experiment
             .any(|(metrics, _)| metrics.avg_cost_saved_bps.is_some());
     // Bonferroni: every variant is tested against control, so each test runs at 0.05 / k to keep
     // the chance of any false verdict across the experiment at 5%.
-    let significance_level = FAMILY_SIGNIFICANCE_LEVEL / variant_metrics.len() as f64;
+    let significance_level = FAMILY_SIGNIFICANCE_LEVEL / compared_variant_count(query, rows) as f64;
 
     let variants: Vec<ExperimentVariantComparison> = variant_metrics
         .into_iter()
         .map(|(variant, variant_row)| {
-            let delta_pp = (variant.auth_rate - control.auth_rate) * 100.0;
+            // A rate exists only once an arm has a resolved payment; until both do there is no
+            // difference to report.
+            let delta_pp = if resolved(&control) > 0 && resolved(&variant) > 0 {
+                (variant.auth_rate - control.auth_rate) * 100.0
+            } else {
+                0.0
+            };
             let net_delta_bps = match (is_cost_experiment, control.net_ev_bps, variant.net_ev_bps) {
                 (true, Some(c), Some(v)) => Some(v - c),
                 _ => None,
@@ -760,6 +785,29 @@ mod tests {
         // The single-variant fields mirror the first variant.
         assert_eq!(response.variant.arm, "rule_a");
         assert_eq!(response.verdict, ExperimentVerdict::VariantWins);
+    }
+
+    #[test]
+    fn the_query_narrows_the_report_but_not_the_correction() {
+        let rows = vec![
+            named("control", arm_row(1000, 800, 200, 800)),
+            named("rule_a", arm_row(1000, 850, 150, 850)),
+            named("rule_b", arm_row(10, 0, 0, 0)),
+        ];
+        let response = build_response(&results_query(&["rule_a"]), &rows);
+        let ids: Vec<_> = response
+            .variants
+            .iter()
+            .map(|v| v.metrics.arm.as_str())
+            .collect();
+        assert_eq!(ids, vec!["rule_a"]);
+        // rule_b recorded payments, so it still counts toward the correction.
+        assert!((response.significance_level - 0.025).abs() < 1e-12);
+
+        // rule_b has nothing resolved yet: no rate, so no delta.
+        let all = build_response(&results_query(&[]), &rows);
+        assert_eq!(all.variants[1].metrics.arm, "rule_b");
+        assert_eq!(all.variants[1].delta_pp, 0.0);
     }
 
     #[test]

@@ -927,8 +927,8 @@ pub enum ExperimentVerdict {
 pub struct ExperimentVariantComparison {
     /// The variant's id and metrics (`metrics.arm` is the id).
     pub metrics: ExperimentArmMetrics,
-    /// Auth rate delta in percentage points (variant - control). Context metric — the verdict
-    /// comes from the EV z-test.
+    /// Auth rate delta in percentage points (variant - control); 0 until both arms have a
+    /// resolved payment. Context metric — the verdict comes from the EV z-test.
     pub delta_pp: f64,
     /// Two-tailed p-value of the EV z-test against control on the per-transaction value
     /// distribution. For auth-only comparisons (saved ≡ 0 on both arms) this is exactly the
@@ -952,8 +952,9 @@ pub struct ExperimentResultsResponse {
     pub control: ExperimentArmMetrics,
     /// Every variant compared with control, in the experiment's order.
     pub variants: Vec<ExperimentVariantComparison>,
-    /// Per-comparison significance level: 0.05 divided by the number of variants (Bonferroni), so
-    /// the chance of any false "wins"/"loses" across all variants stays at 5%.
+    /// Per-comparison significance level: 0.05 divided by the number of variants compared
+    /// (Bonferroni) — every requested variant and every variant that recorded payments — so the
+    /// chance of any false "wins"/"loses" across all variants stays at 5%.
     pub significance_level: f64,
     /// The first variant's metrics. Kept for single-variant clients; read `variants`.
     pub variant: ExperimentArmMetrics,
@@ -989,8 +990,9 @@ pub struct ExperimentResultsQuery {
     /// Restricts results to one endpoint. An experiment applies different layers per endpoint,
     /// so arms are only comparable within one. `None` reads every endpoint together.
     pub endpoint: Option<crate::euclid::types::ExperimentEndpoint>,
-    /// The experiment's variant ids in order. Variants that have recorded nothing yet still count
-    /// toward the Bonferroni correction. Empty reads the variants from the recorded payments.
+    /// The variants to report, in order. Every one of them, and every variant that recorded
+    /// payments, counts toward the Bonferroni correction, including those with nothing recorded
+    /// yet. Empty reports the variants named by the recorded payments.
     pub variant_ids: Vec<String>,
 }
 

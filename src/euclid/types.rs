@@ -168,6 +168,10 @@ pub struct ExperimentVariant {
     pub stopped: bool,
 }
 
+fn is_zero_pct(pct: &u8) -> bool {
+    *pct == 0
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ABTestData {
     /// Layered control arm. When present it defines control and the single-strategy control
@@ -191,8 +195,9 @@ pub struct ABTestData {
     pub control_algorithm_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub variant_algorithm_id: Option<String>,
-    /// Single-variant format: percentage of traffic routed to the variant arm (1–49).
-    #[serde(default)]
+    /// Single-variant format: percentage of traffic routed to the variant arm (1–50). Zero, and
+    /// left out of the stored definition, for multi-variant experiments.
+    #[serde(default, skip_serializing_if = "is_zero_pct")]
     pub variant_split_pct: u8,
     /// Minimum transactions to collect before reporting a significance verdict.
     pub min_sample_size: u32,

@@ -901,6 +901,10 @@ function MetricsComparisonTable({ results, abData, costKind }: {
     </td>
   )
   const rowCls = 'border-t border-slate-100 dark:border-[#1a1a22]'
+  // Rates exist only over resolved payments; an arm with none has no rate, and no delta against it.
+  const resolvedCount = (m: { success_count: number; failure_count: number }) => m.success_count + m.failure_count
+  const rate = (m: { success_count: number; failure_count: number }, value: number) => resolvedCount(m) > 0 ? authRatePct(value) : '—'
+  const hasRates = (m: { success_count: number; failure_count: number }) => resolvedCount(m) > 0 && resolvedCount(c) > 0
 
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-[#222226]">
@@ -922,18 +926,18 @@ function MetricsComparisonTable({ results, abData, costKind }: {
         <tbody>
           <tr>
             {metricCell('Net auth rate', 'NAR')}
-            <td className={num}>{authRatePct(c.auth_rate)}</td>
+            <td className={num}>{rate(c, c.auth_rate)}</td>
             {results.variants.map(v => {
-              const d = (v.metrics.auth_rate - c.auth_rate) * 100
-              return <Fragment key={v.metrics.arm}>{withDelta(authRatePct(v.metrics.auth_rate), d, deltaLabel(d), isSignificantVerdict(v.verdict))}</Fragment>
+              const d = hasRates(v.metrics) ? (v.metrics.auth_rate - c.auth_rate) * 100 : null
+              return <Fragment key={v.metrics.arm}>{withDelta(rate(v.metrics, v.metrics.auth_rate), d, d === null ? '' : deltaLabel(d), isSignificantVerdict(v.verdict))}</Fragment>
             })}
           </tr>
           <tr className={rowCls}>
             {metricCell('First-attempt rate', 'FAAR')}
-            <td className={num}>{authRatePct(c.first_attempt_auth_rate)}</td>
+            <td className={num}>{rate(c, c.first_attempt_auth_rate)}</td>
             {results.variants.map(v => {
-              const d = (v.metrics.first_attempt_auth_rate - c.first_attempt_auth_rate) * 100
-              return <Fragment key={v.metrics.arm}>{withDelta(authRatePct(v.metrics.first_attempt_auth_rate), d, deltaLabel(d), isSignificantVerdict(v.verdict))}</Fragment>
+              const d = hasRates(v.metrics) ? (v.metrics.first_attempt_auth_rate - c.first_attempt_auth_rate) * 100 : null
+              return <Fragment key={v.metrics.arm}>{withDelta(rate(v.metrics, v.metrics.first_attempt_auth_rate), d, d === null ? '' : deltaLabel(d), isSignificantVerdict(v.verdict))}</Fragment>
             })}
           </tr>
           <tr className={rowCls}>
