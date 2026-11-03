@@ -50,7 +50,7 @@ export function OnboardingPage() {
   const { setMerchantId } = useMerchantStore()
   const assetBaseUrl = import.meta.env.BASE_URL
 
-  // `?parent=<merchant id>` adds a profile to that merchant instead of creating a new merchant.
+  // `?parent=<merchant id>` adds a sub-merchant to that merchant instead of creating a standalone one.
   const [searchParams] = useSearchParams()
   const parentId = searchParams.get('parent')
   const parentName = parentId
@@ -59,7 +59,7 @@ export function OnboardingPage() {
         parentId,
       )
     : null
-  const noun = parentId ? 'profile' : 'merchant'
+  const noun = parentId ? 'sub-merchant' : 'merchant'
   const NameIcon = parentId ? Layers : Building2
 
   const [merchantName, setMerchantName] = useState('')
@@ -117,12 +117,12 @@ export function OnboardingPage() {
               <div className="space-y-6">
                 <h1 className="max-w-[10ch] text-[clamp(3.8rem,6.8vw,6rem)] font-semibold leading-[0.92] tracking-[-0.065em] text-slate-950 dark:text-white">
                   {parentId
-                    ? 'One merchant, a profile for each region.'
+                    ? 'One merchant, a sub-merchant for each region.'
                     : 'Set up your merchant before processing traffic.'}
                 </h1>
                 <p className="max-w-[38rem] text-lg leading-9 text-slate-600 dark:text-[#9aa4b6] sm:text-[1.3rem]">
                   {parentId
-                    ? `A profile has its own routing rules. ${parentName}'s members and API keys work for it as soon as it is created.`
+                    ? `A sub-merchant has its own routing rules. ${parentName}'s members and API keys work for it as soon as it is created.`
                     : 'Create your merchant account, then configure routing, analytics, and payment audits.'}
                 </p>
               </div>
@@ -150,7 +150,7 @@ export function OnboardingPage() {
           <div className="w-full max-w-[540px]">
             <div className="text-center">
               <h2 className="text-[clamp(2.15rem,3.6vw,3.05rem)] font-semibold tracking-[-0.05em] text-slate-950 dark:text-white">
-                {parentId ? `Add a profile to ${parentName}` : 'Create your merchant'}
+                {parentId ? `Add a sub-merchant to ${parentName}` : 'Create your merchant'}
               </h2>
               <p className="mt-3 text-base text-slate-500 dark:text-[#8a94a7]">
                 {parentId
@@ -162,7 +162,7 @@ export function OnboardingPage() {
             <div className="mt-10 border-t border-slate-200 pt-10 dark:border-[#1d1d23]">
               <form onSubmit={handleSubmit} className="space-y-6">
                 <Field
-                  label={`${noun === 'profile' ? 'Profile' : 'Merchant'} name`}
+                  label={`${noun === 'sub-merchant' ? 'Sub-merchant' : 'Merchant'} name`}
                   footer={`You can adjust rules, connectors, and analytics after the ${noun} is created.`}
                 >
                   <div className="relative">
@@ -209,7 +209,7 @@ export function OnboardingPage() {
               <div className="mt-10 border-t border-slate-200 pt-6 text-center text-xs text-slate-500 dark:border-[#1d1d23] dark:text-[#78849a]">
                 <p>
                   {parentId
-                    ? `Access to this profile comes from ${parentName}.`
+                    ? `Access to this sub-merchant comes from ${parentName}.`
                     : 'Merchant access will be linked to your current session.'}
                 </p>
                 <p className="mt-4 text-slate-500 dark:text-[#78849a]">Juspay Decision Engine</p>

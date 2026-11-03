@@ -1,19 +1,19 @@
 import { useAuthStore, type MerchantInfo } from '../store/authStore'
 
 /**
- * Where the session sits among Decision Engine merchants and their profiles.
+ * Where the session sits among Decision Engine merchants and their sub-merchants.
  *
- * A profile has no members or API keys of its own: both live on its merchant and reach every one of
- * its profiles. Pages that manage either read this to say so, and to offer only what the backend
+ * A sub-merchant has no members or API keys of its own: both live on its parent merchant and reach
+ * every one of its sub-merchants. Pages that manage either read this to say so, and to offer only what the backend
  * would accept — it re-checks every request regardless.
  */
 export interface MerchantScope {
   /** The scope the session is on. */
   current: MerchantInfo | undefined
-  /** The merchant that owns `current`: its parent for a profile, otherwise `current` itself. */
+  /** The merchant that owns `current`: its parent for a sub-merchant, otherwise `current` itself. */
   merchant: MerchantInfo | undefined
-  /** The session is on a profile of a Decision Engine merchant. */
-  isProfile: boolean
+  /** The session is on a sub-merchant of a Decision Engine merchant. */
+  isSubMerchant: boolean
   /** Hyperswitch owns this scope's tree, members and access; nothing here manages them. */
   isHyperswitch: boolean
   /** The session's role on `merchant` is admin. */
@@ -29,7 +29,7 @@ export function useMerchantScope(): MerchantScope {
   return {
     current,
     merchant,
-    isProfile: Boolean(parentId),
+    isSubMerchant: Boolean(parentId),
     isHyperswitch: Boolean(user?.isRedirectSession || user?.hierarchy || current?.hs_merchant_id),
     // The list carries the role per scope; the session's own `role` is not refreshed by a switch.
     isAdmin: (current?.role ?? user?.role) === 'admin',

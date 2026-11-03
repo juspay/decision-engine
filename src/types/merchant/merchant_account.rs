@@ -75,8 +75,8 @@ pub struct MerchantAccount {
     pub priorityLogicConfig: Option<String>,
     // #[serde(rename = "merchantCategoryCode")]
     pub merchantCategoryCode: Option<String>,
-    /// The merchant this account is a profile of. `None` for a merchant, which is every account
-    /// created before profiles existed and every one synced from Hyperswitch.
+    /// The merchant this account is a sub-merchant of. `None` for a merchant, which is every account
+    /// created before sub-merchants existed and every one synced from Hyperswitch.
     #[serde(default)]
     pub parentMerchantId: Option<String>,
 }
@@ -120,7 +120,7 @@ pub struct MerchantAccountCreateRequest {
     #[merchant]
     pub merchant_id: String,
     pub gateway_success_rate_based_decider_input: Option<String>,
-    /// Creates the account as a profile of this merchant. Its members and API keys then reach it.
+    /// Creates the account as a sub-merchant of this merchant. Its members and API keys then reach it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_merchant_id: Option<String>,
 }

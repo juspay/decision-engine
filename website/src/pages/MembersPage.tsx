@@ -55,9 +55,9 @@ function CopyButton({ text }: { text: string }) {
 }
 
 export function MembersPage() {
-  // Members belong to the merchant and reach all of its profiles; from a profile, this page shows
+  // Members belong to the merchant and reach all of its sub-merchants; from a sub-merchant, this page shows
   // its merchant's members and an invite lands there.
-  const { merchant, isProfile, isAdmin } = useMerchantScope()
+  const { merchant, isSubMerchant, isAdmin } = useMerchantScope()
   const merchantName = merchantLabel(merchant, 'this merchant')
   const [members, setMembers] = useState<MemberInfo[]>([])
   const [loadingMembers, setLoadingMembers] = useState(true)
@@ -113,9 +113,9 @@ export function MembersPage() {
         <PageHeading
           title="Members"
           description={
-            isProfile
-              ? `Members of ${merchantName}. They have access to ${merchantName} and all of its profiles, including this one.`
-              : `Members have access to ${merchantName} and all of its profiles.`
+            isSubMerchant
+              ? `Members of ${merchantName}. They have access to ${merchantName} and all of its sub-merchants, including this one.`
+              : `Members have access to ${merchantName} and all of its sub-merchants.`
           }
         />
       </div>
@@ -128,7 +128,7 @@ export function MembersPage() {
           <h2 className="text-base font-semibold text-slate-900 dark:text-white">Invite member</h2>
         </div>
         <p className="-mt-3 mb-4 text-sm text-slate-500 dark:text-[#8a8a93]">
-          They will get access to {merchantName} and all of its profiles.
+          They will get access to {merchantName} and all of its sub-merchants.
         </p>
 
         <form onSubmit={handleInvite} className="space-y-4">

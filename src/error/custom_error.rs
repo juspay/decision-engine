@@ -156,8 +156,8 @@ pub enum MerchantAccountConfigurationError {
     MerchantInsertionFailed,
     #[error("Unauthorized")]
     Unauthorized,
-    #[error("Profiles can only be added to an existing Decision Engine merchant, not to a profile or a Hyperswitch account")]
-    InvalidProfileParent,
+    #[error("Sub-merchants can only be added to an existing Decision Engine merchant, not to a sub-merchant or a Hyperswitch account")]
+    InvalidSubMerchantParent,
 }
 
 impl axum::response::IntoResponse for MerchantAccountConfigurationError {
@@ -190,7 +190,7 @@ impl axum::response::IntoResponse for MerchantAccountConfigurationError {
                 ),
             )
                 .into_response(),
-            Self::InvalidProfileParent => (
+            Self::InvalidSubMerchantParent => (
                 hyper::StatusCode::BAD_REQUEST,
                 crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
@@ -338,8 +338,8 @@ pub enum UserAuthError {
     UnsupportedOperation,
     #[error("Invalid or expired password reset token")]
     InvalidResetToken,
-    #[error("Profiles can only be added to a Decision Engine merchant, not to a profile or a Hyperswitch account")]
-    InvalidProfileParent,
+    #[error("Sub-merchants can only be added to a Decision Engine merchant, not to a sub-merchant or a Hyperswitch account")]
+    InvalidSubMerchantParent,
 }
 
 impl axum::response::IntoResponse for UserAuthError {
@@ -365,7 +365,7 @@ impl axum::response::IntoResponse for UserAuthError {
             Self::InvalidVerificationToken => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
             Self::UnsupportedOperation => (hyper::StatusCode::FORBIDDEN, self.to_string()),
             Self::InvalidResetToken => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
-            Self::InvalidProfileParent => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
+            Self::InvalidSubMerchantParent => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
         };
         (
             status,

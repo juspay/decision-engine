@@ -70,7 +70,7 @@ pub async fn create_api_key(
     }: ScopedJson<CreateApiKeyRequest>,
 ) -> Result<Json<CreateApiKeyResponse>, error::ContainerError<ApiKeyError>> {
     ensure_key_manager(session.as_deref())?;
-    // Keys live on the merchant and cover its profiles, so one asked for from a profile is created
+    // Keys live on the merchant and cover its sub-merchants, so one asked for from a sub-merchant is created
     // on its merchant; the response names the merchant it belongs to.
     let merchant = auth::key_holder(&merchant).await;
     let created = mint_api_key(&merchant, payload.description)
@@ -83,7 +83,7 @@ pub async fn create_api_key(
 pub async fn list_api_keys(
     MerchantFromPath(merchant): MerchantFromPath,
 ) -> Result<Json<Vec<ApiKeyListItem>>, error::ContainerError<ApiKeyError>> {
-    // A profile lists its merchant's keys: they are the ones that work for it.
+    // A sub-merchant lists its merchant's keys: they are the ones that work for it.
     let merchant = auth::key_holder(&merchant).await;
     let app_state = get_tenant_app_state().await;
     let keys = api_keys::list(&app_state.db, &merchant)
@@ -101,8 +101,8 @@ pub async fn revoke_api_key(
     ensure_key_manager(session.as_deref())?;
     let app_state = get_tenant_app_state().await;
 
-    // The route names no merchant. A session revokes among its own merchant's keys — a profile's
-    // merchant's, for a session on a profile; the admin-secret lane (no session) acts for whichever
+    // The route names no merchant. A session revokes among its own merchant's keys — its parent's,
+    // for a session on a sub-merchant; the admin-secret lane (no session) acts for whichever
     // merchant owns the key.
     let merchant = match auth::session_merchant(session.as_deref()) {
         Some(merchant) => auth::key_holder(&merchant).await,
@@ -137,7 +137,7 @@ pub async fn revoke_api_key(
 }
 
 /// Creating and revoking keys takes a merchant admin, since a key reaches the merchant and every one
-/// of its profiles. Only a person signed in to the dashboard has a role to check; an API key or the
+/// of its sub-merchants. Only a person signed in to the dashboard has a role to check; an API key or the
 /// admin secret is a credential that already holds that reach.
 ///
 /// A session handed over from Hyperswitch manages no keys at all: Hyperswitch calls Decision Engine

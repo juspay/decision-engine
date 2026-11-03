@@ -321,9 +321,9 @@ pub async fn create_merchant_config(
         return Err(error::MerchantAccountConfigurationError::MerchantAlreadyExists.into());
     }
 
-    // A profile goes under an existing Decision Engine merchant, one level deep: never under a
-    // profile, and never under a Hyperswitch account, whose tree Hyperswitch owns.
-    let is_profile = payload.parent_merchant_id.is_some();
+    // A sub-merchant goes under an existing Decision Engine merchant, one level deep: never under
+    // another sub-merchant, and never under a Hyperswitch account, whose tree Hyperswitch owns.
+    let is_sub_merchant = payload.parent_merchant_id.is_some();
     if let Some(parent_id) = &payload.parent_merchant_id {
         let valid_parent = ETM::merchant_account::load_merchant_by_merchant_id(parent_id.clone())
             .await
@@ -331,7 +331,7 @@ pub async fn create_merchant_config(
                 parent.parentMerchantId.is_none() && ETM::hierarchy::of_account(&parent).is_none()
             });
         if !valid_parent {
-            return Err(error::MerchantAccountConfigurationError::InvalidProfileParent.into());
+            return Err(error::MerchantAccountConfigurationError::InvalidSubMerchantParent.into());
         }
     }
 
@@ -342,8 +342,8 @@ pub async fn create_merchant_config(
     match result {
         Ok(_) => {
             logger::debug!("Merchant account configuration created successfully");
-            // A profile is reached by its merchant's keys, so it gets none of its own.
-            let api_key = if is_profile {
+            // A sub-merchant is reached by its merchant's keys, so it gets none of its own.
+            let api_key = if is_sub_merchant {
                 None
             } else {
                 crate::routes::api_key::mint_api_key(&merchant, Some("Default API key".to_string()))

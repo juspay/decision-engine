@@ -6,7 +6,7 @@ openapi: "openapi.json POST /decide"
 
 `POST /decide` accepts a flat payment payload with nested `card` and `routing_config` objects. It runs the rule layer and then success-rate routing, with A/B experiments, cost optimisation, volume commitments, scoring and fallback handling.
 
-Send the same authentication and tenant headers used for `/routing/hybrid` (`Authorization: Bearer <token>` or `x-api-key: <key>`). Merchant sessions and API keys may only name their own `merchant_id` or one of its profiles; a cross-merchant request returns `403`. Service callers can use the existing `x-admin-secret` header to act for the named routing scope. `/routing/hybrid` continues to accept its existing request and return its existing response.
+Send the same authentication and tenant headers used for `/routing/hybrid` (`Authorization: Bearer <token>` or `x-api-key: <key>`). Merchant sessions and API keys may only name their own `merchant_id` or that of one of their [sub-merchants](/sub-merchants); a cross-merchant request returns `403`. Service callers can use the existing `x-admin-secret` header to act for the named routing scope. `/routing/hybrid` continues to accept its existing request and return its existing response.
 
 ## Full request
 
@@ -87,9 +87,7 @@ The required fields are `payment_id`, `merchant_id`, `amount`, `currency`, `rout
 
 Country codes use ISO alpha-2 values. The adapter translates them to the configured country names for rule matching. Other configured enum values retain an exact match when available, otherwise a case-insensitive match. Existing rule schemas and stored configurations keep their current names.
 
-`merchant_id` is the routing scope formerly called `created_by`; integrations must continue sending the same identifier (the HS profile ID where applicable).
-
-The optional `profile_id` names one of the merchant's [profiles](/merchant-profiles); the request then uses that profile's rules and scores. A merchant's key or session may name any of its profiles. A `profile_id` that belongs to a different merchant returns `400`. `routing_config.algorithm_for` remains explicit and required; it is not inferred from `payment_id`.
+`merchant_id` is the routing scope formerly called `created_by`; integrations must continue sending the same identifier (the HS profile ID where applicable). `routing_config.algorithm_for` remains explicit and required; it is not inferred from `payment_id`.
 
 `amount` is the single payment amount in this contract. It supplies both existing rule parameters, `amount` and `payment_amount`, without changing stored rule definitions. `metadata` supplies custom rule parameters without overwriting configured or reserved fields. `authentication_type` supplies both rule and dynamic authentication data. Preferred accounts and ranking/elimination options are forwarded to the existing decider; feature and experiment gates still control whether it runs. `country` takes precedence over `billing_country`, then `business_country`.
 

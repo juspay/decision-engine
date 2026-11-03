@@ -5588,11 +5588,6 @@
             "type": "string",
             "example": "test_merchant"
           },
-          "profileId": {
-            "type": "string",
-            "description": "One of the merchant's profiles. The request then uses that profile's rules and scores. A merchant's API key or session may name any of its profiles; a profile of another merchant returns 400.",
-            "example": "pro_india"
-          },
           "paymentInfo": {
             "$ref": "#/components/schemas/PaymentInfo"
           },
@@ -5806,11 +5801,6 @@
             "type": "string",
             "example": "merchant_demo"
           },
-          "profileId": {
-            "type": "string",
-            "description": "The profile the decision was made for, if any. The score is recorded for that profile.",
-            "example": "pro_india"
-          },
           "gateway": {
             "type": "string",
             "example": "stripe"
@@ -5936,7 +5926,7 @@
           },
           "parent_merchant_id": {
             "type": "string",
-            "description": "Create the account as a profile of this existing merchant. A profile gets no api_key of its own; its merchant's keys reach it.",
+            "description": "Create the account as a sub-merchant of this existing merchant. A sub-merchant gets no api_key of its own; its parent's keys reach it.",
             "example": "merchant_demo"
           }
         }
@@ -6240,7 +6230,7 @@
           },
           "parent_merchant_id": {
             "type": "string",
-            "description": "Set on a profile: the merchant it belongs to, whose members and API keys reach it. Absent on a merchant."
+            "description": "Set on a sub-merchant: the merchant it belongs to, whose members and API keys reach it. Absent on a standalone or parent merchant."
           }
         }
       },
@@ -6256,7 +6246,7 @@
           },
           "parent_merchant_id": {
             "type": "string",
-            "description": "Add a profile to this merchant instead of creating a merchant. Only its admins may. The parent must not be a profile or a Hyperswitch-synced account.",
+            "description": "Add a sub-merchant to this merchant instead of creating a standalone merchant. Only its admins may. The parent must not be a sub-merchant or a Hyperswitch-synced account.",
             "example": "merchant_demo"
           }
         }
@@ -10086,12 +10076,6 @@
             "type": "string",
             "minLength": 1,
             "description": "Routing scope previously supplied as created_by. Use the same identifier, including the HS profile ID where applicable."
-          },
-          "profile_id": {
-            "type": "string",
-            "minLength": 1,
-            "description": "One of the merchant's profiles. The request then uses that profile's rules and scores. A merchant's API key or session may name any of its profiles; a profile of another merchant returns 400.",
-            "example": "pro_india"
           }
         }
       },

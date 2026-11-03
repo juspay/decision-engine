@@ -245,10 +245,6 @@ pub use gsm::{GsmErrorInfo, GsmInfo};
 pub struct UpdateScorePayload {
     #[merchant]
     pub merchant_id: String,
-    /// One of `merchant_id`'s profiles: the score is then recorded for that profile.
-    #[profile]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub profile_id: Option<String>,
     pub gateway: String,
     pub gateway_reference_id: Option<String>,
     pub status: TxnStatus,

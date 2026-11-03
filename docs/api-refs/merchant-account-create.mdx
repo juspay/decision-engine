@@ -30,18 +30,18 @@ curl --location "$BASE_URL/merchant-account/create" \
 }
 ```
 
-## Create a Profile
+## Create a Sub-merchant
 
-Pass `parent_merchant_id` to create the account as a [profile](/merchant-profiles) of an existing merchant. The merchant's API keys and members reach the profile, so the response has no `api_key`.
+Pass `parent_merchant_id` to create the account as a [sub-merchant](/sub-merchants) of an existing merchant. The parent's API keys and members reach the sub-merchant, so the response has no `api_key`.
 
 ```bash
 curl --location "$BASE_URL/merchant-account/create" \
   --header "x-admin-secret: <admin_secret>" \
   --header "Content-Type: application/json" \
   --data '{
-    "merchant_id": "pro_demo_india",
+    "merchant_id": "merchant_demo_india",
     "parent_merchant_id": "merchant_demo"
   }'
 ```
 
-The parent must already exist and be a Decision Engine merchant: not a profile, and not an account synced from Hyperswitch (`400`).
+The parent must already exist and be a Decision Engine merchant: not a sub-merchant, and not an account synced from Hyperswitch (`400`).

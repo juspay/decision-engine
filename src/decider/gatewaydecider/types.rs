@@ -987,10 +987,6 @@ pub struct DomainDeciderRequestForApiCallV2 {
     pub payment_info: PaymentInfo,
     #[merchant]
     pub merchant_id: String,
-    /// One of `merchant_id`'s profiles: the request then routes with that profile's rules.
-    #[profile]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub profile_id: Option<String>,
     pub eligible_gateway_list: Option<Vec<String>>,
     pub ranking_algorithm: Option<RankingAlgorithm>,
     pub elimination_enabled: Option<bool>,
@@ -1128,7 +1124,6 @@ impl From<(&RoutingRequest, Option<Self>)> for DomainDeciderRequestForApiCallV2 
                 channel: None,
             },
             merchant_id: request.created_by.clone(),
-            profile_id: None,
             eligible_gateway_list: request.fallback_output.as_ref().map(|connectors| {
                 connectors
                     .iter()

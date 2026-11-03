@@ -64,7 +64,7 @@ pub struct LoginRequest {
 #[derive(Debug, Deserialize)]
 pub struct CreateMerchantRequest {
     pub merchant_name: String,
-    /// Creates a profile of this merchant instead of a new merchant. Only its admins may.
+    /// Creates a sub-merchant of this merchant instead of a standalone one. Only its admins may.
     #[serde(default)]
     pub parent_merchant_id: Option<String>,
 }
@@ -82,7 +82,7 @@ pub struct SwitchMerchantRequest {
 /// re-parsing the label. They are absent for a scope with no Hyperswitch ancestry — every DE-native
 /// merchant — which is why every one of them is optional.
 ///
-/// A DE-native profile carries `parent_merchant_id` instead, and follows its merchant in the list.
+/// A sub-merchant carries `parent_merchant_id` instead, and follows its merchant in the list.
 #[derive(Debug, Serialize, Clone)]
 pub struct MerchantInfo {
     pub merchant_id: String,
@@ -489,14 +489,14 @@ pub async fn create_merchant(
 
     let parent = payload.parent_merchant_id.clone();
     if let Some(parent_id) = &parent {
-        ensure_can_add_profile(&app_state, &claims.user_id, parent_id).await?;
+        ensure_can_add_sub_merchant(&app_state, &claims.user_id, parent_id).await?;
     }
 
-    let id = uuid::Uuid::new_v4().simple().to_string();
-    let merchant_id = match parent {
-        Some(_) => format!("pro_{}", &id[..20]),
-        None => format!("merchant_{}", &id[..12]),
-    };
+    // A sub-merchant is a merchant like any other, and is named like one.
+    let merchant_id = format!(
+        "merchant_{}",
+        &uuid::Uuid::new_v4().simple().to_string()[..12]
+    );
     let now = date_time::now();
 
     let new_merchant = MerchantAccountNew {
@@ -514,7 +514,7 @@ pub async fn create_merchant(
         .await
         .change_context(UserAuthError::StorageError)?;
 
-    // A profile takes its members from its merchant, so it gets no membership of its own, and the
+    // A sub-merchant takes its members from its merchant, so it gets no membership of its own, and the
     // creator — an admin of that merchant — is an admin of it.
     if parent.is_some() {
         let merchants = fetch_user_merchants(&app_state, &claims.user_id).await?;
@@ -877,7 +877,7 @@ pub async fn invite_member(
     };
 
     let app_state = get_tenant_app_state().await;
-    // Members belong to the merchant: from inside a profile, this is its merchant's.
+    // Members belong to the merchant: from inside a sub-merchant, this is its parent's.
     let merchant_id = membership_owner(&claims.merchant_id).await;
 
     use crate::storage::backend::schema::merchant_account::dsl as ma_dsl;
@@ -1052,7 +1052,7 @@ pub async fn list_members(
 
     let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
     let app_state = get_tenant_app_state().await;
-    // Members belong to the merchant: from inside a profile, this is its merchant's.
+    // Members belong to the merchant: from inside a sub-merchant, this is its parent's.
     let merchant_id = membership_owner(&claims.merchant_id).await;
 
     let memberships =
@@ -1331,22 +1331,22 @@ async fn fetch_user_merchants(
             hs_org_name: ancestry.as_ref().and_then(|h| h.hs_org_name.clone()),
         });
 
-        // A merchant's profiles follow it, with the role held on the merchant: a profile has no
+        // A merchant's sub-merchants follow it, with the role held on the merchant: a sub-merchant has no
         // members of its own.
-        let mut profiles = crate::storage::types::MerchantAccount::find_all(
+        let mut sub_merchants = crate::storage::types::MerchantAccount::find_all(
             &app_state.db,
             ma_dsl::parent_merchant_id.eq(Some(um.merchant_id.clone())),
         )
         .await
         .change_error(UserAuthError::StorageError)?;
-        profiles.sort_by_key(|profile| profile.date_created);
-        for profile in profiles {
-            let Some(profile_id) = profile.merchant_id else {
+        sub_merchants.sort_by_key(|sub| sub.date_created);
+        for sub in sub_merchants {
+            let Some(sub_id) = sub.merchant_id else {
                 continue;
             };
             result.push(MerchantInfo {
-                merchant_name: profile.merchant_name.unwrap_or_else(|| profile_id.clone()),
-                merchant_id: profile_id,
+                merchant_name: sub.merchant_name.unwrap_or_else(|| sub_id.clone()),
+                merchant_id: sub_id,
                 role: um.role.clone(),
                 parent_merchant_id: Some(um.merchant_id.clone()),
                 profile_name: None,
@@ -1357,13 +1357,13 @@ async fn fetch_user_merchants(
             });
         }
     }
-    // A membership held directly on a profile would list it twice; the first entry stands.
+    // A membership held directly on a sub-merchant would list it twice; the first entry stands.
     let mut seen = std::collections::HashSet::new();
     result.retain(|merchant| seen.insert(merchant.merchant_id.clone()));
     Ok(result)
 }
 
-/// The merchant that holds the memberships for `merchant_id`: its parent when it is a profile,
+/// The merchant that holds the memberships for `merchant_id`: its parent when it is a sub-merchant,
 /// which has no members of its own.
 async fn membership_owner(merchant_id: &str) -> String {
     load_merchant_by_merchant_id(merchant_id.to_string())
@@ -1372,16 +1372,16 @@ async fn membership_owner(merchant_id: &str) -> String {
         .unwrap_or_else(|| merchant_id.to_string())
 }
 
-/// Refuses a profile under `parent_id` unless `user_id` is an admin of it, and it is a Decision
-/// Engine merchant: not itself a profile, and not synced from Hyperswitch, whose tree is managed
+/// Refuses a sub-merchant under `parent_id` unless `user_id` is an admin of it, and it is a Decision
+/// Engine merchant: not itself a sub-merchant, and not synced from Hyperswitch, whose tree is managed
 /// there.
-async fn ensure_can_add_profile(
+async fn ensure_can_add_sub_merchant(
     app_state: &crate::app::TenantAppState,
     user_id: &str,
     parent_id: &str,
 ) -> Result<(), ContainerError<UserAuthError>> {
     // Checked on the merchant that holds the memberships, so Acme's admin naming one of Acme's
-    // profiles hears why it cannot be a parent, while anyone else is simply refused.
+    // sub-merchants hears why it cannot be a parent, while anyone else is simply refused.
     let is_admin = UserMerchant::find_all(
         &app_state.db,
         um_dsl::user_id
@@ -1402,7 +1402,7 @@ async fn ensure_can_add_profile(
         .ok_or_else(|| error::ContainerError::from(UserAuthError::MerchantNotFound))?;
     if parent.parentMerchantId.is_some() || hierarchy::of_account(&parent).is_some() {
         return Err(error::ContainerError::from(
-            UserAuthError::InvalidProfileParent,
+            UserAuthError::InvalidSubMerchantParent,
         ));
     }
     Ok(())

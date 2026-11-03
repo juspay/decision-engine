@@ -11,7 +11,7 @@ import { tokenRef } from '../lib/tokenRef'
  * switcher groups and searches on. All of them are absent for a scope with no Hyperswitch
  * ancestry — every DE-native merchant — so each consumer falls back to the flat label.
  *
- * A Decision Engine profile carries `parent_merchant_id` instead, and is listed right after its
+ * A sub-merchant carries `parent_merchant_id` instead, and is listed right after its
  * merchant with the role held there.
  */
 export interface MerchantInfo {

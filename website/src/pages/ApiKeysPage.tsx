@@ -75,8 +75,8 @@ function Code({ children }: { children: React.ReactNode }) {
 
 export function ApiKeysPage() {
   const { merchantId } = useMerchantStore()
-  const { merchant, isProfile, isHyperswitch, isAdmin } = useMerchantScope()
-  // On a profile, every call below is answered with its merchant's keys: the only ones there are,
+  const { merchant, isSubMerchant, isHyperswitch, isAdmin } = useMerchantScope()
+  // On a sub-merchant, every call below is answered with its parent's keys: the only ones there are,
   // and the ones that work for it.
   const merchantName = merchantLabel(merchant, 'this merchant')
 
@@ -153,21 +153,20 @@ export function ApiKeysPage() {
 
       <KeysNote>
         <p>
-          {isProfile ? (
+          {isSubMerchant ? (
             <>
               These are <span className="font-medium text-slate-800 dark:text-white">{merchantName}</span>'s
-              keys. A key works for {merchantName} and every one of its profiles, including this one.
+              keys. A key works for {merchantName} and every one of its sub-merchants, including this
+              one. Send this sub-merchant's <Code>merchant_id</Code>, <Code>{merchantId}</Code>, to
+              route with its rules.
             </>
           ) : (
-            'A key works for this merchant and every one of its profiles, including profiles added later.'
-          )}{' '}
-          Name the profile in each request with <Code>profile_id</Code>
-          {isProfile && (
             <>
-              {' '}(<Code>{merchantId}</Code> for this one)
+              A key works for this merchant and every one of its sub-merchants, including ones added
+              later. Send the <Code>merchant_id</Code> of whichever one a request is for.
             </>
           )}
-          .{!isAdmin && ' Only admins can create or revoke keys.'}
+          {!isAdmin && ' Only admins can create or revoke keys.'}
         </p>
       </KeysNote>
 
@@ -282,7 +281,7 @@ export function ApiKeysPage() {
         title="Revoke API key?"
         description={`${confirmRevoke?.key_prefix ?? ''}…${
           confirmRevoke?.description ? ` (${confirmRevoke.description})` : ''
-        } stops working immediately for ${merchantName} and all of its profiles. Requests using it will be rejected. This cannot be undone.`}
+        } stops working immediately for ${merchantName} and all of its sub-merchants. Requests using it will be rejected. This cannot be undone.`}
         confirmLabel="Revoke key"
         variant="danger"
         onCancel={() => setConfirmRevoke(null)}

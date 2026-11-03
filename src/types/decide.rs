@@ -13,10 +13,6 @@ pub struct DecideRequest {
     pub payment_id: String,
     #[merchant]
     pub merchant_id: String,
-    /// One of `merchant_id`'s profiles: the request then routes with that profile's rules.
-    #[profile]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub profile_id: Option<String>,
     pub amount: u64,
     pub currency: String,
     pub payment_method_type: Option<String>,
@@ -219,7 +215,7 @@ impl DecideRequest {
         for (field, raw) in fields {
             if !matches!(
                 field.as_str(),
-                "merchant_id" | "profile_id" | "routing_config" | "card" | "metadata"
+                "merchant_id" | "routing_config" | "card" | "metadata"
             ) {
                 push(field.clone(), routing_key(field), raw)?;
             }
@@ -561,6 +557,7 @@ mod tests {
             "payment_source",
             "auth_type",
             "channel",
+            "profile_id",
             "attempt_id",
         ] {
             let mut value = baseline.clone();

@@ -251,16 +251,8 @@ pub async fn decide_gateway(
         "Incoming request headers"
     );
     let (body, parsed) = match request {
-        Ok(ScopedJson {
-            merchant,
-            mut payload,
-            body,
-        }) => {
+        Ok(ScopedJson { payload, body, .. }) => {
             logger::debug!("Body: {:?}", body);
-            // A named profile is the scope routed for; everything downstream reads `merchant_id`.
-            if payload.profile_id.take().is_some() {
-                payload.merchant_id = merchant.to_string();
-            }
             (body, Ok(payload))
         }
         Err(ScopedJsonRejection::Parse { body, error }) => {

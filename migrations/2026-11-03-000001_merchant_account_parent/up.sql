@@ -1,4 +1,4 @@
--- A profile is a merchant_account row whose parent_merchant_id names the merchant it belongs to. A
+-- A sub-merchant is a merchant_account row whose parent_merchant_id names the merchant it belongs to. A
 -- merchant has none. Existing rows stay NULL, so every one of them remains a merchant.
 --
 -- The compose migrator replays every up.sql on each start, and MySQL has no ADD COLUMN IF NOT
