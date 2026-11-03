@@ -186,7 +186,10 @@ The chart can wire Decision Engine to external Kafka and ClickHouse analytics in
 | `groovyRunner.healthcheck.periodSeconds` | Groovy Runner health check period                         | `5`             |
 | `groovyRunner.healthcheck.timeoutSeconds` | Groovy Runner health check timeout                       | `5`             |
 | `groovyRunner.healthcheck.failureThreshold` | Groovy Runner health check failure threshold           | `5`             |
-| `groovyRunner.securityContext`          | Overrides `securityContext` key by key for this container (an explicit `false` wins) | `runAsUser: 1000, runAsGroup: 1000` |
+| `groovyRunner.securityContext`          | Overrides `securityContext` key by key for this container (an explicit `false` wins) | `runAsUser: 1000, runAsGroup: 1000, readOnlyRootFilesystem: true` |
+| `groovyRunner.networkPolicy.enabled`    | Allow ingress to the runner only from decision-engine pods and close its egress | `true` |
+| `groovyRunner.networkPolicy.extraIngress` | Additional ingress rules for the runner                  | `[]`            |
+| `groovyRunner.networkPolicy.extraEgress` | Egress rules for the runner (e.g. a service-mesh sidecar's control plane) | `[]` |
 
 ### Database Migration Configuration
 

@@ -213,10 +213,19 @@ redis:
 # Groovy Runner configuration
 groovyRunner:
   enabled: true
-  # The image's `groovy` user, which owns /home/groovy.
+  # The image's `groovy` user, which owns /home/groovy. The root filesystem is
+  # read-only; /tmp is an emptyDir.
   securityContext:
     runAsUser: 1000
     runAsGroup: 1000
+    readOnlyRootFilesystem: true
+  # Restricts the runner to traffic from the decision-engine pods and closes
+  # egress. Needs a CNI that enforces NetworkPolicy. If a service-mesh sidecar
+  # is injected into the runner, open its control-plane traffic in extraEgress.
+  networkPolicy:
+    enabled: true
+    extraIngress: []
+    extraEgress: []
   image:
     repository: "ghcr.io/juspay/decision-engine/groovy-runner"
     version: "v1.4"
