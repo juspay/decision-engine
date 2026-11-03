@@ -21,7 +21,7 @@ import {
 } from '../../types/api'
 import { Badge } from '../ui/Badge'
 import { Card as GlassCard, SurfaceLabel } from '../ui/Card'
-import { humanizeAuditValue, routeLabel } from '../../lib/auditLabels'
+import { humanizeAuditValue, overviewRouteLabel, routeLabel } from '../../lib/auditLabels'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { TimeRangeFilter } from '../ui/TimeRangeFilter'
@@ -43,12 +43,6 @@ const PRESET_WINDOW_COPY: Record<AnalyticsRange, { detail: string; badge: string
 
 const GATEWAY_ACTIVITY_LIMIT = 6
 
-const ROUTE_HIT_LABELS: Record<string, string> = {
-  '/decide_gateway': 'Decide Gateway',
-  '/routing_hybrid': 'Hybrid Routing',
-  '/update_gateway': 'Update Gateway',
-  '/rule_evaluate': 'Rule Evaluate',
-}
 
 function formatCompactNumber(value: number | undefined) {
   return new Intl.NumberFormat(undefined, {
@@ -402,7 +396,7 @@ export function OverviewPage() {
                       key={item.route}
                       className="text-[11px] leading-4 text-slate-500 dark:text-[#8d96aa]"
                     >
-                      {ROUTE_HIT_LABELS[item.route] || item.route}{' '}
+                      {overviewRouteLabel(item.route)}{' '}
                       <span className="font-semibold tabular-nums text-slate-700 dark:text-[#c6cfdd]">
                         {formatExactNumber(item.count)}
                       </span>

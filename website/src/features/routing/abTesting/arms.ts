@@ -11,13 +11,14 @@ export const SR_ROUTING_ARM_ID = 'sr_routing'
 export const EXPERIMENT_ENDPOINTS: ExperimentEndpoint[] = ['hybrid_routing', 'decide_gateway', 'evaluate']
 
 export const ENDPOINT_LABELS: Record<ExperimentEndpoint, string> = {
-  hybrid_routing: 'Hybrid routing',
+  hybrid_routing: 'Decide',
   decide_gateway: 'Decide gateway',
   evaluate: 'Rule evaluate',
 }
 
 export const ENDPOINT_PATHS: Record<ExperimentEndpoint, string> = {
-  hybrid_routing: '/routing/hybrid',
+  // `/routing/hybrid` runs the same evaluation and shares this endpoint's experiments.
+  hybrid_routing: '/decide',
   decide_gateway: '/decide-gateway',
   evaluate: '/routing/evaluate',
 }

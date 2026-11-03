@@ -31,6 +31,7 @@ import {
 
 import { PageHeading } from '../ui/PageHeading'
 import { useMerchantStore } from '../../store/merchantStore'
+import { PaymentFieldFilter, parsePaymentFields, serializePaymentFields } from '../../features/audit/paymentFields'
 import {
   eventPhase as auditEventPhase,
   flowTypeValue,
@@ -100,13 +101,9 @@ function attributeLabel(field: PaymentAttributeField, value: string, labels: Rec
     .map((word, index) => (index === 0 ? word.charAt(0).toUpperCase() + word.slice(1) : word))
     .join(' ')
 }
-const ROUTE_OPTIONS = [
-  { value: 'decide', label: 'Decide' },
-  { value: 'decide_gateway', label: 'Decide Gateway' },
-  { value: 'update_gateway_score', label: 'Update Gateway' },
-  { value: 'routing_evaluate', label: 'Rule Evaluate' },
-  { value: 'routing_hybrid', label: 'Hybrid Routing' },
-]
+const ROUTE_OPTIONS = ['decide', 'decide_gateway', 'update_gateway_score', 'routing_evaluate', 'routing_hybrid'].map(
+  (value) => ({ value, label: routeLabel(value) }),
+)
 const INSPECTOR_TABS = ['summary', 'input', 'response', 'raw'] as const
 const INSPECTOR_TAB_LABELS: Record<(typeof INSPECTOR_TABS)[number], string> = {
   summary: 'Summary',
@@ -163,10 +160,10 @@ function parsePageSize(searchParams: URLSearchParams): number {
  */
 const ROUTING_KIND_OPTIONS = [
   { value: '', label: 'Any routing type' },
-  { value: 'multi_objective', label: 'Multi-objective' },
+  { value: 'multi_objective', label: 'Multi Objective' },
+  { value: 'auth_rate', label: 'Auth Rate' },
   { value: 'rule_based', label: 'Rule based / Volume based' },
   { value: 'debit_routing', label: 'Debit routing' },
-  { value: 'hybrid', label: 'Hybrid' },
 ]
 
 type AuditFilters = {
@@ -186,6 +183,8 @@ type AuditFilters = {
   minAmount: string
   maxAmount: string
   connectorMismatch: string
+  /** `payment_fields`: a JSON object of routing keys or `metadata.<key>` names to values. */
+  paymentFields: string
 }
 
 type InspectorTab = (typeof INSPECTOR_TABS)[number]
@@ -207,6 +206,7 @@ const EMPTY_FILTERS: AuditFilters = {
   minAmount: '',
   maxAmount: '',
   connectorMismatch: '',
+  paymentFields: '',
 }
 
 function normalizeAuditFilters(filters: AuditFilters): AuditFilters {
@@ -230,6 +230,7 @@ function normalizeAuditFilters(filters: AuditFilters): AuditFilters {
     minAmount: filters.minAmount.trim(),
     maxAmount: filters.maxAmount.trim(),
     connectorMismatch: filters.connectorMismatch === 'true' ? 'true' : '',
+    paymentFields: serializePaymentFields(parsePaymentFields(filters.paymentFields)),
   }
 }
 
@@ -248,6 +249,7 @@ function paymentFilterParams(filters: AuditFilters): Record<string, string | und
     min_amount: filters.minAmount || undefined,
     max_amount: filters.maxAmount || undefined,
     connector_mismatch: filters.connectorMismatch || undefined,
+    payment_fields: filters.paymentFields || undefined,
   }
 }
 
@@ -297,11 +299,13 @@ function buildAuditUrl(
 
 function parseRoutingKind(searchParams: URLSearchParams): string {
   const explicit = searchParams.get('routing_kind') || ''
+  // `hybrid` named the view before /decide joined it.
+  if (explicit === 'hybrid') return 'multi_objective'
   if (ROUTING_KIND_OPTIONS.some((option) => option.value && option.value === explicit)) return explicit
   const legacyMode = searchParams.get('mode')
   if (legacyMode === 'rule_based' || legacyMode === 'debit_routing') return legacyMode
   if (searchParams.get('routing_approach') === DEBIT_ROUTING_APPROACH) return 'debit_routing'
-  if (searchParams.get('exclude_routing_approach') === DEBIT_ROUTING_APPROACH) return 'multi_objective'
+  if (searchParams.get('exclude_routing_approach') === DEBIT_ROUTING_APPROACH) return 'auth_rate'
   return ''
 }
 
@@ -334,6 +338,7 @@ function parseFilters(searchParams: URLSearchParams): AuditFilters {
     minAmount: searchParams.get('min_amount') || '',
     maxAmount: searchParams.get('max_amount') || '',
     connectorMismatch: searchParams.get('connector_mismatch') || '',
+    paymentFields: searchParams.get('payment_fields') || '',
   })
 }
 
@@ -1353,7 +1358,7 @@ export function PaymentAuditPage() {
             />
             <label
               className={`${fieldClassName(filters.connectorMismatch === 'true')} flex cursor-pointer items-center gap-2`}
-              title="Only payments whose latest Decide Gateway or Hybrid Routing decision differs from a reported update connector."
+              title="Only payments whose latest Multi Objective or Auth Rate decision differs from a reported update connector."
             >
               <input
                 type="checkbox"
@@ -1363,6 +1368,11 @@ export function PaymentAuditPage() {
               />
               Connector mismatches only
             </label>
+            <PaymentFieldFilter
+              value={filters.paymentFields}
+              onApply={(next) => applyDropdownFilter('paymentFields', next)}
+              fieldClassName={fieldClassName}
+            />
           </div>
         ) : null}
         {/* The redesigned bar has no Search button; this keeps Enter submitting the text fields. */}

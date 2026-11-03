@@ -79,10 +79,11 @@ function srLabel(config: SrConfigOverride): string {
   return SR_STRATEGY_LABELS[srStrategyOf(config)]
 }
 
-// Decision Audit view that holds an endpoint's trail.
+// Decision Audit view that holds an endpoint's trail; Multi Objective holds both /decide and
+// /routing/hybrid, where a `hybrid_routing` experiment runs.
 const AUDIT_ROUTING_KIND: Record<ExperimentEndpoint, string> = {
-  hybrid_routing: 'hybrid',
-  decide_gateway: 'multi_objective',
+  hybrid_routing: 'multi_objective',
+  decide_gateway: 'auth_rate',
   evaluate: 'rule_based',
 }
 
@@ -422,8 +423,8 @@ function ControlArmSummary({ arm, source, runningExperimentName, algorithms, alg
             <span className="mb-1 flex items-center gap-1 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">
               SR settings
               <InfoHint text={source === 'current'
-                ? "Follows the merchant's Auth Rate routing, Autopilot and Cost savings settings. SR applies on /decide-gateway and on /routing/hybrid requests that include dynamic_routing_request."
-                : 'SR applies on /decide-gateway and on /routing/hybrid requests that include dynamic_routing_request.'} />
+                ? "Follows the merchant's Auth Rate routing, Autopilot and Cost savings settings. SR applies on /decide-gateway, /decide, and /routing/hybrid requests that include dynamic_routing_request."
+                : 'SR applies on /decide-gateway, /decide, and /routing/hybrid requests that include dynamic_routing_request.'} />
             </span>
             {arm.srStrategy ? (
               <>
@@ -1211,7 +1212,7 @@ function ExperimentDetailPanel({
         {!endpoint ? (
           <p className="text-sm italic text-slate-500">
             {hybridOnly
-              ? 'Both arms are identical on hybrid routing, so this experiment does not split its traffic.'
+              ? 'Both arms are identical on /decide and /routing/hybrid, so this experiment does not split its traffic.'
               : 'Both arms are identical on every selected endpoint, so this experiment does not split traffic.'}
           </p>
         ) : isLoading && !results ? (

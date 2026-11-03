@@ -10,7 +10,8 @@ use crate::{
             ActivateRoutingConfigRequest, AlgorithmType, Context, DeactivateRoutingConfigRequest,
             ExperimentEndpoint, JsonifiedRoutingAlgorithm, KeyDataType, RoutingBatchRequest,
             RoutingBatchResponse, RoutingDictionaryRecord, RoutingEvaluateResponse, RoutingRequest,
-            RoutingRule, SrDimensionConfig, StaticRoutingAlgorithm, ELIGIBLE_DIMENSIONS,
+            RoutingRule, RuleSelection, SrDimensionConfig, StaticRoutingAlgorithm,
+            ELIGIBLE_DIMENSIONS,
         },
         utils::{
             apply_default_fallback, generate_random_id, is_valid_enum_value,
@@ -786,6 +787,7 @@ async fn build_no_active_algorithm_response(
         output: format_output(&output),
         evaluated_output,
         eligible_connectors,
+        selection: RuleSelection::NoActiveAlgorithm,
     }
 }
 
@@ -1048,6 +1050,11 @@ async fn evaluate_algorithm_data(
             }
         };
 
+    let mut selection = match rule_name.as_deref() {
+        Some("default_fallback") => RuleSelection::NoRuleMatched,
+        Some("default_selection") | None => RuleSelection::DefaultSelection,
+        Some(_) => RuleSelection::Matched,
+    };
     let (output, evaluated_output, rule_name) = match payload
         .fallback_output
         .as_deref()
@@ -1066,6 +1073,7 @@ async fn evaluate_algorithm_data(
                     chosen = ?evaluated_output,
                     "routing_evaluation: answering with the fallback because no connector the rule chose is in fallback_output"
                 );
+                selection = RuleSelection::OutputNotEligible;
                 (
                     Output::Priority(fallback.to_vec()),
                     fallback.to_vec(),
@@ -1080,6 +1088,7 @@ async fn evaluate_algorithm_data(
                     routable_connectors = ?routable_connectors,
                     "routing_evaluation: dropping connectors the rule chose that are not in fallback_output"
                 );
+                selection = RuleSelection::OutputPartiallyEligible;
                 (
                     Output::Priority(routable_connectors.clone()),
                     routable_connectors,
@@ -1116,6 +1125,7 @@ async fn evaluate_algorithm_data(
         output: format_output(&output),
         evaluated_output,
         eligible_connectors,
+        selection,
     };
 
     Ok(EvaluationOutcome {
@@ -1624,6 +1634,7 @@ pub async fn routing_evaluate_batch(
                     output: serde_json::Value::Null,
                     evaluated_output: Vec::new(),
                     eligible_connectors: Vec::new(),
+                    selection: RuleSelection::default(),
                 });
             }
         }

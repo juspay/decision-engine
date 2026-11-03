@@ -43,8 +43,8 @@ pub async fn load(
                 .count();
             (results.len(), success, failure, results)
         } else {
-            let (total_results, total_success, total_failure) =
-                metrics::audit_summaries::count(client, query, scope)
+            let ((total_results, total_success, total_failure), results) =
+                metrics::audit_summaries::load_list(client, query, scope)
                     .await
                     .map_err(|error| {
                         crate::logger::error!(
@@ -53,23 +53,10 @@ pub async fn load(
                             merchant_id = %query.merchant_id,
                             payment_id = ?query.payment_id,
                             request_id = ?query.request_id,
-                            "payment audit summary count failed"
+                            "payment audit summary list load failed"
                         );
                         error
                     })?;
-            let results = metrics::audit_summaries::load_page(client, query, scope)
-                .await
-                .map_err(|error| {
-                    crate::logger::error!(
-                        ?error,
-                        ?scope,
-                        merchant_id = %query.merchant_id,
-                        payment_id = ?query.payment_id,
-                        request_id = ?query.request_id,
-                        "payment audit summary page load failed"
-                    );
-                    error
-                })?;
             (total_results, total_success, total_failure, results)
         };
     let page = query.page;

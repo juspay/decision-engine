@@ -68,9 +68,9 @@ impl KnownFeature {
             Self::VolumeContracts => {
                 crate::decider::gatewaydecider::volume_commitment::FEATURE_FLAG
             }
-            Self::SrRouting => crate::routes::hybrid_routing::SR_ROUTING_FEATURE_FLAG,
+            Self::SrRouting => crate::routes::decide::evaluation::SR_ROUTING_FEATURE_FLAG,
             Self::SrScoresFromRuleRouting => {
-                crate::routes::hybrid_routing::SR_SCORES_FROM_RULE_ROUTING_FEATURE_FLAG
+                crate::routes::decide::evaluation::SR_SCORES_FROM_RULE_ROUTING_FEATURE_FLAG
             }
         }
     }

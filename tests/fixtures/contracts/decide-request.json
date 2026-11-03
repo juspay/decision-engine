@@ -9,6 +9,7 @@
   "capture_method": null,
   "mandate_type": null,
   "mandate_acceptance_type": null,
+  "payment_type": null,
   "setup_future_usage": null,
   "transaction_initiator": null,
   "surcharge_amount": null,
