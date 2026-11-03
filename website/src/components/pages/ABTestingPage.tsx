@@ -572,6 +572,26 @@ function VerdictChip({ verdict }: { verdict: string }) {
   return null
 }
 
+/**
+ * Results with `variants` filled in. A backend that predates multi-variant experiments answers with
+ * the single-variant fields only; they describe its one variant.
+ */
+function withVariantComparisons(results: ExperimentResultsResponse): ExperimentResultsResponse {
+  if (results.variants?.length) return results
+  return {
+    ...results,
+    significance_level: results.significance_level ?? 0.05,
+    variants: [{
+      metrics: results.variant,
+      delta_pp: results.delta_pp,
+      p_value: results.p_value,
+      confidence_interval: results.confidence_interval,
+      verdict: results.verdict,
+      net_delta_bps: results.net_delta_bps,
+    }],
+  }
+}
+
 // ─── SR Config param display helpers ──────────────────────────────────────────
 
 // Fetches the merchant's live SR config (hedging %, elimination threshold) — the same values
@@ -1017,11 +1037,12 @@ function ExperimentDetailPanel({
     ? `/analytics/experiment/${algorithm.id}/results?endpoint=${endpoint}${startParam}&min_sample_size=${abData.min_sample_size}&guardrail_threshold_pp=${abData.guardrail_threshold_pp}&variants=${variantsParam}${evalMargin !== undefined ? `&evaluation_margin=${evalMargin}` : ''}`
     : null
 
-  const { data: results, isLoading } = useSWR<ExperimentResultsResponse>(
+  const { data: rawResults, isLoading } = useSWR<ExperimentResultsResponse>(
     merchantId && resultsUrl ? resultsUrl : null,
     fetcher,
     { refreshInterval: 60_000 },
   )
+  const results = rawResults ? withVariantComparisons(rawResults) : undefined
 
   const TXN_PAGE_SIZE = 20
   const [txnPage, setTxnPage] = useState(1)
