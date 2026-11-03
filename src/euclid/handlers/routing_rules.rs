@@ -1962,6 +1962,7 @@ pub async fn deactivate_routing_rule(
 pub(crate) async fn stop_breached_payment_experiment(
     merchant_id: &str,
     experiment_id: &str,
+    run: u64,
 ) -> Result<(), String> {
     let state = get_tenant_app_state().await;
     // Internal work, since the guardrail only names pairs the decider recorded while routing.
@@ -1981,20 +1982,26 @@ pub(crate) async fn stop_breached_payment_experiment(
             crate::decider::gatewaydecider::ab_test::guardrail::mark_stopped(
                 merchant_id,
                 experiment_id,
+                run,
             );
             return Ok(());
         }
     }
-    // Publish the empty experiment slot so other replicas stop reading the old cache. Retry this
-    // write on later feedback if Redis is unavailable.
+    // Drop the cached slot rather than publishing an empty one. A concurrent activation may have
+    // just installed a replacement experiment, and writing "none" here would hide it until the
+    // entry expired. Dropping the key only costs the next read a database lookup, which back-fills
+    // whatever is actually active. Retry on later feedback if Redis is unavailable.
     let key = experiment_cache_key(merchant_id, &payment);
-    let ttl = state.config.cache_config.service_config_ttl;
     state
         .redis_conn
-        .set_key_with_ttl(&key, CachedExperimentSlot { experiment: None }, ttl)
+        .delete_key(&key)
         .await
         .map_err(|e| format!("{e:?}"))?;
-    crate::decider::gatewaydecider::ab_test::guardrail::mark_stopped(merchant_id, experiment_id);
+    crate::decider::gatewaydecider::ab_test::guardrail::mark_stopped(
+        merchant_id,
+        experiment_id,
+        run,
+    );
     logger::warn!(merchant_id = %merchant_id, experiment_id = %experiment_id,
         "A/B experiment stopped after guardrail breach");
     Ok(())

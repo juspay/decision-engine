@@ -19,9 +19,13 @@ const GUARDRAIL_SAMPLE_PCT: u32 = 10;
 #[derive(Default)]
 struct Guardrails {
     merchants: HashMap<String, HashMap<String, Experiment>>,
+    // Identifies one observation period. A stop request carries the run it was raised for, so a
+    // stop that lands after a reset cannot silence the run that replaced it.
+    next_run: u64,
 }
 
 struct Experiment {
+    run: u64,
     threshold_pp: f64,
     min_resolved: u64,
     breached: bool,
@@ -32,8 +36,9 @@ struct Experiment {
 }
 
 impl Experiment {
-    fn new(data: &ABTestData) -> Self {
+    fn new(data: &ABTestData, run: u64) -> Self {
         Self {
+            run,
             threshold_pp: data.guardrail_threshold_pp,
             min_resolved: (data.min_sample_size / GUARDRAIL_SAMPLE_PCT) as u64,
             breached: false,
@@ -116,12 +121,18 @@ pub fn plan(
         return arms::plan(data, endpoint, payment_id);
     }
     let mut guardrails = lock();
+    // Split the borrow so a new observation period can take its run from the same registry.
+    let guardrails = &mut *guardrails;
+    let next_run = &mut guardrails.next_run;
     let experiment = guardrails
         .merchants
         .entry(merchant_id.to_owned())
         .or_default()
         .entry(experiment_id.to_owned())
-        .or_insert_with(|| Experiment::new(data));
+        .or_insert_with(|| {
+            *next_run += 1;
+            Experiment::new(data, *next_run)
+        });
     experiment.prune(Instant::now());
     let side = experiment
         .payments
@@ -168,9 +179,15 @@ pub fn record_decision(
     }
 }
 
+/// One breached experiment and the observation period it breached in.
+pub struct BreachedRun {
+    pub experiment_id: String,
+    pub run: u64,
+}
+
 /// Update net auth rate on feedback and return experiments needing durable deactivation. At most
 /// one success counts per payment and endpoint. A breached experiment stays pending until stopped.
-pub fn record_outcome(merchant_id: &str, payment_id: &str, is_success: bool) -> Vec<String> {
+pub fn record_outcome(merchant_id: &str, payment_id: &str, is_success: bool) -> Vec<BreachedRun> {
     let mut guardrails = lock();
     let Some(experiments) = guardrails.merchants.get_mut(merchant_id) else {
         return Vec::new();
@@ -203,19 +220,25 @@ pub fn record_outcome(merchant_id: &str, payment_id: &str, is_success: bool) -> 
     experiments
         .iter()
         .filter(|(_, experiment)| experiment.breached && !experiment.stop_completed)
-        .map(|(experiment_id, _)| experiment_id.clone())
+        .map(|(experiment_id, experiment)| BreachedRun {
+            experiment_id: experiment_id.clone(),
+            run: experiment.run,
+        })
         .collect()
 }
 
-/// A successful stop ends deactivation retries until a deliberate new activation.
-pub fn mark_stopped(merchant_id: &str, experiment_id: &str) {
+/// A successful stop ends deactivation retries until a deliberate new activation. A stop raised
+/// for an earlier run is ignored, so a reset plus fresh routing is never silenced by it.
+pub fn mark_stopped(merchant_id: &str, experiment_id: &str, run: u64) {
     let mut guardrails = lock();
     if let Some(experiment) = guardrails
         .merchants
         .get_mut(merchant_id)
         .and_then(|merchant| merchant.get_mut(experiment_id))
     {
-        experiment.stop_completed = true;
+        if experiment.run == run {
+            experiment.stop_completed = true;
+        }
     }
 }
 
@@ -243,6 +266,10 @@ mod tests {
             "guardrail_threshold_pp": 10.0
         }))
         .unwrap()
+    }
+
+    fn stopped(breached: Vec<BreachedRun>) -> Vec<String> {
+        breached.into_iter().map(|b| b.experiment_id).collect()
     }
 
     fn payment_for(side: ArmSide, used: &[String]) -> String {
@@ -299,19 +326,19 @@ mod tests {
         }
         assert!(record_outcome(merchant, &controls[0], true).is_empty());
         assert_eq!(
-            record_outcome(merchant, &variants[0], false),
+            stopped(record_outcome(merchant, &variants[0], false)),
             vec![experiment]
         );
         assert_eq!(
-            record_outcome(merchant, &variants[0], false),
+            stopped(record_outcome(merchant, &variants[0], false)),
             vec![experiment]
         );
         assert_eq!(
-            record_outcome(merchant, &controls[1], true),
+            stopped(record_outcome(merchant, &controls[1], true)),
             vec![experiment]
         );
         assert_eq!(
-            record_outcome(merchant, &variants[1], false),
+            stopped(record_outcome(merchant, &variants[1], false)),
             vec![experiment]
         );
 
@@ -350,10 +377,11 @@ mod tests {
             ArmSide::Variant
         );
         assert_eq!(
-            record_outcome(merchant, &variants[0], true),
+            stopped(record_outcome(merchant, &variants[0], true)),
             vec![experiment]
         );
-        mark_stopped(merchant, experiment);
+        let run = lock().merchants[merchant][experiment].run;
+        mark_stopped(merchant, experiment, run);
         assert!(record_outcome(merchant, &variants[0], true).is_empty());
 
         {
@@ -400,6 +428,65 @@ mod tests {
         reset(merchant, experiment);
     }
 
+    /// A stop raised before a reset must not silence the run that replaced it.
+    #[test]
+    fn stop_completion_is_scoped_to_its_run() {
+        let merchant = "guardrail_run_merchant";
+        let experiment = "guardrail_run_experiment";
+        let config = data();
+        let mut used = Vec::new();
+        let control = payment_for(ArmSide::Control, &used);
+        used.push(control.clone());
+        let variant = payment_for(ArmSide::Variant, &used);
+        used.push(variant.clone());
+
+        let route = |payment_id: &str| {
+            plan(
+                merchant,
+                experiment,
+                &config,
+                ExperimentEndpoint::HybridRouting,
+                payment_id,
+            );
+            record_decision(
+                merchant,
+                experiment,
+                payment_id,
+                ExperimentEndpoint::HybridRouting,
+            );
+        };
+
+        // First run breaches and a stop is raised for it, but the stop has not landed yet.
+        for payment_id in &used {
+            route(payment_id);
+        }
+        record_outcome(merchant, &control, true);
+        let raised = record_outcome(merchant, &variant, false);
+        let stale_run = raised[0].run;
+        assert_eq!(stopped(raised), vec![experiment]);
+
+        // The merchant reactivates, and fresh routing starts a new observation period.
+        reset(merchant, experiment);
+        for payment_id in &used {
+            route(payment_id);
+        }
+        let live_run = lock().merchants[merchant][experiment].run;
+        assert_ne!(stale_run, live_run);
+
+        // The old stop lands now. It must leave the new run alone.
+        mark_stopped(merchant, experiment, stale_run);
+        record_outcome(merchant, &control, true);
+        assert_eq!(
+            stopped(record_outcome(merchant, &variant, false)),
+            vec![experiment]
+        );
+
+        // A stop naming the live run still ends its retries.
+        mark_stopped(merchant, experiment, live_run);
+        assert!(record_outcome(merchant, &variant, false).is_empty());
+        reset(merchant, experiment);
+    }
+
     #[test]
     fn saved_threshold_and_merchant_scope_control_the_cutoff() {
         let merchant = "guardrail_threshold_merchant";
@@ -436,7 +523,7 @@ mod tests {
                 record_outcome(scope, payment_id, true);
             }
             record_outcome(scope, &variants[0], true);
-            let stop = record_outcome(scope, &variants[1], false);
+            let stop = stopped(record_outcome(scope, &variants[1], false));
             if scope == merchant {
                 assert!(stop.is_empty()); // 50pp drop is within the saved 60pp limit.
             } else {
