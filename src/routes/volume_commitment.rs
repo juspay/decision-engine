@@ -35,8 +35,8 @@ pub struct RunQuery {
 }
 
 /// Who may run what: the admin secret may run anything, a session or api key its own merchant and
-/// that merchant's sub-merchants, and the sweep of every merchant (1 + 2N database reads and N ClickHouse queries,
-/// serial) is the scheduler's alone.
+/// that merchant's sub-merchants, and the sweep of every merchant (1 + 2N database reads and N
+/// ClickHouse queries, serial) is the scheduler's alone.
 async fn authorize_run(
     admin: bool,
     session: Option<&AuthContext>,
@@ -50,18 +50,15 @@ async fn authorize_run(
             StatusCode::FORBIDDEN,
             "running a forecast for every merchant needs the admin secret",
         )),
-        (Some(context), Some(merchant_id)) => crate::auth::authorize_merchant_id(
-            Some(context),
-            merchant_id,
-        )
-        .await
-        .map(|_| ())
-        .map_err(|_| {
-            RouteError::new(
-                StatusCode::FORBIDDEN,
-                "this session may only run a forecast for its own merchant or its sub-merchants",
-            )
-        }),
+        (Some(context), Some(merchant_id)) => {
+            let reached = crate::auth::authorize_merchant_id(Some(context), merchant_id).await;
+            reached.map(|_| ()).map_err(|_| {
+                RouteError::new(
+                    StatusCode::FORBIDDEN,
+                    "this session may only run its merchant and that merchant's sub-merchants",
+                )
+            })
+        }
         (None, Some(_)) => Err(RouteError::new(
             StatusCode::UNAUTHORIZED,
             "running a forecast needs a session, an api key, or the admin secret",
