@@ -524,12 +524,13 @@ export function ScopeSwitcher() {
                             } leading-[18px]`}
                           >
                             {labels.profile}
-                            {/* The merchant listed among its own profiles: named as such, so it
-                                does not read as a repeat of the group header above it. */}
+                            {/* The merchant listed among its own profiles — the default scope, with
+                                its own rules — marked so it does not read as a repeat of the group
+                                header above it. */}
                             {deMerchants.has(scope.merchant_id) && (
                               <span className="font-normal text-slate-500 dark:text-slate-400">
                                 {' '}
-                                · merchant
+                                (default)
                               </span>
                             )}
                           </span>
