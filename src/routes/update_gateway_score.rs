@@ -113,9 +113,13 @@ pub async fn update_gateway_score(
         "Incoming request headers"
     );
     let update_score_request = match request {
-        Ok(ScopedJson { payload, body, .. }) => {
+        Ok(ScopedJson {
+            payload,
+            body,
+            merchant,
+        }) => {
             crate::logger::debug!(tag = "UpdateGatewayScore", "Body: {:?}", body);
-            Ok(payload)
+            Ok((payload, merchant))
         }
         Err(ScopedJsonRejection::Parse { body, error }) => {
             crate::logger::debug!(tag = "UpdateGatewayScore", "Body: {:?}", body);
@@ -150,7 +154,7 @@ pub async fn update_gateway_score(
     };
 
     match update_score_request {
-        Ok(payload) => {
+        Ok((payload, merchant)) => {
             let merchant_id = payload.merchant_id.clone();
             let gateway = payload.gateway.clone();
             let payment_id = payload.payment_id.clone();
@@ -174,6 +178,41 @@ pub async fn update_gateway_score(
                 trace_id.clone(),
                 None,
             );
+            let transaction_status = serde_json::to_string(&payload.status)
+                .unwrap_or_else(|_| format!("{:?}", payload.status))
+                .trim_matches('"')
+                .to_string();
+            // Validate stored ownership before acknowledgement, the GSM filter and task spawn.
+            let scoring_context =
+                match crate::feedback::scoring_context::load(merchant, &payment_id).await {
+                    Ok(context) => context,
+                    Err(error) => {
+                        crate::analytics::DomainAnalyticsEvent::record_error(
+                            crate::analytics::AnalyticsFlowContext::new(
+                                crate::analytics::ApiFlow::DynamicRouting,
+                                crate::analytics::FlowType::UpdateGatewayScoreError,
+                            ),
+                            crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+                            Some(merchant_id.clone()),
+                            Some(payment_id.clone()),
+                            x_request_id,
+                            global_request_id,
+                            trace_id,
+                            Some(gateway.clone()),
+                            None,
+                            error.error_code.clone(),
+                            error.error_message.clone(),
+                            crate::analytics::serialize_details(&UpdateGatewayScoreFailureDetail {
+                                payment_id: &payment_id,
+                                request_id: None,
+                                status: &transaction_status,
+                            }),
+                            Some("scoring_context_validation_failed".to_string()),
+                            None,
+                        );
+                        return Err(error);
+                    }
+                };
             // GSM lookup is a fast in-memory lookup — compute it synchronously so the
             // caller gets the result immediately without waiting for the score update.
             let gsm_info = payload.error_info.as_ref().and_then(|ei| {
@@ -197,12 +236,7 @@ pub async fn update_gateway_score(
             let spawn_payment_id = payment_id.clone();
             let spawn_merchant_id = merchant_id.clone();
             let handle = FEEDBACK_TASK_TRACKER.spawn(async move {
-                let transaction_status = serde_json::to_string(&payload.status)
-                    .unwrap_or_else(|_| format!("{:?}", payload.status))
-                    .trim_matches('"')
-                    .to_string();
-
-                match check_and_update_gateway_score_(payload.clone()).await {
+                match check_and_update_gateway_score_(payload.clone(), scoring_context).await {
                     Ok(outcome) => {
                         // A payment without a scoring context had no score to update.
                         if outcome != SCORE_UPDATE_SKIPPED {

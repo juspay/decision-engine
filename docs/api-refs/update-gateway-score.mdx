@@ -7,6 +7,20 @@ description: "Curl example for /update-gateway-score."
 
 Call this after non-debit runtime payments so SR data stays current. Do not call it for `NTW_BASED_ROUTING` debit runs where `decided_gateway` is not the selected network.
 
+The stored scoring context must belong to the authorized merchant. Decision Engine checks its
+`merchantId` before acknowledging feedback, applying the GSM scoring filter, or starting the
+background score update. A foreign context returns HTTP `403` with
+`SCORING_CONTEXT_MERCHANT_MISMATCH`; no score is updated. A confirmed missing context keeps the
+existing accepted-but-skipped behavior. Redis read or decode failures return an error.
+
+Context and deduplication keys retain their existing payment-id-based formats for upgrade
+compatibility. Payment IDs must remain unique across merchants sharing Redis: a collision can
+overwrite a context and cause feedback to be rejected, or suppress an update through the existing
+lock. This ownership check prevents using a foreign context; it does not provide independent
+namespaces for identical payment IDs. All feedback handlers must run this version before relying
+on the ownership check. A future key migration must cover context writers, readers and locks
+together, and drain old handlers plus the existing 1,800-second context lifetime.
+
 ## Request
 
 ```bash

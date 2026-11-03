@@ -753,11 +753,7 @@ pub async fn run_decider_flow(
         }
     };
 
-    let key = [
-        C::GATEWAY_SCORING_DATA,
-        &deciderParams.dpTxnDetail.txnUuid.clone(),
-    ]
-    .concat();
+    let key = crate::feedback::scoring_context::key(&deciderParams.dpTxnDetail.txnUuid);
     let updated_gateway_scoring_data = T::GatewayScoringData {
         routingApproach: Some(decider_flow.writer.gwDeciderApproach.clone().to_string()),
         is_legacy_decider_flow,

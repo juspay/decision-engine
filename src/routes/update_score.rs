@@ -65,7 +65,11 @@ pub async fn update_score(
         .to_string();
     tracing::Span::current().record("is_audit_trail_log", "true");
     let (body_bytes, update_score_request) = match request {
-        Ok(ScopedJson { payload, body, .. }) => (body, Ok(payload)),
+        Ok(ScopedJson {
+            payload,
+            body,
+            merchant,
+        }) => (body, Ok((payload, merchant))),
         Err(ScopedJsonRejection::Parse { body, error }) => (body, Err(error)),
         Err(ScopedJsonRejection::Scope(violation)) => {
             return Err(violation.into());
@@ -131,7 +135,7 @@ pub async fn update_score(
     let req_body = String::from_utf8_lossy(&body_bytes).to_string();
 
     match update_score_request {
-        Ok(payload) => {
+        Ok((payload, merchant)) => {
             let merchant_id = payload.txn_detail.merchantId.clone();
             let merchant_id_txt = crate::types::merchant::id::merchant_id_to_text(merchant_id);
             tracing::Span::current().record("merchant_id", merchant_id_txt.clone());
@@ -241,6 +245,8 @@ pub async fn update_score(
                 isRedisCompEnabled: redis_comp_enabled_de,
             });
 
+            let scoring_context =
+                crate::feedback::scoring_context::load(merchant, &txn_detail.txnUuid).await?;
             check_and_update_gateway_score(
                 txn_detail,
                 txn_card_info,
@@ -254,8 +260,9 @@ pub async fn update_score(
                     crate::analytics::FlowType::UpdateScoreLegacyScoreSnapshot,
                 ),
                 redis_comp_config_final,
+                scoring_context,
             )
-            .await;
+            .await?;
 
             jemalloc_ctl::epoch::advance().unwrap();
             let allocated_after = jemalloc_ctl::stats::allocated::read().unwrap_or(0);

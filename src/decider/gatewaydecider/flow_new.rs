@@ -391,7 +391,7 @@ pub async fn load_srv3_default_bucket_size(merchant_id: &str) -> i32 {
 
 /// Saves the scoring context `/update-gateway-score` reads to update SR scores for the payment.
 async fn write_gateway_scoring_data(txn_uuid: &str, data: &T::GatewayScoringData) {
-    let key = [C::GATEWAY_SCORING_DATA, txn_uuid].concat();
+    let key = crate::feedback::scoring_context::key(txn_uuid);
     get_tenant_app_state()
         .await
         .redis_conn
