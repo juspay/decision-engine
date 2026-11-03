@@ -330,7 +330,7 @@ impl From<RoutingEvaluateResponse> for RuleSection {
 }
 
 /// Rewrites the rule output's connector objects from `gateway_id` to
-/// `payment_merchant_connector_id`, whatever the output type nests them under.
+/// `merchant_connector_id`, whatever the output type nests them under.
 fn rename_connector_ids(value: serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::Object(map) => {
@@ -339,7 +339,7 @@ fn rename_connector_ids(value: serde_json::Value) -> serde_json::Value {
                 map.into_iter()
                     .map(|(key, value)| {
                         let key = if is_connector && key == "gateway_id" {
-                            "payment_merchant_connector_id".to_string()
+                            "merchant_connector_id".to_string()
                         } else {
                             key
                         };
@@ -368,7 +368,6 @@ pub struct SuccessRateSection {
     pub approach: Option<GatewayDeciderApproach>,
     /// Every scored connector, best first.
     pub scores: Vec<ConnectorScore>,
-    pub scheduled_outage: Option<bool>,
     pub diagnostics: Option<SuccessRateDiagnostics>,
 }
 
@@ -378,7 +377,6 @@ impl SuccessRateSection {
             status: SuccessRateStatus::Failed,
             approach: None,
             scores: Vec::new(),
-            scheduled_outage: None,
             diagnostics: None,
         }
     }
@@ -657,7 +655,7 @@ impl From<DecidedGateway> for Layers {
             reset_approach,
             routing_dimension,
             routing_dimension_level,
-            is_scheduled_outage,
+            is_scheduled_outage: _,
             is_dynamic_mga_enabled,
             gateway_mga_id_map,
             is_rust_based_decider,
@@ -687,7 +685,6 @@ impl From<DecidedGateway> for Layers {
                 status: SuccessRateStatus::Applied,
                 approach: Some(routing_approach),
                 scores: scores(gateway_priority_map.as_ref()),
-                scheduled_outage: Some(is_scheduled_outage),
                 diagnostics: Some(SuccessRateDiagnostics {
                     head_before_downtime_check: gateway_before_evaluation
                         .as_deref()
@@ -875,8 +872,8 @@ mod tests {
             success_rate: SuccessRateOutcome::Skipped,
             evaluated_connectors: Some(stripe_adyen()),
         })?;
-        let stripe = json!({"gateway_name": "stripe", "payment_merchant_connector_id": "mca_s"});
-        let adyen = json!({"gateway_name": "adyen", "payment_merchant_connector_id": "mca_a"});
+        let stripe = json!({"gateway_name": "stripe", "merchant_connector_id": "mca_s"});
+        let adyen = json!({"gateway_name": "adyen", "merchant_connector_id": "mca_a"});
         assert!(actual["id"]
             .as_str()
             .is_some_and(|id| id.starts_with("dec_")));
@@ -939,8 +936,8 @@ mod tests {
             success_rate: SuccessRateOutcome::Applied(Box::new(decision)),
             evaluated_connectors: Some(vec![connector("adyen", Some("mca_a"))]),
         })?;
-        let stripe = json!({"gateway_name": "stripe", "payment_merchant_connector_id": "mca_s"});
-        let adyen = json!({"gateway_name": "adyen", "payment_merchant_connector_id": "mca_a"});
+        let stripe = json!({"gateway_name": "stripe", "merchant_connector_id": "mca_s"});
+        let adyen = json!({"gateway_name": "adyen", "merchant_connector_id": "mca_a"});
         assert_eq!(actual["connectors"], json!([adyen, stripe]));
         assert_eq!(
             actual["outcome"],
@@ -953,10 +950,9 @@ mod tests {
                 "status": "applied",
                 "approach": "SR_SELECTION_MULTI_OBJECTIVE",
                 "scores": [
-                    {"gateway_name": "stripe", "payment_merchant_connector_id": "mca_s", "score": 0.98},
-                    {"gateway_name": "adyen", "payment_merchant_connector_id": "mca_a", "score": 0.97}
+                    {"gateway_name": "stripe", "merchant_connector_id": "mca_s", "score": 0.98},
+                    {"gateway_name": "adyen", "merchant_connector_id": "mca_a", "score": 0.97}
                 ],
-                "scheduled_outage": false,
                 "diagnostics": {
                     "head_before_downtime_check": stripe,
                     "reset_approach": "NO_RESET",
@@ -978,10 +974,10 @@ mod tests {
                 "outcome": "COST_WON", "reason": "adyen beats stripe on EV",
                 "cost_saved_bps": 1480.0, "qualified_count": 2, "margin": 1.0, "ev_gap_top2": 0.1351,
                 "ranked": [
-                    {"gateway_name": "adyen", "payment_merchant_connector_id": "mca_a",
+                    {"gateway_name": "adyen", "merchant_connector_id": "mca_a",
                      "auth_rate": 0.97, "cost_bps": 20.0, "cost_source": "SEED", "cost_model": null,
                      "ev": 0.9681, "is_sr_head": false, "is_chosen": true},
-                    {"gateway_name": "stripe", "payment_merchant_connector_id": "mca_s",
+                    {"gateway_name": "stripe", "merchant_connector_id": "mca_s",
                      "auth_rate": 0.98, "cost_bps": 1500.0, "cost_source": "SEED",
                      "cost_model": {"brand": "VISA", "variant": null, "issuer": null, "ccy": null,
                                     "ic_category": null, "pct_bps": 150.0, "fixed_fee": null},
@@ -1169,8 +1165,8 @@ mod tests {
             success_rate: SuccessRateOutcome::Applied(Box::new(decision)),
             evaluated_connectors: Some(vec![connector("stripe", None)]),
         })?;
-        let stripe = json!({"gateway_name": "stripe", "payment_merchant_connector_id": null});
-        let adyen = json!({"gateway_name": "adyen", "payment_merchant_connector_id": null});
+        let stripe = json!({"gateway_name": "stripe", "merchant_connector_id": null});
+        let adyen = json!({"gateway_name": "adyen", "merchant_connector_id": null});
         assert_eq!(actual["connectors"], json!([stripe, adyen]));
         assert_eq!(actual["outcome"]["reason"], "success_rate_ranked");
         // Equal scores sort by identifier.

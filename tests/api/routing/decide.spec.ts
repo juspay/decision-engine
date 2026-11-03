@@ -47,7 +47,7 @@ function legacyRequest(request: DecideRequest) {
       algorithm_for: request.routing_config.algorithm_for,
       fallback_output: request.routing_config.eligible_connectors.map(c => ({
         gateway_name: c.gateway_name,
-        gateway_id: c.payment_merchant_connector_id ?? null,
+        gateway_id: c.merchant_connector_id ?? null,
       })),
       parameters,
     },
@@ -62,22 +62,22 @@ function legacyRequest(request: DecideRequest) {
 
 const connector = (name: string) => {
   const { gateway_name, gateway_id } = factory.gatewayConnector(name)
-  return { gateway_name, payment_merchant_connector_id: gateway_id! }
+  return { gateway_name, merchant_connector_id: gateway_id! }
 }
 
 /** A hybrid `{gateway_name, gateway_id}` connector in the `/decide` shape. */
-const fromLegacy = (c: any) => ({ gateway_name: c.gateway_name, payment_merchant_connector_id: c.gateway_id ?? null })
+const fromLegacy = (c: any) => ({ gateway_name: c.gateway_name, merchant_connector_id: c.gateway_id ?? null })
 
 /** A decider `"name:id"` (or bare `"name"`) identifier in the `/decide` shape. */
 const fromIdentifier = (identifier: string) => {
   const split = identifier.indexOf(':')
   return split < 0
-    ? { gateway_name: identifier, payment_merchant_connector_id: null }
-    : { gateway_name: identifier.slice(0, split), payment_merchant_connector_id: identifier.slice(split + 1) }
+    ? { gateway_name: identifier, merchant_connector_id: null }
+    : { gateway_name: identifier.slice(0, split), merchant_connector_id: identifier.slice(split + 1) }
 }
 
-const identifierOf = (c: { gateway_name: string; payment_merchant_connector_id?: string | null }) =>
-  c.payment_merchant_connector_id ? `${c.gateway_name}:${c.payment_merchant_connector_id}` : c.gateway_name
+const identifierOf = (c: { gateway_name: string; merchant_connector_id?: string | null }) =>
+  c.merchant_connector_id ? `${c.gateway_name}:${c.merchant_connector_id}` : c.gateway_name
 
 /** The identifiers a `/decide` answer names, as a set: fallbacks tied on score come back in either order. */
 const candidates = (response: DecideResponse) => response.connectors.map(identifierOf).sort()
@@ -87,7 +87,7 @@ const renameIds = (value: any): any => Array.isArray(value)
   ? value.map(renameIds)
   : value && typeof value === 'object'
     ? Object.fromEntries(Object.entries(value).map(([key, v]) => [
-      'gateway_name' in value && key === 'gateway_id' ? 'payment_merchant_connector_id' : key, renameIds(v),
+      'gateway_name' in value && key === 'gateway_id' ? 'merchant_connector_id' : key, renameIds(v),
     ]))
     : value
 
@@ -136,7 +136,7 @@ function expectFieldMapParity(decide: DecideResponse, hybrid: any) {
     expect(decide.connectors[0]).toEqual(fromIdentifier(legacy.decided_gateway))
     expect(candidates(decide)).toEqual([legacy.decided_gateway, ...legacy.fallback_gateways].sort())
     expect(decide.success_rate).toMatchObject({
-      status: 'applied', approach: legacy.routing_approach, scheduled_outage: legacy.is_scheduled_outage,
+      status: 'applied', approach: legacy.routing_approach,
     })
     // Scores are live: the call in between can move them slightly, so they compare per connector
     // within a tolerance.
@@ -245,8 +245,8 @@ test.describe('Decide parity with hybrid (API)', () => {
     })
     expect(response.body.cost!.outcome).toBe('COST_WON')
     expect(response.body.connectors).toEqual([
-      { gateway_name: 'adyen', payment_merchant_connector_id: null },
-      { gateway_name: 'stripe', payment_merchant_connector_id: null },
+      { gateway_name: 'adyen', merchant_connector_id: null },
+      { gateway_name: 'stripe', merchant_connector_id: null },
     ])
   })
 
@@ -260,8 +260,8 @@ test.describe('Decide parity with hybrid (API)', () => {
     const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacyRequest(body) })
     expectFieldMapParity(response.body, hybrid.body)
     expect(response.body.connectors).toEqual([
-      { gateway_name: 'stripe', payment_merchant_connector_id: null },
-      { gateway_name: 'adyen', payment_merchant_connector_id: null },
+      { gateway_name: 'stripe', merchant_connector_id: null },
+      { gateway_name: 'adyen', merchant_connector_id: null },
     ])
   })
 })
@@ -303,13 +303,13 @@ test.describe('Decide contract (API)', () => {
     await api.activateRoutingAlgorithm(merchant.id, created.body.rule_id)
     const body = decideRequest(merchant.id)
     body.routing_config.eligible_connectors.push({
-      gateway_name: selected.gateway_name, payment_merchant_connector_id: selected.gateway_id!,
+      gateway_name: selected.gateway_name, merchant_connector_id: selected.gateway_id!,
     })
     const response = await api.raw<DecideResponse>('POST', '/decide', { body })
     const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacyRequest(body) })
     expectFieldMapParity(response.body, hybrid.body)
     expect(response.body.connectors).toEqual([
-      { gateway_name: selected.gateway_name, payment_merchant_connector_id: selected.gateway_id },
+      { gateway_name: selected.gateway_name, merchant_connector_id: selected.gateway_id },
     ])
     expect(response.body.outcome).toMatchObject({ type: 'routed', strategy: 'rule', reason: 'rule_matched' })
   })
@@ -326,7 +326,7 @@ test.describe('Decide contract (API)', () => {
     await api.activateRoutingAlgorithm(merchant.id, created.body.rule_id)
     const body = decideRequest(merchant.id)
     body.routing_config.eligible_connectors.push({
-      gateway_name: tokenHolder.gateway_name, payment_merchant_connector_id: tokenHolder.gateway_id!,
+      gateway_name: tokenHolder.gateway_name, merchant_connector_id: tokenHolder.gateway_id!,
     })
 
     body.payment_type = 'ppt_mandate'
@@ -335,7 +335,7 @@ test.describe('Decide contract (API)', () => {
     expectFieldMapParity(mandate.body, hybrid.body)
     expect(mandate.body.outcome).toMatchObject({ type: 'routed', strategy: 'rule', reason: 'rule_matched' })
     expect(mandate.body.connectors).toEqual([
-      { gateway_name: tokenHolder.gateway_name, payment_merchant_connector_id: tokenHolder.gateway_id },
+      { gateway_name: tokenHolder.gateway_name, merchant_connector_id: tokenHolder.gateway_id },
     ])
 
     // A rule that tests payment_type cannot match a payment that does not send it.
@@ -355,7 +355,7 @@ test.describe('Decide contract (API)', () => {
       await api.setMerchantFeature(merchant.id, 'sr-routing', enabled)
       const body = decideRequest(merchant.id)
       body.routing_config.eligible_connectors = [{
-        gateway_name: connector.gateway_name, payment_merchant_connector_id: connector.gateway_id!,
+        gateway_name: connector.gateway_name, merchant_connector_id: connector.gateway_id!,
       }]
       const response = await api.raw<DecideResponse>('POST', '/decide', { body })
       const hybrid = await api.raw('POST', '/routing/hybrid', { body: legacyRequest(body) })
@@ -443,9 +443,9 @@ test.describe('Decide contract (API)', () => {
 })
 
 test.describe('Decide scenarios (API)', () => {
-  const stripe = { gateway_name: 'stripe', payment_merchant_connector_id: 'mca_stripe' }
-  const adyen = { gateway_name: 'adyen', payment_merchant_connector_id: 'mca_adyen' }
-  const checkout = { gateway_name: 'checkout', payment_merchant_connector_id: 'mca_checkout' }
+  const stripe = { gateway_name: 'stripe', merchant_connector_id: 'mca_stripe' }
+  const adyen = { gateway_name: 'adyen', merchant_connector_id: 'mca_adyen' }
+  const checkout = { gateway_name: 'checkout', merchant_connector_id: 'mca_checkout' }
 
   async function activate(api: any, merchantId: string, payload: any) {
     const created = await api.createRoutingAlgorithm(payload)

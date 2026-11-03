@@ -23,7 +23,7 @@ import { ErrorMessage } from '../ui/ErrorMessage'
 import { FieldError, invalidFieldClass } from '../ui/FieldError'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useCanEditRouting } from '../../store/authStore'
-import { apiPost } from '../../lib/api'
+import { apiPost, fetcher } from '../../lib/api'
 import { RoutingAlgorithm } from '../../types/api'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import {
@@ -87,7 +87,7 @@ export function EuclidRuleBuilderPage() {
   )
   const { data: activeAlgorithms } = useSWR<RoutingAlgorithm[]>(
     merchantId ? `/routing/list/active/${merchantId}` : null,
-    () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`)
+    () => fetcher<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`)
   )
 
   const sourceId = editId || cloneFromId

@@ -69,8 +69,8 @@ export function decideRequestFor(payment: SimulatedPayment): DecideRequest {
 
 // The decider's identifier for a connector: "name:id", or the bare name without an account.
 export function connectorIdentifier(connector: DecideConnector): string {
-  return connector.payment_merchant_connector_id
-    ? `${connector.gateway_name}:${connector.payment_merchant_connector_id}`
+  return connector.merchant_connector_id
+    ? `${connector.gateway_name}:${connector.merchant_connector_id}`
     : connector.gateway_name
 }
 

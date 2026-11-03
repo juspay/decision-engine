@@ -289,8 +289,6 @@ export interface DecideRequest {
   payment_method_sub_type?: string | null
   authentication_type?: string | null
   capture_method?: string | null
-  mandate_type?: string | null
-  mandate_acceptance_type?: string | null
   // The payment_type rule key: non_mandate, setup_mandate, ppt_mandate, …
   payment_type?: string | null
   setup_future_usage?: string | null
@@ -319,7 +317,6 @@ export interface DecideRequest {
   reward?: string | null
   network_token?: string | null
   metadata?: Record<string, string> | null
-  country?: string | null
   customer_id?: string | null
   routing_config: DecideRoutingConfig
 }
@@ -348,7 +345,7 @@ export interface DecideRoutingConfig {
 export interface DecideConnector {
   gateway_name: string
   // Omitted or null names the connector by gateway alone, as a hybrid fallback entry without gateway_id.
-  payment_merchant_connector_id?: string | null
+  merchant_connector_id?: string | null
 }
 
 // The /decide answer. `connectors` is the order to try: the first is the choice, the rest the
@@ -398,7 +395,6 @@ export interface DecideSuccessRateSection {
   status: 'applied' | 'failed'
   approach: string | null
   scores: DecideConnectorScore[]
-  scheduled_outage: boolean | null
   diagnostics: Record<string, unknown> | null
 }
 

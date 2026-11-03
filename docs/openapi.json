@@ -3350,7 +3350,7 @@
       }
     },
     "/routing/list/active/{merchant_id}": {
-      "post": {
+      "get": {
         "operationId": "getActiveRoutingRule",
         "tags": [
           "Routing Rules"
@@ -5223,8 +5223,6 @@
                 "payment_method_sub_type": "credit",
                 "authentication_type": null,
                 "capture_method": null,
-                "mandate_type": null,
-                "mandate_acceptance_type": null,
                 "payment_type": null,
                 "setup_future_usage": null,
                 "transaction_initiator": null,
@@ -5264,7 +5262,6 @@
                 "metadata": {
                   "segment": "premium"
                 },
-                "country": null,
                 "customer_id": null,
                 "routing_config": {
                   "algorithm_for": "payment",
@@ -5274,11 +5271,11 @@
                   "eligible_connectors": [
                     {
                       "gateway_name": "worldpay",
-                      "payment_merchant_connector_id": "mca_wp"
+                      "merchant_connector_id": "mca_wp"
                     },
                     {
                       "gateway_name": "checkout",
-                      "payment_merchant_connector_id": "mca_cko"
+                      "merchant_connector_id": "mca_cko"
                     }
                   ],
                   "preferred_connectors": null
@@ -5299,7 +5296,7 @@
             }
           },
           "400": {
-            "description": "Missing required fields, unknown fields, incorrect JSON types, invalid routing input or an existing hybrid evaluation error."
+            "description": "`TE_03` for a body that is not JSON, or a missing, unknown or invalid field, named by its path (for example `Unknown field `routing_config.eligible_connectors[0].gateway_id``); `TE_04` with a fixed message when routing cannot be evaluated for the payment. Deserializer and inner engine errors are logged, never returned."
           },
           "401": {
             "description": "Authentication required."
@@ -5308,7 +5305,7 @@
             "description": "The authenticated session or API key cannot act on this merchant."
           },
           "500": {
-            "description": "Routing configuration or service unavailable."
+            "description": "`TE_00` `Something went wrong`; the cause is logged, never returned."
           }
         }
       }
@@ -9922,14 +9919,6 @@
             "type": "string",
             "nullable": true
           },
-          "mandate_type": {
-            "type": "string",
-            "nullable": true
-          },
-          "mandate_acceptance_type": {
-            "type": "string",
-            "nullable": true
-          },
           "payment_type": {
             "type": "string",
             "nullable": true,
@@ -10046,11 +10035,6 @@
               "type": "string"
             }
           },
-          "country": {
-            "type": "string",
-            "nullable": true,
-            "description": "ISO 3166 alpha-2 country code."
-          },
           "customer_id": {
             "type": "string",
             "nullable": true
@@ -10165,7 +10149,7 @@
             "type": "string",
             "minLength": 1
           },
-          "payment_merchant_connector_id": {
+          "merchant_connector_id": {
             "type": "string",
             "nullable": true,
             "minLength": 1,
@@ -10178,13 +10162,13 @@
         "additionalProperties": false,
         "required": [
           "gateway_name",
-          "payment_merchant_connector_id"
+          "merchant_connector_id"
         ],
         "properties": {
           "gateway_name": {
             "type": "string"
           },
-          "payment_merchant_connector_id": {
+          "merchant_connector_id": {
             "type": "string",
             "nullable": true,
             "description": "Null for a connector named without an account."
@@ -10444,7 +10428,6 @@
           "status",
           "approach",
           "scores",
-          "scheduled_outage",
           "diagnostics"
         ],
         "properties": {
@@ -10466,10 +10449,6 @@
               "$ref": "#/components/schemas/DecideConnectorScore"
             },
             "description": "Every scored connector, best first."
-          },
-          "scheduled_outage": {
-            "type": "boolean",
-            "nullable": true
           },
           "diagnostics": {
             "type": "object",

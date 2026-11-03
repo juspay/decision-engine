@@ -607,7 +607,7 @@ function _runDecide(merchantId, headers, idx) {
         const fbBody  = JSON.stringify({
           merchantId,
           // The decider's identifier: "name:id", or the bare name without an account.
-          gateway: head.payment_merchant_connector_id ? `${gw}:${head.payment_merchant_connector_id}` : gw,
+          gateway: head.merchant_connector_id ? `${gw}:${head.merchant_connector_id}` : gw,
           paymentId,
           status,
         });

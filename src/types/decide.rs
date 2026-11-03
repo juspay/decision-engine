@@ -19,8 +19,6 @@ pub struct DecideRequest {
     pub payment_method_sub_type: Option<String>,
     pub authentication_type: Option<String>,
     pub capture_method: Option<String>,
-    pub mandate_type: Option<String>,
-    pub mandate_acceptance_type: Option<String>,
     /// The rule key of the same name: `non_mandate`, `setup_mandate`, `ppt_mandate`, … Rules route
     /// mandate payments by it, such as a processor-token charge to the processor holding the token.
     pub payment_type: Option<String>,
@@ -50,7 +48,6 @@ pub struct DecideRequest {
     pub reward: Option<String>,
     pub network_token: Option<String>,
     pub metadata: Option<BTreeMap<String, String>>,
-    pub country: Option<String>,
     pub customer_id: Option<String>,
     pub routing_config: DecideRoutingConfig,
 }
@@ -87,7 +84,7 @@ pub struct DecideConnector {
     /// The connector account. A connector named without one is matched and scored by its
     /// gateway name alone, as a hybrid `fallback_output` entry without a `gateway_id` is.
     #[serde(default)]
-    pub payment_merchant_connector_id: Option<String>,
+    pub merchant_connector_id: Option<String>,
 }
 
 impl DecideConnector {
@@ -103,7 +100,7 @@ impl DecideConnector {
     fn to_legacy(&self) -> ConnectorInfo {
         ConnectorInfo {
             gateway_name: self.gateway_name.clone(),
-            gateway_id: self.payment_merchant_connector_id.clone(),
+            gateway_id: self.merchant_connector_id.clone(),
         }
     }
 }
@@ -112,7 +109,7 @@ impl From<ConnectorInfo> for DecideConnector {
     fn from(connector: ConnectorInfo) -> Self {
         Self {
             gateway_name: connector.gateway_name,
-            payment_merchant_connector_id: connector.gateway_id,
+            merchant_connector_id: connector.gateway_id,
         }
     }
 }
@@ -196,13 +193,18 @@ impl DecideRequest {
     /// The rule parameters this request supplies, in the order a later one replaces an earlier
     /// one of the same key.
     fn rule_parameters(&self, config: &TomlConfig) -> Result<Vec<RuleParameter>, String> {
-        let value = serde_json::to_value(self).map_err(|error| error.to_string())?;
+        let value = serde_json::to_value(self).map_err(|error| {
+            crate::logger::error!(%error, "a /decide request did not serialize");
+            "The request could not be processed".to_string()
+        })?;
         let Some(fields) = value.as_object() else {
             return Ok(Vec::new());
         };
         let mut parameters = Vec::new();
         let mut push = |field: String, key: &str, raw: &serde_json::Value| {
-            routing_value(key, raw, config).map(|value| {
+            // Named by the request's own field: the routing key is an internal name.
+            let invalid = format!("Invalid value for field `{field}`");
+            routing_value(key, raw, config).map_err(|_| invalid).map(|value| {
                 if let Some(value) = value {
                     parameters.push(RuleParameter {
                         field,
@@ -287,12 +289,12 @@ impl DecideRequest {
         {
             if connector.gateway_name.trim().is_empty()
                 || connector
-                    .payment_merchant_connector_id
+                    .merchant_connector_id
                     .as_deref()
                     .is_some_and(|id| id.trim().is_empty())
             {
                 return Err(
-                    "Connector names and payment_merchant_connector_id must not be empty"
+                    "Connector names and merchant_connector_id must not be empty"
                         .to_string(),
                 );
             }
@@ -397,7 +399,7 @@ mod tests {
             "payment_id": "pay_1", "merchant_id": "pro_1", "amount": 100, "currency": "USD",
             "payment_method_type": "card", "payment_method_sub_type": "credit",
             "routing_config": {"algorithm_for": "payment",
-                "eligible_connectors": [{"gateway_name": "stripe", "payment_merchant_connector_id": "mca_1"}]}
+                "eligible_connectors": [{"gateway_name": "stripe", "merchant_connector_id": "mca_1"}]}
         }))?;
         let legacy: RoutingRequest = serde_json::from_value(json!({
             "payment_id": "pay_1", "created_by": "pro_1", "algorithm_for": "payment",
@@ -448,16 +450,16 @@ mod tests {
         let mut value = serde_json::to_value(request()?)?;
         value["customer_id"] = json!("cus_1");
         value["authentication_type"] = json!("no_three_ds");
-        value["country"] = json!("IN");
+        value["billing_country"] = json!("IN");
         value["card"]["card_issuer"] = json!("Example Bank");
         value["card"]["card_subtype"] = json!("commercial");
         value["routing_config"]["elimination_enabled"] = json!(false);
         value["routing_config"]["enable_multi_objective"] = json!(true);
         value["routing_config"]["ranking_algorithm"] = json!("NTW_SR_HYBRID_ROUTING");
         value["routing_config"]["eligible_connectors"][1] =
-            json!({"gateway_name": "worldpay", "payment_merchant_connector_id": "mca_wp_2"});
+            json!({"gateway_name": "worldpay", "merchant_connector_id": "mca_wp_2"});
         value["routing_config"]["preferred_connectors"] = json!([
-            {"gateway_name": "worldpay", "payment_merchant_connector_id": "mca_wp_2"}
+            {"gateway_name": "worldpay", "merchant_connector_id": "mca_wp_2"}
         ]);
         let request: DecideRequest = serde_json::from_value(value)?;
         let actual = serde_json::to_value(
@@ -559,6 +561,9 @@ mod tests {
             "channel",
             "profile_id",
             "attempt_id",
+            "mandate_type",
+            "mandate_acceptance_type",
+            "country",
         ] {
             let mut value = baseline.clone();
             value[key] = Value::Null;
@@ -607,7 +612,7 @@ mod tests {
         let flat: DecideRequest = serde_json::from_value(json!({
             "payment_id": "pay_1", "merchant_id": "pro_1", "amount": 100, "currency": "USD",
             "routing_config": {"algorithm_for": "payment",
-                "eligible_connectors": [{"gateway_name": "stripe"}, {"gateway_name": "adyen", "payment_merchant_connector_id": null}],
+                "eligible_connectors": [{"gateway_name": "stripe"}, {"gateway_name": "adyen", "merchant_connector_id": null}],
                 "preferred_connectors": [{"gateway_name": "adyen"}]}
         }))?;
         let mapped = serde_json::to_value(flat.to_hybrid_request(&config()?)?)?;
@@ -628,7 +633,7 @@ mod tests {
         );
 
         let mut blank = flat;
-        blank.routing_config.eligible_connectors[0].payment_merchant_connector_id =
+        blank.routing_config.eligible_connectors[0].merchant_connector_id =
             Some(" ".into());
         assert!(blank.to_hybrid_request(&config()?).is_err());
         Ok(())

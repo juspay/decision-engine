@@ -58,7 +58,7 @@ test.describe('Merchant scope: the path', () => {
       refused(await call('DELETE', `/merchant-account/${b}/connectors/adyen/credentials/acct`))
       refused(await call('GET', `/merchant-account/${b}/cost-ingestions`))
       refused(await call('POST', `/routing/list/${b}`))
-      refused(await call('POST', `/routing/list/active/${b}`))
+      refused(await call('GET', `/routing/list/active/${b}`))
       refused(await call('GET', `/api-key/list/${b}`))
       refused(await call('GET', `/config-sr-dimension/${b}`))
     })

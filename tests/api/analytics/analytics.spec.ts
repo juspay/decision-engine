@@ -109,7 +109,7 @@ test.describe('Analytics API', () => {
     const decided = await api.raw('POST', '/decide', { body: {
       payment_id: paymentId, merchant_id: merchant.id, amount: 1000, currency: 'USD',
       payment_method_type: 'card', payment_method_sub_type: 'credit',
-      routing_config: { algorithm_for: 'payment', eligible_connectors: [{ gateway_name: 'stripe', payment_merchant_connector_id: 'mca_stripe' }] },
+      routing_config: { algorithm_for: 'payment', eligible_connectors: [{ gateway_name: 'stripe', merchant_connector_id: 'mca_stripe' }] },
     } })
 
     const audit = await waitForAuditFlowType(api, paymentId, 'routing_hybrid_decision')

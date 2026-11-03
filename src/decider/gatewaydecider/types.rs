@@ -1160,9 +1160,8 @@ impl DomainDeciderRequestForApiCallV2 {
         info.currency = Currency::text_to_curr(&request.currency.to_ascii_uppercase())
             .map_err(|_| "Invalid currency".to_string())?;
         info.country = request
-            .country
+            .billing_country
             .as_ref()
-            .or(request.billing_country.as_ref())
             .or(request.business_country.as_ref())
             .map(|country| {
                 CountryISO2::text_to_country(&country.to_ascii_uppercase())

@@ -5,7 +5,7 @@ import { Button } from '../ui/Button'
 import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { Spinner } from '../ui/Spinner'
-import { apiPost } from '../../lib/api'
+import { apiPost, fetcher } from '../../lib/api'
 import {
   ABTestAlgorithmData,
   EuclidAlgorithmData,
@@ -166,7 +166,7 @@ export function RuleEvaluationPanel({
   // ---- active / all algorithms (for prefill) ----
   const { data: activeAlgorithms } = useSWR<RoutingAlgorithm[]>(
     merchantId ? ['active-routing', merchantId] : null,
-    () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`),
+    () => fetcher<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`),
     { revalidateOnFocus: false },
   )
   const { data: allAlgorithms } = useSWR<RoutingAlgorithm[]>(

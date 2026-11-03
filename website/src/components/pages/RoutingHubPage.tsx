@@ -82,7 +82,7 @@ export function RoutingHubPage() {
 
   const { data: activeAlgorithms, isLoading: activeLoading, mutate: mutateActiveAlgorithms } = useSWR<RoutingAlgorithm[]>(
     merchantId ? `/routing/list/active/${merchantId}` : null,
-    () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`),
+    () => fetcher<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`),
   )
 
   const { data: srConfig, isLoading: srLoading } = useSWR<FetchedRuleConfig>(
