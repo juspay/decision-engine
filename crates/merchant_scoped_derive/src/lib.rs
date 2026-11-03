@@ -13,12 +13,15 @@
 //! A marked field is anything that is itself `MerchantScoped`: a `String` or `MerchantId` naming
 //! one merchant, an `Option` of one, or a nested request type that derives it too. The generated
 //! `merchant_ids` lists every marked field's merchants in declaration order.
+//!
+//! At most one `Option<String>` field may be marked `#[profile]`: the profile of that merchant the
+//! request is for. It becomes the generated `profile_id`.
 
 use proc_macro::TokenStream;
 use quote::quote;
 use syn::{parse_macro_input, spanned::Spanned, Data, DeriveInput, Fields};
 
-#[proc_macro_derive(MerchantScoped, attributes(merchant))]
+#[proc_macro_derive(MerchantScoped, attributes(merchant, profile))]
 pub fn derive_merchant_scoped(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     expand(&input)
@@ -41,7 +44,21 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
     };
 
     let mut marked = Vec::new();
+    let mut profile = None;
     for field in &fields.named {
+        if let Some(attr) = field
+            .attrs
+            .iter()
+            .find(|attr| attr.path().is_ident("profile"))
+        {
+            attr.meta.require_path_only()?;
+            if profile.replace(field.ident.as_ref()).is_some() {
+                return Err(syn::Error::new(
+                    attr.span(),
+                    "only one field may be #[profile]",
+                ));
+            }
+        }
         let mut attrs = field
             .attrs
             .iter()
@@ -62,6 +79,14 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
         ));
     }
 
+    let profile_id = profile.map(|field| {
+        quote! {
+            fn profile_id(&self) -> ::std::option::Option<&str> {
+                self.#field.as_deref()
+            }
+        }
+    });
+
     let name = &input.ident;
     let (impl_generics, ty_generics, where_clause) = input.generics.split_for_impl();
     Ok(quote! {
@@ -73,6 +98,7 @@ fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
                 )*
                 merchant_ids
             }
+            #profile_id
         }
     })
 }

@@ -64,10 +64,20 @@ pub async fn create_api_key(
     // body-supplied `merchant_id` would let any authenticated caller create a working key for a
     // victim merchant and impersonate it. The admin-secret lane inserts no session and may mint for
     // any merchant (that is how Hyperswitch provisions keys).
+    session: Option<axum::Extension<auth::AuthContext>>,
     ScopedJson {
         merchant, payload, ..
     }: ScopedJson<CreateApiKeyRequest>,
 ) -> Result<Json<CreateApiKeyResponse>, error::ContainerError<ApiKeyError>> {
+    ensure_key_manager(session.as_deref())?;
+    // A key on the merchant already covers its profiles, so one on a profile would only be a
+    // narrower copy the dashboard has nowhere to show.
+    if crate::types::merchant::merchant_account::load_authorized(&merchant)
+        .await
+        .is_some_and(|account| account.parentMerchantId.is_some())
+    {
+        return Err(ApiKeyError::ProfileKey.into());
+    }
     let created = mint_api_key(&merchant, payload.description)
         .await
         .ok_or(ApiKeyError::CreationFailed)?;
@@ -91,6 +101,7 @@ pub async fn revoke_api_key(
     session: Option<axum::Extension<auth::AuthContext>>,
     Path(key_id): Path<String>,
 ) -> Result<Json<RevokeApiKeyResponse>, error::ContainerError<ApiKeyError>> {
+    ensure_key_manager(session.as_deref())?;
     let app_state = get_tenant_app_state().await;
 
     // The route names no merchant. A session revokes among its own merchant's keys; the admin-secret
@@ -102,7 +113,9 @@ pub async fn revoke_api_key(
                 .await
                 .map_err(|_| ApiKeyError::StorageError)?
                 .ok_or(ApiKeyError::NotFound)?;
-            auth::authorize_merchant_id(None, &owner).map_err(|_| ApiKeyError::NotFound)?
+            auth::authorize_merchant_id(None, &owner)
+                .await
+                .map_err(|_| ApiKeyError::NotFound)?
         }
     };
 
@@ -123,6 +136,25 @@ pub async fn revoke_api_key(
         key_id,
         message: "API key revoked successfully".to_string(),
     }))
+}
+
+/// Creating and revoking keys takes a merchant admin, since a key reaches the merchant and every one
+/// of its profiles. Only a person signed in to the dashboard has a role to check; an API key or the
+/// admin secret is a credential that already holds that reach.
+///
+/// A session handed over from Hyperswitch manages no keys at all: Hyperswitch calls Decision Engine
+/// with the admin secret, so its accounts have no use for one.
+fn ensure_key_manager(session: Option<&auth::AuthContext>) -> Result<(), ApiKeyError> {
+    let Some(context) = session else {
+        return Ok(());
+    };
+    match context.auth_kind {
+        auth::AuthKind::HsRedirect => Err(ApiKeyError::HyperswitchSession),
+        auth::AuthKind::Jwt if context.role.as_deref() != Some("admin") => {
+            Err(ApiKeyError::Forbidden)
+        }
+        auth::AuthKind::Jwt | auth::AuthKind::ApiKey => Ok(()),
+    }
 }
 
 /// Mint a key for the merchant and return it, raw key included — the only time it is shown.
@@ -161,4 +193,36 @@ pub async fn mint_api_key(
         description,
         created_at: now,
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn dashboard(kind: auth::AuthKind, role: &str) -> auth::AuthContext {
+        auth::AuthContext {
+            auth_kind: kind,
+            role: Some(role.to_string()),
+            ..auth::AuthContext::from_api_key("acme")
+        }
+    }
+
+    #[test]
+    fn only_admins_and_credentials_manage_keys() {
+        assert!(ensure_key_manager(None).is_ok());
+        assert!(ensure_key_manager(Some(&auth::AuthContext::from_api_key("acme"))).is_ok());
+        assert!(ensure_key_manager(Some(&dashboard(auth::AuthKind::Jwt, "admin"))).is_ok());
+        assert!(matches!(
+            ensure_key_manager(Some(&dashboard(auth::AuthKind::Jwt, "member"))),
+            Err(ApiKeyError::Forbidden)
+        ));
+    }
+
+    #[test]
+    fn a_hyperswitch_session_manages_no_keys_whatever_its_role() {
+        assert!(matches!(
+            ensure_key_manager(Some(&dashboard(auth::AuthKind::HsRedirect, "admin"))),
+            Err(ApiKeyError::HyperswitchSession)
+        ));
+    }
 }

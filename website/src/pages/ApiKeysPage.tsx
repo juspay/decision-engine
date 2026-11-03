@@ -1,7 +1,8 @@
 import { useState } from 'react'
 import useSWR from 'swr'
-import { Key, Copy, Check, Trash2, Plus } from 'lucide-react'
+import { Key, Copy, Check, Trash2, Plus, Info } from 'lucide-react'
 import { apiFetch, apiPost, fetcher } from '../lib/api'
+import { merchantLabel, useMerchantScope } from '../lib/merchantScope'
 import { useMerchantStore } from '../store/merchantStore'
 import { Card, CardBody, CardHeader } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
@@ -49,8 +50,33 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
+/** Why this page offers no keys to manage: they live on another merchant, or in Hyperswitch. */
+function KeysElsewhere({ children }: { children: React.ReactNode }) {
+  return (
+    <Card>
+      <CardBody>
+        <div className="flex items-start gap-3 text-sm text-slate-600 dark:text-[#8a8a93]">
+          <Info size={16} className="mt-0.5 shrink-0 text-slate-500" />
+          <div className="space-y-2 leading-6">{children}</div>
+        </div>
+      </CardBody>
+    </Card>
+  )
+}
+
+function Code({ children }: { children: React.ReactNode }) {
+  return (
+    <code className="rounded bg-slate-100 px-1 py-0.5 text-xs font-mono dark:bg-[#1c1c24]">
+      {children}
+    </code>
+  )
+}
+
 export function ApiKeysPage() {
   const { merchantId } = useMerchantStore()
+  const { merchant, isProfile, isHyperswitch, isAdmin } = useMerchantScope()
+  // Keys live on the merchant and cover its profiles, so a profile has none of its own to list.
+  const keysHere = !isProfile && !isHyperswitch
   const [description, setDescription] = useState('')
   const [creating, setCreating] = useState(false)
   const [newKey, setNewKey] = useState<CreateApiKeyResponse | null>(null)
@@ -60,7 +86,7 @@ export function ApiKeysPage() {
   const [revokedIds, setRevokedIds] = useState<Set<string>>(new Set())
 
   const { data: keys, mutate } = useSWR<ApiKeyListItem[]>(
-    merchantId ? `/api-key/list/${merchantId}` : null,
+    merchantId && keysHere ? `/api-key/list/${merchantId}` : null,
     fetcher,
   )
 
@@ -100,14 +126,56 @@ export function ApiKeysPage() {
   }
 
   const activeKeys = keys?.filter((k) => k.is_active && !revokedIds.has(k.key_id)) ?? []
+  const heading = (
+    <div>
+      <PageHeading title="API Keys" description={<>Create and manage API keys for programmatic access to the routing engine. Pass the key via the{' '} <Code>x-api-key</Code>{' '} header on all API requests.</>} />
+    </div>
+  )
+
+  if (isHyperswitch) {
+    return (
+      <div className="space-y-6">
+        {heading}
+        <KeysElsewhere>
+          <p>Hyperswitch accounts do not use API keys. Hyperswitch calls Decision Engine directly.</p>
+        </KeysElsewhere>
+      </div>
+    )
+  }
+
+  if (isProfile) {
+    const name = merchantLabel(merchant, 'its merchant')
+    return (
+      <div className="space-y-6">
+        {heading}
+        <KeysElsewhere>
+          <p>
+            API keys are managed on <span className="font-medium text-slate-800 dark:text-white">{name}</span>.
+            Every {name} key works for this profile. Switch to {name} to create or revoke one.
+          </p>
+          <p>
+            To route with this profile's rules, send <Code>merchant_id</Code> <Code>{merchant?.merchant_id}</Code>{' '}
+            and <Code>profile_id</Code> <Code>{merchantId}</Code>.
+          </p>
+        </KeysElsewhere>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
-      <div>
-        <PageHeading title="API Keys" description={<>Create and manage API keys for programmatic access to the routing engine. Pass the key via the{' '} <code className="rounded bg-slate-100 px-1 py-0.5 text-xs font-mono dark:bg-[#1c1c24]">x-api-key</code>{' '} header on all API requests.</>} />
-      </div>
+      {heading}
+
+      <KeysElsewhere>
+        <p>
+          A key works for this merchant and every one of its profiles, including profiles added later.
+          Name the profile in each request with <Code>profile_id</Code>.
+          {!isAdmin && ' Only admins can create or revoke keys.'}
+        </p>
+      </KeysElsewhere>
 
       {/* Create new key */}
+      {isAdmin && (
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
@@ -151,6 +219,7 @@ export function ApiKeysPage() {
           )}
         </CardBody>
       </Card>
+      )}
 
       {/* Active keys list */}
       <Card>
@@ -166,7 +235,7 @@ export function ApiKeysPage() {
           <ErrorMessage error={revokeError} />
           {activeKeys.length === 0 ? (
             <p className="px-5 py-6 text-sm text-slate-500 dark:text-[#8a8a93]">
-              No active API keys. Create one above.
+              {isAdmin ? 'No active API keys. Create one above.' : 'No active API keys.'}
             </p>
           ) : (
             <table className="w-full text-sm">
@@ -191,6 +260,7 @@ export function ApiKeysPage() {
                       {new Date(key.created_at).toLocaleDateString()}
                     </td>
                     <td className="px-5 py-3 text-right">
+                      {isAdmin && (
                       <Button
                         size="sm"
                         variant="danger"
@@ -200,6 +270,7 @@ export function ApiKeysPage() {
                         <Trash2 size={12} />
                         {revokingId === key.key_id ? 'Revoking…' : 'Revoke'}
                       </Button>
+                      )}
                     </td>
                   </tr>
                 ))}

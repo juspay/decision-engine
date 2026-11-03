@@ -10,11 +10,15 @@ import { tokenRef } from '../lib/tokenRef'
  * `profile_name` fields are the same scope split into account-tree levels, which is what the
  * switcher groups and searches on. All of them are absent for a scope with no Hyperswitch
  * ancestry — every DE-native merchant — so each consumer falls back to the flat label.
+ *
+ * A Decision Engine profile carries `parent_merchant_id` instead, and is listed right after its
+ * merchant with the role held there.
  */
 export interface MerchantInfo {
   merchant_id: string
   merchant_name: string
   role: string
+  parent_merchant_id?: string
   profile_name?: string
   hs_merchant_id?: string
   hs_merchant_name?: string

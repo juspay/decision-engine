@@ -76,6 +76,7 @@ also carries a `gsm_info` object describing the lookup result.
 
 - Do not call this after `NTW_BASED_ROUTING` just to record the selected debit network; debit audit comes from `/decide-gateway` analytics.
 - Call it after payment authorization completes, not before.
+- Send the same `profileId` you sent to `/decide-gateway`, if any, so the score is recorded for that [profile](/merchant-profiles).
 
 ## Related
 

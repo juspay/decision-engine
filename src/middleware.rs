@@ -97,7 +97,8 @@ fn outcome(status: StatusCode) -> &'static str {
     }
 }
 
-/// Enforce that a per-merchant session may only act on the merchant named in the path.
+/// Enforce that a per-merchant session may only act on the merchant named in the path: its own, or
+/// one of its profiles.
 ///
 /// Runs immediately *after* [`authenticate`], so an `AuthContext` is already in the request
 /// extensions for the JWT and api-key lanes. Those lanes carry a concrete `merchant_id`; a route
@@ -132,13 +133,16 @@ pub async fn enforce_merchant_scope(
         .ok();
     let req = Request::from_parts(parts, body);
 
-    if let Some(path_params) = path_params {
-        for (key, value) in &path_params {
-            if key == auth::scope::MERCHANT_PATH_PARAM && value != context.merchant_id.as_str() {
-                return Ok(axum::response::IntoResponse::into_response(
-                    auth::MerchantScopeViolation::ForeignMerchant,
-                ));
-            }
+    let path_merchant = path_params.and_then(|path_params| {
+        path_params
+            .iter()
+            .find(|(key, _)| *key == auth::scope::MERCHANT_PATH_PARAM)
+            .map(|(_, value)| value.to_owned())
+    });
+    // The session's own merchant, or one of its profiles.
+    if let Some(merchant_id) = path_merchant {
+        if let Err(violation) = auth::authorize_merchant_id(Some(&context), &merchant_id).await {
+            return Ok(axum::response::IntoResponse::into_response(violation));
         }
     }
 

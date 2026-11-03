@@ -75,6 +75,10 @@ pub struct MerchantAccount {
     pub priorityLogicConfig: Option<String>,
     // #[serde(rename = "merchantCategoryCode")]
     pub merchantCategoryCode: Option<String>,
+    /// The merchant this account is a profile of. `None` for a merchant, which is every account
+    /// created before profiles existed and every one synced from Hyperswitch.
+    #[serde(default)]
+    pub parentMerchantId: Option<String>,
 }
 
 impl Debug for MerchantAccount {
@@ -106,6 +110,7 @@ impl Debug for MerchantAccount {
             .field("tenantAccountId", &"[REDACTED]")
             .field("priorityLogicConfig", &self.priorityLogicConfig)
             .field("merchantCategoryCode", &self.merchantCategoryCode)
+            .field("parentMerchantId", &self.parentMerchantId)
             .finish()
     }
 }
@@ -115,6 +120,9 @@ pub struct MerchantAccountCreateRequest {
     #[merchant]
     pub merchant_id: String,
     pub gateway_success_rate_based_decider_input: Option<String>,
+    /// Creates the account as a profile of this merchant. Its members and API keys then reach it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_merchant_id: Option<String>,
 }
 
 impl TryFrom<MerchantAccountCreateRequest> for MerchantAccountNew {
@@ -130,6 +138,7 @@ impl TryFrom<MerchantAccountCreateRequest> for MerchantAccountNew {
                 .gateway_success_rate_based_decider_input,
             internal_metadata: None,
             enabled: BitBoolWrite(true),
+            parent_merchant_id: value.parent_merchant_id,
         })
     }
 }
@@ -188,6 +197,7 @@ impl TryFrom<DBMerchantAccount> for MerchantAccount {
             tenantAccountId: value.tenant_account_id,
             priorityLogicConfig: value.priority_logic_config,
             merchantCategoryCode: value.merchant_category_code,
+            parentMerchantId: value.parent_merchant_id,
         })
     }
 }

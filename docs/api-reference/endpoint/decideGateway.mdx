@@ -188,6 +188,7 @@ curl --location "$BASE_URL/decide-gateway" \
 - Debit routing requires the merchant debit-routing flag to be enabled and debit metadata encoded as a JSON string in `paymentInfo.metadata`.
 - Multi-objective routing is not a `rankingAlgorithm` value: it is a cost-aware post-step on SR-based scoring, toggled per request with `enableMultiObjective` or per merchant with the `cost_savings_enabled` feature flag. When it runs, the response carries a `multi_objective_info` block, and `routing_approach` becomes `SR_SELECTION_MULTI_OBJECTIVE` when a cheaper gateway wins on expected value.
 - A successful call emits analytics/audit events asynchronously.
+- The optional `profileId` names one of the merchant's [profiles](/merchant-profiles): the decision then uses that profile's configuration and scores. A merchant's key may name any of its profiles. A `profileId` that belongs to a different merchant returns `400`.
 
 ## Related
 

@@ -113,8 +113,16 @@ pub async fn update_gateway_score(
         "Incoming request headers"
     );
     let update_score_request = match request {
-        Ok(ScopedJson { payload, body, .. }) => {
+        Ok(ScopedJson {
+            merchant,
+            mut payload,
+            body,
+        }) => {
             crate::logger::debug!(tag = "UpdateGatewayScore", "Body: {:?}", body);
+            // A named profile is the scope scored for; everything downstream reads `merchant_id`.
+            if payload.profile_id.take().is_some() {
+                payload.merchant_id = merchant.to_string();
+            }
             Ok(payload)
         }
         Err(ScopedJsonRejection::Parse { body, error }) => {

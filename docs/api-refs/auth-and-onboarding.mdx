@@ -73,6 +73,19 @@ curl --location "$BASE_URL/onboarding/merchant" \
   --data '{ "merchant_name": "Demo Merchant" }'
 ```
 
+## Add a Profile to a Merchant
+
+The same route adds a [profile](/merchant-profiles) when given `parent_merchant_id`. Only an admin of that merchant can add one. The profile gets a `pro_…` id, and the merchant's members and API keys reach it at once. The response's `token` is scoped to the new profile.
+
+```bash
+curl --location "$BASE_URL/onboarding/merchant" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{ "merchant_name": "Acme India", "parent_merchant_id": "merchant_demo" }'
+```
+
+The parent must be a Decision Engine merchant: not a profile, and not an account synced from Hyperswitch (`400`). `/auth/merchants` lists each merchant followed by its profiles, which carry `parent_merchant_id` and the role held on the merchant.
+
 ## Logout
 
 ```bash

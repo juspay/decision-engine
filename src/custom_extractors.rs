@@ -104,7 +104,7 @@ impl IntoResponse for ScopedJsonRejection {
 impl<S, T> axum::extract::FromRequest<S> for ScopedJson<T>
 where
     S: Send + Sync,
-    T: serde::de::DeserializeOwned + crate::auth::MerchantScoped,
+    T: serde::de::DeserializeOwned + crate::auth::MerchantScoped + Send,
 {
     type Rejection = ScopedJsonRejection;
 
@@ -127,6 +127,7 @@ where
             Err(error) => return Err(ScopedJsonRejection::Parse { body, error }),
         };
         let merchant = crate::auth::authorize(session.as_ref(), &payload)
+            .await
             .map_err(ScopedJsonRejection::Scope)?;
         Ok(Self {
             merchant,
@@ -199,6 +200,7 @@ where
         };
         let session = parts.extensions.get::<AuthContext>();
         crate::auth::authorize_merchant_id(session, &merchant_id)
+            .await
             .map(Self)
             .map_err(IntoResponse::into_response)
     }
@@ -461,7 +463,7 @@ mod tests {
 
     async fn scoped_status<T>(session: Option<&str>, body: &str) -> axum::http::StatusCode
     where
-        T: serde::de::DeserializeOwned + crate::auth::MerchantScoped,
+        T: serde::de::DeserializeOwned + crate::auth::MerchantScoped + Send,
     {
         use axum::{body::Body, extract::FromRequest};
 

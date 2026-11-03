@@ -4,6 +4,7 @@ import { Building2, Check, ChevronDown, ChevronRight, Layers, Plus, Search, Stor
 import { useAuthStore, type MerchantInfo } from '../../store/authStore'
 import { useMerchantStore } from '../../store/merchantStore'
 import { apiFetch } from '../../lib/api'
+import { merchantLabel, useMerchantScope } from '../../lib/merchantScope'
 import { CopyButton } from '../ui/CopyButton'
 
 interface SwitchMerchantResponse {
@@ -30,13 +31,29 @@ interface ScopeLabels {
  * backend built (or, failing that, the scope id) is the honest thing to show for it. The levels
  * above are `null` rather than a placeholder, so the layout can drop them instead of rendering
  * rows of "—".
+ *
+ * A Decision Engine merchant with profiles is named as the merchant of itself and of each of them,
+ * from `deMerchants` (Decision Engine merchant id → name), so it groups the way a Hyperswitch
+ * merchant does.
  */
-function labelsOf(scope: MerchantInfo): ScopeLabels {
+function labelsOf(scope: MerchantInfo, deMerchants: Map<string, string> = new Map()): ScopeLabels {
+  const deMerchant = deMerchants.get(scope.parent_merchant_id ?? scope.merchant_id) ?? null
   return {
     org: scope.hs_org_name ?? scope.hs_org_id ?? null,
-    merchant: scope.hs_merchant_name ?? scope.hs_merchant_id ?? null,
+    merchant: scope.hs_merchant_name ?? scope.hs_merchant_id ?? deMerchant,
     profile: scope.profile_name ?? scope.merchant_name ?? scope.merchant_id,
   }
+}
+
+/** The Decision Engine merchants that have profiles, by id, with their names. */
+function merchantsWithProfiles(scopes: MerchantInfo[]): Map<string, string> {
+  const parents = new Set(scopes.flatMap((s) => (s.parent_merchant_id ? [s.parent_merchant_id] : [])))
+  const names = new Map<string, string>()
+  for (const parent of parents) {
+    const merchant = scopes.find((s) => s.merchant_id === parent)
+    names.set(parent, merchantLabel(merchant, parent))
+  }
+  return names
 }
 
 /** A scope id shortened for a list row, where the full id is noise. */
@@ -67,12 +84,14 @@ interface MerchantGroup {
  * made of entirely — there the tree flattens back into the plain merchant list it always was.
  * Order follows the incoming list so the backend stays the one deciding it.
  */
-function groupScopes(scopes: MerchantInfo[]): MerchantGroup[] {
+function groupScopes(scopes: MerchantInfo[], deMerchants: Map<string, string>): MerchantGroup[] {
   const groups = new Map<string, MerchantGroup>()
 
   for (const scope of scopes) {
-    const labels = labelsOf(scope)
-    const key = scope.hs_merchant_id ?? labels.merchant ?? UNGROUPED_KEY
+    const labels = labelsOf(scope, deMerchants)
+    const deKey = scope.parent_merchant_id ?? (deMerchants.has(scope.merchant_id) ? scope.merchant_id : null)
+    const key =
+      scope.hs_merchant_id ?? (deKey ? `de:${deKey}` : null) ?? labels.merchant ?? UNGROUPED_KEY
     const existing = groups.get(key)
     if (existing) {
       existing.scopes.push(scope)
@@ -92,8 +111,8 @@ function groupScopes(scopes: MerchantInfo[]): MerchantGroup[] {
 }
 
 /** Whether `scope` matches the search text, across every level and the raw ids. */
-function matches(scope: MerchantInfo, query: string): boolean {
-  const labels = labelsOf(scope)
+function matches(scope: MerchantInfo, query: string, deMerchants: Map<string, string>): boolean {
+  const labels = labelsOf(scope, deMerchants)
   return [
     labels.profile,
     labels.merchant,
@@ -139,7 +158,16 @@ export function ScopeSwitcher() {
   // produce a scope its own account tree does not know about.
   const canAddMerchant = !user?.isRedirectSession && !user?.isSuperAdminView
 
+  // A profile goes under the merchant the session is in — the current one, or a profile's parent —
+  // and only its admins may add one. Hyperswitch scopes get their profiles from Hyperswitch.
+  const sessionScope = useMerchantScope()
+  const profileParent =
+    canAddMerchant && sessionScope.isAdmin && !sessionScope.isHyperswitch
+      ? sessionScope.merchant
+      : undefined
+
   const currentScope = merchants.find((m) => m.merchant_id === user?.merchantId)
+  const deMerchants = useMemo(() => merchantsWithProfiles(merchants), [merchants])
 
   // The current scope's own ancestry is authoritative for it — the session carries it even when the
   // switcher list does not (a view session before `/auth/me` returns, a scope outside the grant).
@@ -150,10 +178,15 @@ export function ScopeSwitcher() {
         profile: user.hierarchy.profile_name ?? currentScope?.merchant_name ?? user.merchantId,
       }
     : currentScope
-      ? labelsOf(currentScope)
+      ? {
+          ...labelsOf(currentScope, deMerchants),
+          // On a Decision Engine merchant itself there is no level above it to name; the chip
+          // would otherwise read "Acme / Acme".
+          ...(deMerchants.has(currentScope.merchant_id) ? { merchant: null } : {}),
+        }
       : { org: null, merchant: null, profile: user?.merchantId ?? 'No scope' }
 
-  const groups = useMemo(() => groupScopes(merchants), [merchants])
+  const groups = useMemo(() => groupScopes(merchants, deMerchants), [merchants, deMerchants])
   const trimmedQuery = query.trim().toLowerCase()
 
   // A level that is the same for every scope in the list names nothing — it is the account the
@@ -174,9 +207,12 @@ export function ScopeSwitcher() {
   const visibleGroups = useMemo(() => {
     if (!trimmedQuery) return groups
     return groups
-      .map((group) => ({ ...group, scopes: group.scopes.filter((s) => matches(s, trimmedQuery)) }))
+      .map((group) => ({
+        ...group,
+        scopes: group.scopes.filter((s) => matches(s, trimmedQuery, deMerchants)),
+      }))
       .filter((group) => group.scopes.length > 0)
-  }, [groups, trimmedQuery])
+  }, [groups, trimmedQuery, deMerchants])
 
   // The one rule for whether a group's rows are hidden, so what the keyboard walks is exactly what
   // is painted. A group whose merchant header is not drawn has no control to fold it and stays open.
@@ -459,8 +495,13 @@ export function ScopeSwitcher() {
 
                   {!folded &&
                     group.scopes.map((scope) => {
-                      const LeafIcon = group.merchant !== null ? Layers : Building2
-                      const labels = labelsOf(scope)
+                      // A Decision Engine merchant listed among its own profiles is the merchant
+                      // itself, and keeps the merchant's icon.
+                      const LeafIcon =
+                        group.merchant !== null && !deMerchants.has(scope.merchant_id)
+                          ? Layers
+                          : Building2
+                      const labels = labelsOf(scope, deMerchants)
                       const isCurrent = scope.merchant_id === user?.merchantId
                       const isActive = scope.merchant_id === activeId
                       return (
@@ -507,13 +548,29 @@ export function ScopeSwitcher() {
               {user?.merchantId}
             </span>
             <CopyButton text={user?.merchantId ?? ''} label="Copy scope id" />
+            {profileParent && (
+              <button
+                onClick={() => {
+                  setOpen(false)
+                  navigate(`/onboarding?parent=${encodeURIComponent(profileParent.merchant_id)}`)
+                }}
+                title={`Add a profile to ${merchantLabel(profileParent)}`}
+                className="ml-auto flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-[12px] font-medium leading-4 text-brand-600 transition-colors hover:bg-slate-50 dark:hover:bg-[#13131a]"
+              >
+                <Layers size={12} className="shrink-0" />
+                {/* Names the merchant, so it never reads as a twin of "Add merchant" beside it. Only
+                    the name truncates; the scope id to the left gives way first. */}
+                <span className="shrink-0">Add profile to</span>
+                <span className="max-w-[96px] truncate">{merchantLabel(profileParent)}</span>
+              </button>
+            )}
             {canAddMerchant && (
               <button
                 onClick={() => {
                   setOpen(false)
                   navigate('/onboarding')
                 }}
-                className="ml-auto flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-brand-600 transition-colors hover:bg-slate-50 dark:hover:bg-[#13131a]"
+                className={`${profileParent ? '' : 'ml-auto '}flex shrink-0 items-center gap-1 rounded-md px-1.5 py-1 text-brand-600 transition-colors hover:bg-slate-50 dark:hover:bg-[#13131a]`}
               >
                 <Plus size={12} />
                 <span className="text-[12px] font-medium leading-4">Add merchant</span>

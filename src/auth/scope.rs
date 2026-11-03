@@ -5,8 +5,8 @@
 //! Only this module constructs it, so a handler that skips authorization has nothing to hand to
 //! storage.
 //!
-//! - A per-merchant session (JWT or api key) is authorized for its own merchant only. A request
-//!   that names any other merchant is refused with `403`.
+//! - A per-merchant session (JWT or api key) is authorized for its own merchant and that merchant's
+//!   profiles. A request that names any other merchant is refused with `403`.
 //! - A service credential (the admin secret, or the `api_key_auth_enabled = false` compat lane)
 //!   carries no session and acts on behalf of whichever merchant the request names. This is how
 //!   Hyperswitch calls Decision Engine.
@@ -22,7 +22,8 @@
 //!    - Named in the path: spell the parameter `:merchant_id` ([`MERCHANT_PATH_PARAM`]) and take
 //!      [`MerchantFromPath`](crate::custom_extractors::MerchantFromPath).
 //!    - Named in the body: `#[derive(MerchantScoped)]` on the request type, `#[merchant]` on every
-//!      field naming a merchant (nested request types included), and take
+//!      field naming a merchant (nested request types included), `#[profile]` on an optional
+//!      `profile_id` naming one of that merchant's profiles, and take
 //!      [`ScopedJson<T>`](crate::custom_extractors::ScopedJson). A handler with its own error
 //!      format takes `Result<ScopedJson<T>, ScopedJsonRejection>` and answers each rejection.
 //!    - Named by neither, only by an object id: the session's merchant ([`session_merchant`]),
@@ -52,6 +53,13 @@ pub const MERCHANT_PATH_PARAM: &str = "merchant_id";
 /// [`MerchantId`]: crate::types::merchant::id::MerchantId
 pub trait MerchantScoped {
     fn merchant_ids(&self) -> Vec<&str>;
+
+    /// The profile the request is for, when it names one alongside its merchant (`#[profile]`). The
+    /// request then acts on the profile, and every merchant it names must be the profile or its
+    /// parent.
+    fn profile_id(&self) -> Option<&str> {
+        None
+    }
 }
 
 impl MerchantScoped for str {
@@ -121,6 +129,8 @@ pub enum MerchantScopeViolation {
     ForeignMerchant,
     /// The request names its merchant in more than one place, and they disagree.
     ConflictingMerchants,
+    /// The request names a profile that does not belong to the merchant it names.
+    ForeignProfile,
     /// A service credential sent a request that names no merchant.
     NoMerchant,
 }
@@ -129,7 +139,9 @@ impl MerchantScopeViolation {
     pub fn status(self) -> StatusCode {
         match self {
             Self::ForeignMerchant => StatusCode::FORBIDDEN,
-            Self::ConflictingMerchants | Self::NoMerchant => StatusCode::BAD_REQUEST,
+            Self::ConflictingMerchants | Self::ForeignProfile | Self::NoMerchant => {
+                StatusCode::BAD_REQUEST
+            }
         }
     }
 
@@ -137,6 +149,7 @@ impl MerchantScopeViolation {
         match self {
             Self::ForeignMerchant => "This session may only act on its own merchant",
             Self::ConflictingMerchants => "The request names more than one merchant",
+            Self::ForeignProfile => "The profile does not belong to the merchant the request names",
             Self::NoMerchant => "The request does not name a merchant",
         }
     }
@@ -154,32 +167,90 @@ impl IntoResponse for MerchantScopeViolation {
     }
 }
 
-/// Resolve the merchant a body-addressed request may act on.
+/// Resolve the merchant a body-addressed request may act on: the profile it names, or else the
+/// merchant it names, or else the session's own.
 ///
-/// Every merchant the request names must be the same one. A session must name only its own
-/// merchant, and a request that names none acts on the session's. A service credential acts on the
-/// merchant the request names.
+/// A session may act on its own merchant and on that merchant's profiles; anything else is
+/// refused. A service credential acts on whatever the request names. Either way, every merchant the
+/// request names must be the one it acts on, or — when it names a profile — that profile's parent.
 pub fn authorize(
     session: Option<&AuthContext>,
     request: &(impl MerchantScoped + ?Sized),
+) -> impl std::future::Future<Output = Result<AuthorizedMerchant, MerchantScopeViolation>> + Send + 'static
+{
+    // Copied out before the lookup, so the future borrows neither the request nor the session.
+    let named: Vec<String> = request
+        .merchant_ids()
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    let profile = request.profile_id().map(str::to_owned);
+    let session_merchant = session.map(|session| session.merchant_id.clone());
+    async move {
+        let named: Vec<&str> = named.iter().map(String::as_str).collect();
+        let Some(target) = profile
+            .as_deref()
+            .or_else(|| named.first().copied())
+            .or(session_merchant.as_deref())
+        else {
+            return Err(MerchantScopeViolation::NoMerchant);
+        };
+        // The parent is read only when something depends on it, so a request on the session's own
+        // merchant — nearly every one today — costs no lookup.
+        let needs_parent = session_merchant.as_deref().is_some_and(|own| own != target)
+            || named.iter().any(|merchant_id| *merchant_id != target);
+        let parent = if needs_parent {
+            parent_of(target).await
+        } else {
+            None
+        };
+        resolve(
+            session_merchant.as_deref(),
+            &named,
+            profile.as_deref(),
+            target,
+            parent.as_deref(),
+        )
+    }
+}
+
+/// The decision [`authorize`] makes, given the parent of the scope the request is for.
+fn resolve(
+    session_merchant: Option<&str>,
+    named: &[&str],
+    profile: Option<&str>,
+    target: &str,
+    parent: Option<&str>,
 ) -> Result<AuthorizedMerchant, MerchantScopeViolation> {
-    let named = request.merchant_ids();
-    if let Some(session) = session {
-        if named
-            .iter()
-            .any(|merchant_id| *merchant_id != session.merchant_id)
-        {
+    // The session comes first, so a profile outside the caller's merchant reads as forbidden
+    // rather than revealing whom it belongs to.
+    if let Some(own) = session_merchant {
+        if target != own && parent != Some(own) {
             return Err(MerchantScopeViolation::ForeignMerchant);
         }
-        return Ok(AuthorizedMerchant(session.merchant_id.clone()));
     }
-    let Some((first, rest)) = named.split_first() else {
-        return Err(MerchantScopeViolation::NoMerchant);
-    };
-    if rest.iter().any(|merchant_id| merchant_id != first) {
-        return Err(MerchantScopeViolation::ConflictingMerchants);
+    for merchant_id in named {
+        if *merchant_id == target || (profile.is_some() && parent == Some(*merchant_id)) {
+            continue;
+        }
+        return Err(match (profile, session_merchant) {
+            (Some(_), _) => MerchantScopeViolation::ForeignProfile,
+            (None, Some(_)) => MerchantScopeViolation::ForeignMerchant,
+            (None, None) => MerchantScopeViolation::ConflictingMerchants,
+        });
     }
-    Ok(AuthorizedMerchant((*first).to_string()))
+    Ok(AuthorizedMerchant(target.to_string()))
+}
+
+/// The merchant `merchant_id` is a profile of. Served from the cached account that routing reads
+/// anyway, and never stale in a way that matters: a profile's parent is set once, when it is
+/// created.
+async fn parent_of(merchant_id: &str) -> Option<String> {
+    // Without storage — a unit test — nothing has been created as a profile.
+    crate::app::APP_STATE.get()?;
+    crate::types::merchant::merchant_account::load_merchant_by_merchant_id(merchant_id.to_string())
+        .await
+        .and_then(|account| account.parentMerchantId)
 }
 
 /// The merchant a session is authorized for, for a route that names no merchant of its own (such as
@@ -192,7 +263,8 @@ pub fn session_merchant(session: Option<&AuthContext>) -> Option<AuthorizedMerch
 pub fn authorize_merchant_id(
     session: Option<&AuthContext>,
     merchant_id: &str,
-) -> Result<AuthorizedMerchant, MerchantScopeViolation> {
+) -> impl std::future::Future<Output = Result<AuthorizedMerchant, MerchantScopeViolation>> + Send + 'static
+{
     authorize(session, merchant_id)
 }
 
@@ -200,20 +272,75 @@ pub fn authorize_merchant_id(
 mod tests {
     use super::*;
 
-    struct Names(Vec<&'static str>);
-
-    impl MerchantScoped for Names {
-        fn merchant_ids(&self) -> Vec<&str> {
-            self.0.clone()
-        }
+    /// `resolve` as `authorize` calls it, with `pro_a1` and `pro_a2` the profiles of merchant `a`.
+    fn authorized_for(
+        session: Option<&str>,
+        names: Vec<&'static str>,
+        profile: Option<&'static str>,
+    ) -> Result<String, MerchantScopeViolation> {
+        let Some(target) = profile.or_else(|| names.first().copied()).or(session) else {
+            return Err(MerchantScopeViolation::NoMerchant);
+        };
+        let parent = target.starts_with("pro_a").then_some("a");
+        resolve(session, &names, profile, target, parent).map(|merchant| merchant.to_string())
     }
 
     fn authorized(
         session: Option<&str>,
         names: Vec<&'static str>,
     ) -> Result<String, MerchantScopeViolation> {
-        let session = session.map(AuthContext::from_api_key);
-        authorize(session.as_ref(), &Names(names)).map(|merchant| merchant.as_str().to_string())
+        authorized_for(session, names, None)
+    }
+
+    #[test]
+    fn a_session_reaches_its_merchants_profiles_and_nothing_else() {
+        assert_eq!(authorized(Some("a"), vec!["pro_a1"]), Ok("pro_a1".into()));
+        assert_eq!(
+            authorized(Some("b"), vec!["pro_a1"]),
+            Err(MerchantScopeViolation::ForeignMerchant)
+        );
+        // A session on a profile does not reach its parent or its siblings.
+        assert_eq!(
+            authorized(Some("pro_a1"), vec!["a"]),
+            Err(MerchantScopeViolation::ForeignMerchant)
+        );
+        assert_eq!(
+            authorized(Some("pro_a1"), vec!["pro_a2"]),
+            Err(MerchantScopeViolation::ForeignMerchant)
+        );
+    }
+
+    #[test]
+    fn a_named_profile_is_what_the_request_acts_on() {
+        assert_eq!(
+            authorized_for(Some("a"), vec!["a"], Some("pro_a1")),
+            Ok("pro_a1".into())
+        );
+        assert_eq!(
+            authorized_for(None, vec!["a"], Some("pro_a1")),
+            Ok("pro_a1".into())
+        );
+        assert_eq!(
+            authorized_for(None, vec![], Some("pro_a1")),
+            Ok("pro_a1".into())
+        );
+        assert_eq!(
+            authorized_for(None, vec!["b"], Some("pro_a1")),
+            Err(MerchantScopeViolation::ForeignProfile)
+        );
+        // Outside the session's merchant, a profile is forbidden before its owner is revealed.
+        assert_eq!(
+            authorized_for(Some("b"), vec!["b"], Some("pro_a1")),
+            Err(MerchantScopeViolation::ForeignMerchant)
+        );
+    }
+
+    #[test]
+    fn a_parent_and_child_named_without_a_profile_field_still_conflict() {
+        assert_eq!(
+            authorized(None, vec!["pro_a1", "a"]),
+            Err(MerchantScopeViolation::ConflictingMerchants)
+        );
     }
 
     #[test]
@@ -289,9 +416,10 @@ mod tests {
 
     #[test]
     fn a_derived_request_is_authorized_on_all_its_merchants() {
-        let session = AuthContext::from_api_key("a".to_string());
+        let request = request(None);
+        let named = request.merchant_ids();
         assert_eq!(
-            authorize(Some(&session), &request(None)),
+            resolve(Some("a"), &named, None, "a", None),
             Err(MerchantScopeViolation::ForeignMerchant)
         );
     }
