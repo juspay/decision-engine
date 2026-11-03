@@ -1,8 +1,7 @@
 import { useState } from 'react'
-import { useNavigate, useSearchParams } from 'react-router-dom'
-import { ArrowRight, Building2, Layers, Loader2 } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { ArrowRight, Building2, Loader2 } from 'lucide-react'
 import { useAuthStore, MerchantInfo } from '../store/authStore'
-import { merchantLabel } from '../lib/merchantScope'
 import { useMerchantStore } from '../store/merchantStore'
 import { apiErrorMessage, apiFetch } from '../lib/api'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
@@ -46,21 +45,9 @@ function Field({
 
 export function OnboardingPage() {
   const navigate = useNavigate()
-  const { updateMerchant, merchants } = useAuthStore()
+  const { updateMerchant } = useAuthStore()
   const { setMerchantId } = useMerchantStore()
   const assetBaseUrl = import.meta.env.BASE_URL
-
-  // `?parent=<merchant id>` adds a sub-merchant to that merchant instead of creating a standalone one.
-  const [searchParams] = useSearchParams()
-  const parentId = searchParams.get('parent')
-  const parentName = parentId
-    ? merchantLabel(
-        merchants.find((m) => m.merchant_id === parentId),
-        parentId,
-      )
-    : null
-  const noun = parentId ? 'sub-merchant' : 'merchant'
-  const NameIcon = parentId ? Layers : Building2
 
   const [merchantName, setMerchantName] = useState('')
   const [loading, setLoading] = useState(false)
@@ -74,11 +61,7 @@ export function OnboardingPage() {
     try {
       const res = await apiFetch<CreateMerchantResponse>('/onboarding/merchant', {
         method: 'POST',
-        body: JSON.stringify(
-          parentId
-            ? { merchant_name: merchantName, parent_merchant_id: parentId }
-            : { merchant_name: merchantName },
-        ),
+        body: JSON.stringify({ merchant_name: merchantName }),
       })
 
       updateMerchant(res.token, res.merchant_id, res.merchants)
@@ -116,31 +99,17 @@ export function OnboardingPage() {
             <div className="max-w-[620px] space-y-9">
               <div className="space-y-6">
                 <h1 className="max-w-[10ch] text-[clamp(3.8rem,6.8vw,6rem)] font-semibold leading-[0.92] tracking-[-0.065em] text-slate-950 dark:text-white">
-                  {parentId
-                    ? 'One merchant, a sub-merchant for each region.'
-                    : 'Set up your merchant before processing traffic.'}
+                  Set up your merchant before processing traffic.
                 </h1>
                 <p className="max-w-[38rem] text-lg leading-9 text-slate-600 dark:text-[#9aa4b6] sm:text-[1.3rem]">
-                  {parentId
-                    ? `A sub-merchant has its own routing rules. ${parentName}'s members and API keys work for it as soon as it is created.`
-                    : 'Create your merchant account, then configure routing, analytics, and payment audits.'}
+                  Create your merchant account, then configure routing, analytics, and payment audits.
                 </p>
               </div>
 
               <div className="flex flex-wrap gap-3">
-                {parentId ? (
-                  <>
-                    <Pill>Own routing rules</Pill>
-                    <Pill>Shared API keys</Pill>
-                    <Pill>Shared members</Pill>
-                  </>
-                ) : (
-                  <>
-                    <Pill>Merchant account</Pill>
-                    <Pill>Routing controls</Pill>
-                    <Pill>Analytics ready</Pill>
-                  </>
-                )}
+                <Pill>Merchant account</Pill>
+                <Pill>Routing controls</Pill>
+                <Pill>Analytics ready</Pill>
               </div>
             </div>
           </div>
@@ -150,23 +119,21 @@ export function OnboardingPage() {
           <div className="w-full max-w-[540px]">
             <div className="text-center">
               <h2 className="text-[clamp(2.15rem,3.6vw,3.05rem)] font-semibold tracking-[-0.05em] text-slate-950 dark:text-white">
-                {parentId ? `Add a sub-merchant to ${parentName}` : 'Create your merchant'}
+                Create your merchant
               </h2>
               <p className="mt-3 text-base text-slate-500 dark:text-[#8a94a7]">
-                {parentId
-                  ? 'Name it after what it routes for, such as a region.'
-                  : 'Set up the merchant account for your Decision Engine dashboard.'}
+                Set up the merchant account for your Decision Engine dashboard.
               </p>
             </div>
 
             <div className="mt-10 border-t border-slate-200 pt-10 dark:border-[#1d1d23]">
               <form onSubmit={handleSubmit} className="space-y-6">
                 <Field
-                  label={`${noun === 'sub-merchant' ? 'Sub-merchant' : 'Merchant'} name`}
-                  footer={`You can adjust rules, connectors, and analytics after the ${noun} is created.`}
+                  label="Merchant name"
+                  footer="You can adjust rules, connectors, and analytics after the merchant is created."
                 >
                   <div className="relative">
-                    <NameIcon
+                    <Building2
                       size={16}
                       className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-500 dark:text-[#798191]"
                     />
@@ -176,7 +143,7 @@ export function OnboardingPage() {
                       autoFocus
                       value={merchantName}
                       onChange={(e) => setMerchantName(e.target.value)}
-                      placeholder={parentId ? 'e.g. Acme India' : 'e.g. Acme Corp'}
+                      placeholder="e.g. Acme Corp"
                       className="h-16 w-full rounded-2xl border border-slate-200 bg-white pl-12 pr-5 text-[15px] text-slate-900 outline-none transition-all placeholder:text-slate-500 focus:border-blue-500 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-white dark:placeholder:text-[#6e7684] dark:focus:border-blue-500 leading-[22px]"
                     />
                   </div>
@@ -192,11 +159,11 @@ export function OnboardingPage() {
                   {loading ? (
                     <>
                       <Loader2 size={16} className="animate-spin" />
-                      Creating {noun}
+                      Creating merchant
                     </>
                   ) : (
                     <>
-                      Create {noun}
+                      Create merchant
                       <ArrowRight
                         size={16}
                         className="transition-transform duration-200 group-hover:translate-x-0.5"
@@ -207,11 +174,7 @@ export function OnboardingPage() {
               </form>
 
               <div className="mt-10 border-t border-slate-200 pt-6 text-center text-xs text-slate-500 dark:border-[#1d1d23] dark:text-[#78849a]">
-                <p>
-                  {parentId
-                    ? `Access to this sub-merchant comes from ${parentName}.`
-                    : 'Merchant access will be linked to your current session.'}
-                </p>
+                <p>Merchant access will be linked to your current session.</p>
                 <p className="mt-4 text-slate-500 dark:text-[#78849a]">Juspay Decision Engine</p>
               </div>
             </div>
