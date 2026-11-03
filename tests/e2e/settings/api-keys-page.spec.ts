@@ -76,7 +76,17 @@ test.describe('API Keys UI', () => {
     await expect(authedPage.getByTestId('api-key-value')).toBeVisible({ timeout: 10_000 })
 
     const row = authedPage.getByRole('row', { name: /to-be-revoked/ })
+    const dialog = authedPage.getByRole('dialog', { name: 'Revoke API key?' })
+
+    // Cancelling the confirmation leaves the key in place.
     await row.getByRole('button', { name: 'Revoke' }).click()
+    await expect(dialog).toBeVisible()
+    await dialog.getByRole('button', { name: 'Cancel' }).click()
+    await expect(dialog).toHaveCount(0)
+    await expect(authedPage.getByRole('cell', { name: 'to-be-revoked' })).toHaveCount(1)
+
+    await row.getByRole('button', { name: 'Revoke' }).click()
+    await dialog.getByRole('button', { name: 'Revoke key' }).click()
 
     await expect(authedPage.getByRole('cell', { name: 'to-be-revoked' })).toHaveCount(0)
   })

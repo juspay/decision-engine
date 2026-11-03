@@ -441,12 +441,13 @@ pub async fn login(
             .map(|m| m.merchant_id.clone())
             .unwrap_or_default()
     });
+    let role = role_on(&merchants, &active_merchant_id, &user.role);
 
     let token = auth::generate_jwt(
         &user.user_id,
         &user.email,
         &active_merchant_id,
-        &user.role,
+        &role,
         TOKEN_TYPE_STANDARD,
         global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
@@ -458,7 +459,7 @@ pub async fn login(
         user_id: user.user_id,
         email: user.email,
         merchant_id: active_merchant_id,
-        role: user.role,
+        role,
         merchants,
     }))
 }
@@ -573,11 +574,13 @@ pub async fn create_merchant(
 
     let merchants = fetch_user_merchants(&app_state, &claims.user_id).await?;
 
+    // The token is for the merchant just created, where the user holds the admin membership
+    // inserted above.
     let new_token = auth::generate_jwt(
         &claims.user_id,
         &claims.email,
         &merchant_id,
-        &claims.role,
+        "admin",
         TOKEN_TYPE_STANDARD,
         global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
@@ -1212,7 +1215,8 @@ pub async fn me(
         permissions,
         email: user.email,
         merchant_id: claims.merchant_id,
-        role: user.role,
+        // The role the session's token carries, which is what its requests are checked against.
+        role: claims.role,
         #[cfg(feature = "mysql")]
         email_verified: user.email_verified != 0,
         #[cfg(feature = "postgres")]
@@ -1286,6 +1290,16 @@ fn roster_admits(roster: &[String], claims: &auth::JwtClaims) -> bool {
         && roster
             .iter()
             .any(|allowed| allowed.eq_ignore_ascii_case(&claims.email))
+}
+
+/// The role a session on `merchant_id` holds: the user's membership there (a sub-merchant carries
+/// its merchant's), or `fallback` for a user with no membership on it.
+fn role_on(merchants: &[MerchantInfo], merchant_id: &str, fallback: &str) -> String {
+    merchants
+        .iter()
+        .find(|m| m.merchant_id == merchant_id)
+        .map_or(fallback, |m| m.role.as_str())
+        .to_string()
 }
 
 async fn fetch_user_merchants(
@@ -2056,12 +2070,13 @@ pub async fn exit_merchant(
             .map(|m| m.merchant_id.clone())
             .unwrap_or_default()
     });
+    let role = role_on(&merchants, &home_merchant_id, &user.role);
 
     let new_token = auth::generate_jwt(
         &user.user_id,
         &user.email,
         &home_merchant_id,
-        &user.role,
+        &role,
         TOKEN_TYPE_STANDARD,
         global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
@@ -2073,7 +2088,7 @@ pub async fn exit_merchant(
         user_id: user.user_id,
         email: user.email,
         merchant_id: home_merchant_id,
-        role: user.role,
+        role,
         merchants,
     }))
 }
@@ -2347,6 +2362,35 @@ mod tests {
             grant: None,
             perms: None,
         }
+    }
+
+    fn membership(merchant_id: &str, role: &str) -> MerchantInfo {
+        MerchantInfo {
+            merchant_id: merchant_id.to_string(),
+            merchant_name: merchant_id.to_string(),
+            role: role.to_string(),
+            parent_merchant_id: None,
+            profile_name: None,
+            hs_merchant_id: None,
+            hs_merchant_name: None,
+            hs_org_id: None,
+            hs_org_name: None,
+        }
+    }
+
+    #[test]
+    fn a_session_takes_the_role_held_on_its_merchant() {
+        // An invited member who later creates a merchant of their own: the user row says
+        // "member", the membership on their own merchant says "admin".
+        let merchants = [
+            membership("theirs", "admin"),
+            membership("invited_to", "member"),
+        ];
+        assert_eq!(role_on(&merchants, "theirs", "member"), "admin");
+        // An admin elsewhere holds only the role granted on the merchant they were invited to.
+        assert_eq!(role_on(&merchants, "invited_to", "admin"), "member");
+        // No membership at all: the user row is all there is.
+        assert_eq!(role_on(&[], "", "admin"), "admin");
     }
 
     #[test]

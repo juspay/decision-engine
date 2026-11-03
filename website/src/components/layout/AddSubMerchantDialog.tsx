@@ -1,5 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
+import { useId, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import { useAuthStore, type MerchantInfo } from '../../store/authStore'
@@ -8,6 +7,7 @@ import { apiErrorMessage, apiFetch } from '../../lib/api'
 import { merchantLabel } from '../../lib/merchantScope'
 import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
+import { Modal } from '../ui/Modal'
 
 interface CreateMerchantResponse {
   token: string
@@ -34,16 +34,8 @@ export function AddSubMerchantDialog({
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const titleId = useId()
   const parentName = merchantLabel(parent)
-
-  useEffect(() => {
-    inputRef.current?.focus()
-    function onKey(e: KeyboardEvent) {
-      if (e.key === 'Escape') onClose()
-    }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [onClose])
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -65,15 +57,12 @@ export function AddSubMerchantDialog({
     }
   }
 
-  // Rendered at the document root, so the backdrop also covers the sidebar.
-  return createPortal(
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-[2px]" onClick={onClose} />
-      <form
-        onSubmit={handleSubmit}
-        className="relative w-full max-w-sm rounded-2xl border border-slate-200 bg-white p-6 shadow-2xl dark:border-[#2a303a] dark:bg-[#0d1118]"
-      >
-        <h3 className="text-sm font-semibold text-slate-900 dark:text-white">
+  // Held open while the merchant is being created: the session moves onto it when that finishes,
+  // which must not happen behind a dialog the user already dismissed.
+  return (
+    <Modal labelledBy={titleId} onClose={onClose} dismissible={!creating} initialFocus={inputRef}>
+      <form onSubmit={handleSubmit}>
+        <h3 id={titleId} className="text-sm font-semibold text-slate-900 dark:text-white">
           Add a sub-merchant to {parentName}
         </h3>
         <p className="mt-2 text-sm leading-relaxed text-slate-500 dark:text-[#8a93a6]">
@@ -92,7 +81,7 @@ export function AddSubMerchantDialog({
           <ErrorMessage error={error} />
         </div>
         <div className="mt-4 flex justify-end gap-2">
-          <Button type="button" variant="secondary" size="sm" onClick={onClose}>
+          <Button type="button" variant="secondary" size="sm" onClick={onClose} disabled={creating}>
             Cancel
           </Button>
           <Button type="submit" size="sm" disabled={!name.trim() || creating}>
@@ -101,7 +90,6 @@ export function AddSubMerchantDialog({
           </Button>
         </div>
       </form>
-    </div>,
-    document.body,
+    </Modal>
   )
 }

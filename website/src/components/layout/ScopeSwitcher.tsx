@@ -336,6 +336,9 @@ export function ScopeSwitcher() {
       return
     }
     if (e.key === 'Enter') {
+      // A focused button — a row's +, a group toggle, Copy — does what it says; Enter takes the
+      // row under the cursor only from the search field.
+      if (e.target instanceof HTMLElement && e.target.closest('button')) return
       e.preventDefault()
       const target = navigableScopes.find((s) => s.merchant_id === activeId)
       if (target) handleSwitch(target.merchant_id)

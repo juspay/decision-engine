@@ -34,10 +34,10 @@ pub struct RunQuery {
     pub merchant_id: Option<String>,
 }
 
-/// Who may run what: the admin secret may run anything, a session or api key only its own
-/// merchant, and the sweep of every merchant (1 + 2N database reads and N ClickHouse queries,
+/// Who may run what: the admin secret may run anything, a session or api key its own merchant and
+/// that merchant's sub-merchants, and the sweep of every merchant (1 + 2N database reads and N ClickHouse queries,
 /// serial) is the scheduler's alone.
-fn authorize_run(
+async fn authorize_run(
     admin: bool,
     session: Option<&AuthContext>,
     merchant_id: Option<&str>,
@@ -50,11 +50,18 @@ fn authorize_run(
             StatusCode::FORBIDDEN,
             "running a forecast for every merchant needs the admin secret",
         )),
-        (Some(context), Some(merchant_id)) if context.merchant_id == merchant_id => Ok(()),
-        (Some(_), Some(_)) => Err(RouteError::new(
-            StatusCode::FORBIDDEN,
-            "this session may only run a forecast for its own merchant",
-        )),
+        (Some(context), Some(merchant_id)) => crate::auth::authorize_merchant_id(
+            Some(context),
+            merchant_id,
+        )
+        .await
+        .map(|_| ())
+        .map_err(|_| {
+            RouteError::new(
+                StatusCode::FORBIDDEN,
+                "this session may only run a forecast for its own merchant or its sub-merchants",
+            )
+        }),
         (None, Some(_)) => Err(RouteError::new(
             StatusCode::UNAUTHORIZED,
             "running a forecast needs a session, an api key, or the admin secret",
@@ -76,7 +83,8 @@ pub async fn run_forecast(
         admin.is_some(),
         session.as_ref().map(|Extension(context)| context),
         query.merchant_id.as_deref(),
-    )?;
+    )
+    .await?;
 
     let Some(deps) = volume_commitment::deps() else {
         // Startup wiring has not run. Worth a real error here: unlike the read view, a caller
@@ -1000,35 +1008,43 @@ mod tests {
         }
     }
 
-    #[test]
-    fn the_admin_secret_runs_anything() {
-        assert!(authorize_run(true, None, None).is_ok());
-        assert!(authorize_run(true, None, Some("m1")).is_ok());
-        assert!(authorize_run(true, Some(&session("m2")), Some("m1")).is_ok());
+    #[tokio::test]
+    async fn the_admin_secret_runs_anything() {
+        assert!(authorize_run(true, None, None).await.is_ok());
+        assert!(authorize_run(true, None, Some("m1")).await.is_ok());
+        assert!(authorize_run(true, Some(&session("m2")), Some("m1"))
+            .await
+            .is_ok());
     }
 
     /// The sweep is the scheduler's: a dashboard user with a write permission must not be able
     /// to put every merchant's forecast on the main server at once.
-    #[test]
-    fn the_sweep_needs_the_admin_secret() {
-        let refused = authorize_run(false, Some(&session("m1")), None).unwrap_err();
+    #[tokio::test]
+    async fn the_sweep_needs_the_admin_secret() {
+        let refused = authorize_run(false, Some(&session("m1")), None)
+            .await
+            .unwrap_err();
         assert_eq!(refused.status(), StatusCode::FORBIDDEN);
-        let refused = authorize_run(false, None, None).unwrap_err();
+        let refused = authorize_run(false, None, None).await.unwrap_err();
         assert_eq!(refused.status(), StatusCode::FORBIDDEN);
     }
 
-    #[test]
-    fn a_session_runs_only_its_own_merchant() {
-        assert!(authorize_run(false, Some(&session("m1")), Some("m1")).is_ok());
-        let refused = authorize_run(false, Some(&session("m1")), Some("m2")).unwrap_err();
+    #[tokio::test]
+    async fn a_session_runs_only_its_own_merchant() {
+        assert!(authorize_run(false, Some(&session("m1")), Some("m1"))
+            .await
+            .is_ok());
+        let refused = authorize_run(false, Some(&session("m1")), Some("m2"))
+            .await
+            .unwrap_err();
         assert_eq!(refused.status(), StatusCode::FORBIDDEN);
     }
 
     /// Api-key compat mode lets an unauthenticated request through the middleware; here it
     /// still needs to say who it is.
-    #[test]
-    fn no_credentials_at_all_is_refused() {
-        let refused = authorize_run(false, None, Some("m1")).unwrap_err();
+    #[tokio::test]
+    async fn no_credentials_at_all_is_refused() {
+        let refused = authorize_run(false, None, Some("m1")).await.unwrap_err();
         assert_eq!(refused.status(), StatusCode::UNAUTHORIZED);
     }
 
