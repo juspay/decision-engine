@@ -9,6 +9,12 @@ description: "Compatibility example for the legacy /update-score route."
 
 `txn_detail` and `txn_card_info` must each carry a `partitionKey` **key**. The value may be `null`, but omitting the key fails with `missing field partitionKey`. The `id` fields are numeric strings, and `txn_detail` needs `netAmount` and `currency` as well as `txnAmount`.
 
+When a stored scoring context exists, its `merchantId` must match the authorized request merchant.
+A mismatch returns HTTP `403` with `SCORING_CONTEXT_MERCHANT_MISMATCH` before scoring or lock
+acquisition. Both feedback APIs load and validate the context once, then use that snapshot through
+the worker. See [Update Gateway Score](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/update-gateway-score.mdx)
+for the current payment-ID uniqueness and upgrade constraints.
+
 ```bash
 curl --location "$BASE_URL/update-score" \
   --header "$AUTH_HEADER" \

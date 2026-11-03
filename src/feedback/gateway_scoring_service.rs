@@ -33,6 +33,7 @@ use crate::decider::gatewaydecider::utils::{
     self as GU, get_m_id, get_payment_method, get_sr_v3_latency_threshold,
 };
 use crate::feedback::gateway_selection_scoring_v3 as GSSV3;
+use crate::feedback::scoring_context::FeedbackContext;
 use crate::feedback::types as FT;
 use crate::feedback::utils as Fbu;
 use crate::feedback::utils::GatewayScoringType as GST;
@@ -453,7 +454,12 @@ pub const SCORE_UPDATE_SKIPPED: &str = "Skipped";
 
 pub async fn check_and_update_gateway_score_(
     api_payload: FT::UpdateScorePayload,
+    context: FeedbackContext,
 ) -> Result<String, T::ErrorResponse> {
+    context.ensure_request(&api_payload.merchant_id, &api_payload.payment_id)?;
+    let Some(gateway_scoring_data) = context.data.as_ref() else {
+        return Ok(SCORE_UPDATE_SKIPPED.to_string());
+    };
     // GSM-based scoring filter: skip penalization for failures where the gateway
     // is healthy (user/issuer-originated errors). Gated per merchant so it can be
     // rolled back instantly without a deploy.
@@ -519,104 +525,28 @@ pub async fn check_and_update_gateway_score_(
         );
     }
 
-    let redis_key = format!(
-        "{}{}",
-        C::GATEWAY_SCORING_DATA,
-        api_payload.clone().payment_id
-    );
-    let app_state = get_tenant_app_state().await;
-
-    // Attempt to fetch gateway scoring data from Redis
-    let m_gateway_scoring_data: Result<
-        GatewayScoringData,
-        error_stack::Report<redis_interface::errors::RedisError>,
-    > = app_state
-        .redis_conn
-        .get_key(&redis_key, "GatewayScoringData")
-        .await;
-
-    match m_gateway_scoring_data {
-        Ok(gateway_scoring_data) => {
-            // Extract transaction details and card info from the API payload
-            let txn_detail: TxnDetail = match Fbu::get_txn_detail_from_api_payload(
-                api_payload.clone(),
-                gateway_scoring_data.clone(),
-            ) {
-                Ok(detail) => detail,
-                Err(e) => {
-                    return Err(invalid_request_error("transaction details", &e));
-                }
-            };
-            let txn_card_info: TxnCardInfo = Fbu::get_txn_card_info_from_api_payload(
-                api_payload.clone(),
-                gateway_scoring_data.clone(),
-            );
-
-            let log_message = "update_gateway_score";
-            let enforce_failure = api_payload.enforce_dynamic_routing_failure.unwrap_or(false);
-
-            // Call the function to check and update the gateway score
-            check_and_update_gateway_score(
-                txn_detail,
-                txn_card_info,
-                log_message,
-                enforce_failure,
-                api_payload.gateway_reference_id.clone(),
-                api_payload.txn_latency.clone(),
-                crate::analytics::AnalyticsRoute::UpdateGatewayScore,
-                crate::analytics::AnalyticsFlowContext::new(
-                    crate::analytics::ApiFlow::DynamicRouting,
-                    crate::analytics::FlowType::UpdateGatewayScoreScoreSnapshot,
-                ),
-                None,
-            )
-            .await;
-
-            // Return success response
-            Ok("Success".to_string())
-        }
-        Err(e) => {
-            // With compression on, a missing key also reads as `GetFailed`, which is otherwise a
-            // read or decode failure. Only a key confirmed absent is skipped.
-            let scoring_data_absent = match e.current_context() {
-                redis_interface::errors::RedisError::NotFound => true,
-                redis_interface::errors::RedisError::GetFailed => {
-                    matches!(app_state.redis_conn.key_exists(&redis_key).await, Ok(false))
-                }
-                _ => false,
-            };
-            if scoring_data_absent {
-                logger::info!(
-                    action = "GATEWAY_SCORING_DATA_NOT_FOUND_SKIP",
-                    tag = "GATEWAY_SCORING_DATA_NOT_FOUND_SKIP",
-                    "No GatewayScoringData in redis for merchant={} gateway={} payment_id={}; \
-                     skipping score update: {}",
-                    api_payload.merchant_id,
-                    api_payload.gateway,
-                    api_payload.payment_id,
-                    e,
-                );
-                return Ok(SCORE_UPDATE_SKIPPED.to_string());
-            }
-            Err(T::ErrorResponse {
-                status: "400".to_string(),
-                error_code: "GATEWAY_SCORING_DATA_NOT_FOUND".to_string(),
-                error_message: "GatewayScoringData is not found in redis".to_string(),
-                priority_logic_tag: None,
-                routing_approach: None,
-                filter_wise_gateways: None,
-                error_info: T::UnifiedError {
-                    code: "GATEWAY_SCORING_DATA_NOT_FOUND".to_string(),
-                    user_message:
-                        "GatewayScoringData is not in redis. Please create the transaction."
-                            .to_string(),
-                    developer_message: e.to_string(),
-                },
-                priority_logic_output: None,
-                is_dynamic_mga_enabled: false,
-            })
-        }
-    }
+    let txn_detail =
+        Fbu::get_txn_detail_from_api_payload(api_payload.clone(), gateway_scoring_data.clone())
+            .map_err(|error| invalid_request_error("transaction details", &error))?;
+    let txn_card_info =
+        Fbu::get_txn_card_info_from_api_payload(api_payload.clone(), gateway_scoring_data.clone());
+    check_and_update_gateway_score(
+        txn_detail,
+        txn_card_info,
+        "update_gateway_score",
+        api_payload.enforce_dynamic_routing_failure.unwrap_or(false),
+        api_payload.gateway_reference_id,
+        api_payload.txn_latency,
+        crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+        crate::analytics::AnalyticsFlowContext::new(
+            crate::analytics::ApiFlow::DynamicRouting,
+            crate::analytics::FlowType::UpdateGatewayScoreScoreSnapshot,
+        ),
+        None,
+        context,
+    )
+    .await?;
+    Ok("Success".to_string())
 }
 
 pub async fn check_and_update_gateway_score(
@@ -629,7 +559,9 @@ pub async fn check_and_update_gateway_score(
     analytics_route: crate::analytics::AnalyticsRoute,
     score_snapshot_flow: crate::analytics::AnalyticsFlowContext,
     redis_comp_config: Option<RedisCompressionConfigCombined>,
-) -> () {
+    context: FeedbackContext,
+) -> Result<(), T::ErrorResponse> {
+    context.ensure_request(&txn_detail.merchantId.0, &txn_detail.txnUuid)?;
     // Get gateway scoring type
     let gateway_scoring_type =
         get_gateway_scoring_type(txn_detail.clone(), txn_card_info.clone(), enforce_failure).await;
@@ -682,6 +614,7 @@ pub async fn check_and_update_gateway_score(
                 analytics_route,
                 score_snapshot_flow,
                 redis_comp_config.clone(),
+                context.data,
             )
             .await;
         }
@@ -703,13 +636,15 @@ pub async fn check_and_update_gateway_score(
             analytics_route,
             score_snapshot_flow,
             redis_comp_config,
+            context.data,
         )
         .await;
     }
+    Ok(())
 }
 
 // Original Haskell function: updateGatewayScore
-pub async fn update_gateway_score(
+async fn update_gateway_score(
     gateway_scoring_type: GatewayScoringType,
     txn_detail: TxnDetail,
     txn_card_info: TxnCardInfo,
@@ -718,6 +653,7 @@ pub async fn update_gateway_score(
     analytics_route: crate::analytics::AnalyticsRoute,
     score_snapshot_flow: crate::analytics::AnalyticsFlowContext,
     redis_compression_config: Option<RedisCompressionConfigCombined>,
+    scoring_context: Option<GatewayScoringData>,
 ) -> () {
     let mer_acc: MerchantAccount =
         MA::load_merchant_by_merchant_id(MID::merchant_id_to_text(txn_detail.clone().merchantId))
@@ -775,36 +711,10 @@ pub async fn update_gateway_score(
         true
     };
 
-    let redis_key = format!("{}{}", C::GATEWAY_SCORING_DATA, txn_detail.clone().txnUuid);
-    let app_state = get_tenant_app_state().await;
-
-    let redis_gateway_score_data_initial: Option<GatewayScoringData> =
-        if should_update_srv3_gateway_score
-            && should_isolate_srv3_producer
-            && should_update_explore_txn
-        {
-            let mb_gateway_scoring_data: Option<GatewayScoringData> = app_state
-                .redis_conn
-                .get_key(&redis_key, "GatewayScoringData")
-                .await
-                .ok();
-            mb_gateway_scoring_data
-        } else {
-            None
-        };
-
-    let mb_gateway_scoring_data: Option<GatewayScoringData> = if should_update_gateway_score {
-        match redis_gateway_score_data_initial {
-            None => {
-                let redis_data: Option<GatewayScoringData> = app_state
-                    .redis_conn
-                    .get_key(&redis_key, "GatewayScoringData")
-                    .await
-                    .ok();
-                redis_data
-            }
-            Some(_) => redis_gateway_score_data_initial,
-        }
+    // The owner-checked snapshot was loaded before acknowledgement and before any lock or
+    // scoring side effect. Never reread the payment-only Redis key inside the worker.
+    let mb_gateway_scoring_data = if should_update_gateway_score {
+        scoring_context.clone()
     } else {
         None
     };
@@ -918,12 +828,7 @@ pub async fn update_gateway_score(
             gateway_scoring_type,
             txn_detail.status
         );
-        let app_state = get_tenant_app_state().await;
-        let mb_gateway_scoring_data: Option<GatewayScoringData> = app_state
-            .redis_conn
-            .get_key(&redis_key, "GatewayScoringData")
-            .await
-            .ok();
+        let mb_gateway_scoring_data = scoring_context.clone();
         GSSV3::flow::update_sr_v3_score(
             gateway_scoring_type.clone(),
             txn_detail.clone(),
@@ -1027,18 +932,7 @@ pub async fn update_gateway_score(
     if should_update_gateway_score && is_update_within_window {
         let mer_acc_p_id: ETM::id::MerchantPId = mer_acc.id;
         let m_pf_mc_config = MerchantConfig::getMerchantConfigEntityLevelLookupConfig().await;
-        let mb_gateway_scoring_data = match mb_gateway_scoring_data {
-            None => {
-                let app_state = get_tenant_app_state().await;
-                let redis_data: Option<GatewayScoringData> = app_state
-                    .redis_conn
-                    .get_key(&redis_key, "GatewayScoringData")
-                    .await
-                    .ok();
-                redis_data
-            }
-            Some(_) => mb_gateway_scoring_data,
-        };
+        let mb_gateway_scoring_data = scoring_context;
         logger::debug!(tag = "GatewayScoringData", "{:?}", mb_gateway_scoring_data);
         match mb_gateway_scoring_data {
             None => {

@@ -3628,6 +3628,9 @@
           }
         },
         "responses": {
+          "403": {
+            "description": "The stored scoring context belongs to a different merchant. Returns SCORING_CONTEXT_MERCHANT_MISMATCH before scoring."
+          },
           "200": {
             "description": "Score updated",
             "content": {
@@ -3682,6 +3685,9 @@
           }
         },
         "responses": {
+          "403": {
+            "description": "The stored scoring context belongs to a different merchant. Returns SCORING_CONTEXT_MERCHANT_MISMATCH before scoring."
+          },
           "200": {
             "description": "OK",
             "content": {
