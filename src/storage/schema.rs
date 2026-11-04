@@ -258,6 +258,7 @@ diesel::table! {
         priority_logic_config -> Nullable<Text>,
         merchant_category_code -> Nullable<Text>,
         merchant_name -> Nullable<Text>,
+        parent_merchant_id -> Nullable<Text>,
     }
 }
 
