@@ -66,7 +66,7 @@ test.describe('Payment Audit UI payment field filter', () => {
     test.setTimeout(120_000)
     const decide = (paymentId: string, bin: string) =>
       api.raw('POST', '/decide', { body: {
-        payment_id: paymentId, merchant_id: merchant.id, amount: 1000, currency: 'USD',
+        payment_id: paymentId, amount: 1000, currency: 'USD',
         payment_method_type: 'card', payment_method_sub_type: 'credit', card: { card_isin: bin },
         routing_config: { algorithm_for: 'payment', eligible_connectors: [{ gateway_name: 'stripe', merchant_connector_id: 'mca_stripe' }] },
       } })

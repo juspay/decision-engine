@@ -204,6 +204,36 @@ where
     }
 }
 
+/// The merchant a route that takes no merchant in its path or body acts on, named by the
+/// `x-connected-merchant-id` header ([`consts::X_CONNECTED_MERCHANT_ID`]).
+///
+/// The header is optional for a per-merchant session (JWT or api key): absent, the call acts on the
+/// session's own merchant; present, it must name that merchant, or the call is refused with `403`.
+/// A service credential has no merchant of its own, so it must send the header.
+#[derive(Debug, Clone)]
+pub struct ConnectedMerchant(pub crate::auth::AuthorizedMerchant);
+
+#[async_trait]
+impl<S> FromRequestParts<S> for ConnectedMerchant
+where
+    S: Send + Sync,
+{
+    type Rejection = crate::auth::MerchantScopeViolation;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let named = parts
+            .headers
+            .get(consts::X_CONNECTED_MERCHANT_ID)
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            // A blank header names no merchant, so a service credential cannot act on `""`.
+            .filter(|merchant_id| !merchant_id.is_empty())
+            .map(str::to_string);
+        let session = parts.extensions.get::<AuthContext>();
+        crate::auth::authorize(session, &named).map(Self)
+    }
+}
+
 #[derive(Clone)]
 pub struct TenantStateResolver(pub Arc<TenantAppState>);
 
@@ -572,6 +602,53 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(scoped.merchant.as_str(), "merchant_b");
+    }
+
+    #[tokio::test]
+    async fn connected_merchant_defaults_to_the_session_and_binds_the_header_to_it() {
+        use crate::auth::MerchantScopeViolation;
+        use axum::extract::FromRequestParts;
+
+        async fn resolve(
+            session: Option<&str>,
+            header: Option<&str>,
+        ) -> Result<String, MerchantScopeViolation> {
+            let mut builder = Request::builder();
+            if let Some(header) = header {
+                builder = builder.header("x-connected-merchant-id", header);
+            }
+            let (mut parts, ()) = builder.body(()).unwrap().into_parts();
+            if let Some(merchant_id) = session {
+                parts
+                    .extensions
+                    .insert(AuthContext::from_api_key(merchant_id));
+            }
+            super::ConnectedMerchant::from_request_parts(&mut parts, &())
+                .await
+                .map(|super::ConnectedMerchant(merchant)| merchant.as_str().to_string())
+        }
+
+        // A session acts on its own merchant, named or not.
+        assert_eq!(resolve(Some("m_a"), None).await, Ok("m_a".to_string()));
+        assert_eq!(
+            resolve(Some("m_a"), Some("m_a")).await,
+            Ok("m_a".to_string())
+        );
+        assert_eq!(resolve(Some("m_a"), Some(" ")).await, Ok("m_a".to_string()));
+        assert_eq!(
+            resolve(Some("m_a"), Some("m_b")).await,
+            Err(MerchantScopeViolation::ForeignMerchant)
+        );
+        // A service credential acts on the merchant the header names, and must name one.
+        assert_eq!(resolve(None, Some("m_b")).await, Ok("m_b".to_string()));
+        assert_eq!(
+            resolve(None, None).await,
+            Err(MerchantScopeViolation::NoMerchant)
+        );
+        assert_eq!(
+            resolve(None, Some("")).await,
+            Err(MerchantScopeViolation::NoMerchant)
+        );
     }
 
     #[tokio::test]

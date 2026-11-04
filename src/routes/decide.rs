@@ -1,23 +1,36 @@
-use crate::custom_extractors::{RequestIds, ScopedJson, ScopedJsonRejection};
+use crate::custom_extractors::{ConnectedMerchant, RequestIds};
 use crate::error::{error_codes, ApiErrorResponse, ContainerError};
 use crate::euclid::errors::EuclidErrors;
 use crate::types::decide::response::DecideResponse;
 use crate::types::decide::DecideRequest;
+use axum::body::Bytes;
+use axum::extract::rejection::BytesRejection;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 
 pub mod evaluation;
 
+/// The merchant is never in the body: it is the `x-connected-merchant-id` header, checked against
+/// the caller's credential, or the credential's own merchant when the header is absent.
 #[axum::debug_handler]
 pub async fn decide(
     ids: RequestIds,
-    request: Result<ScopedJson<DecideRequest>, ScopedJsonRejection>,
+    ConnectedMerchant(merchant): ConnectedMerchant,
+    body: Result<Bytes, BytesRejection>,
 ) -> Response {
-    let payload = match request {
-        Ok(ScopedJson { payload, .. }) => payload,
-        // A merchant the caller may not act on answers as on every other merchant-scoped route.
-        Err(ScopedJsonRejection::Scope(violation)) => return violation.into_response(),
-        Err(rejection) => return DecideError::from(rejection).into_response(),
+    let body = match body {
+        Ok(body) => body,
+        Err(rejection) => {
+            crate::logger::warn!(error = %rejection.body_text(), "/decide body could not be read");
+            return DecideError::MalformedBody.into_response();
+        }
+    };
+    let payload = match serde_json::from_slice::<DecideRequest>(&body) {
+        Ok(payload) => payload.for_merchant(&merchant),
+        Err(error) => {
+            crate::logger::warn!(error = %error, "/decide body did not parse");
+            return DecideError::from_unparsable(&body).into_response();
+        }
     };
     match decide_payment(ids, payload).await {
         Ok(response) if response.status().is_success() => response,
@@ -39,13 +52,19 @@ async fn decide_payment(ids: RequestIds, payload: DecideRequest) -> Result<Respo
         .map_err(DecideError::InvalidRequest)?;
     let invalid_inputs = payload.invalid_rule_inputs(config);
     let payment_id = payload.payment_id.clone();
+    let merchant_reference_id = payload.merchant_reference_id.clone();
     evaluation::evaluate(
         ids,
         request,
         Some(payload),
-        move |evaluation, request_id| {
-            let decision =
-                DecideResponse::from_evaluation(evaluation, invalid_inputs, payment_id, request_id);
+        // The call's request id is the `x-request-id` response header, not part of the decision.
+        move |evaluation, _request_id| {
+            let decision = DecideResponse::from_evaluation(
+                evaluation,
+                invalid_inputs,
+                payment_id,
+                merchant_reference_id,
+            );
             serde_json::to_value(decision)
                 .map(Some)
                 .map_err(|_| EuclidErrors::FailedToSerializeJsonToString.into())
@@ -130,25 +149,6 @@ impl DecideError {
                 error_codes::TE_00,
                 "Something went wrong".to_string(),
             ),
-        }
-    }
-}
-
-impl From<ScopedJsonRejection> for DecideError {
-    fn from(rejection: ScopedJsonRejection) -> Self {
-        match rejection {
-            ScopedJsonRejection::Read(error) => {
-                crate::logger::warn!(error = %error, "/decide body could not be read");
-                Self::MalformedBody
-            }
-            ScopedJsonRejection::Parse { body, error } => {
-                crate::logger::warn!(error = %error.body_text(), "/decide body did not parse");
-                Self::from_unparsable(&body)
-            }
-            ScopedJsonRejection::Scope(violation) => {
-                crate::logger::warn!(error = %violation, "/decide merchant out of scope");
-                Self::Internal
-            }
         }
     }
 }

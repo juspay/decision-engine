@@ -1,6 +1,6 @@
 {
   "payment_id": "pay_demo",
-  "merchant_id": "pro_demo",
+  "merchant_reference_id": "order_demo",
   "amount": 1000,
   "currency": "USD",
   "payment_method_type": "card",

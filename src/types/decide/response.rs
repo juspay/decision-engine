@@ -30,8 +30,9 @@ pub struct DecideResponse {
     /// Unique per decision, so a retried payment's decisions stay apart.
     pub id: String,
     pub payment_id: String,
-    /// The call's `x-request-id`, or the one minted for it.
-    pub request_id: String,
+    /// The request's `merchant_reference_id`, as sent. The call's own id is the `x-request-id`
+    /// response header.
+    pub merchant_reference_id: Option<String>,
     pub created_at: String,
     /// The order to try connectors in: the first is the choice, the rest the retry order.
     pub connectors: Vec<DecideConnector>,
@@ -45,6 +46,16 @@ pub struct DecideResponse {
     pub warnings: Vec<Warning>,
 }
 
+/// Every part of the response that explains itself follows one shape:
+///
+/// - `status`: what a section did, and `reason`: why — stable `snake_case` codes to branch on.
+///   New values may be added.
+/// - `message`: the same fact in words, for people reading logs or a dashboard. Not stable; never
+///   branch on it.
+///
+/// So the decision's `outcome` is `{type, strategy, reason, message}`, `cost` and `volume_steering`
+/// carry `{status, message}`, a blocked commitment `{connector, reason}`, and a warning
+/// `{code, param, message}` like an error.
 #[derive(Debug, Serialize)]
 pub struct Outcome {
     #[serde(rename = "type")]
@@ -365,6 +376,7 @@ pub enum SuccessRateStatus {
 #[derive(Debug, Serialize)]
 pub struct SuccessRateSection {
     pub status: SuccessRateStatus,
+    #[serde(serialize_with = "snake_case")]
     pub approach: Option<GatewayDeciderApproach>,
     /// Every scored connector, best first.
     pub scores: Vec<ConnectorScore>,
@@ -414,6 +426,7 @@ fn scores(priority_map: Option<&serde_json::Value>) -> Vec<ConnectorScore> {
 pub struct SuccessRateDiagnostics {
     /// The connector at the head before downtime was checked.
     pub head_before_downtime_check: Option<DecideConnector>,
+    #[serde(serialize_with = "snake_case")]
     pub reset_approach: ResetApproach,
     pub dimension: SuccessRateDimension,
     pub filter_wise_gateways: Option<serde_json::Value>,
@@ -470,8 +483,11 @@ impl From<GatewayPriorityLogicOutput> for PriorityLogicOutput {
 
 #[derive(Debug, Serialize)]
 pub struct CostSection {
-    pub outcome: MultiObjectiveOutcome,
-    pub reason: String,
+    /// `cost_won` when a cheaper connector took the payment, `auth_won` when the success-rate
+    /// head kept it.
+    #[serde(serialize_with = "snake_case")]
+    pub status: MultiObjectiveOutcome,
+    pub message: String,
     pub cost_saved_bps: Option<f64>,
     pub qualified_count: usize,
     pub margin: f64,
@@ -492,8 +508,8 @@ impl From<MultiObjectiveInfo> for CostSection {
             ranked,
         } = info;
         Self {
-            outcome,
-            reason,
+            status: outcome,
+            message: reason,
             cost_saved_bps,
             qualified_count,
             margin,
@@ -509,6 +525,7 @@ pub struct RankedConnector {
     pub connector: DecideConnector,
     pub auth_rate: f64,
     pub cost_bps: Option<f64>,
+    #[serde(serialize_with = "snake_case")]
     pub cost_source: Option<CostSource>,
     pub cost_model: Option<CostModelSection>,
     pub ev: f64,
@@ -580,8 +597,11 @@ impl From<CostModel> for CostModelSection {
 
 #[derive(Debug, Serialize)]
 pub struct VolumeSteeringSection {
-    pub outcome: VolumeSteerOutcome,
-    pub reason: String,
+    /// `steered` when a connector behind on its commitment took the payment, `sr_prevailed` when
+    /// normal routing kept it.
+    #[serde(serialize_with = "snake_case")]
+    pub status: VolumeSteerOutcome,
+    pub message: String,
     pub sr_head: Option<DecideConnector>,
     pub chosen: Option<DecideConnector>,
     pub sr_gap_conceded: Option<f64>,
@@ -594,7 +614,10 @@ pub struct VolumeSteeringSection {
 #[derive(Debug, Serialize)]
 pub struct BlockedConnector {
     pub connector: DecideConnector,
-    pub gate: SteerBlock,
+    /// Why the commitment did not get this payment: `already_chosen`, `not_offered`,
+    /// `cycle_closed`, `outside_tolerance` or `lost_roll`.
+    #[serde(serialize_with = "snake_case")]
+    pub reason: SteerBlock,
 }
 
 impl From<VolumeSteerInfo> for VolumeSteeringSection {
@@ -611,8 +634,8 @@ impl From<VolumeSteerInfo> for VolumeSteeringSection {
             blocked,
         } = info;
         Self {
-            outcome,
-            reason,
+            status: outcome,
+            message: reason,
             sr_head: sr_head.as_deref().map(DecideConnector::from_identifier),
             chosen: chosen.as_deref().map(DecideConnector::from_identifier),
             sr_gap_conceded,
@@ -623,10 +646,22 @@ impl From<VolumeSteerInfo> for VolumeSteeringSection {
                 .into_iter()
                 .map(|BlockedCommitment { connector, gate }| BlockedConnector {
                     connector: DecideConnector::from_identifier(&connector),
-                    gate,
+                    reason: gate,
                 })
                 .collect(),
         }
+    }
+}
+
+/// Writes a decider enum, which the legacy endpoints spell `SCREAMING_SNAKE_CASE`, in the
+/// `snake_case` every `/decide` code uses. `None` stays `null`.
+fn snake_case<T: Serialize, S: serde::Serializer>(
+    value: &T,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    match serde_json::to_value(value).map_err(serde::ser::Error::custom)? {
+        serde_json::Value::String(name) => serializer.serialize_str(&name.to_lowercase()),
+        other => other.serialize(serializer),
     }
 }
 
@@ -668,8 +703,8 @@ impl From<DecidedGateway> for Layers {
         let mut outcome = Outcome::of_approach(&routing_approach);
         // Cost and volume steering explain their own pick.
         let explanation = match outcome.reason {
-            Reason::CostOptimized => cost.as_ref().map(|cost| &cost.reason),
-            Reason::VolumeCommitment => volume_steering.as_ref().map(|steering| &steering.reason),
+            Reason::CostOptimized => cost.as_ref().map(|cost| &cost.message),
+            Reason::VolumeCommitment => volume_steering.as_ref().map(|steering| &steering.message),
             _ => None,
         };
         if let Some(explanation) = explanation {
@@ -719,7 +754,7 @@ impl DecideResponse {
         evaluation: RoutingEvaluation,
         invalid_inputs: Vec<InvalidRuleInput>,
         payment_id: String,
-        request_id: String,
+        merchant_reference_id: Option<String>,
     ) -> Self {
         let RoutingEvaluation {
             static_routing,
@@ -802,7 +837,7 @@ impl DecideResponse {
         Self {
             id: format!("dec_{}", uuid::Uuid::now_v7().simple()),
             payment_id,
-            request_id,
+            merchant_reference_id,
             created_at: chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
             connectors: layers.connectors,
             outcome: layers.outcome,
@@ -853,7 +888,7 @@ mod tests {
             evaluation,
             invalid_inputs,
             "pay_1".to_string(),
-            "req_1".to_string(),
+            Some("order_1".to_string()),
         ))
     }
 
@@ -877,7 +912,8 @@ mod tests {
         assert!(actual["id"]
             .as_str()
             .is_some_and(|id| id.starts_with("dec_")));
-        assert_eq!(actual["request_id"], "req_1");
+        assert_eq!(actual["merchant_reference_id"], "order_1");
+        assert!(actual.get("request_id").is_none());
         assert_eq!(actual["connectors"], json!([stripe, adyen]));
         assert_eq!(
             actual["outcome"],
@@ -948,14 +984,14 @@ mod tests {
             actual["success_rate"],
             json!({
                 "status": "applied",
-                "approach": "SR_SELECTION_MULTI_OBJECTIVE",
+                "approach": "sr_selection_multi_objective",
                 "scores": [
                     {"gateway_name": "stripe", "merchant_connector_id": "mca_s", "score": 0.98},
                     {"gateway_name": "adyen", "merchant_connector_id": "mca_a", "score": 0.97}
                 ],
                 "diagnostics": {
                     "head_before_downtime_check": stripe,
-                    "reset_approach": "NO_RESET",
+                    "reset_approach": "no_reset",
                     "dimension": {"value": "ORDER_PAYMENT, CREDIT, CARD", "level": "PM_LEVEL"},
                     "filter_wise_gateways": null,
                     "priority_logic": {"tag": "tag_1", "output": {"is_enforcement": false,
@@ -971,14 +1007,14 @@ mod tests {
         assert_eq!(
             actual["cost"],
             json!({
-                "outcome": "COST_WON", "reason": "adyen beats stripe on EV",
+                "status": "cost_won", "message": "adyen beats stripe on EV",
                 "cost_saved_bps": 1480.0, "qualified_count": 2, "margin": 1.0, "ev_gap_top2": 0.1351,
                 "ranked": [
                     {"gateway_name": "adyen", "merchant_connector_id": "mca_a",
-                     "auth_rate": 0.97, "cost_bps": 20.0, "cost_source": "SEED", "cost_model": null,
+                     "auth_rate": 0.97, "cost_bps": 20.0, "cost_source": "seed", "cost_model": null,
                      "ev": 0.9681, "is_sr_head": false, "is_chosen": true},
                     {"gateway_name": "stripe", "merchant_connector_id": "mca_s",
-                     "auth_rate": 0.98, "cost_bps": 1500.0, "cost_source": "SEED",
+                     "auth_rate": 0.98, "cost_bps": 1500.0, "cost_source": "seed",
                      "cost_model": {"brand": "VISA", "variant": null, "issuer": null, "ccy": null,
                                     "ic_category": null, "pct_bps": 150.0, "fixed_fee": null},
                      "ev": 0.833, "is_sr_head": true, "is_chosen": false}
@@ -1146,6 +1182,48 @@ mod tests {
             assert_eq!(actual["outcome"]["strategy"], "none");
             assert_eq!(actual["outcome"]["reason"], reason);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn a_volume_steer_explains_itself_in_the_shape_cost_does(
+    ) -> Result<(), Box<dyn std::error::Error>> {
+        let decision: DecidedGateway = serde_json::from_value(json!({
+            "decided_gateway": "adyen:mca_a", "fallback_gateways": ["stripe:mca_s"],
+            "routing_approach": "SR_SELECTION_VOLUME_COMMITMENT", "reset_approach": "NO_RESET",
+            "is_scheduled_outage": false, "is_dynamic_mga_enabled": false,
+            "is_rust_based_decider": true,
+            "volume_steer_info": {"outcome": "STEERED", "reason": "adyen is behind its commitment",
+                "srHead": "stripe:mca_s", "chosen": "adyen:mca_a", "srGapConceded": 0.01,
+                "steerRate": 0.4, "steeringCount": 2, "runId": "run_1",
+                "blocked": [{"connector": "checkout:mca_c", "gate": "LOST_ROLL"}]}
+        }))?;
+        let actual = decide(RoutingEvaluation {
+            static_routing: None,
+            static_error: None,
+            success_rate: SuccessRateOutcome::Applied(Box::new(decision)),
+            evaluated_connectors: Some(stripe_adyen()),
+        })?;
+        assert_eq!(
+            actual["outcome"],
+            json!({"type": "routed", "strategy": "volume_commitment", "reason": "volume_commitment",
+                   "message": "adyen is behind its commitment"})
+        );
+        assert_eq!(
+            actual["success_rate"]["approach"],
+            "sr_selection_volume_commitment"
+        );
+        assert_eq!(
+            actual["volume_steering"],
+            json!({
+                "status": "steered", "message": "adyen is behind its commitment",
+                "sr_head": {"gateway_name": "stripe", "merchant_connector_id": "mca_s"},
+                "chosen": {"gateway_name": "adyen", "merchant_connector_id": "mca_a"},
+                "sr_gap_conceded": 0.01, "steer_rate": 0.4, "steering_count": 2, "run_id": "run_1",
+                "blocked": [{"connector": {"gateway_name": "checkout", "merchant_connector_id": "mca_c"},
+                             "reason": "lost_roll"}]
+            })
+        );
         Ok(())
     }
 

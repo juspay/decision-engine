@@ -5198,13 +5198,33 @@
           "Routing Rules"
         ],
         "summary": "Decide routing",
-        "description": "Evaluate the existing hybrid routing pipeline using the flat request contract. Existing rule evaluation, SR feature gates, A/B experiments and fallback behavior apply.",
+        "description": "Evaluate the existing hybrid routing pipeline using the flat request contract. Existing rule evaluation, SR feature gates, A/B experiments and fallback behavior apply. The merchant is never in the body: it is `x-connected-merchant-id`, or the caller's own merchant. Every code in the response (`status`, `reason`, `code`) is snake_case and may gain values; `message` is prose for people and is never stable.",
         "security": [
           {
             "BearerAuth": []
           },
           {
             "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-connected-merchant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The merchant the decision is for. Optional with a session or API key, which act on their own merchant: when sent, it must name that merchant, or the call is refused with 403. Required with a service credential, which has no merchant of its own."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The call's id, minted when absent. Returned in the `x-request-id` response header."
           }
         ],
         "requestBody": {
@@ -5216,7 +5236,7 @@
               },
               "example": {
                 "payment_id": "pay_demo",
-                "merchant_id": "pro_demo",
+                "merchant_reference_id": "order_demo",
                 "amount": 1000,
                 "currency": "USD",
                 "payment_method_type": "card",
@@ -5296,13 +5316,13 @@
             }
           },
           "400": {
-            "description": "`TE_03` for a body that is not JSON, or a missing, unknown or invalid field, named by its path (for example `Unknown field `routing_config.eligible_connectors[0].gateway_id``); `TE_04` with a fixed message when routing cannot be evaluated for the payment. Deserializer and inner engine errors are logged, never returned."
+            "description": "A service credential that sent no `x-connected-merchant-id`; `TE_03` for a body that is not JSON, or a missing, unknown or invalid field (a body `merchant_id` is unknown), named by its path (for example `Unknown field `routing_config.eligible_connectors[0].gateway_id``); `TE_04` with a fixed message when routing cannot be evaluated for the payment. Deserializer and inner engine errors are logged, never returned."
           },
           "401": {
             "description": "Authentication required."
           },
           "403": {
-            "description": "The authenticated session or API key cannot act on this merchant."
+            "description": "`x-connected-merchant-id` names a merchant other than the session's or API key's own."
           },
           "500": {
             "description": "`TE_00` `Something went wrong`; the cause is logged, never returned."
@@ -9881,7 +9901,6 @@
         "additionalProperties": false,
         "required": [
           "payment_id",
-          "merchant_id",
           "amount",
           "currency",
           "routing_config"
@@ -9890,6 +9909,11 @@
           "payment_id": {
             "type": "string",
             "minLength": 1
+          },
+          "merchant_reference_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "The caller's own reference for this decision, such as its order or attempt id. Echoed back on the response."
           },
           "amount": {
             "type": "integer",
@@ -10041,11 +10065,6 @@
           },
           "routing_config": {
             "$ref": "#/components/schemas/DecideRoutingConfig"
-          },
-          "merchant_id": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Routing scope previously supplied as created_by. Use the same identifier, including the HS profile ID where applicable."
           }
         }
       },
@@ -10181,7 +10200,7 @@
         "required": [
           "id",
           "payment_id",
-          "request_id",
+          "merchant_reference_id",
           "created_at",
           "connectors",
           "outcome",
@@ -10200,9 +10219,10 @@
           "payment_id": {
             "type": "string"
           },
-          "request_id": {
+          "merchant_reference_id": {
             "type": "string",
-            "description": "The `x-request-id` of the call, or the one minted for it. Matches the response header."
+            "nullable": true,
+            "description": "The request's `merchant_reference_id`, as sent. The call's own id is the `x-request-id` response header."
           },
           "created_at": {
             "type": "string",
@@ -10441,7 +10461,7 @@
           "approach": {
             "type": "string",
             "nullable": true,
-            "description": "The decider's routing approach, for example `SR_SELECTION_V3_ROUTING`."
+            "description": "The decider's routing approach in snake_case, for example `sr_selection_v3_routing`."
           },
           "scores": {
             "type": "array",
@@ -10485,9 +10505,9 @@
                 "type": "string",
                 "nullable": true,
                 "enum": [
-                  "IN_HOUSE",
-                  "SEED",
-                  "HYPERSENSE"
+                  "in_house",
+                  "seed",
+                  "hypersense"
                 ]
               },
               "cost_model": {
@@ -10512,8 +10532,8 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "outcome",
-          "reason",
+          "status",
+          "message",
           "cost_saved_bps",
           "qualified_count",
           "margin",
@@ -10521,15 +10541,17 @@
           "ranked"
         ],
         "properties": {
-          "outcome": {
+          "status": {
             "type": "string",
             "enum": [
-              "COST_WON",
-              "AUTH_WON"
-            ]
+              "cost_won",
+              "auth_won"
+            ],
+            "description": "`cost_won` when a cheaper connector took the payment, `auth_won` when the success-rate head kept it."
           },
-          "reason": {
-            "type": "string"
+          "message": {
+            "type": "string",
+            "description": "Why, in words. Not stable; branch on `status`."
           },
           "cost_saved_bps": {
             "type": "number",
@@ -10558,8 +10580,8 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "outcome",
-          "reason",
+          "status",
+          "message",
           "sr_head",
           "chosen",
           "sr_gap_conceded",
@@ -10569,15 +10591,17 @@
           "blocked"
         ],
         "properties": {
-          "outcome": {
+          "status": {
             "type": "string",
             "enum": [
-              "STEERED",
-              "SR_PREVAILED"
-            ]
+              "steered",
+              "sr_prevailed"
+            ],
+            "description": "`steered` when a connector behind on its commitment took the payment, `sr_prevailed` when normal routing kept it."
           },
-          "reason": {
-            "type": "string"
+          "message": {
+            "type": "string",
+            "description": "Why, in words. Not stable; branch on `status`."
           },
           "sr_head": {
             "oneOf": [
@@ -10616,14 +10640,22 @@
               "type": "object",
               "required": [
                 "connector",
-                "gate"
+                "reason"
               ],
               "properties": {
                 "connector": {
                   "$ref": "#/components/schemas/DecideResultConnector"
                 },
-                "gate": {
-                  "type": "string"
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "already_chosen",
+                    "not_offered",
+                    "cycle_closed",
+                    "outside_tolerance",
+                    "lost_roll"
+                  ],
+                  "description": "Why the commitment did not get this payment."
                 }
               }
             }

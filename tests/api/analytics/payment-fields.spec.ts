@@ -12,7 +12,7 @@ test.describe('Payment audit payment field filter (API)', () => {
     const connectors = [{ gateway_name: 'stripe', merchant_connector_id: 'mca_stripe' }]
     const decide = (paymentId: string, bin: string, segment: string, country: string) =>
       api.raw('POST', '/decide', { body: {
-        payment_id: paymentId, merchant_id: merchant.id, amount: 1000, currency: 'USD',
+        payment_id: paymentId, amount: 1000, currency: 'USD',
         payment_method_type: 'card', payment_method_sub_type: 'credit', billing_country: country,
         card: { card_isin: bin }, metadata: { segment },
         routing_config: { algorithm_for: 'payment', eligible_connectors: connectors },

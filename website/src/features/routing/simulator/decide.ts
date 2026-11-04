@@ -6,6 +6,7 @@ import {
   DecideResponse,
   VolumeSteerInfo,
 } from '../../../types/api'
+import { apiFetch } from '../../../lib/api'
 
 // `/decide-gateway` takes the SR request as is. `/decide` takes the same payment as one flat
 // request: it evaluates the active rule on the payment's attributes, then SR among the rule output.
@@ -44,7 +45,6 @@ export function decideRequestFor(payment: SimulatedPayment): DecideRequest {
   const isCard = payment.paymentMethod.toUpperCase() === 'CARD'
   return {
     payment_id: payment.paymentId,
-    merchant_id: payment.merchantId,
     amount: Math.round(payment.amount),
     currency: payment.currency,
     payment_method_type: payment.paymentMethod || null,
@@ -116,6 +116,17 @@ export function simulatedDecisionFromDecideGateway(res: DecideGatewayResponse): 
   }
 }
 
+// Routes one simulated payment through `/decide`. The merchant is never in the body: the
+// `x-connected-merchant-id` header names it, and the API checks it against the session.
+export async function decideSimulatedPayment(payment: SimulatedPayment): Promise<SimulatedDecision> {
+  const response = await apiFetch<DecideResponse>('/decide', {
+    method: 'POST',
+    headers: { 'x-connected-merchant-id': payment.merchantId },
+    body: JSON.stringify(decideRequestFor(payment)),
+  })
+  return simulatedDecisionFromDecide(response)
+}
+
 export function simulatedDecisionFromDecide(res: DecideResponse): SimulatedDecision {
   const [head, ...rest] = res.connectors
   if (!head) throw new Error(`Decide returned no connector (${res.outcome.reason})`)
@@ -124,21 +135,30 @@ export function simulatedDecisionFromDecide(res: DecideResponse): SimulatedDecis
   return {
     decidedGateway: connectorIdentifier(head),
     fallbackGateways: rest.map(connectorIdentifier),
-    routingApproach: sr ? sr.approach : RULE_DECIDED_APPROACH,
+    // `/decide` writes codes in snake_case; the simulator's rows keep the decider's spelling.
+    routingApproach: sr ? sr.approach?.toUpperCase() ?? null : RULE_DECIDED_APPROACH,
     gatewayPriorityMap: sr
       ? Object.fromEntries(sr.scores.map(score => [connectorIdentifier(score), score.score]))
       : null,
     costSavedBps: cost?.cost_saved_bps ?? null,
-    costWon: cost?.outcome === 'COST_WON',
-    authWon: cost?.outcome === 'AUTH_WON',
+    costWon: cost?.status === 'cost_won',
+    authWon: cost?.status === 'auth_won',
     headAuthRate: cost?.ranked.find(r => r.is_sr_head)?.auth_rate ?? null,
     chosenAuthRate: cost?.ranked.find(r => r.is_chosen)?.auth_rate ?? null,
     margin: cost?.margin ?? null,
     evGapTop2: cost?.ev_gap_top2 ?? null,
-    steerOutcome: steer?.outcome ?? null,
+    steerOutcome: steer ? toDecider<VolumeSteerInfo['outcome']>(steer.status) : null,
     steerSrHead: steer?.sr_head ? connectorIdentifier(steer.sr_head) : null,
     steerBlocked: steer
-      ? steer.blocked.map(({ connector, gate }) => ({ connector: connectorIdentifier(connector), gate }))
+      ? steer.blocked.map(({ connector, reason }) => ({
+        connector: connectorIdentifier(connector),
+        gate: toDecider<BlockedCommitment['gate']>(reason),
+      }))
       : null,
   }
+}
+
+// A `/decide` snake_case code in the decider's SCREAMING_SNAKE_CASE spelling.
+function toDecider<T extends string>(code: string): T {
+  return code.toUpperCase() as T
 }

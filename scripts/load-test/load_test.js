@@ -561,7 +561,6 @@ function _runDecide(merchantId, headers, idx) {
   // what SR ranks, as on hybrid.
   const body = JSON.stringify({
     payment_id:              paymentId,
-    merchant_id:             merchantId,
     amount:                  ruleVariant.amount,
     currency:                srVariant.currency,
     authentication_type:     ruleVariant.authentication_type,
@@ -577,7 +576,8 @@ function _runDecide(merchantId, headers, idx) {
   const res = http.post(
     `${envDefaults.baseUrl}/decide`,
     body,
-    { headers, tags: { name: "decide" } }
+    // The merchant is never in the `/decide` body.
+    { headers: { ...headers, "x-connected-merchant-id": merchantId }, tags: { name: "decide" } }
   );
   latencyTrend.add(res.timings.duration);
 

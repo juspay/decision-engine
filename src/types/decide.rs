@@ -7,12 +7,18 @@ use std::collections::BTreeMap;
 
 pub mod response;
 
-#[derive(Debug, Clone, Serialize, Deserialize, crate::auth::MerchantScoped)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DecideRequest {
     pub payment_id: String,
-    #[merchant]
+    /// The merchant the call acts on. Never read from the body: it is the `x-connected-merchant-id`
+    /// header, or the caller's own merchant (see [`crate::custom_extractors::ConnectedMerchant`]),
+    /// set with [`DecideRequest::for_merchant`]. Not written either, so a recorded request reads as
+    /// the caller sent it.
+    #[serde(skip)]
     pub merchant_id: String,
+    /// The caller's own reference for this decision, echoed back in the response.
+    pub merchant_reference_id: Option<String>,
     pub amount: u64,
     pub currency: String,
     pub payment_method_type: Option<String>,
@@ -190,6 +196,14 @@ pub struct InvalidRuleInput {
 }
 
 impl DecideRequest {
+    /// The request acting on `merchant`, the merchant the caller was authorized for.
+    pub fn for_merchant(self, merchant: &crate::auth::AuthorizedMerchant) -> Self {
+        Self {
+            merchant_id: merchant.as_str().to_string(),
+            ..self
+        }
+    }
+
     /// The rule parameters this request supplies, in the order a later one replaces an earlier
     /// one of the same key.
     fn rule_parameters(&self, config: &TomlConfig) -> Result<Vec<RuleParameter>, String> {
@@ -204,20 +218,22 @@ impl DecideRequest {
         let mut push = |field: String, key: &str, raw: &serde_json::Value| {
             // Named by the request's own field: the routing key is an internal name.
             let invalid = format!("Invalid value for field `{field}`");
-            routing_value(key, raw, config).map_err(|_| invalid).map(|value| {
-                if let Some(value) = value {
-                    parameters.push(RuleParameter {
-                        field,
-                        key: key.to_string(),
-                        value,
-                    });
-                }
-            })
+            routing_value(key, raw, config)
+                .map_err(|_| invalid)
+                .map(|value| {
+                    if let Some(value) = value {
+                        parameters.push(RuleParameter {
+                            field,
+                            key: key.to_string(),
+                            value,
+                        });
+                    }
+                })
         };
         for (field, raw) in fields {
             if !matches!(
                 field.as_str(),
-                "merchant_id" | "routing_config" | "card" | "metadata"
+                "merchant_reference_id" | "routing_config" | "card" | "metadata"
             ) {
                 push(field.clone(), routing_key(field), raw)?;
             }
@@ -294,8 +310,7 @@ impl DecideRequest {
                     .is_some_and(|id| id.trim().is_empty())
             {
                 return Err(
-                    "Connector names and merchant_connector_id must not be empty"
-                        .to_string(),
+                    "Connector names and merchant_connector_id must not be empty".to_string(),
                 );
             }
         }
@@ -339,10 +354,20 @@ mod tests {
         Ok(config)
     }
 
+    /// The body as `/decide` parses it, acting on `merchant` as the header or session names it.
+    fn parse(merchant: &str, body: Value) -> Result<DecideRequest, serde_json::Error> {
+        serde_json::from_value::<DecideRequest>(body).map(|request| {
+            request.for_merchant(&crate::auth::AuthorizedMerchant::internal(merchant))
+        })
+    }
+
     fn request() -> Result<DecideRequest, serde_json::Error> {
-        serde_json::from_str(include_str!(
-            "../../tests/fixtures/contracts/decide-request.json"
-        ))
+        parse(
+            "pro_demo",
+            serde_json::from_str(include_str!(
+                "../../tests/fixtures/contracts/decide-request.json"
+            ))?,
+        )
     }
 
     #[test]
@@ -395,12 +420,15 @@ mod tests {
     #[test]
     fn decide_preserves_hybrid_defaults_for_an_equivalent_request(
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let flat: DecideRequest = serde_json::from_value(json!({
-            "payment_id": "pay_1", "merchant_id": "pro_1", "amount": 100, "currency": "USD",
-            "payment_method_type": "card", "payment_method_sub_type": "credit",
-            "routing_config": {"algorithm_for": "payment",
-                "eligible_connectors": [{"gateway_name": "stripe", "merchant_connector_id": "mca_1"}]}
-        }))?;
+        let flat = parse(
+            "pro_1",
+            json!({
+                "payment_id": "pay_1", "amount": 100, "currency": "USD",
+                "payment_method_type": "card", "payment_method_sub_type": "credit",
+                "routing_config": {"algorithm_for": "payment",
+                    "eligible_connectors": [{"gateway_name": "stripe", "merchant_connector_id": "mca_1"}]}
+            }),
+        )?;
         let legacy: RoutingRequest = serde_json::from_value(json!({
             "payment_id": "pay_1", "created_by": "pro_1", "algorithm_for": "payment",
             "parameters": {
@@ -461,7 +489,7 @@ mod tests {
         value["routing_config"]["preferred_connectors"] = json!([
             {"gateway_name": "worldpay", "merchant_connector_id": "mca_wp_2"}
         ]);
-        let request: DecideRequest = serde_json::from_value(value)?;
+        let request = parse("pro_demo", value)?;
         let actual = serde_json::to_value(
             request
                 .to_hybrid_request(&config()?)?
@@ -564,6 +592,9 @@ mod tests {
             "mandate_type",
             "mandate_acceptance_type",
             "country",
+            // Named by the `x-connected-merchant-id` header or the caller's credential instead.
+            "merchant_id",
+            "request_id",
         ] {
             let mut value = baseline.clone();
             value[key] = Value::Null;
@@ -609,12 +640,15 @@ mod tests {
     #[test]
     fn decide_accepts_connectors_named_without_an_account_like_hybrid(
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let flat: DecideRequest = serde_json::from_value(json!({
-            "payment_id": "pay_1", "merchant_id": "pro_1", "amount": 100, "currency": "USD",
-            "routing_config": {"algorithm_for": "payment",
-                "eligible_connectors": [{"gateway_name": "stripe"}, {"gateway_name": "adyen", "merchant_connector_id": null}],
-                "preferred_connectors": [{"gateway_name": "adyen"}]}
-        }))?;
+        let flat = parse(
+            "pro_1",
+            json!({
+                "payment_id": "pay_1", "amount": 100, "currency": "USD",
+                "routing_config": {"algorithm_for": "payment",
+                    "eligible_connectors": [{"gateway_name": "stripe"}, {"gateway_name": "adyen", "merchant_connector_id": null}],
+                    "preferred_connectors": [{"gateway_name": "adyen"}]}
+            }),
+        )?;
         let mapped = serde_json::to_value(flat.to_hybrid_request(&config()?)?)?;
         assert_eq!(
             mapped["static_routing_request"]["fallback_output"],
@@ -633,8 +667,7 @@ mod tests {
         );
 
         let mut blank = flat;
-        blank.routing_config.eligible_connectors[0].merchant_connector_id =
-            Some(" ".into());
+        blank.routing_config.eligible_connectors[0].merchant_connector_id = Some(" ".into());
         assert!(blank.to_hybrid_request(&config()?).is_err());
         Ok(())
     }

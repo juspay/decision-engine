@@ -280,9 +280,11 @@ export interface ExperimentTransactionsResponse {
   transactions: ExperimentTransaction[]
 }
 
+// The merchant is the `x-connected-merchant-id` header, or the caller's own; never the body.
 export interface DecideRequest {
   payment_id: string
-  merchant_id: string
+  // The caller's own reference, echoed back on the response.
+  merchant_reference_id?: string | null
   amount: number
   currency: string
   payment_method_type?: string | null
@@ -349,12 +351,13 @@ export interface DecideConnector {
 }
 
 // The /decide answer. `connectors` is the order to try: the first is the choice, the rest the
-// retry order. Each routing layer has a section, null when that layer did not run. New values
-// may be added to the outcome enums.
+// retry order. Each routing layer has a section, null when that layer did not run. Every code
+// (`status`, `reason`, `code`) is snake_case and may gain values; `message` is prose, never
+// branched on. The call's request id is the `x-request-id` response header.
 export interface DecideResponse {
   id: string
   payment_id: string
-  request_id: string
+  merchant_reference_id: string | null
   created_at: string
   connectors: DecideConnector[]
   outcome: DecideOutcome
@@ -393,6 +396,7 @@ export interface DecideConnectorScore extends DecideConnector {
 
 export interface DecideSuccessRateSection {
   status: 'applied' | 'failed'
+  // The decider's approach in snake_case, e.g. `sr_selection_v3_routing`.
   approach: string | null
   scores: DecideConnectorScore[]
   diagnostics: Record<string, unknown> | null
@@ -401,7 +405,7 @@ export interface DecideSuccessRateSection {
 export interface DecideRankedConnector extends DecideConnector {
   auth_rate: number
   cost_bps: number | null
-  cost_source: CostSource | null
+  cost_source: Lowercase<CostSource> | null
   cost_model: Record<string, string | number | null> | null
   ev: number
   is_sr_head: boolean
@@ -409,8 +413,8 @@ export interface DecideRankedConnector extends DecideConnector {
 }
 
 export interface DecideCostSection {
-  outcome: MultiObjectiveOutcome
-  reason: string
+  status: Lowercase<MultiObjectiveOutcome>
+  message: string
   cost_saved_bps: number | null
   qualified_count: number
   margin: number
@@ -419,15 +423,15 @@ export interface DecideCostSection {
 }
 
 export interface DecideVolumeSteeringSection {
-  outcome: VolumeSteerInfo['outcome']
-  reason: string
+  status: Lowercase<VolumeSteerInfo['outcome']>
+  message: string
   sr_head: DecideConnector | null
   chosen: DecideConnector | null
   sr_gap_conceded: number | null
   steer_rate: number | null
   steering_count: number
   run_id: string | null
-  blocked: { connector: DecideConnector; gate: SteerBlock }[]
+  blocked: { connector: DecideConnector; reason: Lowercase<SteerBlock> }[]
 }
 
 export interface CreateRoutingRequest {
