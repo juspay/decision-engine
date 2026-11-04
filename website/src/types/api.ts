@@ -280,10 +280,8 @@ export interface ExperimentTransactionsResponse {
   transactions: ExperimentTransaction[]
 }
 
-// The merchant is the `x-connected-merchant-id` header, or the caller's own; never the body.
 export interface DecideRequest {
   payment_id: string
-  // The caller's own reference, echoed back on the response.
   merchant_reference_id?: string | null
   amount: number
   currency: string
@@ -351,9 +349,7 @@ export interface DecideConnector {
 }
 
 // The /decide answer. `connectors` is the order to try: the first is the choice, the rest the
-// retry order. Each routing layer has a section, null when that layer did not run. Every code
-// (`status`, `reason`, `code`) is snake_case and may gain values; `message` is prose, never
-// branched on. The call's request id is the `x-request-id` response header.
+// retry order. Each routing layer has a section, null when that layer did not run.
 export interface DecideResponse {
   id: string
   payment_id: string
@@ -396,7 +392,6 @@ export interface DecideConnectorScore extends DecideConnector {
 
 export interface DecideSuccessRateSection {
   status: 'applied' | 'failed'
-  // The decider's approach in snake_case, e.g. `sr_selection_v3_routing`.
   approach: string | null
   scores: DecideConnectorScore[]
   diagnostics: Record<string, unknown> | null

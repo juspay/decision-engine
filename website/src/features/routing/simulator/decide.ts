@@ -116,8 +116,7 @@ export function simulatedDecisionFromDecideGateway(res: DecideGatewayResponse): 
   }
 }
 
-// Routes one simulated payment through `/decide`. The merchant is never in the body: the
-// `x-connected-merchant-id` header names it, and the API checks it against the session.
+// Routes one simulated payment through `/decide`.
 export async function decideSimulatedPayment(payment: SimulatedPayment): Promise<SimulatedDecision> {
   const response = await apiFetch<DecideResponse>('/decide', {
     method: 'POST',
@@ -135,7 +134,6 @@ export function simulatedDecisionFromDecide(res: DecideResponse): SimulatedDecis
   return {
     decidedGateway: connectorIdentifier(head),
     fallbackGateways: rest.map(connectorIdentifier),
-    // `/decide` writes codes in snake_case; the simulator's rows keep the decider's spelling.
     routingApproach: sr ? sr.approach?.toUpperCase() ?? null : RULE_DECIDED_APPROACH,
     gatewayPriorityMap: sr
       ? Object.fromEntries(sr.scores.map(score => [connectorIdentifier(score), score.score]))
@@ -158,7 +156,6 @@ export function simulatedDecisionFromDecide(res: DecideResponse): SimulatedDecis
   }
 }
 
-// A `/decide` snake_case code in the decider's SCREAMING_SNAKE_CASE spelling.
 function toDecider<T extends string>(code: string): T {
   return code.toUpperCase() as T
 }

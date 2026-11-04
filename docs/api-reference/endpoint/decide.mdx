@@ -4,22 +4,23 @@ description: "Route a payment: one ranked connector list, how it was reached, an
 openapi: "openapi.json POST /decide"
 ---
 
-`POST /decide` accepts a flat payment payload with nested `card` and `routing_config` objects. It runs the rule layer and then success-rate routing, with A/B experiments, cost optimisation, volume commitments, scoring and fallback handling.
+`POST /decide` routes a payment: it evaluates the active rule, then ranks the result by success rate, cost and volume commitments.
 
-Send the same authentication and tenant headers used for `/routing/hybrid` (`Authorization: Bearer <token>` or `x-api-key: <key>`). `/routing/hybrid` continues to accept its existing request and return its existing response.
+Authenticate with `Authorization: Bearer <token>` or `x-api-key: <key>`.
 
 ### Merchant
 
-The merchant is never in the body. It is named by the `x-connected-merchant-id` header, the routing scope formerly sent as `created_by` (the HS profile ID where applicable):
+The merchant is set by the `x-connected-merchant-id` header, never the body.
 
 | Caller | Without the header | With the header |
 | --- | --- | --- |
-| Session or API key | Acts on its own merchant | Must name its own merchant, or `403` |
-| Service credential (`x-admin-secret`) | `400`: it has no merchant of its own | Acts on the merchant the header names |
+| Session or API key | Its own merchant | Must be its own merchant, else `403` |
+| Service credential | `400` | The merchant named |
 
 ### Request ids
 
-`merchant_reference_id` is the caller's own reference for the decision, such as its order or attempt id; it is echoed back in the response. The call's own id is the `x-request-id` header: send one, or one is minted, and it is returned in the `x-request-id` response header.
+`merchant_reference_id` is your own reference and is echoed in the response. `x-request-id` identifies the call; one is generated if absent and returned as a response header.
+
 
 ## Full request
 
@@ -93,34 +94,31 @@ The merchant is never in the body. It is named by the `x-connected-merchant-id` 
 }
 ```
 
-The required fields are `payment_id`, `amount`, `currency`, `routing_config.algorithm_for` and `routing_config.eligible_connectors`. Every input connector requires a nonempty `gateway_name`. `merchant_connector_id` is optional: when sent it must be nonempty, and when omitted or null the connector is named by its gateway alone, as a hybrid `fallback_output` entry without `gateway_id` is (rules then match it only by name, and success-rate scores are keyed by the gateway name). Other fields may be omitted or null. Amounts are unsigned integers in minor units; BINs are strings and preserve leading zeros.
+Required: `payment_id`, `amount`, `currency`, `routing_config.algorithm_for` and `routing_config.eligible_connectors`. Other fields may be omitted or null.
 
-Country codes use ISO alpha-2 values. The adapter translates them to the configured country names for rule matching. Other configured enum values retain an exact match when available, otherwise a case-insensitive match. Existing rule schemas and stored configurations keep their current names.
+- `amount` is an unsigned integer in minor units.
+- Country codes are ISO 3166 alpha-2.
+- BINs are strings, so leading zeros are kept.
+- A connector needs a nonempty `gateway_name`. `merchant_connector_id` is optional and, when sent, nonempty.
+- `metadata` adds custom rule parameters; it cannot override payment fields.
+- `payment_type` (`non_mandate`, `setup_mandate`, `ppt_mandate`, …) is matched by rules only.
 
-`routing_config.algorithm_for` remains explicit and required; it is not inferred from `payment_id`.
-
-`amount` is the single payment amount in this contract. It supplies both existing rule parameters, `amount` and `payment_amount`, without changing stored rule definitions. `metadata` supplies custom rule parameters without overwriting configured or reserved fields. `authentication_type` supplies both rule and dynamic authentication data. Preferred accounts and ranking/elimination options are forwarded to the existing decider; feature and experiment gates still control whether it runs. The success-rate decider takes its country from `billing_country`, then `business_country`.
-
-`payment_type` is the rule key of the same name (`non_mandate`, `setup_mandate`, `ppt_mandate`, …), which rules use to route mandate payments, for example a processor-token charge to the processor that holds the token. A rule that tests it matches only when it is sent. It does not set the success-rate decider's transaction type.
-
-The removed fields (`transaction_type`, EMI fields, `internal_metadata`, `order_amount`, `payment_amount`, `udfs`, `payment_metadata`, `payment_source`, `auth_type` and `channel`), old `context` / `created_by`, top-level card fields and `fallback_connectors` are not accepted by `/decide`. Other endpoints retain their existing contracts. Missing required fields, unknown fields and incorrect JSON types return `400` in the standard invalid-request format.
+Unknown fields are rejected.
 
 ### Errors
-
-Every error message is written for the caller. Deserializer text, internal routing-key names and inner engine errors are logged, never returned.
 
 | Status | `code` | `message` |
 | --- | --- | --- |
 | `400` | `TE_03` | `Request body must be a valid JSON object` |
-| `400` | `TE_03` | ``Unknown field `<path>` ``, ``Missing required field `<path>` `` or ``Invalid value for field `<path>` ``, where `<path>` is the request field, such as `routing_config.eligible_connectors[0].gateway_id` |
-| `400` | `TE_03` | A validation message naming the field, such as `payment_id must not be empty` or `Country fields must use ISO 3166 alpha-2 codes` |
+| `400` | `TE_03` | ``Unknown field `<path>` ``, ``Missing required field `<path>` ``, ``Invalid value for field `<path>` `` |
+| `400` | `TE_03` | A validation message naming the field, e.g. `payment_id must not be empty` |
 | `400` | `TE_04` | `Unable to decide a connector for this payment` |
-| `400` | | `The request does not name a merchant`: a service credential sent no `x-connected-merchant-id` |
-| `403` | | `x-connected-merchant-id` names a merchant other than the session's or API key's own |
+| `400` | | `The request does not name a merchant` |
+| `403` | | `This session may only act on its own merchant` |
 | `500` | `TE_00` | `Something went wrong` |
 
 ```json
-{ "code": "TE_03", "message": "Unknown field `mandate_type`", "data": null }
+{ "code": "TE_03", "message": "Unknown field `card.card_bin`", "data": null }
 ```
 
 ## Response
@@ -198,37 +196,33 @@ Every error message is written for the caller. Deserializer text, internal routi
 }
 ```
 
-`connectors` is the order to try: the first is the choice, the rest the retry order. Every connector in the response, in every section, has the same `{gateway_name, merchant_connector_id}` shape; `merchant_connector_id` is null for a connector named without an account.
+`connectors` is the order to try: the first is the choice, the rest the retry order. Every connector has the shape `{gateway_name, merchant_connector_id}`.
 
 `outcome` says how the order was reached:
 
 | `type` | Meaning |
 | --- | --- |
 | `routed` | The configured routing produced the order. |
-| `fallback` | Routing could not apply, so the candidates in request order, or the rule output unranked, answered. |
-| `no_connector` | No connector is left to try; `connectors` is empty. The call still returns `200`. |
+| `fallback` | Routing could not apply; the eligible connectors, or the unranked rule output, are returned. |
+| `no_connector` | Nothing is left to try; `connectors` is empty. Still `200`. |
 
-`strategy` names the layer that set the order (`rule`, `success_rate`, `cost`, `volume_commitment`, `debit_network`, `candidate_order`, `none`) and `reason` the specific case, for example `rule_matched`, `success_rate_ranked`, `cost_optimized`, `no_active_rule`, `rule_output_not_eligible`, `rule_input_invalid` or `success_rate_unavailable`.
+`strategy` is the layer that set the order (`rule`, `success_rate`, `cost`, `volume_commitment`, `debit_network`, `candidate_order`, `none`); `reason` is the specific case, such as `rule_matched` or `no_active_rule`.
 
 ### Codes and messages
 
-Every part of the response that explains itself uses the same fields:
-
-| Field | Holds | Stable |
+| Field | Meaning | Branch on it |
 | --- | --- | --- |
-| `status` | What a section did: `rule.status`, `success_rate.status`, `cost.status` (`cost_won`, `auth_won`), `volume_steering.status` (`steered`, `sr_prevailed`) | Yes; branch on it |
-| `reason` | Why: `outcome.reason`, and `volume_steering.blocked[].reason` (`already_chosen`, `not_offered`, `cycle_closed`, `outside_tolerance`, `lost_roll`) | Yes; branch on it |
-| `code` | Which problem: `warnings[].code`, and `code` on an error | Yes; branch on it |
-| `message` | The same fact in words, for people reading logs or a dashboard: `outcome.message`, `cost.message`, `volume_steering.message`, `warnings[].message` | No; never branch on it |
+| `status` | What a section did, e.g. `cost.status`: `cost_won`, `auth_won` | Yes |
+| `reason` | Why, e.g. `outcome.reason`, `volume_steering.blocked[].reason` | Yes |
+| `code` | Which problem, on warnings and errors | Yes |
+| `message` | Human-readable text | No |
 
-Every code, including `success_rate.approach` and `cost_source`, is `snake_case`. New values may be added.
+Codes are `snake_case`; new values may be added.
 
-Each routing layer has a section, null when that layer did not run: `rule` (null when the rule layer failed), `success_rate` (null when the `sr-routing` setting is off or the A/B arm has no SR layer; `status: failed` when the decider failed and the order fell back), `cost`, `volume_steering` and `debit_routing`. `success_rate.diagnostics` carries the decider's internals for support and is not covered by compatibility guarantees.
+Each routing layer (`rule`, `success_rate`, `cost`, `volume_steering`, `debit_routing`) has a section, null when the layer did not run. `success_rate.diagnostics` is for support and may change.
 
-`warnings` lists problems the decision routed around: `rule_input_invalid` (a request value the routing configuration does not allow; `param` names the request field, such as `card.card_network`, and there is one warning per invalid value), `rule_evaluation_failed` (the rule could not be evaluated for another reason), `rule_output_not_eligible` and `rule_output_partially_eligible` (the rule chose connectors outside `eligible_connectors`), and `success_rate_failed`. Routing problems never fail the call.
-
-`id` is unique per decision. `merchant_reference_id` is the request's, as sent; the call's id is the `x-request-id` response header.
+`warnings` lists problems routed around, such as `rule_input_invalid` with `param` naming the field. Routing problems never fail the call.
 
 ## Feedback
 
-Report the payment's outcome with `POST /update-gateway-score`, naming the payment by `paymentId` and the connector tried by its decider identifier: `"gateway_name:merchant_connector_id"`, or the bare `gateway_name` for a connector without an account.
+Report the outcome with `POST /update-gateway-score`, naming the connector as `"gateway_name:merchant_connector_id"`, or `gateway_name` alone without an account.

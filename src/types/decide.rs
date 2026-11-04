@@ -11,13 +11,10 @@ pub mod response;
 #[serde(deny_unknown_fields)]
 pub struct DecideRequest {
     pub payment_id: String,
-    /// The merchant the call acts on. Never read from the body: it is the `x-connected-merchant-id`
-    /// header, or the caller's own merchant (see [`crate::custom_extractors::ConnectedMerchant`]),
-    /// set with [`DecideRequest::for_merchant`]. Not written either, so a recorded request reads as
-    /// the caller sent it.
+    /// Set from [`crate::custom_extractors::ConnectedMerchant`], never the body.
     #[serde(skip)]
     pub merchant_id: String,
-    /// The caller's own reference for this decision, echoed back in the response.
+    /// Echoed in the response.
     pub merchant_reference_id: Option<String>,
     pub amount: u64,
     pub currency: String,
@@ -196,7 +193,7 @@ pub struct InvalidRuleInput {
 }
 
 impl DecideRequest {
-    /// The request acting on `merchant`, the merchant the caller was authorized for.
+    /// Sets the authorized merchant.
     pub fn for_merchant(self, merchant: &crate::auth::AuthorizedMerchant) -> Self {
         Self {
             merchant_id: merchant.as_str().to_string(),
@@ -354,7 +351,6 @@ mod tests {
         Ok(config)
     }
 
-    /// The body as `/decide` parses it, acting on `merchant` as the header or session names it.
     fn parse(merchant: &str, body: Value) -> Result<DecideRequest, serde_json::Error> {
         serde_json::from_value::<DecideRequest>(body).map(|request| {
             request.for_merchant(&crate::auth::AuthorizedMerchant::internal(merchant))
@@ -592,7 +588,7 @@ mod tests {
             "mandate_type",
             "mandate_acceptance_type",
             "country",
-            // Named by the `x-connected-merchant-id` header or the caller's credential instead.
+            // Set by header, not body.
             "merchant_id",
             "request_id",
         ] {

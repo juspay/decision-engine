@@ -30,8 +30,7 @@ pub struct DecideResponse {
     /// Unique per decision, so a retried payment's decisions stay apart.
     pub id: String,
     pub payment_id: String,
-    /// The request's `merchant_reference_id`, as sent. The call's own id is the `x-request-id`
-    /// response header.
+    /// Echoed from the request.
     pub merchant_reference_id: Option<String>,
     pub created_at: String,
     /// The order to try connectors in: the first is the choice, the rest the retry order.
@@ -46,16 +45,7 @@ pub struct DecideResponse {
     pub warnings: Vec<Warning>,
 }
 
-/// Every part of the response that explains itself follows one shape:
-///
-/// - `status`: what a section did, and `reason`: why — stable `snake_case` codes to branch on.
-///   New values may be added.
-/// - `message`: the same fact in words, for people reading logs or a dashboard. Not stable; never
-///   branch on it.
-///
-/// So the decision's `outcome` is `{type, strategy, reason, message}`, `cost` and `volume_steering`
-/// carry `{status, message}`, a blocked commitment `{connector, reason}`, and a warning
-/// `{code, param, message}` like an error.
+/// `status`, `reason` and `code` are stable snake_case codes; `message` is human-readable text.
 #[derive(Debug, Serialize)]
 pub struct Outcome {
     #[serde(rename = "type")]
@@ -483,8 +473,6 @@ impl From<GatewayPriorityLogicOutput> for PriorityLogicOutput {
 
 #[derive(Debug, Serialize)]
 pub struct CostSection {
-    /// `cost_won` when a cheaper connector took the payment, `auth_won` when the success-rate
-    /// head kept it.
     #[serde(serialize_with = "snake_case")]
     pub status: MultiObjectiveOutcome,
     pub message: String,
@@ -597,8 +585,6 @@ impl From<CostModel> for CostModelSection {
 
 #[derive(Debug, Serialize)]
 pub struct VolumeSteeringSection {
-    /// `steered` when a connector behind on its commitment took the payment, `sr_prevailed` when
-    /// normal routing kept it.
     #[serde(serialize_with = "snake_case")]
     pub status: VolumeSteerOutcome,
     pub message: String,
@@ -614,8 +600,6 @@ pub struct VolumeSteeringSection {
 #[derive(Debug, Serialize)]
 pub struct BlockedConnector {
     pub connector: DecideConnector,
-    /// Why the commitment did not get this payment: `already_chosen`, `not_offered`,
-    /// `cycle_closed`, `outside_tolerance` or `lost_roll`.
     #[serde(serialize_with = "snake_case")]
     pub reason: SteerBlock,
 }
@@ -653,8 +637,7 @@ impl From<VolumeSteerInfo> for VolumeSteeringSection {
     }
 }
 
-/// Writes a decider enum, which the legacy endpoints spell `SCREAMING_SNAKE_CASE`, in the
-/// `snake_case` every `/decide` code uses. `None` stays `null`.
+/// Serializes a `SCREAMING_SNAKE_CASE` enum as `snake_case`.
 fn snake_case<T: Serialize, S: serde::Serializer>(
     value: &T,
     serializer: S,

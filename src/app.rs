@@ -388,8 +388,7 @@ fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
         )
         .route(
             "/routing/list/active/:merchant_id",
-            // GET is the contract. POST stays only until Hyperswitch, which still posts here,
-            // moves to GET; remove it with that change.
+            // POST: Hyperswitch compatibility; remove once it uses GET.
             metered!(get, routing_rules::list_active_routing_algorithm)
                 .merge(metered!(post, routing_rules::list_active_routing_algorithm)),
         )

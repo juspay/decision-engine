@@ -576,7 +576,6 @@ function _runDecide(merchantId, headers, idx) {
   const res = http.post(
     `${envDefaults.baseUrl}/decide`,
     body,
-    // The merchant is never in the `/decide` body.
     { headers: { ...headers, "x-connected-merchant-id": merchantId }, tags: { name: "decide" } }
   );
   latencyTrend.add(res.timings.duration);

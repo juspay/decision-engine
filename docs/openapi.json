@@ -5198,7 +5198,7 @@
           "Routing Rules"
         ],
         "summary": "Decide routing",
-        "description": "Evaluate the existing hybrid routing pipeline using the flat request contract. Existing rule evaluation, SR feature gates, A/B experiments and fallback behavior apply. The merchant is never in the body: it is `x-connected-merchant-id`, or the caller's own merchant. Every code in the response (`status`, `reason`, `code`) is snake_case and may gain values; `message` is prose for people and is never stable.",
+        "description": "Route a payment: evaluate the active rule, then rank by success rate, cost and volume commitments. Codes (`status`, `reason`, `code`) are snake_case and may gain values; `message` is human-readable text.",
         "security": [
           {
             "BearerAuth": []
@@ -5215,7 +5215,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "The merchant the decision is for. Optional with a session or API key, which act on their own merchant: when sent, it must name that merchant, or the call is refused with 403. Required with a service credential, which has no merchant of its own."
+            "description": "The merchant to decide for. Optional with a session or API key (defaults to its own merchant; any other is `403`). Required with a service credential."
           },
           {
             "name": "x-request-id",
@@ -5224,7 +5224,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "The call's id, minted when absent. Returned in the `x-request-id` response header."
+            "description": "Identifies the call; generated if absent and returned as a response header."
           }
         ],
         "requestBody": {
@@ -5306,7 +5306,7 @@
         },
         "responses": {
           "200": {
-            "description": "Routing decision. Connector order and account IDs are preserved from hybrid routing. An account ID can be null when a legacy rule identifies only a gateway.",
+            "description": "Routing decision.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5316,16 +5316,16 @@
             }
           },
           "400": {
-            "description": "A service credential that sent no `x-connected-merchant-id`; `TE_03` for a body that is not JSON, or a missing, unknown or invalid field (a body `merchant_id` is unknown), named by its path (for example `Unknown field `routing_config.eligible_connectors[0].gateway_id``); `TE_04` with a fixed message when routing cannot be evaluated for the payment. Deserializer and inner engine errors are logged, never returned."
+            "description": "`TE_03`: invalid body or field, named by its path. `TE_04`: routing could not be evaluated. Also returned when a service credential sends no `x-connected-merchant-id`."
           },
           "401": {
             "description": "Authentication required."
           },
           "403": {
-            "description": "`x-connected-merchant-id` names a merchant other than the session's or API key's own."
+            "description": "`x-connected-merchant-id` is not the caller's own merchant."
           },
           "500": {
-            "description": "`TE_00` `Something went wrong`; the cause is logged, never returned."
+            "description": "`TE_00` `Something went wrong`."
           }
         }
       }
@@ -9913,13 +9913,13 @@
           "merchant_reference_id": {
             "type": "string",
             "nullable": true,
-            "description": "The caller's own reference for this decision, such as its order or attempt id. Echoed back on the response."
+            "description": "Your own reference; echoed in the response."
           },
           "amount": {
             "type": "integer",
             "minimum": 0,
             "maximum": 18446744073709551615,
-            "description": "Amount in currency minor units; supplies both existing amount and payment_amount rule keys and the dynamic payment amount."
+            "description": "Amount in currency minor units."
           },
           "currency": {
             "type": "string",
@@ -10172,7 +10172,7 @@
             "type": "string",
             "nullable": true,
             "minLength": 1,
-            "description": "The connector account. Omit it (or send null) to name the connector by gateway alone, as a hybrid fallback_output entry without gateway_id does; scores are then keyed by the gateway name."
+            "description": "The connector account. Omit to name the connector by gateway alone."
           }
         }
       },
@@ -10214,7 +10214,7 @@
         "properties": {
           "id": {
             "type": "string",
-            "description": "Unique per decision (`dec_` + a time-ordered UUID), so a retried payment's decisions stay apart."
+            "description": "Unique per decision."
           },
           "payment_id": {
             "type": "string"
@@ -10222,7 +10222,7 @@
           "merchant_reference_id": {
             "type": "string",
             "nullable": true,
-            "description": "The request's `merchant_reference_id`, as sent. The call's own id is the `x-request-id` response header."
+            "description": "The request's `merchant_reference_id`."
           },
           "created_at": {
             "type": "string",
@@ -10300,7 +10300,7 @@
           "reason",
           "message"
         ],
-        "description": "How the order was reached. New values may be added to each enum; treat unknown values as their nearest documented meaning.",
+        "description": "How the order was reached. Enums may gain values.",
         "properties": {
           "type": {
             "type": "string",
@@ -10352,7 +10352,7 @@
           },
           "message": {
             "type": "string",
-            "description": "For people reading logs. Not stable; branch on `reason`."
+            "description": "Human-readable; branch on `reason`."
           }
         }
       },
@@ -10461,7 +10461,7 @@
           "approach": {
             "type": "string",
             "nullable": true,
-            "description": "The decider's routing approach in snake_case, for example `sr_selection_v3_routing`."
+            "description": "The decider's approach, e.g. `sr_selection_v3_routing`."
           },
           "scores": {
             "type": "array",
@@ -10473,7 +10473,7 @@
           "diagnostics": {
             "type": "object",
             "nullable": true,
-            "description": "The decider's internals, for support: `head_before_downtime_check`, `reset_approach`, `dimension {value, level}`, `filter_wise_gateways`, `priority_logic {tag, output}`, `dynamic_mga_enabled`, `gateway_mga_id_map`, `rust_based_decider` and `latency_ms`. Not covered by compatibility guarantees."
+            "description": "Decider internals for support. May change."
           }
         }
       },
@@ -10547,11 +10547,11 @@
               "cost_won",
               "auth_won"
             ],
-            "description": "`cost_won` when a cheaper connector took the payment, `auth_won` when the success-rate head kept it."
+            "description": "`cost_won`: a cheaper connector won. `auth_won`: the success-rate head kept it."
           },
           "message": {
             "type": "string",
-            "description": "Why, in words. Not stable; branch on `status`."
+            "description": "Human-readable; branch on `status`."
           },
           "cost_saved_bps": {
             "type": "number",
@@ -10597,11 +10597,11 @@
               "steered",
               "sr_prevailed"
             ],
-            "description": "`steered` when a connector behind on its commitment took the payment, `sr_prevailed` when normal routing kept it."
+            "description": "`steered`: a connector behind on its commitment took it. `sr_prevailed`: normal routing kept it."
           },
           "message": {
             "type": "string",
-            "description": "Why, in words. Not stable; branch on `status`."
+            "description": "Human-readable; branch on `status`."
           },
           "sr_head": {
             "oneOf": [
@@ -10655,7 +10655,7 @@
                     "outside_tolerance",
                     "lost_roll"
                   ],
-                  "description": "Why the commitment did not get this payment."
+                  "description": "Why this commitment did not get the payment."
                 }
               }
             }

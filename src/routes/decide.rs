@@ -10,8 +10,6 @@ use axum::response::{IntoResponse, Response};
 
 pub mod evaluation;
 
-/// The merchant is never in the body: it is the `x-connected-merchant-id` header, checked against
-/// the caller's credential, or the credential's own merchant when the header is absent.
 #[axum::debug_handler]
 pub async fn decide(
     ids: RequestIds,
@@ -34,8 +32,7 @@ pub async fn decide(
     };
     match decide_payment(ids, payload).await {
         Ok(response) if response.status().is_success() => response,
-        // A hybrid failure arrives already rendered in the inner engine's own format; only its
-        // status class is kept. The evaluation has logged and recorded the detail.
+        // Keep only the status class; the detail is logged.
         Ok(response) => DecideError::evaluation_failed(response.status()).into_response(),
         Err(error) => error.into_response(),
     }
@@ -57,7 +54,6 @@ async fn decide_payment(ids: RequestIds, payload: DecideRequest) -> Result<Respo
         ids,
         request,
         Some(payload),
-        // The call's request id is the `x-request-id` response header, not part of the decision.
         move |evaluation, _request_id| {
             let decision = DecideResponse::from_evaluation(
                 evaluation,
@@ -74,10 +70,8 @@ async fn decide_payment(ids: RequestIds, payload: DecideRequest) -> Result<Respo
     .map_err(DecideError::from)
 }
 
-/// Every error `/decide` answers with. Messages are written for the caller: a validation error
-/// names the request field to fix, and anything else answers with a fixed message, so no
-/// deserializer text, routing-key name or inner engine error reaches an external system. The
-/// detail is logged instead.
+/// `/decide` errors. Validation errors name the field; everything else gets a fixed message and the
+/// detail is logged.
 #[derive(Debug)]
 enum DecideError {
     /// The body is not JSON, or could not be read.
@@ -88,7 +82,7 @@ enum DecideError {
     MissingField(String),
     /// A field of the wrong JSON type or out of range.
     InvalidField(String),
-    /// A value the request validation rejected; the message is written by `/decide` itself.
+    /// A value request validation rejected.
     InvalidRequest(String),
     /// Routing could not be evaluated for an otherwise valid request.
     RoutingFailed,
@@ -104,7 +98,7 @@ impl DecideError {
         }
     }
 
-    /// Reads which field failed, and how, from the body the extractor could not parse.
+    /// Which field failed to parse, and how.
     fn from_unparsable(body: &[u8]) -> Self {
         let deserializer = &mut serde_json::Deserializer::from_slice(body);
         let Err(error) = serde_path_to_error::deserialize::<_, DecideRequest>(deserializer) else {

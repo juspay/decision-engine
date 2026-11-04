@@ -2,10 +2,6 @@ import { test, expect, factory } from '../../fixtures/test'
 import contract from '../../fixtures/contracts/decide-request.json'
 import type { DecideRequest, DecideResponse } from '../../../website/src/types/api'
 
-/**
- * A `/decide` body. The merchant is never in it: the fixture's session names its own merchant, and
- * a service call names one with `x-connected-merchant-id`.
- */
 function decideRequest(): DecideRequest {
   return {
     ...structuredClone(contract),
@@ -286,7 +282,6 @@ test.describe('Decide contract (API)', () => {
     })
     expect(response.body.id).toMatch(/^dec_[0-9a-f]{32}$/)
     expect(Number.isNaN(Date.parse(response.body.created_at))).toBe(false)
-    // The call's id is the response header, not part of the decision.
     expect(response.headers['x-request-id']).toBe(requestId)
     expect(response.body).not.toHaveProperty('request_id')
   })
@@ -421,7 +416,7 @@ test.describe('Decide contract (API)', () => {
     const body = decideRequest()
     const named = (merchantId: string) => ({ 'x-connected-merchant-id': merchantId })
     const foreign = named(factory.merchantId('foreign'))
-    // A session acts on its own merchant; naming it is optional, naming another is refused.
+    // Session: header optional, own merchant only.
     for (const [headers, status] of [[{}, 200], [named(merchant.id), 200], [foreign, 403]] as const) {
       const response = await api.raw('POST', '/decide', { body, headers, failOnStatusCode: false })
       expect(response.status).toBe(status)
@@ -434,11 +429,10 @@ test.describe('Decide contract (API)', () => {
       })
       expect(response.status).toBe(status)
     }
-    // A service credential has no merchant of its own, so it must name one.
+    // Service credential: header required.
     const service = api.asService()
     expect((await service.raw('POST', '/decide', { body, headers: foreign })).status).toBe(200)
     expect((await service.raw('POST', '/decide', { body, failOnStatusCode: false })).status).toBe(400)
-    // The body never names the merchant.
     const inBody = await api.raw('POST', '/decide', {
       body: { ...body, merchant_id: merchant.id }, failOnStatusCode: false,
     })

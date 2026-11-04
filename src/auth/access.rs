@@ -21,7 +21,7 @@ use axum::http::Method;
 /// parameter can be crafted to resemble one of these.
 const READ_ONLY_POST_ROUTES: &[&str] = &[
     "/routing/list/:merchant_id",
-    // Served over GET; the POST alias remains until Hyperswitch moves off it.
+    // POST alias for Hyperswitch.
     "/routing/list/active/:merchant_id",
     "/routing/evaluate",
     "/rule/get",

@@ -204,12 +204,8 @@ where
     }
 }
 
-/// The merchant a route that takes no merchant in its path or body acts on, named by the
-/// `x-connected-merchant-id` header ([`consts::X_CONNECTED_MERCHANT_ID`]).
-///
-/// The header is optional for a per-merchant session (JWT or api key): absent, the call acts on the
-/// session's own merchant; present, it must name that merchant, or the call is refused with `403`.
-/// A service credential has no merchant of its own, so it must send the header.
+/// The merchant named by `x-connected-merchant-id`. Optional for a session or API key (defaults to
+/// its own merchant, any other is `403`); required for a service credential.
 #[derive(Debug, Clone)]
 pub struct ConnectedMerchant(pub crate::auth::AuthorizedMerchant);
 
@@ -226,7 +222,7 @@ where
             .get(consts::X_CONNECTED_MERCHANT_ID)
             .and_then(|value| value.to_str().ok())
             .map(str::trim)
-            // A blank header names no merchant, so a service credential cannot act on `""`.
+            // Blank counts as absent.
             .filter(|merchant_id| !merchant_id.is_empty())
             .map(str::to_string);
         let session = parts.extensions.get::<AuthContext>();
@@ -628,7 +624,7 @@ mod tests {
                 .map(|super::ConnectedMerchant(merchant)| merchant.as_str().to_string())
         }
 
-        // A session acts on its own merchant, named or not.
+        // Session: own merchant only.
         assert_eq!(resolve(Some("m_a"), None).await, Ok("m_a".to_string()));
         assert_eq!(
             resolve(Some("m_a"), Some("m_a")).await,
@@ -639,7 +635,7 @@ mod tests {
             resolve(Some("m_a"), Some("m_b")).await,
             Err(MerchantScopeViolation::ForeignMerchant)
         );
-        // A service credential acts on the merchant the header names, and must name one.
+        // Service credential: header required.
         assert_eq!(resolve(None, Some("m_b")).await, Ok("m_b".to_string()));
         assert_eq!(
             resolve(None, None).await,
