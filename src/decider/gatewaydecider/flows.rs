@@ -130,6 +130,39 @@ pub async fn decider_full_payload_hs_function(
     dreq: T::DomainDeciderRequest,
     redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Result<(T::DecidedGateway, Vec<(String, Vec<String>)>), T::ErrorResponse> {
+    // The merchant account drives decider behaviour (e.g. whether priority logic
+    // scripts run), so it is loaded from storage rather than taken from the
+    // request body.
+    let merchant_account = match ETM::merchant_account::load_merchant_by_merchant_id(
+        dreq.txnDetail.merchantId.0.clone(),
+    )
+    .await
+    {
+        Some(account) => account,
+        None => {
+            logger::error!(
+                tag = "loadMerchantByMerchantId",
+                action = "loadMerchantByMerchantId",
+                "Merchant account not found for id: {:?}",
+                dreq.txnDetail.merchantId
+            );
+            Err(T::ErrorResponse {
+                status: "400".to_string(),
+                error_code: "DATA_NOT_FOUND".to_string(),
+                error_message: "Merchant not found".to_string(),
+                priority_logic_tag: None,
+                routing_approach: None,
+                filter_wise_gateways: None,
+                error_info: UnifiedError {
+                    code: "MERCHANT_NOT_FOUND".to_string(),
+                    user_message: "Merchant not found".to_string(),
+                    developer_message: "Merchant not found".to_string(),
+                },
+                priority_logic_output: None,
+                is_dynamic_mga_enabled: false,
+            })?
+        }
+    };
     let merchant_prefs = match ETM::merchant_iframe_preferences::getMerchantIPrefsByMId(
         dreq.txnDetail.merchantId.0.clone(),
     )
@@ -191,7 +224,7 @@ pub async fn decider_full_payload_hs_function(
     };
 
     let decider_params = T::DeciderParams {
-        dpMerchantAccount: dreq.merchantAccount,
+        dpMerchantAccount: merchant_account,
         dpOrder: dreq.orderReference,
         dpTxnDetail: dreq.txnDetail,
         dpTxnOfferDetails: dreq.txnOfferDetails,

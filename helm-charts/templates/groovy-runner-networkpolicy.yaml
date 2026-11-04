@@ -1,0 +1,37 @@
+{{- if and .Values.groovyRunner.enabled .Values.groovyRunner.networkPolicy.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "decision-engine.groovyRunnerName" . }}
+  labels:
+    {{- include "decision-engine.labels" . | nindent 4 }}
+    app.kubernetes.io/component: {{ .Values.groovyRunner.metadata.labels.component }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "decision-engine.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: {{ .Values.groovyRunner.metadata.labels.component }}
+  policyTypes:
+    - Ingress
+    - Egress
+  # Only the decision-engine pods call the runner.
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              {{- include "decision-engine.selectorLabels" . | nindent 14 }}
+              app.kubernetes.io/component: {{ .Values.decisionEngine.metadata.labels.component }}
+      ports:
+        - protocol: TCP
+          port: {{ .Values.groovyRunner.service.port }}
+    {{- with .Values.groovyRunner.networkPolicy.extraIngress }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  # The runner makes no outbound connections, so egress is closed unless
+  # extraEgress opens it (e.g. for a service-mesh sidecar).
+  egress:
+    {{- with .Values.groovyRunner.networkPolicy.extraEgress }}
+    {{- toYaml . | nindent 4 }}
+    {{- else }} []
+    {{- end }}
+{{- end }}
