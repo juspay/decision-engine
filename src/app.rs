@@ -836,8 +836,7 @@ where
         global_app_state.global_config.analytics.clickhouse.clone(),
     );
 
-    // SIGTERM (Kubernetes) and SIGINT (Ctrl-C), the pair Hyperswitch's `common_utils::signals`
-    // listens for.
+    // SIGTERM (Kubernetes) and SIGINT (Ctrl-C).
     let mut sigterm = signal(SignalKind::terminate()).expect("Failed to create SIGTERM handler");
     let mut sigint = signal(SignalKind::interrupt()).expect("Failed to create SIGINT handler");
 
@@ -849,9 +848,7 @@ where
     let shutdown_timeout =
         std::time::Duration::from_secs(global_app_state.global_config.server.shutdown_timeout);
 
-    // On a signal: drop readiness first and keep serving for `drain_delay`, so the pod leaves the
-    // Service endpoints before the listener closes; then stop accepting and give in-flight
-    // requests up to `shutdown_timeout` to finish (Hyperswitch's actix `shutdown_timeout`).
+    // On a signal: drop readiness, keep serving for `drain_delay`, then give in-flight requests `shutdown_timeout` to finish.
     let handle_clone = handle.clone();
     tokio::spawn(async move {
         let signal_name = tokio::select! {

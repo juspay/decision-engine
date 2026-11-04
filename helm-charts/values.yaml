@@ -1,9 +1,7 @@
 # Default values for decision-engine
 replicaCount: 1
 
-# Time Kubernetes waits after SIGTERM before SIGKILL. Must exceed the app's
-# server.shutdown_drain_delay (5s) + server.shutdown_timeout (20s) + the 5s
-# feedback-task drain, or in-flight requests are cut off mid-drain.
+# Must exceed server.shutdown_drain_delay (5s) + server.shutdown_timeout (20s) + 5s feedback drain.
 terminationGracePeriodSeconds: 35
 
 image:

@@ -110,8 +110,7 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
-          # Liveness stays on /health (always 200 while the process runs) so a draining pod is
-          # not restarted; readiness uses /health/ready, which flips to 400 on SIGTERM.
+          # Readiness uses /health/ready (400 on SIGTERM); liveness stays on /health so a draining pod isn't restarted.
           readinessProbe:
             httpGet:
               path: /health/ready
