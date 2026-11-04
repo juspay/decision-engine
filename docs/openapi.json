@@ -5215,7 +5215,7 @@
             "schema": {
               "type": "string"
             },
-            "description": "The merchant to decide for. Optional with a session or API key (defaults to its own merchant; any other is `403`). Required with a service credential."
+            "description": "The merchant to decide for. Optional with a session or API key (defaults to its own merchant; it may name a sub-merchant, any other is `403`). Required with a service credential."
           },
           {
             "name": "x-request-id",
@@ -5940,6 +5940,11 @@
               "string",
               "null"
             ]
+          },
+          "parent_merchant_id": {
+            "type": "string",
+            "description": "Create the account as a sub-merchant of this existing merchant. A sub-merchant gets no api_key of its own; its parent's keys reach it.",
+            "example": "merchant_demo"
           }
         }
       },
@@ -6239,6 +6244,10 @@
           },
           "role": {
             "type": "string"
+          },
+          "parent_merchant_id": {
+            "type": "string",
+            "description": "Set on a sub-merchant: the merchant it belongs to, whose members and API keys reach it. Absent on a standalone or parent merchant."
           }
         }
       },
@@ -6251,6 +6260,11 @@
           "merchant_name": {
             "type": "string",
             "example": "Demo Merchant"
+          },
+          "parent_merchant_id": {
+            "type": "string",
+            "description": "Add a sub-merchant to this merchant instead of creating a standalone merchant. Only its admins may. The parent must not be a sub-merchant or a Hyperswitch-synced account.",
+            "example": "merchant_demo"
           }
         }
       },

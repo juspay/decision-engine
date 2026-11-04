@@ -1,0 +1,78 @@
+---
+title: "Sub-merchants"
+description: "One merchant, one API key and one team, with a sub-merchant and its own routing rules for each region or business line."
+---
+
+# Sub-merchants
+
+A **sub-merchant** is a merchant that belongs to another merchant, its **parent**. Give a merchant one sub-merchant per region, brand or business line, and each gets its own routing rules while sharing the parent's API keys and team.
+
+```
+Merchant      merchant_acme          ← parent: members, API keys, its own rules
+├── Sub-merchant  merchant_acme_in   ← its own rules, scores and analytics
+└── Sub-merchant  merchant_acme_us   ← its own rules, scores and analytics
+```
+
+A sub-merchant is a merchant in every other way: it has its own `merchant_id`, and every API that takes a `merchant_id` takes it.
+
+| | Parent merchant | Sub-merchant |
+| --- | --- | --- |
+| Routing rules, scores, analytics, settings | Its own | Its own |
+| Members | Held here | Same as its parent |
+| API keys | Held here | Same as its parent |
+
+A parent keeps its own routing rules too, so an existing merchant works exactly as before once you add sub-merchants to it.
+
+## One API key for every sub-merchant
+
+An API key created on a merchant works for that merchant and **every one of its sub-merchants**, including ones added later. Each request names the merchant it is for, in `merchant_id`, as it always has:
+
+```bash
+curl "$BASE_URL/decide" \
+  --header "x-api-key: $ACME_KEY" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "merchant_id": "merchant_acme_in",
+    "payment_id": "pay_1",
+    ...
+  }'
+```
+
+| With Acme's key, `merchant_id` | Result |
+| --- | --- |
+| `merchant_acme` | Acme's own rules |
+| `merchant_acme_in` | Acme India's rules |
+| `merchant_acme_us` | Acme US's rules |
+| Any merchant outside Acme | `403` |
+
+A sub-merchant has no keys of its own. Listing, creating or revoking keys from a sub-merchant acts on its parent's keys, so the dashboard's API Keys page shows the same keys on the parent and on each sub-merchant. Revoking a key revokes it for all of them.
+
+## Members
+
+People are invited to the **parent merchant**. A member reaches the parent and all of its sub-merchants with the same role, including sub-merchants added later. Inviting from inside a sub-merchant invites to its parent. There is no membership on a sub-merchant alone.
+
+| Action | Admin | Member |
+| --- | --- | --- |
+| View and edit routing on the parent and its sub-merchants | ✅ | ✅ |
+| Add a sub-merchant | ✅ | — |
+| Create or revoke API keys | ✅ | — |
+| Invite people | ✅ | — |
+
+## Adding a sub-merchant
+
+In the dashboard, open the account switcher and choose **+** at the end of the merchant's row. It appears for admins only. Through the API:
+
+```bash
+curl "$BASE_URL/onboarding/merchant" \
+  --header "Authorization: Bearer $TOKEN" \
+  --header "Content-Type: application/json" \
+  --data '{ "merchant_name": "Acme India", "parent_merchant_id": "merchant_acme" }'
+```
+
+Operators can do the same with the admin secret through [`/merchant-account/create`](/api-refs/merchant-account-create), passing `parent_merchant_id`.
+
+Sub-merchants are one level deep: a sub-merchant can't have sub-merchants of its own.
+
+## Hyperswitch accounts
+
+Accounts synced from Hyperswitch keep the organization → merchant → profile tree Hyperswitch manages. Their profiles, members and access are managed in Hyperswitch, and Hyperswitch calls Decision Engine with the admin secret. So in Decision Engine you can't add sub-merchants to them, and Hyperswitch sessions can't create or revoke API keys.

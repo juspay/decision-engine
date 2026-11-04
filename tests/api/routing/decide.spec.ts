@@ -482,6 +482,9 @@ test.describe('Decide scenarios (API)', () => {
       }],
     })
     await api.setMerchantFeature(merchant.id, 'sr-routing', true)
+    // With explore-exploit on, the hedging percent alone decides whether a payment explores,
+    // whatever global random-traffic config the environment carries.
+    await api.setMerchantFeature(merchant.id, 'explore-exploit-srv3', true)
     const payment = (subType: string) => {
       const body = decideRequest()
       body.payment_method_sub_type = subType

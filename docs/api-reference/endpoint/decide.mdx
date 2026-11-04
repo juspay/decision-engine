@@ -14,7 +14,7 @@ The merchant is set by the `x-connected-merchant-id` header, never the body.
 
 | Caller | Without the header | With the header |
 | --- | --- | --- |
-| Session or API key | Its own merchant | Must be its own merchant, else `403` |
+| Session or API key | Its own merchant | Its own merchant or a [sub-merchant](/sub-merchants), else `403` |
 | Service credential | `400` | The merchant named |
 
 ### Request ids

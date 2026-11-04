@@ -64,6 +64,9 @@ pub struct LoginRequest {
 #[derive(Debug, Deserialize)]
 pub struct CreateMerchantRequest {
     pub merchant_name: String,
+    /// Creates a sub-merchant of this merchant instead of a standalone one. Only its admins may.
+    #[serde(default)]
+    pub parent_merchant_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -78,11 +81,15 @@ pub struct SwitchMerchantRequest {
 /// scope split into its account-tree levels, so the picker can group and search by level instead of
 /// re-parsing the label. They are absent for a scope with no Hyperswitch ancestry — every DE-native
 /// merchant — which is why every one of them is optional.
+///
+/// A sub-merchant carries `parent_merchant_id` instead, and follows its merchant in the list.
 #[derive(Debug, Serialize, Clone)]
 pub struct MerchantInfo {
     pub merchant_id: String,
     pub merchant_name: String,
     pub role: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_merchant_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -434,12 +441,13 @@ pub async fn login(
             .map(|m| m.merchant_id.clone())
             .unwrap_or_default()
     });
+    let role = role_on(&merchants, &active_merchant_id, &user.role);
 
     let token = auth::generate_jwt(
         &user.user_id,
         &user.email,
         &active_merchant_id,
-        &user.role,
+        &role,
         TOKEN_TYPE_STANDARD,
         global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
@@ -451,7 +459,7 @@ pub async fn login(
         user_id: user.user_id,
         email: user.email,
         merchant_id: active_merchant_id,
-        role: user.role,
+        role,
         merchants,
     }))
 }
@@ -480,9 +488,15 @@ pub async fn create_merchant(
 
     let app_state = get_tenant_app_state().await;
 
+    let parent = payload.parent_merchant_id.clone();
+    if let Some(parent_id) = &parent {
+        ensure_can_add_sub_merchant(&app_state, &claims.user_id, parent_id).await?;
+    }
+
+    // A sub-merchant is a merchant like any other, and is named like one.
     let merchant_id = format!(
         "merchant_{}",
-        &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
+        &uuid::Uuid::new_v4().simple().to_string()[..12]
     );
     let now = date_time::now();
 
@@ -494,11 +508,34 @@ pub async fn create_merchant(
         gateway_success_rate_based_decider_input: None,
         internal_metadata: None,
         enabled: crate::storage::types::BitBoolWrite(true),
+        parent_merchant_id: parent.clone(),
     };
 
     crate::generics::generic_insert(&app_state.db, new_merchant)
         .await
         .change_context(UserAuthError::StorageError)?;
+
+    // A sub-merchant takes its members from its merchant, so it gets no membership of its own, and the
+    // creator — an admin of that merchant — is an admin of it.
+    if parent.is_some() {
+        let merchants = fetch_user_merchants(&app_state, &claims.user_id).await?;
+        let new_token = auth::generate_jwt(
+            &claims.user_id,
+            &claims.email,
+            &merchant_id,
+            "admin",
+            TOKEN_TYPE_STANDARD,
+            global_config.user_auth.jwt_secret.peek(),
+            global_config.user_auth.jwt_expiry_seconds,
+        )
+        .change_context(UserAuthError::TokenGenerationFailed)?;
+        return Ok(Json(CreateMerchantResponse {
+            token: new_token,
+            merchant_id,
+            merchant_name: payload.merchant_name,
+            merchants,
+        }));
+    }
 
     let new_user_merchant = NewUserMerchant {
         user_id: claims.user_id.clone(),
@@ -537,11 +574,13 @@ pub async fn create_merchant(
 
     let merchants = fetch_user_merchants(&app_state, &claims.user_id).await?;
 
+    // The token is for the merchant just created, where the user holds the admin membership
+    // inserted above.
     let new_token = auth::generate_jwt(
         &claims.user_id,
         &claims.email,
         &merchant_id,
-        &claims.role,
+        "admin",
         TOKEN_TYPE_STANDARD,
         global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
@@ -841,19 +880,21 @@ pub async fn invite_member(
     };
 
     let app_state = get_tenant_app_state().await;
+    // Members belong to the merchant: from inside a sub-merchant, this is its parent's.
+    let merchant_id = membership_owner(&claims.merchant_id).await;
 
     use crate::storage::backend::schema::merchant_account::dsl as ma_dsl;
 
     let merchant_name = crate::storage::types::MerchantAccount::find_all(
         &app_state.db,
-        ma_dsl::merchant_id.eq(Some(claims.merchant_id.clone())),
+        ma_dsl::merchant_id.eq(Some(merchant_id.clone())),
     )
     .await
     .change_error(UserAuthError::StorageError)?
     .into_iter()
     .next()
     .and_then(|m| m.merchant_name)
-    .unwrap_or_else(|| claims.merchant_id.clone());
+    .unwrap_or_else(|| merchant_id.clone());
 
     let existing_users = User::find_all(&app_state.db, lower(dsl::email).eq(payload.email.clone()))
         .await
@@ -867,7 +908,7 @@ pub async fn invite_member(
             &app_state.db,
             um_dsl::user_id
                 .eq(existing_user.user_id.clone())
-                .and(um_dsl::merchant_id.eq(claims.merchant_id.clone())),
+                .and(um_dsl::merchant_id.eq(merchant_id.clone())),
         )
         .await
         .change_error(UserAuthError::StorageError)?;
@@ -878,7 +919,7 @@ pub async fn invite_member(
 
         let new_user_merchant = NewUserMerchant {
             user_id: existing_user.user_id.clone(),
-            merchant_id: claims.merchant_id.clone(),
+            merchant_id: merchant_id.clone(),
             role: role.clone(),
             created_at: now,
         };
@@ -948,7 +989,7 @@ pub async fn invite_member(
 
         let new_user_merchant = NewUserMerchant {
             user_id: user_id.clone(),
-            merchant_id: claims.merchant_id.clone(),
+            merchant_id: merchant_id.clone(),
             role: role.clone(),
             created_at: now,
         };
@@ -1014,13 +1055,13 @@ pub async fn list_members(
 
     let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
     let app_state = get_tenant_app_state().await;
+    // Members belong to the merchant: from inside a sub-merchant, this is its parent's.
+    let merchant_id = membership_owner(&claims.merchant_id).await;
 
-    let memberships = UserMerchant::find_all(
-        &app_state.db,
-        um_dsl::merchant_id.eq(claims.merchant_id.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let memberships =
+        UserMerchant::find_all(&app_state.db, um_dsl::merchant_id.eq(merchant_id.clone()))
+            .await
+            .change_error(UserAuthError::StorageError)?;
 
     let user_ids: Vec<String> = memberships.iter().map(|m| m.user_id.clone()).collect();
 
@@ -1174,7 +1215,8 @@ pub async fn me(
         permissions,
         email: user.email,
         merchant_id: claims.merchant_id,
-        role: user.role,
+        // The role the session's token carries, which is what its requests are checked against.
+        role: claims.role,
         #[cfg(feature = "mysql")]
         email_verified: user.email_verified != 0,
         #[cfg(feature = "postgres")]
@@ -1250,6 +1292,16 @@ fn roster_admits(roster: &[String], claims: &auth::JwtClaims) -> bool {
             .any(|allowed| allowed.eq_ignore_ascii_case(&claims.email))
 }
 
+/// The role a session on `merchant_id` holds: the user's membership there (a sub-merchant carries
+/// its merchant's), or `fallback` for a user with no membership on it.
+fn role_on(merchants: &[MerchantInfo], merchant_id: &str, fallback: &str) -> String {
+    merchants
+        .iter()
+        .find(|m| m.merchant_id == merchant_id)
+        .map_or(fallback, |m| m.role.as_str())
+        .to_string()
+}
+
 async fn fetch_user_merchants(
     app_state: &crate::app::TenantAppState,
     user_id: &String,
@@ -1282,17 +1334,92 @@ async fn fetch_user_merchants(
             .and_then(|a| hierarchy::from_internal_metadata(a.internal_metadata.as_deref()));
 
         result.push(MerchantInfo {
-            merchant_id: um.merchant_id,
+            merchant_id: um.merchant_id.clone(),
             merchant_name: name,
-            role: um.role,
+            role: um.role.clone(),
+            parent_merchant_id: account.as_ref().and_then(|a| a.parent_merchant_id.clone()),
             profile_name: ancestry.as_ref().and_then(|h| h.profile_name.clone()),
             hs_merchant_id: ancestry.as_ref().map(|h| h.hs_merchant_id.clone()),
             hs_merchant_name: ancestry.as_ref().and_then(|h| h.hs_merchant_name.clone()),
             hs_org_id: ancestry.as_ref().map(|h| h.hs_org_id.clone()),
             hs_org_name: ancestry.as_ref().and_then(|h| h.hs_org_name.clone()),
         });
+
+        // A merchant's sub-merchants follow it, with the role held on the merchant: a sub-merchant has no
+        // members of its own.
+        let mut sub_merchants = crate::storage::types::MerchantAccount::find_all(
+            &app_state.db,
+            ma_dsl::parent_merchant_id.eq(Some(um.merchant_id.clone())),
+        )
+        .await
+        .change_error(UserAuthError::StorageError)?;
+        sub_merchants.sort_by_key(|sub| sub.date_created);
+        for sub in sub_merchants {
+            let Some(sub_id) = sub.merchant_id else {
+                continue;
+            };
+            result.push(MerchantInfo {
+                merchant_name: sub.merchant_name.unwrap_or_else(|| sub_id.clone()),
+                merchant_id: sub_id,
+                role: um.role.clone(),
+                parent_merchant_id: Some(um.merchant_id.clone()),
+                profile_name: None,
+                hs_merchant_id: None,
+                hs_merchant_name: None,
+                hs_org_id: None,
+                hs_org_name: None,
+            });
+        }
     }
+    // A membership held directly on a sub-merchant would list it twice; the first entry stands.
+    let mut seen = std::collections::HashSet::new();
+    result.retain(|merchant| seen.insert(merchant.merchant_id.clone()));
     Ok(result)
+}
+
+/// The merchant that holds the memberships for `merchant_id`: its parent when it is a sub-merchant,
+/// which has no members of its own.
+async fn membership_owner(merchant_id: &str) -> String {
+    load_merchant_by_merchant_id(merchant_id.to_string())
+        .await
+        .and_then(|account| account.parentMerchantId)
+        .unwrap_or_else(|| merchant_id.to_string())
+}
+
+/// Refuses a sub-merchant under `parent_id` unless `user_id` is an admin of it, and it is a Decision
+/// Engine merchant: not itself a sub-merchant, and not synced from Hyperswitch, whose tree is managed
+/// there.
+async fn ensure_can_add_sub_merchant(
+    app_state: &crate::app::TenantAppState,
+    user_id: &str,
+    parent_id: &str,
+) -> Result<(), ContainerError<UserAuthError>> {
+    // Checked on the merchant that holds the memberships, so Acme's admin naming one of Acme's
+    // sub-merchants hears why it cannot be a parent, while anyone else is simply refused.
+    let is_admin = UserMerchant::find_all(
+        &app_state.db,
+        um_dsl::user_id
+            .eq(user_id.to_owned())
+            .and(um_dsl::merchant_id.eq(membership_owner(parent_id).await))
+            .and(um_dsl::role.eq("admin")),
+    )
+    .await
+    .change_error(UserAuthError::StorageError)?
+    .into_iter()
+    .next()
+    .is_some();
+    if !is_admin {
+        return Err(error::ContainerError::from(UserAuthError::Forbidden));
+    }
+    let parent = load_merchant_by_merchant_id(parent_id.to_owned())
+        .await
+        .ok_or_else(|| error::ContainerError::from(UserAuthError::MerchantNotFound))?;
+    if parent.parentMerchantId.is_some() || hierarchy::of_account(&parent).is_some() {
+        return Err(error::ContainerError::from(
+            UserAuthError::InvalidSubMerchantParent,
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
@@ -1676,6 +1803,7 @@ async fn granted_merchants(grant: &ScopeGrant, role: &str) -> Vec<MerchantInfo> 
             merchant_name: switcher_label(&scope),
             merchant_id: scope.profile_id,
             role: role.to_string(),
+            parent_merchant_id: None,
             profile_name: scope.profile_name,
             hs_merchant_id: scope.hs_merchant_id,
             hs_merchant_name: scope.hs_merchant_name,
@@ -1942,12 +2070,13 @@ pub async fn exit_merchant(
             .map(|m| m.merchant_id.clone())
             .unwrap_or_default()
     });
+    let role = role_on(&merchants, &home_merchant_id, &user.role);
 
     let new_token = auth::generate_jwt(
         &user.user_id,
         &user.email,
         &home_merchant_id,
-        &user.role,
+        &role,
         TOKEN_TYPE_STANDARD,
         global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
@@ -1959,7 +2088,7 @@ pub async fn exit_merchant(
         user_id: user.user_id,
         email: user.email,
         merchant_id: home_merchant_id,
-        role: user.role,
+        role,
         merchants,
     }))
 }
@@ -2233,6 +2362,35 @@ mod tests {
             grant: None,
             perms: None,
         }
+    }
+
+    fn membership(merchant_id: &str, role: &str) -> MerchantInfo {
+        MerchantInfo {
+            merchant_id: merchant_id.to_string(),
+            merchant_name: merchant_id.to_string(),
+            role: role.to_string(),
+            parent_merchant_id: None,
+            profile_name: None,
+            hs_merchant_id: None,
+            hs_merchant_name: None,
+            hs_org_id: None,
+            hs_org_name: None,
+        }
+    }
+
+    #[test]
+    fn a_session_takes_the_role_held_on_its_merchant() {
+        // An invited member who later creates a merchant of their own: the user row says
+        // "member", the membership on their own merchant says "admin".
+        let merchants = [
+            membership("theirs", "admin"),
+            membership("invited_to", "member"),
+        ];
+        assert_eq!(role_on(&merchants, "theirs", "member"), "admin");
+        // An admin elsewhere holds only the role granted on the merchant they were invited to.
+        assert_eq!(role_on(&merchants, "invited_to", "admin"), "member");
+        // No membership at all: the user row is all there is.
+        assert_eq!(role_on(&[], "", "admin"), "admin");
     }
 
     #[test]

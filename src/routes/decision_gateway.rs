@@ -89,7 +89,7 @@ where
 
     let (body, api_decider_request) = match request {
         Ok(ScopedJson { payload, body, .. }) => (body, Ok(payload)),
-        Err(ScopedJsonRejection::Parse { body, error, .. }) => (body, Err(error)),
+        Err(ScopedJsonRejection::Parse { body, error }) => (body, Err(error)),
         Err(ScopedJsonRejection::Scope(violation)) => {
             return Err(violation.into());
         }

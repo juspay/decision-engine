@@ -55,6 +55,12 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.groovyRunner.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}
       nodeSelector:
         kubernetes.io/arch: arm64
       {{- with .Values.affinity }}

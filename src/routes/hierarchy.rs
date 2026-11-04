@@ -242,6 +242,8 @@ pub async fn sync_hierarchy(
                         MA::insert_merchant_account(MA::MerchantAccountCreateRequest {
                             merchant_id: profile.profile_id.clone(),
                             gateway_success_rate_based_decider_input: None,
+                            // Hyperswitch scopes are placed by their ancestry, never by a parent.
+                            parent_merchant_id: None,
                         })
                         .await
                         .map_err(|_| {

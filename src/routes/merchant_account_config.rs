@@ -321,6 +321,20 @@ pub async fn create_merchant_config(
         return Err(error::MerchantAccountConfigurationError::MerchantAlreadyExists.into());
     }
 
+    // A sub-merchant goes under an existing Decision Engine merchant, one level deep: never under
+    // another sub-merchant, and never under a Hyperswitch account, whose tree Hyperswitch owns.
+    let is_sub_merchant = payload.parent_merchant_id.is_some();
+    if let Some(parent_id) = &payload.parent_merchant_id {
+        let valid_parent = ETM::merchant_account::load_merchant_by_merchant_id(parent_id.clone())
+            .await
+            .is_some_and(|parent| {
+                parent.parentMerchantId.is_none() && ETM::hierarchy::of_account(&parent).is_none()
+            });
+        if !valid_parent {
+            return Err(error::MerchantAccountConfigurationError::InvalidSubMerchantParent.into());
+        }
+    }
+
     let result = ETM::merchant_account::insert_merchant_account(payload)
         .await
         .change_context(error::MerchantAccountConfigurationError::MerchantInsertionFailed);
@@ -328,12 +342,14 @@ pub async fn create_merchant_config(
     match result {
         Ok(_) => {
             logger::debug!("Merchant account configuration created successfully");
-            let api_key = crate::routes::api_key::mint_api_key(
-                &merchant,
-                Some("Default API key".to_string()),
-            )
-            .await
-            .map(|created| created.api_key);
+            // A sub-merchant is reached by its merchant's keys, so it gets none of its own.
+            let api_key = if is_sub_merchant {
+                None
+            } else {
+                crate::routes::api_key::mint_api_key(&merchant, Some("Default API key".to_string()))
+                    .await
+                    .map(|created| created.api_key)
+            };
             Ok(Json(MerchantAccountCreateResponse {
                 message: "Merchant account created successfully".to_string(),
                 merchant_id,
