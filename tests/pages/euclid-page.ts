@@ -139,7 +139,7 @@ export class EuclidRuleBuilder extends RoutingListPage {
 
   /** Open the gateway-name dropdown of a rule block's THEN section without typing anything. */
   async openGatewayDropdown(blockIndex: number): Promise<void> {
-    await this.thenSection(blockIndex).getByRole('button', { name: 'Show gateway list' }).click()
+    await this.thenSection(blockIndex).getByRole('button', { name: 'Show connector list' }).click()
   }
 
   /** Pick a gateway from the dropdown (rather than typing it) and commit the row. */

@@ -144,7 +144,7 @@ export function RoutingEventsPage() {
                 No routing events in this window
               </p>
               <p className="mt-1 text-[13px] text-slate-500 mx-auto max-w-[57ch] leading-[18px]">
-                Events appear once success-rate feedback flows through update-gateway-score and gateway
+                Events appear once success-rate feedback flows through update-gateway-score and connector
                 scores start shifting.
               </p>
             </div>

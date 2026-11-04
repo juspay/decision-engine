@@ -1105,7 +1105,7 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
           {fieldError(errors.id)}
         </div>
         <div>
-          {fieldLabel('Connector', 'exact gateway name')}
+          {fieldLabel('Connector', 'exact connector name')}
           <Combobox
             className={errors.connector ? inputInvalidClass : inputClass}
             value={contract.connector}

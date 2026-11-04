@@ -24,7 +24,7 @@ export function GatewaySelect({
   value,
   onChange,
   options,
-  placeholder = 'Gateway name',
+  placeholder = 'Connector name',
   className = '',
   dataCy,
   onEnter,
@@ -131,7 +131,7 @@ export function GatewaySelect({
       <button
         type="button"
         tabIndex={-1}
-        aria-label={open ? 'Hide gateway list' : 'Show gateway list'}
+        aria-label={open ? 'Hide connector list' : 'Show connector list'}
         // Keeps focus in the input, so the editors' commit-on-leave never fires from a toggle click.
         onMouseDown={(e) => {
           e.preventDefault()
@@ -158,7 +158,7 @@ export function GatewaySelect({
               <p className="px-3 py-2.5 text-sm text-slate-500">
                 {value.trim()
                   ? <>No connector matches — <span className="font-mono">{value.trim()}</span> is used as typed</>
-                  : 'No gateways'}
+                  : 'No connectors'}
               </p>
             ) : (
               filtered.map((o, i) => (

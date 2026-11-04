@@ -283,12 +283,12 @@ export function AuthPage() {
                   Manage routing, analytics, and audits from one dashboard.
                 </h2>
                 <p className="max-w-[38rem] text-lg leading-9 text-slate-600 dark:text-[#9aa4b6] sm:text-[1.35rem]">
-                  Sign in to manage gateway routing, analytics, and payment audits.
+                  Sign in to manage connector routing, analytics, and payment audits.
                 </p>
               </div>
 
               <div className="flex flex-wrap gap-3">
-                <PillStat>Gateway routing</PillStat>
+                <PillStat>Connector routing</PillStat>
                 <PillStat>Merchant analytics</PillStat>
                 <PillStat>Payment audit</PillStat>
               </div>
