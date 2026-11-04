@@ -44,7 +44,7 @@ where
 
 /// The caller's message for a body that did not parse: the failing field by its path, never
 /// serde's text. Messages our own deserializers write are kept.
-pub fn json_rejection_message(rejection: &axum::extract::rejection::JsonRejection) -> String {
+fn json_rejection_message(rejection: &axum::extract::rejection::JsonRejection) -> String {
     use axum::extract::rejection::JsonRejection;
     const MALFORMED: &str = "Request body must be a valid JSON object";
     let error = match rejection {
