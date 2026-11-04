@@ -85,7 +85,7 @@ async function enableAutopilotSrDimensions(merchantId: string): Promise<void> {
 // Optional cluster dimensions — empty string normalizes to null so the decider treats them as
 // "any" (a stored "" would never match a real value).
 const optionalDim = z.preprocess(
-  (v) => (v === '' || v === null || v === undefined ? null : v),
+  (v: string | null | undefined) => (v === '' || v === null || v === undefined ? null : v),
   z.string().nullable()
 )
 
@@ -99,39 +99,40 @@ const subLevelSchema = z.object({
   authType: optionalDim,
   // Provenance passthrough: "autopilot" for auto-calibrated rows, null for human-authored.
   source: optionalDim,
-  bucketSize: z.coerce.number().int().positive(),
+  bucketSize: z.coerce.number<number | string>().int().positive(),
   hedgingPercent: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().nullable()
   ),
   latencyThreshold: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().nullable()
   ),
 })
 
 const srFormSchema = z.object({
-  defaultBucketSize: z.coerce.number().int().positive(),
+  defaultBucketSize: z.coerce.number<number | string>().int().positive(),
   defaultSuccessRate: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().min(0).max(1).nullable()
   ),
   defaultLatencyThreshold: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().nullable()
   ),
   defaultHedgingPercent: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().nullable()
   ),
   margin: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().min(0).max(100).nullable()
   ),
   subLevelInputConfig: z.array(subLevelSchema),
 })
 
-type SRForm = z.infer<typeof srFormSchema>
+type SRFormInput = z.input<typeof srFormSchema>
+type SRForm = z.output<typeof srFormSchema>
 
 interface SRConfigResponse {
   merchant_id: string
@@ -285,7 +286,7 @@ export function SRRoutingPage() {
     reset,
     watch,
     formState: { errors },
-  } = useForm<SRForm>({
+  } = useForm<SRFormInput, unknown, SRForm>({
     resolver: zodResolver(srFormSchema),
     defaultValues: {
       defaultBucketSize: 200,
