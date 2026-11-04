@@ -2053,7 +2053,9 @@ pub(crate) async fn stop_breached_payment_experiment(
     };
     let running = arms::running_variant_ids(&data);
     if !running.iter().any(|id| id == variant_id) {
-        // Already stopped by an earlier attempt or another instance.
+        // Already stopped by an earlier attempt or another instance. That attempt may have saved
+        // the definition but failed to drop the cached slot, so drop it again before finishing.
+        drop_cached_experiment(&state, merchant_id).await?;
         guardrail::mark_stopped(merchant_id, experiment_id, variant_id, run);
         return Ok(());
     }
@@ -2088,16 +2090,26 @@ pub(crate) async fn stop_breached_payment_experiment(
         return Err("the experiment changed while stopping the variant".into());
     }
     // Drop the cached slot so every instance reads the updated definition on its next payment.
-    let key = experiment_cache_key(merchant_id, &payment);
-    state
-        .redis_conn
-        .delete_key(&key)
-        .await
-        .map_err(|e| format!("{e:?}"))?;
+    drop_cached_experiment(&state, merchant_id).await?;
     guardrail::mark_stopped(merchant_id, experiment_id, variant_id, run);
     logger::warn!(merchant_id = %merchant_id, experiment_id = %experiment_id,
         variant_id = %variant_id, "A/B variant stopped after guardrail breach");
     Ok(())
+}
+
+/// Drop the merchant's cached payment experiment slot, so the next read loads it from the
+/// database. Fails when Redis is unavailable, leaving the stop to be retried on later feedback.
+async fn drop_cached_experiment(
+    state: &crate::app::TenantAppState,
+    merchant_id: &str,
+) -> Result<(), String> {
+    let key = experiment_cache_key(merchant_id, &AlgorithmType::Payment.to_string());
+    state
+        .redis_conn
+        .delete_key(&key)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("{e:?}"))
 }
 
 /// Stop the experiment whose last running variant breached its guardrail.
@@ -2135,12 +2147,7 @@ async fn stop_whole_experiment(
     // just installed a replacement experiment, and writing "none" here would hide it until the
     // entry expired. Dropping the key only costs the next read a database lookup, which back-fills
     // whatever is actually active. Retry on later feedback if Redis is unavailable.
-    let key = experiment_cache_key(merchant_id, &payment);
-    state
-        .redis_conn
-        .delete_key(&key)
-        .await
-        .map_err(|e| format!("{e:?}"))?;
+    drop_cached_experiment(state, merchant_id).await?;
     crate::decider::gatewaydecider::ab_test::guardrail::mark_stopped(
         merchant_id,
         experiment_id,

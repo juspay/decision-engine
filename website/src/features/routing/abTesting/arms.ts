@@ -124,11 +124,19 @@ export function routesDifferently(a: ExperimentArm, b: ExperimentArm, endpoint: 
   return !sameArm(routingBehaviour(a, endpoint), routingBehaviour(b, endpoint))
 }
 
-/** Whether this variant's traffic is split from control on `endpoint`. */
-export function variantSplitsOn(data: ABTestAlgorithmData, variant: ResolvedVariant, endpoint: ExperimentEndpoint): boolean {
-  return !variant.stopped
-    && scopedEndpoints(data).includes(endpoint)
+/**
+ * Whether this variant is compared with control on `endpoint`: the endpoint is in scope and the
+ * variant routes differently from control there. A stopped variant still is, since the payments it
+ * recorded before it stopped are still read as its results.
+ */
+export function variantComparedOn(data: ABTestAlgorithmData, variant: ResolvedVariant, endpoint: ExperimentEndpoint): boolean {
+  return scopedEndpoints(data).includes(endpoint)
     && routesDifferently(resolvedControl(data), variant.arm, endpoint)
+}
+
+/** Whether this variant's traffic is split from control on `endpoint` now. */
+export function variantSplitsOn(data: ABTestAlgorithmData, variant: ResolvedVariant, endpoint: ExperimentEndpoint): boolean {
+  return !variant.stopped && variantComparedOn(data, variant, endpoint)
 }
 
 /** Whether some running variant is split from control on `endpoint`. */
@@ -136,7 +144,12 @@ export function splitsOn(data: ABTestAlgorithmData, endpoint: ExperimentEndpoint
   return resolvedVariants(data).some(v => variantSplitsOn(data, v, endpoint))
 }
 
-/** Endpoints where traffic is actually split, in display order. */
-export function splitEndpoints(data: ABTestAlgorithmData): ExperimentEndpoint[] {
-  return EXPERIMENT_ENDPOINTS.filter(e => splitsOn(data, e))
+/** The variants compared with control on `endpoint`, stopped ones included, in order. */
+export function comparedVariants(data: ABTestAlgorithmData, endpoint: ExperimentEndpoint): ResolvedVariant[] {
+  return resolvedVariants(data).filter(v => variantComparedOn(data, v, endpoint))
+}
+
+/** Endpoints with results to read: some variant is compared with control there, in display order. */
+export function comparedEndpoints(data: ABTestAlgorithmData): ExperimentEndpoint[] {
+  return EXPERIMENT_ENDPOINTS.filter(e => comparedVariants(data, e).length > 0)
 }

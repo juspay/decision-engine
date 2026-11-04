@@ -88,7 +88,7 @@ Optional query parameters: `start_ms`, `end_ms`, `min_sample_size`, `guardrail_t
 | `variant_loses` | Variant significantly underperforms control. |
 | `guardrail_breached` | Variant's auth rate dropped more than `guardrail_threshold_pp` below control — short-circuits before significance is even computed. |
 
-For an auth-only experiment (no cost data / multi-objective involved on either arm), the significance test collapses to a pure auth-rate z-test and cost-related fields (`total_cost_saved`, `avg_cost_saved_bps`, `net_ev_bps`, `net_delta_bps`) are `null`.
+For an auth-only experiment (no arm recorded cost data, including variants left out of `variants`), the significance test collapses to a pure auth-rate z-test and cost-related fields (`total_cost_saved`, `avg_cost_saved_bps`, `net_ev_bps`, `net_delta_bps`) are `null`.
 
 ## Experiment Transactions
 

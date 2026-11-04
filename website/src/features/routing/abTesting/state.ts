@@ -2,11 +2,24 @@ import { RoutingAlgorithm, ABTestAlgorithmData, ExperimentArm, SrConfigOverride 
 import { ABTestExperimentType, ABTestFormValues, ArmLayersForm, DEFAULT_VARIANT_SR_CONFIG, EMPTY_ARM, SrStrategy, VariantForm } from './types'
 import { CONTROL_ARM_ID, resolvedControl, resolvedVariants, scopedEndpoints } from './arms'
 
-// Infer the experiment type from the persisted arm shape (the backend stores no "type").
+const TUNING_KEYS: (keyof SrConfigOverride)[] = ['hedging_percent', 'elimination_threshold']
+
+/** Whether the arm runs SR with no rule layer and sets no SR field outside `allowed`. */
+function srOnlyWith(arm: ExperimentArm, allowed: (keyof SrConfigOverride)[]): boolean {
+  if (arm.rule_algorithm_id || !arm.sr) return false
+  const sr = arm.sr
+  return (Object.keys(sr) as (keyof SrConfigOverride)[])
+    .every(key => sr[key] === undefined || allowed.includes(key))
+}
+
+// Infer the experiment type from the persisted arm shape (the backend stores no "type"). SR config
+// tuning is the shape that mode saves: control on the live SR config, and every variant on SR with
+// only hedging/elimination overrides. Anything else, such as a rule-changing variant beside an SR
+// tuning one, is an algorithm comparison, whose form keeps each arm's layers and overrides.
 export function inferExperimentType(abData: ABTestAlgorithmData): ABTestExperimentType {
-  // SR config tuning: a variant tweaks hedging/elimination.
-  const tunes = resolvedVariants(abData).some(({ arm: { sr } }) =>
-    sr && (sr.hedging_percent !== undefined || sr.elimination_threshold !== undefined))
+  const tunes = srOnlyWith(resolvedControl(abData), [])
+    && resolvedVariants(abData).every(({ arm }) =>
+      srOnlyWith(arm, TUNING_KEYS) && TUNING_KEYS.some(key => arm.sr?.[key] !== undefined))
   return tunes ? 'sr_config_tuning' : 'algorithm_comparison'
 }
 

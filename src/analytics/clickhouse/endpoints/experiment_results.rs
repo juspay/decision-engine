@@ -293,11 +293,9 @@ fn build_response(query: &ExperimentResultsQuery, rows: &[ArmRow]) -> Experiment
     // success·(margin·10⁴ + saved_bps). Arms without cost data extract saved as 0 (they truly
     // saved nothing — no absolute-cost asymmetry between arms). Surfaced in the response only
     // for cost experiments (at least one arm ran multi-objective); for auth-only experiments the
-    // same test collapses to a pure auth z-test and the UI shows the auth delta instead.
-    let is_cost_experiment = control.avg_cost_saved_bps.is_some()
-        || variant_metrics
-            .iter()
-            .any(|(metrics, _)| metrics.avg_cost_saved_bps.is_some());
+    // same test collapses to a pure auth z-test and the UI shows the auth delta instead. Every
+    // recorded arm counts, reported or not, so narrowing the query never changes the test's basis.
+    let is_cost_experiment = rows.iter().any(has_cost_data);
     // Bonferroni: every variant is tested against control, so each test runs at 0.05 / k to keep
     // the chance of any false verdict across the experiment at 5%.
     let significance_level = FAMILY_SIGNIFICANCE_LEVEL / compared_variant_count(query, rows) as f64;
@@ -450,8 +448,6 @@ fn arm_metrics(arm: &str, row: Option<&ArmRow>, evaluation_margin: f64) -> Exper
             };
             let auth_rate = rate(r.success_count);
             let first_attempt_auth_rate = rate(r.first_attempt_success_count);
-            // Cost data present only when at least one outcome event carried a chosen cost.
-            // avgIf over an empty set is `nan`, so guard on both the count and finiteness.
             let has_cost = r.cost_event_count > 0;
             let avg_chosen_cost_bps =
                 Some(r.avg_chosen_cost_bps).filter(|v| has_cost && v.is_finite());
@@ -485,6 +481,12 @@ fn arm_metrics(arm: &str, row: Option<&ArmRow>, evaluation_margin: f64) -> Exper
             }
         }
     }
+}
+
+/// Whether the arm recorded cost data: at least one payment carried a chosen cost. avgIf over an
+/// empty set is `nan`, so both the count and the average's finiteness are checked.
+fn has_cost_data(row: &ArmRow) -> bool {
+    row.cost_event_count > 0 && row.avg_cost_saved_bps.is_finite()
 }
 
 /// Payments in the arm with a terminal outcome — the sample every rate and test runs on.
@@ -808,6 +810,34 @@ mod tests {
         let all = build_response(&results_query(&[]), &rows);
         assert_eq!(all.variants[1].metrics.arm, "rule_b");
         assert_eq!(all.variants[1].delta_pp, 0.0);
+    }
+
+    #[test]
+    fn hiding_the_cost_variant_keeps_the_cost_basis() {
+        let cost_arm = ArmRow {
+            avg_chosen_cost_bps: 180.0,
+            avg_cost_saved_bps: 20.0,
+            cost_event_count: 900,
+            saved_success_sum: 17_000.0,
+            saved_success_sq_sum: 400_000.0,
+            ..arm_row(1000, 850, 150, 850)
+        };
+        let rows = vec![
+            named("control", arm_row(1000, 800, 200, 800)),
+            named("rule_a", arm_row(1000, 820, 180, 820)),
+            named("cost_b", cost_arm),
+        ];
+        let narrowed = build_response(&results_query(&["rule_a"]), &rows);
+        let full = build_response(&results_query(&[]), &rows);
+        assert!(narrowed.variants[0].net_delta_bps.is_some());
+        assert_eq!(
+            narrowed.variants[0].net_delta_bps,
+            full.variants[0].net_delta_bps
+        );
+        assert_eq!(
+            narrowed.variants[0].confidence_interval,
+            full.variants[0].confidence_interval
+        );
     }
 
     #[test]

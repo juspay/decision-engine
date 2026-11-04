@@ -39,13 +39,13 @@ import {
   MAX_VARIANTS,
   armById,
   armName,
+  comparedEndpoints,
+  comparedVariants,
   controlSplitPct,
   projectArm,
   resolvedControl,
   resolvedVariants,
   routesDifferently,
-  splitEndpoints,
-  variantSplitsOn,
 } from '../../features/routing/abTesting/arms'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { useConnectorFees } from '../../hooks/useCostRouting'
@@ -819,9 +819,14 @@ function ConfigComparisonTable({ abData, isTuning, live, autopilotOn, algorithmN
     rows.push({ label: 'SR strategy', cells: arms.map(arm => arm.sr ? srLabel(arm.sr) : muted('No SR')) })
     if (arms.some(arm => arm.sr)) {
       const auto = (arm: ExperimentArm) => !!arm.sr && arm.sr.use_autopilot !== false && autopilotOn
-      const hedge = (arm: ExperimentArm) => !arm.sr ? dash : auto(arm) ? muted('Auto-tuned per segment') : live.hedging != null ? `${live.hedging}%` : muted('Uses default')
+      // An arm's own override shows ahead of the live or auto-tuned value it replaces.
+      const hedge = (arm: ExperimentArm) => !arm.sr ? dash
+        : typeof arm.sr.hedging_percent === 'number' ? emphasis(`${arm.sr.hedging_percent}%`)
+          : auto(arm) ? muted('Auto-tuned per segment') : live.hedging != null ? `${live.hedging}%` : muted('Uses default')
       const bucket = (arm: ExperimentArm) => !arm.sr ? dash : auto(arm) ? muted('Auto-tuned per segment') : live.bucketSize != null ? `${live.bucketSize} requests` : muted('Uses default')
-      const elim = (arm: ExperimentArm) => !arm.sr ? dash : live.elimination != null ? elimText(live.elimination) : muted('Uses default')
+      const elim = (arm: ExperimentArm) => !arm.sr ? dash
+        : typeof arm.sr.elimination_threshold === 'number' ? emphasis(elimText(arm.sr.elimination_threshold))
+          : live.elimination != null ? elimText(live.elimination) : muted('Uses default')
       rows.push({ label: 'Hedging %', cells: arms.map(hedge) })
       rows.push({ label: 'Elimination threshold', cells: arms.map(elim) })
       rows.push({ label: 'Bucket size', cells: arms.map(bucket) })
@@ -1018,13 +1023,17 @@ function ExperimentDetailPanel({
 
   // An experiment applies different layers per endpoint, so its arms are only comparable within one
   // endpoint: results are read one endpoint at a time. Hybrid-only sessions only ever see hybrid.
+  // An endpoint keeps its results tab after the variants compared there stop.
   const hybridOnly = useHybridOnlySession()
   const endpoints = abData
-    ? splitEndpoints(abData).filter(e => !hybridOnly || e === 'hybrid_routing')
+    ? comparedEndpoints(abData).filter(e => !hybridOnly || e === 'hybrid_routing')
     : []
   const [pickedEndpoint, setPickedEndpoint] = useState<ExperimentEndpoint | null>(null)
   const endpoint = pickedEndpoint && endpoints.includes(pickedEndpoint) ? pickedEndpoint : endpoints[0] ?? null
   const variants = abData ? resolvedVariants(abData) : []
+  // The variants compared with control on the selected endpoint. The others route like control
+  // there and record nothing, so they are left out of its results, progress and verdict.
+  const endpointVariants = abData && endpoint ? comparedVariants(abData, endpoint) : []
   // The layers the arm recorded under `armId` applied on the selected endpoint.
   const servedArm = (armId: string): ExperimentArm | null => {
     const arm = abData && endpoint ? armById(abData, armId) : undefined
@@ -1036,7 +1045,7 @@ function ExperimentDetailPanel({
   const startParam = experimentStartParam(algorithm)
   // The variant ids set the order and the number of comparisons the significance level is
   // corrected for, including variants that haven't recorded anything yet.
-  const variantsParam = variants.map(v => encodeURIComponent(v.id)).join(',')
+  const variantsParam = endpointVariants.map(v => encodeURIComponent(v.id)).join(',')
   const resultsUrl = abData && endpoint
     ? `/analytics/experiment/${algorithm.id}/results?endpoint=${endpoint}${startParam}&min_sample_size=${abData.min_sample_size}&guardrail_threshold_pp=${abData.guardrail_threshold_pp}&variants=${variantsParam}${evalMargin !== undefined ? `&evaluation_margin=${evalMargin}` : ''}`
     : null
@@ -1329,7 +1338,7 @@ function ExperimentDetailPanel({
           <p className="text-[13px] text-slate-500 dark:text-[#8d96aa] leading-[18px] break-words">
             On <code className="text-[12px]">{ENDPOINT_PATHS[endpoint]}</code> this compares{' '}
             <span className="font-medium text-slate-700 dark:text-slate-200">{routingType(CONTROL_ARM_ID)}</span> with{' '}
-            {variants.filter(v => variantSplitsOn(abData, v, endpoint) || v.stopped).map((v, i, shown) => (
+            {endpointVariants.map((v, i, shown) => (
               <Fragment key={v.id}>
                 {i > 0 && (i === shown.length - 1 ? ' and ' : ', ')}
                 <span className="font-medium text-slate-700 dark:text-slate-200">{routingType(v.id)}</span>
@@ -2248,7 +2257,11 @@ export function ABTestingPage() {
   const selectedId = searchParams.get('experiment')
   const [showCreate, setShowCreate] = useState(false)
 
-  const selectedAlgo = savedAbTests.find(a => a.id === selectedId) ?? null
+  // The running experiment is read from the polled active list, so a variant the guardrail stops
+  // shows as stopped without reloading the page.
+  const selectedAlgo = (activeAbTest?.id === selectedId ? activeAbTest : undefined)
+    ?? savedAbTests.find(a => a.id === selectedId)
+    ?? null
 
   const [form, setForm] = useState<ABTestFormValues>(newForm)
   // How live traffic routes today, used as the control arm until the user customizes it. Read at

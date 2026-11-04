@@ -44,11 +44,17 @@ export function toABTestCreatePayload(
   const tuning = values.experimentType === 'sr_config_tuning'
   // SR config tuning: every arm runs SR; control uses the live config, each variant tweaks
   // hedging/elimination.
+  // In algorithm comparison, a variant's SR layer keeps any hedging/elimination overrides it was
+  // read with, so duplicating or editing a mixed experiment saves them unchanged.
+  const comparisonArm = (v: VariantForm): ExperimentArmPayload => {
+    const arm = toArmPayload(v.layers)
+    return arm.sr ? { ...arm, sr: { ...arm.sr, ...toSrConfigPayload(v.srConfig) } } : arm
+  }
   const variant = (v: VariantForm): ExperimentVariantPayload => ({
     id: v.id,
     name: v.name.trim() || v.id,
     split_pct: v.splitPct,
-    ...(tuning ? { sr: toSrConfigPayload(v.srConfig) } : toArmPayload(v.layers)),
+    ...(tuning ? { sr: toSrConfigPayload(v.srConfig) } : comparisonArm(v)),
   })
   const data: ABTestAlgorithmPayload = {
     control: tuning ? { sr: {} } : toArmPayload(values.control),
