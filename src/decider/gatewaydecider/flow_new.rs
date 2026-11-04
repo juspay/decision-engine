@@ -75,7 +75,7 @@ async fn prepare_decider_params(
         cardBrandRoutingEnabled: false,
     };
 
-    let dreq = dreq_.to_domain_decider_request().await;
+    let dreq = dreq_.to_domain_decider_request(merchant_account.clone());
     let resolve_bin = match Utils::fetch_extended_card_bin(&dreq.txnCardInfo.clone()) {
         Some(card_bin) => Some(card_bin),
         None => match dreq.txnCardInfo.card_isin {

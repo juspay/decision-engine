@@ -23,9 +23,14 @@ These files already exist with all required sections. Edit the one that matches 
 [server]
 host = "0.0.0.0"
 port = 8080
+routing_request_timeout_ms = 2000  # optional, default 2000
 ```
 
 `host` is the bind address. Use `0.0.0.0` for Docker/deployed, `127.0.0.1` for local-only.
+
+`routing_request_timeout_ms` caps how long a routing hot-path request may run before it is answered with `504`: `/decide-gateway`, `/decision_gateway`, `/routing/evaluate`, `/routing/evaluate/batch`, `/routing/hybrid` and `/update-gateway-score`. Other routes, such as report uploads and analytics, have no deadline. A score update the handler has already queued still completes after the timeout.
+
+A handler that panics on any route is answered with `500` and logged, rather than having its connection dropped.
 
 ### Logging
 
