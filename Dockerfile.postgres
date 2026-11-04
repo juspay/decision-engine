@@ -68,4 +68,6 @@ USER ${APP_UID}:${APP_UID}
 
 WORKDIR ${BIN_DIR}
 
-CMD ["sh", "-c", "./${BINARY}"]
+# `exec` makes the binary PID 1 so it receives SIGTERM; with plain `sh -c`, dash stays PID 1,
+# swallows the signal, and the pod is SIGKILLed after the grace period instead of draining.
+CMD ["sh", "-c", "exec ./${BINARY}"]

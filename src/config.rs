@@ -477,6 +477,8 @@ impl Default for VolumeCommitmentConfig {
             server: Server {
                 host: "127.0.0.1".to_string(),
                 port: 9095,
+                shutdown_timeout: Server::default_shutdown_timeout(),
+                shutdown_drain_delay: Server::default_shutdown_drain_delay(),
             },
             main_server_url: "http://127.0.0.1:8080".to_string(),
             tick_secs: 30,
@@ -730,6 +732,25 @@ pub struct Limit {
 pub struct Server {
     pub host: String,
     pub port: u16,
+    /// Seconds in-flight requests get to finish once the listener stops accepting, as
+    /// `[server] shutdown_timeout` in Hyperswitch. Requests still running after this are dropped.
+    #[serde(default = "Server::default_shutdown_timeout")]
+    pub shutdown_timeout: u64,
+    /// Seconds the pod keeps serving after SIGTERM with readiness already down, so endpoints and
+    /// the mesh stop routing to it before the listener closes. Set to 0 for local runs.
+    #[serde(default = "Server::default_shutdown_drain_delay")]
+    pub shutdown_drain_delay: u64,
+}
+
+impl Server {
+    // drain_delay + shutdown_timeout + the 5s feedback-task drain must stay under the pod's
+    // terminationGracePeriodSeconds (chart default 35), or Kubernetes SIGKILLs mid-drain.
+    pub(crate) fn default_shutdown_timeout() -> u64 {
+        20
+    }
+    pub(crate) fn default_shutdown_drain_delay() -> u64 {
+        5
+    }
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]
@@ -1253,6 +1274,51 @@ mod tests {
     struct TestDeser {
         #[serde(default)]
         pub secrets_management: SecretsManagementConfig,
+    }
+
+    #[derive(Clone, serde::Deserialize, Debug)]
+    struct ServerDeser {
+        pub server: Server,
+    }
+
+    fn parse_server(data: &str) -> Server {
+        serde_path_to_error::deserialize::<_, ServerDeser>(
+            config::Config::builder()
+                .add_source(config::File::from_str(data, config::FileFormat::Toml))
+                .build()
+                .unwrap(),
+        )
+        .unwrap()
+        .server
+    }
+
+    // Deployed configs predate the shutdown keys; they must keep loading and get the defaults.
+    #[test]
+    fn server_shutdown_keys_default_when_absent() {
+        let server = parse_server(
+            r#"
+            [server]
+            host = "0.0.0.0"
+            port = 8080
+            "#,
+        );
+        assert_eq!(server.shutdown_timeout, 20);
+        assert_eq!(server.shutdown_drain_delay, 5);
+    }
+
+    #[test]
+    fn server_shutdown_keys_are_overridable() {
+        let server = parse_server(
+            r#"
+            [server]
+            host = "0.0.0.0"
+            port = 8080
+            shutdown_timeout = 30
+            shutdown_drain_delay = 0
+            "#,
+        );
+        assert_eq!(server.shutdown_timeout, 30);
+        assert_eq!(server.shutdown_drain_delay, 0);
     }
 
     #[test]
