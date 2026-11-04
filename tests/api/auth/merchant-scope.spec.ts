@@ -127,8 +127,7 @@ test.describe('Merchant scope: the body', () => {
     const bad = { ...factory.singleRoutingPayload(merchant.id), algorithm: { type: 'single', data: 7 } }
     const created = await api.createRoutingAlgorithm(bad, { failOnStatusCode: false })
     expect(created.status).toBe(400)
-    expect(JSON.stringify(created.body)).toContain('could not parse routing rule')
-    expect(JSON.stringify(created.body)).toContain('algorithm')
+    expect(created.body.message).toContain('Invalid value for field `algorithm')
   })
 })
 

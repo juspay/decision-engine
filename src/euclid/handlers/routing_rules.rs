@@ -563,11 +563,8 @@ pub async fn routing_create(
         ScopedJsonRejection::Read(error) => error_stack::report!(EuclidErrors::InvalidRequest(
             format!("could not read routing rule: {error}")
         )),
-        ScopedJsonRejection::Parse { error, .. } => {
-            error_stack::report!(EuclidErrors::InvalidRequest(format!(
-                "could not parse routing rule: {}",
-                error.body_text()
-            )))
+        ScopedJsonRejection::Parse { message, .. } => {
+            error_stack::report!(EuclidErrors::InvalidRequest(message.message))
         }
         ScopedJsonRejection::Scope(violation) => {
             error_stack::report!(EuclidErrors::MerchantScopeViolation(violation))

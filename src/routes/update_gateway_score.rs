@@ -117,7 +117,7 @@ pub async fn update_gateway_score(
             crate::logger::debug!(tag = "UpdateGatewayScore", "Body: {:?}", body);
             Ok(payload)
         }
-        Err(ScopedJsonRejection::Parse { body, error }) => {
+        Err(ScopedJsonRejection::Parse { body, error, .. }) => {
             crate::logger::debug!(tag = "UpdateGatewayScore", "Body: {:?}", body);
             Err(error)
         }

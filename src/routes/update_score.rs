@@ -66,7 +66,7 @@ pub async fn update_score(
     tracing::Span::current().record("is_audit_trail_log", "true");
     let (body_bytes, update_score_request) = match request {
         Ok(ScopedJson { payload, body, .. }) => (body, Ok(payload)),
-        Err(ScopedJsonRejection::Parse { body, error }) => (body, Err(error)),
+        Err(ScopedJsonRejection::Parse { body, error, .. }) => (body, Err(error)),
         Err(ScopedJsonRejection::Scope(violation)) => {
             return Err(violation.into());
         }

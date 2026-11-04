@@ -255,7 +255,7 @@ pub async fn decide_gateway(
             logger::debug!("Body: {:?}", body);
             (body, Ok(payload))
         }
-        Err(ScopedJsonRejection::Parse { body, error }) => {
+        Err(ScopedJsonRejection::Parse { body, error, .. }) => {
             logger::debug!("Body: {:?}", body);
             (body, Err(error))
         }

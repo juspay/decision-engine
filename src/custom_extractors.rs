@@ -32,19 +32,109 @@ where
         request: axum::extract::Request,
         state: &S,
     ) -> Result<Self, Self::Rejection> {
-        match axum::Json::<T>::from_request(request, state).await {
-            Ok(axum::Json(payload)) => Ok(Self(payload)),
-            Err(rejection) => Err(invalid_json_response(rejection.body_text())),
+        if !has_json_content_type(request.headers()) {
+            let message = "Expected request with `Content-Type: application/json`".to_string();
+            return Err(invalid_json_response(message.clone(), message));
         }
+        let body = axum::body::Bytes::from_request(request, state)
+            .await
+            .map_err(|rejection| {
+                invalid_json_response(rejection.body_text(), rejection.body_text())
+            })?;
+        parse_json(&body)
+            .map(Self)
+            .map_err(|error| invalid_json_response(error.message, error.detail))
     }
 }
 
+fn has_json_content_type(headers: &axum::http::HeaderMap) -> bool {
+    headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.split(';').next())
+        .map(|essence| essence.trim().to_ascii_lowercase())
+        .and_then(|essence| essence.strip_prefix("application/").map(str::to_string))
+        .is_some_and(|subtype| subtype == "json" || subtype.ends_with("+json"))
+}
+
+/// A JSON body that did not parse: `message` names the field for the caller; `detail` is serde's
+/// text, for the log only.
+#[derive(Debug, Clone)]
+pub struct JsonBodyError {
+    pub message: String,
+    pub detail: String,
+}
+
+/// Parses a JSON body, naming the failing field by its path.
+pub fn parse_json<T: serde::de::DeserializeOwned>(body: &[u8]) -> Result<T, JsonBodyError> {
+    let malformed = |detail: String| JsonBodyError {
+        message: "Request body must be a valid JSON object".to_string(),
+        detail,
+    };
+    let mut deserializer = serde_json::Deserializer::from_slice(body);
+    let error = match serde_path_to_error::deserialize::<_, T>(&mut deserializer) {
+        Ok(payload) => {
+            return deserializer
+                .end()
+                .map(|()| payload)
+                .map_err(|error| malformed(error.to_string()))
+        }
+        Err(error) => error,
+    };
+    let path = error.path().to_string();
+    let inner = error.into_inner();
+    let detail = inner.to_string();
+    let at_root = matches!(path.as_str(), "." | "");
+    if !inner.is_data() {
+        return Err(malformed(detail));
+    }
+    let message = if detail.starts_with("unknown field") && !at_root {
+        format!("Unknown field `{path}`")
+    } else if let Some(field) = detail
+        .strip_prefix("missing field `")
+        .and_then(|rest| rest.split('`').next())
+    {
+        if at_root {
+            format!("Missing required field `{field}`")
+        } else {
+            format!("Missing required field `{path}.{field}`")
+        }
+    } else if at_root {
+        return Err(malformed(detail));
+    } else {
+        match own_message(&detail) {
+            Some(own) => format!("Invalid value for field `{path}`: {own}"),
+            None => format!("Invalid value for field `{path}`"),
+        }
+    };
+    Err(JsonBodyError { message, detail })
+}
+
+/// A message our own deserializers wrote, as opposed to serde's, which names Rust types and the
+/// accepted alternatives. `None` for serde's own.
+fn own_message(detail: &str) -> Option<&str> {
+    const SERDE: [&str; 6] = [
+        "invalid type",
+        "invalid value",
+        "invalid length",
+        "unknown variant",
+        "unknown field",
+        "duplicate field",
+    ];
+    // serde_json appends the position.
+    let message = detail
+        .rsplit_once(" at line ")
+        .map_or(detail, |(message, _)| message);
+    (!SERDE.iter().any(|prefix| message.starts_with(prefix))).then_some(message)
+}
+
 /// The standard answer to a body that could not be read or parsed, logged once.
-fn invalid_json_response(message: String) -> Response {
+fn invalid_json_response(message: String, detail: String) -> Response {
     crate::logger::error!(
         status_code = StatusCode::BAD_REQUEST.as_u16(),
         error_code = crate::error::error_codes::TE_03,
         error_message = %message,
+        error_detail = %detail,
         "Request JSON extraction failed"
     );
     (
@@ -81,10 +171,12 @@ pub struct ScopedJson<T> {
 pub enum ScopedJsonRejection {
     /// The body could not be read, or is over the route's body limit.
     Read(crate::routes::body::RequestBodyError),
-    /// The body is not a valid `T`. The message names the JSON path of the field that failed.
+    /// The body is not a valid `T`. `message` names the field that failed; `error` is for the
+    /// decider endpoints' own formats.
     Parse {
         body: axum::body::Bytes,
         error: axum::extract::rejection::JsonRejection,
+        message: JsonBodyError,
     },
     /// The body parsed but names a merchant the caller may not act on.
     Scope(crate::auth::MerchantScopeViolation),
@@ -93,8 +185,8 @@ pub enum ScopedJsonRejection {
 impl IntoResponse for ScopedJsonRejection {
     fn into_response(self) -> Response {
         match self {
-            Self::Read(error) => invalid_json_response(error.to_string()),
-            Self::Parse { error, .. } => invalid_json_response(error.body_text()),
+            Self::Read(error) => invalid_json_response(error.to_string(), error.to_string()),
+            Self::Parse { message, .. } => invalid_json_response(message.message, message.detail),
             Self::Scope(violation) => violation.into_response(),
         }
     }
@@ -124,7 +216,19 @@ where
             })?;
         let payload = match axum::Json::<T>::from_bytes(&body) {
             Ok(axum::Json(payload)) => payload,
-            Err(error) => return Err(ScopedJsonRejection::Parse { body, error }),
+            Err(error) => {
+                let message = parse_json::<T>(&body)
+                    .err()
+                    .unwrap_or_else(|| JsonBodyError {
+                        message: error.body_text(),
+                        detail: error.body_text(),
+                    });
+                return Err(ScopedJsonRejection::Parse {
+                    body,
+                    error,
+                    message,
+                });
+            }
         };
         let merchant = crate::auth::authorize(session.as_ref(), &payload)
             .map_err(ScopedJsonRejection::Scope)?;
@@ -345,15 +449,29 @@ mod tests {
     async fn json_rejections_return_invalid_request_and_log_once() {
         use axum::{body::Body, extract::FromRequest, response::IntoResponse};
 
-        for (content_type, body) in [
-            (Some("application/json"), r#"{"count": 1,}"#.to_string()),
+        let content_type_message = "Expected request with `Content-Type: application/json`";
+        for (content_type, body, message) in [
+            (
+                Some("application/json"),
+                r#"{"count": 1,}"#.to_string(),
+                "Request body must be a valid JSON object",
+            ),
             (
                 Some("application/json"),
                 r#"{"count": "invalid"}"#.to_string(),
+                "Invalid value for field `count`",
             ),
-            (None, r#"{"count": 1}"#.to_string()),
-            (Some("text/plain"), r#"{"count": 1}"#.to_string()),
-            (Some("application/json"), " ".repeat(2 * 1024 * 1024 + 1)),
+            (None, r#"{"count": 1}"#.to_string(), content_type_message),
+            (
+                Some("text/plain"),
+                r#"{"count": 1}"#.to_string(),
+                content_type_message,
+            ),
+            (
+                Some("application/json"),
+                " ".repeat(2 * 1024 * 1024 + 1),
+                "Failed to buffer the request body: length limit exceeded",
+            ),
         ] {
             let request = || {
                 let mut req = Request::new(Body::from(body.clone()));
@@ -370,9 +488,6 @@ mod tests {
                 .await
                 .unwrap_err();
             assert_eq!(errors_logged() - before, 1);
-            let expected = axum::Json::<TestPayload>::from_request(request(), &())
-                .await
-                .unwrap_err();
             assert_eq!(actual.status(), axum::http::StatusCode::BAD_REQUEST);
             assert_eq!(actual.headers()["content-type"], "application/json");
             let body = axum::body::to_bytes(actual.into_body(), usize::MAX)
@@ -383,7 +498,7 @@ mod tests {
                 actual,
                 serde_json::json!({
                     "code": crate::error::error_codes::TE_03,
-                    "message": expected.body_text(),
+                    "message": message,
                     "data": null,
                 })
             );
@@ -399,9 +514,6 @@ mod tests {
                 .unwrap_err()
                 .into_response();
             assert_eq!(errors_logged() - before, 1);
-            let expected = axum::Json::<ScopedTestPayload>::from_request(request(), &())
-                .await
-                .unwrap_err();
             assert_eq!(actual.status(), axum::http::StatusCode::BAD_REQUEST);
             let body = axum::body::to_bytes(actual.into_body(), usize::MAX)
                 .await
@@ -411,9 +523,68 @@ mod tests {
                 actual,
                 serde_json::json!({
                     "code": crate::error::error_codes::TE_03,
-                    "message": expected.body_text(),
+                    "message": message,
                     "data": null,
                 })
+            );
+        }
+    }
+
+    #[test]
+    fn parse_errors_name_the_field_without_serde_text() {
+        #[derive(Debug, serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        #[allow(dead_code)]
+        struct Inner {
+            name: String,
+        }
+        #[derive(Debug, serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        #[allow(dead_code)]
+        struct Body {
+            amount: u64,
+            items: Vec<Inner>,
+            #[serde(default, deserialize_with = "own_error")]
+            limit: Option<u32>,
+        }
+        fn own_error<'de, D: serde::Deserializer<'de>>(_: D) -> Result<Option<u32>, D::Error> {
+            Err(serde::de::Error::custom("limit out of range"))
+        }
+        let message = |body: &str| {
+            super::parse_json::<Body>(body.as_bytes())
+                .map(|_| String::new())
+                .unwrap_or_else(|error| error.message)
+        };
+        assert_eq!(
+            message(r#"{"amount": 1, "items": [], "x": 1}"#),
+            "Unknown field `x`"
+        );
+        assert_eq!(
+            message(r#"{"amount": 1, "items": [{"name": "a", "id": 1}]}"#),
+            "Unknown field `items[0].id`"
+        );
+        assert_eq!(
+            message(r#"{"items": []}"#),
+            "Missing required field `amount`"
+        );
+        assert_eq!(
+            message(r#"{"amount": 1, "items": [{}]}"#),
+            "Missing required field `items[0].name`"
+        );
+        for amount in ["-1", "\"1\"", "1.5"] {
+            assert_eq!(
+                message(&format!(r#"{{"amount": {amount}, "items": []}}"#)),
+                "Invalid value for field `amount`"
+            );
+        }
+        assert_eq!(
+            message(r#"{"amount": 1, "items": [], "limit": 9}"#),
+            "Invalid value for field `limit`: limit out of range"
+        );
+        for malformed in [r#"{"amount": "#, "[]", r#"{"amount": 1, "items": []} x"#] {
+            assert_eq!(
+                message(malformed),
+                "Request body must be a valid JSON object"
             );
         }
     }
@@ -515,12 +686,8 @@ mod tests {
             .body(Body::from(r#"{"merchant_id": "m", "description": 7}"#))
             .unwrap();
         match super::ScopedJson::<CreateApiKeyRequest>::from_request(request, &()).await {
-            Err(super::ScopedJsonRejection::Parse { error, .. }) => {
-                assert!(
-                    error.body_text().contains("description"),
-                    "{}",
-                    error.body_text()
-                )
+            Err(super::ScopedJsonRejection::Parse { message, .. }) => {
+                assert_eq!(message.message, "Invalid value for field `description`")
             }
             other => panic!("expected a parse failure, got {other:?}"),
         }

@@ -5316,7 +5316,7 @@
             }
           },
           "400": {
-            "description": "`TE_03`: invalid body or field, named by its path. `TE_04`: routing could not be evaluated. Also returned when a service credential sends no `x-connected-merchant-id`."
+            "description": "`TE_03`: invalid body or field (named by its path), or routing could not be evaluated. Also returned when a service credential sends no `x-connected-merchant-id`."
           },
           "401": {
             "description": "Authentication required."
@@ -5325,7 +5325,7 @@
             "description": "`x-connected-merchant-id` is not the caller's own merchant."
           },
           "500": {
-            "description": "`TE_00` `Something went wrong`."
+            "description": "`TE_00` `The request could not be completed`."
           }
         }
       }
