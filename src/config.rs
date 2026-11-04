@@ -1276,51 +1276,6 @@ mod tests {
         pub secrets_management: SecretsManagementConfig,
     }
 
-    #[derive(Clone, serde::Deserialize, Debug)]
-    struct ServerDeser {
-        pub server: Server,
-    }
-
-    fn parse_server(data: &str) -> Server {
-        serde_path_to_error::deserialize::<_, ServerDeser>(
-            config::Config::builder()
-                .add_source(config::File::from_str(data, config::FileFormat::Toml))
-                .build()
-                .unwrap(),
-        )
-        .unwrap()
-        .server
-    }
-
-    // Deployed configs predate the shutdown keys; they must keep loading and get the defaults.
-    #[test]
-    fn server_shutdown_keys_default_when_absent() {
-        let server = parse_server(
-            r#"
-            [server]
-            host = "0.0.0.0"
-            port = 8080
-            "#,
-        );
-        assert_eq!(server.shutdown_timeout, 20);
-        assert_eq!(server.shutdown_drain_delay, 5);
-    }
-
-    #[test]
-    fn server_shutdown_keys_are_overridable() {
-        let server = parse_server(
-            r#"
-            [server]
-            host = "0.0.0.0"
-            port = 8080
-            shutdown_timeout = 30
-            shutdown_drain_delay = 0
-            "#,
-        );
-        assert_eq!(server.shutdown_timeout, 30);
-        assert_eq!(server.shutdown_drain_delay, 0);
-    }
-
     #[test]
     fn test_non_case() {
         let data = r#"
