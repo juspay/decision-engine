@@ -270,6 +270,8 @@ pub struct MerchantAccount {
     pub priority_logic_config: Option<String>,
     pub merchant_category_code: Option<String>,
     pub merchant_name: Option<String>,
+    /// The merchant this row is a sub-merchant of. `None` for a merchant.
+    pub parent_merchant_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Insertable)]
@@ -282,6 +284,7 @@ pub struct MerchantAccountNew {
     pub gateway_success_rate_based_decider_input: Option<String>,
     pub internal_metadata: Option<String>,
     pub enabled: BitBoolWrite,
+    pub parent_merchant_id: Option<String>,
 }
 
 #[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]

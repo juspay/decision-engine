@@ -1,11 +1,13 @@
 import { useState } from 'react'
 import useSWR from 'swr'
-import { Key, Copy, Check, Trash2, Plus } from 'lucide-react'
+import { Key, Copy, Check, Trash2, Plus, Info } from 'lucide-react'
 import { apiFetch, apiPost, fetcher } from '../lib/api'
+import { merchantLabel, useMerchantScope } from '../lib/merchantScope'
 import { useMerchantStore } from '../store/merchantStore'
 import { Card, CardBody, CardHeader } from '../components/ui/Card'
 import { Button } from '../components/ui/Button'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
+import { ConfirmDialog } from '../components/ui/ConfirmDialog'
 
 import { PageHeading } from '../components/ui/PageHeading'
 interface ApiKeyListItem {
@@ -49,8 +51,35 @@ function CopyButton({ text }: { text: string }) {
   )
 }
 
+/** A line of context above the keys: whose keys they are, and what they reach. */
+function KeysNote({ children }: { children: React.ReactNode }) {
+  return (
+    <Card>
+      <CardBody>
+        <div className="flex items-start gap-3 text-sm text-slate-600 dark:text-[#8a8a93]">
+          <Info size={16} className="mt-0.5 shrink-0 text-slate-500" />
+          <div className="space-y-2 leading-6">{children}</div>
+        </div>
+      </CardBody>
+    </Card>
+  )
+}
+
+function Code({ children }: { children: React.ReactNode }) {
+  return (
+    <code className="rounded bg-slate-100 px-1 py-0.5 text-xs font-mono dark:bg-[#1c1c24]">
+      {children}
+    </code>
+  )
+}
+
 export function ApiKeysPage() {
   const { merchantId } = useMerchantStore()
+  const { merchant, isSubMerchant, isHyperswitch, isAdmin } = useMerchantScope()
+  // On a sub-merchant, every call below is answered with its parent's keys: the only ones there are,
+  // and the ones that work for it.
+  const merchantName = merchantLabel(merchant, 'this merchant')
+
   const [description, setDescription] = useState('')
   const [creating, setCreating] = useState(false)
   const [newKey, setNewKey] = useState<CreateApiKeyResponse | null>(null)
@@ -58,9 +87,10 @@ export function ApiKeysPage() {
   const [revokingId, setRevokingId] = useState<string | null>(null)
   const [revokeError, setRevokeError] = useState<string | null>(null)
   const [revokedIds, setRevokedIds] = useState<Set<string>>(new Set())
+  const [confirmRevoke, setConfirmRevoke] = useState<ApiKeyListItem | null>(null)
 
   const { data: keys, mutate } = useSWR<ApiKeyListItem[]>(
-    merchantId ? `/api-key/list/${merchantId}` : null,
+    merchantId && !isHyperswitch ? `/api-key/list/${merchantId}` : null,
     fetcher,
   )
 
@@ -100,14 +130,48 @@ export function ApiKeysPage() {
   }
 
   const activeKeys = keys?.filter((k) => k.is_active && !revokedIds.has(k.key_id)) ?? []
+  const heading = (
+    <div>
+      <PageHeading title="API Keys" description={<>Create and manage API keys for programmatic access to the routing engine. Pass the key via the{' '} <Code>x-api-key</Code>{' '} header on all API requests.</>} />
+    </div>
+  )
+
+  if (isHyperswitch) {
+    return (
+      <div className="space-y-6">
+        {heading}
+        <KeysNote>
+          <p>Hyperswitch accounts do not use API keys. Hyperswitch calls Decision Engine directly.</p>
+        </KeysNote>
+      </div>
+    )
+  }
 
   return (
     <div className="space-y-6">
-      <div>
-        <PageHeading title="API Keys" description={<>Create and manage API keys for programmatic access to the routing engine. Pass the key via the{' '} <code className="rounded bg-slate-100 px-1 py-0.5 text-xs font-mono dark:bg-[#1c1c24]">x-api-key</code>{' '} header on all API requests.</>} />
-      </div>
+      {heading}
+
+      <KeysNote>
+        <p>
+          {isSubMerchant ? (
+            <>
+              These are <span className="font-medium text-slate-800 dark:text-white">{merchantName}</span>'s
+              keys. A key works for {merchantName} and every one of its sub-merchants, including this
+              one. Send this sub-merchant's <Code>merchant_id</Code>, <Code>{merchantId}</Code>, to
+              route with its rules.
+            </>
+          ) : (
+            <>
+              A key works for this merchant and every one of its sub-merchants, including ones added
+              later. Send the <Code>merchant_id</Code> of whichever one a request is for.
+            </>
+          )}
+          {!isAdmin && ' Only admins can create or revoke keys.'}
+        </p>
+      </KeysNote>
 
       {/* Create new key */}
+      {isAdmin && (
       <Card>
         <CardHeader>
           <div className="flex items-center gap-2">
@@ -151,6 +215,7 @@ export function ApiKeysPage() {
           )}
         </CardBody>
       </Card>
+      )}
 
       {/* Active keys list */}
       <Card>
@@ -166,7 +231,7 @@ export function ApiKeysPage() {
           <ErrorMessage error={revokeError} />
           {activeKeys.length === 0 ? (
             <p className="px-5 py-6 text-sm text-slate-500 dark:text-[#8a8a93]">
-              No active API keys. Create one above.
+              {isAdmin ? 'No active API keys. Create one above.' : 'No active API keys.'}
             </p>
           ) : (
             <table className="w-full text-sm">
@@ -191,15 +256,17 @@ export function ApiKeysPage() {
                       {new Date(key.created_at).toLocaleDateString()}
                     </td>
                     <td className="px-5 py-3 text-right">
+                      {isAdmin && (
                       <Button
                         size="sm"
                         variant="danger"
                         disabled={revokingId === key.key_id}
-                        onClick={() => handleRevoke(key.key_id)}
+                        onClick={() => setConfirmRevoke(key)}
                       >
                         <Trash2 size={12} />
                         {revokingId === key.key_id ? 'Revoking…' : 'Revoke'}
                       </Button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -208,6 +275,21 @@ export function ApiKeysPage() {
           )}
         </CardBody>
       </Card>
+
+      <ConfirmDialog
+        open={confirmRevoke !== null}
+        title="Revoke API key?"
+        description={`${confirmRevoke?.key_prefix ?? ''}…${
+          confirmRevoke?.description ? ` (${confirmRevoke.description})` : ''
+        } stops working immediately for ${merchantName} and all of its sub-merchants. Requests using it will be rejected. This cannot be undone.`}
+        confirmLabel="Revoke key"
+        variant="danger"
+        onCancel={() => setConfirmRevoke(null)}
+        onConfirm={() => {
+          if (confirmRevoke) handleRevoke(confirmRevoke.key_id)
+          setConfirmRevoke(null)
+        }}
+      />
     </div>
   )
 }

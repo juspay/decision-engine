@@ -156,6 +156,8 @@ pub enum MerchantAccountConfigurationError {
     MerchantInsertionFailed,
     #[error("Unauthorized")]
     Unauthorized,
+    #[error("Sub-merchants can only be added to an existing Decision Engine merchant, not to a sub-merchant or a Hyperswitch account")]
+    InvalidSubMerchantParent,
 }
 
 impl axum::response::IntoResponse for MerchantAccountConfigurationError {
@@ -184,6 +186,15 @@ impl axum::response::IntoResponse for MerchantAccountConfigurationError {
                 crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "MerchantId not found".to_string(),
+                    None,
+                ),
+            )
+                .into_response(),
+            Self::InvalidSubMerchantParent => (
+                hyper::StatusCode::BAD_REQUEST,
+                crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    self.to_string(),
                     None,
                 ),
             )
@@ -240,6 +251,10 @@ pub enum ApiKeyError {
     MerchantNotFound,
     #[error("Storage error")]
     StorageError,
+    #[error("Only a merchant admin can manage API keys")]
+    Forbidden,
+    #[error("Hyperswitch accounts do not use API keys")]
+    HyperswitchSession,
 }
 
 impl axum::response::IntoResponse for ApiKeyError {
@@ -259,6 +274,15 @@ impl axum::response::IntoResponse for ApiKeyError {
                 crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     "Merchant not found".to_string(),
+                    None,
+                ),
+            )
+                .into_response(),
+            Self::Forbidden | Self::HyperswitchSession => (
+                hyper::StatusCode::FORBIDDEN,
+                crate::error::ApiErrorResponse::new(
+                    crate::error::error_codes::TE_04,
+                    self.to_string(),
                     None,
                 ),
             )
@@ -314,6 +338,8 @@ pub enum UserAuthError {
     UnsupportedOperation,
     #[error("Invalid or expired password reset token")]
     InvalidResetToken,
+    #[error("Sub-merchants can only be added to a Decision Engine merchant, not to a sub-merchant or a Hyperswitch account")]
+    InvalidSubMerchantParent,
 }
 
 impl axum::response::IntoResponse for UserAuthError {
@@ -339,6 +365,7 @@ impl axum::response::IntoResponse for UserAuthError {
             Self::InvalidVerificationToken => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
             Self::UnsupportedOperation => (hyper::StatusCode::FORBIDDEN, self.to_string()),
             Self::InvalidResetToken => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
+            Self::InvalidSubMerchantParent => (hyper::StatusCode::BAD_REQUEST, self.to_string()),
         };
         (
             status,

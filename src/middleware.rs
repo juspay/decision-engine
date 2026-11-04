@@ -97,7 +97,8 @@ fn outcome(status: StatusCode) -> &'static str {
     }
 }
 
-/// Enforce that a per-merchant session may only act on the merchant named in the path.
+/// Enforce that a per-merchant session may only act on the merchant named in the path: its own, or
+/// one of its sub-merchants.
 ///
 /// Runs immediately *after* [`authenticate`], so an `AuthContext` is already in the request
 /// extensions for the JWT and api-key lanes. Those lanes carry a concrete `merchant_id`; a route
@@ -132,17 +133,71 @@ pub async fn enforce_merchant_scope(
         .ok();
     let req = Request::from_parts(parts, body);
 
-    if let Some(path_params) = path_params {
-        for (key, value) in &path_params {
-            if key == auth::scope::MERCHANT_PATH_PARAM && value != context.merchant_id.as_str() {
-                return Ok(axum::response::IntoResponse::into_response(
-                    auth::MerchantScopeViolation::ForeignMerchant,
-                ));
-            }
+    let path_merchant = path_params.and_then(|path_params| {
+        path_params
+            .iter()
+            .find(|(key, _)| *key == auth::scope::MERCHANT_PATH_PARAM)
+            .map(|(_, value)| value.to_owned())
+    });
+    // The session's own merchant, or one of its sub-merchants.
+    if let Some(merchant_id) = path_merchant {
+        if let Err(violation) = auth::authorize_merchant_id(Some(&context), &merchant_id).await {
+            return Ok(axum::response::IntoResponse::into_response(violation));
         }
     }
 
     Ok(next.run(req).await)
+}
+
+/// Answer a routing hot-path request with `504` once it has run for
+/// `server.routing_request_timeout_ms`, dropping the handler. Layered on the routes Hyperswitch
+/// calls per payment, so a stalled Redis or database fails those calls fast instead of piling up
+/// connections. Work a handler has already spawned (async score updates) carries on regardless.
+pub async fn routing_deadline(req: Request<Body>, next: Next) -> Response<Body> {
+    let timeout_ms = APP_STATE
+        .get()
+        .map(|state| state.global_config.server.routing_request_timeout_ms)
+        .unwrap_or(2000);
+    deadline(std::time::Duration::from_millis(timeout_ms), req, next).await
+}
+
+async fn deadline(timeout: std::time::Duration, req: Request<Body>, next: Next) -> Response<Body> {
+    match tokio::time::timeout(timeout, next.run(req)).await {
+        Ok(response) => response,
+        Err(_) => {
+            crate::logger::error!(
+                timeout_ms = timeout.as_millis() as u64,
+                "Routing request exceeded its deadline"
+            );
+            axum::response::IntoResponse::into_response((
+                StatusCode::GATEWAY_TIMEOUT,
+                error::ApiErrorResponse::new(
+                    error::error_codes::TE_00,
+                    "Request timed out".to_string(),
+                    None,
+                ),
+            ))
+        }
+    }
+}
+
+/// Turn a panic anywhere below the router into a logged `500`, so the caller gets an answer and
+/// the failure reaches logs and metrics instead of resetting the connection.
+pub fn panic_response(panic: Box<dyn std::any::Any + Send + 'static>) -> Response<Body> {
+    let detail = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&str>().copied())
+        .unwrap_or("unknown panic");
+    crate::logger::error!(panic = detail, "Request handler panicked");
+    axum::response::IntoResponse::into_response((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        error::ApiErrorResponse::new(
+            error::error_codes::TE_00,
+            "Internal server error".to_string(),
+            None,
+        ),
+    ))
 }
 
 /// Admit only callers presenting the deployment's admin secret. Layered on the admin route group
@@ -417,6 +472,47 @@ mod tests {
     async fn service_credentials_are_not_scoped() {
         let foreign = format!("/merchant-account/{FOREIGN}/seed-costs");
         assert_eq!(status(false, &foreign).await, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn a_request_past_its_deadline_is_answered_with_504() {
+        async fn slow() -> &'static str {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            "late"
+        }
+        async fn short_deadline(req: Request<Body>, next: Next) -> Response<Body> {
+            deadline(std::time::Duration::from_millis(20), req, next).await
+        }
+        let app = Router::new()
+            .route("/slow", post(slow))
+            .route("/fast", post(|| async { "ok" }))
+            .layer(from_fn(short_deadline));
+        for (uri, expected) in [
+            ("/slow", StatusCode::GATEWAY_TIMEOUT),
+            ("/fast", StatusCode::OK),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(Request::post(uri).body(Body::empty()).expect("request"))
+                .await
+                .expect("response");
+            assert_eq!(response.status(), expected, "{uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_panicking_handler_is_answered_with_500() {
+        async fn boom() -> &'static str {
+            panic!("boom")
+        }
+        let app = Router::new().route("/boom", post(boom)).layer(
+            tower_http::catch_panic::CatchPanicLayer::custom(panic_response),
+        );
+        let response = app
+            .oneshot(Request::post("/boom").body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
     }
 
     #[test]

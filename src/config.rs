@@ -479,6 +479,7 @@ impl Default for VolumeCommitmentConfig {
                 port: 9095,
                 shutdown_timeout: Server::default_shutdown_timeout(),
                 shutdown_drain_delay: Server::default_shutdown_drain_delay(),
+                routing_request_timeout_ms: default_routing_request_timeout_ms(),
             },
             main_server_url: "http://127.0.0.1:8080".to_string(),
             tick_secs: 30,
@@ -740,6 +741,10 @@ pub struct Server {
     /// the mesh stop routing to it before the listener closes. Set to 0 for local runs.
     #[serde(default = "Server::default_shutdown_drain_delay")]
     pub shutdown_drain_delay: u64,
+    /// Longest a routing hot-path request (decide, evaluate, hybrid, score update) may run before
+    /// it is answered with `504`. Bounds how long a slow Redis or database holds a connection.
+    #[serde(default = "default_routing_request_timeout_ms")]
+    pub routing_request_timeout_ms: u64,
 }
 
 impl Server {
@@ -751,6 +756,10 @@ impl Server {
     pub(crate) fn default_shutdown_drain_delay() -> u64 {
         5
     }
+}
+
+fn default_routing_request_timeout_ms() -> u64 {
+    2000
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]

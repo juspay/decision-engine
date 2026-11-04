@@ -102,7 +102,10 @@ where
                 // Application errors are logged at their source; completion records status.
                 .on_failure(()),
         )
-        .layer(middleware::from_fn(record_api_response));
+        .layer(middleware::from_fn(record_api_response))
+        .layer(tower_http::catch_panic::CatchPanicLayer::custom(
+            crate::middleware::panic_response,
+        ));
     router.layer(middleware)
 }
 
@@ -392,15 +395,18 @@ fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
         )
         .route(
             "/routing/evaluate",
-            metered!(post, routing_rules::routing_evaluate),
+            metered!(post, routing_rules::routing_evaluate)
+                .layer(middleware::from_fn(custom_middleware::routing_deadline)),
         )
         .route(
             "/routing/evaluate/batch",
-            metered!(post, routing_rules::routing_evaluate_batch),
+            metered!(post, routing_rules::routing_evaluate_batch)
+                .layer(middleware::from_fn(custom_middleware::routing_deadline)),
         )
         .route(
             "/decision_gateway",
-            metered!(post, routes::decision_gateway::decision_gateway),
+            metered!(post, routes::decision_gateway::decision_gateway)
+                .layer(middleware::from_fn(custom_middleware::routing_deadline)),
         )
         .route(
             "/rule/create",
@@ -651,16 +657,19 @@ fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
         )
         .route(
             "/decide-gateway",
-            metered!(post, routes::decide_gateway::decide_gateway),
+            metered!(post, routes::decide_gateway::decide_gateway)
+                .layer(middleware::from_fn(custom_middleware::routing_deadline)),
         )
         .route(
             "/routing/hybrid",
-            metered!(post, routes::hybrid_routing::hybrid_routing_evaluate),
+            metered!(post, routes::hybrid_routing::hybrid_routing_evaluate)
+                .layer(middleware::from_fn(custom_middleware::routing_deadline)),
         )
         .route("/decide", metered!(post, routes::decide::decide))
         .route(
             "/update-gateway-score",
-            metered!(post, routes::update_gateway_score::update_gateway_score),
+            metered!(post, routes::update_gateway_score::update_gateway_score)
+                .layer(middleware::from_fn(custom_middleware::routing_deadline)),
         )
         .route(
             "/gateway-score/reset",

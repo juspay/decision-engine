@@ -6,7 +6,7 @@ openapi: "openapi.json POST /decide"
 
 `POST /decide` accepts a flat payment payload with nested `card` and `routing_config` objects. It runs the rule layer and then success-rate routing, with A/B experiments, cost optimisation, volume commitments, scoring and fallback handling.
 
-Send the same authentication and tenant headers used for `/routing/hybrid` (`Authorization: Bearer <token>` or `x-api-key: <key>`). Merchant sessions and API keys may only name their own `merchant_id`; a cross-merchant request returns `403`. Service callers can use the existing `x-admin-secret` header to act for the named routing scope. `/routing/hybrid` continues to accept its existing request and return its existing response.
+Send the same authentication and tenant headers used for `/routing/hybrid` (`Authorization: Bearer <token>` or `x-api-key: <key>`). Merchant sessions and API keys may only name their own `merchant_id` or that of one of their [sub-merchants](/sub-merchants); a cross-merchant request returns `403`. Service callers can use the existing `x-admin-secret` header to act for the named routing scope. `/routing/hybrid` continues to accept its existing request and return its existing response.
 
 ## Full request
 
