@@ -600,7 +600,7 @@ function _runDecide(merchantId, headers, idx) {
     try {
       const json = JSON.parse(res.body);
       const head = json.connectors?.[0];
-      const gw = head?.gateway_name;
+      const gw = head?.connector;
       if (gw) {
         gatewaySelected.add(1, { gateway: gw });
         const status  = Math.random() < 0.85 ? "CHARGED" : "FAILURE";
