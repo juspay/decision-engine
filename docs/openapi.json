@@ -5324,6 +5324,9 @@
           "403": {
             "description": "`x-connected-merchant-id` is not the caller's own merchant."
           },
+          "404": {
+            "description": "`TE_02`: the merchant's routing configuration was not found."
+          },
           "500": {
             "description": "`TE_00` `The request could not be completed`."
           }

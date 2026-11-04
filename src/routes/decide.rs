@@ -4,6 +4,7 @@ use crate::euclid::errors::EuclidErrors;
 use crate::types::decide::response::DecideResponse;
 use crate::types::decide::DecideRequest;
 use axum::response::Response;
+use error_stack::ResultExt;
 
 pub mod evaluation;
 
@@ -13,21 +14,7 @@ pub async fn decide(
     ConnectedMerchant(merchant): ConnectedMerchant,
     Json(payload): Json<DecideRequest>,
 ) -> Result<Response, RouteError> {
-    let response = decide_payment(ids, payload.for_merchant(&merchant)).await?;
-    let status = response.status();
-    if status.is_success() {
-        Ok(response)
-    } else if status.is_client_error() {
-        // The inner engine's error names internal routing keys; it is logged, not returned.
-        Err(RouteError::bad_request(
-            "Unable to decide a connector for this payment",
-        ))
-    } else {
-        Err(RouteError::internal(status))
-    }
-}
-
-async fn decide_payment(ids: RequestIds, payload: DecideRequest) -> Result<Response, RouteError> {
+    let payload = payload.for_merchant(&merchant);
     let state = crate::app::get_tenant_app_state().await;
     let config = state
         .config
@@ -40,7 +27,7 @@ async fn decide_payment(ids: RequestIds, payload: DecideRequest) -> Result<Respo
     let invalid_inputs = payload.invalid_rule_inputs(config);
     let payment_id = payload.payment_id.clone();
     let merchant_reference_id = payload.merchant_reference_id.clone();
-    evaluation::evaluate(
+    let response = evaluation::evaluate(
         ids,
         request,
         Some(payload),
@@ -51,11 +38,11 @@ async fn decide_payment(ids: RequestIds, payload: DecideRequest) -> Result<Respo
                 payment_id,
                 merchant_reference_id,
             );
-            serde_json::to_value(decision)
-                .map(Some)
-                .map_err(|_| EuclidErrors::FailedToSerializeJsonToString.into())
+            let value = serde_json::to_value(decision)
+                .change_context(EuclidErrors::FailedToSerializeJsonToString)?;
+            Ok(Some(value))
         },
     )
-    .await
-    .map_err(RouteError::internal)
+    .await?;
+    Ok(response)
 }

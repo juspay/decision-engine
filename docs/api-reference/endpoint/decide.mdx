@@ -112,7 +112,7 @@ Unknown fields are rejected.
 | `400` | `TE_03` | `Request body must be a valid JSON object` |
 | `400` | `TE_03` | ``Unknown field `<path>` ``, ``Missing required field `<path>` ``, ``Invalid value for field `<path>` `` |
 | `400` | `TE_03` | A validation message naming the field, e.g. `payment_id must not be empty` |
-| `400` | `TE_03` | `Unable to decide a connector for this payment` |
+| `400` / `404` | `TE_03` / `TE_02` | The routing engine's message when the merchant's configuration cannot route the payment |
 | `400` | | `The request does not name a merchant` |
 | `403` | | `This session may only act on its own merchant` |
 | `500` | `TE_00` | `The request could not be completed` |
