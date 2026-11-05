@@ -12,6 +12,7 @@ RUN apt-get update \
     && apt-get install -y cmake libpq-dev libssl-dev pkg-config protobuf-compiler clang
 
 COPY . .
+ARG VERGEN_GIT_DESCRIBE
 RUN RUSTFLAGS="-A warnings" cargo build --release --features release ${EXTRA_FEATURES}
 
 
