@@ -147,6 +147,15 @@ pub static API_RESPONSE_COUNTER: LazyLock<CounterVec> = LazyLock::new(|| {
     )
 });
 
+/// Count of cross-pod cache invalidations grouped by cache kind and outcome (published, publish_failed, applied).
+pub static CACHE_INVALIDATION_COUNTER: LazyLock<CounterVec> = LazyLock::new(|| {
+    CounterVec::new(
+        "cache_invalidations_total",
+        "Count of cross-pod cache invalidations grouped by cache kind and outcome",
+        &["kind", "outcome"],
+    )
+});
+
 /// `count` bucket boundaries starting at `start`, each `factor` times the previous one.
 fn exponential_buckets(start: f64, factor: f64, count: i32) -> Vec<f64> {
     (0..count).map(|i| start * factor.powi(i)).collect()

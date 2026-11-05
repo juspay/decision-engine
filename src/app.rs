@@ -836,6 +836,11 @@ where
         global_app_state.global_config.analytics.clickhouse.clone(),
     );
 
+    // Background job: apply cache invalidations published by other pods (merchant accounts, cost models).
+    crate::redis::invalidation::spawn_subscriber(
+        global_app_state.global_config.analytics.clickhouse.clone(),
+    );
+
     // Create a signal stream for SIGTERM
     let mut sigterm = signal(SignalKind::terminate()).expect("Failed to create SIGTERM handler");
 

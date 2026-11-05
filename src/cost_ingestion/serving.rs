@@ -686,6 +686,19 @@ pub async fn refresh_merchant(
     refresh_inner(cfg, Some(merchant_id)).await
 }
 
+/// [`refresh_merchant`] here, then tell every other pod to rebuild the same merchant.
+pub async fn refresh_merchant_everywhere(
+    cfg: &ClickHouseAnalyticsConfig,
+    merchant_id: &str,
+) -> Result<usize, String> {
+    let result = refresh_merchant(cfg, merchant_id).await;
+    crate::redis::invalidation::publish(crate::redis::invalidation::CacheKind::CostModel(
+        merchant_id.to_string(),
+    ))
+    .await;
+    result
+}
+
 async fn refresh_inner(
     cfg: &ClickHouseAnalyticsConfig,
     merchant: Option<&str>,

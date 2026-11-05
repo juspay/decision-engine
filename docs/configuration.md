@@ -75,7 +75,20 @@ Controls rate limiting on the delete APIs. `request_count` requests allowed per 
 [cache_config]
 service_config_redis_prefix = "DE_service_config_"
 service_config_ttl = 300    # Redis TTL for service config entries, in seconds
+invalidation_channel = "decision_engine_invalidate"  # optional, this is the default
 ```
+
+#### Cross-pod cache invalidation
+
+Each pod keeps merchant accounts and cost models in memory. When one pod changes them, it updates its own copy and publishes a message on the Redis pub/sub channel `invalidation_channel`. Every other pod listens on that channel and drops or rebuilds its copy:
+
+| Change | What the other pods do |
+|---|---|
+| Merchant account created, updated or deleted | Evict their cached account |
+| Cost models refitted (report upload or delete, ingest worker, invoice, connector-fee override) | Rebuild that merchant's models from ClickHouse |
+| Service config written (for example `/rule/*` SR config, `/config-sr-dimension`, merchant feature toggles, `/gateway-score/reset`, SR auto-calibration) | Drop their in-memory copy, so the next read takes the new value from Redis |
+
+Publishing is best effort. If Redis is unavailable, the write still succeeds and the other pods fall back to the existing TTLs (`service_config_ttl` for accounts and service configs, the 5-minute cost-model refresh). Deployments that share a Redis but must stay separate (for example, two environments) should each set their own `invalidation_channel`. The metric `cache_invalidations_total{kind, outcome}` counts published, failed and applied invalidations.
 
 ### Database
 

@@ -247,8 +247,26 @@ pub async fn load_authorized(
     load_merchant_by_merchant_id(merchant.as_str().to_string()).await
 }
 
+fn cache_key(merchant_id: &str) -> String {
+    format!("merchant_acct_{merchant_id}")
+}
+
+/// Drop this process's cached copy of a merchant account.
+pub(crate) fn evict_cached(merchant_id: &str) {
+    let _ = GLOBAL_CACHE.remove(&cache_key(merchant_id));
+}
+
+/// Drop the cached account here and on every other pod.
+async fn invalidate_cached(merchant_id: &str) {
+    evict_cached(merchant_id);
+    crate::redis::invalidation::publish(crate::redis::invalidation::CacheKind::MerchantAccount(
+        merchant_id.to_string(),
+    ))
+    .await;
+}
+
 pub async fn load_merchant_by_merchant_id(merchant_id: String) -> Option<MerchantAccount> {
-    let cache_key = format!("merchant_acct_{}", merchant_id);
+    let cache_key = cache_key(&merchant_id);
 
     if let Ok(cached) = GLOBAL_CACHE.get::<MerchantAccount>(&cache_key) {
         return Some(cached);
@@ -301,7 +319,7 @@ pub async fn delete_merchant_account(
     )
     .await?;
 
-    let _ = GLOBAL_CACHE.remove(&format!("merchant_acct_{}", merchant_id));
+    invalidate_cached(&merchant_id).await;
     Ok(())
 }
 
@@ -354,7 +372,7 @@ pub async fn update_merchant_hierarchy(
     >(conn, dsl::merchant_id.eq(merchant_id.clone()), values)
     .await?;
 
-    let _ = GLOBAL_CACHE.remove(&format!("merchant_acct_{}", merchant_id));
+    invalidate_cached(&merchant_id).await;
     Ok(())
 }
 
@@ -373,6 +391,6 @@ pub async fn update_merchant_account(
         _,
     >(conn, dsl::merchant_id.eq(merchant_id.clone()), values)
     .await?;
-    let _ = GLOBAL_CACHE.remove(&format!("merchant_acct_{}", merchant_id));
+    invalidate_cached(&merchant_id).await;
     Ok(())
 }
