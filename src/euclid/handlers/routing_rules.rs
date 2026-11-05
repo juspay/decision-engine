@@ -20,9 +20,7 @@ use crate::{
     },
 };
 
-use crate::custom_extractors::{
-    Json, MerchantFromPath, RequestIds, ScopedJson, ScopedJsonRejection,
-};
+use crate::custom_extractors::{Json, MerchantFromPath, RequestIds, ScopedJson};
 use crate::euclid::algorithm_store;
 use crate::euclid::{
     errors::EuclidErrors, errors::ValidationErrorDetails, types::RoutingAlgorithmMapper,
@@ -544,7 +542,11 @@ fn scope_experiment_to_session(
 pub async fn routing_create(
     ids: RequestIds,
     session: Option<axum::Extension<crate::auth::AuthContext>>,
-    request: Result<ScopedJson<RoutingRule>, ScopedJsonRejection>,
+    ScopedJson {
+        merchant,
+        payload: mut config,
+        body,
+    }: ScopedJson<RoutingRule>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
     let state = get_tenant_app_state().await;
     let RequestIds {
@@ -553,26 +555,6 @@ pub async fn routing_create(
         trace_id,
     } = ids;
 
-    // The parse message names the JSON path of the field that did not parse, which matters for
-    // nested documents (volume contracts especially).
-    let ScopedJson {
-        merchant,
-        payload: mut config,
-        body,
-    } = request.map_err(|rejection| match rejection {
-        ScopedJsonRejection::Read(error) => error_stack::report!(EuclidErrors::InvalidRequest(
-            format!("could not read routing rule: {error}")
-        )),
-        ScopedJsonRejection::Parse { error, .. } => {
-            error_stack::report!(EuclidErrors::InvalidRequest(format!(
-                "could not parse routing rule: {}",
-                error.body_text()
-            )))
-        }
-        ScopedJsonRejection::Scope(violation) => {
-            error_stack::report!(EuclidErrors::MerchantScopeViolation(violation))
-        }
-    })?;
     // The request as received, for the analytics event.
     let payload: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
 

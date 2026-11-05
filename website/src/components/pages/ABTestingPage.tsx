@@ -2239,7 +2239,7 @@ export function ABTestingPage() {
   )
   const { data: activeAlgorithms, error: activeAlgorithmsError, mutate: mutateActive } = useSWR<RoutingAlgorithm[]>(
     merchantId ? ['active-routing', merchantId] : null,
-    () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`),
+    () => fetcher<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`),
     { refreshInterval: 10_000 },
   )
 

@@ -13,6 +13,8 @@ pub const ID_LENGTH: usize = 20;
 pub const X_TENANT_ID: &str = "x-tenant-id";
 /// Header key for request ID
 pub const X_REQUEST_ID: &str = "x-request-id";
+/// Header naming the merchant a call acts on.
+pub const X_CONNECTED_MERCHANT_ID: &str = "x-connected-merchant-id";
 /// Header key for udf order id
 pub const UDF_ORDER_ID: &str = "x-order-id";
 /// Header key for udf customer id

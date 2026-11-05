@@ -8,9 +8,8 @@ description: "Curl example for listing active routing algorithms."
 ## Request
 
 ```bash
-curl --location --request POST "$BASE_URL/routing/list/active/merchant_demo" \
-  --header "$AUTH_HEADER" \
-  --header "Content-Type: application/json"
+curl --location "$BASE_URL/routing/list/active/merchant_demo" \
+  --header "$AUTH_HEADER"
 ```
 
 ## Response

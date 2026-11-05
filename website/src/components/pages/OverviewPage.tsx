@@ -158,7 +158,7 @@ export function OverviewPage() {
 
   const { data: activeAlgorithms } = useSWR<RoutingAlgorithm[]>(
     effectiveMerchantId ? `/routing/list/active/${effectiveMerchantId}` : null,
-    () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${effectiveMerchantId}`),
+    () => fetcher<RoutingAlgorithm[]>(`/routing/list/active/${effectiveMerchantId}`),
     { shouldRetryOnError: false },
   )
 

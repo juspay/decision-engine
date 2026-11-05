@@ -107,9 +107,9 @@ test.describe('Analytics API', () => {
     test.setTimeout(120_000)
     const paymentId = factory.paymentId('analytics_decide')
     const decided = await api.raw('POST', '/decide', { body: {
-      payment_id: paymentId, merchant_id: merchant.id, amount: 1000, currency: 'USD',
+      payment_id: paymentId, amount: 1000, currency: 'USD',
       payment_method_type: 'card', payment_method_sub_type: 'credit',
-      routing_config: { algorithm_for: 'payment', eligible_connectors: [{ connector: 'stripe', payment_merchant_connector_id: 'mca_stripe' }] },
+      routing_config: { algorithm_for: 'payment', eligible_connectors: [{ connector: 'stripe', merchant_connector_id: 'mca_stripe' }] },
     } })
 
     const audit = await waitForAuditFlowType(api, paymentId, 'routing_hybrid_decision')

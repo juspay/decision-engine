@@ -25,9 +25,9 @@ import {
   type ContractRunTally,
 } from './VolumeCommitmentRunChart'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
-import { BlockedCommitment, DecideGatewayResponse, DecideResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RankedPsp, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
+import { BlockedCommitment, DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RankedPsp, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
-import { RULE_DECIDED_APPROACH, SIMULATION_ENDPOINTS, SimulationEndpoint, decideRequestFor, savedSimulationEndpoint, simulatedDecisionFromDecide, simulatedDecisionFromDecideGateway } from '../../features/routing/simulator/decide'
+import { RULE_DECIDED_APPROACH, SIMULATION_ENDPOINTS, SimulationEndpoint, decideSimulatedPayment, savedSimulationEndpoint, simulatedDecisionFromDecideGateway } from '../../features/routing/simulator/decide'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import {
@@ -2553,7 +2553,7 @@ export function DecisionSimulatorPage() {
       }
 
       const decision = endpoint === 'decide'
-        ? simulatedDecisionFromDecide(await apiPost<DecideResponse>('/decide', decideRequestFor({
+        ? await decideSimulatedPayment({
           merchantId: effectiveMerchantId,
           paymentId,
           amount,
@@ -2566,7 +2566,7 @@ export function DecisionSimulatorPage() {
           cardIssuerCountry,
           gateways,
           eliminationEnabled,
-        })))
+        })
         : simulatedDecisionFromDecideGateway(await apiPost<DecideGatewayResponse>('/decide-gateway', decideRequest))
 
       const { decidedGateway, fallbackGateways } = decision

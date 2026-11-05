@@ -9,7 +9,7 @@ import { FieldError, invalidFieldClass } from '../ui/FieldError'
 import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useCanEditRouting } from '../../store/authStore'
-import { apiPost } from '../../lib/api'
+import { apiPost, fetcher } from '../../lib/api'
 import { RoutingAlgorithm } from '../../types/api'
 import { VolumeSplitGatewayFormEntry } from '../../features/routing/volumeSplit/types'
 import { toVolumeSplitCreatePayload, toVolumeSplitAlgorithm } from '../../features/routing/volumeSplit/payload'
@@ -75,7 +75,7 @@ export function VolumeSplitBuilderPage() {
   )
   const { data: activeRules } = useSWR<RoutingAlgorithm[]>(
     merchantId ? `/routing/list/active/${merchantId}` : null,
-    () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`)
+    () => fetcher<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`)
   )
 
   const sourceId = editId || cloneFromId

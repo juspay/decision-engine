@@ -1,14 +1,12 @@
 {
   "payment_id": "pay_demo",
-  "merchant_id": "pro_demo",
+  "merchant_reference_id": "order_demo",
   "amount": 1000,
   "currency": "USD",
   "payment_method_type": "card",
   "payment_method_sub_type": "credit",
   "authentication_type": null,
   "capture_method": null,
-  "mandate_type": null,
-  "mandate_acceptance_type": null,
   "payment_type": null,
   "setup_future_usage": null,
   "transaction_initiator": null,
@@ -48,7 +46,6 @@
   "metadata": {
     "segment": "premium"
   },
-  "country": null,
   "customer_id": null,
   "routing_config": {
     "algorithm_for": "payment",
@@ -58,11 +55,11 @@
     "eligible_connectors": [
       {
         "connector": "worldpay",
-        "payment_merchant_connector_id": "mca_wp"
+        "merchant_connector_id": "mca_wp"
       },
       {
         "connector": "checkout",
-        "payment_merchant_connector_id": "mca_cko"
+        "merchant_connector_id": "mca_cko"
       }
     ],
     "preferred_connectors": null
