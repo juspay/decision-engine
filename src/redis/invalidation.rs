@@ -99,13 +99,9 @@ pub fn spawn_subscriber(clickhouse: ClickHouseAnalyticsConfig) {
             Ok(()) => {
                 logger::info!(tag = "cache_invalidation", channel = %channel, "Listening for cache invalidations");
 
-                let mut open = true;
-                while open {
-                    match messages.recv().await {
-                        Ok(message) if *message.channel == *channel => {
-                            handle(&message.value, &cache_config, &clickhouse);
-                        }
-                        Ok(_) => {}
+                loop {
+                    let message = match messages.recv().await {
+                        Ok(message) => message,
                         // A burst overran the buffer; the skipped entries expire on TTL, later ones still apply.
                         Err(RecvError::Lagged(skipped)) => {
                             logger::warn!(
@@ -113,14 +109,18 @@ pub fn spawn_subscriber(clickhouse: ClickHouseAnalyticsConfig) {
                                 skipped,
                                 "Invalidations dropped; affected entries expire on TTL"
                             );
+                            continue;
                         }
                         Err(RecvError::Closed) => {
                             logger::error!(
                                 tag = "cache_invalidation",
                                 "Subscriber stream closed; caches fall back to TTL expiry"
                             );
-                            open = false;
+                            break;
                         }
+                    };
+                    if *message.channel == *channel {
+                        handle(&message.value, &cache_config, &clickhouse);
                     }
                 }
             }
