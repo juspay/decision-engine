@@ -477,7 +477,9 @@ impl Default for VolumeCommitmentConfig {
             server: Server {
                 host: "127.0.0.1".to_string(),
                 port: 9095,
-                routing_request_timeout_ms: default_routing_request_timeout_ms(),
+                shutdown_timeout: Server::default_shutdown_timeout(),
+                shutdown_drain_delay: Server::default_shutdown_drain_delay(),
+                routing_request_timeout_ms: Server::default_routing_request_timeout_ms(),
             },
             main_server_url: "http://127.0.0.1:8080".to_string(),
             tick_secs: 30,
@@ -731,14 +733,27 @@ pub struct Limit {
 pub struct Server {
     pub host: String,
     pub port: u16,
+    #[serde(default = "Server::default_shutdown_timeout")]
+    pub shutdown_timeout: u64,
+    #[serde(default = "Server::default_shutdown_drain_delay")]
+    pub shutdown_drain_delay: u64,
     /// Longest a routing hot-path request (decide, evaluate, hybrid, score update) may run before
     /// it is answered with `504`. Bounds how long a slow Redis or database holds a connection.
-    #[serde(default = "default_routing_request_timeout_ms")]
+    #[serde(default = "Server::default_routing_request_timeout_ms")]
     pub routing_request_timeout_ms: u64,
 }
 
-fn default_routing_request_timeout_ms() -> u64 {
-    2000
+impl Server {
+    // drain_delay + shutdown_timeout + 5s feedback drain must stay under terminationGracePeriodSeconds (chart default 35).
+    fn default_shutdown_timeout() -> u64 {
+        20
+    }
+    fn default_shutdown_drain_delay() -> u64 {
+        5
+    }
+    fn default_routing_request_timeout_ms() -> u64 {
+        2000
+    }
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]

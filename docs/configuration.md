@@ -32,6 +32,24 @@ routing_request_timeout_ms = 2000  # optional, default 2000
 
 A handler that panics on any route is answered with `500` and logged, rather than having its connection dropped.
 
+#### Graceful shutdown
+
+```toml
+[server]
+shutdown_drain_delay = 5  # seconds
+shutdown_timeout = 20     # seconds
+```
+
+Both keys are optional; the values above are the defaults. On SIGTERM or SIGINT the server:
+
+1. Marks itself not ready, so `GET /health/ready` returns `400`, and keeps serving for `shutdown_drain_delay` seconds. This gives Kubernetes and the service mesh time to stop routing new requests to the pod.
+2. Stops accepting connections and gives in-flight requests up to `shutdown_timeout` seconds to finish. This is the same setting as Hyperswitch's `[server] shutdown_timeout`.
+3. Waits up to 5 seconds for background gateway-score feedback tasks, then exits.
+
+The pod's `terminationGracePeriodSeconds` must be longer than `shutdown_drain_delay + shutdown_timeout + 5`, or Kubernetes kills the process mid-drain. The Helm chart defaults it to `35`. The chart's readiness probe uses `/health/ready`, and its liveness probe stays on `/health`, which returns `200` for as long as the process runs. This keeps a draining pod from being restarted.
+
+For local runs, set `shutdown_drain_delay = 0` so Ctrl-C exits right away. Environment overrides: `DECISION_ENGINE__SERVER__SHUTDOWN_DRAIN_DELAY`, `DECISION_ENGINE__SERVER__SHUTDOWN_TIMEOUT`.
+
 ### Response version header
 
 The main API and volume commitment scheduler add `x-de-version` to their responses,
