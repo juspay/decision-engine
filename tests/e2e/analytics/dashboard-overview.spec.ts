@@ -32,11 +32,11 @@ test.describe('Dashboard Overview UI', () => {
 
     await expect(authedPage.getByRole('heading', { level: 1, name: 'Overview' })).toBeVisible()
     await expect(authedPage.getByText('Setup', { exact: true }).first()).toBeVisible()
-    await expect(authedPage.getByText('Gateway activity').first()).toBeVisible()
+    await expect(authedPage.getByText('Connector activity').first()).toBeVisible()
     await expect(authedPage.getByText(merchant.id).first()).toBeVisible()
 
     // Wait for the first analytics load to settle before triggering a refresh.
-    await expect(authedPage.getByText('Top gateway').first()).toBeVisible()
+    await expect(authedPage.getByText('Top connector').first()).toBeVisible()
 
     // Changing the range must re-query analytics rather than re-render stale numbers. The Cypress
     // original asserted a "Loading" text badge; the refresh affordance is now a 2px progress bar and a
@@ -49,7 +49,7 @@ test.describe('Dashboard Overview UI', () => {
     await authedPage.getByRole('button', { name: '1w', exact: true }).click()
     await refetch
 
-    await expect(authedPage.getByText('Top gateway').first()).toBeVisible({ timeout: 30_000 })
+    await expect(authedPage.getByText('Top connector').first()).toBeVisible({ timeout: 30_000 })
 
     await authedPage.getByRole('button', { name: 'Analytics' }).click()
     await expect(authedPage).toHaveURL(/\/analytics/)

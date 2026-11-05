@@ -343,8 +343,8 @@ export interface DecideRoutingConfig {
 }
 
 export interface DecideConnector {
-  gateway_name: string
-  // Omitted or null names the connector by gateway alone, as a hybrid fallback entry without gateway_id.
+  connector: string
+  // Omitted or null names the connector by its name alone, as a hybrid fallback entry without gateway_id.
   merchant_connector_id?: string | null
 }
 

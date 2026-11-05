@@ -96,7 +96,7 @@ function EmptyWorkspace() {
         </h2>
         <p className="mt-4 max-w-xl text-sm leading-7 text-slate-600 dark:text-[#b2bdd1]">
           Analytics use your signed-in merchant account. After sign-in, the overview shows service
-          health, active routing, request count, and gateway activity.
+          health, active routing, request count, and connector activity.
         </p>
       </GlassCard>
 
@@ -115,8 +115,8 @@ function EmptyWorkspace() {
             },
             {
               icon: Network,
-              title: 'Gateway activity',
-              text: 'View recent request distribution by gateway.',
+              title: 'Connector activity',
+              text: 'View recent request distribution by connector.',
             },
           ].map((item) => (
             <div key={item.title} className="flex items-start gap-4">
@@ -439,7 +439,7 @@ export function OverviewPage() {
             </GlassCard>
 
             <GlassCard className="flex flex-col p-5">
-              <SurfaceLabel>Top gateway</SurfaceLabel>
+              <SurfaceLabel>Top connector</SurfaceLabel>
               <p className="mt-3 truncate text-[2rem] font-semibold leading-none tracking-tight text-slate-950 dark:text-white">
                 {topGateway ? humanizeAuditValue(topGateway) : '—'}
               </p>
@@ -458,11 +458,11 @@ export function OverviewPage() {
             <GlassCard className="p-6">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <SurfaceLabel>Gateway activity</SurfaceLabel>
+                  <SurfaceLabel>Connector activity</SurfaceLabel>
                   <p className="mt-1 text-xs text-slate-500 dark:text-[#8d96aa]">
                     {gatewayUsage.length
                       ? `${formatExactNumber(gatewayTrafficTotal)} decisions across ${gatewayUsage.length} ${gatewayUsage.length === 1 ? 'gateway' : 'gateways'}`
-                      : 'Routing decisions by gateway'}
+                      : 'Routing decisions by connector'}
                   </p>
                 </div>
                 <Badge variant="blue">{selectedWindow.badge}</Badge>
@@ -509,10 +509,10 @@ export function OverviewPage() {
                 ) : (
                   <div className="rounded-[20px] border border-dashed border-slate-200 px-5 py-12 text-center dark:border-[#2a303a]">
                     <p className="text-sm font-semibold text-slate-950 dark:text-white">
-                      No gateway activity yet
+                      No connector activity yet
                     </p>
                     <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-[#a6b0c3]">
-                      Traffic by gateway will appear here once requests flow through.
+                      Traffic by connector will appear here once requests flow through.
                     </p>
                   </div>
                 )}
@@ -622,7 +622,7 @@ export function OverviewPage() {
             <GlassCard className="p-6">
               <div className="flex items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <SurfaceLabel>Gateway health</SurfaceLabel>
+                  <SurfaceLabel>Connector health</SurfaceLabel>
                   <p className="mt-1 text-xs text-slate-500 dark:text-[#8d96aa]">
                     Success-rate score, weighted by scored transactions
                   </p>
@@ -656,7 +656,7 @@ export function OverviewPage() {
                   <div className="rounded-xl border border-dashed border-slate-200 px-5 py-10 text-center dark:border-[#2a303a]">
                     <p className="text-sm font-semibold text-slate-950 dark:text-white">No score data yet</p>
                     <p className="mt-1.5 text-xs text-slate-500 dark:text-[#a6b0c3]">
-                      SR scores appear once gateways handle traffic.
+                      SR scores appear once connectors handle traffic.
                     </p>
                   </div>
                 )}

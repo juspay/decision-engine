@@ -5290,11 +5290,11 @@
                   "ranking_algorithm": null,
                   "eligible_connectors": [
                     {
-                      "gateway_name": "worldpay",
+                      "connector": "worldpay",
                       "merchant_connector_id": "mca_wp"
                     },
                     {
-                      "gateway_name": "checkout",
+                      "connector": "checkout",
                       "merchant_connector_id": "mca_cko"
                     }
                   ],
@@ -10178,10 +10178,10 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "gateway_name"
+          "connector"
         ],
         "properties": {
-          "gateway_name": {
+          "connector": {
             "type": "string",
             "minLength": 1
           },
@@ -10189,7 +10189,7 @@
             "type": "string",
             "nullable": true,
             "minLength": 1,
-            "description": "The connector account. Omit to name the connector by gateway alone."
+            "description": "The connector account. Omit to name the connector by name alone."
           }
         }
       },
@@ -10197,11 +10197,11 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "gateway_name",
+          "connector",
           "merchant_connector_id"
         ],
         "properties": {
-          "gateway_name": {
+          "connector": {
             "type": "string"
           },
           "merchant_connector_id": {

@@ -470,7 +470,7 @@ export function RuleEvaluationPanel({
           {/* Fallback Gateways */}
           <div className="space-y-2">
             <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-[#78849a] leading-4">
-              Fallback Gateways
+              Fallback Connectors
             </p>
             <div className="space-y-1.5">
               {fallbackConnectors.map((connector, idx) => (
@@ -479,14 +479,14 @@ export function RuleEvaluationPanel({
                     {idx + 1}
                   </span>
                   <input
-                    placeholder="gateway name"
+                    placeholder="connector name"
                     value={connector.gateway_name}
                     onChange={e => updateFallbackConnector(idx, 'gateway_name', e.target.value)}
                     className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-[#c8d0de] focus:outline-none"
                   />
                   <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2 py-2.5 text-[11px] font-bold text-slate-500 dark:text-[#3a4258] select-none leading-4">/</span>
                   <input
-                    placeholder="gateway id (optional)"
+                    placeholder="connector id (optional)"
                     value={connector.gateway_id || ''}
                     onChange={e => updateFallbackConnector(idx, 'gateway_id', e.target.value)}
                     className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-500 dark:text-[#8090a8] focus:outline-none"
@@ -504,7 +504,7 @@ export function RuleEvaluationPanel({
               onClick={addFallbackConnector}
               className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10 transition-colors"
             >
-              <Plus size={12} /> Add Gateway
+              <Plus size={12} /> Add Connector
             </button>
           </div>
         </CardBody>

@@ -74,7 +74,7 @@ const ALL_SEARCH_GROUPS: SearchGroup[] = [
       { to: '/routing/sr?tab=autopilot', label: 'Autopilot', hint: 'Multi Objective', icon: Gauge, keywords: ['sr', 'auto', 'automatic'] },
       { to: '/routing/sr?tab=manual', label: 'Manual Config', hint: 'Multi Objective', icon: SlidersHorizontal, keywords: ['sr', 'weights', 'tuning'] },
       { to: '/routing/sr?tab=manual', label: 'Scoring Defaults', hint: 'Manual Config', icon: SlidersHorizontal, keywords: ['sr', 'scoring', 'defaults', 'weights', 'bucket size', 'hedging', 'payment type override'] },
-      { to: '/routing/sr?tab=manual&section=elimination', label: 'Elimination', hint: 'Manual Config', icon: Ban, keywords: ['sr', 'eliminate', 'threshold', 'latency', 'auth rate', 'drop psp', 'remove gateway'] },
+      { to: '/routing/sr?tab=manual&section=elimination', label: 'Elimination', hint: 'Manual Config', icon: Ban, keywords: ['sr', 'eliminate', 'threshold', 'latency', 'auth rate', 'drop psp', 'remove connector', 'remove gateway'] },
       { to: '/routing/sr?tab=manual&section=dimensions', label: 'SR Dimensions', hint: 'Manual Config', icon: Layers, keywords: ['sr', 'dimensions', 'split', 'clusters', 'udf', 'card network', 'currency', 'country', 'bin'] },
       { to: '/routing/sr?tab=flags', label: 'Feature Flags', hint: 'Multi Objective', icon: ToggleRight, keywords: ['sr', 'toggles', 'settings'] },
       { to: '/routing/sr?tab=cost', label: 'Cost Estimation', hint: 'Multi Objective', icon: Coins, keywords: ['cost', 'pricing', 'fees', 'connectors', 'clusters'] },

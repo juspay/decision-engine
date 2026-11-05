@@ -39,7 +39,7 @@ export interface SimulatedPayment {
   eliminationEnabled: boolean
 }
 
-// The `/decide` request for one simulated payment. Connectors are named by gateway alone, as the
+// The `/decide` request for one simulated payment. Connectors are named alone, as the
 // simulator's gateways carry no connector account. Card attributes are sent for card payments only.
 export function decideRequestFor(payment: SimulatedPayment): DecideRequest {
   const isCard = payment.paymentMethod.toUpperCase() === 'CARD'
@@ -62,7 +62,7 @@ export function decideRequestFor(payment: SimulatedPayment): DecideRequest {
       algorithm_for: 'payment',
       ranking_algorithm: 'SR_BASED_ROUTING',
       elimination_enabled: payment.eliminationEnabled,
-      eligible_connectors: payment.gateways.map(gateway_name => ({ gateway_name })),
+      eligible_connectors: payment.gateways.map(connector => ({ connector })),
     },
   }
 }
@@ -70,8 +70,8 @@ export function decideRequestFor(payment: SimulatedPayment): DecideRequest {
 // The decider's identifier for a connector: "name:id", or the bare name without an account.
 export function connectorIdentifier(connector: DecideConnector): string {
   return connector.merchant_connector_id
-    ? `${connector.gateway_name}:${connector.merchant_connector_id}`
-    : connector.gateway_name
+    ? `${connector.connector}:${connector.merchant_connector_id}`
+    : connector.connector
 }
 
 // The approach a row records when the rule layer set the order and success rate did not run.

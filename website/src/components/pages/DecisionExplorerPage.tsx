@@ -591,7 +591,7 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
     ...(event.merchant_id ? [{ label: 'Merchant', value: event.merchant_id }] : []),
     ...(event.payment_id ? [{ label: 'Payment ID', value: event.payment_id }] : []),
     ...(event.request_id ? [{ label: 'Request ID', value: event.request_id }] : []),
-    ...(event.gateway ? [{ label: 'Gateway', value: event.gateway }] : []),
+    ...(event.gateway ? [{ label: 'Connector', value: event.gateway }] : []),
     ...(event.status ? [{ label: 'Status', value: humanizeAuditValue(event.status) }] : []),
   ]
 
@@ -676,7 +676,7 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
 
   return {
     title: 'Configure auth-rate routing first',
-    body: 'Auth-rate simulation needs success-rate routing configured before it can run gateway decisions.',
+    body: 'Auth-rate simulation needs success-rate routing configured before it can run connector decisions.',
     detail,
     configurePath: '/routing/sr',
   }
@@ -1488,7 +1488,7 @@ export function DecisionExplorerPage() {
     if (!debitRoutingFlag.isEnabled) return openSetupPrompt('debit', 'Debit routing is disabled.')
 
     const gateways = debitForm.eligible_gateways.split(',').map(s => s.trim()).filter(Boolean)
-    if (gateways.length === 0) return setError('Add at least one eligible gateway')
+    if (gateways.length === 0) return setError('Add at least one eligible connector')
 
     setLoading(true)
     setError(null)
@@ -2328,7 +2328,7 @@ export function DecisionExplorerPage() {
 
                 {/* Fallback Gateways */}
                 <div className="space-y-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-[#78849a] leading-4">Fallback Gateways</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-[#78849a] leading-4">Fallback Connectors</p>
                   <div className="space-y-1.5">
                     {fallbackConnectors.map((connector, idx) => (
                       <div key={idx} className="group flex items-center gap-0 rounded-xl border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] overflow-hidden transition-shadow hover:shadow-sm">
@@ -2336,14 +2336,14 @@ export function DecisionExplorerPage() {
                           {idx + 1}
                         </span>
                         <input
-                          placeholder="gateway name"
+                          placeholder="connector name"
                           value={connector.gateway_name}
                           onChange={e => updateFallbackConnector(idx, 'gateway_name', e.target.value)}
                           className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-[#c8d0de] focus:outline-none"
                         />
                         <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2 py-2.5 text-[11px] font-bold text-slate-500 dark:text-[#3a4258] select-none leading-4">/</span>
                         <input
-                          placeholder="gateway id (optional)"
+                          placeholder="connector id (optional)"
                           value={connector.gateway_id || ''}
                           onChange={e => updateFallbackConnector(idx, 'gateway_id', e.target.value)}
                           className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-500 dark:text-[#8090a8] focus:outline-none"
@@ -2361,7 +2361,7 @@ export function DecisionExplorerPage() {
                     onClick={addFallbackConnector}
                     className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10 transition-colors"
                   >
-                    <Plus size={12} /> Add Gateway
+                    <Plus size={12} /> Add Connector
                   </button>
                 </div>
               </>
@@ -2429,7 +2429,7 @@ export function DecisionExplorerPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Eligible Gateways (comma-separated)</label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Eligible Connectors (comma-separated)</label>
                   <input
                     value={debitForm.eligible_gateways}
                     onChange={e => setDebitField('eligible_gateways', e.target.value)}
@@ -2633,7 +2633,7 @@ export function DecisionExplorerPage() {
                         <option value="FAILURE">Failure (FAILURE)</option>
                       </select>
                       <p className="mt-1 text-xs text-slate-500 max-w-[57ch]">
-                        After deciding the gateway, single test will post feedback with this outcome so the payment appears in Decision Audit.
+                        After deciding the connector, single test will post feedback with this outcome so the payment appears in Decision Audit.
                       </p>
                     </div>
                     {singleRunOutcome === 'FAILURE' && <ErrorInfoFields info={errorInfo} onChange={setErrorField} rules={gsmRules} />}
@@ -2716,7 +2716,7 @@ export function DecisionExplorerPage() {
                                   <span className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums leading-4">100%</span>
                                 </div>
                               </div>
-                              <UiTooltip text="Simulated success rate for this gateway">
+                              <UiTooltip text="Simulated success rate for this connector">
                                 <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold tabular-nums shrink-0 ${ratePillClass}`}>
                                   {gwRate}%
                                 </span>
@@ -2899,7 +2899,7 @@ export function DecisionExplorerPage() {
                       className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
                     />
                     <span className="text-xs text-slate-600 dark:text-slate-400">
-                      Smart retry — on GSM <code className="text-[11px] leading-4">retry</code> decision, attempt next fallback gateway
+                      Smart retry — on GSM <code className="text-[11px] leading-4">retry</code> decision, attempt next fallback connector
                       {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-700">(enable GSM scoring filter first)</span>}
                     </span>
                   </label>
@@ -2934,7 +2934,7 @@ export function DecisionExplorerPage() {
                       className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
                     />
                     <span className="text-xs text-slate-600 dark:text-slate-400">
-                      Smart retry — on GSM <code className="text-[11px] leading-4">retry</code> decision, attempt next fallback gateway
+                      Smart retry — on GSM <code className="text-[11px] leading-4">retry</code> decision, attempt next fallback connector
                       {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-700">(enable GSM scoring filter first)</span>}
                     </span>
                   </label>
@@ -3089,7 +3089,7 @@ export function DecisionExplorerPage() {
                     <div>
                       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-[#8f9bb0]">
                         <span>Observed percentage split</span>
-                        <span>{sortedVolumeDistribution.length} gateways</span>
+                        <span>{sortedVolumeDistribution.length} connectors</span>
                       </div>
                       <div className="mt-2 flex h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-[#1d2633]">
                         {sortedVolumeDistribution.map((item) => (
@@ -3140,7 +3140,7 @@ export function DecisionExplorerPage() {
                           <tr>
                             <th className="w-16 px-4 py-2 text-left">#</th>
                             <th className="px-4 py-2 text-left">payment_id</th>
-                            <th className="px-4 py-2 text-left">gateway</th>
+                            <th className="px-4 py-2 text-left">connector</th>
                             <th className="w-24 px-4 py-2 text-right">trace</th>
                           </tr>
                         </thead>
@@ -3304,7 +3304,7 @@ export function DecisionExplorerPage() {
                 <Card className="shrink-0">
                   <CardHeader className="!py-3">
                     <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-sm font-medium text-slate-800 dark:text-white">Gateway Selection Summary</h3>
+                      <h3 className="text-sm font-medium text-slate-800 dark:text-white">Connector Selection Summary</h3>
                       <div className="flex items-center gap-1.5">
                         {totalSimulationPayments > 0 && (() => {
                           const r = 6
@@ -3503,7 +3503,7 @@ export function DecisionExplorerPage() {
                     })()}
                     {Object.keys(gatewayStats).length === 1 && eligibleGatewaysParsed.length > 1 && (
                       <p className="text-[11px] text-slate-500 pt-1 max-w-[57ch] leading-4">
-                        SR routing concentrates traffic on the highest-scoring gateway. Run with a "Gateway Down" scenario to see score drop and traffic shift to the next gateway.
+                        SR routing concentrates traffic on the highest-scoring connector. Run with a "Connector Down" scenario to see score drop and traffic shift to the next connector.
                       </p>
                     )}
                   </CardBody>
@@ -3525,11 +3525,11 @@ export function DecisionExplorerPage() {
                             <tr>
                               <th className="text-left px-3 py-2 w-10">#</th>
                               <th className="text-left px-3 py-2">Payment ID</th>
-                              <th className="text-left px-3 py-2 whitespace-nowrap">Gateway</th>
+                              <th className="text-left px-3 py-2 whitespace-nowrap">Connector</th>
                               <th className="text-left px-3 py-2">Routing</th>
                               <th className="text-left px-3 py-2">Outcome</th>
                               <th className="text-right px-3 py-2 whitespace-nowrap">Cost Savings</th>
-                              {smartRetryEnabled && <th className="text-left px-3 py-2 whitespace-nowrap">Retry Gateway</th>}
+                              {smartRetryEnabled && <th className="text-left px-3 py-2 whitespace-nowrap">Retry Connector</th>}
                               {smartRetryEnabled && <th className="text-left px-3 py-2">Retry Outcome</th>}
                               <th className="w-8" />
                             </tr>
@@ -3647,7 +3647,7 @@ export function DecisionExplorerPage() {
                   <CardBody>
                     <div className="flex items-start justify-between mb-3">
                       <div>
-                        <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Decided Gateway</p>
+                        <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Decided Connector</p>
                         <p className="text-3xl font-bold text-slate-900">{result.decided_gateway}</p>
                       </div>
                       <div className="text-right space-y-2">
@@ -3716,7 +3716,7 @@ export function DecisionExplorerPage() {
                   <Card>
                     <CardHeader>
                       <div className="flex items-center justify-between">
-                        <h3 className="text-sm font-medium text-slate-800">Gateway Scores</h3>
+                        <h3 className="text-sm font-medium text-slate-800">Connector Scores</h3>
                         <Button size="sm" variant="ghost" onClick={run} className="text-xs">
                           <RefreshCw size={12} /> Refresh
                         </Button>
@@ -3810,7 +3810,7 @@ export function DecisionExplorerPage() {
               <Card>
                 <CardBody className="py-16 text-center">
                   <Play size={32} className="text-gray-500 mx-auto mb-3" />
-                  <p className="text-slate-500 text-sm mx-auto max-w-[57ch]">Fill in the parameters and click "Run Single Transaction" to decide a gateway, post feedback, and inspect the audit trail.</p>
+                  <p className="text-slate-500 text-sm mx-auto max-w-[57ch]">Fill in the parameters and click "Run Single Transaction" to decide a connector, post feedback, and inspect the audit trail.</p>
                 </CardBody>
               </Card>
             )
@@ -3994,7 +3994,7 @@ export function DecisionExplorerPage() {
                   ) : (
                     <EmptyAuditState
                       title="No audit trail captured yet"
-                      body="Run a simulated payment and gateway update first, then reopen the row once the audit payload is available."
+                      body="Run a simulated payment and connector update first, then reopen the row once the audit payload is available."
                     />
                   )}
                 </div>

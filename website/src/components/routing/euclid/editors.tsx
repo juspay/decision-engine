@@ -101,14 +101,14 @@ export function SortableGatewayItem({
         <input
           value={draftId}
           onChange={(e) => setDraftId(e.target.value)}
-          placeholder="Gateway ID (optional)"
+          placeholder="Connector ID (optional)"
           className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226]"
         />
         <button
           type="button"
           onClick={commit}
           disabled={!draftName.trim()}
-          aria-label="Save gateway"
+          aria-label="Save connector"
           className="text-emerald-700 transition-colors hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Check size={14} />
@@ -240,7 +240,7 @@ export function PriorityEditor({
           value={newGatewayId}
           onChange={(e) => setNewGatewayId(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
-          placeholder="Gateway ID (optional)"
+          placeholder="Connector ID (optional)"
           className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226]"
         />
         <Button type="button" size="sm" variant="secondary" onClick={add}>
@@ -331,7 +331,7 @@ export function VolumeSplitEditor({
           value={newId}
           onChange={(e) => setNewId(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
-          placeholder="Gateway ID (optional)"
+          placeholder="Connector ID (optional)"
           className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226]"
         />
         <Button type="button" size="sm" variant="secondary" onClick={add}>
@@ -403,7 +403,7 @@ function VolumeSplitRow({
         <input
           value={draftId}
           onChange={(e) => setDraftId(e.target.value)}
-          placeholder="Gateway ID (optional)"
+          placeholder="Connector ID (optional)"
           className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226]"
         />
         <button

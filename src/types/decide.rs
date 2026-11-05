@@ -83,9 +83,10 @@ pub struct DecideRoutingConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct DecideConnector {
-    pub gateway_name: String,
+    /// The connector's name, e.g. `stripe`.
+    pub connector: String,
     /// The connector account. A connector named without one is matched and scored by its
-    /// gateway name alone, as a hybrid `fallback_output` entry without a `gateway_id` is.
+    /// name alone, as a hybrid `fallback_output` entry without a `gateway_id` is.
     #[serde(default)]
     pub merchant_connector_id: Option<String>,
 }
@@ -102,7 +103,7 @@ impl DecideConnector {
 
     fn to_legacy(&self) -> ConnectorInfo {
         ConnectorInfo {
-            gateway_name: self.gateway_name.clone(),
+            gateway_name: self.connector.clone(),
             gateway_id: self.merchant_connector_id.clone(),
         }
     }
@@ -111,7 +112,7 @@ impl DecideConnector {
 impl From<ConnectorInfo> for DecideConnector {
     fn from(connector: ConnectorInfo) -> Self {
         Self {
-            gateway_name: connector.gateway_name,
+            connector: connector.gateway_name,
             merchant_connector_id: connector.gateway_id,
         }
     }
@@ -300,7 +301,7 @@ impl DecideRequest {
             .iter()
             .chain(self.routing_config.preferred_connectors.iter().flatten())
         {
-            if connector.gateway_name.trim().is_empty()
+            if connector.connector.trim().is_empty()
                 || connector
                     .merchant_connector_id
                     .as_deref()
@@ -422,7 +423,7 @@ mod tests {
                 "payment_id": "pay_1", "amount": 100, "currency": "USD",
                 "payment_method_type": "card", "payment_method_sub_type": "credit",
                 "routing_config": {"algorithm_for": "payment",
-                    "eligible_connectors": [{"gateway_name": "stripe", "merchant_connector_id": "mca_1"}]}
+                    "eligible_connectors": [{"connector": "stripe", "merchant_connector_id": "mca_1"}]}
             }),
         )?;
         let legacy: RoutingRequest = serde_json::from_value(json!({
@@ -481,9 +482,9 @@ mod tests {
         value["routing_config"]["enable_multi_objective"] = json!(true);
         value["routing_config"]["ranking_algorithm"] = json!("NTW_SR_HYBRID_ROUTING");
         value["routing_config"]["eligible_connectors"][1] =
-            json!({"gateway_name": "worldpay", "merchant_connector_id": "mca_wp_2"});
+            json!({"connector": "worldpay", "merchant_connector_id": "mca_wp_2"});
         value["routing_config"]["preferred_connectors"] = json!([
-            {"gateway_name": "worldpay", "merchant_connector_id": "mca_wp_2"}
+            {"connector": "worldpay", "merchant_connector_id": "mca_wp_2"}
         ]);
         let request = parse("pro_demo", value)?;
         let actual = serde_json::to_value(
@@ -610,8 +611,12 @@ mod tests {
         let mut value = baseline.clone();
         value["routing_config"]["fallback_connectors"] = json!([]);
         assert!(serde_json::from_value::<DecideRequest>(value).is_err());
-        let mut value = baseline;
+        let mut value = baseline.clone();
         value["routing_config"]["eligible_connectors"][0]["gateway_id"] = json!("mca_1");
+        assert!(serde_json::from_value::<DecideRequest>(value).is_err());
+        // A connector is named by `connector`, as everywhere in this contract.
+        let mut value = baseline;
+        value["routing_config"]["eligible_connectors"][0] = json!({"gateway_name": "stripe"});
         assert!(serde_json::from_value::<DecideRequest>(value).is_err());
         Ok(())
     }
@@ -641,8 +646,8 @@ mod tests {
             json!({
                 "payment_id": "pay_1", "amount": 100, "currency": "USD",
                 "routing_config": {"algorithm_for": "payment",
-                    "eligible_connectors": [{"gateway_name": "stripe"}, {"gateway_name": "adyen", "merchant_connector_id": null}],
-                    "preferred_connectors": [{"gateway_name": "adyen"}]}
+                    "eligible_connectors": [{"connector": "stripe"}, {"connector": "adyen", "merchant_connector_id": null}],
+                    "preferred_connectors": [{"connector": "adyen"}]}
             }),
         )?;
         let mapped = serde_json::to_value(flat.to_hybrid_request(&config()?)?)?;

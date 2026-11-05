@@ -9,7 +9,7 @@ import { test, expect, factory, poll } from '../../fixtures/test'
 test.describe('Payment audit payment field filter (API)', () => {
   test('finds payments by card BIN, country and metadata across every routing endpoint', async ({ api, merchant }) => {
     test.setTimeout(120_000)
-    const connectors = [{ gateway_name: 'stripe', merchant_connector_id: 'mca_stripe' }]
+    const connectors = [{ connector: 'stripe', merchant_connector_id: 'mca_stripe' }]
     const decide = (paymentId: string, bin: string, segment: string, country: string) =>
       api.raw('POST', '/decide', { body: {
         payment_id: paymentId, amount: 1000, currency: 'USD',

@@ -26,7 +26,7 @@ function abTestArmIds(active: RoutingAlgorithm[]): Set<string> {
 
 const config: RoutingRuleListConfig = {
   title: 'Rule-Based Routing',
-  description: 'Create conditions to route card and alternative payment transactions dynamically across multiple active gateways.',
+  description: 'Create conditions to route card and alternative payment transactions dynamically across multiple active connectors.',
   cellAlign: 'top',
   basePath: '/routing/rules',
   emptyText: 'No rule-based rules yet.',
@@ -46,7 +46,7 @@ const config: RoutingRuleListConfig = {
       },
     },
     {
-      header: 'Destination Gateway',
+      header: 'Destination Connector',
       gatewayFilter: true,
       cellClassName: 'max-w-[300px]',
       render: (algo) => {

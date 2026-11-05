@@ -263,11 +263,11 @@ export function RoutingRuleListPage({ config }: { config: RoutingRuleListConfig 
                           label={column.header}
                           value={gatewayFilter}
                           options={[
-                            { value: 'all', label: 'All gateways' },
+                            { value: 'all', label: 'All connectors' },
                             ...gatewayOptions.map((g) => ({ value: g, label: g })),
                           ]}
                           onChange={setGatewayFilter}
-                          ariaLabel="Filter by gateway"
+                          ariaLabel="Filter by connector"
                         />
                       ) : (
                         column.header
