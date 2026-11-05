@@ -83,6 +83,9 @@ where
     S: Clone + Send + Sync + 'static,
 {
     let middleware = ServiceBuilder::new()
+        .layer(middleware::from_fn(
+            custom_middleware::default_response_headers,
+        ))
         .layer(middleware::from_fn(ensure_request_id))
         .layer(
             tower_trace::TraceLayer::new_for_http()

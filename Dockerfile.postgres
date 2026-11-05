@@ -37,6 +37,7 @@ RUN PROFILE_FLAG=$([ "$BUILD_MODE" = "debug" ] && echo "" || echo "--profile ${B
 # ── Stage 3: build the binary ─────────────────────────────────────────────────
 # Dependencies are already compiled above. Only changed crates are recompiled.
 COPY . .
+ARG VERGEN_GIT_DESCRIBE
 RUN PROFILE_FLAG=$([ "$BUILD_MODE" = "debug" ] && echo "" || echo "--profile ${BUILD_MODE}") && \
     RUSTFLAGS="-A warnings" cargo build $PROFILE_FLAG --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES}
 
