@@ -342,9 +342,7 @@ fn rename_connector_ids(value: serde_json::Value) -> serde_json::Value {
                     .map(|(key, value)| {
                         let key = match key.as_str() {
                             "gateway_name" if is_connector => "connector".to_string(),
-                            "gateway_id" if is_connector => {
-                                "merchant_connector_id".to_string()
-                            }
+                            "gateway_id" if is_connector => "merchant_connector_id".to_string(),
                             _ => key,
                         };
                         (key, rename_connector_ids(value))
