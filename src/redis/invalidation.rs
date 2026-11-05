@@ -3,6 +3,7 @@
 use fred::interfaces::PubsubInterface;
 use fred::types::RedisValue;
 use once_cell::sync::Lazy;
+use tokio::sync::broadcast::error::RecvError;
 
 use crate::app::get_tenant_app_state;
 use crate::config::{CacheConfig, ClickHouseAnalyticsConfig};
@@ -91,15 +92,35 @@ pub fn spawn_subscriber(clickhouse: ClickHouseAnalyticsConfig) {
         let subscriber = state.redis_conn.conn.subscriber.clone();
 
         let mut messages = subscriber.on_message();
+        // Resubscribes after a Redis reconnect, otherwise invalidations silently stop arriving.
+        let _resubscriber = subscriber.manage_subscriptions();
+
         match subscriber.subscribe::<(), _>(channel.as_str()).await {
             Ok(()) => {
-                // Resubscribes after a Redis reconnect, otherwise invalidations silently stop arriving.
-                let _resubscriber = subscriber.manage_subscriptions();
                 logger::info!(tag = "cache_invalidation", channel = %channel, "Listening for cache invalidations");
 
-                while let Ok(message) = messages.recv().await {
-                    if *message.channel == *channel {
-                        handle(&message.value, &cache_config, &clickhouse);
+                let mut open = true;
+                while open {
+                    match messages.recv().await {
+                        Ok(message) if *message.channel == *channel => {
+                            handle(&message.value, &cache_config, &clickhouse);
+                        }
+                        Ok(_) => {}
+                        // A burst overran the buffer; the skipped entries expire on TTL, later ones still apply.
+                        Err(RecvError::Lagged(skipped)) => {
+                            logger::warn!(
+                                tag = "cache_invalidation",
+                                skipped,
+                                "Invalidations dropped; affected entries expire on TTL"
+                            );
+                        }
+                        Err(RecvError::Closed) => {
+                            logger::error!(
+                                tag = "cache_invalidation",
+                                "Subscriber stream closed; caches fall back to TTL expiry"
+                            );
+                            open = false;
+                        }
                     }
                 }
             }
