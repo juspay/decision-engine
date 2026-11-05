@@ -76,6 +76,7 @@ The merchant is set by the `x-connected-merchant-id` header, never the body.
   "customer_id": null,
   "routing_config": {
     "algorithm_for": "payment",
+    "decision_arm": null,
     "elimination_enabled": null,
     "enable_multi_objective": null,
     "ranking_algorithm": null,
@@ -97,6 +98,7 @@ The merchant is set by the `x-connected-merchant-id` header, never the body.
 Required: `payment_id`, `amount`, `currency`, `routing_config.algorithm_for` and `routing_config.eligible_connectors`. Other fields may be omitted or null.
 
 - `amount` is an unsigned integer in minor units.
+- `routing_config.decision_arm` identifies the caller-assigned arm: `control` or `variant`. It is retained in the request audit and does not override Decision Engine's internal experiment assignment. Omit it or send null when unspecified.
 - Country codes are ISO 3166 alpha-2.
 - BINs are strings, so leading zeros are kept.
 - A connector needs a nonempty `connector`. `merchant_connector_id` is optional and, when sent, nonempty.
