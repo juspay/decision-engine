@@ -5273,11 +5273,11 @@
                   "ranking_algorithm": null,
                   "eligible_connectors": [
                     {
-                      "gateway_name": "worldpay",
+                      "connector": "worldpay",
                       "payment_merchant_connector_id": "mca_wp"
                     },
                     {
-                      "gateway_name": "checkout",
+                      "connector": "checkout",
                       "payment_merchant_connector_id": "mca_cko"
                     }
                   ],
@@ -5289,7 +5289,7 @@
         },
         "responses": {
           "200": {
-            "description": "Routing decision. Connector order and account IDs are preserved from hybrid routing. An account ID can be null when a legacy rule identifies only a gateway.",
+            "description": "Routing decision. Connector order and account IDs are preserved from hybrid routing. An account ID can be null when a legacy rule names only the connector.",
             "content": {
               "application/json": {
                 "schema": {
@@ -10172,10 +10172,10 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "gateway_name"
+          "connector"
         ],
         "properties": {
-          "gateway_name": {
+          "connector": {
             "type": "string",
             "minLength": 1
           },
@@ -10183,7 +10183,7 @@
             "type": "string",
             "nullable": true,
             "minLength": 1,
-            "description": "The connector account. Omit it (or send null) to name the connector by gateway alone, as a hybrid fallback_output entry without gateway_id does; scores are then keyed by the gateway name."
+            "description": "The connector account. Omit it (or send null) to name the connector alone, as a hybrid fallback_output entry without gateway_id does; scores are then keyed by the connector name."
           }
         }
       },
@@ -10191,11 +10191,11 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "gateway_name",
+          "connector",
           "payment_merchant_connector_id"
         ],
         "properties": {
-          "gateway_name": {
+          "connector": {
             "type": "string"
           },
           "payment_merchant_connector_id": {
@@ -10488,7 +10488,7 @@
           "diagnostics": {
             "type": "object",
             "nullable": true,
-            "description": "The decider's internals, for support: `head_before_downtime_check`, `reset_approach`, `dimension {value, level}`, `filter_wise_gateways`, `priority_logic {tag, output}`, `dynamic_mga_enabled`, `gateway_mga_id_map`, `rust_based_decider` and `latency_ms`. Not covered by compatibility guarantees."
+            "description": "The decider's internals, for support: `head_before_downtime_check`, `reset_approach`, `dimension {value, level}`, `filter_wise_connectors`, `priority_logic {tag, output}`, `dynamic_mga_enabled`, `connector_mga_id_map`, `rust_based_decider` and `latency_ms`. Not covered by compatibility guarantees."
           }
         }
       },

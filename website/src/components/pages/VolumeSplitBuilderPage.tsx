@@ -211,7 +211,7 @@ export function VolumeSplitBuilderPage() {
         >
           <ArrowLeft size={16} /> Volume Split Routing
         </button>
-        <PageHeading title={isEdit ? 'Edit Volume Split Rule' : 'Create Volume Split Rule'} description="Divide traffic across gateways by percentage. The last row absorbs whatever the others leave." className="truncate" />
+        <PageHeading title={isEdit ? 'Edit Volume Split Rule' : 'Create Volume Split Rule'} description="Divide traffic across connectors by percentage. The last row absorbs whatever the others leave." className="truncate" />
       </div>
 
       {isEdit && !sourceRule && allRules && (
@@ -277,15 +277,15 @@ export function VolumeSplitBuilderPage() {
                 </p>
 
                 <div className="hidden grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(260px,320px)_32px] gap-3 px-1 text-xs font-medium text-slate-500 md:grid">
-                  <span>Gateway Name</span>
-                  <span>Gateway ID</span>
+                  <span>Connector Name</span>
+                  <span>Connector ID</span>
                   <span>Split %</span>
                   <span />
                 </div>
 
                 {gateways.map((g, index) => {
                   const isInferred = g.id === inferredGatewayId
-                  const label = g.gatewayName.trim() || `Gateway ${index + 1}`
+                  const label = g.gatewayName.trim() || `Connector ${index + 1}`
                   return (
                     <div
                       key={g.id}
@@ -375,7 +375,7 @@ export function VolumeSplitBuilderPage() {
                     onClick={addGateway}
                     className="flex items-center gap-1 text-[13px] font-medium text-brand-600 transition-colors hover:text-brand-700 dark:text-brand-400 leading-[18px]"
                   >
-                    <Plus size={14} /> Add Gateway
+                    <Plus size={14} /> Add Connector
                   </button>
                   <span
                     role={fieldErrors.total ? 'alert' : undefined}

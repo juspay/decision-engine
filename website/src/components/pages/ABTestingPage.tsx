@@ -1278,7 +1278,7 @@ function ExperimentDetailPanel({
                   <th className={TXN_HEAD_CELL}>Arm</th>
                   <th className={TXN_HEAD_CELL}>Routing</th>
                   <th className={TXN_HEAD_CELL}>Payment ID</th>
-                  <th className={TXN_HEAD_CELL}>Gateway</th>
+                  <th className={TXN_HEAD_CELL}>Connector</th>
                   <th className={TXN_HEAD_CELL}>Status</th>
                   <th className={TXN_HEAD_CELL}>Time</th>
                 </tr>
@@ -1407,7 +1407,7 @@ function SrArmEditor({ label, splitPct, config, onChange }: SrArmEditorProps) {
         <div>
           <label className={`mb-1.5 flex items-center gap-1 ${type.label}`}>
             Hedging %
-            <InfoHint text="Share of traffic sent to non-top gateways to keep their scores fresh (the explore-exploit tradeoff)." />
+            <InfoHint text="Share of traffic sent to non-top connectors to keep their scores fresh (the explore-exploit tradeoff)." />
           </label>
           <input
             type="number" min={0} max={100} step={1}
@@ -1421,7 +1421,7 @@ function SrArmEditor({ label, splitPct, config, onChange }: SrArmEditorProps) {
         <div>
           <label className={`mb-1.5 flex items-center gap-1 ${type.label}`}>
             Elimination threshold (0–1)
-            <InfoHint text="SR score (0–1) below which a gateway is dropped from routing." />
+            <InfoHint text="SR score (0–1) below which a connector is dropped from routing." />
           </label>
           <input
             type="number" min={0} max={1} step={0.01}

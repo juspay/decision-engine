@@ -30,10 +30,10 @@ test.describe('Rule Builder — UI interactions', () => {
       await expect(sharedPage.getByText('Configured Rules')).toBeVisible()
     })
 
-    test('shows the Default Fallback Gateway section', async ({ sharedPage }) => {
-      await expect(sharedPage.getByText('Default Fallback Gateway')).toBeVisible()
+    test('shows the Default Fallback Connector section', async ({ sharedPage }) => {
+      await expect(sharedPage.getByText('Default Fallback Connector')).toBeVisible()
       await expect(
-        sharedPage.getByText('This gateway handles any transactions that do not match'),
+        sharedPage.getByText('This connector handles any transactions that do not match'),
       ).toBeVisible()
     })
 
@@ -348,7 +348,7 @@ test.describe('Rule Builder — UI interactions', () => {
 
     test('shows correct description text', async ({ sharedPage }) => {
       await expect(
-        sharedPage.getByText('This gateway handles any transactions that do not match'),
+        sharedPage.getByText('This connector handles any transactions that do not match'),
       ).toBeVisible()
       await expect(sharedPage.getByText('fallback_output')).toBeVisible()
     })

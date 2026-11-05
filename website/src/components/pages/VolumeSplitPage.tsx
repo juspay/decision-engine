@@ -8,7 +8,7 @@ import { Notice } from '../ui/Notice'
 function describeSplit(algo: RoutingAlgorithm): string {
   const gateways = toVolumeSplitRuleDetailsState(algo)?.gateways ?? []
   const named = gateways.filter((g) => g.gatewayName.trim())
-  if (named.length === 0) return 'No gateways configured'
+  if (named.length === 0) return 'No connectors configured'
   return named.map((g) => `${g.gatewayName} ${g.split}%`).join(' / ')
 }
 
@@ -26,7 +26,7 @@ const activeRuleBased = (active: RoutingAlgorithm[]) =>
 
 const config: RoutingRuleListConfig = {
   title: 'Volume Split Routing',
-  description: 'Divide payment traffic across gateways by fixed percentages, independent of transaction attributes.',
+  description: 'Divide payment traffic across connectors by fixed percentages, independent of transaction attributes.',
   cellAlign: 'middle',
   basePath: '/routing/volume',
   emptyText: 'No volume split rules yet.',

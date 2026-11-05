@@ -3,14 +3,14 @@ import { VolumeSplitRuleFormValues } from './types'
 
 export const volumeSplitGatewaySchema = z.object({
   id: z.string().min(1),
-  gatewayName: z.string().trim().min(1, 'Gateway name is required'),
+  gatewayName: z.string().trim().min(1, 'Connector name is required'),
   gatewayId: z.string().trim(),
   split: z.number().min(0).max(100),
 })
 
 export const volumeSplitRuleFormSchema = z.object({
   ruleName: z.string().trim().min(1, 'Enter a rule name'),
-  gateways: z.array(volumeSplitGatewaySchema).min(1, 'Add at least one gateway'),
+  gateways: z.array(volumeSplitGatewaySchema).min(1, 'Add at least one connector'),
 })
 
 /** Every problem in the form, keyed to the control that owns it. */
@@ -37,13 +37,13 @@ export function collectVolumeSplitErrors(values: VolumeSplitRuleFormValues): Vol
     errors.ruleName = 'Enter a rule name'
   }
   if (!values.gateways.length) {
-    errors.total = 'Add at least one gateway.'
+    errors.total = 'Add at least one connector.'
     return errors
   }
 
   values.gateways.forEach((gateway) => {
     if (!gateway.gatewayName.trim()) {
-      errors.gateways[gateway.id] = 'Choose a gateway.'
+      errors.gateways[gateway.id] = 'Choose a connector.'
     }
   })
 

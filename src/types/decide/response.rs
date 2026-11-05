@@ -329,8 +329,9 @@ impl From<RoutingEvaluateResponse> for RuleSection {
     }
 }
 
-/// Rewrites the rule output's connector objects from `gateway_id` to
-/// `payment_merchant_connector_id`, whatever the output type nests them under.
+/// Rewrites the rule output's connector objects from the rule store's `{gateway_name, gateway_id}`
+/// to the `/decide` `{connector, payment_merchant_connector_id}`, whatever the output type nests
+/// them under.
 fn rename_connector_ids(value: serde_json::Value) -> serde_json::Value {
     match value {
         serde_json::Value::Object(map) => {
@@ -338,10 +339,12 @@ fn rename_connector_ids(value: serde_json::Value) -> serde_json::Value {
             serde_json::Value::Object(
                 map.into_iter()
                     .map(|(key, value)| {
-                        let key = if is_connector && key == "gateway_id" {
-                            "payment_merchant_connector_id".to_string()
-                        } else {
-                            key
+                        let key = match key.as_str() {
+                            "gateway_name" if is_connector => "connector".to_string(),
+                            "gateway_id" if is_connector => {
+                                "payment_merchant_connector_id".to_string()
+                            }
+                            _ => key,
                         };
                         (key, rename_connector_ids(value))
                     })
@@ -418,10 +421,10 @@ pub struct SuccessRateDiagnostics {
     pub head_before_downtime_check: Option<DecideConnector>,
     pub reset_approach: ResetApproach,
     pub dimension: SuccessRateDimension,
-    pub filter_wise_gateways: Option<serde_json::Value>,
+    pub filter_wise_connectors: Option<serde_json::Value>,
     pub priority_logic: PriorityLogicSection,
     pub dynamic_mga_enabled: bool,
-    pub gateway_mga_id_map: Option<serde_json::Value>,
+    pub connector_mga_id_map: Option<serde_json::Value>,
     pub rust_based_decider: bool,
     /// The decider's CPU time.
     pub latency_ms: Option<u64>,
@@ -442,9 +445,9 @@ pub struct PriorityLogicSection {
 #[derive(Debug, Serialize)]
 pub struct PriorityLogicOutput {
     pub is_enforcement: bool,
-    pub gws: Vec<String>,
+    pub connectors: Vec<String>,
     pub priority_logic_tag: Option<String>,
-    pub gateway_reference_ids: HashMap<String, String>,
+    pub connector_reference_ids: HashMap<String, String>,
     pub primary_logic: Option<PriorityLogicData>,
     pub fallback_logic: Option<PriorityLogicData>,
 }
@@ -461,9 +464,9 @@ impl From<GatewayPriorityLogicOutput> for PriorityLogicOutput {
         } = output;
         Self {
             is_enforcement,
-            gws,
+            connectors: gws,
             priority_logic_tag,
-            gateway_reference_ids: gateway_reference_ids.into_iter().collect(),
+            connector_reference_ids: gateway_reference_ids.into_iter().collect(),
             primary_logic,
             fallback_logic,
         }
@@ -697,13 +700,13 @@ impl From<DecidedGateway> for Layers {
                         value: routing_dimension,
                         level: routing_dimension_level,
                     },
-                    filter_wise_gateways,
+                    filter_wise_connectors: filter_wise_gateways,
                     priority_logic: PriorityLogicSection {
                         tag: priority_logic_tag,
                         output: priority_logic_output.map(Into::into),
                     },
                     dynamic_mga_enabled: is_dynamic_mga_enabled,
-                    gateway_mga_id_map,
+                    connector_mga_id_map: gateway_mga_id_map,
                     rust_based_decider: is_rust_based_decider,
                     latency_ms: latency,
                 }),
@@ -875,8 +878,8 @@ mod tests {
             success_rate: SuccessRateOutcome::Skipped,
             evaluated_connectors: Some(stripe_adyen()),
         })?;
-        let stripe = json!({"gateway_name": "stripe", "payment_merchant_connector_id": "mca_s"});
-        let adyen = json!({"gateway_name": "adyen", "payment_merchant_connector_id": "mca_a"});
+        let stripe = json!({"connector": "stripe", "payment_merchant_connector_id": "mca_s"});
+        let adyen = json!({"connector": "adyen", "payment_merchant_connector_id": "mca_a"});
         assert!(actual["id"]
             .as_str()
             .is_some_and(|id| id.starts_with("dec_")));
@@ -939,8 +942,8 @@ mod tests {
             success_rate: SuccessRateOutcome::Applied(Box::new(decision)),
             evaluated_connectors: Some(vec![connector("adyen", Some("mca_a"))]),
         })?;
-        let stripe = json!({"gateway_name": "stripe", "payment_merchant_connector_id": "mca_s"});
-        let adyen = json!({"gateway_name": "adyen", "payment_merchant_connector_id": "mca_a"});
+        let stripe = json!({"connector": "stripe", "payment_merchant_connector_id": "mca_s"});
+        let adyen = json!({"connector": "adyen", "payment_merchant_connector_id": "mca_a"});
         assert_eq!(actual["connectors"], json!([adyen, stripe]));
         assert_eq!(
             actual["outcome"],
@@ -953,20 +956,20 @@ mod tests {
                 "status": "applied",
                 "approach": "SR_SELECTION_MULTI_OBJECTIVE",
                 "scores": [
-                    {"gateway_name": "stripe", "payment_merchant_connector_id": "mca_s", "score": 0.98},
-                    {"gateway_name": "adyen", "payment_merchant_connector_id": "mca_a", "score": 0.97}
+                    {"connector": "stripe", "payment_merchant_connector_id": "mca_s", "score": 0.98},
+                    {"connector": "adyen", "payment_merchant_connector_id": "mca_a", "score": 0.97}
                 ],
                 "scheduled_outage": false,
                 "diagnostics": {
                     "head_before_downtime_check": stripe,
                     "reset_approach": "NO_RESET",
                     "dimension": {"value": "ORDER_PAYMENT, CREDIT, CARD", "level": "PM_LEVEL"},
-                    "filter_wise_gateways": null,
+                    "filter_wise_connectors": null,
                     "priority_logic": {"tag": "tag_1", "output": {"is_enforcement": false,
-                        "gws": ["stripe:mca_s"], "priority_logic_tag": "tag_1",
-                        "gateway_reference_ids": {}, "primary_logic": null, "fallback_logic": null}},
+                        "connectors": ["stripe:mca_s"], "priority_logic_tag": "tag_1",
+                        "connector_reference_ids": {}, "primary_logic": null, "fallback_logic": null}},
                     "dynamic_mga_enabled": false,
-                    "gateway_mga_id_map": null,
+                    "connector_mga_id_map": null,
                     "rust_based_decider": true,
                     "latency_ms": 4
                 }
@@ -978,10 +981,10 @@ mod tests {
                 "outcome": "COST_WON", "reason": "adyen beats stripe on EV",
                 "cost_saved_bps": 1480.0, "qualified_count": 2, "margin": 1.0, "ev_gap_top2": 0.1351,
                 "ranked": [
-                    {"gateway_name": "adyen", "payment_merchant_connector_id": "mca_a",
+                    {"connector": "adyen", "payment_merchant_connector_id": "mca_a",
                      "auth_rate": 0.97, "cost_bps": 20.0, "cost_source": "SEED", "cost_model": null,
                      "ev": 0.9681, "is_sr_head": false, "is_chosen": true},
-                    {"gateway_name": "stripe", "payment_merchant_connector_id": "mca_s",
+                    {"connector": "stripe", "payment_merchant_connector_id": "mca_s",
                      "auth_rate": 0.98, "cost_bps": 1500.0, "cost_source": "SEED",
                      "cost_model": {"brand": "VISA", "variant": null, "issuer": null, "ccy": null,
                                     "ic_category": null, "pct_bps": 150.0, "fixed_fee": null},
@@ -1013,7 +1016,7 @@ mod tests {
             actual["warnings"],
             json!([{"code": "success_rate_failed", "param": null, "message": "decider unavailable"}])
         );
-        assert_eq!(actual["connectors"][0]["gateway_name"], "stripe");
+        assert_eq!(actual["connectors"][0]["connector"], "stripe");
         Ok(())
     }
 
@@ -1169,12 +1172,12 @@ mod tests {
             success_rate: SuccessRateOutcome::Applied(Box::new(decision)),
             evaluated_connectors: Some(vec![connector("stripe", None)]),
         })?;
-        let stripe = json!({"gateway_name": "stripe", "payment_merchant_connector_id": null});
-        let adyen = json!({"gateway_name": "adyen", "payment_merchant_connector_id": null});
+        let stripe = json!({"connector": "stripe", "payment_merchant_connector_id": null});
+        let adyen = json!({"connector": "adyen", "payment_merchant_connector_id": null});
         assert_eq!(actual["connectors"], json!([stripe, adyen]));
         assert_eq!(actual["outcome"]["reason"], "success_rate_ranked");
         // Equal scores sort by identifier.
-        assert_eq!(actual["success_rate"]["scores"][0]["gateway_name"], "adyen");
+        assert_eq!(actual["success_rate"]["scores"][0]["connector"], "adyen");
         Ok(())
     }
 }

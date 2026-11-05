@@ -28,7 +28,7 @@ test.describe('Volume split output', () => {
     const then = euclid.thenSection(0)
 
     await expect(then.getByPlaceholder('Split %')).toBeVisible()
-    await expect(then.getByPlaceholder('Gateway name')).toBeVisible()
+    await expect(then.getByPlaceholder('Connector name')).toBeVisible()
     // Priority numbering disappears in split mode.
     await expect(then.getByText('1.', { exact: true })).toHaveCount(0)
   })
@@ -83,6 +83,6 @@ test.describe('Volume split output', () => {
 
     const then = euclid.thenSection(0)
     await expect(then.getByPlaceholder('Split %')).toHaveCount(0)
-    await expect(then.getByPlaceholder('Gateway name')).toBeVisible()
+    await expect(then.getByPlaceholder('Connector name')).toBeVisible()
   })
 })

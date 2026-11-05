@@ -35,9 +35,9 @@ test.describe('Decision Explorer UI', () => {
 
     await expect(authedPage.getByRole('button', { name: 'Evaluate Rules' }).first()).toBeVisible()
     await expect(authedPage.getByText('Rule Evaluation Parameters').first()).toBeVisible()
-    await expect(authedPage.getByText('Fallback Gateways').first()).toBeVisible()
-    await expect(authedPage.getByPlaceholder('gateway name').first()).toBeVisible()
-    await expect(authedPage.getByPlaceholder('gateway id (optional)').first()).toBeVisible()
+    await expect(authedPage.getByText('Fallback Connectors').first()).toBeVisible()
+    await expect(authedPage.getByPlaceholder('connector name').first()).toBeVisible()
+    await expect(authedPage.getByPlaceholder('connector id (optional)').first()).toBeVisible()
     await expect(authedPage.getByText('Add Parameter').first()).toBeVisible()
   })
 

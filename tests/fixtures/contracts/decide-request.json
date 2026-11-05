@@ -57,11 +57,11 @@
     "ranking_algorithm": null,
     "eligible_connectors": [
       {
-        "gateway_name": "worldpay",
+        "connector": "worldpay",
         "payment_merchant_connector_id": "mca_wp"
       },
       {
-        "gateway_name": "checkout",
+        "connector": "checkout",
         "payment_merchant_connector_id": "mca_cko"
       }
     ],
