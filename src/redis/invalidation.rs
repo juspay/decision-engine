@@ -3,7 +3,6 @@
 use fred::interfaces::PubsubInterface;
 use fred::types::RedisValue;
 use once_cell::sync::Lazy;
-use tokio::sync::broadcast::error::RecvError;
 
 use crate::app::get_tenant_app_state;
 use crate::config::{CacheConfig, ClickHouseAnalyticsConfig};
@@ -98,27 +97,9 @@ pub fn spawn_subscriber(clickhouse: ClickHouseAnalyticsConfig) {
                 let _resubscriber = subscriber.manage_subscriptions();
                 logger::info!(tag = "cache_invalidation", channel = %channel, "Listening for cache invalidations");
 
-                let mut open = true;
-                while open {
-                    match messages.recv().await {
-                        Ok(message) if *message.channel == *channel => {
-                            handle(&message.value, &cache_config, &clickhouse)
-                        }
-                        Ok(_) => {}
-                        Err(RecvError::Lagged(skipped)) => {
-                            logger::warn!(
-                                tag = "cache_invalidation",
-                                skipped,
-                                "Invalidations dropped; affected entries expire on TTL"
-                            );
-                        }
-                        Err(RecvError::Closed) => {
-                            logger::error!(
-                                tag = "cache_invalidation",
-                                "Subscriber stream closed; caches fall back to TTL expiry"
-                            );
-                            open = false;
-                        }
+                while let Ok(message) = messages.recv().await {
+                    if *message.channel == *channel {
+                        handle(&message.value, &cache_config, &clickhouse);
                     }
                 }
             }
