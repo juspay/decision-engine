@@ -51,9 +51,9 @@ const errors     = new Counter("decide_errors");
 const successRate = new Rate("decide_success");
 
 const srPayloads = [
-  { paymentMethodType: "CARD", paymentMethod: "DEBIT",  authType: "THREE_DS",    cardBrand: "VISA",       currency: "AED", amount: 1000, eligibleGatewayList: ["stripe", "adyen"] },
-  { paymentMethodType: "CARD", paymentMethod: "CREDIT", authType: "NO_THREE_DS", cardBrand: "MASTERCARD", currency: "USD", amount: 5000, eligibleGatewayList: ["stripe", "adyen", "checkout"] },
-  { paymentMethodType: "CARD", paymentMethod: "DEBIT",  authType: "THREE_DS",    cardBrand: "AMEX",       currency: "EUR", amount: 2500, eligibleGatewayList: ["adyen", "braintree"] },
+  { paymentMethod: "CARD", paymentMethodType: "DEBIT",  authType: "THREE_DS",    cardBrand: "VISA",       currency: "AED", amount: 1000, eligibleGatewayList: ["stripe", "adyen"] },
+  { paymentMethod: "CARD", paymentMethodType: "CREDIT", authType: "NO_THREE_DS", cardBrand: "MASTERCARD", currency: "USD", amount: 5000, eligibleGatewayList: ["stripe", "adyen", "checkout"] },
+  { paymentMethod: "CARD", paymentMethodType: "DEBIT",  authType: "THREE_DS",    cardBrand: "AMEX",       currency: "EUR", amount: 2500, eligibleGatewayList: ["adyen", "braintree"] },
 ];
 
 // ── Setup: identical auth flow to load_test.js ───────────────────────────────
