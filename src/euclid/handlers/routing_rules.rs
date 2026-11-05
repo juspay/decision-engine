@@ -218,7 +218,7 @@ pub(crate) async fn active_payment_experiment(
         }
     };
     match serde_json::from_str::<StaticRoutingAlgorithm>(&algorithm.algorithm_data).ok()? {
-        StaticRoutingAlgorithm::AbTest(data) => Some((algorithm.id, data)),
+        StaticRoutingAlgorithm::AbTest(data) => Some((algorithm.id, *data)),
         _ => None,
     }
 }
@@ -1032,7 +1032,7 @@ async fn evaluate_algorithm_data(
                 );
 
                 let r = preview::evaluate_rule_arm(
-                    plan.side,
+                    &plan.side,
                     plan.projection.rule_algorithm_id.as_deref(),
                     payload,
                     &state.db,
@@ -1851,11 +1851,12 @@ pub async fn activate_routing_rule(
 
         // Only the merchant's own algorithm can be activated; another merchant's id reads as
         // not-found.
-        let algorithm = algorithm_store::find(&state.db, &merchant, &payload.routing_algorithm_id)
-            .await
-            .change_context(EuclidErrors::RoutingAlgorithmNotFound(
-                payload.routing_algorithm_id.clone(),
-            ))?;
+        let mut algorithm =
+            algorithm_store::find(&state.db, &merchant, &payload.routing_algorithm_id)
+                .await
+                .change_context(EuclidErrors::RoutingAlgorithmNotFound(
+                    payload.routing_algorithm_id.clone(),
+                ))?;
 
         // An experiment runs in its own slot beside the active rule for its transaction type, so
         // the rule stays active, and listed as active, while the experiment runs and after it
@@ -1875,6 +1876,27 @@ pub async fn activate_routing_rule(
             .as_ref()
             .map(|mapping| mapping.routing_algorithm_id.clone())
             .filter(|id| *id != algorithm.id);
+        let already_active = occupant
+            .as_ref()
+            .is_some_and(|mapping| mapping.routing_algorithm_id == algorithm.id);
+        if is_experiment && !already_active {
+            if let Some(resumed) = with_stopped_variants_resumed(&algorithm.algorithm_data) {
+                let modified_at = utc_now();
+                algorithm_store::update_definition(
+                    &state.db,
+                    &merchant,
+                    &algorithm.id,
+                    &algorithm.name,
+                    &algorithm.description,
+                    resumed.clone(),
+                    modified_at,
+                )
+                .await
+                .change_context(EuclidErrors::StorageError)?;
+                algorithm.algorithm_data = resumed;
+                algorithm.modified_at = modified_at;
+            }
+        }
         let changed = match occupant {
             // Already active with the same algorithm: only the cache TTL is refreshed.
             Some(mapping) if mapping.routing_algorithm_id == algorithm.id => false,
@@ -1968,31 +1990,154 @@ pub async fn deactivate_routing_rule(
     outcome
 }
 
-/// Stop only the experiment that breached its guardrail. The regular routing rule remains active.
-/// The conditional delete cannot remove a replacement experiment activated in the meantime.
+fn utc_now() -> time::PrimitiveDateTime {
+    let now = time::OffsetDateTime::now_utc();
+    time::PrimitiveDateTime::new(now.date(), now.time())
+}
+
+/// The experiment definition with every guardrail-stopped variant running again, or `None` when no
+/// variant is stopped. A deliberate activation starts a new observation period, so a variant the
+/// guardrail stopped in an earlier run gets its traffic back.
+fn with_stopped_variants_resumed(algorithm_data: &str) -> Option<String> {
+    let StaticRoutingAlgorithm::AbTest(mut data) =
+        serde_json::from_str::<StaticRoutingAlgorithm>(algorithm_data).ok()?
+    else {
+        return None;
+    };
+    let variants = data.variants.as_mut()?;
+    if !variants.iter().any(|variant| variant.stopped) {
+        return None;
+    }
+    for variant in variants.iter_mut() {
+        variant.stopped = false;
+    }
+    serde_json::to_string(&StaticRoutingAlgorithm::AbTest(data)).ok()
+}
+
+/// Stop the variant that breached its guardrail. Its payments are routed by the live setup from then
+/// on, untracked, while the experiment's other variants keep running. When it was the last running variant the
+/// whole experiment stops instead; the regular routing rule remains active either way.
 pub(crate) async fn stop_breached_payment_experiment(
     merchant_id: &str,
     experiment_id: &str,
+    variant_id: &str,
     run: u64,
 ) -> Result<(), String> {
+    use crate::decider::gatewaydecider::ab_test::{arms, guardrail};
+
     let state = get_tenant_app_state().await;
     // Internal work, since the guardrail only names pairs the decider recorded while routing.
     let merchant = crate::auth::AuthorizedMerchant::internal(merchant_id);
     let payment = AlgorithmType::Payment.to_string();
     let slot = experiment_slot(&payment);
-    let deleted = algorithm_store::vacate_slot_holding(&state.db, &merchant, &slot, experiment_id)
+
+    let occupant = algorithm_store::find_slot(&state.db, &merchant, &slot)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    if occupant
+        .as_ref()
+        .is_none_or(|mapping| mapping.routing_algorithm_id != experiment_id)
+    {
+        // The experiment is no longer running, so the variant gets no traffic either.
+        return stop_whole_experiment(&state, &merchant, experiment_id, variant_id, run).await;
+    }
+
+    let algorithm = algorithm_store::find(&state.db, &merchant, experiment_id)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    let StaticRoutingAlgorithm::AbTest(mut data) =
+        serde_json::from_str::<StaticRoutingAlgorithm>(&algorithm.algorithm_data)
+            .map_err(|e| e.to_string())?
+    else {
+        return Err("the experiment slot holds an algorithm that is not an experiment".into());
+    };
+    let running = arms::running_variant_ids(&data);
+    if !running.iter().any(|id| id == variant_id) {
+        // Already stopped by an earlier attempt or another instance. That attempt may have saved
+        // the definition but failed to drop the cached slot, so drop it again before finishing.
+        drop_cached_experiment(&state, merchant_id).await?;
+        guardrail::mark_stopped(merchant_id, experiment_id, variant_id, run);
+        return Ok(());
+    }
+    if running.len() == 1 {
+        return stop_whole_experiment(&state, &merchant, experiment_id, variant_id, run).await;
+    }
+
+    // Several variants are running, so `variants` is set: the single-variant format has one.
+    let Some(variant) = data
+        .variants
+        .as_mut()
+        .and_then(|variants| variants.iter_mut().find(|v| v.id == variant_id))
+    else {
+        return Err(format!("variant {variant_id} is not in the experiment"));
+    };
+    variant.stopped = true;
+    let updated =
+        serde_json::to_string(&StaticRoutingAlgorithm::AbTest(data)).map_err(|e| e.to_string())?;
+    let replaced = algorithm_store::replace_definition_if_unchanged(
+        &state.db,
+        &merchant,
+        experiment_id,
+        &algorithm.algorithm_data,
+        updated,
+        utc_now(),
+    )
+    .await
+    .map_err(|e| format!("{e:?}"))?;
+    if !replaced {
+        // Another writer, such as a stop for a different variant, changed the definition after it
+        // was read. Later feedback retries against the new definition.
+        return Err("the experiment changed while stopping the variant".into());
+    }
+    // Drop the cached slot so every instance reads the updated definition on its next payment.
+    drop_cached_experiment(&state, merchant_id).await?;
+    guardrail::mark_stopped(merchant_id, experiment_id, variant_id, run);
+    logger::warn!(merchant_id = %merchant_id, experiment_id = %experiment_id,
+        variant_id = %variant_id, "A/B variant stopped after guardrail breach");
+    Ok(())
+}
+
+/// Drop the merchant's cached payment experiment slot, so the next read loads it from the
+/// database. Fails when Redis is unavailable, leaving the stop to be retried on later feedback.
+async fn drop_cached_experiment(
+    state: &crate::app::TenantAppState,
+    merchant_id: &str,
+) -> Result<(), String> {
+    let key = experiment_cache_key(merchant_id, &AlgorithmType::Payment.to_string());
+    state
+        .redis_conn
+        .delete_key(&key)
+        .await
+        .map(|_| ())
+        .map_err(|e| format!("{e:?}"))
+}
+
+/// Stop the experiment whose last running variant breached its guardrail.
+/// The conditional delete cannot remove a replacement experiment activated in the meantime.
+async fn stop_whole_experiment(
+    state: &crate::app::TenantAppState,
+    merchant: &crate::auth::AuthorizedMerchant,
+    experiment_id: &str,
+    variant_id: &str,
+    run: u64,
+) -> Result<(), String> {
+    let merchant_id = merchant.as_str();
+    let payment = AlgorithmType::Payment.to_string();
+    let slot = experiment_slot(&payment);
+    let deleted = algorithm_store::vacate_slot_holding(&state.db, merchant, &slot, experiment_id)
         .await
         .map_err(|e| format!("{e:?}"))?;
     if !deleted {
         // A previous attempt may have deleted the mapping but failed to update Redis. Retry the
         // cache write only when the slot is empty, never hiding a replacement experiment.
-        let active = algorithm_store::find_slot(&state.db, &merchant, &slot)
+        let active = algorithm_store::find_slot(&state.db, merchant, &slot)
             .await
             .map_err(|e| format!("{e:?}"))?;
         if active.is_some() {
             crate::decider::gatewaydecider::ab_test::guardrail::mark_stopped(
                 merchant_id,
                 experiment_id,
+                variant_id,
                 run,
             );
             return Ok(());
@@ -2002,15 +2147,11 @@ pub(crate) async fn stop_breached_payment_experiment(
     // just installed a replacement experiment, and writing "none" here would hide it until the
     // entry expired. Dropping the key only costs the next read a database lookup, which back-fills
     // whatever is actually active. Retry on later feedback if Redis is unavailable.
-    let key = experiment_cache_key(merchant_id, &payment);
-    state
-        .redis_conn
-        .delete_key(&key)
-        .await
-        .map_err(|e| format!("{e:?}"))?;
+    drop_cached_experiment(state, merchant_id).await?;
     crate::decider::gatewaydecider::ab_test::guardrail::mark_stopped(
         merchant_id,
         experiment_id,
+        variant_id,
         run,
     );
     logger::warn!(merchant_id = %merchant_id, experiment_id = %experiment_id,
@@ -2048,11 +2189,22 @@ fn changes_experiment_routing(
     let routing_setup = |algorithm: &StaticRoutingAlgorithm| {
         match algorithm {
             StaticRoutingAlgorithm::AbTest(data) => serde_json::to_value(
-                StaticRoutingAlgorithm::AbTest(crate::euclid::types::ABTestData {
+                StaticRoutingAlgorithm::AbTest(Box::new(crate::euclid::types::ABTestData {
                     min_sample_size: 0,
                     guardrail_threshold_pp: 0.0,
-                    ..data.clone()
-                }),
+                    // Display names and guardrail stops don't change how a payment is assigned.
+                    variants: data.variants.as_ref().map(|variants| {
+                        variants
+                            .iter()
+                            .map(|variant| crate::euclid::types::ExperimentVariant {
+                                name: None,
+                                stopped: false,
+                                ..variant.clone()
+                            })
+                            .collect()
+                    }),
+                    ..(**data).clone()
+                })),
             ),
             other => serde_json::to_value(other),
         }
@@ -2452,7 +2604,7 @@ mod routing_evaluate_analytics_flows_tests {
 
 #[cfg(test)]
 mod experiment_edit_tests {
-    use super::changes_experiment_routing;
+    use super::{changes_experiment_routing, with_stopped_variants_resumed};
     use crate::euclid::types::StaticRoutingAlgorithm;
 
     fn experiment(split: u8, sample: u32, guardrail: f64, rule: &str) -> StaticRoutingAlgorithm {
@@ -2488,5 +2640,62 @@ mod experiment_edit_tests {
             &existing,
             &experiment(10, 1000, 3.0, "routing_b")
         ));
+    }
+
+    fn multi_variant(
+        names: [&str; 2],
+        stopped: [bool; 2],
+        second_rule: &str,
+    ) -> StaticRoutingAlgorithm {
+        serde_json::from_value(serde_json::json!({
+            "type": "ab_test",
+            "data": {
+                "control": { "rule_algorithm_id": "routing_a" },
+                "variants": [
+                    { "id": "b", "name": names[0], "split_pct": 10,
+                      "rule_algorithm_id": "routing_b", "stopped": stopped[0] },
+                    { "id": "c", "name": names[1], "split_pct": 10,
+                      "rule_algorithm_id": second_rule, "stopped": stopped[1] }
+                ],
+                "min_sample_size": 1000,
+                "guardrail_threshold_pp": 3.0
+            }
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn variant_names_and_guardrail_stops_are_not_routing_changes() {
+        let existing = multi_variant(["B", "C"], [false, true], "routing_c");
+        assert!(!changes_experiment_routing(
+            &existing,
+            &multi_variant(["Rules B", "Rules C"], [false, false], "routing_c"),
+        ));
+        assert!(changes_experiment_routing(
+            &existing,
+            &multi_variant(["B", "C"], [false, true], "routing_d"),
+        ));
+    }
+
+    #[test]
+    fn activation_resumes_stopped_variants() {
+        let stopped =
+            serde_json::to_string(&multi_variant(["B", "C"], [true, false], "routing_c")).unwrap();
+        let resumed = with_stopped_variants_resumed(&stopped).expect("a variant was stopped");
+        let resumed: StaticRoutingAlgorithm = serde_json::from_str(&resumed).unwrap();
+        let StaticRoutingAlgorithm::AbTest(data) = resumed else {
+            panic!("not an experiment");
+        };
+        assert!(data
+            .variants
+            .unwrap()
+            .iter()
+            .all(|variant| !variant.stopped));
+
+        let running =
+            serde_json::to_string(&multi_variant(["B", "C"], [false, false], "routing_c")).unwrap();
+        assert!(with_stopped_variants_resumed(&running).is_none());
+        let single = serde_json::to_string(&experiment(10, 1000, 3.0, "routing_a")).unwrap();
+        assert!(with_stopped_variants_resumed(&single).is_none());
     }
 }

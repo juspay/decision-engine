@@ -469,13 +469,15 @@ pub async fn check_and_update_gateway_score_(
                 crate::euclid::handlers::routing_rules::stop_breached_payment_experiment(
                     &api_payload.merchant_id,
                     &breached.experiment_id,
+                    &breached.variant_id,
                     breached.run,
                 )
                 .await
             {
                 logger::error!(merchant_id = %api_payload.merchant_id,
-                    experiment_id = %breached.experiment_id, error = %error,
-                    "Failed to stop breached A/B experiment; later payment feedback will retry");
+                    experiment_id = %breached.experiment_id, variant_id = %breached.variant_id,
+                    error = %error,
+                    "Failed to stop breached A/B variant; later payment feedback will retry");
             }
         }
     }
