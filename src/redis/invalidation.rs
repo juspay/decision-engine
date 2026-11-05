@@ -1,5 +1,7 @@
 //! Cross-pod invalidation of in-process caches over Redis pub/sub.
 
+use std::time::Duration;
+
 use fred::interfaces::PubsubInterface;
 use fred::types::RedisValue;
 use once_cell::sync::Lazy;
@@ -36,6 +38,9 @@ struct CacheRedact {
 
 // Lets a pod skip its own messages; the writer has already updated its local copy.
 static INSTANCE_ID: Lazy<String> = Lazy::new(|| uuid::Uuid::new_v4().to_string());
+
+const SUBSCRIBE_RETRY_START: Duration = Duration::from_secs(1);
+const SUBSCRIBE_RETRY_MAX: Duration = Duration::from_secs(30);
 
 /// Tell every other pod to drop or rebuild `kind`; best effort, the cache TTL is the backstop.
 pub async fn publish(kind: CacheKind) {
@@ -95,37 +100,37 @@ pub fn spawn_subscriber(clickhouse: ClickHouseAnalyticsConfig) {
         // Resubscribes after a Redis reconnect, otherwise invalidations silently stop arriving.
         let _resubscriber = subscriber.manage_subscriptions();
 
-        match subscriber.subscribe::<(), _>(channel.as_str()).await {
-            Ok(()) => {
-                logger::info!(tag = "cache_invalidation", channel = %channel, "Listening for cache invalidations");
+        // A failed first subscribe would otherwise disable invalidation on this pod until restart.
+        let mut retry_in = SUBSCRIBE_RETRY_START;
+        while let Err(error) = subscriber.subscribe::<(), _>(channel.as_str()).await {
+            logger::warn!(tag = "cache_invalidation", ?error, channel = %channel, retry_in_secs = retry_in.as_secs(), "Subscribe failed; retrying");
+            tokio::time::sleep(retry_in).await;
+            retry_in = (retry_in * 2).min(SUBSCRIBE_RETRY_MAX);
+        }
+        logger::info!(tag = "cache_invalidation", channel = %channel, "Listening for cache invalidations");
 
-                loop {
-                    let message = match messages.recv().await {
-                        Ok(message) => message,
-                        // A burst overran the buffer; the skipped entries expire on TTL, later ones still apply.
-                        Err(RecvError::Lagged(skipped)) => {
-                            logger::warn!(
-                                tag = "cache_invalidation",
-                                skipped,
-                                "Invalidations dropped; affected entries expire on TTL"
-                            );
-                            continue;
-                        }
-                        Err(RecvError::Closed) => {
-                            logger::error!(
-                                tag = "cache_invalidation",
-                                "Subscriber stream closed; caches fall back to TTL expiry"
-                            );
-                            break;
-                        }
-                    };
-                    if *message.channel == *channel {
-                        handle(&message.value, &cache_config, &clickhouse);
-                    }
+        loop {
+            let message = match messages.recv().await {
+                Ok(message) => message,
+                // A burst overran the buffer; the skipped entries expire on TTL, later ones still apply.
+                Err(RecvError::Lagged(skipped)) => {
+                    logger::warn!(
+                        tag = "cache_invalidation",
+                        skipped,
+                        "Invalidations dropped; affected entries expire on TTL"
+                    );
+                    continue;
                 }
-            }
-            Err(error) => {
-                logger::error!(tag = "cache_invalidation", ?error, channel = %channel, "Subscribe failed; caches fall back to TTL expiry");
+                Err(RecvError::Closed) => {
+                    logger::error!(
+                        tag = "cache_invalidation",
+                        "Subscriber stream closed; caches fall back to TTL expiry"
+                    );
+                    break;
+                }
+            };
+            if *message.channel == *channel {
+                handle(&message.value, &cache_config, &clickhouse);
             }
         }
     });
