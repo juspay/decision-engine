@@ -57,7 +57,14 @@ mod cargo_workspace {
     }
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     cargo_workspace::verify_cargo_metadata_format();
     cargo_workspace::set_cargo_workspace_members_env();
+
+    println!("cargo:rerun-if-env-changed=VERGEN_GIT_DESCRIBE");
+    vergen::EmitBuilder::builder()
+        .git_describe(true, true, None)
+        .emit()?;
+
+    Ok(())
 }

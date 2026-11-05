@@ -11,6 +11,22 @@ use masking::PeekInterface;
 
 const API_KEY_CACHE_TTL: i64 = 300;
 
+/// Adds the build's Git version to every response, preserving an existing value.
+pub async fn default_response_headers(req: Request<Body>, next: Next) -> Response {
+    static VERSION: once_cell::sync::Lazy<axum::http::HeaderValue> =
+        once_cell::sync::Lazy::new(|| {
+            axum::http::HeaderValue::from_str(env!("VERGEN_GIT_DESCRIBE"))
+                .unwrap_or_else(|_| axum::http::HeaderValue::from_static("unknown"))
+        });
+
+    let mut response = next.run(req).await;
+    response
+        .headers_mut()
+        .entry("x-de-version")
+        .or_insert_with(|| VERSION.clone());
+    response
+}
+
 type EndpointMetricsFn =
     fn(
         axum::extract::State<&'static str>,
@@ -569,5 +585,87 @@ mod tests {
             .await
             .expect("body");
         assert_eq!(&body[..], b"made");
+    }
+}
+
+#[cfg(test)]
+mod response_header_tests {
+    use super::default_response_headers;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        middleware::{self, Next},
+        response::Response,
+        routing::get,
+        Json, Router,
+    };
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn version_covers_health_errors_rejections_and_fallbacks() {
+        async fn reject(_req: Request<Body>, _next: Next) -> Result<Response, StatusCode> {
+            Err(StatusCode::UNAUTHORIZED)
+        }
+
+        let protected = Router::new()
+            .route("/protected", get(|| async { "unreachable" }))
+            .route_layer(middleware::from_fn(reject));
+        let router = Router::new()
+            .merge(protected)
+            .nest(
+                "/health",
+                Router::new().route("/", get(crate::routes::health::health)),
+            )
+            .route(
+                "/error",
+                get(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
+            )
+            .route(
+                "/json",
+                axum::routing::post(|Json(_): Json<serde_json::Value>| async { "ok" }),
+            )
+            .layer(middleware::from_fn(default_response_headers));
+
+        for (method, uri, status) in [
+            ("GET", "/health", StatusCode::OK),
+            ("GET", "/error", StatusCode::INTERNAL_SERVER_ERROR),
+            ("GET", "/protected", StatusCode::UNAUTHORIZED),
+            ("GET", "/missing", StatusCode::NOT_FOUND),
+            ("POST", "/health", StatusCode::METHOD_NOT_ALLOWED),
+            ("POST", "/json", StatusCode::BAD_REQUEST),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(uri)
+                        .header("content-type", "application/json")
+                        .header("x-de-version", "client-supplied")
+                        .body(Body::from("invalid json"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), status, "{method} {uri}");
+            assert_eq!(
+                response.headers()["x-de-version"],
+                env!("VERGEN_GIT_DESCRIBE"),
+                "{method} {uri}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn version_preserves_existing_response_value() {
+        let router = Router::new()
+            .route(
+                "/",
+                get(|| async { ([("x-de-version", "existing")], "ok") }),
+            )
+            .layer(middleware::from_fn(default_response_headers));
+        let response = router.oneshot(Request::new(Body::empty())).await.unwrap();
+        assert_eq!(response.headers()["x-de-version"], "existing");
+        assert_eq!(response.headers().get_all("x-de-version").iter().count(), 1);
     }
 }

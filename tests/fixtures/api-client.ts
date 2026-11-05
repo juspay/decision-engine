@@ -238,7 +238,7 @@ export class ApiClient {
   }
 
   listActiveRoutingAlgorithms(createdBy: string, options: RequestOptions = {}) {
-    return this.raw('POST', `/routing/list/active/${createdBy}`, options)
+    return this.raw('GET', `/routing/list/active/${createdBy}`, options)
   }
 
   evaluateRoutingAlgorithm(payload: unknown, options: RequestOptions = {}) {

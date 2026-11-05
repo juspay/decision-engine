@@ -69,7 +69,11 @@ test.describe('A/B experiment edit', () => {
     const { status, requestBody, body } = await saved
     expect(status, JSON.stringify(body)).toBe(200)
     expect(requestBody.routing_algorithm_id).toBe(experiment.id)
-    expect(requestBody.algorithm.data.variant_split_pct).toBe(20)
+    // The saved single variant keeps its `variant` id, so its payments stay attributed the same way.
+    expect(requestBody.algorithm.data.variants).toEqual([
+      expect.objectContaining({ id: 'variant', split_pct: 20, sr: { enable_multi_objective: false, use_autopilot: true } }),
+    ])
+    expect(requestBody.algorithm.data.variant_split_pct).toBeUndefined()
   })
 
   test('an experiment with recorded payments keeps its routing setup', async ({ authedPage, api, merchant }) => {

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, type ReactNode } from 'react'
+import { Fragment, useState, useEffect, useRef, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import useSWR, { useSWRConfig } from 'swr'
@@ -27,17 +27,25 @@ import * as type from '../ui/typography'
 import { RuleBreakdown } from '../routing/euclid/RuleBreakdown'
 import { validateABTestForm, validateEvaluationSettings } from '../../features/routing/abTesting/schema'
 import { toABTestCreatePayload, withEvaluationSettings } from '../../features/routing/abTesting/payload'
-import { currentSetupArm, inferExperimentType, srStrategyOf, toABTestFormValues } from '../../features/routing/abTesting/state'
-import { ABTestFormValues, ABTestExperimentType, EditScope, ArmLayersForm, EMPTY_ARM, SrConfigOverrideForm, DEFAULT_VARIANT_SR_CONFIG, SR_STRATEGY_LABELS, SrStrategy } from '../../features/routing/abTesting/types'
+import { currentSetupArm, inferExperimentType, newVariant, srStrategyOf, toABTestFormValues } from '../../features/routing/abTesting/state'
+import { ABTestFormValues, ABTestExperimentType, EditScope, ArmLayersForm, SrConfigOverrideForm, SR_STRATEGY_LABELS, SrStrategy, VariantForm, MIN_VARIANT_PCT, MAX_VARIANT_PCT } from '../../features/routing/abTesting/types'
 import {
+  CONTROL_ARM_ID,
   ENDPOINT_LABELS,
   ENDPOINT_LAYERS,
   ENDPOINT_PATHS,
   EXPERIMENT_ENDPOINTS,
+  MAX_TOTAL_VARIANT_PCT,
+  MAX_VARIANTS,
+  armById,
+  armName,
+  comparedEndpoints,
+  comparedVariants,
+  controlSplitPct,
   projectArm,
-  resolvedArm,
-  sameArm,
-  splitEndpoints,
+  resolvedControl,
+  resolvedVariants,
+  routesDifferently,
 } from '../../features/routing/abTesting/arms'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { useConnectorFees } from '../../hooks/useCostRouting'
@@ -52,10 +60,10 @@ function abExperimentKind(abData?: ABTestAlgorithmData): ABTestExperimentType {
   return abData ? inferExperimentType(abData) : 'algorithm_comparison'
 }
 
-// Cost/net-value metrics are meaningful when either arm runs multi-objective (cost-aware) routing.
+// Cost/net-value metrics are meaningful when any arm runs multi-objective (cost-aware) routing.
 function hasCostArm(abData?: ABTestAlgorithmData): boolean {
-  return !!abData && (resolvedArm(abData, 'control').sr?.enable_multi_objective === true
-    || resolvedArm(abData, 'variant').sr?.enable_multi_objective === true)
+  return !!abData && [resolvedControl(abData), ...resolvedVariants(abData).map(v => v.arm)]
+    .some(arm => arm.sr?.enable_multi_objective === true)
 }
 
 // Hyperswitch SSO sessions route only through /routing/hybrid, so their experiments are scoped to it
@@ -240,8 +248,10 @@ const SR_STRATEGIES = Object.keys(SR_STRATEGY_LABELS) as (keyof typeof SR_STRATE
 // (Rule-based / Volume split / …) shows a 2nd dropdown when it has more than one config (a
 // single-config type is auto-selected). The SR layer is one of the SR strategies. Either layer may
 // be left empty; the arm needs at least one.
-function ArmLayersEditor({ label, help, accent, algorithms, value, costDataAvailable, srRoutingOn, liveSrConfig, onChange }: {
-  label: string
+function ArmLayersEditor({ label, help, accent, headerExtra, algorithms, value, costDataAvailable, srRoutingOn, liveSrConfig, onChange }: {
+  label: ReactNode
+  // Shown at the right of the arm's header, such as a variant's Remove action.
+  headerExtra?: ReactNode
   help: string
   // Variant arm (accent) vs control arm — drives the colored pill + panel tint so the two are
   // visually distinct and can't be misread for each other across the form.
@@ -301,6 +311,7 @@ function ArmLayersEditor({ label, help, accent, algorithms, value, costDataAvail
           {label}
         </span>
         <InfoHint text={help} />
+        {headerExtra && <span className="ml-auto">{headerExtra}</span>}
       </div>
 
       <div>
@@ -459,29 +470,30 @@ function ControlArmSummary({ arm, source, runningExperimentName, algorithms, alg
 }
 
 // Read-only preview of what the experiment compares on each endpoint. Each endpoint applies only the
-// arm layers it supports, and traffic is split only where the two arms differ. Hybrid-only sessions
-// see just `/routing/hybrid`.
+// arm layers it supports, and a variant's traffic is split only where it differs from control.
+// Hybrid-only sessions see just `/routing/hybrid`.
 function EndpointPreview({ form, hybridOnly, algorithmName }: {
   form: ABTestFormValues
   hybridOnly: boolean
   algorithmName: (id: string) => string
 }) {
   const data = toABTestCreatePayload(form, '').algorithm.data as ABTestAlgorithmData
-  const control = resolvedArm(data, 'control')
-  const variant = resolvedArm(data, 'variant')
+  const control = resolvedControl(data)
+  const variants = resolvedVariants(data)
   const endpoints = hybridOnly ? (['hybrid_routing'] as ExperimentEndpoint[]) : EXPERIMENT_ENDPOINTS
-  if (!(control.rule_algorithm_id || control.sr) || !(variant.rule_algorithm_id || variant.sr)) return null
+  const hasLayers = (arm: ExperimentArm) => !!(arm.rule_algorithm_id || arm.sr)
+  if (!hasLayers(control) || !variants.some(v => hasLayers(v.arm))) return null
 
   return (
     <div>
-      <FieldLabel hint="The experiment runs on every endpoint where the two arms differ. Each endpoint applies only the parts of an arm it supports, so the change measured can differ per endpoint. Results are reported per endpoint.">
+      <FieldLabel hint="Each variant runs on every endpoint where it differs from control. Each endpoint applies only the parts of an arm it supports, so the change measured can differ per endpoint. Results are reported per endpoint.">
         What's compared on each endpoint
       </FieldLabel>
       <div className="space-y-2">
         {endpoints.map(endpoint => {
           const c = projectArm(control, endpoint)
-          const v = projectArm(variant, endpoint)
-          const identical = sameArm(c, v)
+          const split = variants.filter(v => hasLayers(v.arm) && routesDifferently(control, v.arm, endpoint))
+          const identical = split.length === 0
           return (
             <div
               key={endpoint}
@@ -499,14 +511,20 @@ function EndpointPreview({ form, hybridOnly, algorithmName }: {
               </div>
               {identical ? (
                 <p className="mt-1 text-[12px] text-slate-500 dark:text-[#8d96aa] leading-4">
-                  Both arms route the same here ({armLabel(c, algorithmName, endpoint)}), so this endpoint's traffic isn't part of the experiment.
+                  {variants.length === 1 ? 'Both arms route' : 'Every variant routes'} the same as control here ({armLabel(c, algorithmName, endpoint)}), so this endpoint's traffic isn't part of the experiment.
                 </p>
               ) : (
-                <p className="mt-1 text-[12px] text-slate-500 dark:text-[#8d96aa] leading-4 break-words">
-                  <span className="font-medium">Control:</span> {armLabel(c, algorithmName, endpoint)}
-                  <span className="mx-1.5">vs</span>
-                  <span className="font-medium">Variant:</span> {armLabel(v, algorithmName, endpoint)}
-                </p>
+                <div className="mt-1 space-y-0.5 text-[12px] text-slate-500 dark:text-[#8d96aa] leading-4 break-words">
+                  <p><span className="font-medium">Control:</span> {armLabel(c, algorithmName, endpoint)}</p>
+                  {variants.map(v => (
+                    <p key={v.id}>
+                      <span className="font-medium">{v.name}:</span>{' '}
+                      {split.includes(v)
+                        ? armLabel(projectArm(v.arm, endpoint), algorithmName, endpoint)
+                        : <span className="italic">same as control here, so its traffic isn't part of the experiment</span>}
+                    </p>
+                  ))}
+                </div>
               )}
             </div>
           )
@@ -552,6 +570,26 @@ function VerdictChip({ verdict }: { verdict: string }) {
     </span>
   )
   return null
+}
+
+/**
+ * Results with `variants` filled in. A backend that predates multi-variant experiments answers with
+ * the single-variant fields only; they describe its one variant.
+ */
+function withVariantComparisons(results: ExperimentResultsResponse): ExperimentResultsResponse {
+  if (results.variants?.length) return results
+  return {
+    ...results,
+    significance_level: results.significance_level ?? 0.05,
+    variants: [{
+      metrics: results.variant,
+      delta_pp: results.delta_pp,
+      p_value: results.p_value,
+      confidence_interval: results.confidence_interval,
+      verdict: results.verdict,
+      net_delta_bps: results.net_delta_bps,
+    }],
+  }
 }
 
 // ─── SR Config param display helpers ──────────────────────────────────────────
@@ -670,7 +708,13 @@ function isSignificantVerdict(verdict: string): boolean {
  * reached, z-test ran, no detectable winner — a final, inconclusive result, NOT a "keep waiting"
  * state). Conflating them makes a completed experiment look stuck at 100%.
  */
-function ConfidenceBanner({ verdict }: { verdict: string }) {
+function ConfidenceBanner({ verdict, variantCount, significanceLevel }: {
+  verdict: string
+  variantCount: number
+  // Per-comparison level after the Bonferroni correction.
+  significanceLevel: number
+}) {
+  const confidence = `${+((1 - significanceLevel) * 100).toFixed(1)}%`
   // `not_significant` is only returned after the sample gate passes (see compute_significance),
   // so it always means the target was reached.
   if (verdict === 'not_significant') {
@@ -679,10 +723,12 @@ function ConfidenceBanner({ verdict }: { verdict: string }) {
         <Info size={16} className="mt-0.5 shrink-0 text-slate-500 dark:text-slate-400" />
         <p className="text-[13px] text-slate-700 dark:text-slate-300 leading-[18px]">
           <span className="font-medium text-slate-900 dark:text-slate-100">Sample target reached — no significant difference.</span>{' '}
-          Control and variant are statistically tied: the delta below sits within the 95% confidence
-          interval, so neither strategy is a proven winner. Collecting more traffic won't change this
-          unless the true gap is larger than the current split can detect — a wider variant allocation
-          would tighten the interval faster.
+          {variantCount === 1 ? 'Control and variant are' : 'No variant is'} statistically
+          {variantCount === 1 ? ' tied' : ' distinguishable from control'}: the deltas below sit within
+          the {confidence} confidence interval{variantCount > 1 ? ` (corrected for comparing ${variantCount} variants)` : ''},
+          so no strategy is a proven winner. Collecting more traffic won't change this unless the true
+          gap is larger than the current split can detect — a wider variant allocation would tighten
+          the interval faster.
         </p>
       </div>
     )
@@ -698,6 +744,25 @@ function ConfidenceBanner({ verdict }: { verdict: string }) {
   )
 }
 
+// Variants alternate between two brand shades so adjacent segments stay distinguishable.
+const VARIANT_BAR_CLS = ['bg-brand-500', 'bg-brand-300 dark:bg-brand-700']
+
+/** Control's share, then each variant's, as one stacked bar. */
+function SplitBar({ controlPct, variants, className = 'mt-2 h-1.5' }: {
+  controlPct: number
+  variants: { id: string; name: string; splitPct: number }[]
+  className?: string
+}) {
+  return (
+    <div className={`flex overflow-hidden rounded-full bg-slate-200 dark:bg-[#232833] ${className}`}>
+      <div className="bg-slate-400 dark:bg-slate-500" style={{ width: `${controlPct}%` }} title={`Control · ${controlPct}%`} />
+      {variants.map((v, i) => (
+        <div key={v.id} className={VARIANT_BAR_CLS[i % 2]} style={{ width: `${v.splitPct}%` }} title={`${v.name} · ${v.splitPct}%`} />
+      ))}
+    </div>
+  )
+}
+
 /** Control (slate) / Variant (brand) column-header pill, reused by both comparison tables. */
 function ArmTh({ label, pct, accent }: { label: string; pct: number; accent?: boolean }) {
   return (
@@ -709,59 +774,62 @@ function ArmTh({ label, pct, accent }: { label: string; pct: number; accent?: bo
   )
 }
 
-/** Config side-by-side: one row per layer, so what each arm applies reads as one matrix. */
-function ConfigComparisonTable({ abData, isTuning, controlPct, variantPct, live, autopilotOn, algorithmName, algorithms }: {
+/** Config side-by-side: one row per layer, one column per arm, so what each arm applies reads as one matrix. */
+function ConfigComparisonTable({ abData, isTuning, live, autopilotOn, algorithmName, algorithms }: {
   abData: ABTestAlgorithmData
   isTuning: boolean
-  controlPct: number
-  variantPct: number
   live: { hedging: number | null; elimination: number | null; bucketSize: number | null }
   autopilotOn: boolean
   algorithmName: (id: string) => string
   algorithms: RoutingAlgorithm[]
 }) {
-  const control = resolvedArm(abData, 'control')
-  const variant = resolvedArm(abData, 'variant')
+  const control = resolvedControl(abData)
+  const variants = resolvedVariants(abData)
+  const arms = [control, ...variants.map(v => v.arm)]
   const muted = (t: string) => <span className="italic text-slate-500">{t}</span>
   const dash = <span className="text-slate-500 dark:text-slate-400">—</span>
   const emphasis = (v: ReactNode) => <span className="font-medium text-brand-600 dark:text-brand-400">{v}</span>
   const elimText = (e: number) => `Drops below ${(e * 100).toFixed(0)}% score`
 
-  const rows: { label: string; control: ReactNode; variant: ReactNode }[] = []
+  // `cells[0]` is control, then one per variant.
+  const rows: { label: string; cells: ReactNode[] }[] = []
 
   if (isTuning) {
-    // Same SR algorithm, control on live config, variant on its overrides.
-    const vHedge = variant.sr?.hedging_percent
-    const vElim = variant.sr?.elimination_threshold
-    rows.push({ label: 'Strategy', control: 'SR Routing (live config)', variant: 'SR Routing (custom params)' })
+    // Same SR algorithm, control on live config, each variant on its overrides.
+    rows.push({ label: 'Strategy', cells: ['SR Routing (live config)', ...variants.map(() => 'SR Routing (custom params)')] })
     rows.push({
       label: 'Hedging %',
-      control: live.hedging != null ? `${live.hedging}%` : muted('Uses default'),
-      variant: typeof vHedge === 'number' ? emphasis(`${vHedge}%`) : muted('Same as control'),
+      cells: [
+        live.hedging != null ? `${live.hedging}%` : muted('Uses default'),
+        ...variants.map(({ arm }) => typeof arm.sr?.hedging_percent === 'number' ? emphasis(`${arm.sr.hedging_percent}%`) : muted('Same as control')),
+      ],
     })
     rows.push({
       label: 'Elimination threshold',
-      control: live.elimination != null ? elimText(live.elimination) : muted('Uses default'),
-      variant: typeof vElim === 'number' ? emphasis(elimText(vElim)) : muted('Same as control'),
+      cells: [
+        live.elimination != null ? elimText(live.elimination) : muted('Uses default'),
+        ...variants.map(({ arm }) => typeof arm.sr?.elimination_threshold === 'number' ? emphasis(elimText(arm.sr.elimination_threshold)) : muted('Same as control')),
+      ],
     })
   } else {
     const rule = (arm: ExperimentArm) => arm.rule_algorithm_id
       ? <div className="space-y-1.5"><p className="font-medium">{algorithmName(arm.rule_algorithm_id)}</p><ArmRuleDetail algorithmId={arm.rule_algorithm_id} algorithms={algorithms} /></div>
       : muted('No rule — uses the request’s fallback connectors')
-    rows.push({ label: 'Routing rule', control: rule(control), variant: rule(variant) })
-    rows.push({
-      label: 'SR strategy',
-      control: control.sr ? srLabel(control.sr) : muted('No SR'),
-      variant: variant.sr ? srLabel(variant.sr) : muted('No SR'),
-    })
-    if (control.sr || variant.sr) {
+    rows.push({ label: 'Routing rule', cells: arms.map(rule) })
+    rows.push({ label: 'SR strategy', cells: arms.map(arm => arm.sr ? srLabel(arm.sr) : muted('No SR')) })
+    if (arms.some(arm => arm.sr)) {
       const auto = (arm: ExperimentArm) => !!arm.sr && arm.sr.use_autopilot !== false && autopilotOn
-      const hedge = (arm: ExperimentArm) => !arm.sr ? dash : auto(arm) ? muted('Auto-tuned per segment') : live.hedging != null ? `${live.hedging}%` : muted('Uses default')
+      // An arm's own override shows ahead of the live or auto-tuned value it replaces.
+      const hedge = (arm: ExperimentArm) => !arm.sr ? dash
+        : typeof arm.sr.hedging_percent === 'number' ? emphasis(`${arm.sr.hedging_percent}%`)
+          : auto(arm) ? muted('Auto-tuned per segment') : live.hedging != null ? `${live.hedging}%` : muted('Uses default')
       const bucket = (arm: ExperimentArm) => !arm.sr ? dash : auto(arm) ? muted('Auto-tuned per segment') : live.bucketSize != null ? `${live.bucketSize} requests` : muted('Uses default')
-      const elim = (arm: ExperimentArm) => !arm.sr ? dash : live.elimination != null ? elimText(live.elimination) : muted('Uses default')
-      rows.push({ label: 'Hedging %', control: hedge(control), variant: hedge(variant) })
-      rows.push({ label: 'Elimination threshold', control: elim(control), variant: elim(variant) })
-      rows.push({ label: 'Bucket size', control: bucket(control), variant: bucket(variant) })
+      const elim = (arm: ExperimentArm) => !arm.sr ? dash
+        : typeof arm.sr.elimination_threshold === 'number' ? emphasis(elimText(arm.sr.elimination_threshold))
+          : live.elimination != null ? elimText(live.elimination) : muted('Uses default')
+      rows.push({ label: 'Hedging %', cells: arms.map(hedge) })
+      rows.push({ label: 'Elimination threshold', cells: arms.map(elim) })
+      rows.push({ label: 'Bucket size', cells: arms.map(bucket) })
     }
   }
 
@@ -770,17 +838,20 @@ function ConfigComparisonTable({ abData, isTuning, controlPct, variantPct, live,
       <table className="w-full min-w-[520px] text-sm">
         <thead>
           <tr className="border-b border-slate-200 bg-slate-50 text-left dark:border-[#222226] dark:bg-[#0c0c10]">
-            <th className="w-[28%] px-4 py-2.5 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">Attribute</th>
-            <th className="px-4 py-2.5"><ArmTh label="Control" pct={controlPct} /></th>
-            <th className="px-4 py-2.5"><ArmTh label="Variant" pct={variantPct} accent /></th>
+            <th className="w-[22%] px-4 py-2.5 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">Attribute</th>
+            <th className="px-4 py-2.5"><ArmTh label="Control" pct={controlSplitPct(abData)} /></th>
+            {variants.map(v => (
+              <th key={v.id} className="px-4 py-2.5"><VariantTh variant={v} /></th>
+            ))}
           </tr>
         </thead>
         <tbody>
           {rows.map((r, i) => (
             <tr key={r.label} className={i > 0 ? 'border-t border-slate-100 dark:border-[#1a1a22]' : ''}>
               <td className="px-4 py-2.5 align-top text-[13px] font-medium text-slate-500 dark:text-[#8d96aa] leading-[18px]">{r.label}</td>
-              <td className="px-4 py-2.5 align-top text-slate-700 dark:text-slate-200">{r.control}</td>
-              <td className="px-4 py-2.5 align-top text-slate-700 dark:text-slate-200">{r.variant}</td>
+              {r.cells.map((cell, j) => (
+                <td key={j} className="px-4 py-2.5 align-top text-slate-700 dark:text-slate-200">{cell}</td>
+              ))}
             </tr>
           ))}
         </tbody>
@@ -789,27 +860,56 @@ function ConfigComparisonTable({ abData, isTuning, controlPct, variantPct, live,
   )
 }
 
-/** Row-aligned performance comparison. Deltas stay neutral until the verdict is significant. */
-function MetricsComparisonTable({ results, controlPct, variantPct, costKind, significant }: {
+/** A variant's column header: its name and share, marked when the guardrail stopped it. */
+function VariantTh({ variant }: { variant: { name: string; splitPct: number; stopped: boolean } }) {
+  return (
+    <span className="inline-flex flex-wrap items-center gap-1">
+      <ArmTh label={variant.name} pct={variant.splitPct} accent />
+      {variant.stopped && (
+        <span className="inline-flex items-center gap-1 rounded-full bg-red-100 px-2 py-0.5 text-[11px] font-medium text-red-600 dark:bg-red-900/30 dark:text-red-400 leading-4" title="The guardrail stopped this variant. Its payments now use your live routing setup.">
+          <AlertTriangle size={10} /> Stopped
+        </span>
+      )}
+    </span>
+  )
+}
+
+/**
+ * Row-aligned performance comparison: control, then each variant with its delta against control.
+ * A variant's deltas stay neutral until its own verdict is significant.
+ */
+function MetricsComparisonTable({ results, abData, costKind }: {
   results: ExperimentResultsResponse
-  controlPct: number
-  variantPct: number
+  abData: ABTestAlgorithmData
   costKind: boolean
-  significant: boolean
 }) {
   const c = results.control
-  const v = results.variant
-  const narDelta = (v.auth_rate - c.auth_rate) * 100
-  const faarDelta = (v.first_attempt_auth_rate - c.first_attempt_auth_rate) * 100
-  const tcsDelta = (v.total_cost_saved ?? 0) - (c.total_cost_saved ?? 0)
+  const configured = resolvedVariants(abData)
+  const header = (arm: string) => configured.find(v => v.id === arm) ?? { name: armName(abData, arm), splitPct: 0, stopped: false }
   // Colour a delta only once the verdict is real — otherwise an early, noisy number would read as a win.
-  const deltaCls = (d: number) => !significant
+  const deltaCls = (d: number, significant: boolean) => !significant
     ? 'text-slate-500 dark:text-slate-400'
     : d > 0 ? 'text-emerald-700 dark:text-emerald-400' : d < 0 ? 'text-red-600' : 'text-slate-500'
   const num = 'px-4 py-2.5 text-right text-slate-700 dark:text-slate-200'
   const metricCell = (label: string, sub: string) => (
     <td className="px-4 py-2.5"><span className="font-medium text-slate-700 dark:text-slate-200">{label}</span> <span className="text-[12px] text-slate-500 leading-4">{sub}</span></td>
   )
+  const money = (v: number | null) => v != null ? v.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'
+  const outcome = (m: { success_count: number; failure_count: number }) => (
+    <><span className="text-emerald-700 dark:text-emerald-400">{m.success_count.toLocaleString()}</span> <span className="text-slate-500 dark:text-slate-400">/</span> <span className="text-red-600">{m.failure_count.toLocaleString()}</span></>
+  )
+  // A variant's value with its delta against control beneath it.
+  const withDelta = (value: ReactNode, delta: number | null, label: string, significant: boolean) => (
+    <td className={num}>
+      <div>{value}</div>
+      {delta !== null && <div className={`text-[12px] font-medium leading-4 ${deltaCls(delta, significant)}`}>{label}</div>}
+    </td>
+  )
+  const rowCls = 'border-t border-slate-100 dark:border-[#1a1a22]'
+  // Rates exist only over resolved payments; an arm with none has no rate, and no delta against it.
+  const resolvedCount = (m: { success_count: number; failure_count: number }) => m.success_count + m.failure_count
+  const rate = (m: { success_count: number; failure_count: number }, value: number) => resolvedCount(m) > 0 ? authRatePct(value) : '—'
+  const hasRates = (m: { success_count: number; failure_count: number }) => resolvedCount(m) > 0 && resolvedCount(c) > 0
 
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-[#222226]">
@@ -817,42 +917,52 @@ function MetricsComparisonTable({ results, controlPct, variantPct, costKind, sig
         <thead>
           <tr className="border-b border-slate-200 bg-slate-50 text-left dark:border-[#222226] dark:bg-[#0c0c10]">
             <th className="px-4 py-2.5 text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">Metric</th>
-            <th className="px-4 py-2.5 text-right"><ArmTh label="Control" pct={controlPct} /></th>
-            <th className="px-4 py-2.5 text-right"><ArmTh label="Variant" pct={variantPct} accent /></th>
-            <th className="px-4 py-2.5 text-right text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">Delta</th>
+            <th className="px-4 py-2.5 text-right"><ArmTh label="Control" pct={controlSplitPct(abData)} /></th>
+            {results.variants.map(v => (
+              <th key={v.metrics.arm} className="px-4 py-2.5 text-right">
+                <div className="flex flex-col items-end gap-1">
+                  <VariantTh variant={header(v.metrics.arm)} />
+                  <VerdictChip verdict={v.verdict} />
+                </div>
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
           <tr>
             {metricCell('Net auth rate', 'NAR')}
-            <td className={num}>{authRatePct(c.auth_rate)}</td>
-            <td className={num}>{authRatePct(v.auth_rate)}</td>
-            <td className={`px-4 py-2.5 text-right font-medium ${deltaCls(narDelta)}`}>{deltaLabel(narDelta)}</td>
+            <td className={num}>{rate(c, c.auth_rate)}</td>
+            {results.variants.map(v => {
+              const d = hasRates(v.metrics) ? (v.metrics.auth_rate - c.auth_rate) * 100 : null
+              return <Fragment key={v.metrics.arm}>{withDelta(rate(v.metrics, v.metrics.auth_rate), d, d === null ? '' : deltaLabel(d), isSignificantVerdict(v.verdict))}</Fragment>
+            })}
           </tr>
-          <tr className="border-t border-slate-100 dark:border-[#1a1a22]">
+          <tr className={rowCls}>
             {metricCell('First-attempt rate', 'FAAR')}
-            <td className={num}>{authRatePct(c.first_attempt_auth_rate)}</td>
-            <td className={num}>{authRatePct(v.first_attempt_auth_rate)}</td>
-            <td className={`px-4 py-2.5 text-right font-medium ${deltaCls(faarDelta)}`}>{deltaLabel(faarDelta)}</td>
+            <td className={num}>{rate(c, c.first_attempt_auth_rate)}</td>
+            {results.variants.map(v => {
+              const d = hasRates(v.metrics) ? (v.metrics.first_attempt_auth_rate - c.first_attempt_auth_rate) * 100 : null
+              return <Fragment key={v.metrics.arm}>{withDelta(rate(v.metrics, v.metrics.first_attempt_auth_rate), d, d === null ? '' : deltaLabel(d), isSignificantVerdict(v.verdict))}</Fragment>
+            })}
           </tr>
-          <tr className="border-t border-slate-100 dark:border-[#1a1a22]">
+          <tr className={rowCls}>
             {metricCell('Transactions', 'count')}
             <td className={num}>{c.transaction_count.toLocaleString()}</td>
-            <td className={num}>{v.transaction_count.toLocaleString()}</td>
-            <td className="px-4 py-2.5 text-right text-slate-500 dark:text-slate-400">—</td>
+            {results.variants.map(v => <td key={v.metrics.arm} className={num}>{v.metrics.transaction_count.toLocaleString()}</td>)}
           </tr>
-          <tr className="border-t border-slate-100 dark:border-[#1a1a22]">
+          <tr className={rowCls}>
             {metricCell('Outcome', 'success / fail')}
-            <td className="px-4 py-2.5 text-right"><span className="text-emerald-700 dark:text-emerald-400">{c.success_count.toLocaleString()}</span> <span className="text-slate-500 dark:text-slate-400">/</span> <span className="text-red-600">{c.failure_count.toLocaleString()}</span></td>
-            <td className="px-4 py-2.5 text-right"><span className="text-emerald-700 dark:text-emerald-400">{v.success_count.toLocaleString()}</span> <span className="text-slate-500 dark:text-slate-400">/</span> <span className="text-red-600">{v.failure_count.toLocaleString()}</span></td>
-            <td className="px-4 py-2.5 text-right text-slate-500 dark:text-slate-400">—</td>
+            <td className="px-4 py-2.5 text-right">{outcome(c)}</td>
+            {results.variants.map(v => <td key={v.metrics.arm} className="px-4 py-2.5 text-right">{outcome(v.metrics)}</td>)}
           </tr>
           {costKind && (
-            <tr className="border-t border-slate-100 dark:border-[#1a1a22]">
+            <tr className={rowCls}>
               {metricCell('Cost saved', 'TCS')}
-              <td className="px-4 py-2.5 text-right text-sky-700 dark:text-sky-400">{c.total_cost_saved != null ? c.total_cost_saved.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</td>
-              <td className="px-4 py-2.5 text-right text-sky-700 dark:text-sky-400">{v.total_cost_saved != null ? v.total_cost_saved.toLocaleString(undefined, { maximumFractionDigits: 2 }) : '—'}</td>
-              <td className={`px-4 py-2.5 text-right font-medium ${deltaCls(tcsDelta)}`}>{`${tcsDelta > 0 ? '+' : ''}${tcsDelta.toLocaleString(undefined, { maximumFractionDigits: 2 })}`}</td>
+              <td className="px-4 py-2.5 text-right text-sky-700 dark:text-sky-400">{money(c.total_cost_saved)}</td>
+              {results.variants.map(v => {
+                const d = (v.metrics.total_cost_saved ?? 0) - (c.total_cost_saved ?? 0)
+                return <Fragment key={v.metrics.arm}>{withDelta(<span className="text-sky-700 dark:text-sky-400">{money(v.metrics.total_cost_saved)}</span>, d, `${d > 0 ? '+' : ''}${d.toLocaleString(undefined, { maximumFractionDigits: 2 })}`, isSignificantVerdict(v.verdict))}</Fragment>
+              })}
             </tr>
           )}
         </tbody>
@@ -913,27 +1023,39 @@ function ExperimentDetailPanel({
 
   // An experiment applies different layers per endpoint, so its arms are only comparable within one
   // endpoint: results are read one endpoint at a time. Hybrid-only sessions only ever see hybrid.
+  // An endpoint keeps its results tab after the variants compared there stop.
   const hybridOnly = useHybridOnlySession()
   const endpoints = abData
-    ? splitEndpoints(abData).filter(e => !hybridOnly || e === 'hybrid_routing')
+    ? comparedEndpoints(abData).filter(e => !hybridOnly || e === 'hybrid_routing')
     : []
   const [pickedEndpoint, setPickedEndpoint] = useState<ExperimentEndpoint | null>(null)
   const endpoint = pickedEndpoint && endpoints.includes(pickedEndpoint) ? pickedEndpoint : endpoints[0] ?? null
-  const servedArm = (side: 'control' | 'variant'): ExperimentArm | null =>
-    abData && endpoint ? projectArm(resolvedArm(abData, side), endpoint) : null
+  const variants = abData ? resolvedVariants(abData) : []
+  // The variants compared with control on the selected endpoint. The others route like control
+  // there and record nothing, so they are left out of its results, progress and verdict.
+  const endpointVariants = abData && endpoint ? comparedVariants(abData, endpoint) : []
+  // The layers the arm recorded under `armId` applied on the selected endpoint.
+  const servedArm = (armId: string): ExperimentArm | null => {
+    const arm = abData && endpoint ? armById(abData, armId) : undefined
+    return arm && endpoint ? projectArm(arm, endpoint) : null
+  }
 
-  // If the variant carries a margin override, value net EV at it; otherwise the backend default.
-  const evalMargin = abData ? resolvedArm(abData, 'variant').sr?.margin : undefined
+  // If a variant carries a margin override, value net EV at it; otherwise the backend default.
+  const evalMargin = variants.find(v => v.arm.sr?.margin !== undefined)?.arm.sr?.margin
   const startParam = experimentStartParam(algorithm)
+  // The variant ids set the order and the number of comparisons the significance level is
+  // corrected for, including variants that haven't recorded anything yet.
+  const variantsParam = endpointVariants.map(v => encodeURIComponent(v.id)).join(',')
   const resultsUrl = abData && endpoint
-    ? `/analytics/experiment/${algorithm.id}/results?endpoint=${endpoint}${startParam}&min_sample_size=${abData.min_sample_size}&guardrail_threshold_pp=${abData.guardrail_threshold_pp}${evalMargin !== undefined ? `&evaluation_margin=${evalMargin}` : ''}`
+    ? `/analytics/experiment/${algorithm.id}/results?endpoint=${endpoint}${startParam}&min_sample_size=${abData.min_sample_size}&guardrail_threshold_pp=${abData.guardrail_threshold_pp}&variants=${variantsParam}${evalMargin !== undefined ? `&evaluation_margin=${evalMargin}` : ''}`
     : null
 
-  const { data: results, isLoading } = useSWR<ExperimentResultsResponse>(
+  const { data: rawResults, isLoading } = useSWR<ExperimentResultsResponse>(
     merchantId && resultsUrl ? resultsUrl : null,
     fetcher,
     { refreshInterval: 60_000 },
   )
+  const results = rawResults ? withVariantComparisons(rawResults) : undefined
 
   const TXN_PAGE_SIZE = 20
   const [txnPage, setTxnPage] = useState(1)
@@ -948,10 +1070,10 @@ function ExperimentDetailPanel({
   )
 
   function routingType(variantArm: string): string {
-    const arm = servedArm(variantArm === 'control' ? 'control' : 'variant')
+    const arm = servedArm(variantArm)
     if (!arm) return '—'
     if (isTuning) {
-      return variantArm === 'variant' ? 'SR Routing (custom params)' : 'SR Routing (live config)'
+      return variantArm === CONTROL_ARM_ID ? 'SR Routing (live config)' : 'SR Routing (custom params)'
     }
     // What this arm applied on the selected endpoint: its rule and/or SR strategy.
     return armLabel(arm, algorithmName, endpoint ?? undefined)
@@ -959,7 +1081,7 @@ function ExperimentDetailPanel({
 
   // Every endpoint records a Decision Audit trail for the payments it routes.
   function txnHasAudit(variantArm: string): boolean {
-    return !!servedArm(variantArm === 'control' ? 'control' : 'variant')
+    return !!servedArm(variantArm)
   }
 
   function openAuditForTxn(paymentId: string, variantArm: string) {
@@ -996,29 +1118,38 @@ function ExperimentDetailPanel({
   // The sample target counts payments with an outcome, as the verdict does: unresolved ones carry
   // no evidence yet.
   const resolvedTxns = (arm: { success_count: number; failure_count: number }) => arm.success_count + arm.failure_count
-  const totalTxns = results ? resolvedTxns(results.control) + resolvedTxns(results.variant) : 0
+  const resultArms = results ? [results.control, ...results.variants.map(v => v.metrics)] : []
+  const totalTxns = resultArms.reduce((sum, arm) => sum + resolvedTxns(arm), 0)
   // Routed payments still waiting for a success or failure: the transactions list counts them, the
   // sample target does not.
-  const awaitingTxns = results
-    ? Math.max(0, results.control.transaction_count + results.variant.transaction_count - totalTxns)
-    : 0
+  const awaitingTxns = Math.max(0, resultArms.reduce((sum, arm) => sum + arm.transaction_count, 0) - totalTxns)
   const controlResolved = results ? resolvedTxns(results.control) : 0
-  const variantResolved = results ? resolvedTxns(results.variant) : 0
-  const guardrailDropPp = results && controlResolved > 0 && variantResolved > 0
-    ? 100 * (results.control.success_count / controlResolved - results.variant.success_count / variantResolved)
-    : null
+  // How far each variant's auth rate fell below control among completed payments.
+  const guardrailDropPp = (metrics: { success_count: number; failure_count: number }) => {
+    const variantResolved = resolvedTxns(metrics)
+    return results && controlResolved > 0 && variantResolved > 0
+      ? 100 * (results.control.success_count / controlResolved - metrics.success_count / variantResolved)
+      : null
+  }
+  const breachedVariants = results?.variants.filter(v => v.verdict === 'guardrail_breached') ?? []
   const minSample = abData?.min_sample_size ?? 1000
-  const collectedShare = minSample > 0 ? Math.min(1, totalTxns / minSample) : 0
+  // Each comparison needs its own sample (control plus that variant), so progress follows the
+  // comparison furthest from its target.
+  const sampleTxns = results && results.variants.length > 0
+    ? Math.min(...results.variants.map(v => controlResolved + resolvedTxns(v.metrics)))
+    : 0
+  const collectedShare = minSample > 0 ? Math.min(1, sampleTxns / minSample) : 0
   const progress = Math.round(collectedShare * 100)
   // A handful of transactions against a 5,000 target rounds to 0% and paints an empty track, which
   // reads as "nothing collected". Keep a sliver of bar, and say "<1%" rather than "0%".
-  const progressLabel = progress === 0 && totalTxns > 0 ? '<1%' : `${progress}%`
-  const progressWidth = totalTxns > 0 ? Math.max(collectedShare * 100, 1.5) : 0
-  const controlPct = 100 - (abData?.variant_split_pct ?? 10)
-  const variantPct = abData?.variant_split_pct ?? 10
+  const progressLabel = progress === 0 && sampleTxns > 0 ? '<1%' : `${progress}%`
+  const progressWidth = sampleTxns > 0 ? Math.max(collectedShare * 100, 1.5) : 0
+  const controlPct = abData ? controlSplitPct(abData) : 90
 
   const status: 'active' | 'paused' | 'inactive' = isActive ? (realPaymentsOn ? 'active' : 'paused') : 'inactive'
-  const significant = results ? isSignificantVerdict(results.verdict) : false
+  const significant = !!results && results.variants.some(v => isSignificantVerdict(v.verdict))
+  // The banner speaks for the experiment as a whole: still collecting while any comparison is.
+  const overallVerdict = results?.variants.some(v => v.verdict === 'collecting_data') ? 'collecting_data' : 'not_significant'
 
   // Rough "time to target" projection for the progress card. There's no served ingestion rate, so
   // the rate is derived from txns-so-far over the time the experiment has been live — `modified_at`
@@ -1026,12 +1157,12 @@ function ExperimentDetailPanel({
   // shown while actively collecting with real progress; any missing/degenerate input returns null
   // rather than a misleading estimate.
   const remainingEta: string | null = (() => {
-    if (status !== 'active' || totalTxns <= 0 || totalTxns >= minSample) return null
+    if (status !== 'active' || sampleTxns <= 0 || sampleTxns >= minSample) return null
     const startMs = algorithm.modified_at ? Date.parse(algorithm.modified_at) : NaN
     if (!Number.isFinite(startMs)) return null
     const elapsedMs = Date.now() - startMs
     if (elapsedMs <= 0) return null
-    const remainMs = (elapsedMs / totalTxns) * (minSample - totalTxns)
+    const remainMs = (elapsedMs / sampleTxns) * (minSample - sampleTxns)
     const hrs = remainMs / 3_600_000
     if (!Number.isFinite(hrs) || hrs <= 0) return null
     const at = 'at current volume'
@@ -1044,15 +1175,10 @@ function ExperimentDetailPanel({
     ? [
         {
           label: 'Traffic split',
-          value: `${controlPct}% / ${variantPct}%`,
+          value: [controlPct, ...variants.map(v => v.splitPct)].map(p => `${p}%`).join(' / '),
           icon: Sliders,
-          caption: 'Control / Variant allocation',
-          visual: (
-            <div className="mt-2 flex h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-[#232833]">
-              <div className="bg-slate-400 dark:bg-slate-500" style={{ width: `${controlPct}%` }} />
-              <div className="bg-brand-500" style={{ width: `${variantPct}%` }} />
-            </div>
-          ),
+          caption: variants.length === 1 ? 'Control / Variant allocation' : `Control / ${variants.map(v => v.name).join(' / ')}`,
+          visual: <SplitBar controlPct={controlPct} variants={variants} />,
         },
         {
           label: 'Sample target',
@@ -1065,7 +1191,9 @@ function ExperimentDetailPanel({
           label: 'Guardrail',
           value: `${abData.guardrail_threshold_pp}pp`,
           icon: ShieldAlert,
-          caption: 'Auth drop under control that stops the experiment',
+          caption: variants.length === 1
+            ? 'Auth drop under control that stops the experiment'
+            : 'Auth drop under control that stops a variant',
           visual: null,
         },
       ]
@@ -1147,7 +1275,7 @@ function ExperimentDetailPanel({
             <div className="flex items-end justify-between">
               <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-slate-500 dark:text-[#8d96aa] leading-4">Resolved transactions</p>
               <p className="text-[15px] font-semibold text-slate-800 dark:text-slate-100 [font-variant-numeric:tabular-nums] leading-[22px]">
-                {totalTxns.toLocaleString()} <span className="text-slate-500">/ {minSample.toLocaleString()}</span>
+                {sampleTxns.toLocaleString()} <span className="text-slate-500">/ {minSample.toLocaleString()}</span>
               </p>
             </div>
             <div className="h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-[#232833]">
@@ -1158,6 +1286,7 @@ function ExperimentDetailPanel({
             </div>
             <p className="text-[12px] text-slate-500 max-w-[80ch] leading-4">
               {progressLabel} of the {minSample.toLocaleString()} needed for a verdict
+              {variants.length > 1 ? ' (control plus each variant; showing the furthest behind)' : ''}
               {awaitingTxns > 0 ? ` · ${awaitingTxns.toLocaleString()} more awaiting an outcome` : ''}
               {remainingEta ? ` · ${remainingEta}` : ''}
             </p>
@@ -1172,8 +1301,6 @@ function ExperimentDetailPanel({
           <ConfigComparisonTable
             abData={abData}
             isTuning={isTuning}
-            controlPct={controlPct}
-            variantPct={variantPct}
             live={{ hedging: liveHedging, elimination: liveElimination, bucketSize: liveBucketSize }}
             autopilotOn={autopilotFeatureOn}
             algorithmName={algorithmName}
@@ -1189,7 +1316,7 @@ function ExperimentDetailPanel({
             <h3 className={type.heading}>Results</h3>
             <p className="mt-0.5 text-[12px] text-slate-500 leading-4">Updates every 60 seconds</p>
           </div>
-          {results && <VerdictChip verdict={results.verdict} />}
+          {results && results.variants.length === 1 && <VerdictChip verdict={results.variants[0].verdict} />}
         </div>
         {endpoints.length > 1 && (
           <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5 dark:border-[#222226] dark:bg-[#14181f]">
@@ -1207,11 +1334,17 @@ function ExperimentDetailPanel({
             ))}
           </div>
         )}
-        {endpoint && servedArm('control') && servedArm('variant') && (
+        {endpoint && abData && servedArm(CONTROL_ARM_ID) && (
           <p className="text-[13px] text-slate-500 dark:text-[#8d96aa] leading-[18px] break-words">
             On <code className="text-[12px]">{ENDPOINT_PATHS[endpoint]}</code> this compares{' '}
-            <span className="font-medium text-slate-700 dark:text-slate-200">{routingType('control')}</span> with{' '}
-            <span className="font-medium text-slate-700 dark:text-slate-200">{routingType('variant')}</span>.
+            <span className="font-medium text-slate-700 dark:text-slate-200">{routingType(CONTROL_ARM_ID)}</span> with{' '}
+            {endpointVariants.map((v, i, shown) => (
+              <Fragment key={v.id}>
+                {i > 0 && (i === shown.length - 1 ? ' and ' : ', ')}
+                <span className="font-medium text-slate-700 dark:text-slate-200">{routingType(v.id)}</span>
+                {variants.length > 1 && ` (${v.name})`}
+              </Fragment>
+            ))}.
           </p>
         )}
         {!endpoint ? (
@@ -1236,19 +1369,37 @@ function ExperimentDetailPanel({
             )}
             {/* Statistical rigor first: while the verdict isn't trustworthy, lead with the confidence
                 notice and keep every delta neutral (handled inside the table). */}
-            {!significant && <ConfidenceBanner verdict={results.verdict} />}
-            <MetricsComparisonTable
-              results={results}
-              controlPct={controlPct}
-              variantPct={variantPct}
-              costKind={costKind}
-              significant={significant}
-            />
-            {results.verdict === 'guardrail_breached' && (
-              <Notice tone="danger">
-                Among completed payments, variant auth rate dropped {guardrailDropPp?.toFixed(2)}pp below control — beyond the {abData?.guardrail_threshold_pp}pp guardrail. {isActive ? 'The experiment stops when payment feedback confirms the breach; check feedback delivery if it remains active.' : 'This experiment is inactive. Payments use your active routing setup.'}
-              </Notice>
+            {!significant && (
+              <ConfidenceBanner
+                verdict={overallVerdict}
+                variantCount={results.variants.length}
+                significanceLevel={results.significance_level}
+              />
             )}
+            {abData && <MetricsComparisonTable results={results} abData={abData} costKind={costKind} />}
+            {results.variants.length > 1 && (
+              <p className="text-[12px] text-slate-500 dark:text-[#8d96aa] leading-4">
+                Each variant is compared with control at a {+(results.significance_level * 100).toFixed(2)}% significance level
+                (5% split across {results.variants.length} comparisons), so the chance of a false winner across all of them stays at 5%.
+              </p>
+            )}
+            {breachedVariants.map(v => {
+              const name = armName(abData, v.metrics.arm)
+              const stopped = variants.find(x => x.id === v.metrics.arm)?.stopped
+              const others = variants.filter(x => x.id !== v.metrics.arm && !x.stopped).length
+              return (
+                <Notice key={v.metrics.arm} tone="danger">
+                  Among completed payments, {variants.length === 1 ? 'variant' : name} auth rate dropped {guardrailDropPp(v.metrics)?.toFixed(2)}pp below control — beyond the {abData?.guardrail_threshold_pp}pp guardrail.{' '}
+                  {!isActive
+                    ? 'This experiment is inactive. Payments use your active routing setup.'
+                    : stopped
+                      ? `${name} is stopped: its payments now use your live routing setup, while the other variants keep running.`
+                      : others > 0
+                        ? `${name} stops when payment feedback confirms the breach, and its payments then use your live routing setup; check feedback delivery if it keeps running.`
+                        : 'The experiment stops when payment feedback confirms the breach; check feedback delivery if it remains active.'}
+                </Notice>
+              )
+            })}
           </div>
         )}
       </section>
@@ -1278,7 +1429,7 @@ function ExperimentDetailPanel({
                   <th className={TXN_HEAD_CELL}>Arm</th>
                   <th className={TXN_HEAD_CELL}>Routing</th>
                   <th className={TXN_HEAD_CELL}>Payment ID</th>
-                  <th className={TXN_HEAD_CELL}>Gateway</th>
+                  <th className={TXN_HEAD_CELL}>Connector</th>
                   <th className={TXN_HEAD_CELL}>Status</th>
                   <th className={TXN_HEAD_CELL}>Time</th>
                 </tr>
@@ -1300,11 +1451,11 @@ function ExperimentDetailPanel({
                       className={`border-b border-slate-50 dark:border-[#131318] transition-colors ${txnIsSr ? 'cursor-pointer hover:bg-slate-50 dark:hover:bg-[#0f0f16]' : 'cursor-default opacity-60'}`}
                     >
                       <td className="px-4 py-2.5">
-                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${txn.variant_arm === 'control'
+                        <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-semibold ${txn.variant_arm === CONTROL_ARM_ID
                             ? 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300'
                             : 'bg-brand-100 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300'
                           } leading-4`}>
-                          {txn.variant_arm === 'control' ? 'Control' : 'Variant'}
+                          {armName(abData, txn.variant_arm)}
                         </span>
                       </td>
                       <td className="px-4 py-3 text-sm text-slate-500 dark:text-slate-400 whitespace-nowrap">
@@ -1390,24 +1541,28 @@ function ExperimentDetailPanel({
 // ─── SR Config Tuning arm editor ──────────────────────────────────────────────
 
 interface SrArmEditorProps {
-  label: string
+  label: ReactNode
+  headerExtra?: ReactNode
   splitPct: number
   config: SrConfigOverrideForm
   onChange: (fn: (c: SrConfigOverrideForm) => SrConfigOverrideForm) => void
 }
 
-function SrArmEditor({ label, splitPct, config, onChange }: SrArmEditorProps) {
+function SrArmEditor({ label, headerExtra, splitPct, config, onChange }: SrArmEditorProps) {
   return (
     <div className="rounded-xl border border-brand-200 dark:border-brand-800/50 bg-brand-50/30 dark:bg-brand-900/10 px-4 py-4 space-y-3">
-      <span className="inline-flex items-center rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 leading-4">
-        {label} ({splitPct}%)
-      </span>
+      <div className="flex items-center gap-1.5">
+        <span className="inline-flex items-center rounded-full bg-brand-100 px-2 py-0.5 text-[11px] font-semibold text-brand-700 dark:bg-brand-900/40 dark:text-brand-300 leading-4">
+          {label} ({splitPct}%)
+        </span>
+        {headerExtra && <span className="ml-auto">{headerExtra}</span>}
+      </div>
 
       <div className="space-y-3">
         <div>
           <label className={`mb-1.5 flex items-center gap-1 ${type.label}`}>
             Hedging %
-            <InfoHint text="Share of traffic sent to non-top gateways to keep their scores fresh (the explore-exploit tradeoff)." />
+            <InfoHint text="Share of traffic sent to non-top connectors to keep their scores fresh (the explore-exploit tradeoff)." />
           </label>
           <input
             type="number" min={0} max={100} step={1}
@@ -1421,7 +1576,7 @@ function SrArmEditor({ label, splitPct, config, onChange }: SrArmEditorProps) {
         <div>
           <label className={`mb-1.5 flex items-center gap-1 ${type.label}`}>
             Elimination threshold (0–1)
-            <InfoHint text="SR score (0–1) below which a gateway is dropped from routing." />
+            <InfoHint text="SR score (0–1) below which a connector is dropped from routing." />
           </label>
           <input
             type="number" min={0} max={1} step={0.01}
@@ -1433,6 +1588,20 @@ function SrArmEditor({ label, splitPct, config, onChange }: SrArmEditorProps) {
         </div>
       </div>
     </div>
+  )
+}
+
+/** A variant's name, edited in place inside its arm pill. */
+function VariantNameInput({ variant, onRename }: { variant: VariantForm; onRename: (name: string) => void }) {
+  return (
+    <input
+      className="w-28 bg-transparent font-semibold placeholder:text-brand-400 focus:outline-none"
+      value={variant.name}
+      placeholder={variant.id}
+      maxLength={40}
+      onChange={e => onRename(e.target.value)}
+      aria-label="Variant name"
+    />
   )
 }
 
@@ -1485,6 +1654,37 @@ function CreateForm({
   // or an edited experiment carries an off-preset value.
   const [customSample, setCustomSample] = useState(!SAMPLE_SIZE_PRESETS.includes(form.minSampleSize))
 
+  const variantTotal = form.variants.reduce((sum, v) => sum + v.splitPct, 0)
+  const controlPct = 100 - variantTotal
+  const canAddVariant = variantTotal + MIN_VARIANT_PCT <= MAX_TOTAL_VARIANT_PCT
+
+  function updateVariant(id: string, patch: Partial<VariantForm>) {
+    setForm(f => ({ ...f, variants: f.variants.map(v => v.id === id ? { ...v, ...patch } : v) }))
+  }
+
+  // A new variant starts as a copy of control, so only what it should change needs picking, and
+  // takes the default share if that still fits.
+  function addVariant() {
+    setForm(f => {
+      const total = f.variants.reduce((sum, v) => sum + v.splitPct, 0)
+      const splitPct = Math.min(10, MAX_TOTAL_VARIANT_PCT - total)
+      const control = f.controlSource === 'current' ? currentControl ?? f.control : f.control
+      return { ...f, variants: [...f.variants, newVariant(f.variants, control, Math.max(MIN_VARIANT_PCT, splitPct))] }
+    })
+  }
+
+  // Every experiment keeps at least one variant.
+  const removeVariantButton = (v: VariantForm) => form.variants.length > 1 ? (
+    <button
+      type="button"
+      onClick={() => setForm(f => ({ ...f, variants: f.variants.filter(x => x.id !== v.id) }))}
+      className="inline-flex items-center gap-1 text-[12px] font-medium text-slate-500 hover:text-red-600 dark:text-[#8d96aa] dark:hover:text-red-400 leading-4"
+      aria-label={`Remove ${v.name || v.id}`}
+    >
+      <Trash2 size={12} /> Remove
+    </button>
+  ) : null
+
   const sampleTargetField = (
     <div>
       <FieldLabel hint="Transactions the experiment collects before it reports a significance verdict.">Sample target</FieldLabel>
@@ -1532,7 +1732,7 @@ function CreateForm({
   // The pp-vs-% nuance lives in the tooltip so the line stays a single row.
   const guardrailField = (
     <label className="flex flex-wrap items-center gap-x-2 gap-y-2 text-sm text-slate-700 dark:text-[#c7cfdd]">
-      <span>Stop automatically if variant auth drops by more than</span>
+      <span>Stop {form.variants.length === 1 ? 'automatically if variant' : 'a variant automatically if its'} auth drops by more than</span>
       <input
         type="number" min={0.5} max={20} step={0.5}
         className={`w-16 ${fieldCls}`}
@@ -1540,7 +1740,9 @@ function CreateForm({
         onChange={e => setForm(f => ({ ...f, guardrailThresholdPp: Number(e.target.value) }))}
       />
       <span>percentage points below control</span>
-      <InfoHint text="After both arms have a completed payment, each new outcome checks the saved guardrail and stops a breached experiment, even before the sample target. A value of 3 stops the experiment at 88% vs 92%; new payments use the active routing rule." />
+      <InfoHint text={form.variants.length === 1
+        ? 'After both arms have a completed payment, each new outcome checks the saved guardrail and stops a breached experiment, even before the sample target. A value of 3 stops the experiment at 88% vs 92%; new payments use the active routing rule.'
+        : 'Each variant is checked against control on its own, even before the sample target. A breached variant stops and its payments use your live routing setup, while the other variants keep running. When the last running variant breaches, the experiment stops and new payments use the active routing rule.'} />
     </label>
   )
 
@@ -1641,17 +1843,21 @@ function CreateForm({
                       onUseCurrent={form.controlSource === 'saved' ? () => setForm(f => ({ ...f, controlSource: 'current' })) : undefined}
                     />
                   )}
-                  <ArmLayersEditor
-                    label="Variant"
-                    help="The setup you want to test."
-                    accent
-                    algorithms={eligibleAlgorithms}
-                    value={form.variant}
-                    costDataAvailable={costDataAvailable}
-                    srRoutingOn={features.isEnabled('sr-routing')}
-                    liveSrConfig={{ hedging: liveHedging, elimination: liveElimination, bucketSize: liveBucketSize, autopilotSegmentCount, autopilotFeatureOn: autopilotOn }}
-                    onChange={variant => setForm(f => ({ ...f, variant }))}
-                  />
+                  {form.variants.map(v => (
+                    <ArmLayersEditor
+                      key={v.id}
+                      label={<VariantNameInput variant={v} onRename={name => updateVariant(v.id, { name })} />}
+                      help={form.variants.length === 1 ? 'The setup you want to test.' : 'A setup you want to test. Each variant is compared with control on its own.'}
+                      accent
+                      headerExtra={removeVariantButton(v)}
+                      algorithms={eligibleAlgorithms}
+                      value={v.layers}
+                      costDataAvailable={costDataAvailable}
+                      srRoutingOn={features.isEnabled('sr-routing')}
+                      liveSrConfig={{ hedging: liveHedging, elimination: liveElimination, bucketSize: liveBucketSize, autopilotSegmentCount, autopilotFeatureOn: autopilotOn }}
+                      onChange={layers => updateVariant(v.id, { layers })}
+                    />
+                  ))}
                 </div>
               )}
 
@@ -1661,7 +1867,7 @@ function CreateForm({
                   <div className="rounded-xl border border-slate-200 dark:border-[#222226] bg-slate-50/50 dark:bg-[#0c0c10] px-4 py-4 space-y-3">
                     <div className="flex items-center gap-2">
                       <span className="inline-flex items-center rounded-full bg-slate-200 px-2 py-0.5 text-[11px] font-semibold text-slate-600 dark:bg-slate-700 dark:text-slate-200 leading-4">
-                        Control ({100 - form.variantSplitPct}%)
+                        Control ({controlPct}%)
                       </span>
                       <span className="text-[12px] text-slate-500 leading-4">current config</span>
                     </div>
@@ -1684,13 +1890,34 @@ function CreateForm({
                     </p>
                   </div>
 
-                  {/* Variant — editable overrides */}
-                  <SrArmEditor
-                    label="Variant"
-                    splitPct={form.variantSplitPct}
-                    config={form.variantSrConfig}
-                    onChange={fn => setForm(f => ({ ...f, variantSrConfig: fn(f.variantSrConfig) }))}
-                  />
+                  {/* Variants — editable overrides */}
+                  {form.variants.map(v => (
+                    <SrArmEditor
+                      key={v.id}
+                      label={<VariantNameInput variant={v} onRename={name => updateVariant(v.id, { name })} />}
+                      headerExtra={removeVariantButton(v)}
+                      splitPct={v.splitPct}
+                      config={v.srConfig}
+                      onChange={fn => setForm(f => ({ ...f, variants: f.variants.map(x => x.id === v.id ? { ...x, srConfig: fn(x.srConfig) } : x) }))}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {form.variants.length < MAX_VARIANTS && (
+                <div>
+                  <button
+                    type="button"
+                    onClick={addVariant}
+                    disabled={!canAddVariant}
+                    title={canAddVariant ? undefined : `Variants already take ${variantTotal}% of traffic; lower one to add another (control keeps at least ${100 - MAX_TOTAL_VARIANT_PCT}%).`}
+                    className="inline-flex items-center gap-1.5 text-[13px] font-medium text-brand-600 hover:text-brand-700 disabled:cursor-not-allowed disabled:opacity-50 dark:text-brand-400 dark:hover:text-brand-300 leading-[18px]"
+                  >
+                    <Plus size={13} /> Add variant
+                  </button>
+                  <p className="mt-1 text-[12px] text-slate-500 dark:text-[#8d96aa] leading-4">
+                    Up to {MAX_VARIANTS} variants, each compared with control. More variants need more traffic to reach a verdict.
+                  </p>
                 </div>
               )}
 
@@ -1705,35 +1932,62 @@ function CreateForm({
                 <div className="mb-2 flex items-center justify-between">
                   <span className={type.label}>Traffic allocation</span>
                   <span className="text-[13px] tabular-nums text-slate-500 dark:text-slate-400 leading-[18px]">
-                    {100 - form.variantSplitPct}% control
+                    {controlPct}% control
                     <span className="mx-1.5 text-slate-500 dark:text-slate-400">/</span>
-                    <span className="font-semibold text-brand-600 dark:text-brand-400">{form.variantSplitPct}% variant</span>
+                    <span className="font-semibold text-brand-600 dark:text-brand-400">{variantTotal}% {form.variants.length === 1 ? 'variant' : 'variants'}</span>
                   </span>
                 </div>
-                {/* One control, not two: the dual-color bar IS the slider. A transparent native range
-                    sits on top for drag + keyboard + a11y (min/max 0–100 so the thumb tracks the true
-                    proportion), and the value is clamped to 5–30% on change. The visible handle and the
-                    segment widths are both driven by variantSplitPct, so they stay aligned. */}
-                <div className="relative rounded-full py-2 focus-within:ring-2 focus-within:ring-brand-500/40">
-                  <div className="flex h-2.5 w-full overflow-hidden rounded-full">
-                    <div className="bg-slate-200 dark:bg-[#232833] transition-all duration-100" style={{ width: `${100 - form.variantSplitPct}%` }} />
-                    <div className="flex-1 bg-brand-500" />
+                {form.variants.length === 1 ? (
+                  // One control, not two: the dual-color bar IS the slider. A transparent native range
+                  // sits on top for drag + keyboard + a11y (min/max 0–100 so the thumb tracks the true
+                  // proportion), and the value is clamped to the variant range on change. The visible
+                  // handle and the segment widths are both driven by the variant's share, so they stay
+                  // aligned.
+                  <div className="relative rounded-full py-2 focus-within:ring-2 focus-within:ring-brand-500/40">
+                    <div className="flex h-2.5 w-full overflow-hidden rounded-full">
+                      <div className="bg-slate-200 dark:bg-[#232833] transition-all duration-100" style={{ width: `${controlPct}%` }} />
+                      <div className="flex-1 bg-brand-500" />
+                    </div>
+                    <div
+                      className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-brand-500 bg-white shadow-sm dark:bg-slate-900"
+                      style={{ left: `${controlPct}%` }}
+                    />
+                    <input
+                      type="range" min={0} max={100} step={1}
+                      value={controlPct}
+                      onChange={e => {
+                        const splitPct = Math.min(MAX_VARIANT_PCT, Math.max(MIN_VARIANT_PCT, 100 - Number(e.target.value)))
+                        updateVariant(form.variants[0].id, { splitPct })
+                      }}
+                      className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
+                      aria-label="Control traffic percentage"
+                    />
                   </div>
-                  <div
-                    className="pointer-events-none absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-brand-500 bg-white shadow-sm dark:bg-slate-900"
-                    style={{ left: `${100 - form.variantSplitPct}%` }}
-                  />
-                  <input
-                    type="range" min={0} max={100} step={1}
-                    value={100 - form.variantSplitPct}
-                    onChange={e => {
-                      const variant = Math.min(30, Math.max(5, 100 - Number(e.target.value)))
-                      setForm(f => ({ ...f, variantSplitPct: variant }))
-                    }}
-                    className="absolute inset-0 h-full w-full cursor-pointer opacity-0"
-                    aria-label="Control traffic percentage"
-                  />
-                </div>
+                ) : (
+                  <div className="space-y-2">
+                    <SplitBar controlPct={controlPct} variants={form.variants} className="h-2.5" />
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {form.variants.map(v => (
+                        <label key={v.id} className="flex items-center justify-between gap-3 rounded-lg border border-slate-200 px-3 py-2 text-sm dark:border-[#222226]">
+                          <span className="truncate text-slate-700 dark:text-slate-200">{v.name || v.id}</span>
+                          <span className="flex items-center gap-1.5">
+                            <input
+                              type="number" min={MIN_VARIANT_PCT} max={MAX_VARIANT_PCT} step={1}
+                              className={`w-16 ${fieldCls}`}
+                              value={v.splitPct}
+                              onChange={e => updateVariant(v.id, { splitPct: Number(e.target.value) })}
+                              aria-label={`${v.name || v.id} traffic percentage`}
+                            />
+                            <span className="text-slate-500">%</span>
+                          </span>
+                        </label>
+                      ))}
+                    </div>
+                    <p className={`text-[12px] leading-4 ${variantTotal > MAX_TOTAL_VARIANT_PCT ? 'text-red-600' : 'text-slate-500 dark:text-[#8d96aa]'}`}>
+                      Each variant takes {MIN_VARIANT_PCT}–{MAX_VARIANT_PCT}% and together at most {MAX_TOTAL_VARIANT_PCT}%, so control keeps the majority. Control gets the rest.
+                    </p>
+                  </div>
+                )}
               </div>
 
               {sampleTargetField}
@@ -1842,7 +2096,7 @@ function ExperimentsTable({
                     ariaLabel="Filter by status"
                   />
                 </th>
-                <th className="px-5 py-3.5">Control → Variant</th>
+                <th className="px-5 py-3.5">Control → Variants</th>
                 <th className="px-5 py-3.5">Traffic Split</th>
                 <th className="px-5 py-3.5">Last Modified</th>
                 <th className="px-5 py-3.5 text-right">Actions</th>
@@ -1871,7 +2125,7 @@ function ExperimentsTable({
                   ? '—'
                   : kind === 'sr_config_tuning'
                     ? 'Live SR config → tuned SR config'
-                    : `${armLabel(resolvedArm(abData, 'control'), algorithmName)} → ${armLabel(resolvedArm(abData, 'variant'), algorithmName)}`
+                    : `${armLabel(resolvedControl(abData), algorithmName)} → ${resolvedVariants(abData).map(v => armLabel(v.arm, algorithmName)).join(' | ')}`
                 const stamp = formatLastModified(algo)
                 // /routing/update and /routing/delete reject a running experiment.
                 const lockedReason = isActive
@@ -1916,7 +2170,7 @@ function ExperimentsTable({
                       <p className="break-words text-sm font-medium leading-5 text-slate-800 dark:text-slate-200" title={arms}>{arms}</p>
                     </td>
                     <td className="align-top whitespace-nowrap px-5 py-4 text-sm tabular-nums text-slate-700 dark:text-slate-300">
-                      {abData ? `${100 - abData.variant_split_pct}% / ${abData.variant_split_pct}%` : '—'}
+                      {abData ? [controlSplitPct(abData), ...resolvedVariants(abData).map(v => v.splitPct)].map(p => `${p}%`).join(' / ') : '—'}
                     </td>
                     <td className="align-top whitespace-nowrap px-5 py-4 text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
                       {stamp ? (
@@ -1958,13 +2212,11 @@ const DEFAULT_FORM: ABTestFormValues = {
   name: '',
   experimentType: 'algorithm_comparison',
   controlSource: 'current',
-  control: { ...EMPTY_ARM },
-  variant: { ...EMPTY_ARM },
+  control: { ruleAlgorithmId: '', srStrategy: '' },
+  variants: [newVariant([])],
   endpoints: [...EXPERIMENT_ENDPOINTS],
-  variantSplitPct: 10,
   minSampleSize: 5000,
   guardrailThresholdPp: 3,
-  variantSrConfig: { ...DEFAULT_VARIANT_SR_CONFIG },
 }
 
 export function ABTestingPage() {
@@ -1977,6 +2229,7 @@ export function ABTestingPage() {
   // stay) scoped to it; the backend enforces the same scope on save.
   const newForm = (): ABTestFormValues => ({
     ...DEFAULT_FORM,
+    variants: [newVariant([])],
     endpoints: hybridOnly ? ['hybrid_routing'] : [...EXPERIMENT_ENDPOINTS],
   })
 
@@ -1986,7 +2239,7 @@ export function ABTestingPage() {
   )
   const { data: activeAlgorithms, error: activeAlgorithmsError, mutate: mutateActive } = useSWR<RoutingAlgorithm[]>(
     merchantId ? ['active-routing', merchantId] : null,
-    () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`),
+    () => fetcher<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`),
     { refreshInterval: 10_000 },
   )
 
@@ -2004,7 +2257,11 @@ export function ABTestingPage() {
   const selectedId = searchParams.get('experiment')
   const [showCreate, setShowCreate] = useState(false)
 
-  const selectedAlgo = savedAbTests.find(a => a.id === selectedId) ?? null
+  // The running experiment is read from the polled active list, so a variant the guardrail stops
+  // shows as stopped without reloading the page.
+  const selectedAlgo = (activeAbTest?.id === selectedId ? activeAbTest : undefined)
+    ?? savedAbTests.find(a => a.id === selectedId)
+    ?? null
 
   const [form, setForm] = useState<ABTestFormValues>(newForm)
   // How live traffic routes today, used as the control arm until the user customizes it. Read at
@@ -2017,15 +2274,16 @@ export function ABTestingPage() {
         autopilotOn: features.isEnabled('autopilot'),
       })
       : null
-  // A new experiment's variant starts as a copy of the current setup, so the user changes only what
-  // they want to test instead of rebuilding the layers they keep.
+  // A new experiment's first variant starts as a copy of the current setup, so the user changes only
+  // what they want to test instead of rebuilding the layers they keep.
   // Seeded once per fresh form; `resetForm` re-arms it.
   const variantSeeded = useRef(false)
   useEffect(() => {
     if (variantSeeded.current || !currentControl || form.controlSource !== 'current') return
     variantSeeded.current = true
-    if (!form.variant.ruleAlgorithmId && !form.variant.srStrategy) {
-      setForm(f => ({ ...f, variant: { ...currentControl } }))
+    const first = form.variants[0]
+    if (first && !first.layers.ruleAlgorithmId && !first.layers.srStrategy) {
+      setForm(f => ({ ...f, variants: f.variants.map((v, i) => i === 0 ? { ...v, layers: { ...currentControl } } : v) }))
     }
   })
   function resetForm() {
@@ -2093,7 +2351,8 @@ export function ABTestingPage() {
         `/analytics/experiment/${algo.id}/results?${experimentStartParam(algo).slice(1)}`,
       )
       if (editCheckFor.current !== algo.id) return
-      const recorded = results.control.transaction_count + results.variant.transaction_count
+      const recorded = [results.control, ...(results.variants?.map(v => v.metrics) ?? [results.variant])]
+        .reduce((sum, arm) => sum + arm.transaction_count, 0)
       setEditScope(recorded > 0 ? 'evaluation' : 'full')
     } catch {
       if (editCheckFor.current !== algo.id) return

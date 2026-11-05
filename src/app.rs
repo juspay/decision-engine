@@ -83,6 +83,9 @@ where
     S: Clone + Send + Sync + 'static,
 {
     let middleware = ServiceBuilder::new()
+        .layer(middleware::from_fn(
+            custom_middleware::default_response_headers,
+        ))
         .layer(middleware::from_fn(ensure_request_id))
         .layer(
             tower_trace::TraceLayer::new_for_http()
@@ -391,7 +394,9 @@ fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
         )
         .route(
             "/routing/list/active/:merchant_id",
-            metered!(post, routing_rules::list_active_routing_algorithm),
+            // POST: Hyperswitch compatibility; remove once it uses GET.
+            metered!(get, routing_rules::list_active_routing_algorithm)
+                .merge(metered!(post, routing_rules::list_active_routing_algorithm)),
         )
         .route(
             "/routing/evaluate",

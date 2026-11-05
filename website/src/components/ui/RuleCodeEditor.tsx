@@ -354,11 +354,11 @@ export function parseDSL(text: string): DSLParseResult {
     }
 
     if (outputType === 'priority' && priorityGateways.length === 0)
-      return { rules: null, error: `Rule ${bi + 1}: priority output must have at least one gateway` }
+      return { rules: null, error: `Rule ${bi + 1}: priority output must have at least one connector` }
     if (outputType === 'volume_split' && volumeSplitEntries.length === 0)
-      return { rules: null, error: `Rule ${bi + 1}: volume_split output must have at least one gateway` }
+      return { rules: null, error: `Rule ${bi + 1}: volume_split output must have at least one connector` }
     if (outputType === 'volume_split_priority' && volumeSplitPriorityEntries.length === 0)
-      return { rules: null, error: `Rule ${bi + 1}: volume_split_priority output must have at least one gateway` }
+      return { rules: null, error: `Rule ${bi + 1}: volume_split_priority output must have at least one connector` }
 
     const normalizedCondBody = condBody.replace(/^([ \t]*)or\s+(?=\S)/gim, '$1or\n$1')
     const statements: StatementGroup[] = []

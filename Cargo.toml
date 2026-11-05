@@ -135,6 +135,7 @@ axum-test = "15.6.0"
 
 [build-dependencies]
 cargo_metadata = "0.18.1"
+vergen = { version = "8.3.2", features = ["git", "git2"] }
 
 [lints.rust]
 unsafe_code = "forbid"

@@ -3350,7 +3350,7 @@
       }
     },
     "/routing/list/active/{merchant_id}": {
-      "post": {
+      "get": {
         "operationId": "getActiveRoutingRule",
         "tags": [
           "Routing Rules"
@@ -4106,6 +4106,15 @@
             "required": false,
             "schema": {
               "type": "number"
+            }
+          },
+          {
+            "name": "variants",
+            "in": "query",
+            "required": false,
+            "description": "Variant ids to report, comma-separated, in order. The significance level is corrected for these and for every other variant that recorded payments. Omitted, the variants named by the recorded payments are reported.",
+            "schema": {
+              "type": "string"
             }
           }
         ],
@@ -5198,13 +5207,33 @@
           "Routing Rules"
         ],
         "summary": "Decide routing",
-        "description": "Evaluate the existing hybrid routing pipeline using the flat request contract. Existing rule evaluation, SR feature gates, A/B experiments and fallback behavior apply.",
+        "description": "Route a payment: evaluate the active rule, then rank by success rate, cost and volume commitments. Codes (`status`, `reason`, `code`) are snake_case and may gain values; `message` is human-readable text.",
         "security": [
           {
             "BearerAuth": []
           },
           {
             "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-connected-merchant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The merchant to decide for. Optional with a session or API key (defaults to its own merchant; it may name a sub-merchant, any other is `403`). Required with a service credential."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifies the call; generated if absent and returned as a response header."
           }
         ],
         "requestBody": {
@@ -5216,15 +5245,13 @@
               },
               "example": {
                 "payment_id": "pay_demo",
-                "merchant_id": "pro_demo",
+                "merchant_reference_id": "order_demo",
                 "amount": 1000,
                 "currency": "USD",
                 "payment_method_type": "card",
                 "payment_method_sub_type": "credit",
                 "authentication_type": null,
                 "capture_method": null,
-                "mandate_type": null,
-                "mandate_acceptance_type": null,
                 "payment_type": null,
                 "setup_future_usage": null,
                 "transaction_initiator": null,
@@ -5264,7 +5291,6 @@
                 "metadata": {
                   "segment": "premium"
                 },
-                "country": null,
                 "customer_id": null,
                 "routing_config": {
                   "algorithm_for": "payment",
@@ -5273,12 +5299,12 @@
                   "ranking_algorithm": null,
                   "eligible_connectors": [
                     {
-                      "gateway_name": "worldpay",
-                      "payment_merchant_connector_id": "mca_wp"
+                      "connector": "worldpay",
+                      "merchant_connector_id": "mca_wp"
                     },
                     {
-                      "gateway_name": "checkout",
-                      "payment_merchant_connector_id": "mca_cko"
+                      "connector": "checkout",
+                      "merchant_connector_id": "mca_cko"
                     }
                   ],
                   "preferred_connectors": null
@@ -5289,7 +5315,7 @@
         },
         "responses": {
           "200": {
-            "description": "Routing decision. Connector order and account IDs are preserved from hybrid routing. An account ID can be null when a legacy rule identifies only a gateway.",
+            "description": "Routing decision.",
             "content": {
               "application/json": {
                 "schema": {
@@ -5299,16 +5325,19 @@
             }
           },
           "400": {
-            "description": "Missing required fields, unknown fields, incorrect JSON types, invalid routing input or an existing hybrid evaluation error."
+            "description": "`TE_03`: invalid body or field (named by its path), or routing could not be evaluated. Also returned when a service credential sends no `x-connected-merchant-id`."
           },
           "401": {
             "description": "Authentication required."
           },
           "403": {
-            "description": "The authenticated session or API key cannot act on this merchant."
+            "description": "`x-connected-merchant-id` is not the caller's own merchant."
+          },
+          "404": {
+            "description": "`TE_02`: the merchant's routing configuration was not found."
           },
           "500": {
-            "description": "Routing configuration or service unavailable."
+            "description": "`TE_00` `The request could not be completed`."
           }
         }
       }
@@ -8776,6 +8805,55 @@
           }
         }
       },
+      "ExperimentVariantComparison": {
+        "type": "object",
+        "description": "One variant's results and how it compares with control.",
+        "properties": {
+          "metrics": {
+            "$ref": "#/components/schemas/ExperimentArmMetrics"
+          },
+          "delta_pp": {
+            "type": "number",
+            "format": "double",
+            "description": "Variant minus control auth rate, in percentage points; 0 until both arms have a resolved payment."
+          },
+          "p_value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Compared with significance_level, not 0.05."
+          },
+          "confidence_interval": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "collecting_data",
+              "not_significant",
+              "variant_wins",
+              "variant_loses",
+              "guardrail_breached"
+            ]
+          },
+          "net_delta_bps": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
       "ExperimentResultsResponse": {
         "type": "object",
         "properties": {
@@ -8788,8 +8866,21 @@
           "control": {
             "$ref": "#/components/schemas/ExperimentArmMetrics"
           },
+          "variants": {
+            "type": "array",
+            "description": "Every variant compared with control, in the experiment's order.",
+            "items": {
+              "$ref": "#/components/schemas/ExperimentVariantComparison"
+            }
+          },
+          "significance_level": {
+            "type": "number",
+            "format": "double",
+            "description": "Per-comparison significance level: 0.05 divided by the number of variants compared (Bonferroni): every requested variant and every variant that recorded payments."
+          },
           "variant": {
-            "$ref": "#/components/schemas/ExperimentArmMetrics"
+            "$ref": "#/components/schemas/ExperimentArmMetrics",
+            "description": "The first variant's metrics, kept for single-variant clients; read variants."
           },
           "delta_pp": {
             "type": "number",
@@ -9898,7 +9989,6 @@
         "additionalProperties": false,
         "required": [
           "payment_id",
-          "merchant_id",
           "amount",
           "currency",
           "routing_config"
@@ -9908,11 +9998,16 @@
             "type": "string",
             "minLength": 1
           },
+          "merchant_reference_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Your own reference; echoed in the response."
+          },
           "amount": {
             "type": "integer",
             "minimum": 0,
             "maximum": 18446744073709551615,
-            "description": "Amount in currency minor units; supplies both existing amount and payment_amount rule keys and the dynamic payment amount."
+            "description": "Amount in currency minor units."
           },
           "currency": {
             "type": "string",
@@ -9933,14 +10028,6 @@
             "nullable": true
           },
           "capture_method": {
-            "type": "string",
-            "nullable": true
-          },
-          "mandate_type": {
-            "type": "string",
-            "nullable": true
-          },
-          "mandate_acceptance_type": {
             "type": "string",
             "nullable": true
           },
@@ -10060,22 +10147,12 @@
               "type": "string"
             }
           },
-          "country": {
-            "type": "string",
-            "nullable": true,
-            "description": "ISO 3166 alpha-2 country code."
-          },
           "customer_id": {
             "type": "string",
             "nullable": true
           },
           "routing_config": {
             "$ref": "#/components/schemas/DecideRoutingConfig"
-          },
-          "merchant_id": {
-            "type": "string",
-            "minLength": 1,
-            "description": "Routing scope previously supplied as created_by. Use the same identifier, including the HS profile ID where applicable."
           }
         }
       },
@@ -10172,18 +10249,18 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "gateway_name"
+          "connector"
         ],
         "properties": {
-          "gateway_name": {
+          "connector": {
             "type": "string",
             "minLength": 1
           },
-          "payment_merchant_connector_id": {
+          "merchant_connector_id": {
             "type": "string",
             "nullable": true,
             "minLength": 1,
-            "description": "The connector account. Omit it (or send null) to name the connector by gateway alone, as a hybrid fallback_output entry without gateway_id does; scores are then keyed by the gateway name."
+            "description": "The connector account. Omit to name the connector by name alone."
           }
         }
       },
@@ -10191,14 +10268,14 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "gateway_name",
-          "payment_merchant_connector_id"
+          "connector",
+          "merchant_connector_id"
         ],
         "properties": {
-          "gateway_name": {
+          "connector": {
             "type": "string"
           },
-          "payment_merchant_connector_id": {
+          "merchant_connector_id": {
             "type": "string",
             "nullable": true,
             "description": "Null for a connector named without an account."
@@ -10211,7 +10288,7 @@
         "required": [
           "id",
           "payment_id",
-          "request_id",
+          "merchant_reference_id",
           "created_at",
           "connectors",
           "outcome",
@@ -10225,14 +10302,15 @@
         "properties": {
           "id": {
             "type": "string",
-            "description": "Unique per decision (`dec_` + a time-ordered UUID), so a retried payment's decisions stay apart."
+            "description": "Unique per decision."
           },
           "payment_id": {
             "type": "string"
           },
-          "request_id": {
+          "merchant_reference_id": {
             "type": "string",
-            "description": "The `x-request-id` of the call, or the one minted for it. Matches the response header."
+            "nullable": true,
+            "description": "The request's `merchant_reference_id`."
           },
           "created_at": {
             "type": "string",
@@ -10310,7 +10388,7 @@
           "reason",
           "message"
         ],
-        "description": "How the order was reached. New values may be added to each enum; treat unknown values as their nearest documented meaning.",
+        "description": "How the order was reached. Enums may gain values.",
         "properties": {
           "type": {
             "type": "string",
@@ -10362,7 +10440,7 @@
           },
           "message": {
             "type": "string",
-            "description": "For people reading logs. Not stable; branch on `reason`."
+            "description": "Human-readable; branch on `reason`."
           }
         }
       },
@@ -10458,7 +10536,6 @@
           "status",
           "approach",
           "scores",
-          "scheduled_outage",
           "diagnostics"
         ],
         "properties": {
@@ -10472,7 +10549,7 @@
           "approach": {
             "type": "string",
             "nullable": true,
-            "description": "The decider's routing approach, for example `SR_SELECTION_V3_ROUTING`."
+            "description": "The decider's approach, e.g. `sr_selection_v3_routing`."
           },
           "scores": {
             "type": "array",
@@ -10481,14 +10558,10 @@
             },
             "description": "Every scored connector, best first."
           },
-          "scheduled_outage": {
-            "type": "boolean",
-            "nullable": true
-          },
           "diagnostics": {
             "type": "object",
             "nullable": true,
-            "description": "The decider's internals, for support: `head_before_downtime_check`, `reset_approach`, `dimension {value, level}`, `filter_wise_gateways`, `priority_logic {tag, output}`, `dynamic_mga_enabled`, `gateway_mga_id_map`, `rust_based_decider` and `latency_ms`. Not covered by compatibility guarantees."
+            "description": "Decider internals for support. May change."
           }
         }
       },
@@ -10520,9 +10593,9 @@
                 "type": "string",
                 "nullable": true,
                 "enum": [
-                  "IN_HOUSE",
-                  "SEED",
-                  "HYPERSENSE"
+                  "in_house",
+                  "seed",
+                  "hypersense"
                 ]
               },
               "cost_model": {
@@ -10547,8 +10620,8 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "outcome",
-          "reason",
+          "status",
+          "message",
           "cost_saved_bps",
           "qualified_count",
           "margin",
@@ -10556,15 +10629,17 @@
           "ranked"
         ],
         "properties": {
-          "outcome": {
+          "status": {
             "type": "string",
             "enum": [
-              "COST_WON",
-              "AUTH_WON"
-            ]
+              "cost_won",
+              "auth_won"
+            ],
+            "description": "`cost_won`: a cheaper connector won. `auth_won`: the success-rate head kept it."
           },
-          "reason": {
-            "type": "string"
+          "message": {
+            "type": "string",
+            "description": "Human-readable; branch on `status`."
           },
           "cost_saved_bps": {
             "type": "number",
@@ -10593,8 +10668,8 @@
         "type": "object",
         "additionalProperties": false,
         "required": [
-          "outcome",
-          "reason",
+          "status",
+          "message",
           "sr_head",
           "chosen",
           "sr_gap_conceded",
@@ -10604,15 +10679,17 @@
           "blocked"
         ],
         "properties": {
-          "outcome": {
+          "status": {
             "type": "string",
             "enum": [
-              "STEERED",
-              "SR_PREVAILED"
-            ]
+              "steered",
+              "sr_prevailed"
+            ],
+            "description": "`steered`: a connector behind on its commitment took it. `sr_prevailed`: normal routing kept it."
           },
-          "reason": {
-            "type": "string"
+          "message": {
+            "type": "string",
+            "description": "Human-readable; branch on `status`."
           },
           "sr_head": {
             "oneOf": [
@@ -10651,14 +10728,22 @@
               "type": "object",
               "required": [
                 "connector",
-                "gate"
+                "reason"
               ],
               "properties": {
                 "connector": {
                   "$ref": "#/components/schemas/DecideResultConnector"
                 },
-                "gate": {
-                  "type": "string"
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "already_chosen",
+                    "not_offered",
+                    "cycle_closed",
+                    "outside_tolerance",
+                    "lost_roll"
+                  ],
+                  "description": "Why this commitment did not get the payment."
                 }
               }
             }

@@ -1,13 +1,14 @@
 use clickhouse::Row;
 use serde::Deserialize;
 
-use crate::analytics::flow::FlowType;
+use crate::analytics::flow::{AnalyticsRoute, FlowType};
 use crate::analytics::models::{AnalyticsQuery, AnalyticsRouteHit};
 use crate::error::ApiError;
 
 use super::super::common::{
-    decision_shape, fetch_all, fetch_one, ordered_route_hits_from_counts, static_flow_type_in_sql,
-    DOMAIN_TABLE, ROUTE_HIT_ENTRY_POINT_FLOW_TYPES, ROUTE_HIT_FLOW_TYPES,
+    decision_shape, fetch_all, fetch_one, ordered_route_hits_from_counts, request_hit_flow_type,
+    route_for_request_hit, static_flow_type_in_sql, DOMAIN_TABLE, ROUTE_HIT_ENTRY_POINT_FLOW_TYPES,
+    ROUTE_HIT_FLOW_TYPES,
 };
 use super::super::filters::{base_window_filters, merchant_filter};
 use super::super::query::{BoundQueryBuilder, FilterClause};
@@ -16,7 +17,19 @@ use super::super::time::effective_window_bounds;
 #[derive(Debug, Clone, Deserialize, Row)]
 struct RouteHitRow {
     flow_type: String,
+    route: Option<String>,
     count: u64,
+}
+
+impl RouteHitRow {
+    /// The card this row counts towards, or `None` for a flow type the overview does not render.
+    fn card(&self) -> Option<(AnalyticsRoute, i64)> {
+        let flow_type = request_hit_flow_type(&self.flow_type)?;
+        Some((
+            route_for_request_hit(flow_type, self.route.as_deref()),
+            self.count as i64,
+        ))
+    }
 }
 
 #[derive(Debug, Clone, Deserialize, Row)]
@@ -30,23 +43,23 @@ pub async fn load(
 ) -> Result<Vec<AnalyticsRouteHit>, ApiError> {
     let (start_ms, end_ms) = effective_window_bounds(query);
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
-    builder.extend_selects(["flow_type", "count() AS count"]);
+    builder.extend_selects(["flow_type", "route", "count() AS count"]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));
     builder.extend_filters(merchant_filter(&query.merchant_id));
     builder.add_filter(FilterClause::raw(format!(
         "flow_type IN {}",
         static_flow_type_in_sql(ROUTE_HIT_ENTRY_POINT_FLOW_TYPES)
     )));
-    builder.add_group_by("flow_type");
+    builder.extend_group_bys(["flow_type", "route"]);
 
     let rows = fetch_all::<RouteHitRow>(builder.build(client)).await?;
     let score_feedback = load_score_feedback(client, query, start_ms, end_ms).await?;
 
     Ok(ordered_route_hits_from_counts(
-        rows.into_iter()
-            .map(|row| (row.flow_type, row.count as i64))
+        rows.iter()
+            .filter_map(RouteHitRow::card)
             .chain(std::iter::once((
-                FlowType::UpdateGatewayScoreRequestHit.as_str().to_string(),
+                AnalyticsRoute::UpdateGatewayScore,
                 score_feedback,
             ))),
     ))
@@ -63,19 +76,18 @@ pub async fn load_endpoint_totals(
 ) -> Result<Vec<AnalyticsRouteHit>, ApiError> {
     let (start_ms, end_ms) = effective_window_bounds(query);
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
-    builder.extend_selects(["flow_type", "count() AS count"]);
+    builder.extend_selects(["flow_type", "route", "count() AS count"]);
     builder.extend_filters(base_window_filters(start_ms, end_ms));
     builder.extend_filters(merchant_filter(&query.merchant_id));
     builder.add_filter(FilterClause::raw(format!(
         "flow_type IN {}",
         static_flow_type_in_sql(ROUTE_HIT_FLOW_TYPES)
     )));
-    builder.add_group_by("flow_type");
+    builder.extend_group_bys(["flow_type", "route"]);
 
     let rows = fetch_all::<RouteHitRow>(builder.build(client)).await?;
     Ok(ordered_route_hits_from_counts(
-        rows.into_iter()
-            .map(|row| (row.flow_type, row.count as i64)),
+        rows.iter().filter_map(RouteHitRow::card),
     ))
 }
 

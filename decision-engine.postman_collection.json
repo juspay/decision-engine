@@ -239,7 +239,7 @@
         {
           "name": "Get Active Routing Rule",
           "request": {
-            "method": "POST",
+            "method": "GET",
             "header": [],
             "url": {
               "raw": "{{baseUrl}}/routing/list/active/{{merchantId}}",

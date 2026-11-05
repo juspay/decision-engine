@@ -14,7 +14,7 @@ import {
   Trash2,
   Zap,
 } from 'lucide-react'
-import { apiPost } from '../../lib/api'
+import { apiPost, fetcher } from '../../lib/api'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useCanEditRouting } from '../../store/authStore'
 import type {
@@ -520,7 +520,7 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
   )
   const { data: activeAlgorithms } = useSWR(
     merchantId ? `/routing/list/active/${merchantId}` : null,
-    (url: string) => apiPost<RoutingAlgorithm[]>(url),
+    (url: string) => fetcher<RoutingAlgorithm[]>(url),
     { revalidateOnFocus: false }
   )
 
@@ -1105,7 +1105,7 @@ export function VolumeContractsPage({ embedded = false }: { embedded?: boolean }
           {fieldError(errors.id)}
         </div>
         <div>
-          {fieldLabel('Connector', 'exact gateway name')}
+          {fieldLabel('Connector', 'exact connector name')}
           <Combobox
             className={errors.connector ? inputInvalidClass : inputClass}
             value={contract.connector}

@@ -216,12 +216,50 @@ where
     serializer.serialize_str(&connectors.join(", "))
 }
 
-/// A hybrid call that answers with an error response.
-struct HybridFailure {
+/// A decider that refused the call, with the error response it answered with.
+pub struct HybridFailure {
     response: axum::response::Response,
     error_code: String,
     error_message: String,
     error: serde_json::Value,
+}
+
+/// Why an evaluation produced no decision.
+pub enum EvaluationError {
+    Rejected(Box<HybridFailure>),
+    Failed(ContainerError<EuclidErrors>),
+}
+
+impl From<ContainerError<EuclidErrors>> for EvaluationError {
+    fn from(error: ContainerError<EuclidErrors>) -> Self {
+        Self::Failed(error)
+    }
+}
+
+impl axum::response::IntoResponse for EvaluationError {
+    fn into_response(self) -> axum::response::Response {
+        match self {
+            Self::Rejected(failure) => failure.response,
+            Self::Failed(error) => error.into_response(),
+        }
+    }
+}
+
+impl From<EvaluationError> for crate::error::RouteError {
+    fn from(error: EvaluationError) -> Self {
+        match error {
+            EvaluationError::Rejected(failure) => {
+                let status = failure.response.status();
+                let cause = format!("{}: {}", failure.error_code, failure.error);
+                if status.is_server_error() {
+                    Self::internal(cause)
+                } else {
+                    Self::new(status, failure.error_message).with_cause(cause)
+                }
+            }
+            EvaluationError::Failed(error) => error.into(),
+        }
+    }
 }
 
 /// Runs one evaluation and answers with the body `render` writes from it, given the call's request
@@ -235,7 +273,7 @@ pub(crate) async fn evaluate(
             String,
         ) -> Result<Option<serde_json::Value>, ContainerError<EuclidErrors>>
         + Send,
-) -> Result<axum::response::Response, ContainerError<EuclidErrors>> {
+) -> Result<axum::response::Response, EvaluationError> {
     // Both endpoints record the same flow types, which the decision analytics select on; the
     // route and the stage say which endpoint answered.
     let (route, routed_stage, failed_stage) = if decide_request.is_some() {
@@ -660,8 +698,12 @@ pub(crate) async fn evaluate(
             Ok(Json(api_response.unwrap_or(response_value)).into_response())
         }
         Ok(Err(failure)) => {
-            record_failure(failure.error_code, failure.error_message, failure.error);
-            Ok(failure.response)
+            record_failure(
+                failure.error_code.clone(),
+                failure.error_message.clone(),
+                failure.error.clone(),
+            );
+            Err(EvaluationError::Rejected(Box::new(failure)))
         }
         Err(err) => {
             let message = err.get_inner().to_string();
@@ -670,7 +712,7 @@ pub(crate) async fn evaluate(
                 message.clone(),
                 serde_json::Value::String(message),
             );
-            Err(err)
+            Err(err.into())
         }
     };
     api_result

@@ -9,16 +9,20 @@ use crate::analytics::clickhouse::query::{
 };
 use crate::analytics::flow::FlowType;
 use crate::analytics::models::{
-    ExperimentArmMetrics, ExperimentResultsQuery, ExperimentResultsResponse, ExperimentVerdict,
+    ExperimentArmMetrics, ExperimentResultsQuery, ExperimentResultsResponse,
+    ExperimentVariantComparison, ExperimentVerdict,
 };
 use crate::error::ApiError;
-use crate::euclid::types::ExperimentEndpoint;
+use crate::euclid::types::{ExperimentEndpoint, CONTROL_ARM_ID, LEGACY_VARIANT_ARM_ID};
 use crate::feedback::gateway_scoring_service::{txn_failure_states, txn_success_states};
 
 /// Default business margin (fraction of ticket) used to value EV when the caller does not
 /// pass one. Matches the routing-time `DEFAULT_MARGIN`; for an accurate verdict the UI should
 /// pass the merchant's real margin.
 pub const DEFAULT_EVALUATION_MARGIN: f64 = 1.0;
+
+/// Chance of any false "wins"/"loses" verdict across all of an experiment's variants.
+const FAMILY_SIGNIFICANCE_LEVEL: f64 = 0.05;
 
 #[derive(Debug, Clone, Deserialize, Row)]
 struct ArmRow {
@@ -234,54 +238,125 @@ pub async fn load(
     builder.add_order_by(OrderClause::asc("arm"));
 
     let rows = fetch_all::<ArmRow>(builder.build(client)).await?;
+    Ok(build_response(query, &rows))
+}
 
-    let control_row = rows.iter().find(|r| r.arm == "control");
-    let variant_row = rows.iter().find(|r| r.arm == "variant");
+/// Variant ids in order, without control, blanks or repeats.
+fn distinct_variant_ids<'a>(ids: impl Iterator<Item = &'a String>) -> Vec<String> {
+    let mut distinct: Vec<String> = Vec::new();
+    for id in ids {
+        if id != CONTROL_ARM_ID && !id.is_empty() && !distinct.contains(id) {
+            distinct.push(id.clone());
+        }
+    }
+    distinct
+}
 
-    let control = arm_metrics("control", control_row, query.evaluation_margin);
-    let variant = arm_metrics("variant", variant_row, query.evaluation_margin);
-    // The minimum sample counts payments with an outcome: unresolved ones carry no evidence yet.
-    let total = resolved(&control) + resolved(&variant);
+/// The variants to report, in order: the requested ids when the query names any, otherwise every
+/// non-control arm the payments were recorded under. With neither, the single-variant `variant`
+/// arm.
+fn reported_variant_ids(query: &ExperimentResultsQuery, rows: &[ArmRow]) -> Vec<String> {
+    let mut ids = if query.variant_ids.is_empty() {
+        distinct_variant_ids(rows.iter().map(|row| &row.arm))
+    } else {
+        distinct_variant_ids(query.variant_ids.iter())
+    };
+    if ids.is_empty() {
+        ids.push(LEGACY_VARIANT_ARM_ID.to_string());
+    }
+    ids
+}
 
-    let delta_pp = (variant.auth_rate - control.auth_rate) * 100.0;
+/// How many comparisons the significance level is corrected for: every requested variant and
+/// every variant that recorded payments, so leaving a variant out of the query never loosens the
+/// level the others are judged at.
+fn compared_variant_count(query: &ExperimentResultsQuery, rows: &[ArmRow]) -> usize {
+    let requested = query.variant_ids.iter();
+    let recorded = rows.iter().map(|row| &row.arm);
+    distinct_variant_ids(requested.chain(recorded)).len().max(1)
+}
+
+fn build_response(query: &ExperimentResultsQuery, rows: &[ArmRow]) -> ExperimentResultsResponse {
+    let row_for = |arm: &str| rows.iter().find(|r| r.arm == arm);
+    let control_row = row_for(CONTROL_ARM_ID);
+    let control = arm_metrics(CONTROL_ARM_ID, control_row, query.evaluation_margin);
+    let variant_ids = reported_variant_ids(query, rows);
+    let variant_metrics: Vec<(ExperimentArmMetrics, Option<&ArmRow>)> = variant_ids
+        .iter()
+        .map(|id| {
+            let row = row_for(id);
+            (arm_metrics(id, row, query.evaluation_margin), row)
+        })
+        .collect();
 
     // EV delta (bps of ticket) — the quantity the z-test below runs on: EV = mean of
     // success·(margin·10⁴ + saved_bps). Arms without cost data extract saved as 0 (they truly
     // saved nothing — no absolute-cost asymmetry between arms). Surfaced in the response only
     // for cost experiments (at least one arm ran multi-objective); for auth-only experiments the
-    // same test collapses to a pure auth z-test and the UI shows the auth delta instead.
-    let is_cost_experiment =
-        control.avg_cost_saved_bps.is_some() || variant.avg_cost_saved_bps.is_some();
-    let net_delta_bps = match (is_cost_experiment, control.net_ev_bps, variant.net_ev_bps) {
-        (true, Some(c), Some(v)) => Some(v - c),
-        _ => None,
-    };
+    // same test collapses to a pure auth z-test and the UI shows the auth delta instead. Every
+    // recorded arm counts, reported or not, so narrowing the query never changes the test's basis.
+    let is_cost_experiment = rows.iter().any(has_cost_data);
+    // Bonferroni: every variant is tested against control, so each test runs at 0.05 / k to keep
+    // the chance of any false verdict across the experiment at 5%.
+    let significance_level = FAMILY_SIGNIFICANCE_LEVEL / compared_variant_count(query, rows) as f64;
 
-    let (p_value, confidence_interval, verdict) = compute_significance(
-        &control,
-        &variant,
-        ev_stats(control_row, query.evaluation_margin),
-        ev_stats(variant_row, query.evaluation_margin),
-        total,
-        query.min_sample_size,
-        query.guardrail_threshold_pp,
-        is_cost_experiment,
-        query.evaluation_margin,
-    );
+    let variants: Vec<ExperimentVariantComparison> = variant_metrics
+        .into_iter()
+        .map(|(variant, variant_row)| {
+            // A rate exists only once an arm has a resolved payment; until both do there is no
+            // difference to report.
+            let delta_pp = if resolved(&control) > 0 && resolved(&variant) > 0 {
+                (variant.auth_rate - control.auth_rate) * 100.0
+            } else {
+                0.0
+            };
+            let net_delta_bps = match (is_cost_experiment, control.net_ev_bps, variant.net_ev_bps) {
+                (true, Some(c), Some(v)) => Some(v - c),
+                _ => None,
+            };
+            // The minimum sample counts payments with an outcome: unresolved ones carry no
+            // evidence yet.
+            let total = resolved(&control) + resolved(&variant);
+            let (p_value, confidence_interval, verdict) = compute_significance(
+                &control,
+                &variant,
+                ev_stats(control_row, query.evaluation_margin),
+                ev_stats(variant_row, query.evaluation_margin),
+                total,
+                query.min_sample_size,
+                query.guardrail_threshold_pp,
+                is_cost_experiment,
+                query.evaluation_margin,
+                significance_level,
+            );
+            ExperimentVariantComparison {
+                metrics: variant,
+                delta_pp,
+                p_value,
+                confidence_interval,
+                verdict,
+                net_delta_bps,
+            }
+        })
+        .collect();
 
-    Ok(ExperimentResultsResponse {
+    // `reported_variant_ids` never returns an empty list.
+    let first = variants[0].clone();
+    ExperimentResultsResponse {
         experiment_id: query.experiment_id.clone(),
         merchant_id: query.merchant_id.clone(),
         control,
-        variant,
-        delta_pp,
-        p_value,
-        confidence_interval,
-        verdict,
+        significance_level,
+        variant: first.metrics,
+        delta_pp: first.delta_pp,
+        p_value: first.p_value,
+        confidence_interval: first.confidence_interval,
+        verdict: first.verdict,
         min_sample_size: query.min_sample_size,
-        net_delta_bps,
+        net_delta_bps: first.net_delta_bps,
         evaluation_margin: query.evaluation_margin,
-    })
+        variants,
+    }
 }
 
 /// Routing decisions an experiment recorded for real payments on its arms, on any endpoint.
@@ -295,9 +370,9 @@ fn experiment_filters(merchant_id: &str, experiment_id: &str) -> Vec<FilterClaus
         "JSONExtractString(assumeNotNull(details), 'experiment_id') = ?",
         vec![experiment_id.into()],
     ));
+    // Every arm: control and each variant id.
     filters.push(FilterClause::raw(
-        "JSONExtractString(assumeNotNull(details), 'variant_arm') IN ('control', 'variant')"
-            .to_string(),
+        "JSONExtractString(assumeNotNull(details), 'variant_arm') != ''".to_string(),
     ));
     // Real payments only. A `/routing/evaluate` preview, such as a Decision Explorer run, has no
     // `routing_source`. Outcome events written by the old in-flight path are not read: outcomes
@@ -373,8 +448,6 @@ fn arm_metrics(arm: &str, row: Option<&ArmRow>, evaluation_margin: f64) -> Exper
             };
             let auth_rate = rate(r.success_count);
             let first_attempt_auth_rate = rate(r.first_attempt_success_count);
-            // Cost data present only when at least one outcome event carried a chosen cost.
-            // avgIf over an empty set is `nan`, so guard on both the count and finiteness.
             let has_cost = r.cost_event_count > 0;
             let avg_chosen_cost_bps =
                 Some(r.avg_chosen_cost_bps).filter(|v| has_cost && v.is_finite());
@@ -408,6 +481,12 @@ fn arm_metrics(arm: &str, row: Option<&ArmRow>, evaluation_margin: f64) -> Exper
             }
         }
     }
+}
+
+/// Whether the arm recorded cost data: at least one payment carried a chosen cost. avgIf over an
+/// empty set is `nan`, so both the count and the average's finiteness are checked.
+fn has_cost_data(row: &ArmRow) -> bool {
+    row.cost_event_count > 0 && row.avg_cost_saved_bps.is_finite()
 }
 
 /// Payments in the arm with a terminal outcome — the sample every rate and test runs on.
@@ -450,6 +529,7 @@ fn compute_significance(
     guardrail_threshold_pp: f64,
     is_cost_experiment: bool,
     evaluation_margin: f64,
+    significance_level: f64,
 ) -> (Option<f64>, Option<(f64, f64)>, ExperimentVerdict) {
     let n_c = resolved(control) as f64;
     let n_v = resolved(variant) as f64;
@@ -488,7 +568,7 @@ fn compute_significance(
 
     let z = delta / se;
     let p_value = two_tailed_p_value(z);
-    let half = 1.96 * se;
+    let half = two_tailed_critical_z(significance_level) * se;
     // CI units follow what the UI shows: bps of EV delta for cost experiments; auth percentage
     // points for auth-only experiments (exact conversion there — saved ≡ 0 means the EV delta
     // is margin·10⁴ × Δauth, so pp = bps / (margin·100)).
@@ -499,7 +579,7 @@ fn compute_significance(
         ((delta - half) / to_pp, (delta + half) / to_pp)
     };
 
-    let verdict = if p_value < 0.05 {
+    let verdict = if p_value < significance_level {
         if delta > 0.0 {
             ExperimentVerdict::VariantWins
         } else {
@@ -510,6 +590,21 @@ fn compute_significance(
     };
 
     (Some(p_value), Some(ci), verdict)
+}
+
+/// The z whose two-tailed p-value is `significance_level` (1.96 at 0.05), by bisection on
+/// [`two_tailed_p_value`], which falls monotonically in z.
+fn two_tailed_critical_z(significance_level: f64) -> f64 {
+    let (mut low, mut high) = (0.0_f64, 10.0_f64);
+    for _ in 0..60 {
+        let mid = (low + high) / 2.0;
+        if two_tailed_p_value(mid) > significance_level {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    (low + high) / 2.0
 }
 
 /// Two-tailed p-value from z-score.
@@ -528,8 +623,12 @@ fn erfc_approx(x: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
-    use super::{arm_metrics, ev_stats, experiment_payments, ArmRow, ExperimentScope};
+    use super::{
+        arm_metrics, build_response, ev_stats, experiment_payments, two_tailed_critical_z, ArmRow,
+        ExperimentScope,
+    };
     use crate::analytics::clickhouse::query::BindArg;
+    use crate::analytics::models::{ExperimentResultsQuery, ExperimentVerdict};
     use crate::euclid::types::ExperimentEndpoint;
 
     fn scope(start_ms: Option<i64>, end_ms: Option<i64>) -> ExperimentScope<'static> {
@@ -631,5 +730,129 @@ mod tests {
         let stats = ev_stats(Some(&arm_row(100, 3, 1, 3)), 1.0).unwrap();
         assert_eq!(stats.n, 4.0);
         assert!((stats.mean - 7_500.0).abs() < 1e-9);
+    }
+
+    fn named(arm: &str, row: ArmRow) -> ArmRow {
+        ArmRow {
+            arm: arm.to_string(),
+            ..row
+        }
+    }
+
+    fn results_query(variant_ids: &[&str]) -> ExperimentResultsQuery {
+        ExperimentResultsQuery {
+            experiment_id: "exp_1".into(),
+            merchant_id: "m_1".into(),
+            start_ms: None,
+            end_ms: None,
+            min_sample_size: 100,
+            guardrail_threshold_pp: 50.0,
+            evaluation_margin: 1.0,
+            endpoint: None,
+            variant_ids: variant_ids.iter().map(|id| id.to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn critical_z_matches_the_significance_level() {
+        assert!((two_tailed_critical_z(0.05) - 1.96).abs() < 1e-2);
+        assert!((two_tailed_critical_z(0.025) - 2.24).abs() < 1e-2);
+    }
+
+    #[test]
+    fn every_variant_is_compared_with_control_at_a_corrected_level() {
+        let rows = vec![
+            named("control", arm_row(1000, 800, 200, 800)),
+            named("rule_a", arm_row(1000, 850, 150, 850)),
+            named("rule_b", arm_row(1000, 805, 195, 805)),
+        ];
+        // rule_c is configured but has recorded nothing yet; it still counts toward the correction.
+        let response = build_response(&results_query(&["rule_a", "rule_b", "rule_c"]), &rows);
+        assert!((response.significance_level - 0.05 / 3.0).abs() < 1e-12);
+        let ids: Vec<_> = response
+            .variants
+            .iter()
+            .map(|v| v.metrics.arm.as_str())
+            .collect();
+        assert_eq!(ids, vec!["rule_a", "rule_b", "rule_c"]);
+        assert_eq!(response.variants[0].verdict, ExperimentVerdict::VariantWins);
+        assert_eq!(
+            response.variants[1].verdict,
+            ExperimentVerdict::NotSignificant
+        );
+        assert_eq!(
+            response.variants[2].verdict,
+            ExperimentVerdict::CollectingData
+        );
+        // The single-variant fields mirror the first variant.
+        assert_eq!(response.variant.arm, "rule_a");
+        assert_eq!(response.verdict, ExperimentVerdict::VariantWins);
+    }
+
+    #[test]
+    fn the_query_narrows_the_report_but_not_the_correction() {
+        let rows = vec![
+            named("control", arm_row(1000, 800, 200, 800)),
+            named("rule_a", arm_row(1000, 850, 150, 850)),
+            named("rule_b", arm_row(10, 0, 0, 0)),
+        ];
+        let response = build_response(&results_query(&["rule_a"]), &rows);
+        let ids: Vec<_> = response
+            .variants
+            .iter()
+            .map(|v| v.metrics.arm.as_str())
+            .collect();
+        assert_eq!(ids, vec!["rule_a"]);
+        // rule_b recorded payments, so it still counts toward the correction.
+        assert!((response.significance_level - 0.025).abs() < 1e-12);
+
+        // rule_b has nothing resolved yet: no rate, so no delta.
+        let all = build_response(&results_query(&[]), &rows);
+        assert_eq!(all.variants[1].metrics.arm, "rule_b");
+        assert_eq!(all.variants[1].delta_pp, 0.0);
+    }
+
+    #[test]
+    fn hiding_the_cost_variant_keeps_the_cost_basis() {
+        let cost_arm = ArmRow {
+            avg_chosen_cost_bps: 180.0,
+            avg_cost_saved_bps: 20.0,
+            cost_event_count: 900,
+            saved_success_sum: 17_000.0,
+            saved_success_sq_sum: 400_000.0,
+            ..arm_row(1000, 850, 150, 850)
+        };
+        let rows = vec![
+            named("control", arm_row(1000, 800, 200, 800)),
+            named("rule_a", arm_row(1000, 820, 180, 820)),
+            named("cost_b", cost_arm),
+        ];
+        let narrowed = build_response(&results_query(&["rule_a"]), &rows);
+        let full = build_response(&results_query(&[]), &rows);
+        assert!(narrowed.variants[0].net_delta_bps.is_some());
+        assert_eq!(
+            narrowed.variants[0].net_delta_bps,
+            full.variants[0].net_delta_bps
+        );
+        assert_eq!(
+            narrowed.variants[0].confidence_interval,
+            full.variants[0].confidence_interval
+        );
+    }
+
+    #[test]
+    fn single_variant_experiments_read_as_before() {
+        let rows = vec![
+            named("control", arm_row(1000, 800, 200, 800)),
+            named("variant", arm_row(1000, 850, 150, 850)),
+        ];
+        let response = build_response(&results_query(&[]), &rows);
+        assert_eq!(response.significance_level, 0.05);
+        assert_eq!(response.variants.len(), 1);
+        assert_eq!(response.variant.arm, "variant");
+
+        let empty = build_response(&results_query(&[]), &[]);
+        assert_eq!(empty.variant.arm, "variant");
+        assert_eq!(empty.verdict, ExperimentVerdict::CollectingData);
     }
 }

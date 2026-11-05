@@ -108,16 +108,16 @@ export class EuclidRuleBuilder extends RoutingListPage {
 
   async addGatewayToBlock(blockIndex: number, gatewayName: string, gatewayId = ''): Promise<void> {
     const then = this.thenSection(blockIndex)
-    await then.locator('input[placeholder="Gateway name"]').fill(gatewayName)
-    if (gatewayId) await then.locator('input[placeholder="Gateway ID (optional)"]').fill(gatewayId)
+    await then.locator('input[placeholder="Connector name"]').fill(gatewayName)
+    if (gatewayId) await then.locator('input[placeholder="Connector ID (optional)"]').fill(gatewayId)
     await then.getByRole('button', { name: 'Add', exact: true }).click()
   }
 
   async addVolumeSplitEntry(blockIndex: number, split: number, gatewayName: string, gatewayId = ''): Promise<void> {
     const then = this.thenSection(blockIndex)
     await then.locator('input[placeholder="Split %"]').fill(String(split))
-    await then.locator('input[placeholder="Gateway name"]').fill(gatewayName)
-    if (gatewayId) await then.locator('input[placeholder="Gateway ID (optional)"]').fill(gatewayId)
+    await then.locator('input[placeholder="Connector name"]').fill(gatewayName)
+    if (gatewayId) await then.locator('input[placeholder="Connector ID (optional)"]').fill(gatewayId)
     await then.getByRole('button', { name: 'Add', exact: true }).click()
   }
 
@@ -132,14 +132,14 @@ export class EuclidRuleBuilder extends RoutingListPage {
       .locator('[class*="p-3"]')
       .filter({ has: this.page.locator('p', { hasText: 'Priority list for this split' }) })
       .nth(rowIndex)
-    await row.locator('input[placeholder="Gateway name"]').fill(gatewayName)
-    if (gatewayId) await row.locator('input[placeholder="Gateway ID (optional)"]').fill(gatewayId)
+    await row.locator('input[placeholder="Connector name"]').fill(gatewayName)
+    if (gatewayId) await row.locator('input[placeholder="Connector ID (optional)"]').fill(gatewayId)
     await row.getByRole('button', { name: 'Add', exact: true }).click()
   }
 
   /** Open the gateway-name dropdown of a rule block's THEN section without typing anything. */
   async openGatewayDropdown(blockIndex: number): Promise<void> {
-    await this.thenSection(blockIndex).getByRole('button', { name: 'Show gateway list' }).click()
+    await this.thenSection(blockIndex).getByRole('button', { name: 'Show connector list' }).click()
   }
 
   /** Pick a gateway from the dropdown (rather than typing it) and commit the row. */
@@ -153,8 +153,8 @@ export class EuclidRuleBuilder extends RoutingListPage {
     const section = this.page
       .locator('.rounded-xl')
       .filter({ has: this.page.locator('p', { hasText: 'Default Fallback' }) })
-    await section.locator('input[placeholder="Gateway name"]').fill(gatewayName)
-    if (gatewayId) await section.locator('input[placeholder="Gateway ID (optional)"]').fill(gatewayId)
+    await section.locator('input[placeholder="Connector name"]').fill(gatewayName)
+    if (gatewayId) await section.locator('input[placeholder="Connector ID (optional)"]').fill(gatewayId)
     await section.getByRole('button', { name: 'Add', exact: true }).click()
   }
 

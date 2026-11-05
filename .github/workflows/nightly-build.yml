@@ -156,6 +156,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -181,6 +183,8 @@ jobs:
         with:
           context: .
           file: Dockerfile.postgres
+          build-args: |
+            VERGEN_GIT_DESCRIBE=${{ needs.create-tag.outputs.tag_name }}
           platforms: ${{ matrix.platform }}
           tags: ghcr.io/${{ github.repository }}/postgres:${{ needs.create-tag.outputs.tag_name }}-${{ matrix.tag }}
           labels: ${{ steps.meta.outputs.labels }}
@@ -210,6 +214,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -235,6 +241,8 @@ jobs:
         with:
           context: .
           file: Dockerfile
+          build-args: |
+            VERGEN_GIT_DESCRIBE=${{ needs.create-tag.outputs.tag_name }}
           platforms: ${{ matrix.platform }}
           tags: ghcr.io/${{ github.repository }}:${{ needs.create-tag.outputs.tag_name }}-${{ matrix.tag }}
           labels: ${{ steps.meta.outputs.labels }}

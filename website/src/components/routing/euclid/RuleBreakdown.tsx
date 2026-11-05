@@ -100,7 +100,7 @@ export function RuleBreakdown({ algo }: { algo: RoutingAlgorithm }) {
           <div className="flex items-center gap-2 px-1 text-xs">
             <span className="text-slate-500 dark:text-[#78849a]">Default:</span>
             <span className="font-medium text-amber-700 dark:text-amber-400">
-              Not set — unmatched payments have no gateway
+              Not set — unmatched payments have no connector
             </span>
           </div>
         )

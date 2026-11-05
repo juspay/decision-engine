@@ -34,19 +34,81 @@ where
     ) -> Result<Self, Self::Rejection> {
         match axum::Json::<T>::from_request(request, state).await {
             Ok(axum::Json(payload)) => Ok(Self(payload)),
-            Err(rejection) => Err(invalid_json_response(rejection.body_text())),
+            Err(rejection) => Err(invalid_json_response(
+                json_rejection_message(&rejection),
+                rejection.body_text(),
+            )),
         }
     }
 }
 
-/// The standard answer to a body that could not be read or parsed, logged once.
-fn invalid_json_response(message: String) -> Response {
+/// The caller's message for a body that did not parse: the failing field by its path, never
+/// serde's text. Messages our own deserializers write are kept.
+fn json_rejection_message(rejection: &axum::extract::rejection::JsonRejection) -> String {
+    use axum::extract::rejection::JsonRejection;
+    const MALFORMED: &str = "Request body must be a valid JSON object";
+    let error = match rejection {
+        JsonRejection::JsonDataError(error) => error,
+        JsonRejection::JsonSyntaxError(_) => return MALFORMED.to_string(),
+        other => return other.body_text(),
+    };
+    let mut source = std::error::Error::source(error);
+    let path_error = std::iter::from_fn(|| {
+        let current = source?;
+        source = current.source();
+        Some(current)
+    })
+    .find_map(|error| error.downcast_ref::<serde_path_to_error::Error<serde_json::Error>>());
+    let Some(error) = path_error else {
+        return MALFORMED.to_string();
+    };
+    let path = error.path().to_string();
+    let at_root = matches!(path.as_str(), "." | "");
+    // serde_json appends the position.
+    let detail = error.inner().to_string();
+    let detail = detail
+        .rsplit_once(" at line ")
+        .map_or(detail.as_str(), |(text, _)| text);
+    if let Some(field) = detail
+        .strip_prefix("missing field `")
+        .and_then(|rest| rest.split('`').next())
+    {
+        return if at_root {
+            format!("Missing required field `{field}`")
+        } else {
+            format!("Missing required field `{path}.{field}`")
+        };
+    }
+    if at_root {
+        return MALFORMED.to_string();
+    }
+    if detail.starts_with("unknown field") {
+        return format!("Unknown field `{path}`");
+    }
+    const SERDE: [&str; 5] = [
+        "invalid type",
+        "invalid value",
+        "invalid length",
+        "unknown variant",
+        "duplicate field",
+    ];
+    if SERDE.iter().any(|prefix| detail.starts_with(prefix)) {
+        format!("Invalid value for field `{path}`")
+    } else {
+        format!("Invalid value for field `{path}`: {detail}")
+    }
+}
+
+/// The standard answer to a body that could not be read or parsed, logged once with serde's text.
+fn invalid_json_response(message: String, detail: String) -> Response {
     crate::logger::error!(
         status_code = StatusCode::BAD_REQUEST.as_u16(),
         error_code = crate::error::error_codes::TE_03,
         error_message = %message,
+        error_detail = %detail,
         "Request JSON extraction failed"
     );
+
     (
         StatusCode::BAD_REQUEST,
         crate::error::ApiErrorResponse::new(crate::error::error_codes::TE_03, message, None),
@@ -93,8 +155,10 @@ pub enum ScopedJsonRejection {
 impl IntoResponse for ScopedJsonRejection {
     fn into_response(self) -> Response {
         match self {
-            Self::Read(error) => invalid_json_response(error.to_string()),
-            Self::Parse { error, .. } => invalid_json_response(error.body_text()),
+            Self::Read(error) => invalid_json_response(error.to_string(), error.to_string()),
+            Self::Parse { error, .. } => {
+                invalid_json_response(json_rejection_message(&error), error.body_text())
+            }
             Self::Scope(violation) => violation.into_response(),
         }
     }
@@ -203,6 +267,32 @@ where
             .await
             .map(Self)
             .map_err(IntoResponse::into_response)
+    }
+}
+
+/// The merchant named by `x-connected-merchant-id`. Optional for a session or API key (defaults to
+/// its own merchant; it may also name a sub-merchant); required for a service credential.
+#[derive(Debug, Clone)]
+pub struct ConnectedMerchant(pub crate::auth::AuthorizedMerchant);
+
+#[async_trait]
+impl<S> FromRequestParts<S> for ConnectedMerchant
+where
+    S: Send + Sync,
+{
+    type Rejection = crate::auth::MerchantScopeViolation;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        let named = parts
+            .headers
+            .get(consts::X_CONNECTED_MERCHANT_ID)
+            .and_then(|value| value.to_str().ok())
+            .map(str::trim)
+            // Blank counts as absent.
+            .filter(|merchant_id| !merchant_id.is_empty())
+            .map(str::to_string);
+        let session = parts.extensions.get::<AuthContext>();
+        crate::auth::authorize(session, &named).await.map(Self)
     }
 }
 
@@ -321,15 +411,29 @@ mod tests {
     async fn json_rejections_return_invalid_request_and_log_once() {
         use axum::{body::Body, extract::FromRequest, response::IntoResponse};
 
-        for (content_type, body) in [
-            (Some("application/json"), r#"{"count": 1,}"#.to_string()),
+        let content_type_message = "Expected request with `Content-Type: application/json`";
+        for (content_type, body, message) in [
+            (
+                Some("application/json"),
+                r#"{"count": 1,}"#.to_string(),
+                "Request body must be a valid JSON object",
+            ),
             (
                 Some("application/json"),
                 r#"{"count": "invalid"}"#.to_string(),
+                "Invalid value for field `count`",
             ),
-            (None, r#"{"count": 1}"#.to_string()),
-            (Some("text/plain"), r#"{"count": 1}"#.to_string()),
-            (Some("application/json"), " ".repeat(2 * 1024 * 1024 + 1)),
+            (None, r#"{"count": 1}"#.to_string(), content_type_message),
+            (
+                Some("text/plain"),
+                r#"{"count": 1}"#.to_string(),
+                content_type_message,
+            ),
+            (
+                Some("application/json"),
+                " ".repeat(2 * 1024 * 1024 + 1),
+                "Failed to buffer the request body: length limit exceeded",
+            ),
         ] {
             let request = || {
                 let mut req = Request::new(Body::from(body.clone()));
@@ -346,9 +450,6 @@ mod tests {
                 .await
                 .unwrap_err();
             assert_eq!(errors_logged() - before, 1);
-            let expected = axum::Json::<TestPayload>::from_request(request(), &())
-                .await
-                .unwrap_err();
             assert_eq!(actual.status(), axum::http::StatusCode::BAD_REQUEST);
             assert_eq!(actual.headers()["content-type"], "application/json");
             let body = axum::body::to_bytes(actual.into_body(), usize::MAX)
@@ -359,7 +460,7 @@ mod tests {
                 actual,
                 serde_json::json!({
                     "code": crate::error::error_codes::TE_03,
-                    "message": expected.body_text(),
+                    "message": message,
                     "data": null,
                 })
             );
@@ -375,9 +476,6 @@ mod tests {
                 .unwrap_err()
                 .into_response();
             assert_eq!(errors_logged() - before, 1);
-            let expected = axum::Json::<ScopedTestPayload>::from_request(request(), &())
-                .await
-                .unwrap_err();
             assert_eq!(actual.status(), axum::http::StatusCode::BAD_REQUEST);
             let body = axum::body::to_bytes(actual.into_body(), usize::MAX)
                 .await
@@ -387,9 +485,68 @@ mod tests {
                 actual,
                 serde_json::json!({
                     "code": crate::error::error_codes::TE_03,
-                    "message": expected.body_text(),
+                    "message": message,
                     "data": null,
                 })
+            );
+        }
+    }
+
+    #[test]
+    fn parse_errors_name_the_field_without_serde_text() {
+        #[derive(Debug, serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        #[allow(dead_code)]
+        struct Inner {
+            name: String,
+        }
+        #[derive(Debug, serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        #[allow(dead_code)]
+        struct Body {
+            amount: u64,
+            items: Vec<Inner>,
+            #[serde(default, deserialize_with = "own_error")]
+            limit: Option<u32>,
+        }
+        fn own_error<'de, D: serde::Deserializer<'de>>(_: D) -> Result<Option<u32>, D::Error> {
+            Err(serde::de::Error::custom("limit out of range"))
+        }
+        let message = |body: &str| {
+            axum::Json::<Body>::from_bytes(body.as_bytes())
+                .map(|_| String::new())
+                .unwrap_or_else(|rejection| super::json_rejection_message(&rejection))
+        };
+        assert_eq!(
+            message(r#"{"amount": 1, "items": [], "x": 1}"#),
+            "Unknown field `x`"
+        );
+        assert_eq!(
+            message(r#"{"amount": 1, "items": [{"name": "a", "id": 1}]}"#),
+            "Unknown field `items[0].id`"
+        );
+        assert_eq!(
+            message(r#"{"items": []}"#),
+            "Missing required field `amount`"
+        );
+        assert_eq!(
+            message(r#"{"amount": 1, "items": [{}]}"#),
+            "Missing required field `items[0].name`"
+        );
+        for amount in ["-1", "\"1\"", "1.5"] {
+            assert_eq!(
+                message(&format!(r#"{{"amount": {amount}, "items": []}}"#)),
+                "Invalid value for field `amount`"
+            );
+        }
+        assert_eq!(
+            message(r#"{"amount": 1, "items": [], "limit": 9}"#),
+            "Invalid value for field `limit`: limit out of range"
+        );
+        for malformed in [r#"{"amount": "#, "[]"] {
+            assert_eq!(
+                message(malformed),
+                "Request body must be a valid JSON object"
             );
         }
     }
@@ -492,10 +649,9 @@ mod tests {
             .unwrap();
         match super::ScopedJson::<CreateApiKeyRequest>::from_request(request, &()).await {
             Err(super::ScopedJsonRejection::Parse { error, .. }) => {
-                assert!(
-                    error.body_text().contains("description"),
-                    "{}",
-                    error.body_text()
+                assert_eq!(
+                    super::json_rejection_message(&error),
+                    "Invalid value for field `description`"
                 )
             }
             other => panic!("expected a parse failure, got {other:?}"),
@@ -574,6 +730,53 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(scoped.merchant.as_str(), "merchant_b");
+    }
+
+    #[tokio::test]
+    async fn connected_merchant_defaults_to_the_session_and_binds_the_header_to_it() {
+        use crate::auth::MerchantScopeViolation;
+        use axum::extract::FromRequestParts;
+
+        async fn resolve(
+            session: Option<&str>,
+            header: Option<&str>,
+        ) -> Result<String, MerchantScopeViolation> {
+            let mut builder = Request::builder();
+            if let Some(header) = header {
+                builder = builder.header("x-connected-merchant-id", header);
+            }
+            let (mut parts, ()) = builder.body(()).unwrap().into_parts();
+            if let Some(merchant_id) = session {
+                parts
+                    .extensions
+                    .insert(AuthContext::from_api_key(merchant_id));
+            }
+            super::ConnectedMerchant::from_request_parts(&mut parts, &())
+                .await
+                .map(|super::ConnectedMerchant(merchant)| merchant.as_str().to_string())
+        }
+
+        // Session: own merchant only.
+        assert_eq!(resolve(Some("m_a"), None).await, Ok("m_a".to_string()));
+        assert_eq!(
+            resolve(Some("m_a"), Some("m_a")).await,
+            Ok("m_a".to_string())
+        );
+        assert_eq!(resolve(Some("m_a"), Some(" ")).await, Ok("m_a".to_string()));
+        assert_eq!(
+            resolve(Some("m_a"), Some("m_b")).await,
+            Err(MerchantScopeViolation::ForeignMerchant)
+        );
+        // Service credential: header required.
+        assert_eq!(resolve(None, Some("m_b")).await, Ok("m_b".to_string()));
+        assert_eq!(
+            resolve(None, None).await,
+            Err(MerchantScopeViolation::NoMerchant)
+        );
+        assert_eq!(
+            resolve(None, Some("")).await,
+            Err(MerchantScopeViolation::NoMerchant)
+        );
     }
 
     #[tokio::test]

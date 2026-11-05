@@ -982,10 +982,10 @@ export function PaymentAuditPage() {
   const content = {
     title: 'Decision Audit',
     description:
-      'Search by payment or request, then inspect every step the payment went through — rule evaluations, gateway decisions, score updates, debit routing, and errors — with the exact payload captured at each step.',
+      'Search by payment or request, then inspect every step the payment went through — rule evaluations, connector decisions, score updates, debit routing, and errors — with the exact payload captured at each step.',
     merchantPrompt: 'Audit data follows your signed-in merchant account.',
     searchTitle: 'Search Decision Trail',
-    searchDescription: 'Use payment or request IDs when you have them. Routing type, gateway, status, route, and error code narrow results quickly.',
+    searchDescription: 'Use payment or request IDs when you have them. Routing type, connector, status, route, and error code narrow results quickly.',
     matchingLabel: 'Matches',
     matchingDescription: 'Scan the current result set and pick a payment to open its full event trail.',
     summaryLabel: 'Selected Payment Timeline',
@@ -1254,7 +1254,7 @@ export function PaymentAuditPage() {
             options={gatewayOptions.map((gateway) => ({ value: gateway, label: gateway }))}
             onChange={(values) => updateFilter('gateway', values.join(','))}
             onClose={applyIfChanged}
-            placeholder="Any gateway"
+            placeholder="Any connector"
             triggerClassName={fieldClassName(!!filters.gateway)}
             compact
           />
@@ -1650,7 +1650,7 @@ export function PaymentAuditPage() {
 
                 {/* Outcome is not repeated here — the badge above it already carries the status. */}
                 <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
-                  <HeadlineFact label="Gateway" value={selectedEvent.gateway || 'Unknown'} />
+                  <HeadlineFact label="Connector" value={selectedEvent.gateway || 'Unknown'} />
                   <HeadlineFact label="Stage" value={stageLabel(selectedEvent)} />
                   <HeadlineFact label="Time" value={formatDateTime(selectedEvent.created_at_ms)} />
                 </div>

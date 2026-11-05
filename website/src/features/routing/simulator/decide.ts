@@ -6,6 +6,7 @@ import {
   DecideResponse,
   VolumeSteerInfo,
 } from '../../../types/api'
+import { apiFetch } from '../../../lib/api'
 
 // `/decide-gateway` takes the SR request as is. `/decide` takes the same payment as one flat
 // request: it evaluates the active rule on the payment's attributes, then SR among the rule output.
@@ -38,13 +39,12 @@ export interface SimulatedPayment {
   eliminationEnabled: boolean
 }
 
-// The `/decide` request for one simulated payment. Connectors are named by gateway alone, as the
+// The `/decide` request for one simulated payment. Connectors are named alone, as the
 // simulator's gateways carry no connector account. Card attributes are sent for card payments only.
 export function decideRequestFor(payment: SimulatedPayment): DecideRequest {
   const isCard = payment.paymentMethod.toUpperCase() === 'CARD'
   return {
     payment_id: payment.paymentId,
-    merchant_id: payment.merchantId,
     amount: Math.round(payment.amount),
     currency: payment.currency,
     payment_method_type: payment.paymentMethod || null,
@@ -62,16 +62,16 @@ export function decideRequestFor(payment: SimulatedPayment): DecideRequest {
       algorithm_for: 'payment',
       ranking_algorithm: 'SR_BASED_ROUTING',
       elimination_enabled: payment.eliminationEnabled,
-      eligible_connectors: payment.gateways.map(gateway_name => ({ gateway_name })),
+      eligible_connectors: payment.gateways.map(connector => ({ connector })),
     },
   }
 }
 
 // The decider's identifier for a connector: "name:id", or the bare name without an account.
 export function connectorIdentifier(connector: DecideConnector): string {
-  return connector.payment_merchant_connector_id
-    ? `${connector.gateway_name}:${connector.payment_merchant_connector_id}`
-    : connector.gateway_name
+  return connector.merchant_connector_id
+    ? `${connector.connector}:${connector.merchant_connector_id}`
+    : connector.connector
 }
 
 // The approach a row records when the rule layer set the order and success rate did not run.
@@ -116,6 +116,16 @@ export function simulatedDecisionFromDecideGateway(res: DecideGatewayResponse): 
   }
 }
 
+// Routes one simulated payment through `/decide`.
+export async function decideSimulatedPayment(payment: SimulatedPayment): Promise<SimulatedDecision> {
+  const response = await apiFetch<DecideResponse>('/decide', {
+    method: 'POST',
+    headers: { 'x-connected-merchant-id': payment.merchantId },
+    body: JSON.stringify(decideRequestFor(payment)),
+  })
+  return simulatedDecisionFromDecide(response)
+}
+
 export function simulatedDecisionFromDecide(res: DecideResponse): SimulatedDecision {
   const [head, ...rest] = res.connectors
   if (!head) throw new Error(`Decide returned no connector (${res.outcome.reason})`)
@@ -124,21 +134,28 @@ export function simulatedDecisionFromDecide(res: DecideResponse): SimulatedDecis
   return {
     decidedGateway: connectorIdentifier(head),
     fallbackGateways: rest.map(connectorIdentifier),
-    routingApproach: sr ? sr.approach : RULE_DECIDED_APPROACH,
+    routingApproach: sr ? sr.approach?.toUpperCase() ?? null : RULE_DECIDED_APPROACH,
     gatewayPriorityMap: sr
       ? Object.fromEntries(sr.scores.map(score => [connectorIdentifier(score), score.score]))
       : null,
     costSavedBps: cost?.cost_saved_bps ?? null,
-    costWon: cost?.outcome === 'COST_WON',
-    authWon: cost?.outcome === 'AUTH_WON',
+    costWon: cost?.status === 'cost_won',
+    authWon: cost?.status === 'auth_won',
     headAuthRate: cost?.ranked.find(r => r.is_sr_head)?.auth_rate ?? null,
     chosenAuthRate: cost?.ranked.find(r => r.is_chosen)?.auth_rate ?? null,
     margin: cost?.margin ?? null,
     evGapTop2: cost?.ev_gap_top2 ?? null,
-    steerOutcome: steer?.outcome ?? null,
+    steerOutcome: steer ? toDecider<VolumeSteerInfo['outcome']>(steer.status) : null,
     steerSrHead: steer?.sr_head ? connectorIdentifier(steer.sr_head) : null,
     steerBlocked: steer
-      ? steer.blocked.map(({ connector, gate }) => ({ connector: connectorIdentifier(connector), gate }))
+      ? steer.blocked.map(({ connector, reason }) => ({
+        connector: connectorIdentifier(connector),
+        gate: toDecider<BlockedCommitment['gate']>(reason),
+      }))
       : null,
   }
+}
+
+function toDecider<T extends string>(code: string): T {
+  return code.toUpperCase() as T
 }

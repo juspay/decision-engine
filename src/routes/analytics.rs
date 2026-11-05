@@ -358,6 +358,10 @@ pub struct ExperimentResultsParams {
     pub evaluation_margin: Option<f64>,
     /// `hybrid_routing`, `decide_gateway` or `evaluate`. Omitted → every endpoint.
     pub endpoint: Option<crate::euclid::types::ExperimentEndpoint>,
+    /// Variant ids to report, comma-separated, in order. The significance level is corrected for
+    /// these and for every other variant that recorded payments. Omitted → the variants the
+    /// recorded payments name.
+    pub variants: Option<String>,
 }
 
 pub async fn experiment_results(
@@ -378,6 +382,15 @@ pub async fn experiment_results(
             crate::analytics::clickhouse::endpoints::experiment_results::DEFAULT_EVALUATION_MARGIN,
         ),
         endpoint: known_experiment_endpoint(params.endpoint)?,
+        variant_ids: params
+            .variants
+            .as_deref()
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+            .collect(),
     };
     Ok(Json(fetch_experiment_results(&state, &query).await?))
 }

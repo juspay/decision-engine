@@ -40,6 +40,9 @@ pub async fn volume_commitment_server_builder(
     let router = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/schedule", get(schedule))
+        .layer(axum::middleware::from_fn(
+            crate::middleware::default_response_headers,
+        ))
         .with_state(scheduler);
 
     // Same signals as the main server; it handles SIGINT, so Ctrl-C no longer kills the process by default.
