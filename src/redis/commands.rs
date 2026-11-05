@@ -799,4 +799,80 @@ impl RedisConnectionWrapper {
             None => Ok(None),
         }
     }
+
+    // TTL + HINCRBY + EXPIRE in one MULTI: the pre-write TTL (-2 = key absent) gives the
+    // caller an atomic new-key signal with zero extra round trips, and a new hash can never
+    // be left without a TTL.
+    pub async fn hincrby_with_expire(
+        &self,
+        key: &str,
+        field: &str,
+        increment: i64,
+        ttl_seconds: i64,
+    ) -> Result<(i64, i64), errors::RedisError> {
+        let key_owned = key.to_string();
+        let field_owned = field.to_string();
+        let result: Vec<i64> = self
+            .multi(false, |transaction| {
+                Box::pin(async move {
+                    transaction.ttl::<(), _>(&key_owned).await?;
+                    transaction
+                        .hincrby::<(), _, _>(
+                            &RedisKey::from(key_owned.clone()),
+                            field_owned.as_str(),
+                            increment,
+                        )
+                        .await?;
+                    transaction.expire::<(), _>(&key_owned, ttl_seconds).await?;
+                    Ok(())
+                })
+            })
+            .await
+            .change_context(errors::RedisError::SetHashFailed)?;
+        match (result.first(), result.get(1)) {
+            (Some(prev_ttl), Some(new_count)) => Ok((*prev_ttl, *new_count)),
+            _ => Err(error_stack::Report::new(errors::RedisError::UnknownResult)),
+        }
+    }
+
+    pub async fn hlen(&self, key: &str) -> Result<i64, errors::RedisError> {
+        self.conn
+            .pool
+            .hlen(key)
+            .await
+            .change_context(errors::RedisError::GetFailed)
+    }
+
+    // Plain HINCRBY — no TTL re-arm; the caller owns key-lifetime semantics.
+    pub async fn hincrby(
+        &self,
+        key: &str,
+        field: &str,
+        increment: i64,
+    ) -> Result<i64, errors::RedisError> {
+        self.conn
+            .pool
+            .hincrby(key, field, increment)
+            .await
+            .change_context(errors::RedisError::SetHashFailed)
+    }
+
+    pub async fn hgetall_map(
+        &self,
+        key: &str,
+    ) -> Result<std::collections::HashMap<String, String>, errors::RedisError> {
+        self.conn
+            .pool
+            .hgetall(key)
+            .await
+            .change_context(errors::RedisError::GetFailed)
+    }
+
+    pub async fn hdel_field(&self, key: &str, field: &str) -> Result<i64, errors::RedisError> {
+        self.conn
+            .pool
+            .hdel(key, field)
+            .await
+            .change_context(errors::RedisError::DeleteFailed)
+    }
 }
