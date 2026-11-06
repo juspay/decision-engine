@@ -1,5 +1,6 @@
 pub mod access;
 pub mod context;
+pub mod merchant_service;
 pub mod scope;
 
 use error_stack::{Report, ResultExt};
