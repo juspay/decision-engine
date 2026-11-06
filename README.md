@@ -168,7 +168,7 @@ curl http://localhost:8080/health
 | [Multi-Objective Routing](docs/api-refs/decide-gateway-multi-objective.mdx) | Cost-aware post-step that re-ranks gateways on expected value |
 | [Configuration Guide](docs/configuration.md) | All config options explained |
 | [Deep Dive Blog](https://juspay.io/blog/juspay-orchestrator-and-merchant-controlled-routing-engine) | How the routing logic works |
-| [Performance Benchmarks](docs/benchmarks.mdx) | Throughput and latency of the `/decide-gateway` endpoint under sustained load |
+| [Performance Benchmarks](docs/benchmarks.mdx) | Latency and throughput of the routing endpoints under sustained load |
 
 ---
 

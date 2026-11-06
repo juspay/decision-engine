@@ -1,9 +1,64 @@
 ---
 title: "Performance Benchmarks"
-description: "Throughput and latency of the /decide-gateway and /routing/evaluate endpoints under sustained load"
+description: "Latency and throughput of the decision engine's routing endpoints under sustained load"
 ---
 
 ## Overview
+
+This page has two sets of measurements, taken on different machines and at different times.
+Compare numbers within a set, not across them.
+
+- **[Latency on a dedicated Linux host](#latency-on-a-dedicated-linux-host-september-2026)
+  (September 2026):** p99 under 2 ms on `/decide-gateway` and `/routing/hybrid` at 200 req/s.
+- **[Throughput and latency on a 2-core pod](#test-environment) (May 2026):** the per-pod
+  throughput ceiling and the scaling guide below. These figures predate the September latency
+  work.
+
+---
+
+## Latency on a dedicated Linux host (September 2026)
+
+Measured on 21 September 2026 with the changes merged in
+[#441](https://github.com/juspay/decision-engine/pull/441), which cached the feature-flag
+lookup that had queried PostgreSQL on every routing call and added an optional in-process cache
+for JWT revocation checks.
+
+| Property | Value |
+|----------|-------|
+| Host | Ubuntu 22.04, 24-core x86_64, dedicated (no other workload) |
+| Build | `release-fast` profile, PostgreSQL |
+| Topology | Decision engine, its datastores and k6 all in Docker on the same host |
+| Load | Fixed arrival rate of 200 req/s (k6 `constant-arrival-rate`) |
+| Trials | 15, with 100% of checks passing, including a check on every hybrid response that its success-rate half ran |
+
+Round-trip latency of the routing call, in milliseconds:
+
+| Endpoint | p50 | p95 | p99 (median of trials) | p99 range |
+|----------|----:|----:|-----------------------:|----------:|
+| `POST /routing/evaluate` | 0.32 | 0.43 | **0.54** | 0.53 – 0.55 |
+| `POST /decide-gateway` | 1.13 | 1.50 | **1.63** | 1.62 – 1.70 |
+| `POST /routing/hybrid` | 1.25 | 1.65 | **1.83** | 1.80 – 1.99 |
+
+On the same harness before #441, p99 was 12.2 ms on `/decide-gateway` and 31.6 ms on
+`/routing/hybrid`. Part of that difference is the PostgreSQL query that #441 removed; the rest
+is the measuring machine: the same build measured on a laptop's Docker VM added 1–2.6 ms to p99
+on its own.
+
+<Note>
+These runs measure latency at a fixed rate, not a throughput ceiling. For per-pod capacity, see
+the [saturation test](#saturation-point) below.
+</Note>
+
+<Note>
+[`POST /decide`](/api-reference/endpoint/decide) runs the same routing evaluator as
+`/routing/hybrid`, and also translates its flat request and builds the standardised `/decide`
+response. It has not yet been measured on this host; run the
+[benchmark workflow](#reproducing-these-results) to measure it alongside the endpoints above.
+</Note>
+
+---
+
+## Throughput and latency on a 2-core pod (May 2026)
 
 The decision engine contributes **~6 ms** (server-side average) to a payment routing
 decision at typical load. A single 2-core pod sustains **835 req/s peak** with zero
@@ -22,7 +77,7 @@ excluding network distance to and from your application.
 
 ---
 
-## Test Environment
+### Test Environment
 
 **Cluster node**
 
@@ -44,7 +99,7 @@ excluding network distance to and from your application.
 
 ---
 
-## Test Methodology
+### Test Methodology
 
 **Tool:** [k6](https://k6.io) — 30s steady load per VU step.
 
@@ -250,6 +305,31 @@ runs 2 concurrent async workers, which is the binding constraint for SR routing 
 ---
 
 ## Reproducing These Results
+
+### Benchmark workflow (GitHub-hosted runner)
+
+The `benchmark` workflow (`.github/workflows/benchmark.yml`, run by hand from the Actions tab)
+builds the server, pins it to two cores of an `ubuntu-latest` runner, and measures `/decide`,
+`/routing/hybrid`, `/decide-gateway` and `/routing/evaluate`:
+
+1. **Latency:** each endpoint at a fixed rate (default 200 req/s), over several rounds with the
+   endpoints alternating so that drift during the run spreads across all of them.
+2. **Throughput:** each endpoint at a series of fixed rates. A step is sustained when k6 dropped
+   no iterations, every check passed and no routing or feedback call errored; the highest
+   sustained step is the endpoint's throughput. SR, hybrid and decide iterations each also send
+   an `/update-gateway-score` call, so the server handles twice that many HTTP requests.
+
+The report appears in the run's summary and in its `benchmark-results` artifact. Hosted runners
+are shared machines, so compare endpoints within one run rather than across runs.
+
+The same phases run against any server that is already up:
+
+```bash
+bash scripts/load-test/ci_benchmark.sh                       # server on http://127.0.0.1:8080
+python3 scripts/load-test/summarize_ci_benchmark.py <results dir>
+```
+
+### Stepped VU and saturation runs
 
 ```bash
 # SR + Rule-based routing (sleep-based, realistic think-time)
