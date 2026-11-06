@@ -605,10 +605,23 @@ diesel::table! {
         description -> Nullable<Varchar>,
         is_active -> TinyInt,
         created_at -> Datetime,
+        authz_version -> Bigint,
+    }
+}
+
+diesel::table! {
+    api_key_merchants (key_id, merchant_id) {
+        key_id -> Varchar,
+        merchant_id -> Varchar,
+        status -> Varchar,
+        permissions -> Nullable<Text>,
+        authz_version -> Bigint,
+        created_at -> Datetime,
     }
 }
 
 diesel::allow_tables_to_appear_in_same_query!(
+    api_key_merchants,
     card_brand_routes,
     card_info,
     cost_ingestion,
