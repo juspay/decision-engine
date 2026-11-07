@@ -772,9 +772,15 @@ pub struct PgDatabase {
 pub struct CacheConfig {
     pub service_config_redis_prefix: String,
     pub service_config_ttl: i64,
+    #[serde(default = "CacheConfig::default_invalidation_channel")]
+    pub invalidation_channel: String,
 }
 
 impl CacheConfig {
+    fn default_invalidation_channel() -> String {
+        "decision_engine_invalidate".to_string()
+    }
+
     pub fn add_prefix(&self, key: &str) -> String {
         format!("{}{}", self.service_config_redis_prefix, key)
     }

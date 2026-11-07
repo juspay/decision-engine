@@ -271,6 +271,7 @@ pub async fn write_through_service_config(key: String, value: &str) {
     let ttl = app_state.config.cache_config.service_config_ttl;
     set_to_redis_cache(&prefixed_key, value, ttl).await;
     set_to_memory_cache(&prefixed_key, value, Some(ttl as u64)).await;
+    super::invalidation::publish(super::invalidation::CacheKind::ServiceConfig(key)).await;
 }
 
 /// Evict a service_config key from both Redis and memory cache after a DB delete.
@@ -281,6 +282,15 @@ pub async fn evict_service_config(key: String) {
     let ttl = app_state.config.cache_config.service_config_ttl;
     set_to_redis_cache(&prefixed_key, "", ttl).await;
     set_to_memory_cache(&prefixed_key, "", Some(ttl as u64)).await;
+    super::invalidation::publish(super::invalidation::CacheKind::ServiceConfig(key)).await;
+}
+
+/// Drop this process's in-memory copy of a service_config key; the next read falls through to Redis.
+pub(crate) fn evict_service_config_from_memory(
+    cache_config: &crate::config::CacheConfig,
+    key: &str,
+) {
+    let _ = GLOBAL_CACHE.remove(&cache_config.add_prefix(key));
 }
 
 pub fn extractValue<A>(value: String) -> Option<A>

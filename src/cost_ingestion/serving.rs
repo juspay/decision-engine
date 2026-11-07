@@ -235,6 +235,13 @@ fn bin_cache() -> &'static RwLock<Arc<HashMap<String, String>>> {
     BIN_CACHE.get_or_init(|| RwLock::new(Arc::new(HashMap::new())))
 }
 
+/// Serializes refreshes (inline, cross-pod and periodic); FIFO, so a refresh that starts later also reads
+/// later and an older snapshot can never overwrite a newer one.
+fn refresh_lock() -> &'static tokio::sync::Mutex<()> {
+    static REFRESH_LOCK: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    REFRESH_LOCK.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 /// Resolve a card's `card_product` tier from its BIN, canonicalised to the same 6-digit key the
 /// ingest side stored. `""` when the BIN is empty or unmapped — the fine lookup then only matches
 /// blended (`card_product = ""`) clusters and otherwise falls through to the coarse blend.
@@ -686,10 +693,25 @@ pub async fn refresh_merchant(
     refresh_inner(cfg, Some(merchant_id)).await
 }
 
+/// [`refresh_merchant`] here, then tell every other pod to rebuild the same merchant.
+pub async fn refresh_merchant_everywhere(
+    cfg: &ClickHouseAnalyticsConfig,
+    merchant_id: &str,
+) -> Result<usize, String> {
+    let result = refresh_merchant(cfg, merchant_id).await;
+    crate::redis::invalidation::publish(crate::redis::invalidation::CacheKind::CostModel(
+        merchant_id.to_string(),
+    ))
+    .await;
+    result
+}
+
 async fn refresh_inner(
     cfg: &ClickHouseAnalyticsConfig,
     merchant: Option<&str>,
 ) -> Result<usize, String> {
+    let _serialized = refresh_lock().lock().await;
+
     // Refresh the GLOBAL BIN → dominant-card_product map (shared across all merchants — a card's
     // product is universal). A single small read, done on every refresh so decide-time resolution
     // tracks BINs as new reports land. Empty on failure ⇒ card_product resolves to "" ⇒ coarse blend.

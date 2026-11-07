@@ -201,7 +201,7 @@ pub(crate) async fn refresh_serving(merchant_id: &str) {
     let Ok(cfg) = super::global_config().map(|config| config.analytics.clickhouse.clone()) else {
         return;
     };
-    if let Err(e) = serving::refresh_merchant(&cfg, merchant_id).await {
+    if let Err(e) = serving::refresh_merchant_everywhere(&cfg, merchant_id).await {
         crate::logger::warn!(
             tag = "cost_serving",
             "inline refresh after override change failed for {}: {}",
