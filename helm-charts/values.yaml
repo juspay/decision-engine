@@ -94,13 +94,11 @@ ingress:
   #    hosts:
   #      - chart-example.local
 
-resources: {}
-  # limits:
-  #   cpu: 100m
-  #   memory: 128Mi
-  # requests:
-  #   cpu: 100m
-  #   memory: 128Mi
+# Requests are needed by the HPA to compute CPU/memory utilization. Limits are left to each environment.
+resources:
+  requests:
+    cpu: 400m
+    memory: 400Mi
 
 nodeSelector: {}
 
