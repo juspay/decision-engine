@@ -95,6 +95,7 @@ helm delete my-release
 | Name                | Description                                                                           | Value           |
 |---------------------|---------------------------------------------------------------------------------------|-----------------|
 | `replicaCount`      | Number of Decision Engine replicas                                                    | `1`             |
+| `terminationGracePeriodSeconds` | Seconds Kubernetes waits after SIGTERM before SIGKILL; must exceed the app's drain delay + shutdown timeout + 5s | `35` |
 | `image.repository`  | Decision Engine image repository                                                      | `ghcr.io/juspay/decision-engine/postgres` |
 | `image.version`         | Decision Engine image tag                                                             | `v1.4`          |
 | `image.pullPolicy`  | Decision Engine image pull policy                                                     | `Always`        |

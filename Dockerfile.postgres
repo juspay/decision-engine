@@ -69,4 +69,5 @@ USER ${APP_UID}:${APP_UID}
 
 WORKDIR ${BIN_DIR}
 
-CMD ["sh", "-c", "./${BINARY}"]
+# `exec` makes the binary PID 1 so it receives SIGTERM (plain `sh -c` keeps dash as PID 1 and swallows it).
+CMD ["sh", "-c", "exec ./${BINARY}"]

@@ -12,6 +12,8 @@ otel_exporter_otlp_timeout = 10000 # milliseconds per export request (exporter d
 [server]
 host = "127.0.0.1"
 port = 8080
+shutdown_drain_delay = 5 # seconds serving with readiness down after SIGTERM/SIGINT
+shutdown_timeout = 20    # seconds in-flight requests get to finish once the listener closes
 
 [limit]
 request_count = 1
