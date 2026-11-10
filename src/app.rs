@@ -846,20 +846,45 @@ where
         global_app_state.global_config.analytics.clickhouse.clone(),
     );
 
-    // Create a signal stream for SIGTERM
+    // SIGTERM (Kubernetes) and SIGINT (Ctrl-C).
     let mut sigterm = signal(SignalKind::terminate()).expect("Failed to create SIGTERM handler");
+    let mut sigint = signal(SignalKind::interrupt()).expect("Failed to create SIGINT handler");
 
     // Create an axum_server handle for graceful shutdown
     let handle = Handle::new();
 
-    // Spawn a task to listen for SIGTERM and trigger shutdown
+    let drain_delay =
+        std::time::Duration::from_secs(global_app_state.global_config.server.shutdown_drain_delay);
+    let shutdown_timeout =
+        std::time::Duration::from_secs(global_app_state.global_config.server.shutdown_timeout);
+
+    // On a signal: drop readiness, keep serving for `drain_delay`, then give in-flight requests `shutdown_timeout` to finish.
     let handle_clone = handle.clone();
     tokio::spawn(async move {
-        sigterm.recv().await;
-        logger::error!("SIGTERM signal received, shutting down...");
+        let signal_name = tokio::select! {
+            _ = sigterm.recv() => "SIGTERM",
+            _ = sigint.recv() => "SIGINT",
+        };
+        logger::error!(
+            category = "SERVER",
+            action = "shutdown_started",
+            signal = signal_name,
+            in_flight_connections = handle_clone.connection_count(),
+            drain_delay_secs = drain_delay.as_secs(),
+            "{} signal received, marking not ready and draining",
+            signal_name
+        );
         let app_state = APP_STATE.get().expect("GlobalAppState not set");
         app_state.set_not_ready(); // Set readiness flag to false
-        handle_clone.shutdown(); // Trigger axum_server shutdown
+        tokio::time::sleep(drain_delay).await;
+        logger::info!(
+            category = "SERVER",
+            action = "shutdown_listener_closing",
+            in_flight_connections = handle_clone.connection_count(),
+            shutdown_timeout_secs = shutdown_timeout.as_secs(),
+            "Stopped accepting connections; waiting for in-flight requests"
+        );
+        handle_clone.graceful_shutdown(Some(shutdown_timeout));
     });
 
     let router = axum::Router::new()
@@ -902,6 +927,12 @@ where
             .serve(router.into_make_service())
             .await?;
     }
+
+    logger::info!(
+        category = "SERVER",
+        action = "shutdown_server_stopped",
+        "HTTP server stopped; in-flight requests drained"
+    );
 
     // Drain in-flight async feedback tasks before the runtime shuts down.
     // close() stops new tasks from being accepted; wait() is event-driven

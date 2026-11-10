@@ -1,6 +1,9 @@
 # Default values for decision-engine
 replicaCount: 1
 
+# Must exceed server.shutdown_drain_delay (5s) + server.shutdown_timeout (20s) + 5s feedback drain.
+terminationGracePeriodSeconds: 35
+
 # When enabled, the HPA owns the replica count and replicaCount is ignored.
 autoscaling:
   enabled: false

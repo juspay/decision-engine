@@ -95,6 +95,7 @@ helm delete my-release
 | Name                | Description                                                                           | Value           |
 |---------------------|---------------------------------------------------------------------------------------|-----------------|
 | `replicaCount`      | Number of Decision Engine replicas                                                    | `1`             |
+| `terminationGracePeriodSeconds` | Seconds Kubernetes waits after SIGTERM before SIGKILL; must exceed the app's drain delay + shutdown timeout + 5s | `35` |
 | `resources` | Decision Engine container resources; the HPA needs `requests.cpu` (and `requests.memory` for the memory target) | `requests: {cpu: 400m, memory: 400Mi}` |
 | `autoscaling.enabled` | Create an HPA for the Decision Engine deployment; the HPA then owns the replica count and `replicaCount` is ignored | `false` |
 | `autoscaling.minReplicas` | HPA minimum replicas | `2` |
