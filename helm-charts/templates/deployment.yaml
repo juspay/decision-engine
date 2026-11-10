@@ -6,7 +6,9 @@ metadata:
     {{- include "decision-engine.labels" . | nindent 4 }}
     app.kubernetes.io/component: {{ .Values.decisionEngine.metadata.labels.component }}
 spec:
+  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "decision-engine.selectorLabels" . | nindent 6 }}

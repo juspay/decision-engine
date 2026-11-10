@@ -95,6 +95,11 @@ helm delete my-release
 | Name                | Description                                                                           | Value           |
 |---------------------|---------------------------------------------------------------------------------------|-----------------|
 | `replicaCount`      | Number of Decision Engine replicas                                                    | `1`             |
+| `autoscaling.enabled` | Create an HPA for the Decision Engine deployment; the HPA then owns the replica count and `replicaCount` is ignored | `false` |
+| `autoscaling.minReplicas` | HPA minimum replicas | `2` |
+| `autoscaling.maxReplicas` | HPA maximum replicas | `4` |
+| `autoscaling.targetCPUUtilizationPercentage` | Average CPU utilization (of requests) the HPA scales to | `80` |
+| `autoscaling.targetMemoryUtilizationPercentage` | Average memory utilization the HPA scales to; unset means CPU only | unset |
 | `image.repository`  | Decision Engine image repository                                                      | `ghcr.io/juspay/decision-engine/postgres` |
 | `image.version`         | Decision Engine image tag                                                             | `v1.4`          |
 | `image.pullPolicy`  | Decision Engine image pull policy                                                     | `Always`        |

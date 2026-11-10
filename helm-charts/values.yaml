@@ -1,6 +1,13 @@
 # Default values for decision-engine
 replicaCount: 1
 
+# When enabled, the HPA owns the replica count and replicaCount is ignored.
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 80
+
 image:
   # Updated to include the registry URL
   repository: ghcr.io/juspay/decision-engine/postgres
