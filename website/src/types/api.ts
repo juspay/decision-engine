@@ -362,8 +362,12 @@ export interface DecideCard {
   card_switch_provider?: string | null
 }
 
+export type DecisionArm = 'control' | 'variant'
+
 export interface DecideRoutingConfig {
   algorithm_for: string
+  // Caller-assigned arm for the request audit; does not override DE experiment assignment.
+  decision_arm?: DecisionArm | null
   elimination_enabled?: boolean | null
   enable_multi_objective?: boolean | null
   ranking_algorithm?: 'SR_BASED_ROUTING' | 'PL_BASED_ROUTING' | 'NTW_BASED_ROUTING' | 'NTW_SR_HYBRID_ROUTING' | null

@@ -81,7 +81,9 @@ async fn run_once(batch: usize, clickhouse: &ClickHouseAnalyticsConfig) {
                 }
                 // Serve the freshly-fitted models immediately (don't wait for the periodic refresh).
                 // Per-merchant: only this merchant is rebuilt, off the global-refresh path.
-                if let Err(e) = super::serving::refresh_merchant(clickhouse, &merchant_id).await {
+                if let Err(e) =
+                    super::serving::refresh_merchant_everywhere(clickhouse, &merchant_id).await
+                {
                     logger::warn!(
                         tag = "ingest_worker",
                         "serving refresh after ingest failed: {}",

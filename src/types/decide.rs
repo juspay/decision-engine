@@ -73,11 +73,22 @@ pub struct DecideCard {
 #[serde(deny_unknown_fields)]
 pub struct DecideRoutingConfig {
     pub algorithm_for: String,
+    /// Caller-assigned arm, retained in the request audit; does not override DE experiments.
+    /// Omitted or null means unspecified.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub decision_arm: Option<DecisionArm>,
     pub elimination_enabled: Option<bool>,
     pub enable_multi_objective: Option<bool>,
     pub ranking_algorithm: Option<RankingAlgorithm>,
     pub eligible_connectors: Vec<DecideConnector>,
     pub preferred_connectors: Option<Vec<DecideConnector>>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DecisionArm {
+    Control,
+    Variant,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -365,6 +376,66 @@ mod tests {
                 "../../tests/fixtures/contracts/decide-request.json"
             ))?,
         )
+    }
+
+    #[test]
+    fn decide_accepts_and_preserves_decision_arms() -> Result<(), Box<dyn std::error::Error>> {
+        let baseline = serde_json::to_value(request()?)?;
+        assert_eq!(request()?.routing_config.decision_arm, None);
+        assert!(baseline["routing_config"].get("decision_arm").is_none());
+        for (value, expected) in [
+            (json!("control"), Some(DecisionArm::Control)),
+            (json!("variant"), Some(DecisionArm::Variant)),
+            (Value::Null, None),
+        ] {
+            let mut body = baseline.clone();
+            body["routing_config"]["decision_arm"] = value.clone();
+            let parsed = parse("pro_demo", body)?;
+            assert_eq!(parsed.routing_config.decision_arm, expected);
+            let recorded = serde_json::to_value(parsed)?;
+            assert_eq!(recorded["routing_config"]["decision_arm"], value);
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn decide_rejects_invalid_decision_arms() -> Result<(), Box<dyn std::error::Error>> {
+        use crate::custom_extractors::Json;
+        use axum::{body::Body, extract::FromRequest, http::Request};
+
+        let baseline = serde_json::to_value(request()?)?;
+        for invalid in [
+            json!("CONTROL"),
+            json!("Variant"),
+            json!("treatment"),
+            json!(""),
+            json!(1),
+            json!(true),
+            json!([]),
+            json!({}),
+        ] {
+            let mut body = baseline.clone();
+            body["routing_config"]["decision_arm"] = invalid.clone();
+            let request = Request::builder()
+                .header("content-type", "application/json")
+                .body(Body::from(serde_json::to_vec(&body)?))?;
+            let response = match Json::<DecideRequest>::from_request(request, &()).await {
+                Err(response) => response,
+                Ok(_) => return Err("invalid arm must be rejected".into()),
+            };
+            assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
+            let body: Value = serde_json::from_slice(
+                &axum::body::to_bytes(response.into_body(), usize::MAX).await?,
+            )?;
+            assert_eq!(body["code"], "TE_03");
+            if invalid.is_string() {
+                assert_eq!(
+                    body["message"],
+                    "Invalid value for field `routing_config.decision_arm`"
+                );
+            }
+        }
+        Ok(())
     }
 
     #[test]

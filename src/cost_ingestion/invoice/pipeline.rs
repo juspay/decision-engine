@@ -104,7 +104,8 @@ pub async fn ingest_invoice_bytes(
     store::put(merchant, &connector, &stored).await?;
 
     // Serve the new add-on now rather than after the periodic tick (same as the report upload path).
-    if let Err(e) = crate::cost_ingestion::serving::refresh_merchant(clickhouse, merchant_id).await
+    if let Err(e) =
+        crate::cost_ingestion::serving::refresh_merchant_everywhere(clickhouse, merchant_id).await
     {
         crate::logger::warn!(
             tag = "invoice_ingest",

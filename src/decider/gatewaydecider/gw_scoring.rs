@@ -244,9 +244,10 @@ pub async fn scoring_flow(
             maybe_source_object.unwrap_or_default(),
         );
 
-        let is_merchant_enabled_for_sr_based_routing =
-            isMerchantEnabledForPaymentFlows(merchant.id, vec![PaymentFlow::SrBasedRouting]).await
-                || ranking_algorithm == Some(RankingAlgorithm::SrBasedRouting);
+        let is_merchant_enabled_for_sr_based_routing = ranking_algorithm
+            == Some(RankingAlgorithm::SrBasedRouting)
+            || isMerchantEnabledForPaymentFlows(merchant.id, vec![PaymentFlow::SrBasedRouting])
+                .await;
 
         let is_sr_v3_metric_enabled = if is_merchant_enabled_for_sr_based_routing
             && functional_preferred_connector.is_none()

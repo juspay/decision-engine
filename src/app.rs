@@ -841,6 +841,11 @@ where
         global_app_state.global_config.analytics.clickhouse.clone(),
     );
 
+    // Background job: apply cache invalidations published by other pods (merchant accounts, cost models).
+    crate::redis::invalidation::spawn_subscriber(
+        global_app_state.global_config.analytics.clickhouse.clone(),
+    );
+
     // SIGTERM (Kubernetes) and SIGINT (Ctrl-C).
     let mut sigterm = signal(SignalKind::terminate()).expect("Failed to create SIGTERM handler");
     let mut sigint = signal(SignalKind::interrupt()).expect("Failed to create SIGINT handler");
