@@ -34,6 +34,7 @@ Based on the React routes in `website/src/App.tsx`, the dashboard exposes:
 - `/dashboard/signup`
 - `/dashboard/onboarding`
 - `/dashboard/routing`
+- `/dashboard/routing?tab=flow` (Decision Flow)
 - `/dashboard/routing/sr`
 - `/dashboard/routing/rules`
 - `/dashboard/routing/volume`
@@ -44,6 +45,12 @@ Based on the React routes in `website/src/App.tsx`, the dashboard exposes:
 
 For source-run Vite development, the same React routes are mounted at `http://localhost:5173/`.
 Outside Docker, production builds default to `/decision-engine/` with API traffic under `/decision-engine/api/*`. Production hosts must proxy that API prefix to the backend. Set `VITE_DASHBOARD_BASE_PATH` and `VITE_API_BASE_PATH` at build time to use different paths.
+
+## Decision Flow
+
+Open Routing and select **Decision Flow** (Beta) to inspect the selected profile’s saved strategy, rule conditions, destinations, fallback connectors, and optimization layers. The view reads configuration without changing it. Auth Rate, elimination, and cost status follow the merchant feature switches; saving a scoring configuration alone does not enable a layer. Active payment experiments are shown alongside the rule or volume strategy.
+
+The connector animation illustrates the pipeline; it is not a simulation, a real payment trace, or a prediction of which rule will match. Hover over or focus the info button beside the introduction for an explanation of what the view can show.
 
 ## Docs And API In The Same Profile
 
