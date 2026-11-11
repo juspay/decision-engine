@@ -100,9 +100,10 @@ test.describe('Merchant CRUD API', () => {
     flag = await api.raw('GET', `/merchant-account/${testMerchantId}/debit-routing`)
     expect(flag.body.debit_routing_enabled).toBe(false)
 
-    const missing = await api.raw('GET', `/merchant-account/${missingMerchantId}/debit-routing`, {
-      failOnStatusCode: false,
-    })
+    // A session may only name its own merchant, so an unknown one is reached as a service caller.
+    const missing = await api
+      .asService()
+      .raw('GET', `/merchant-account/${missingMerchantId}/debit-routing`, { failOnStatusCode: false })
     expect(missing.status).toBe(404)
   })
 })

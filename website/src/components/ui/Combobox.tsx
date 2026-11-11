@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
 import { createPortal } from 'react-dom'
+import { useCloseOnFrameBlur } from '../../hooks/useCloseOnFrameBlur'
 
 interface ComboboxProps {
   value: string
@@ -54,6 +55,8 @@ export function Combobox({ value, onChange, options, placeholder, className = ''
     document.addEventListener('mousedown', onOutside)
     return () => document.removeEventListener('mousedown', onOutside)
   }, [open, close])
+
+  useCloseOnFrameBlur(open, close)
 
   // reset highlight when filtered list changes
   useEffect(() => { setHighlightedIndex(-1) }, [filtered.length])

@@ -2,6 +2,8 @@ import org.codehaus.groovy.control.CompilerConfiguration
 import org.codehaus.groovy.control.customizers.SecureASTCustomizer
 import org.kohsuke.groovy.sandbox.SandboxTransformer
 import org.kohsuke.groovy.sandbox.GroovyValueFilter
+import org.kohsuke.groovy.sandbox.GroovyInterceptor
+import org.codehaus.groovy.runtime.MethodClosure
 import com.sun.net.httpserver.HttpServer
 import java.lang.reflect.Array
 import groovy.json.JsonSlurper
@@ -53,39 +55,16 @@ class App {
                     println("Context: ${context.dump()}")
 
                     try {
-                        def closure = dslBuilderService.evaluateScript(log, "gatewayPriorityLogic", merchantId, script)
-                        closure.delegate = context
-                        closure()
-                    } catch (IndexOutOfBoundsException e) {
+                        dslBuilderService.evaluateScript(log, "gatewayPriorityLogic", merchantId, script, context)
+                    } catch (ScriptEvaluationException e) {
+                        def (label, userMessage) = ScriptEvaluationException.DESCRIPTIONS[e.errorCode]
                         http.sendResponseHeaders(400, 0)
-                        log.error("IndexOutOfBoundsException while trying to execute custom gateway priority logic for order ${orderInfo?.orderId}", e)
-                        println("IndexOutOfBoundsException while trying to execute custom gateway priority logic for order ${orderInfo?.orderId} : ${e}")
+                        log.error("${label} while trying to execute custom gateway priority logic for order ${orderInfo?.orderId}", e)
+                        println("${label} while trying to execute custom gateway priority logic for order ${orderInfo?.orderId} : ${e}")
                         return out.write(JsonOutput.toJson(
                             [ error  : true
-                            , error_message : "CODE_TOO_LARGE"
-                            , user_message  : "Script cannot be executed due to huge size of method." 
-                            , log : log.log
-                            ]
-                        ))
-                    } catch (GroovyRuntimeException e) {
-                        http.sendResponseHeaders(400, 0)
-                        log.error("GroovyRuntimeException while trying to execute custom gateway priority logic for order ${orderInfo?.orderId}", e)
-                        println("GroovyRuntimeException while trying to execute custom gateway priority logic for order ${orderInfo?.orderId} : ${e}")
-                        return out.write(JsonOutput.toJson(
-                            [ error  : true
-                            , error_message : "COMPILATION_ERROR"
-                            , user_message  : "Script cannot be executed due to compilation issues." 
-                            , log : log.log
-                            ]
-                        ))
-                    } catch (Exception e) {
-                        http.sendResponseHeaders(400, 0)
-                        log.error("Exception while trying to execute custom gateway priority logic for order ${orderInfo?.orderId}" , e)
-                        println("Exception while trying to execute custom gateway priority logic for order ${orderInfo?.orderId} : ${e}")
-                        return out.write(JsonOutput.toJson(
-                            [ error  : true
-                            , error_message : "UNHANDLED_EXCEPTION"
-                            , user_message  : "Script cannot be executed due to Exception" 
+                            , error_message : e.errorCode
+                            , user_message  : userMessage
                             , log : log.log
                             ]
                         ))
@@ -143,9 +122,7 @@ class App {
                     log.info("Context: " + context.dump())
 
                     try {
-                        def closure = dslBuilderService.evaluateScript(log, "gatewayPriorityLogic", merchantId, script)
-                        closure.delegate = context
-                        closure()
+                        dslBuilderService.evaluateScript(log, "gatewayPriorityLogic", merchantId, script, context)
                     }
                     catch (RuntimeException e) {
                         log.error("Exception while trying to execute custom gateway priority logic for order", e)
@@ -298,7 +275,9 @@ class DslBuilderService {
     private class CustomScriptSandbox extends GroovyValueFilter {
         @Override
         Object filter(Object o) {
-            if (o instanceof Collection || o instanceof Map || o instanceof Number)
+            if (o instanceof MethodClosure)
+                throw new SecurityException("Oops, unexpected type: " + o.class);
+            if (o instanceof Collection || o instanceof Map || o instanceof Number || o instanceof GString)
                 return o;
             if (o == null || ALLOWED_TYPES.contains(o.class) || ALLOWED_TYPES.contains(o))
                 return o;
@@ -313,9 +292,49 @@ class DslBuilderService {
                 Character,
                 String,
                 Array,
-                System,
-                Random
+                Random,
+                Math,
+                Date
         ] as Set
+
+        // `System` itself is not an allowed type; only reading the clock is
+        // permitted, for scripts that call it directly instead of using the
+        // `currentTimeMillis` field on the context.
+        @Override
+        Object onStaticCall(GroovyInterceptor.Invoker invoker, Class receiver, String method, Object... args) throws Throwable {
+            if (receiver == System && method == "currentTimeMillis" && args.length == 0) {
+                return invoker.call(receiver, method)
+            }
+            checkMethod(method)
+            return super.onStaticCall(invoker, receiver, method, args)
+        }
+
+        // The value filter checks receivers, arguments and return values, so a
+        // method on an allowed type still runs before its result is checked.
+        // These methods act outside the script (processes, code evaluation,
+        // runtime metadata, dynamic dispatch) and are refused by name.
+        @Override
+        Object onMethodCall(GroovyInterceptor.Invoker invoker, Object receiver, String method, Object... args) throws Throwable {
+            checkMethod(method)
+            return super.onMethodCall(invoker, receiver, method, args)
+        }
+
+        private static final Set<String> DISALLOWED_METHODS = [
+                "execute",
+                "evaluate",
+                "invokeMethod",
+                "getMetaClass",
+                "setMetaClass",
+                "addShutdownHook",
+                "forName",
+                "sleep",
+                "wait"
+        ] as Set
+
+        private static void checkMethod(String method) {
+            if (DISALLOWED_METHODS.contains(method))
+                throw new SecurityException("Oops, method not allowed: " + method);
+        }
     }
 
     public ThreadSafeLRUMap scriptCache
@@ -334,21 +353,70 @@ class DslBuilderService {
         shell = new GroovyShell(compilerConfig)
     }
 
-    public def evaluateScript(Log log, String cacheDomain, String cacheID, String snippet) {
+    // Compiles the snippet into a closure and invokes it with `context` as the
+    // delegate. The closure must run while the value filter is registered: the
+    // filter is thread-local and only applies to calls made while it is active.
+    //
+    // Anything the script hands back can contain code that runs when it is
+    // read (a GString with a closure, a closure in a map, an exception whose
+    // message renders script values). So, before the filter is unregistered,
+    // the output is copied into plain values and failures are reduced to a
+    // ScriptEvaluationException carrying only strings.
+    public void evaluateScript(Log log, String cacheDomain, String cacheID, String snippet, Context context) {
         def code = "{->${snippet}\n}"
 
         def sandbox = new CustomScriptSandbox()
         try {
             sandbox.register()
             Script script = getScript(cacheDomain, cacheID, code)
+            Closure closure
             synchronized (script) {
-                return script.run()
+                closure = (Closure) script.run()
             }
-        } catch (RuntimeException e) {
-            log.error("exception while running script", e)
-            throw e
+            closure.delegate = context
+            closure()
+            context.gatewayPriorityLogicOutput = plainOutput(context.gatewayPriorityLogicOutput)
+        } catch (Exception e) {
+            def failure = new ScriptEvaluationException(errorCodeFor(e), describe(e))
+            log.error("exception while running script", failure)
+            throw failure
         } finally {
             sandbox.unregister()
+        }
+    }
+
+    private static GatewayPriorityLogicOutput plainOutput(GatewayPriorityLogicOutput output) {
+        if (output == null) {
+            return new GatewayPriorityLogicOutput([], false, [:])
+        }
+        List gatewayPriority = output.gatewayPriority == null ? null : output.gatewayPriority.collect { plainValue(it) }
+        Map gatewayReferenceIds = null
+        if (output.gatewayReferenceIds != null) {
+            gatewayReferenceIds = [:]
+            output.gatewayReferenceIds.each { k, v -> gatewayReferenceIds.put(plainValue(k), plainValue(v)) }
+        }
+        return new GatewayPriorityLogicOutput(gatewayPriority, output.isEnforcement == true, gatewayReferenceIds)
+    }
+
+    private static Object plainValue(Object value) {
+        if (value == null || value instanceof Number || value instanceof Boolean)
+            return value
+        if (value instanceof CharSequence || value instanceof Character)
+            return value.toString()
+        throw new SecurityException("Oops, unexpected type in script output: " + value.getClass())
+    }
+
+    private static String errorCodeFor(Exception e) {
+        if (e instanceof IndexOutOfBoundsException) return ScriptEvaluationException.CODE_TOO_LARGE
+        if (e instanceof GroovyRuntimeException) return ScriptEvaluationException.COMPILATION_ERROR
+        return ScriptEvaluationException.UNHANDLED_EXCEPTION
+    }
+
+    private static String describe(Exception e) {
+        try {
+            return e.toString()
+        } catch (Throwable ignored) {
+            return e.getClass().getName()
         }
     }
 
@@ -415,6 +483,30 @@ class Log {
     }
     def info(String dscr) {
         log = log + [["Info", dscr]]
+    }
+}
+// -------------------------------------------------------------------------
+
+// A script failure reduced to plain strings, so that handling it after the
+// sandbox is unregistered cannot run script code. It keeps no cause or stack
+// trace for the same reason.
+class ScriptEvaluationException extends RuntimeException {
+    static final String CODE_TOO_LARGE = "CODE_TOO_LARGE"
+    static final String COMPILATION_ERROR = "COMPILATION_ERROR"
+    static final String UNHANDLED_EXCEPTION = "UNHANDLED_EXCEPTION"
+
+    // error code -> [log label, user message]
+    static final Map<String, List<String>> DESCRIPTIONS = [
+            (CODE_TOO_LARGE)     : ["IndexOutOfBoundsException", "Script cannot be executed due to huge size of method."],
+            (COMPILATION_ERROR)  : ["GroovyRuntimeException", "Script cannot be executed due to compilation issues."],
+            (UNHANDLED_EXCEPTION): ["Exception", "Script cannot be executed due to Exception"]
+    ]
+
+    final String errorCode
+
+    ScriptEvaluationException(String errorCode, String message) {
+        super(message, null, false, false)
+        this.errorCode = errorCode
     }
 }
 // -------------------------------------------------------------------------

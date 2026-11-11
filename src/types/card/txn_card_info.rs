@@ -1,5 +1,6 @@
 use crate::error::ApiError;
 use crate::types::card::card_type::CardType;
+use crate::types::payment_instrument::PaymentInstrument;
 use masking::{PeekInterface, Secret};
 use serde::{Deserialize, Deserializer, Serialize};
 use time::{OffsetDateTime, PrimitiveDateTime};
@@ -42,6 +43,24 @@ impl std::fmt::Display for AuthType {
             Self::Moto => write!(f, "MOTO"),
             Self::Fido => write!(f, "FIDO"),
             Self::Ctp => write!(f, "CTP"),
+        }
+    }
+}
+
+impl AuthType {
+    /// The auth-level SR dimension's grouping: `THREE_DS`, `OTP` or `UNKNOWN`.
+    pub fn sr_auth_level(&self) -> &'static str {
+        match self {
+            Self::ThreeDs | Self::ThreeDs2 => "THREE_DS",
+            Self::Otp => "OTP",
+            Self::Atmpin
+            | Self::OboOtp
+            | Self::Vies
+            | Self::NoThreeDs
+            | Self::NetworkToken
+            | Self::Moto
+            | Self::Fido
+            | Self::Ctp => "UNKNOWN",
         }
     }
 }
@@ -127,50 +146,118 @@ where
     }
 }
 
+/// A transaction's card and payment method details. `instrument` is the payment method in
+/// Decision Engine's canonical form. On the wire, the legacy APIs send the legacy
+/// fields instead (`paymentMethodType` is the category, `paymentMethod` the specific method); see
+/// [`TxnCardInfoWire`].
 #[derive(Debug, Clone, PartialEq, Deserialize, Serialize)]
+#[serde(from = "TxnCardInfoWire", into = "TxnCardInfoWire")]
 pub struct TxnCardInfo {
-    #[serde(rename = "id")]
     pub id: TxnCardInfoPId,
-    // #[serde(rename = "txnId")]
-    // pub txnId: TransactionId,
-    #[serde(rename = "cardIsin")]
     pub card_isin: Option<String>,
-    #[serde(rename = "cardIssuerBankName")]
     pub cardIssuerBankName: Option<String>,
-    #[serde(rename = "cardSwitchProvider")]
     pub cardSwitchProvider: Option<Secret<String>>,
-    #[serde(rename = "cardType")]
     pub card_type: Option<CardType>,
-    #[serde(rename = "cardProgram", default)]
     pub card_program: Option<String>,
     /// Issuer country of the card (ISO code or region bucket). Used by the multi-objective
     /// cost cluster key to separate same-currency scenarios (US debit vs EU consumer vs
     /// international) at a single merchant. Optional; absent when issuer enrichment is
     /// unavailable.
-    #[serde(rename = "cardIssuerCountry", default)]
     pub card_issuer_country: Option<String>,
     /// Acceptance channel (`ecom`/`pos`/`contactless`) — feeds the in-house category predictor.
-    #[serde(rename = "channel", default)]
     pub channel: Option<String>,
-    #[serde(rename = "nameOnCard")]
     pub nameOnCard: Option<Secret<String>>,
-    // #[serde(rename = "txnDetailId")]
-    // pub txnDetailId: TxnDetailId,
+    pub dateCreated: OffsetDateTime,
+    pub instrument: PaymentInstrument,
+    pub paymentSource: Option<Secret<String>>,
+    pub authType: Option<AuthType>,
+    pub partitionKey: Option<PrimitiveDateTime>,
+}
+
+/// [`TxnCardInfo`] as the legacy APIs send it.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct TxnCardInfoWire {
+    #[serde(rename = "id")]
+    id: TxnCardInfoPId,
+    #[serde(rename = "cardIsin")]
+    card_isin: Option<String>,
+    #[serde(rename = "cardIssuerBankName")]
+    cardIssuerBankName: Option<String>,
+    #[serde(rename = "cardSwitchProvider")]
+    cardSwitchProvider: Option<Secret<String>>,
+    #[serde(rename = "cardType")]
+    card_type: Option<CardType>,
+    #[serde(rename = "cardProgram", default)]
+    card_program: Option<String>,
+    #[serde(rename = "cardIssuerCountry", default)]
+    card_issuer_country: Option<String>,
+    #[serde(rename = "channel", default)]
+    channel: Option<String>,
+    #[serde(rename = "nameOnCard")]
+    nameOnCard: Option<Secret<String>>,
     #[serde(with = "time::serde::iso8601")]
     #[serde(rename = "dateCreated")]
-    pub dateCreated: OffsetDateTime,
+    dateCreated: OffsetDateTime,
+    /// The legacy category: `CARD`, `UPI`, `NB`.
     #[serde(rename = "paymentMethodType")]
-    pub paymentMethodType: String,
+    paymentMethodType: String,
+    /// The legacy specific method: `VISA`, `UPI_PAY`.
     #[serde(rename = "paymentMethod")]
-    pub paymentMethod: String,
+    paymentMethod: String,
     #[serde(rename = "paymentSource")]
     #[serde(serialize_with = "mask_secret_option")]
-    pub paymentSource: Option<Secret<String>>,
+    paymentSource: Option<Secret<String>>,
     #[serde(rename = "authType")]
-    pub authType: Option<AuthType>,
+    authType: Option<AuthType>,
     #[serde(rename = "partitionKey")]
     #[serde(deserialize_with = "deserialize_optional_primitive_datetime")]
-    pub partitionKey: Option<PrimitiveDateTime>,
+    partitionKey: Option<PrimitiveDateTime>,
+}
+
+impl From<TxnCardInfoWire> for TxnCardInfo {
+    fn from(wire: TxnCardInfoWire) -> Self {
+        Self {
+            id: wire.id,
+            card_isin: wire.card_isin,
+            cardIssuerBankName: wire.cardIssuerBankName,
+            cardSwitchProvider: wire.cardSwitchProvider,
+            card_type: wire.card_type,
+            card_program: wire.card_program,
+            card_issuer_country: wire.card_issuer_country,
+            channel: wire.channel,
+            nameOnCard: wire.nameOnCard,
+            dateCreated: wire.dateCreated,
+            instrument: PaymentInstrument::from_legacy_txn(
+                &wire.paymentMethodType,
+                &wire.paymentMethod,
+            ),
+            paymentSource: wire.paymentSource,
+            authType: wire.authType,
+            partitionKey: wire.partitionKey,
+        }
+    }
+}
+
+impl From<TxnCardInfo> for TxnCardInfoWire {
+    fn from(info: TxnCardInfo) -> Self {
+        Self {
+            id: info.id,
+            card_isin: info.card_isin,
+            cardIssuerBankName: info.cardIssuerBankName,
+            cardSwitchProvider: info.cardSwitchProvider,
+            card_type: info.card_type,
+            card_program: info.card_program,
+            card_issuer_country: info.card_issuer_country,
+            channel: info.channel,
+            nameOnCard: info.nameOnCard,
+            dateCreated: info.dateCreated,
+            paymentMethodType: info.instrument.method_code().to_string(),
+            paymentMethod: info.instrument.method_type_code().into_owned(),
+            paymentSource: info.paymentSource,
+            authType: info.authType,
+            partitionKey: info.partitionKey,
+        }
+    }
 }
 
 impl TxnCardInfo {
@@ -241,8 +328,11 @@ pub fn convert_safe_to_txn_card_info(
         channel: None,
         nameOnCard: safe_info.nameOnCard,
         dateCreated: safe_info.dateCreated,
-        paymentMethodType: safe_info.paymentMethodType,
-        paymentMethod: safe_info.paymentMethod,
+        // The legacy score API sends the legacy transaction fields.
+        instrument: PaymentInstrument::from_legacy_txn(
+            &safe_info.paymentMethodType,
+            &safe_info.paymentMethod,
+        ),
         paymentSource: safe_info.paymentSource,
         authType: safe_info
             .authType

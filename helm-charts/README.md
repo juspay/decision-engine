@@ -8,7 +8,7 @@ This chart bootstraps a [Decision Engine](https://github.com/juspay/decision-eng
 
 ## Prerequisites
 
-- Kubernetes 1.19+
+- Kubernetes 1.23+
 - Helm 3.2.0+
 - PV provisioner support in the underlying infrastructure (if persistence is needed)
 
@@ -95,12 +95,21 @@ helm delete my-release
 | Name                | Description                                                                           | Value           |
 |---------------------|---------------------------------------------------------------------------------------|-----------------|
 | `replicaCount`      | Number of Decision Engine replicas                                                    | `1`             |
+| `terminationGracePeriodSeconds` | Seconds Kubernetes waits after SIGTERM before SIGKILL; must exceed the app's drain delay + shutdown timeout + 5s | `35` |
+| `resources` | Decision Engine container resources; the HPA needs `requests.cpu` (and `requests.memory` for the memory target) | `requests: {cpu: 400m, memory: 400Mi}` |
+| `autoscaling.enabled` | Create an HPA for the Decision Engine deployment; the HPA then owns the replica count and `replicaCount` is ignored | `false` |
+| `autoscaling.minReplicas` | HPA minimum replicas | `2` |
+| `autoscaling.maxReplicas` | HPA maximum replicas | `4` |
+| `autoscaling.targetCPUUtilizationPercentage` | Average CPU utilization (of requests) the HPA scales to | `80` |
+| `autoscaling.targetMemoryUtilizationPercentage` | Average memory utilization the HPA scales to; unset means CPU only | unset |
 | `image.repository`  | Decision Engine image repository                                                      | `ghcr.io/juspay/decision-engine/postgres` |
 | `image.version`         | Decision Engine image tag                                                             | `v1.4`          |
 | `image.pullPolicy`  | Decision Engine image pull policy                                                     | `Always`        |
 | `imagePullSecrets`  | Image pull secrets                                                                    | `[]`            |
 | `nameOverride`      | Override the name of the chart                                                        | `""`            |
 | `fullnameOverride`  | Override the full name of the application                                             | `""`            |
+| `securityContext`   | Container security context for decision-engine, groovy-runner and the migration jobs (non-root, no privilege escalation, all capabilities dropped) | see `values.yaml` |
+| `initContainers.securityContext` | Security context for the busybox wait-for init containers (runs as `nobody`) | see `values.yaml` |
 
 ### Decision Engine Configuration
 
@@ -125,6 +134,7 @@ helm delete my-release
 | `decisionEngine.apiClient.poolMaxIdlePerHost` | API client pool max idle per host                       | `10`            |
 | `decisionEngine.apiClient.identity`        | API client identity                                        | `""`            |
 | `decisionEngine.routingConfig.enabled`     | Enable routing config                                      | `true`          |
+| `decisionEngine.securityContext`           | Overrides `securityContext` key by key for this container (an explicit `false` wins) | `runAsUser: 10001, runAsGroup: 10001` |
 
 ### PostgreSQL Configuration
 
@@ -183,6 +193,10 @@ The chart can wire Decision Engine to external Kafka and ClickHouse analytics in
 | `groovyRunner.healthcheck.periodSeconds` | Groovy Runner health check period                         | `5`             |
 | `groovyRunner.healthcheck.timeoutSeconds` | Groovy Runner health check timeout                       | `5`             |
 | `groovyRunner.healthcheck.failureThreshold` | Groovy Runner health check failure threshold           | `5`             |
+| `groovyRunner.securityContext`          | Overrides `securityContext` key by key for this container (an explicit `false` wins) | `runAsUser: 1000, runAsGroup: 1000, readOnlyRootFilesystem: true` |
+| `groovyRunner.networkPolicy.enabled`    | Allow ingress to the runner only from decision-engine pods and close its egress | `true` |
+| `groovyRunner.networkPolicy.extraIngress` | Additional ingress rules for the runner                  | `[]`            |
+| `groovyRunner.networkPolicy.extraEgress` | Egress rules for the runner (e.g. a service-mesh sidecar's control plane) | `[]` |
 
 ### Database Migration Configuration
 
@@ -195,7 +209,11 @@ The chart can wire Decision Engine to external Kafka and ClickHouse analytics in
 | `dbMigration.postgresql.image.pullPolicy` | PostgreSQL migration image pull policy                     | `"IfNotPresent"` |
 | `dbMigration.postgresql.migrations.path`  | PostgreSQL migrations path                                 | `"/app/migrations_pg"` |
 | `dbMigration.postgresql.initSqlScript`    | PostgreSQL initial SQL script                              | `"-- This will be the initial migration script"` |
+| `dbMigration.postgresql.securityContext`  | Overrides `securityContext` for the PostgreSQL migration container (writes only to an emptyDir at `/work`) | `runAsUser: 10001, runAsGroup: 10001` |
 | `dbMigration.mysql.enabled`               | Enable MySQL migration                                     | `false`         |
+| `dbMigration.mysql.image.repository`      | MySQL migration image repository (must ship the `mysql` client and `curl`) | `"mysql"` |
+| `dbMigration.mysql.image.tag`             | MySQL migration image tag                                  | `"8.4"`        |
+| `dbMigration.mysql.securityContext`       | Overrides `securityContext` for the MySQL migration container | `runAsUser: 999, runAsGroup: 999` |
 
 ### Routing Config Configuration
 

@@ -130,12 +130,12 @@ const STAGES: StageDef[] = [
       const split = experiment ? `${experiment.variant_split_pct}% of payments land in the variant, the rest in control — ` : ''
       return `${split}payments are hashed into their arm by payment ID. An arm pointing at a fixed strategy answers immediately — nothing below runs for that payment. An arm pointing at live routing continues with its own overrides (hedging, elimination threshold).`
     },
-    runsWhen: 'While an experiment occupies the strategy slot. /routing/evaluate always follows its arms; /decide-gateway interception additionally needs the real-payments flag.',
-    configuredBy: 'The A/B Testing page. An active experiment occupies the same slot as rules and volume splits.',
+    runsWhen: 'While a payment experiment is active. /routing/evaluate always follows its arms; /decide-gateway interception additionally needs the real-payments flag.',
+    configuredBy: 'The A/B Testing page. Experiments have a separate activation slot and can run alongside rules or volume splits.',
     configureTo: '/routing/ab-testing',
     api: 'POST /routing/list/active/{merchant_id}',
     view: (stack) => {
-      if (stack.slot !== 'ab') return { badge: 'No experiment', variant: 'gray', dim: true }
+      if (!stack.experimentAlgorithm) return { badge: 'No experiment', variant: 'gray', dim: true }
       if (!stack.abRealPaymentsOn)
         return { badge: 'Live · interceptor flag off', variant: 'orange', dim: false, kind: 'traffic split' }
       const split = abTestData(stack)?.variant_split_pct
@@ -176,8 +176,8 @@ const STAGES: StageDef[] = [
       if (stack.slot === 'volume')
         return `“${name}” splits traffic by weighted draw — lane thickness above mirrors each connector’s share. Only one strategy can hold this slot at a time.`
       if (stack.slot === 'ab')
-        return `The experiment “${name}” holds the slot, so rules and volume splits are paused while it runs — they all share this one activation slot.`
-      return 'One strategy holds this slot at a time: a rule set (first match wins), a volume split (weighted draw), or a running experiment. Its output is the ordered candidate list.'
+        return `The experiment “${name}” is active. Its selected arm determines the routing used for that payment.`
+      return 'One payment strategy holds this slot at a time: a rule set (first match wins) or a volume split (weighted draw). Its output is the ordered candidate list; experiments activate separately.'
     },
     runsWhen: 'Whenever a strategy is activated. Activating one replaces whatever held the slot.',
     configuredBy: 'The Rule-Based or Volume Split pages.',
@@ -564,15 +564,15 @@ function StackBoard({
         tone: 'warn',
         text: 'No strategy is active — your integration’s connector list goes to scoring with only the eligibility check applied.',
       })
-    if (stack.slot === 'ab' && !stack.abRealPaymentsOn)
+    if (stack.experimentAlgorithm && !stack.abRealPaymentsOn)
       warnings.push({
         tone: 'warn',
-        text: 'An experiment holds the slot but the real-payments flag is off — /decide-gateway traffic is not intercepted, while /routing/evaluate calls still follow the experiment’s arms.',
+        text: 'An experiment is active but the real-payments flag is off — /decide-gateway traffic is not intercepted, while /routing/evaluate calls still follow the experiment’s arms.',
       })
-    if (stack.slot === 'ab' && stack.abRealPaymentsOn)
+    if (stack.experimentAlgorithm && stack.abRealPaymentsOn)
       warnings.push({
         tone: 'info',
-        text: 'While the experiment runs, rules and volume splits are paused — they share one activation slot.',
+        text: 'The experiment runs alongside your saved strategy; its selected arm determines the routing used for that payment.',
       })
     if (stack.srConfigured && !stack.eliminationConfigured)
       warnings.push({
@@ -622,6 +622,11 @@ function StackBoard({
             </span>
           )}
         </BoardRow>
+        {stack.experimentAlgorithm && stack.slot !== 'ab' ? (
+          <BoardRow label="Experiment">
+            <Badge variant="purple">{stack.experimentAlgorithm.name}</Badge>
+          </BoardRow>
+        ) : null}
         <BoardRow label="Optimization">
           <StatusChip on={stack.srConfigured} label="Success-rate scoring" to="/routing/sr" />
           <StatusChip on={stack.eliminationConfigured} label="Elimination" to="/routing/sr" />
@@ -1149,7 +1154,7 @@ function StageLiveDetail({
         {!stack.abRealPaymentsOn ? (
           <p className="text-[12px] leading-4 text-amber-600 dark:text-amber-400">
             The real-payments flag is off: /decide-gateway traffic is not intercepted, but
-            /routing/evaluate calls still follow the experiment’s arms while it holds the slot.
+            /routing/evaluate calls still follow the experiment’s arms while the experiment is active.
           </p>
         ) : null}
       </div>

@@ -1,10 +1,7 @@
 use crate::app::get_tenant_app_state;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::merchant_priority_logic::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::merchant_priority_logic::dsl;
+use crate::generics::Repository;
+use crate::storage::backend::schema::merchant_priority_logic::dsl;
 use crate::storage::types::MerchantPriorityLogic as DBMerchantPriorityLogic;
-use diesel::associations::HasTable;
 use diesel::*;
 use serde::{Deserialize, Serialize};
 use std::option::Option;
@@ -96,12 +93,7 @@ impl From<DBMerchantPriorityLogic> for MerchantPriorityLogic {
 pub async fn find_all_priority_logic_by_merchant_pid(mpid: i64) -> Vec<MerchantPriorityLogic> {
     // Call the DB using Diesel's generic find all function
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_all::<
-        <DBMerchantPriorityLogic as HasTable>::Table,
-        _,
-        DBMerchantPriorityLogic,
-    >(&app_state.db, dsl::merchant_account_id.eq(mpid))
-    .await
+    match DBMerchantPriorityLogic::find_all(&app_state.db, dsl::merchant_account_id.eq(mpid)).await
     {
         Ok(db_results) => db_results.into_iter().map(From::from).collect(),
         Err(_) => Vec::new(), // Silently handle any errors by returning an empty vector
@@ -111,13 +103,7 @@ pub async fn find_all_priority_logic_by_merchant_pid(mpid: i64) -> Vec<MerchantP
 pub async fn find_priority_logic_by_id(mpl_id: String) -> Option<MerchantPriorityLogic> {
     // Perform the database query using Diesel
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_one_optional::<
-        <DBMerchantPriorityLogic as HasTable>::Table,
-        _,
-        DBMerchantPriorityLogic,
-    >(&app_state.db, dsl::id.eq(mpl_id))
-    .await
-    {
+    match DBMerchantPriorityLogic::find_optional(&app_state.db, dsl::id.eq(mpl_id)).await {
         Ok(Some(db_record)) => Some(MerchantPriorityLogic::from(db_record)),
         Ok(None) => None,
         Err(_) => None, // Silently handle any errors by returning None

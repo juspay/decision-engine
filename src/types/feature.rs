@@ -1,6 +1,7 @@
 use crate::app::get_tenant_app_state;
 // use db::eulermeshimpl::mesh_config;
 // use db::mesh::internal::*;
+use crate::generics::Repository;
 use crate::storage::types::Feature as DBFeature;
 // use types::utils::dbconfig::get_euler_db_conf;
 use crate::types::merchant::id::{merchant_id_to_text, to_merchant_id, MerchantId};
@@ -28,11 +29,7 @@ use std::string::String;
 // use test::quickcheck_instances_time::*;
 // use data_int::Int64;
 // use data_text::Text;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::feature::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::feature::dsl;
-use diesel::associations::HasTable;
+use crate::storage::backend::schema::feature::dsl;
 
 #[derive(Debug, PartialEq, Clone, Serialize, Deserialize)]
 pub struct FeaturePId {
@@ -79,16 +76,7 @@ impl From<DBFeature> for Feature {
 pub async fn get_feature_by_name(feature_name: &str) -> Option<Feature> {
     // Try to find the feature using diesel
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_one_optional::<
-        <DBFeature as HasTable>::Table,
-        _,
-        DBFeature
-    >(
-        &app_state.db,
-        dsl::name.eq(feature_name.to_owned()),
-    )
-    .await
-    {
+    match DBFeature::find_optional(&app_state.db, dsl::name.eq(feature_name.to_owned())).await {
         Ok(Some(db_feature)) => Some(db_feature.into()),
         Ok(None) => None,
         Err(_) => None, // Silently handle any errors by returning None
@@ -103,8 +91,8 @@ pub async fn get_db_feature_enabled(
     // Convert MerchantId to String for database query
     let merchant_id_str = merchant_id_to_text(mid.clone());
     let app_state = get_tenant_app_state().await;
-    // Use generic_find_one_optional for diesel query
-    crate::generics::generic_find_one_optional::<<DBFeature as HasTable>::Table, _, DBFeature>(
+    // Use find_optional for diesel query
+    DBFeature::find_optional(
         &app_state.db,
         dsl::name
             .eq(feature_name.to_owned())

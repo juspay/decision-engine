@@ -130,8 +130,7 @@ pub async fn for_merchant(
     let sql = SUMMARY_SQL.replace("__DB__", &cfg.database);
     // The SQL goes in the request body (guarantees a Content-Length; ClickHouse rejects a
     // body-less POST with 411). Only the `{name:Type}` bindings ride in the query string.
-    let mut req = client()
-        .post(cfg.url.trim_end_matches('/'))
+    let mut req = super::ch_http::post(client(), &cfg.url)
         .query(&[("param_merchant_id", merchant_id)])
         .body(sql);
     if !cfg.user.is_empty() {

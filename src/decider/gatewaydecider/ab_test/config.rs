@@ -1,21 +1,5 @@
-use crate::app::get_tenant_app_state;
-use crate::euclid::types::{
-    ABTestData, RoutingAlgorithm, RoutingAlgorithmMapper, StaticRoutingAlgorithm,
-};
-use crate::generics::generic_find_one;
+use crate::euclid::types::ABTestData;
 use crate::types::service_configuration;
-use diesel::associations::HasTable;
-use diesel::prelude::*;
-
-#[cfg(feature = "mysql")]
-use crate::storage::schema::routing_algorithm::dsl as algo_dsl;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::routing_algorithm_mapper::dsl as mapper_dsl;
-
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::routing_algorithm::dsl as algo_dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::routing_algorithm_mapper::dsl as mapper_dsl;
 
 /// service_configuration key for the FeatureConf blob — same key the UI reads/writes.
 const FEATURE_CONF_KEY: &str = "ab_test_real_payments_enabled";
@@ -25,13 +9,32 @@ pub struct AbTestConfig {
     pub data: ABTestData,
 }
 
+/// How long the parsed `FeatureConf` blob is reused before Postgres is read again. The decider
+/// asks on every payment; the window is short so a change made in the UI still lands promptly.
+const FEATURE_CONF_CACHE_TTL_MS: u64 = 5_000;
+
+/// Parsed `FeatureConf` for [`FEATURE_CONF_KEY`], or `None` when the row is absent or unparsable.
+/// `None` is cached too — a missing row is the common case, and it costs a query to discover.
+static FEATURE_CONF_CACHE: once_cell::sync::Lazy<
+    crate::redis::mem_cache::TypedCache<Option<crate::redis::types::FeatureConf>>,
+> = once_cell::sync::Lazy::new(|| {
+    crate::redis::mem_cache::TypedCache::new(FEATURE_CONF_CACHE_TTL_MS, 1)
+});
+
 pub async fn is_enabled(merchant_id: &str) -> bool {
-    let conf = service_configuration::find_config_by_name(FEATURE_CONF_KEY.to_string())
-        .await
-        .ok()
-        .flatten()
-        .and_then(|c| c.value)
-        .and_then(|v| serde_json::from_str::<crate::redis::types::FeatureConf>(&v).ok());
+    let conf = match FEATURE_CONF_CACHE.get(FEATURE_CONF_KEY) {
+        Some(cached) => cached,
+        None => {
+            let fetched = service_configuration::find_config_by_name(FEATURE_CONF_KEY.to_string())
+                .await
+                .ok()
+                .flatten()
+                .and_then(|c| c.value)
+                .and_then(|v| serde_json::from_str::<crate::redis::types::FeatureConf>(&v).ok());
+            FEATURE_CONF_CACHE.store(FEATURE_CONF_KEY.to_string(), fetched.clone());
+            fetched
+        }
+    };
 
     if let Some(conf) = conf {
         return crate::redis::feature::check_merchant_enabled(
@@ -43,41 +46,13 @@ pub async fn is_enabled(merchant_id: &str) -> bool {
     false
 }
 
+/// The merchant's running payment experiment, which sits beside the active rule in its own slot
+/// (see the experiment slot in `euclid::handlers::routing_rules`).
 pub async fn load_active_ab_test(merchant_id: &str) -> Option<AbTestConfig> {
-    let state = get_tenant_app_state().await;
-
-    // Load the active *payment* routing algorithm mapper for this merchant. The merchant can
-    // hold one mapper row per algorithm_for slot (payout, 3DS, volume_commitment as well) and an
-    // A/B experiment only ever lives in the payment slot.
-    let mapper =
-        generic_find_one::<<RoutingAlgorithmMapper as HasTable>::Table, _, RoutingAlgorithmMapper>(
-            &state.db,
-            mapper_dsl::created_by.eq(merchant_id.to_string()).and(
-                mapper_dsl::algorithm_for
-                    .eq(crate::euclid::types::AlgorithmType::Payment.to_string()),
-            ),
-        )
-        .await
-        .ok()?;
-
-    let experiment_id = mapper.routing_algorithm_id.clone();
-
-    // Load the routing algorithm record
-    let algorithm = generic_find_one::<<RoutingAlgorithm as HasTable>::Table, _, RoutingAlgorithm>(
-        &state.db,
-        algo_dsl::id.eq(experiment_id.clone()),
-    )
-    .await
-    .ok()?;
-
-    // Parse and check it's an AB test
-    let parsed: StaticRoutingAlgorithm = serde_json::from_str(&algorithm.algorithm_data).ok()?;
-
-    match parsed {
-        StaticRoutingAlgorithm::AbTest(data) => Some(AbTestConfig {
-            experiment_id,
-            data,
-        }),
-        _ => None,
-    }
+    let (experiment_id, data) =
+        crate::euclid::handlers::routing_rules::active_payment_experiment(merchant_id).await?;
+    Some(AbTestConfig {
+        experiment_id,
+        data,
+    })
 }

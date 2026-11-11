@@ -59,10 +59,11 @@ pub async fn ingest_invoice_bytes(
     clickhouse: &ClickHouseAnalyticsConfig,
     connector: &str,
     account: &str,
-    merchant_id: &str,
+    merchant: &crate::auth::AuthorizedMerchant,
     invoice_ref: &str,
     bytes: &[u8],
 ) -> Result<InvoiceOutcome, IngestError> {
+    let merchant_id = merchant.as_str();
     let connector = connector.to_lowercase();
     let registry = InvoiceRegistry::with_builtins();
     let source = registry.get(&connector)?;
@@ -100,10 +101,11 @@ pub async fn ingest_invoice_bytes(
 
     let updated_at = crate::utils::date_time::now().to_string();
     let stored = StoredAddon::new(addon, &parsed.summary, updated_at);
-    store::put(merchant_id, &connector, &stored).await?;
+    store::put(merchant, &connector, &stored).await?;
 
     // Serve the new add-on now rather than after the periodic tick (same as the report upload path).
-    if let Err(e) = crate::cost_ingestion::serving::refresh_merchant(clickhouse, merchant_id).await
+    if let Err(e) =
+        crate::cost_ingestion::serving::refresh_merchant_everywhere(clickhouse, merchant_id).await
     {
         crate::logger::warn!(
             tag = "invoice_ingest",
@@ -240,8 +242,7 @@ pub(super) async fn exec(
         .iter()
         .map(|(k, v)| (format!("param_{k}"), v.clone()))
         .collect();
-    let mut req = reqwest::Client::new()
-        .post(cfg.url.trim_end_matches('/'))
+    let mut req = crate::cost_ingestion::ch_http::post(&reqwest::Client::new(), &cfg.url)
         .query(&q)
         .body(query.to_string());
     if !cfg.user.is_empty() {

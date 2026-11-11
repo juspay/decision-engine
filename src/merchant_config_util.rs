@@ -368,7 +368,7 @@ pub async fn isPaymentFlowEnabledForMerchant(
 
 // // Original Haskell function: logMerConfigLengthMisMatchError
 pub fn logMerConfigLengthMisMatchError(pfs: Vec<String>, mc_arr: Vec<MerchantConfig>) {
-    logger::error!(
+    logger::warn!(
         "Merchant config length mismatch for payment flows: {:?} and merchant config: {:?}",
         pfs,
         mc_arr

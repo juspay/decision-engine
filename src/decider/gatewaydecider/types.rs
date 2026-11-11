@@ -1,10 +1,12 @@
 use crate::app::{get_tenant_app_state, TenantAppState};
 use crate::decider::network_decider;
+use crate::euclid::{ast::ValueType, types::RoutingRequest};
 use crate::redis::feature::RedisCompressionConfigCombined;
 use crate::types::country::country_iso::CountryISO2;
 use crate::types::currency::Currency;
 use crate::types::money::internal as ETMo;
 use crate::types::order::udfs::UDFs;
+use crate::types::payment_instrument::{InstrumentError, PaymentInstrument};
 use crate::types::transaction::id as ETId;
 use crate::types::txn_details::types::TxnObjectType;
 use masking::{PeekInterface, Secret};
@@ -527,8 +529,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
         volume_steer_info: None,
         gateway_scoring_data: GatewayScoringData {
             merchantId: String::new(),
-            paymentMethodType: String::new(),
-            paymentMethod: String::new(),
+            instrument: PaymentInstrument::default(),
             orderType: String::new(),
             cardType: None,
             bankCode: None,
@@ -558,8 +559,9 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
 #[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct GatewayScoringData {
     pub merchantId: String,
-    pub paymentMethodType: String,
-    pub paymentMethod: String,
+    /// Stored as `paymentMethod` and `paymentMethodType`, in the standard meaning.
+    #[serde(flatten)]
+    pub instrument: crate::types::payment_instrument::PaymentInstrument,
     pub orderType: String,
     pub cardType: Option<String>,
     pub bankCode: Option<String>,
@@ -661,6 +663,10 @@ pub enum GatewayDeciderApproach {
     /// A volume-contract nudge moved the payment off the SR head — the volume-driven sibling of
     /// [`Self::SrSelectionMultiObjective`].
     SrSelectionVolumeCommitment,
+    PreferredConnectorRouting,
+    PreferredConnectorAllDowntimeRouting,
+    PreferredConnectorDowntimeRouting,
+    PreferredConnectorGlobalDowntimeRouting,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -951,13 +957,18 @@ pub struct ApiTxnCardInfo {
 //     }
 // }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+/// The legacy decider request carries its merchant in three places; all of them must agree with
+/// the session.
+#[derive(Debug, Serialize, Deserialize, Clone, crate::auth::MerchantScoped)]
 pub struct DomainDeciderRequest {
+    #[merchant]
     pub orderReference: ETO::Order,
     pub orderMetadata: ETOMV2::OrderMetadataV2,
+    #[merchant]
     pub txnDetail: ETTD::TxnDetail,
     pub txnOfferDetails: Option<Vec<ETTOD::TxnOfferDetail>>,
     pub txnCardInfo: ETCa::txn_card_info::TxnCardInfo,
+    #[merchant]
     pub merchantAccount: ETM::merchant_account::MerchantAccount,
     pub cardToken: Option<String>,
     pub txnType: Option<String>,
@@ -970,10 +981,11 @@ pub struct DomainDeciderRequest {
 }
 
 // impl Given<SecretContext> for DomainDeciderRequest {}
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, crate::auth::MerchantScoped)]
 #[serde(rename_all = "camelCase")]
 pub struct DomainDeciderRequestForApiCallV2 {
     pub payment_info: PaymentInfo,
+    #[merchant]
     pub merchant_id: String,
     pub eligible_gateway_list: Option<Vec<String>>,
     pub ranking_algorithm: Option<RankingAlgorithm>,
@@ -1016,7 +1028,8 @@ pub struct PaymentInfo {
     customer_id: Option<ETCu::CustomerId>,
     #[serde(default, deserialize_with = "deserialize_optional_udfs_to_hashmap")]
     udfs: Option<UDFs>,
-    preferred_gateway: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    preferred_connectors: Option<Vec<String>>,
     payment_type: TxnObjectType,
     pub metadata: Option<String>,
     internal_metadata: Option<String>,
@@ -1041,19 +1054,182 @@ pub struct PaymentInfo {
     channel: Option<String>,
 }
 
+fn routing_param_text(request: &RoutingRequest, key: &str) -> Option<String> {
+    request.parameters.get(key).and_then(|value| match value {
+        Some(ValueType::EnumVariant(value))
+        | Some(ValueType::StrValue(value))
+        | Some(ValueType::GlobalRef(value)) => Some(value.clone()),
+        Some(ValueType::MetadataVariant(value)) => Some(value.value.clone()),
+        _ => None,
+    })
+}
+
+fn routing_param_number(request: &RoutingRequest, key: &str) -> Option<u64> {
+    request.parameters.get(key).and_then(|value| match value {
+        Some(ValueType::Number(value)) => Some(*value),
+        _ => None,
+    })
+}
+
+fn normalize_static_enum(value: String) -> String {
+    value.replace('-', "_").to_ascii_uppercase()
+}
+
+impl From<(&RoutingRequest, Option<Self>)> for DomainDeciderRequestForApiCallV2 {
+    fn from((request, dynamic): (&RoutingRequest, Option<Self>)) -> Self {
+        Self {
+            payment_info: PaymentInfo {
+                payment_id: request.payment_id.clone().unwrap_or_default(),
+                amount: routing_param_number(request, "amount").unwrap_or_default() as f64,
+                currency: routing_param_text(request, "currency")
+                    .and_then(|value| Currency::text_to_curr(&normalize_static_enum(value)).ok())
+                    .unwrap_or(Currency::USD),
+                country: routing_param_text(request, "billing_country")
+                    .or_else(|| routing_param_text(request, "business_country"))
+                    .and_then(|value| {
+                        CountryISO2::text_to_country(&normalize_static_enum(value)).ok()
+                    }),
+                customer_id: None,
+                udfs: None,
+                preferred_connectors: dynamic.and_then(|r| r.payment_info.preferred_connectors),
+                payment_type: routing_param_text(request, "payment_type")
+                    .and_then(|value| TxnObjectType::from_text(normalize_static_enum(value)))
+                    .unwrap_or(TxnObjectType::Unknown),
+                metadata: None,
+                internal_metadata: None,
+                is_emi: None,
+                emi_bank: None,
+                emi_tenure: None,
+                payment_method_type: routing_param_text(request, "payment_method_type")
+                    .map(normalize_static_enum)
+                    .unwrap_or_else(|| "null".to_string()),
+                payment_method: routing_param_text(request, "payment_method")
+                    .map(normalize_static_enum)
+                    .unwrap_or_default(),
+                payment_source: None,
+                auth_type: routing_param_text(request, "authentication_type")
+                    .or_else(|| routing_param_text(request, "auth_type"))
+                    .and_then(|value| {
+                        ETCa::txn_card_info::text_to_auth_type(&normalize_static_enum(value)).ok()
+                    }),
+                card_issuer_bank_name: None,
+                card_isin: routing_param_text(request, "card_bin")
+                    .or_else(|| routing_param_text(request, "extended_card_bin")),
+                card_type: routing_param_text(request, "card_type").and_then(|value| {
+                    ETCa::card_type::CardType::try_from(normalize_static_enum(value)).ok()
+                }),
+                card_switch_provider: routing_param_text(request, "card_network").map(Secret::new),
+                card_program: None,
+                card_issuer_country: routing_param_text(request, "issuer_country"),
+                channel: None,
+            },
+            merchant_id: request.created_by.clone(),
+            eligible_gateway_list: request.fallback_output.as_ref().map(|connectors| {
+                connectors
+                    .iter()
+                    .map(crate::euclid::ast::ConnectorInfo::identifier)
+                    .collect()
+            }),
+            ranking_algorithm: Some(RankingAlgorithm::SrBasedRouting),
+            elimination_enabled: None,
+            enable_multi_objective: None,
+        }
+    }
+}
+
 // write a function to transfer DomainDeciderRequestForApiCallV2 to DomainDeciderRequest
 
 impl DomainDeciderRequestForApiCallV2 {
+    pub fn from_decide(
+        request: &crate::types::decide::DecideRequest,
+        static_request: &RoutingRequest,
+    ) -> Result<Self, String> {
+        let mut dynamic = Self::from((static_request, None));
+        let info = &mut dynamic.payment_info;
+        info.amount = request.amount as f64;
+        info.payment_method = request
+            .payment_method_type
+            .clone()
+            .map(normalize_static_enum)
+            .unwrap_or_default();
+        info.payment_method_type = request
+            .payment_method_sub_type
+            .clone()
+            .map(normalize_static_enum)
+            .unwrap_or_else(|| "null".to_string());
+        info.currency = Currency::text_to_curr(&request.currency.to_ascii_uppercase())
+            .map_err(|_| "Invalid currency".to_string())?;
+        info.country = request
+            .billing_country
+            .as_ref()
+            .or(request.business_country.as_ref())
+            .map(|country| {
+                CountryISO2::text_to_country(&country.to_ascii_uppercase())
+                    .map_err(|_| "Country fields must use ISO 3166 alpha-2 codes".to_string())
+            })
+            .transpose()?;
+        info.customer_id = request.customer_id.clone().map(ETCu::CustomerId);
+        if let Some(auth_type) = request.authentication_type.as_ref() {
+            info.auth_type = Some(
+                ETCa::txn_card_info::text_to_auth_type(&normalize_static_enum(auth_type.clone()))
+                    .map_err(|_| "Invalid authentication type".to_string())?,
+            );
+        }
+        if let Some(card) = &request.card {
+            info.card_isin = card.card_isin.clone().or(card.card_extended_bin.clone());
+            info.card_type = card.card_type.clone().and_then(|value| {
+                ETCa::card_type::CardType::try_from(normalize_static_enum(value)).ok()
+            });
+            info.card_issuer_bank_name = card.card_issuer.clone();
+            info.card_program = card.card_subtype.clone();
+            info.card_issuer_country = card.card_issuing_country_code.clone();
+            info.card_switch_provider = card
+                .card_switch_provider
+                .clone()
+                .or(card.card_network.clone())
+                .map(Secret::new);
+        }
+        info.preferred_connectors =
+            request
+                .routing_config
+                .preferred_connectors
+                .as_ref()
+                .map(|connectors| {
+                    connectors
+                        .iter()
+                        .map(crate::types::decide::DecideConnector::identifier)
+                        .collect()
+                });
+        dynamic.ranking_algorithm = request
+            .routing_config
+            .ranking_algorithm
+            .clone()
+            .or(dynamic.ranking_algorithm);
+        dynamic.elimination_enabled = request.routing_config.elimination_enabled;
+        dynamic.enable_multi_objective = request.routing_config.enable_multi_objective;
+        Ok(dynamic)
+    }
+
     pub fn payment_id(&self) -> &str {
         &self.payment_info.payment_id
     }
 
-    pub fn payment_method_type(&self) -> &str {
-        &self.payment_info.payment_method_type
+    /// The payment's instrument, checked as [`PaymentInstrument::parse`] does.
+    /// `/decide-gateway` rejects a request that fails this.
+    pub fn check_payment_method(&self) -> Result<PaymentInstrument, InstrumentError> {
+        PaymentInstrument::parse(
+            &self.payment_info.payment_method,
+            Some(&self.payment_info.payment_method_type),
+        )
     }
 
-    pub fn payment_method(&self) -> &str {
-        &self.payment_info.payment_method
+    /// The payment's instrument, unchecked: what the engine routes on once the request is in.
+    /// `/routing/hybrid` builds its request from rule parameters its caller already validated.
+    pub fn instrument(&self) -> PaymentInstrument {
+        PaymentInstrument::parse_lenient(
+            Some(&self.payment_info.payment_method),
+            Some(&self.payment_info.payment_method_type),
+        )
     }
 
     pub fn auth_type(&self) -> Option<String> {
@@ -1089,7 +1265,12 @@ impl DomainDeciderRequestForApiCallV2 {
             .map(ToString::to_string)
     }
 
-    pub async fn to_domain_decider_request(&self) -> DomainDeciderRequest {
+    /// The domain request for this call, for `merchant_account` — the merchant the caller already
+    /// loaded and answered "not found" for, so the conversion itself cannot fail.
+    pub fn to_domain_decider_request(
+        &self,
+        merchant_account: ETM::merchant_account::MerchantAccount,
+    ) -> DomainDeciderRequest {
         DomainDeciderRequest {
             orderReference: ETO::Order {
                 id: ETO::id::to_order_prim_id(1),
@@ -1106,7 +1287,7 @@ impl DomainDeciderRequestForApiCallV2 {
                     .udfs
                     .clone()
                     .unwrap_or(UDFs(HashMap::new())),
-                preferredGateway: self.payment_info.preferred_gateway.clone(),
+                preferredGateway: self.payment_info.preferred_connector_for_routing(),
                 productId: None,
                 orderType: ETO::OrderType::from_txn_object_type(
                     self.payment_info.payment_type.clone(),
@@ -1142,7 +1323,8 @@ impl DomainDeciderRequestForApiCallV2 {
                 merchantGatewayAccountId: None,
                 txnAmount: Some(ETMo::Money::from_double(self.payment_info.amount)),
                 txnObjectType: Some(self.payment_info.payment_type.clone()),
-                sourceObject: Some(self.payment_info.payment_method.clone()),
+                // The engine reads the specific method from the source object, as legacy routing did.
+                sourceObject: Some(self.instrument().method_type_code().into_owned()),
                 sourceObjectId: None,
                 currency: self.payment_info.currency.clone(),
                 country: self.payment_info.country,
@@ -1168,17 +1350,12 @@ impl DomainDeciderRequestForApiCallV2 {
                 channel: self.payment_info.channel.clone(),
                 nameOnCard: None,
                 dateCreated: OffsetDateTime::now_utc(),
-                paymentMethodType: self.payment_info.payment_method_type.to_string(),
-                paymentMethod: self.payment_info.payment_method.clone(),
+                instrument: self.instrument(),
                 paymentSource: self.payment_info.payment_source.clone().map(Secret::new),
                 authType: self.payment_info.auth_type.clone(),
                 partitionKey: None,
             },
-            merchantAccount: ETM::merchant_account::load_merchant_by_merchant_id(
-                self.merchant_id.clone(),
-            )
-            .await
-            .expect("Merchant account not found"),
+            merchantAccount: merchant_account,
             cardToken: None,
             txnType: None,
             shouldCreateMandate: None,
@@ -1602,6 +1779,16 @@ impl fmt::Display for GatewayDeciderApproach {
             }
             Self::SrSelectionVolumeCommitment => {
                 write!(f, "SR_SELECTION_VOLUME_COMMITMENT")
+            }
+            Self::PreferredConnectorRouting => write!(f, "PREFERRED_CONNECTOR_ROUTING"),
+            Self::PreferredConnectorAllDowntimeRouting => {
+                write!(f, "PREFERRED_CONNECTOR_ALL_DOWNTIME_ROUTING")
+            }
+            Self::PreferredConnectorDowntimeRouting => {
+                write!(f, "PREFERRED_CONNECTOR_DOWNTIME_ROUTING")
+            }
+            Self::PreferredConnectorGlobalDowntimeRouting => {
+                write!(f, "PREFERRED_CONNECTOR_GLOBAL_DOWNTIME_ROUTING")
             }
         }
     }
@@ -2067,4 +2254,67 @@ pub struct MetricEntry {
 pub struct SrMetrics {
     pub dimension: String,
     pub value: MetricEntry,
+}
+
+impl PaymentInfo {
+    fn preferred_connector_for_routing(&self) -> Option<String> {
+        self.preferred_connectors
+            .as_ref()
+            .and_then(|connectors| connectors.first().cloned())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::panic_in_result_fn)]
+mod preferred_connectors_contract_tests {
+    use super::{GatewayDeciderApproach, PaymentInfo};
+    use serde_json::json;
+
+    #[test]
+    fn canonical_contract_selects_and_serializes_the_first_connector(
+    ) -> Result<(), serde_json::Error> {
+        let value = json!({"paymentId":"pay_test", "amount":100, "currency":"CAD",
+            "preferredConnectors":["loonio:mca_one", "gigadat:mca_two"],
+            "paymentType":"ORDER_PAYMENT", "paymentMethodType":"interac", "paymentMethod":"bank_redirect"});
+        let info: PaymentInfo = serde_json::from_value(value)?;
+        assert_eq!(
+            info.preferred_connector_for_routing().as_deref(),
+            Some("loonio:mca_one")
+        );
+        let serialized = serde_json::to_value(info)?;
+        assert_eq!(
+            serialized.get("preferredConnectors"),
+            Some(&json!(["loonio:mca_one", "gigadat:mca_two"]))
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn absent_and_empty_fields_do_not_select_a_connector() -> Result<(), serde_json::Error> {
+        let base = json!({"paymentId":"pay_test", "amount":100, "currency":"CAD", "paymentType":"ORDER_PAYMENT", "paymentMethodType":"interac", "paymentMethod":"bank_redirect"});
+        let no_preference: PaymentInfo = serde_json::from_value(base.clone())?;
+        assert_eq!(no_preference.preferred_connector_for_routing(), None);
+
+        let mut empty = base.clone();
+        empty["preferredConnectors"] = json!([]);
+        let empty: PaymentInfo = serde_json::from_value(empty)?;
+        assert_eq!(empty.preferred_connector_for_routing(), None);
+        Ok(())
+    }
+
+    #[test]
+    fn routing_labels_use_only_connector_names() -> Result<(), serde_json::Error> {
+        for suffix in [
+            "ROUTING",
+            "ALL_DOWNTIME_ROUTING",
+            "DOWNTIME_ROUTING",
+            "GLOBAL_DOWNTIME_ROUTING",
+        ] {
+            let label = format!("PREFERRED_CONNECTOR_{suffix}");
+            let approach: GatewayDeciderApproach = serde_json::from_value(json!(label.clone()))?;
+            assert_eq!(approach.to_string(), label);
+            assert_eq!(serde_json::to_value(approach)?, json!(label));
+        }
+        Ok(())
+    }
 }

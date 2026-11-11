@@ -12,13 +12,10 @@
 //! `sync` then writes ancestry forward (onto each scope) and rebuilds the reverse indexes. It
 //! is idempotent — re-running with an unchanged tree reports zero changes.
 
-use axum::http::HeaderMap;
-use axum::Json;
-use masking::PeekInterface;
+use crate::custom_extractors::Json;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-use crate::app::APP_STATE;
 use crate::error;
 use crate::logger;
 use crate::types::merchant::hierarchy::{
@@ -137,34 +134,12 @@ pub struct ReconcileResponse {
 // Handlers
 // ---------------------------------------------------------------------------------------
 
-fn verify_admin_secret(
-    headers: &HeaderMap,
-) -> Result<(), error::ContainerError<error::MerchantAccountConfigurationError>> {
-    let global_config = APP_STATE
-        .get()
-        .map(|state| state.global_config.clone())
-        .ok_or(error::MerchantAccountConfigurationError::StorageError)?;
-
-    let provided = headers
-        .get("x-admin-secret")
-        .and_then(|value| value.to_str().ok())
-        .unwrap_or("");
-
-    if provided != global_config.admin_secret.secret.peek().as_str() {
-        return Err(error::MerchantAccountConfigurationError::Unauthorized.into());
-    }
-    Ok(())
-}
-
 /// Read-only classification of every existing scope against the submitted tree. Writes nothing.
 #[axum::debug_handler]
 pub async fn reconcile_hierarchy(
-    headers: HeaderMap,
     Json(payload): Json<HierarchyRequest>,
 ) -> Result<Json<ReconcileResponse>, error::ContainerError<error::MerchantAccountConfigurationError>>
 {
-    verify_admin_secret(&headers)?;
-
     let index = TreeIndex::build(&payload);
 
     let accounts = MA::load_all_merchant_accounts()
@@ -236,11 +211,8 @@ pub async fn reconcile_hierarchy(
 /// Upserts a scope per profile, writes ancestry forward, and rebuilds the reverse indexes.
 #[axum::debug_handler]
 pub async fn sync_hierarchy(
-    headers: HeaderMap,
     Json(payload): Json<HierarchyRequest>,
 ) -> Result<Json<SyncResponse>, error::ContainerError<error::MerchantAccountConfigurationError>> {
-    verify_admin_secret(&headers)?;
-
     let index = TreeIndex::build(&payload);
     let synced_at = synced_at_stamp();
 
@@ -270,6 +242,8 @@ pub async fn sync_hierarchy(
                         MA::insert_merchant_account(MA::MerchantAccountCreateRequest {
                             merchant_id: profile.profile_id.clone(),
                             gateway_success_rate_based_decider_input: None,
+                            // Hyperswitch scopes are placed by their ancestry, never by a parent.
+                            parent_merchant_id: None,
                         })
                         .await
                         .map_err(|_| {

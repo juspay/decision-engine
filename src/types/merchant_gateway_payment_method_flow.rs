@@ -1,9 +1,6 @@
 use crate::app::get_tenant_app_state;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::merchant_gateway_payment_method_flow::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::merchant_gateway_payment_method_flow::dsl;
-use diesel::associations::HasTable;
+use crate::generics::Repository;
+use crate::storage::backend::schema::merchant_gateway_payment_method_flow::dsl;
 use diesel::*;
 use serde::{Deserialize, Serialize};
 use std::option::Option;
@@ -154,12 +151,8 @@ pub async fn get_all_mgpmf_by_mga_id_and_gpmf_ids(
         .map(gateway_payment_method_flow_id_text)
         .collect();
     let app_state = get_tenant_app_state().await;
-    // Query using Diesel and generic_find_all
-    match crate::generics::generic_find_all::<
-        <DBMerchantGatewayPaymentMethodFlow as HasTable>::Table,
-        _,
-        DBMerchantGatewayPaymentMethodFlow,
-    >(
+    // Query using Diesel and find_all
+    match DBMerchantGatewayPaymentMethodFlow::find_all(
         &app_state.db,
         dsl::merchant_gateway_account_id
             .eq_any(mga_ids)

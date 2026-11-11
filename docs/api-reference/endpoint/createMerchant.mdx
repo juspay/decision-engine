@@ -25,7 +25,7 @@ export ADMIN_SECRET="x-admin-secret: <admin_secret>"
 
 - Method and path: `POST /merchant-account/create`
 - Parameters: none.
-- Body: JSON body with `merchant_id` (keep it stable — it scopes analytics and routing config) and optional `gateway_success_rate_based_decider_input`.
+- Body: JSON body with `merchant_id` (keep it stable — it scopes analytics and routing config), optional `gateway_success_rate_based_decider_input`, and optional `parent_merchant_id` to create the account as a [sub-merchant](/sub-merchants) of that merchant. A sub-merchant gets no `api_key` in the response, because its parent's keys reach it.
 
 ## Example
 

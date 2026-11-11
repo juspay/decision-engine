@@ -2,13 +2,240 @@ use crate::app::APP_STATE;
 use crate::auth;
 use crate::custom_extractors::TenantStateResolver;
 use crate::error::{self, ContainerError};
+use crate::generics::Repository;
 use axum::body::Body;
-use axum::response::{IntoResponse, Response};
+use axum::response::Response;
 use axum::{http::Request, http::StatusCode, middleware::Next};
 use diesel::ExpressionMethods;
 use masking::PeekInterface;
 
 const API_KEY_CACHE_TTL: i64 = 300;
+
+/// Adds the build's Git version to every response, preserving an existing value.
+pub async fn default_response_headers(req: Request<Body>, next: Next) -> Response {
+    static VERSION: once_cell::sync::Lazy<axum::http::HeaderValue> =
+        once_cell::sync::Lazy::new(|| {
+            axum::http::HeaderValue::from_str(env!("VERGEN_GIT_DESCRIBE"))
+                .unwrap_or_else(|_| axum::http::HeaderValue::from_static("unknown"))
+        });
+
+    let mut response = next.run(req).await;
+    response
+        .headers_mut()
+        .entry("x-de-version")
+        .or_insert_with(|| VERSION.clone());
+    response
+}
+
+type EndpointMetricsFn =
+    fn(
+        axum::extract::State<&'static str>,
+        Request<Body>,
+        Next,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response<Body>> + Send>>;
+
+/// One method of a route, with its request metrics attached ([`endpoint`]). Every route is
+/// registered through it, so none goes unmeasured:
+///
+/// ```ignore
+/// .route("/rule/create", metered!(post, rule_configuration::create_rule_config))
+/// .route("/merchant-account/:merchant_id", metered!(get, mac::get_merchant_config, "merchant_account_get"))
+/// .route("/seed-costs", metered!(get, seed_costs::get_seed_costs).merge(metered!(put, seed_costs::set_seed_costs)))
+/// ```
+///
+/// The endpoint is named after the handler, or explicitly where the dashboards already know the
+/// route by another name.
+macro_rules! metered {
+    ($method:ident, $($handler:ident)::+ $(,)?) => {
+        $crate::middleware::metered!($method, $($handler)::+, $crate::middleware::handler_name!($($handler)::+))
+    };
+    ($method:ident, $($handler:ident)::+, $name:expr $(,)?) => {
+        axum::routing::$method($($handler)::+).route_layer($crate::middleware::endpoint($name))
+    };
+}
+pub(crate) use metered;
+
+/// The last segment of a handler path, as a string: `routes::api_key::create_api_key` →
+/// `"create_api_key"`.
+macro_rules! handler_name {
+    ($last:ident) => {
+        stringify!($last)
+    };
+    ($head:ident :: $($rest:ident)::+) => {
+        $crate::middleware::handler_name!($($rest)::+)
+    };
+}
+pub(crate) use handler_name;
+
+/// The request metrics for one route, under `name` — the `endpoint` label the dashboards group by:
+/// `api_requests_total`, `api_latency_seconds`, and `api_requests_by_status` (`success` below
+/// `400`, `failure` otherwise). Routes attach it through `metered!`.
+///
+/// As a route layer it runs inside authentication, so it times the handler and its extractors, not
+/// the credential check.
+pub fn endpoint(
+    name: &'static str,
+) -> axum::middleware::FromFnLayer<
+    EndpointMetricsFn,
+    &'static str,
+    (axum::extract::State<&'static str>, Request<Body>),
+> {
+    axum::middleware::from_fn_with_state(name, record_endpoint as EndpointMetricsFn)
+}
+
+fn record_endpoint(
+    axum::extract::State(name): axum::extract::State<&'static str>,
+    req: Request<Body>,
+    next: Next,
+) -> std::pin::Pin<Box<dyn std::future::Future<Output = Response<Body>> + Send>> {
+    Box::pin(async move {
+        crate::metrics::API_REQUEST_TOTAL_COUNTER
+            .with_label_values(&[name])
+            .inc();
+        let timer = crate::metrics::API_LATENCY_HISTOGRAM
+            .with_label_values(&[name])
+            .start_timer();
+        let response = next.run(req).await;
+        timer.observe_duration();
+        crate::metrics::API_REQUEST_COUNTER
+            .with_label_values(&[name, outcome(response.status())])
+            .inc();
+        response
+    })
+}
+
+/// The `status` label of `api_requests_by_status`: every 4xx and 5xx is a failure.
+fn outcome(status: StatusCode) -> &'static str {
+    if status.is_client_error() || status.is_server_error() {
+        "failure"
+    } else {
+        "success"
+    }
+}
+
+/// Enforce that a per-merchant session may only act on the merchant named in the path: its own, or
+/// one of its sub-merchants.
+///
+/// Runs immediately *after* [`authenticate`], so an `AuthContext` is already in the request
+/// extensions for the JWT and api-key lanes. Those lanes carry a concrete `merchant_id`; a route
+/// addressed by a merchant names it in the path ([`auth::scope::MERCHANT_PATH_PARAM`]). When the two disagree
+/// the request is refused here, so no handler has to remember the check — and a path-addressed
+/// route added later is covered the day it is written.
+///
+/// This guard refuses early for every path-addressed route. Handlers then resolve the merchant
+/// they act on as an [`auth::AuthorizedMerchant`] — from the path with
+/// [`crate::custom_extractors::MerchantFromPath`], from the body with
+/// [`crate::custom_extractors::ScopedJson`] — which per-merchant storage requires.
+///
+/// Service credentials (the shared admin secret, and the `api_key_auth_enabled = false`
+/// backward-compat lane) insert *no* `AuthContext`, so they fall through unrestricted exactly as
+/// before — they are trusted callers that scope requests off the path/body themselves.
+pub async fn enforce_merchant_scope(
+    req: Request<Body>,
+    next: Next,
+) -> Result<Response<Body>, ContainerError<error::ApiError>> {
+    use axum::extract::{FromRequestParts, RawPathParams};
+
+    // No context ⇒ admin-secret / compat lane ⇒ trusted service caller, nothing to scope.
+    let Some(context) = req.extensions().get::<auth::AuthContext>().cloned() else {
+        return Ok(next.run(req).await);
+    };
+
+    let (mut parts, body) = req.into_parts();
+    // `RawPathParams` is populated during routing; this layer runs after it. Borrow the pattern's
+    // captured values without consuming any typed `Path` extractor the handler still needs.
+    let path_params = RawPathParams::from_request_parts(&mut parts, &())
+        .await
+        .ok();
+    let req = Request::from_parts(parts, body);
+
+    let path_merchant = path_params.and_then(|path_params| {
+        path_params
+            .iter()
+            .find(|(key, _)| *key == auth::scope::MERCHANT_PATH_PARAM)
+            .map(|(_, value)| value.to_owned())
+    });
+    // The session's own merchant, or one of its sub-merchants.
+    if let Some(merchant_id) = path_merchant {
+        if let Err(violation) = auth::authorize_merchant_id(Some(&context), &merchant_id).await {
+            return Ok(axum::response::IntoResponse::into_response(violation));
+        }
+    }
+
+    Ok(next.run(req).await)
+}
+
+/// Answer a routing hot-path request with `504` once it has run for
+/// `server.routing_request_timeout_ms`, dropping the handler. Layered on the routes Hyperswitch
+/// calls per payment, so a stalled Redis or database fails those calls fast instead of piling up
+/// connections. Work a handler has already spawned (async score updates) carries on regardless.
+pub async fn routing_deadline(req: Request<Body>, next: Next) -> Response<Body> {
+    let timeout_ms = APP_STATE
+        .get()
+        .map(|state| state.global_config.server.routing_request_timeout_ms)
+        .unwrap_or(2000);
+    deadline(std::time::Duration::from_millis(timeout_ms), req, next).await
+}
+
+async fn deadline(timeout: std::time::Duration, req: Request<Body>, next: Next) -> Response<Body> {
+    match tokio::time::timeout(timeout, next.run(req)).await {
+        Ok(response) => response,
+        Err(_) => {
+            crate::logger::error!(
+                timeout_ms = timeout.as_millis() as u64,
+                "Routing request exceeded its deadline"
+            );
+            axum::response::IntoResponse::into_response((
+                StatusCode::GATEWAY_TIMEOUT,
+                error::ApiErrorResponse::new(
+                    error::error_codes::TE_00,
+                    "Request timed out".to_string(),
+                    None,
+                ),
+            ))
+        }
+    }
+}
+
+/// Turn a panic anywhere below the router into a logged `500`, so the caller gets an answer and
+/// the failure reaches logs and metrics instead of resetting the connection.
+pub fn panic_response(panic: Box<dyn std::any::Any + Send + 'static>) -> Response<Body> {
+    let detail = panic
+        .downcast_ref::<String>()
+        .map(String::as_str)
+        .or_else(|| panic.downcast_ref::<&str>().copied())
+        .unwrap_or("unknown panic");
+    crate::logger::error!(panic = detail, "Request handler panicked");
+    axum::response::IntoResponse::into_response((
+        StatusCode::INTERNAL_SERVER_ERROR,
+        error::ApiErrorResponse::new(
+            error::error_codes::TE_00,
+            "Internal server error".to_string(),
+            None,
+        ),
+    ))
+}
+
+/// Admit only callers presenting the deployment's admin secret. Layered on the admin route group
+/// (see `admin_routes` in `app.rs`), so its handlers never see any other caller.
+pub async fn require_admin_secret(mut req: Request<Body>, next: Next) -> Response<Body> {
+    let expected = APP_STATE
+        .get()
+        .map(|state| state.global_config.admin_secret.secret.peek().as_str())
+        .unwrap_or_default();
+    if !auth::presents_admin_secret(req.headers(), expected) {
+        return axum::response::IntoResponse::into_response((
+            StatusCode::UNAUTHORIZED,
+            error::ApiErrorResponse::new(
+                error::error_codes::TE_04,
+                "Invalid or missing x-admin-secret header".to_string(),
+                None,
+            ),
+        ));
+    }
+    req.extensions_mut().insert(auth::AdminCaller);
+    next.run(req).await
+}
 
 /// Middleware providing implementation to perform JWE + JWS encryption and decryption around the
 /// card APIs
@@ -32,7 +259,12 @@ pub async fn authenticate(
 ) -> Result<Response<Body>, ContainerError<error::ApiError>> {
     let app_state = match APP_STATE.get() {
         Some(s) => s,
-        None => return Ok((StatusCode::INTERNAL_SERVER_ERROR, "Server not ready").into_response()),
+        None => {
+            return Ok(crate::error::text_error_response(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "Server not ready",
+            ))
+        }
     };
     let mut req = req;
 
@@ -68,37 +300,41 @@ pub async fn authenticate(
                     auth::access::required_permission(req.method(), matched_path.as_deref());
 
                 if !context.allows(&required) {
-                    return Ok((
+                    return Ok(crate::error::text_error_response(
                         StatusCode::FORBIDDEN,
                         format!("This session does not have {}", required.as_str()),
-                    )
-                        .into_response());
+                    ));
                 }
 
                 req.extensions_mut().insert(context);
                 return Ok(next.run(req).await);
             }
             Err(_) => {
-                return Ok((StatusCode::UNAUTHORIZED, "Invalid or expired token").into_response())
+                return Ok(crate::error::text_error_response(
+                    StatusCode::UNAUTHORIZED,
+                    "Invalid or expired token",
+                ))
             }
         }
     }
 
     // Accept the shared admin secret (service-to-service callers such as Hyperswitch, which
     // has no merchant api-key or dashboard session). Checked before the api-key compat mode so
-    // a wrong secret is always rejected. No AuthContext is inserted — like compat mode, these
-    // callers scope requests off the body/path, and extractors that require an AuthContext
-    // (e.g. analytics) keep rejecting them.
-    if let Some(provided) = req
-        .headers()
-        .get("x-admin-secret")
-        .and_then(|v| v.to_str().ok())
-    {
-        let expected = app_state.global_config.admin_secret.secret.peek();
-        if !expected.is_empty() && provided == expected {
+    // a wrong secret is always rejected. No AuthContext is inserted, only `AdminCaller` — like
+    // compat mode, these callers scope requests off the body/path, and extractors that require an
+    // AuthContext (e.g. analytics) keep rejecting them.
+    if req.headers().contains_key(auth::ADMIN_SECRET_HEADER) {
+        if auth::presents_admin_secret(
+            req.headers(),
+            app_state.global_config.admin_secret.secret.peek(),
+        ) {
+            req.extensions_mut().insert(auth::AdminCaller);
             return Ok(next.run(req).await);
         }
-        return Ok((StatusCode::UNAUTHORIZED, "Invalid admin secret").into_response());
+        return Ok(crate::error::text_error_response(
+            StatusCode::UNAUTHORIZED,
+            "Invalid admin secret",
+        ));
     }
 
     if !app_state.global_config.api_key_auth_enabled {
@@ -108,11 +344,10 @@ pub async fn authenticate(
     let api_key = match req.headers().get("x-api-key").and_then(|v| v.to_str().ok()) {
         Some(k) => k.to_owned(),
         None => {
-            return Ok((
+            return Ok(crate::error::text_error_response(
                 StatusCode::UNAUTHORIZED,
                 "Missing authentication credentials",
-            )
-                .into_response())
+            ))
         }
     };
 
@@ -123,7 +358,10 @@ pub async fn authenticate(
         match crate::tenant::GlobalAppState::get_app_state_of_tenant(app_state, "public").await {
             Ok(s) => s,
             Err(_) => {
-                return Ok((StatusCode::INTERNAL_SERVER_ERROR, "Tenant not found").into_response())
+                return Ok(crate::error::text_error_response(
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    "Tenant not found",
+                ))
             }
         };
 
@@ -138,19 +376,11 @@ pub async fn authenticate(
 
     // Cache miss — query DB
     use crate::storage::types::MerchantApiKey;
-    use diesel::associations::HasTable;
 
-    #[cfg(feature = "mysql")]
-    use crate::storage::schema::merchant_api_keys::dsl;
-    #[cfg(feature = "postgres")]
-    use crate::storage::schema_pg::merchant_api_keys::dsl;
+    use crate::storage::backend::schema::merchant_api_keys::dsl;
 
-    let results = crate::generics::generic_find_all::<
-        <MerchantApiKey as HasTable>::Table,
-        _,
-        MerchantApiKey,
-    >(&tenant_state.db, dsl::key_hash.eq(key_hash.clone()))
-    .await;
+    let results =
+        MerchantApiKey::find_all(&tenant_state.db, dsl::key_hash.eq(key_hash.clone())).await;
 
     let key_record = match results {
         Ok(mut rows) => rows.pop(),
@@ -171,7 +401,10 @@ pub async fn authenticate(
             };
 
             if !is_active {
-                return Ok((StatusCode::UNAUTHORIZED, "API key is revoked").into_response());
+                return Ok(crate::error::text_error_response(
+                    StatusCode::UNAUTHORIZED,
+                    "API key is revoked",
+                ));
             }
 
             // Populate Redis cache
@@ -184,6 +417,255 @@ pub async fn authenticate(
                 .insert(auth::AuthContext::from_api_key(record.merchant_id));
             Ok(next.run(req).await)
         }
-        None => Ok((StatusCode::UNAUTHORIZED, "Invalid API key").into_response()),
+        None => Ok(crate::error::text_error_response(
+            StatusCode::UNAUTHORIZED,
+            "Invalid API key",
+        )),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::middleware::from_fn;
+    use axum::routing::post;
+    use axum::Router;
+    use tower::ServiceExt;
+
+    const OWN: &str = "merchant_a";
+    const FOREIGN: &str = "merchant_b";
+
+    /// Stands in for `authenticate` on the api-key lane.
+    async fn session_for_own_merchant(mut req: Request<Body>, next: Next) -> Response<Body> {
+        req.extensions_mut()
+            .insert(auth::AuthContext::from_api_key(OWN));
+        next.run(req).await
+    }
+
+    fn app(with_session: bool) -> Router {
+        let router = Router::new()
+            .route(
+                "/merchant-account/:merchant_id/seed-costs",
+                post(|| async {}),
+            )
+            .route("/api-key/list/:merchant_id", post(|| async {}))
+            .route("/routing/list/:merchant_id", post(|| async {}))
+            .layer(from_fn(enforce_merchant_scope));
+        if with_session {
+            router.layer(from_fn(session_for_own_merchant))
+        } else {
+            router
+        }
+    }
+
+    async fn status(with_session: bool, uri: &str) -> StatusCode {
+        app(with_session)
+            .oneshot(Request::post(uri).body(Body::empty()).expect("request"))
+            .await
+            .expect("response")
+            .status()
+    }
+
+    #[tokio::test]
+    async fn every_merchant_path_param_must_match_the_session() {
+        for route in [
+            "/merchant-account/{}/seed-costs",
+            "/api-key/list/{}",
+            "/routing/list/{}",
+        ] {
+            let own = route.replace("{}", OWN);
+            let foreign = route.replace("{}", FOREIGN);
+            assert_eq!(status(true, &own).await, StatusCode::OK, "{own}");
+            assert_eq!(
+                status(true, &foreign).await,
+                StatusCode::FORBIDDEN,
+                "{foreign}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn service_credentials_are_not_scoped() {
+        let foreign = format!("/merchant-account/{FOREIGN}/seed-costs");
+        assert_eq!(status(false, &foreign).await, StatusCode::OK);
+    }
+
+    #[tokio::test]
+    async fn a_request_past_its_deadline_is_answered_with_504() {
+        async fn slow() -> &'static str {
+            tokio::time::sleep(std::time::Duration::from_secs(5)).await;
+            "late"
+        }
+        async fn short_deadline(req: Request<Body>, next: Next) -> Response<Body> {
+            deadline(std::time::Duration::from_millis(20), req, next).await
+        }
+        let app = Router::new()
+            .route("/slow", post(slow))
+            .route("/fast", post(|| async { "ok" }))
+            .layer(from_fn(short_deadline));
+        for (uri, expected) in [
+            ("/slow", StatusCode::GATEWAY_TIMEOUT),
+            ("/fast", StatusCode::OK),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(Request::post(uri).body(Body::empty()).expect("request"))
+                .await
+                .expect("response");
+            assert_eq!(response.status(), expected, "{uri}");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_panicking_handler_is_answered_with_500() {
+        async fn boom() -> &'static str {
+            panic!("boom")
+        }
+        let app = Router::new().route("/boom", post(boom)).layer(
+            tower_http::catch_panic::CatchPanicLayer::custom(panic_response),
+        );
+        let response = app
+            .oneshot(Request::post("/boom").body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+    }
+
+    #[test]
+    fn a_metered_route_is_named_after_its_handler() {
+        assert_eq!(
+            handler_name!(routes::api_key::create_api_key),
+            "create_api_key"
+        );
+        assert_eq!(handler_name!(overview), "overview");
+    }
+
+    #[tokio::test]
+    async fn a_metered_route_still_serves_its_handler() {
+        async fn made() -> (StatusCode, &'static str) {
+            (StatusCode::CREATED, "made")
+        }
+        let app = Router::new().route(
+            "/x",
+            metered!(post, made).merge(metered!(get, made, "explicit_name")),
+        );
+        for request in [Request::post("/x"), Request::get("/x")] {
+            let response = app
+                .clone()
+                .oneshot(request.body(Body::empty()).expect("request"))
+                .await
+                .expect("response");
+            assert_eq!(response.status(), StatusCode::CREATED);
+        }
+    }
+
+    #[test]
+    fn every_client_and_server_error_counts_as_a_failure() {
+        assert_eq!(outcome(StatusCode::OK), "success");
+        assert_eq!(outcome(StatusCode::NO_CONTENT), "success");
+        assert_eq!(outcome(StatusCode::FOUND), "success");
+        assert_eq!(outcome(StatusCode::BAD_REQUEST), "failure");
+        assert_eq!(outcome(StatusCode::FORBIDDEN), "failure");
+        assert_eq!(outcome(StatusCode::INTERNAL_SERVER_ERROR), "failure");
+    }
+
+    #[tokio::test]
+    async fn the_endpoint_layer_passes_the_response_through() {
+        let app = Router::new().route(
+            "/x",
+            post(|| async { (StatusCode::CREATED, "made") })
+                .route_layer(endpoint("endpoint_layer_test")),
+        );
+        let response = app
+            .oneshot(Request::post("/x").body(Body::empty()).expect("request"))
+            .await
+            .expect("response");
+        assert_eq!(response.status(), StatusCode::CREATED);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        assert_eq!(&body[..], b"made");
+    }
+}
+
+#[cfg(test)]
+mod response_header_tests {
+    use super::default_response_headers;
+    use axum::{
+        body::Body,
+        http::{Request, StatusCode},
+        middleware::{self, Next},
+        response::Response,
+        routing::get,
+        Json, Router,
+    };
+    use tower::ServiceExt;
+
+    #[tokio::test]
+    async fn version_covers_health_errors_rejections_and_fallbacks() {
+        async fn reject(_req: Request<Body>, _next: Next) -> Result<Response, StatusCode> {
+            Err(StatusCode::UNAUTHORIZED)
+        }
+
+        let protected = Router::new()
+            .route("/protected", get(|| async { "unreachable" }))
+            .route_layer(middleware::from_fn(reject));
+        let router = Router::new()
+            .merge(protected)
+            .nest(
+                "/health",
+                Router::new().route("/", get(crate::routes::health::health)),
+            )
+            .route(
+                "/error",
+                get(|| async { StatusCode::INTERNAL_SERVER_ERROR }),
+            )
+            .route(
+                "/json",
+                axum::routing::post(|Json(_): Json<serde_json::Value>| async { "ok" }),
+            )
+            .layer(middleware::from_fn(default_response_headers));
+
+        for (method, uri, status) in [
+            ("GET", "/health", StatusCode::OK),
+            ("GET", "/error", StatusCode::INTERNAL_SERVER_ERROR),
+            ("GET", "/protected", StatusCode::UNAUTHORIZED),
+            ("GET", "/missing", StatusCode::NOT_FOUND),
+            ("POST", "/health", StatusCode::METHOD_NOT_ALLOWED),
+            ("POST", "/json", StatusCode::BAD_REQUEST),
+        ] {
+            let response = router
+                .clone()
+                .oneshot(
+                    Request::builder()
+                        .method(method)
+                        .uri(uri)
+                        .header("content-type", "application/json")
+                        .header("x-de-version", "client-supplied")
+                        .body(Body::from("invalid json"))
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), status, "{method} {uri}");
+            assert_eq!(
+                response.headers()["x-de-version"],
+                env!("VERGEN_GIT_DESCRIBE"),
+                "{method} {uri}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn version_preserves_existing_response_value() {
+        let router = Router::new()
+            .route(
+                "/",
+                get(|| async { ([("x-de-version", "existing")], "ok") }),
+            )
+            .layer(middleware::from_fn(default_response_headers));
+        let response = router.oneshot(Request::new(Body::empty())).await.unwrap();
+        assert_eq!(response.headers()["x-de-version"], "existing");
+        assert_eq!(response.headers().get_all("x-de-version").iter().count(), 1);
     }
 }

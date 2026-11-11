@@ -1,3 +1,4 @@
+use crate::generics::Repository;
 use crate::utils::date_time;
 use serde::{Deserialize, Serialize};
 // use db::eulermeshimpl::{mesh_config, throw_missing_tenant_error, throw_tenant_mismatch_error, default_tenant_account_id};
@@ -17,10 +18,7 @@ use crate::types::merchant::id::{to_merchant_id, to_merchant_pid, MerchantId, Me
 // use eulerhs::extra::combinators::to_domain_all;
 // use eulerhs::language::{MonadFlow, log_error, throw_exception, get_option_local, TenantConfigObj, TenantConfig};
 // use eulerhs::prelude::{bool, from_maybe, when};
-#[cfg(feature = "mysql")]
-use crate::storage::schema::merchant_account::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::merchant_account::dsl;
+use crate::storage::backend::schema::merchant_account::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
 use std::cmp::PartialEq;
@@ -36,11 +34,12 @@ pub struct EnableTokenization {
     pub enable_issuer_tokenization: bool,
 }
 
-#[derive(Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize, crate::auth::MerchantScoped)]
 pub struct MerchantAccount {
     // #[serde(rename = "id")]
     pub id: MerchantPId,
     // #[serde(rename = "merchantId")]
+    #[merchant]
     pub merchantId: MerchantId,
     // #[serde(rename = "country")]
     pub country: Option<String>,
@@ -76,6 +75,10 @@ pub struct MerchantAccount {
     pub priorityLogicConfig: Option<String>,
     // #[serde(rename = "merchantCategoryCode")]
     pub merchantCategoryCode: Option<String>,
+    /// The merchant this account is a sub-merchant of. `None` for a merchant, which is every account
+    /// created before sub-merchants existed and every one synced from Hyperswitch.
+    #[serde(default)]
+    pub parentMerchantId: Option<String>,
 }
 
 impl Debug for MerchantAccount {
@@ -107,14 +110,19 @@ impl Debug for MerchantAccount {
             .field("tenantAccountId", &"[REDACTED]")
             .field("priorityLogicConfig", &self.priorityLogicConfig)
             .field("merchantCategoryCode", &self.merchantCategoryCode)
+            .field("parentMerchantId", &self.parentMerchantId)
             .finish()
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, crate::auth::MerchantScoped)]
 pub struct MerchantAccountCreateRequest {
+    #[merchant]
     pub merchant_id: String,
     pub gateway_success_rate_based_decider_input: Option<String>,
+    /// Creates the account as a sub-merchant of this merchant. Its members and API keys then reach it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_merchant_id: Option<String>,
 }
 
 impl TryFrom<MerchantAccountCreateRequest> for MerchantAccountNew {
@@ -130,6 +138,7 @@ impl TryFrom<MerchantAccountCreateRequest> for MerchantAccountNew {
                 .gateway_success_rate_based_decider_input,
             internal_metadata: None,
             enabled: BitBoolWrite(true),
+            parent_merchant_id: value.parent_merchant_id,
         })
     }
 }
@@ -188,6 +197,7 @@ impl TryFrom<DBMerchantAccount> for MerchantAccount {
             tenantAccountId: value.tenant_account_id,
             priorityLogicConfig: value.priority_logic_config,
             merchantCategoryCode: value.merchant_category_code,
+            parentMerchantId: value.parent_merchant_id,
         })
     }
 }
@@ -229,26 +239,47 @@ impl TryFrom<DBMerchantAccount> for MerchantAccount {
 //     unimplemented!()
 // }
 
+/// The account of a merchant the request is authorized for. `None` for one that was never created:
+/// a service caller may name any merchant.
+pub async fn load_authorized(
+    merchant: &crate::auth::AuthorizedMerchant,
+) -> Option<MerchantAccount> {
+    load_merchant_by_merchant_id(merchant.as_str().to_string()).await
+}
+
+fn cache_key(merchant_id: &str) -> String {
+    format!("merchant_acct_{merchant_id}")
+}
+
+/// Drop this process's cached copy of a merchant account.
+pub(crate) fn evict_cached(merchant_id: &str) {
+    let _ = GLOBAL_CACHE.remove(&cache_key(merchant_id));
+}
+
+/// Drop the cached account here and on every other pod.
+async fn invalidate_cached(merchant_id: &str) {
+    evict_cached(merchant_id);
+    crate::redis::invalidation::publish(crate::redis::invalidation::CacheKind::MerchantAccount(
+        merchant_id.to_string(),
+    ))
+    .await;
+}
+
 pub async fn load_merchant_by_merchant_id(merchant_id: String) -> Option<MerchantAccount> {
-    let cache_key = format!("merchant_acct_{}", merchant_id);
+    let cache_key = cache_key(&merchant_id);
 
     if let Ok(cached) = GLOBAL_CACHE.get::<MerchantAccount>(&cache_key) {
         return Some(cached);
     }
 
     let app_state = get_tenant_app_state().await;
-    let result = match crate::generics::generic_find_all::<
-        <DBMerchantAccount as HasTable>::Table,
-        _,
-        DBMerchantAccount,
-    >(&app_state.db, dsl::merchant_id.eq(merchant_id))
-    .await
-    {
-        Ok(mut db_results) => db_results
-            .pop()
-            .and_then(|db_merchant| MerchantAccount::try_from(db_merchant).ok()),
-        Err(_) => None,
-    };
+    let result =
+        match DBMerchantAccount::find_all(&app_state.db, dsl::merchant_id.eq(merchant_id)).await {
+            Ok(mut db_results) => db_results
+                .pop()
+                .and_then(|db_merchant| MerchantAccount::try_from(db_merchant).ok()),
+            Err(_) => None,
+        };
 
     if let Some(ref merchant) = result {
         let ttl = app_state.config.cache_config.service_config_ttl as u64;
@@ -264,7 +295,7 @@ pub async fn insert_merchant_account<T>(
 where
     MerchantAccountNew: TryFrom<T>,
 {
-    // Perform the query using Diesel's generic_find_all
+    // Perform the query using Diesel's find_all
     let app_state = get_tenant_app_state().await;
 
     let config =
@@ -288,7 +319,7 @@ pub async fn delete_merchant_account(
     )
     .await?;
 
-    let _ = GLOBAL_CACHE.remove(&format!("merchant_acct_{}", merchant_id));
+    invalidate_cached(&merchant_id).await;
     Ok(())
 }
 
@@ -299,12 +330,8 @@ pub async fn load_all_merchant_accounts() -> Result<Vec<MerchantAccount>, crate:
 {
     let app_state = get_tenant_app_state().await;
 
-    let db_results = crate::generics::generic_find_all::<
-        <DBMerchantAccount as HasTable>::Table,
-        _,
-        DBMerchantAccount,
-    >(&app_state.db, dsl::merchant_id.is_not_null())
-    .await?;
+    let db_results =
+        DBMerchantAccount::find_all(&app_state.db, dsl::merchant_id.is_not_null()).await?;
 
     Ok(db_results
         .into_iter()
@@ -321,13 +348,10 @@ pub async fn update_merchant_hierarchy(
     let app_state = get_tenant_app_state().await;
 
     // Read-modify-write so a sibling key written by another consumer survives the write.
-    let existing = crate::generics::generic_find_all::<
-        <DBMerchantAccount as HasTable>::Table,
-        _,
-        DBMerchantAccount,
-    >(&app_state.db, dsl::merchant_id.eq(merchant_id.clone()))
-    .await?
-    .pop();
+    let existing =
+        DBMerchantAccount::find_all(&app_state.db, dsl::merchant_id.eq(merchant_id.clone()))
+            .await?
+            .pop();
 
     let existing_metadata = existing.and_then(|account| account.internal_metadata);
 
@@ -348,7 +372,7 @@ pub async fn update_merchant_hierarchy(
     >(conn, dsl::merchant_id.eq(merchant_id.clone()), values)
     .await?;
 
-    let _ = GLOBAL_CACHE.remove(&format!("merchant_acct_{}", merchant_id));
+    invalidate_cached(&merchant_id).await;
     Ok(())
 }
 
@@ -367,6 +391,6 @@ pub async fn update_merchant_account(
         _,
     >(conn, dsl::merchant_id.eq(merchant_id.clone()), values)
     .await?;
-    let _ = GLOBAL_CACHE.remove(&format!("merchant_acct_{}", merchant_id));
+    invalidate_cached(&merchant_id).await;
     Ok(())
 }

@@ -4,6 +4,40 @@ use serde::{Deserialize, Serialize};
 use crate::euclid::types::StaticRoutingAlgorithm;
 use crate::types::routing_configuration::{AlgorithmType, ConfigVariant};
 
+// One event belongs to exactly one of these three families. The write path stamps the family
+// onto the row as its `summary_kind` (`derive_payment_audit_summary_kind`); the read path filters
+// and composes scopes out of the same sets (`clickhouse::common`). Both sides read them here so a
+// new flow type joins its family once.
+
+pub const SUMMARY_KIND_PREVIEW: &str = "preview";
+pub const SUMMARY_KIND_HYBRID: &str = "hybrid";
+pub const SUMMARY_KIND_DYNAMIC: &str = "dynamic";
+
+pub const PAYMENT_AUDIT_PREVIEW_FLOW_TYPES: &[FlowType] = &[
+    FlowType::RoutingEvaluateSingle,
+    FlowType::RoutingEvaluatePriority,
+    FlowType::RoutingEvaluateVolumeSplit,
+    FlowType::RoutingEvaluateAdvanced,
+    FlowType::RoutingEvaluatePreview,
+    FlowType::RoutingEvaluateError,
+];
+
+pub const PAYMENT_AUDIT_HYBRID_FLOW_TYPES: &[FlowType] = &[
+    FlowType::RoutingHybridDecision,
+    FlowType::RoutingHybridError,
+];
+
+pub const PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES: &[FlowType] = &[
+    FlowType::DecideGatewayDecision,
+    FlowType::UpdateGatewayScoreUpdate,
+    FlowType::UpdateGatewayScoreSkipped,
+    FlowType::UpdateScoreLegacyScoreSnapshot,
+    FlowType::DecideGatewayRuleHit,
+    FlowType::DecideGatewayError,
+    FlowType::UpdateGatewayScoreError,
+    FlowType::UpdateScoreLegacyError,
+];
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ApiFlow {
@@ -27,6 +61,7 @@ impl ApiFlow {
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum FlowType {
+    Decide,
     DecideGateway,
     UpdateGatewayScore,
     UpdateScoreLegacy,
@@ -79,6 +114,7 @@ pub enum FlowType {
     DecideGatewayError,
     UpdateGatewayScoreRequestHit,
     UpdateGatewayScoreUpdate,
+    UpdateGatewayScoreSkipped,
     UpdateGatewayScoreScoreSnapshot,
     UpdateGatewayScoreError,
     UpdateScoreLegacyScoreSnapshot,
@@ -86,6 +122,9 @@ pub enum FlowType {
     RoutingEvaluateRequestHit,
     RoutingEvaluatePreview,
     RoutingEvaluateError,
+    RoutingHybridRequestHit,
+    RoutingHybridDecision,
+    RoutingHybridError,
     RoutingCreateAbTest,
     RoutingEvaluateAbTest,
     RoutingCreateVolumeContract,
@@ -98,6 +137,7 @@ pub enum FlowType {
 impl FlowType {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Decide => "decide",
             Self::DecideGateway => "decide_gateway",
             Self::UpdateGatewayScore => "update_gateway_score",
             Self::UpdateScoreLegacy => "update_score_legacy",
@@ -150,6 +190,7 @@ impl FlowType {
             Self::DecideGatewayError => "decide_gateway_error",
             Self::UpdateGatewayScoreRequestHit => "update_gateway_score_request_hit",
             Self::UpdateGatewayScoreUpdate => "update_gateway_score_update",
+            Self::UpdateGatewayScoreSkipped => "update_gateway_score_skipped",
             Self::UpdateGatewayScoreScoreSnapshot => "update_gateway_score_score_snapshot",
             Self::UpdateGatewayScoreError => "update_gateway_score_error",
             Self::UpdateScoreLegacyScoreSnapshot => "update_score_legacy_score_snapshot",
@@ -157,6 +198,9 @@ impl FlowType {
             Self::RoutingEvaluateRequestHit => "routing_evaluate_request_hit",
             Self::RoutingEvaluatePreview => "routing_evaluate_preview",
             Self::RoutingEvaluateError => "routing_evaluate_error",
+            Self::RoutingHybridRequestHit => "routing_hybrid_request_hit",
+            Self::RoutingHybridDecision => "routing_hybrid_decision",
+            Self::RoutingHybridError => "routing_hybrid_error",
             Self::RoutingCreateAbTest => "routing_create_ab_test",
             Self::RoutingEvaluateAbTest => "routing_evaluate_ab_test",
             Self::RoutingCreateVolumeContract => "routing_create_volume_contract",
@@ -182,13 +226,15 @@ impl AnalyticsFlowContext {
     }
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "snake_case")]
 pub enum AnalyticsRoute {
+    Decide,
     DecideGateway,
     UpdateGatewayScore,
     UpdateScore,
     RoutingEvaluate,
+    RoutingHybrid,
     RoutingCreate,
     RuleConfigCreate,
     RuleConfigGet,
@@ -199,10 +245,12 @@ pub enum AnalyticsRoute {
 impl AnalyticsRoute {
     pub const fn as_str(self) -> &'static str {
         match self {
+            Self::Decide => "decide",
             Self::DecideGateway => "decide_gateway",
             Self::UpdateGatewayScore => "update_gateway_score",
             Self::UpdateScore => "update_score",
             Self::RoutingEvaluate => "routing_evaluate",
+            Self::RoutingHybrid => "routing_hybrid",
             Self::RoutingCreate => "routing_create",
             Self::RuleConfigCreate => "rule_config_create",
             Self::RuleConfigGet => "rule_config_get",
@@ -213,10 +261,12 @@ impl AnalyticsRoute {
 
     pub fn from_stored_value(value: &str) -> Option<Self> {
         match value {
+            "decide" => Some(Self::Decide),
             "decision_gateway" | "decide_gateway" => Some(Self::DecideGateway),
             "update_gateway_score" => Some(Self::UpdateGatewayScore),
             "update_score" => Some(Self::UpdateScore),
             "routing_evaluate" => Some(Self::RoutingEvaluate),
+            "routing_hybrid" => Some(Self::RoutingHybrid),
             "routing_create" => Some(Self::RoutingCreate),
             "rule_config_create" => Some(Self::RuleConfigCreate),
             "rule_config_get" => Some(Self::RuleConfigGet),
@@ -229,38 +279,44 @@ impl AnalyticsRoute {
     pub fn from_filter_value(value: &str) -> Option<Self> {
         let trimmed = value.trim();
         match trimmed {
-            "Decide Gateway" => Some(Self::DecideGateway),
-            "Update Gateway" => Some(Self::UpdateGatewayScore),
-            "Update Score" => Some(Self::UpdateScore),
-            "Rule Evaluate" => Some(Self::RoutingEvaluate),
-            "Routing Create" => Some(Self::RoutingCreate),
-            "Rule Config Create" => Some(Self::RuleConfigCreate),
-            "Rule Config Get" => Some(Self::RuleConfigGet),
-            "Rule Config Update" => Some(Self::RuleConfigUpdate),
-            "Rule Config Delete" => Some(Self::RuleConfigDelete),
+            "/decide" | "Decide" => Some(Self::Decide),
+            "/decide-gateway" | "Decide Gateway" => Some(Self::DecideGateway),
+            "/update-gateway-score" | "Update Gateway" => Some(Self::UpdateGatewayScore),
+            "/update-score" | "Update Score" => Some(Self::UpdateScore),
+            "/routing/evaluate" | "Rule Evaluate" => Some(Self::RoutingEvaluate),
+            "/routing/hybrid" | "Hybrid Routing" => Some(Self::RoutingHybrid),
+            "/routing/create" | "Routing Create" => Some(Self::RoutingCreate),
+            "/rule/create" | "Rule Config Create" => Some(Self::RuleConfigCreate),
+            "/rule/get" | "Rule Config Get" => Some(Self::RuleConfigGet),
+            "/rule/update" | "Rule Config Update" => Some(Self::RuleConfigUpdate),
+            "/rule/delete" | "Rule Config Delete" => Some(Self::RuleConfigDelete),
             _ => Self::from_stored_value(trimmed),
         }
     }
 
     pub const fn payment_audit_label(self) -> &'static str {
         match self {
-            Self::DecideGateway => "Decide Gateway",
-            Self::UpdateGatewayScore => "Update Gateway",
-            Self::UpdateScore => "Update Score",
-            Self::RoutingEvaluate => "Rule Evaluate",
-            Self::RoutingCreate => "Routing Create",
-            Self::RuleConfigCreate => "Rule Config Create",
-            Self::RuleConfigGet => "Rule Config Get",
-            Self::RuleConfigUpdate => "Rule Config Update",
-            Self::RuleConfigDelete => "Rule Config Delete",
+            Self::Decide => "/decide",
+            Self::DecideGateway => "/decide-gateway",
+            Self::UpdateGatewayScore => "/update-gateway-score",
+            Self::UpdateScore => "/update-score",
+            Self::RoutingEvaluate => "/routing/evaluate",
+            Self::RoutingHybrid => "/routing/hybrid",
+            Self::RoutingCreate => "/routing/create",
+            Self::RuleConfigCreate => "/rule/create",
+            Self::RuleConfigGet => "/rule/get",
+            Self::RuleConfigUpdate => "/rule/update",
+            Self::RuleConfigDelete => "/rule/delete",
         }
     }
 
     pub const fn overview_label(self) -> Option<&'static str> {
         match self {
+            Self::Decide => Some("/decide"),
             Self::DecideGateway => Some("/decide_gateway"),
             Self::UpdateGatewayScore => Some("/update_gateway"),
             Self::RoutingEvaluate => Some("/rule_evaluate"),
+            Self::RoutingHybrid => Some("/routing_hybrid"),
             _ => None,
         }
     }
@@ -271,6 +327,10 @@ pub fn classify_request(method: &Method, path: &str) -> Option<AnalyticsFlowCont
     let segments = split_path(normalized_path);
 
     match (method.as_str(), segments.as_slice()) {
+        ("POST", ["decide"]) => Some(AnalyticsFlowContext::new(
+            ApiFlow::DynamicRouting,
+            FlowType::Decide,
+        )),
         ("POST", ["decide-gateway"]) => Some(AnalyticsFlowContext::new(
             ApiFlow::DynamicRouting,
             FlowType::DecideGateway,
@@ -486,10 +546,47 @@ mod tests {
             Err(error) => panic!("flow type should serialize: {error}"),
         };
         assert_eq!(flow_type, "\"routing_evaluate_volume_split\"");
+        assert_eq!(
+            FlowType::RoutingHybridDecision.as_str(),
+            "routing_hybrid_decision"
+        );
+        assert_eq!(AnalyticsRoute::RoutingHybrid.as_str(), "routing_hybrid");
+        assert_eq!(
+            AnalyticsRoute::from_filter_value("Hybrid Routing"),
+            Some(AnalyticsRoute::RoutingHybrid)
+        );
+        assert_eq!(
+            AnalyticsRoute::from_filter_value("/routing/hybrid"),
+            Some(AnalyticsRoute::RoutingHybrid)
+        );
+        assert_eq!(
+            AnalyticsRoute::from_filter_value("/decide"),
+            Some(AnalyticsRoute::Decide)
+        );
+        assert_eq!(
+            AnalyticsRoute::from_filter_value("/decide-gateway"),
+            Some(AnalyticsRoute::DecideGateway)
+        );
     }
 
     #[test]
     fn classifies_dynamic_routing_routes() {
+        assert_eq!(
+            classify_request(&Method::POST, "/decide"),
+            Some(AnalyticsFlowContext::new(
+                ApiFlow::DynamicRouting,
+                FlowType::Decide
+            ))
+        );
+        assert_eq!(
+            AnalyticsRoute::from_filter_value("Decide"),
+            Some(AnalyticsRoute::Decide)
+        );
+        assert_eq!(
+            AnalyticsRoute::from_stored_value("decide"),
+            Some(AnalyticsRoute::Decide)
+        );
+        assert_eq!(classify_request(&Method::GET, "/decide"), None);
         assert_eq!(
             classify_request(&Method::POST, "/decide-gateway"),
             Some(AnalyticsFlowContext::new(

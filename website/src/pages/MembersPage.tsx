@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { UserPlus, Users, Copy, Check, Loader2, Eye, EyeOff } from 'lucide-react'
 import { apiErrorMessage, apiFetch } from '../lib/api'
+import { merchantLabel, useMerchantScope } from '../lib/merchantScope'
 import { ErrorMessage } from '../components/ui/ErrorMessage'
 
 import { PageHeading } from '../components/ui/PageHeading'
@@ -54,6 +55,10 @@ function CopyButton({ text }: { text: string }) {
 }
 
 export function MembersPage() {
+  // Members belong to the merchant and reach all of its sub-merchants; from a sub-merchant, this page shows
+  // its merchant's members and an invite lands there.
+  const { merchant, isSubMerchant, isAdmin } = useMerchantScope()
+  const merchantName = merchantLabel(merchant, 'this merchant')
   const [members, setMembers] = useState<MemberInfo[]>([])
   const [loadingMembers, setLoadingMembers] = useState(true)
   const [membersError, setMembersError] = useState<string | null>(null)
@@ -105,15 +110,26 @@ export function MembersPage() {
   return (
     <div className="mx-auto max-w-3xl space-y-8 px-4 py-8">
       <div>
-        <PageHeading title="Members" />
+        <PageHeading
+          title="Members"
+          description={
+            isSubMerchant
+              ? `Members of ${merchantName}. They have access to ${merchantName} and all of its sub-merchants, including this one.`
+              : `Members have access to ${merchantName} and all of its sub-merchants.`
+          }
+        />
       </div>
 
       {/* Invite form */}
+      {isAdmin && (
       <div className="rounded-2xl border border-slate-200 bg-white p-6 dark:border-[#1d2029] dark:bg-[#0c0e14]">
         <div className="flex items-center gap-2.5 mb-5">
           <UserPlus size={18} className="text-brand-600 dark:text-sky-400" />
           <h2 className="text-base font-semibold text-slate-900 dark:text-white">Invite member</h2>
         </div>
+        <p className="-mt-3 mb-4 text-sm text-slate-500 dark:text-[#8a8a93]">
+          They will get access to {merchantName} and all of its sub-merchants.
+        </p>
 
         <form onSubmit={handleInvite} className="space-y-4">
           <div className="flex gap-3">
@@ -128,7 +144,7 @@ export function MembersPage() {
             <select
               value={role}
               onChange={(e) => setRole(e.target.value)}
-              className="h-10 rounded-xl border border-slate-200 bg-white px-3 text-sm text-slate-700 outline-none transition focus:border-blue-500 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-slate-200"
+              className="h-10 rounded-xl border border-slate-200 bg-white pl-3 pr-8 text-sm text-slate-700 outline-none transition focus:border-blue-500 dark:border-[#2a2d35] dark:bg-[#1a1d25] dark:text-slate-200"
             >
               <option value="member">Member</option>
               <option value="admin">Admin</option>
@@ -178,12 +194,13 @@ export function MembersPage() {
               </>
             ) : (
               <p className="text-sm text-green-800 dark:text-green-300">
-                <span className="font-semibold">{inviteResult.email}</span> has been added to this merchant.
+                <span className="font-semibold">{inviteResult.email}</span> has been added to {merchantName}.
               </p>
             )}
           </div>
         )}
       </div>
+      )}
 
       {/* Members list */}
       <div className="rounded-2xl border border-slate-200 bg-white dark:border-[#1d2029] dark:bg-[#0c0e14]">

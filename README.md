@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="https://img.shields.io/badge/Rust-1.85%2B-orange?style=for-the-badge&logo=rust&logoColor=white" alt="Rust"/>
+<img src="https://img.shields.io/badge/Rust-1.88%2B-orange?style=for-the-badge&logo=rust&logoColor=white" alt="Rust"/>
 <img src="https://img.shields.io/badge/License-AGPL%20v3-blue?style=for-the-badge" alt="License"/>
 <img src="https://img.shields.io/badge/Docker-Ready-2496ED?style=for-the-badge&logo=docker&logoColor=white" alt="Docker"/>
 <img src="https://img.shields.io/github/v/release/juspay/decision-engine?include_prereleases&style=for-the-badge&label=Release&color=brightgreen" alt="Release"/>
@@ -72,8 +72,10 @@ API is ready at `http://localhost:8080`. That's it.
 For API + dashboard + docs together:
 
 ```bash
-docker compose --profile dashboard-postgres-ghcr up -d
+docker compose --profile dashboard-postgres-ghcr up -d --build
 ```
+
+Dashboard profiles build the frontend from source inside Docker. Rerun with `--build` after frontend changes; no host Node.js installation or prebuilt `website/dist` is required.
 
 Open:
 
@@ -112,7 +114,7 @@ secure cluster (e.g. CockroachDB Cloud), set `pg_sslmode` (and `pg_ssl_root_cert
 
 ### From Source
 
-Prerequisites: Rust 1.85+, MySQL or PostgreSQL, Redis, [`just`](https://just.systems)
+Prerequisites: Rust 1.88+, MySQL or PostgreSQL, Redis, [`just`](https://just.systems)
 
 ```bash
 git clone https://github.com/juspay/decision-engine.git
@@ -142,7 +144,7 @@ For the full local dev environment (API + dashboard on port 5173 + docs), run:
 ./oneclick.sh
 ```
 
-This brings up Postgres, Redis, ClickHouse, and Kafka via Docker Compose, runs migrations, and starts the API server and dashboard locally. See [Local Setup Guide](docs/local-setup.md) for full details and options like `ONECLICK_KEEP_INFRA=1`.
+This brings up Postgres, Redis, ClickHouse, Kafka, an OpenTelemetry collector and Prometheus via Docker Compose, runs migrations, and starts the API server and dashboard locally. The API pushes its metrics to the collector on `localhost:4317`; browse them at `http://localhost:9898/metrics` or in Prometheus at `http://localhost:9090`. See [Local Setup Guide](docs/local-setup.md) for full details and options like `ONECLICK_KEEP_INFRA=1`.
 
 ### Verify
 

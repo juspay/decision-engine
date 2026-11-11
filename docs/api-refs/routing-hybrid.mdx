@@ -5,6 +5,8 @@ description: "Curl example for /routing/hybrid."
 
 # Hybrid Routing Evaluation
 
+New integrations should use [POST /decide](/api-reference/endpoint/decide), which runs the same evaluation and carries every fact this response does in one ranked connector list and one section per routing layer.
+
 `/routing/hybrid` evaluates the active rule path (`static_routing_request`) together with runtime SR/decision context (`dynamic_routing_request`) in one call. At least one of the two must be provided.
 
 - `static_routing_request` uses the same shape as [`/routing/evaluate`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-evaluate.mdx) (`created_by` + `parameters`).
@@ -33,8 +35,8 @@ curl --location "$BASE_URL/routing/hybrid" \
         "amount": 1000,
         "currency": "USD",
         "paymentType": "ORDER_PAYMENT",
-        "paymentMethodType": "CARD",
-        "paymentMethod": "CREDIT",
+        "paymentMethod": "CARD",
+        "paymentMethodType": "CREDIT",
         "authType": "THREE_DS"
       }
     }
@@ -74,3 +76,24 @@ curl --location "$BASE_URL/routing/hybrid" \
   ]
 }
 ```
+
+
+## Customer preferred connector
+
+Hyperswitch stores preferred-connector history only on the customer record, keyed by
+payment method type and business profile. It sends the matching profile's preference
+in `paymentInfo.preferredConnectors` as an ordered array of `connector:mca_id` strings.
+Decision Engine consumes the first entry; it does not store or look up customer or
+payment-method records.
+
+```json
+{"paymentInfo": {"preferredConnectors": ["loonio:mca_123"]}}
+```
+
+A functional preference skips success-rate reordering, but outage and elimination
+checks remain active. Responses use `PREFERRED_CONNECTOR_ROUTING` or its
+`PREFERRED_CONNECTOR_*_DOWNTIME_ROUTING` variants. Stale or ineligible preferences
+fall through to normal routing.
+
+Feedback recognizes `PREFERRED_CONNECTOR_*` labels so preferred-routing outcomes
+continue updating scores.

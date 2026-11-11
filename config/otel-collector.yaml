@@ -1,0 +1,20 @@
+# Local otel-collector for the `monitoring` profile: OTLP in on :4317, Prometheus format out on :9898, as in the Hyperswitch clusters.
+receivers:
+  otlp:
+    protocols:
+      grpc:
+        endpoint: 0.0.0.0:4317
+
+processors:
+  batch: {}
+
+exporters:
+  prometheus:
+    endpoint: 0.0.0.0:9898
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [prometheus]

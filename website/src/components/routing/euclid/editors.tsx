@@ -20,7 +20,6 @@ import { Plus, Trash2, GripVertical, CornerDownRight, ChevronDown, ChevronUp, Pe
 import { Button } from '../../ui/Button'
 import { FieldError } from '../../ui/FieldError'
 import { SearchableSelect } from '../../ui/SearchableSelect'
-import { SearchableMultiSelect } from '../../ui/SearchableMultiSelect'
 import { GatewaySelect } from '../../ui/GatewaySelect'
 import { gatewayOptions, type GatewayOption } from '../../../lib/connectors'
 import { RoutingKeyConfig } from '../../../hooks/useDynamicRoutingConfig'
@@ -102,14 +101,14 @@ export function SortableGatewayItem({
         <input
           value={draftId}
           onChange={(e) => setDraftId(e.target.value)}
-          placeholder="Gateway ID (optional)"
+          placeholder="Connector ID (optional)"
           className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226]"
         />
         <button
           type="button"
           onClick={commit}
           disabled={!draftName.trim()}
-          aria-label="Save gateway"
+          aria-label="Save connector"
           className="text-emerald-700 transition-colors hover:text-emerald-700 disabled:cursor-not-allowed disabled:opacity-40"
         >
           <Check size={14} />
@@ -241,7 +240,7 @@ export function PriorityEditor({
           value={newGatewayId}
           onChange={(e) => setNewGatewayId(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
-          placeholder="Gateway ID (optional)"
+          placeholder="Connector ID (optional)"
           className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226]"
         />
         <Button type="button" size="sm" variant="secondary" onClick={add}>
@@ -332,7 +331,7 @@ export function VolumeSplitEditor({
           value={newId}
           onChange={(e) => setNewId(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), add())}
-          placeholder="Gateway ID (optional)"
+          placeholder="Connector ID (optional)"
           className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226]"
         />
         <Button type="button" size="sm" variant="secondary" onClick={add}>
@@ -404,7 +403,7 @@ function VolumeSplitRow({
         <input
           value={draftId}
           onChange={(e) => setDraftId(e.target.value)}
-          placeholder="Gateway ID (optional)"
+          placeholder="Connector ID (optional)"
           className="flex-1 rounded-lg border border-slate-200 bg-transparent px-3 py-2 text-sm focus:outline-none focus:border-brand-500 dark:border-[#222226]"
         />
         <button
@@ -599,7 +598,8 @@ export function ConditionRowEditor({
       <div className="flex items-center gap-2">
         {isEnum && isMulti ? (
           <div data-cy="cond-val" className="w-[14rem]">
-            <SearchableMultiSelect
+            <SearchableSelect
+              multiple
               values={selectedValues}
               onChange={(vals) => onChange({ ...row, value: vals })}
               options={(keyInfo?.values || []).map((v: string) => ({ value: v, label: toLabel(v) }))}
@@ -813,6 +813,16 @@ export function RuleBlockEditor({
 }) {
   const [collapsed, setCollapsed] = useState(false)
 
+  // Only the grip carries the drag listeners. The header's own click toggles the block and the
+  // name field is a text input, so a drag starting anywhere else would fight one of the two.
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: block.id })
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    // A dragged block floats over its neighbours, so it needs to win the stacking order.
+    zIndex: isDragging ? 10 : undefined,
+  }
+
   // A message inside a collapsed block would be invisible, so an errored block opens itself.
   useEffect(() => {
     if (error) setCollapsed(false)
@@ -823,15 +833,32 @@ export function RuleBlockEditor({
   }
 
   return (
-    <div className={`overflow-hidden rounded-xl border ${
-      error ? 'border-red-300 dark:border-red-500/50' : 'border-slate-200 dark:border-[#1c1c24]'
-    }`}>
+    <div
+      ref={setNodeRef}
+      style={style}
+      className={`relative overflow-hidden rounded-xl border ${
+        error ? 'border-red-300 dark:border-red-500/50' : 'border-slate-200 dark:border-[#1c1c24]'
+      } ${
+        // The block is transparent at rest so it sits on the card; while it floats it needs an
+        // opaque ground of its own, or the rules underneath show through it.
+        isDragging ? 'bg-white shadow-lg dark:bg-[#11151d]' : ''
+      }`}
+    >
       {/* Header — clicking anywhere on it collapses the block, except the name field and the
           action buttons, which stop the click from reaching it. */}
       <div
         onClick={() => setCollapsed(!collapsed)}
         className="flex cursor-pointer items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-5 py-3 dark:border-[#1c1c24] dark:bg-[#111118]"
       >
+        <span
+          {...attributes}
+          {...listeners}
+          onClick={(e) => e.stopPropagation()}
+          aria-label={`Reorder ${block.name || 'rule'}`}
+          className="-ml-1 shrink-0 cursor-grab touch-none text-slate-500 focus:outline-none focus-visible:text-brand-600 dark:focus-visible:text-brand-400"
+        >
+          <GripVertical size={15} />
+        </span>
         <div className="flex min-w-0 flex-1 items-baseline gap-2">
           <input
             value={block.name}

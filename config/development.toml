@@ -3,13 +3,17 @@ enabled = true
 level = "DEBUG"
 log_format = "default"
 
+[log.telemetry]
+metrics_enabled = false # push metrics to the OpenTelemetry collector over OTLP/gRPC; oneclick.sh and the compose monitoring profile turn this on
+ignore_errors = true    # log and continue if the OTLP exporter cannot be built
+otel_exporter_otlp_endpoint = "http://localhost:4317" # OTLP/gRPC address of the OpenTelemetry collector
+otel_exporter_otlp_timeout = 10000 # milliseconds per export request (exporter default)
+
 [server]
 host = "127.0.0.1"
 port = 8080
-
-[metrics]
-host = "127.0.0.1"
-port = 9094
+shutdown_drain_delay = 5 # seconds serving with readiness down after SIGTERM/SIGINT
+shutdown_timeout = 20    # seconds in-flight requests get to finish once the listener closes
 
 [limit]
 request_count = 1
@@ -86,6 +90,7 @@ max_capacity = 5000
 [cache_config]
 service_config_redis_prefix = "DE_service_config_"
 service_config_ttl = 300    # 5 minutes
+invalidation_channel = "decision_engine_invalidate" # Redis pub/sub channel for cross-pod cache invalidation
 
 [compression_filepath]
 zstd_compression_filepath = "/tmp/extra-paths/redis-zstd-dictionaries/sbx"
@@ -114,6 +119,12 @@ report_poll_interval_secs = 30
 aws_bucket = ""
 aws_region = ""
 
+[cost_ingestion.connector]
+checkout_production_api_base_url = "https://api.checkout.com"
+checkout_sandbox_api_base_url = "https://api.sandbox.checkout.com"
+chase_token_url = "https://idag2.jpmorganchase.com/adfs/oauth2/token"
+chase_reports_url = "https://api.reports.jpmorgan.com/api/v1/reports"
+
 [cost_ingestion.creds_encryption_keys]
 # key-id = AES-256 key (hex, 64 chars). Dev-only placeholder; per environment generate with
 # `openssl rand -hex 32`. On rotation add e.g. `v2 = "..."` and set current = "v2" above.
@@ -122,12 +133,125 @@ v1 = "0000000000000000000000000000000000000000000000000000000000000000"
 [volume_commitment]
 # Expose the scheduler on its own port in this process. Prod: only the deployment that owns it.
 enabled = true
-# How often a merchant's plan is rebuilt — the only scheduled job. prod default: 3600 (1 h)
+# How long the scheduler sleeps when no merchant has a contract at all. A merchant's own cadence
+# is not this: it is derived from the contract's day, so every contract is forecast the same
+# number of times per contract day (24) whether that day lasts a minute or twenty-four hours.
 default_forecast_interval_secs = 60
 # Where the scheduler calls when a forecast comes due. Normally this same process's [server].
 main_server_url = "http://127.0.0.1:8080"
-# How often the scheduler wakes. Keep well under the shortest cadence above.
-tick_secs = 10
+# How often the scheduler wakes. Must be no coarser than the shortest cadence it has to fire — a
+# due job cannot fire sooner than the next tick, so a coarser tick silently becomes the cadence.
+# A contract day of 48s or less derives the 2-second floor, so 2 is as slow as this can be.
+#
+# Not lower, either: every tick reads each active contract back from Postgres to work out what is
+# due, so at DEBUG a one-second tick fills the console with the same five queries a second whether
+# or not anything is happening.
+tick_secs = 2
+# May a contract declare a `test_minutes` billing cycle, whose "day" lasts seconds? A demo
+# device, meaningless against real billing. Defaults off, so production needs no key at all.
+allow_test_cycles = true
+# How long one of those contract "days" lasts. This is the demo's speed dial: a cycle is `anchor`
+# of these, so 30 runs the ten-day templates below in five minutes and paces them at a contract
+# day every half minute. The forecast cadence follows it — 24 forecasts a contract day, as on a
+# calendar contract — down to a floor of one every 2s, which a day of 48s reaches. Below that the
+# demo still runs, with fewer forecasts per day than production would have. Held to 1..=3600.
+test_day_secs = 10
+
+# ── Demo contract templates ───────────────────────────────────────────────────────────────────
+[[volume_commitment.samples]]
+id = "saved_by_steering"
+title = "Would have missed — now makes it"
+summary = "A commitment just out of reach of unaided routing, which steering closes."
+expected_outcome = """
+Watch adyen. Approval-rate routing sends most payments to whichever PSP is scoring better — on \
+the default sliders that is stripe — so adyen arrives well short of a $1.3M promise on its own. \
+It flips to "Steering" and takes the difference from stripe, whose own $100k promise is met in \
+the first contract day and which has no claim on the rest. The shaded wedge under adyen's line is \
+the volume the engine added; the commitment lands by the cycle close."""
+
+[volume_commitment.samples.contract]
+routing_mode = "pace_guarded"
+tolerance_bps = 500
+# $200,000 a contract day: what the simulator sustains at its ordinary rate — around 20 payments a
+# second over a ten-second contract day. Held a little under the ~24/s measured, so a slower
+# machine still leaves the targets below reachable; a faster one simply meets them earlier.
+#
+# This figure also sets the simulator's ticket, which it derives back out of it: $200,000 over the
+# 200 payments a contract day carries is $1,000 a payment. Change the rate and the tickets follow,
+# so the targets below keep meaning what they say.
+#
+# The rate holds now. It used to decay eightfold inside a single cycle, because the simulator page
+# recomputed every tile from the whole result array and kept a table row per payment in the DOM,
+# on the thread the run dispatches from — which made every target here a guess about how far into
+# a run it would be judged. Client time per payment is flat at ~15-30ms against a backend
+# answering in ~20ms, so these figures mean the same thing on day 9 as on day 0.
+expected_daily_traffic = 20000000
+currency = { denomination = "USD" }
+
+# $1.3M — 65% of the $2.0M the cycle carries, and far more than routing gives adyen
+# unaided (a fifth of the flow on the default sliders), so only steering gets it there. Under the
+# cycle total, so steering can.
+#
+# The 1.5% rebate is what pays for the steering: reward over volume still owed is the approval
+# rate a commitment can afford to give up, and 1.5% comfortably covers the ~1pp gap between the
+# two PSPs' scores. A thinner rebate would be gated by tolerance and the scenario would stall.
+[[volume_commitment.samples.contract.volume_contracts]]
+id = "saved-by-steering"
+connector = "adyen"
+billing_cycle = { type = "test_minutes", anchor = 10, timezone = "UTC" }
+archetype = "lumpsum"
+terms = { target = 130000000, reward = { kind = "percentage", value = { rebate_bps = 150 } } }
+
+# The traffic adyen is steered from. $100k is met within the first contract day, so this
+# commitment is never itself behind and never competes for the steering budget.
+[[volume_commitment.samples.contract.volume_contracts]]
+id = "saved-by-steering-source"
+connector = "stripe"
+billing_cycle = { type = "test_minutes", anchor = 10, timezone = "UTC" }
+archetype = "lumpsum"
+terms = { target = 10000000, reward = { kind = "percentage", value = { rebate_bps = 150 } } }
+
+[[volume_commitment.samples]]
+id = "reward_ranked"
+title = "Two commitments, one traffic budget"
+summary = "Two promises that cannot both be met, paying very different rewards."
+expected_outcome = """
+Together these ask for more traffic than the cycle has. The engine keeps the one worth more — the \
+2% commitment — and drops the 0.25% one, rather than steering both into missing."""
+
+[volume_commitment.samples.contract]
+routing_mode = "pace_guarded"
+tolerance_bps = 500
+# $200,000 a contract day: what the simulator sustains at its ordinary rate — around 20 payments a
+# second over a ten-second contract day. Held a little under the ~24/s measured, so a slower
+# machine still leaves the targets below reachable; a faster one simply meets them earlier.
+#
+# This figure also sets the simulator's ticket, which it derives back out of it: $200,000 over the
+# 200 payments a contract day carries is $1,000 a payment. Change the rate and the tickets follow,
+# so the targets below keep meaning what they say.
+#
+# The rate holds now. It used to decay eightfold inside a single cycle, because the simulator page
+# recomputed every tile from the whole result array and kept a table row per payment in the DOM,
+# on the thread the run dispatches from — which made every target here a guess about how far into
+# a run it would be judged. Client time per payment is flat at ~15-30ms against a backend
+# answering in ~20ms, so these figures mean the same thing on day 9 as on day 0.
+expected_daily_traffic = 20000000
+currency = { denomination = "USD" }
+
+# $1.4M each against $2.0M of traffic: together 1.4x what exists, so one has to give.
+[[volume_commitment.samples.contract.volume_contracts]]
+id = "contested-rich"
+connector = "adyen"
+billing_cycle = { type = "test_minutes", anchor = 10, timezone = "UTC" }
+archetype = "lumpsum"
+terms = { target = 140000000, reward = { kind = "percentage", value = { rebate_bps = 200 } } }
+
+[[volume_commitment.samples.contract.volume_contracts]]
+id = "contested-cheap"
+connector = "stripe"
+billing_cycle = { type = "test_minutes", anchor = 10, timezone = "UTC" }
+archetype = "lumpsum"
+terms = { target = 140000000, reward = { kind = "percentage", value = { rebate_bps = 25 } } }
 
 # The scheduler's own listener. GET /schedule shows the timing; GET /health is a liveness probe.
 [volume_commitment.server]
@@ -315,25 +439,20 @@ tiers = [
 public = { schema = "public" }
 
 [routing_config.keys]
+# payment_method, payment_method_type and one key per payment method (card, wallet, upi...) are
+# generated from the code's payment method vocabulary (src/types/payment_instrument.rs).
 amount = { type = "integer", min = 0 }
 authentication_type = { type = "enum", values = "three_ds, no_three_ds" }
-bank_debit = { type = "enum", values = "ach, sepa, sepa_guarenteed_debit, eft_debit_order, bacs, becs" }
-bank_redirect = { type = "enum", values = "giropay, ideal, sofort, eft, eps, bancontact_card, blik, local_bank_redirect, online_banking_thailand, online_banking_czech_republic, online_banking_finland, online_banking_fpx, online_banking_poland, online_banking_slovakia, przelewy24, trustly, bizum, interac, open_banking_uk, open_banking_pis, open_banking" }
-bank_transfer = { type = "enum", values = "ach, sepa, sepa_bank_transfer, bacs, multibanco, pix, pse, permata_bank_transfer, bca_bank_transfer, bni_va, bri_va, cimb_va, danamon_va, mandiri_va, local_bank_transfer, instant_bank_transfer, pix_key, pix_emv, pix_qr, pix_automatico_push, pix_automatico_qr, payshap, payshap_proxy, instant_bank_transfer_finland, instant_bank_transfer_poland, indonesian_bank_transfer" }
 billing_country = { type = "enum", values = "Afghanistan, AlandIslands, Albania, Algeria, AmericanSamoa, Andorra, Angola, Anguilla, Antarctica, AntiguaAndBarbuda, Argentina, Armenia, Aruba, Australia, Austria, Azerbaijan, Bahamas, Bahrain, Bangladesh, Barbados, Belarus, Belgium, Belize, Benin, Bermuda, Bhutan, BoliviaPlurinationalState, BonaireSintEustatiusAndSaba, BosniaAndHerzegovina, Botswana, BouvetIsland, Brazil, BritishIndianOceanTerritory, BruneiDarussalam, Bulgaria, BurkinaFaso, Burundi, CaboVerde, Cambodia, Cameroon, Canada, CaymanIslands, CentralAfricanRepublic, Chad, Chile, China, ChristmasIsland, CocosKeelingIslands, Colombia, Comoros, Congo, CongoDemocraticRepublic, CookIslands, CostaRica, CotedIvoire, Croatia, Cuba, Curacao, Cyprus, Czechia, Denmark, Djibouti, Dominica, DominicanRepublic, Ecuador, Egypt, ElSalvador, EquatorialGuinea, Eritrea, Estonia, Ethiopia, FalklandIslandsMalvinas, FaroeIslands, Fiji, Finland, France, FrenchGuiana, FrenchPolynesia, FrenchSouthernTerritories, Gabon, Gambia, Georgia, Germany, Ghana, Gibraltar, Greece, Greenland, Grenada, Guadeloupe, Guam, Guatemala, Guernsey, Guinea, GuineaBissau, Guyana, Haiti, HeardIslandAndMcDonaldIslands, HolySee, Honduras, HongKong, Hungary, Iceland, India, Indonesia, IranIslamicRepublic, Iraq, Ireland, IsleOfMan, Israel, Italy, Jamaica, Japan, Jersey, Jordan, Kazakhstan, Kenya, Kiribati, KoreaDemocraticPeoplesRepublic, KoreaRepublic, Kuwait, Kyrgyzstan, LaoPeoplesDemocraticRepublic, Latvia, Lebanon, Lesotho, Liberia, Libya, Liechtenstein, Lithuania, Luxembourg, Macao, MacedoniaTheFormerYugoslavRepublic, Madagascar, Malawi, Malaysia, Maldives, Mali, Malta, MarshallIslands, Martinique, Mauritania, Mauritius, Mayotte, Mexico, MicronesiaFederatedStates, MoldovaRepublic, Monaco, Mongolia, Montenegro, Montserrat, Morocco, Mozambique, Myanmar, Namibia, Nauru, Nepal, Netherlands, NewCaledonia, NewZealand, Nicaragua, Niger, Nigeria, Niue, NorfolkIsland, NorthernMarianaIslands, Norway, Oman, Pakistan, Palau, PalestineState, Panama, PapuaNewGuinea, Paraguay, Peru, Philippines, Pitcairn, Poland, Portugal, PuertoRico, Qatar, Reunion, Romania, RussianFederation, Rwanda, SaintBarthelemy, SaintHelenaAscensionAndTristandaCunha, SaintKittsAndNevis, SaintLucia, SaintMartinFrenchpart, SaintPierreAndMiquelon, SaintVincentAndTheGrenadines, Samoa, SanMarino, SaoTomeAndPrincipe, SaudiArabia, Senegal, Serbia, Seychelles, SierraLeone, Singapore, SintMaartenDutchpart, Slovakia, Slovenia, SolomonIslands, Somalia, SouthAfrica, SouthGeorgiaAndTheSouthSandwichIslands, SouthSudan, Spain, SriLanka, Sudan, Suriname, SvalbardAndJanMayen, Swaziland, Sweden, Switzerland, SyrianArabRepublic, TaiwanProvinceOfChina, Tajikistan, TanzaniaUnitedRepublic, Thailand, TimorLeste, Togo, Tokelau, Tonga, TrinidadAndTobago, Tunisia, Turkey, Turkmenistan, TurksAndCaicosIslands, Tuvalu, Uganda, Ukraine, UnitedArabEmirates, UnitedKingdomOfGreatBritainAndNorthernIreland, UnitedStatesOfAmerica, UnitedStatesMinorOutlyingIslands, Uruguay, Uzbekistan, Vanuatu, VenezuelaBolivarianRepublic, Vietnam, VirginIslandsBritish, VirginIslandsUS, WallisAndFutuna, WesternSahara, Yemen, Zambia, Zimbabwe" }
 business_country = { type = "enum", values = "Afghanistan, AlandIslands, Albania, Algeria, AmericanSamoa, Andorra, Angola, Anguilla, Antarctica, AntiguaAndBarbuda, Argentina, Armenia, Aruba, Australia, Austria, Azerbaijan, Bahamas, Bahrain, Bangladesh, Barbados, Belarus, Belgium, Belize, Benin, Bermuda, Bhutan, BoliviaPlurinationalState, BonaireSintEustatiusAndSaba, BosniaAndHerzegovina, Botswana, BouvetIsland, Brazil, BritishIndianOceanTerritory, BruneiDarussalam, Bulgaria, BurkinaFaso, Burundi, CaboVerde, Cambodia, Cameroon, Canada, CaymanIslands, CentralAfricanRepublic, Chad, Chile, China, ChristmasIsland, CocosKeelingIslands, Colombia, Comoros, Congo, CongoDemocraticRepublic, CookIslands, CostaRica, CotedIvoire, Croatia, Cuba, Curacao, Cyprus, Czechia, Denmark, Djibouti, Dominica, DominicanRepublic, Ecuador, Egypt, ElSalvador, EquatorialGuinea, Eritrea, Estonia, Ethiopia, FalklandIslandsMalvinas, FaroeIslands, Fiji, Finland, France, FrenchGuiana, FrenchPolynesia, FrenchSouthernTerritories, Gabon, Gambia, Georgia, Germany, Ghana, Gibraltar, Greece, Greenland, Grenada, Guadeloupe, Guam, Guatemala, Guernsey, Guinea, GuineaBissau, Guyana, Haiti, HeardIslandAndMcDonaldIslands, HolySee, Honduras, HongKong, Hungary, Iceland, India, Indonesia, IranIslamicRepublic, Iraq, Ireland, IsleOfMan, Israel, Italy, Jamaica, Japan, Jersey, Jordan, Kazakhstan, Kenya, Kiribati, KoreaDemocraticPeoplesRepublic, KoreaRepublic, Kuwait, Kyrgyzstan, LaoPeoplesDemocraticRepublic, Latvia, Lebanon, Lesotho, Liberia, Libya, Liechtenstein, Lithuania, Luxembourg, Macao, MacedoniaTheFormerYugoslavRepublic, Madagascar, Malawi, Malaysia, Maldives, Mali, Malta, MarshallIslands, Martinique, Mauritania, Mauritius, Mayotte, Mexico, MicronesiaFederatedStates, MoldovaRepublic, Monaco, Mongolia, Montenegro, Montserrat, Morocco, Mozambique, Myanmar, Namibia, Nauru, Nepal, Netherlands, NewCaledonia, NewZealand, Nicaragua, Niger, Nigeria, Niue, NorfolkIsland, NorthernMarianaIslands, Norway, Oman, Pakistan, Palau, PalestineState, Panama, PapuaNewGuinea, Paraguay, Peru, Philippines, Pitcairn, Poland, Portugal, PuertoRico, Qatar, Reunion, Romania, RussianFederation, Rwanda, SaintBarthelemy, SaintHelenaAscensionAndTristandaCunha, SaintKittsAndNevis, SaintLucia, SaintMartinFrenchpart, SaintPierreAndMiquelon, SaintVincentAndTheGrenadines, Samoa, SanMarino, SaoTomeAndPrincipe, SaudiArabia, Senegal, Serbia, Seychelles, SierraLeone, Singapore, SintMaartenDutchpart, Slovakia, Slovenia, SolomonIslands, Somalia, SouthAfrica, SouthGeorgiaAndTheSouthSandwichIslands, SouthSudan, Spain, SriLanka, Sudan, Suriname, SvalbardAndJanMayen, Swaziland, Sweden, Switzerland, SyrianArabRepublic, TaiwanProvinceOfChina, Tajikistan, TanzaniaUnitedRepublic, Thailand, TimorLeste, Togo, Tokelau, Tonga, TrinidadAndTobago, Tunisia, Turkey, Turkmenistan, TurksAndCaicosIslands, Tuvalu, Uganda, Ukraine, UnitedArabEmirates, UnitedKingdomOfGreatBritainAndNorthernIreland, UnitedStatesOfAmerica, UnitedStatesMinorOutlyingIslands, Uruguay, Uzbekistan, Vanuatu, VenezuelaBolivarianRepublic, Vietnam, VirginIslandsBritish, VirginIslandsUS, WallisAndFutuna, WesternSahara, Yemen, Zambia, Zimbabwe" }
 business_label = { type = "str_value" }
 capture_method = { type = "enum", values = "automatic, manual, manual_multiple, scheduled, sequential_automatic" }
-card = { type = "enum", values = "debit, credit, card" }
 card_bin = { type = "str_value", exact_length = 6, regex = "^[0-9]{6}$" }
 card_discovery = { type = "enum", values = "manual, saved_card, click_to_pay" }
 card_network = { type = "enum", values = "visa, VISA, Visa, visaCard, mastercard, MASTERCARD, MasterCard, masterCard, mastercardCard, master_card, Master_card, Master_Card, Master Card, Mastercard, american_express, AMERICANEXPRESS, AmericanExpress, americanExpress, americanExpressCard, amex, AMEX, Amex, jcb, JCB, Jcb, diners_club, DINERSCLUB, DinersClub, dinersClub, dinersClubCard, discover, DISCOVER, Discover, discoverCard, cartes_bancaires, CARTESBANCAIRES, CartesBancaires, cartesBancaires, union_pay, UNIONPAY, UnionPay, unionPay, interac, INTERAC, Interac, rupay, RUPAY, RuPay, ruPay, maestro, MAESTRO, Maestro, star, STAR, Star, pulse, PULSE, Pulse, accel, ACCEL, Accel, nyce, NYCE, Nyce, prop, PROP, Prop, private_label, PRIVATE LABEL, PrivateLabel, dinacard, DINACARD, Dinacard" }
-card_redirect = { type = "enum", values = "knet, benefit, momo_atm, card_redirect" }
 card_type = { type = "enum", values = "debit, credit, card" }
-crypto = { type = "enum", values = "crypto_currency" }
 currency = { type = "enum", values = "AED, AFN, ALL, AMD, ANG, AOA, ARS, AUD, AWG, AZN, BAM, BBD, BDT, BGN, BHD, BIF, BMD, BND, BOB, BRL, BSD, BTN, BWP, BYN, BZD, CAD, CDF, CHF, CLF, CLP, CNY, COP, CRC, CUC, CUP, CVE, CZK, DJF, DKK, DOP, DZD, EGP, ERN, ETB, EUR, FJD, FKP, GBP, GEL, GHS, GIP, GMD, GNF, GTQ, GYD, HKD, HNL, HRK, HTG, HUF, IDR, ILS, INR, IQD, IRR, ISK, JMD, JOD, JPY, KES, KGS, KHR, KMF, KPW, KRW, KWD, KYD, KZT, LAK, LBP, LKR, LRD, LSL, LYD, MAD, MDL, MGA, MKD, MMK, MNT, MOP, MRU, MUR, MVR, MWK, MXN, MYR, MZN, NAD, NGN, NIO, NOK, NPR, NZD, OMR, PAB, PEN, PGK, PHP, PKR, PLN, PYG, QAR, RON, RSD, RUB, RWF, SAR, SBD, SCR, SDG, SEK, SGD, SHP, SLE, SLL, SOS, SRD, SSP, STD, STN, SVC, SYP, SZL, THB, TJS, TMT, TND, TOP, TRY, TTD, TWD, TZS, UAH, UGX, USD, UYU, UZS, VES, VND, VUV, WST, XAF, XCD, XOF, XPF, YER, ZAR, ZMW, ZWL" }
 extended_card_bin = { type = "str_value", exact_length = 8, regex = "^[0-9]{8}$" }
-gift_card = { type = "enum", values = "givex, pay_safe_card, bhn_card_network" }
 issuer_country = { type = "enum", values = "Afghanistan, AlandIslands, Albania, Algeria, AmericanSamoa, Andorra, Angola, Anguilla, Antarctica, AntiguaAndBarbuda, Argentina, Armenia, Aruba, Australia, Austria, Azerbaijan, Bahamas, Bahrain, Bangladesh, Barbados, Belarus, Belgium, Belize, Benin, Bermuda, Bhutan, BoliviaPlurinationalState, BonaireSintEustatiusAndSaba, BosniaAndHerzegovina, Botswana, BouvetIsland, Brazil, BritishIndianOceanTerritory, BruneiDarussalam, Bulgaria, BurkinaFaso, Burundi, CaboVerde, Cambodia, Cameroon, Canada, CaymanIslands, CentralAfricanRepublic, Chad, Chile, China, ChristmasIsland, CocosKeelingIslands, Colombia, Comoros, Congo, CongoDemocraticRepublic, CookIslands, CostaRica, CotedIvoire, Croatia, Cuba, Curacao, Cyprus, Czechia, Denmark, Djibouti, Dominica, DominicanRepublic, Ecuador, Egypt, ElSalvador, EquatorialGuinea, Eritrea, Estonia, Ethiopia, FalklandIslandsMalvinas, FaroeIslands, Fiji, Finland, France, FrenchGuiana, FrenchPolynesia, FrenchSouthernTerritories, Gabon, Gambia, Georgia, Germany, Ghana, Gibraltar, Greece, Greenland, Grenada, Guadeloupe, Guam, Guatemala, Guernsey, Guinea, GuineaBissau, Guyana, Haiti, HeardIslandAndMcDonaldIslands, HolySee, Honduras, HongKong, Hungary, Iceland, India, Indonesia, IranIslamicRepublic, Iraq, Ireland, IsleOfMan, Israel, Italy, Jamaica, Japan, Jersey, Jordan, Kazakhstan, Kenya, Kiribati, KoreaDemocraticPeoplesRepublic, KoreaRepublic, Kuwait, Kyrgyzstan, LaoPeoplesDemocraticRepublic, Latvia, Lebanon, Lesotho, Liberia, Libya, Liechtenstein, Lithuania, Luxembourg, Macao, MacedoniaTheFormerYugoslavRepublic, Madagascar, Malawi, Malaysia, Maldives, Mali, Malta, MarshallIslands, Martinique, Mauritania, Mauritius, Mayotte, Mexico, MicronesiaFederatedStates, MoldovaRepublic, Monaco, Mongolia, Montenegro, Montserrat, Morocco, Mozambique, Myanmar, Namibia, Nauru, Nepal, Netherlands, NewCaledonia, NewZealand, Nicaragua, Niger, Nigeria, Niue, NorfolkIsland, NorthernMarianaIslands, Norway, Oman, Pakistan, Palau, PalestineState, Panama, PapuaNewGuinea, Paraguay, Peru, Philippines, Pitcairn, Poland, Portugal, PuertoRico, Qatar, Reunion, Romania, RussianFederation, Rwanda, SaintBarthelemy, SaintHelenaAscensionAndTristandaCunha, SaintKittsAndNevis, SaintLucia, SaintMartinFrenchpart, SaintPierreAndMiquelon, SaintVincentAndTheGrenadines, Samoa, SanMarino, SaoTomeAndPrincipe, SaudiArabia, Senegal, Serbia, Seychelles, SierraLeone, Singapore, SintMaartenDutchpart, Slovakia, Slovenia, SolomonIslands, Somalia, SouthAfrica, SouthGeorgiaAndTheSouthSandwichIslands, SouthSudan, Spain, SriLanka, Sudan, Suriname, SvalbardAndJanMayen, Swaziland, Sweden, Switzerland, SyrianArabRepublic, TaiwanProvinceOfChina, Tajikistan, TanzaniaUnitedRepublic, Thailand, TimorLeste, Togo, Tokelau, Tonga, TrinidadAndTobago, Tunisia, Turkey, Turkmenistan, TurksAndCaicosIslands, Tuvalu, Uganda, Ukraine, UnitedArabEmirates, UnitedKingdomOfGreatBritainAndNorthernIreland, UnitedStatesOfAmerica, UnitedStatesMinorOutlyingIslands, Uruguay, Uzbekistan, Vanuatu, VenezuelaBolivarianRepublic, Vietnam, VirginIslandsBritish, VirginIslandsUS, WallisAndFutuna, WesternSahara, Yemen, Zambia, Zimbabwe" }
 issuer_name = { type = "str_value", min_length = 1 }
 mandate_acceptance_type = { type = "enum", values = "online, offline" }
@@ -342,22 +461,11 @@ customer_device_display_size = { type = "enum", values = "size320x568, size375x6
 customer_device_platform = { type = "enum", values = "web, android, ios" }
 customer_device_type = { type = "enum", values = "mobile, tablet, desktop, gaming_console" }
 metadata = { type = "udf" }
-mobile_payment = { type = "enum", values = "direct_carrier_billing" }
-network_token = { type = "enum", values = "network_token" }
-open_banking = { type = "enum", values = "open_banking_pis" }
-pay_later = { type = "enum", values = "affirm, alma, afterpay_clearpay, klarna, pay_bright, atome, walley, flexiti, breadpay, payjustnow" }
-payment_method = { type = "enum", values = "card, card_redirect, pay_later, wallet, bank_redirect, bank_transfer, crypto, bank_debit, reward, real_time_payment, upi, voucher, gift_card, open_banking, mobile_payment, network_token" }
 payment_amount = { type = "integer", min = 0 }
-payment_method_type = { type = "enum", values = "ach, affirm, afterpay_clearpay, alfamart, ali_pay, ali_pay_hk, alma, amazon_pay, apple_pay, atome, bacs, bancontact_card, becs, benefit, bizum, blik, boleto, bca_bank_transfer, bni_va, bri_va, card, card_redirect, cimb_va, classic_reward, credit, crypto_currency, cashapp, dana, danamon_va, debit, duit_now, efecty, eft, eps, fps, evoucher, giropay, givex, google_pay, go_pay, gcash, ideal, interac, indomaret, klarna, kakao_pay, local_bank_redirect, mandiri_va, knet, mb_way, mobile_pay, momo, momo_atm, multibanco, online_banking_thailand, online_banking_czech_republic, online_banking_finland, online_banking_fpx, online_banking_poland, online_banking_slovakia, oxxo, pago_efectivo, permata_bank_transfer, open_banking_uk, pay_bright, paypal, paze, pix, pay_safe_card, przelewy24, prompt_pay, pse, red_compra, red_pagos, samsung_pay, sepa, sepa_bank_transfer, sofort, swish, touch_n_go, trustly, twint, upi_collect, upi_intent, vipps, viet_qr, venmo, walley, we_chat_pay, seven_eleven, lawson, mini_stop, family_mart, seicomart, pay_easy, local_bank_transfer, mifinity, open_banking_pis, direct_carrier_billing, instant_bank_transfer, paysera, bluecode, breadpay, bhn_card_network, eft_debit_order, flexiti, payjustnow, pix_key, pix_emv, pix_qr, pix_automatico_qr, pix_automatico_push, qris, sepa_guarenteed_debit, skrill, upi_qr, instant_bank_transfer_finland, instant_bank_transfer_poland, revolut_pay, indonesian_bank_transfer, open_banking, network_token, payshap, payshap_proxy" }
 payment_type = { type = "enum", values = "normal, new_mandate, update_mandate, setup_mandate, recurring_mandate, non_mandate, ppt_mandate" }
-real_time_payment = { type = "enum", values = "fps, duit_now, prompt_pay, viet_qr, qris" }
-reward = { type = "enum", values = "evoucher, classic_reward" }
 setup_future_usage = { type = "enum", values = "on_session, off_session" }
 surcharge_amount = { type = "integer", min = 0 }
 transaction_initiator = { type = "enum", values = "customer, merchant" }
-upi = { type = "enum", values = "upi_collect, upi_intent, upi_qr" }
-voucher = { type = "enum", values = "boleto, efecty, pago_efectivo, red_compra, red_pagos, indomaret, alfamart, oxxo, seven_eleven, lawson, mini_stop, family_mart, seicomart, pay_easy" }
-wallet = { type = "enum", values = "amazon_pay, apple_pay, google_pay, paypal, ali_pay, ali_pay_hk, dana, mb_way, mobile_pay, samsung_pay, twint, vipps, touch_n_go, swish, we_chat_pay, go_pay, gcash, momo, kakao_pay, cashapp, mifinity, paze, bluecode, skrill, paysera, venmo, revolut_pay" }
 
 [debit_routing_config]
 fraud_check_fee = 1.0
@@ -987,6 +1095,11 @@ jwt_expiry_seconds = 86400
 hs_redirect_jwt_expiry_seconds = 28800
 email_verification_enabled = false
 signup_requires_admin_secret = false
+# Local default keeps logout immediate; raise it to skip the denylist read per request.
+jwt_revocation_cache_ttl_ms = 0
+# Super admins can enter and change any merchant, and this file is also the Helm chart's config, so
+# the roster ships empty. Set it per deployment (e2e injects one via
+# DECISION_ENGINE__USER_AUTH__SUPER_ADMIN_EMAILS).
 super_admin_emails = []
 
 [admin_secret]

@@ -1,14 +1,14 @@
+import { ExperimentEndpoint } from '../../../types/api'
+
 export type ABTestExperimentType =
-  // Compare any two routing strategies. The SR strategies (auth / multi-objective manual /
-  // multi-objective autopilot) and rule-based/volume-split configs are all pickable arms here —
-  // this is where auth-vs-cost and manual-vs-autopilot experiments now live.
+  // Compare any two arms, each a bundle of layers: a saved routing config (rule-based / priority /
+  // volume split / single) for the rule layer, and an SR strategy for the SR layer. Either layer
+  // may be left out, so rule vs SR, rule + SR vs rule + SR, and SR vs SR all live here.
   | 'algorithm_comparison'
   | 'sr_config_tuning'
 
-// Synthetic arm values for the SR strategies. They all resolve to algorithm_id 'sr_routing' but
-// carry different per-arm overrides (see payload.ts `resolveArm`). Two independent dials —
-// cost-awareness (multi-objective) and autopilot self-tuning — give four combinations. Kept
-// distinct in the form so the arm dropdown and the `control !== variant` check can tell them apart.
+// SR layer strategies. Two independent dials — cost-awareness (multi-objective) and autopilot
+// self-tuning — give four combinations, each resolving to a distinct SR override.
 export type SrStrategy = 'sr_auth' | 'sr_auth_autopilot' | 'sr_mo_manual' | 'sr_mo_autopilot'
 // Labels name the routing *goal* (approvals, or approvals + fee savings) rather than the internal
 // algorithm (SR / multi-objective), with the autopilot-vs-manual tuning mode as a trailing
@@ -31,16 +31,62 @@ export const DEFAULT_VARIANT_SR_CONFIG: SrConfigOverrideForm = {
   eliminationThreshold: null,
 }
 
+/** One arm in the form. '' means the layer is not applied by this arm. */
+export interface ArmLayersForm {
+  ruleAlgorithmId: string
+  srStrategy: SrStrategy | ''
+}
+
+export const EMPTY_ARM: ArmLayersForm = { ruleAlgorithmId: '', srStrategy: '' }
+
+/** One variant in the form. */
+export interface VariantForm {
+  /** Recorded as the variant's `variant_arm`; kept when an experiment is edited or duplicated. */
+  id: string
+  name: string
+  /** Only used in algorithm_comparison mode. */
+  layers: ArmLayersForm
+  /** Only used in sr_config_tuning mode. */
+  srConfig: SrConfigOverrideForm
+  splitPct: number
+}
+
+/** Each variant's share of traffic, as the form allows it. */
+export const MIN_VARIANT_PCT = 5
+export const MAX_VARIANT_PCT = 30
+
+/**
+ * Where the control arm comes from:
+ * - `current`: the merchant's current routing setup, read when the experiment is created
+ *   (`control` is ignored until then);
+ * - `saved`: the control of the experiment this form was cloned from;
+ * - `custom`: picked by the user.
+ */
+export type ControlSource = 'current' | 'saved' | 'custom'
+
+/**
+ * What editing an experiment may change:
+ * - `checking`: still reading whether the experiment has recorded payments;
+ * - `full`: it has none, so every setting can change;
+ * - `evaluation`: its results are read against its setup, so only the name, sample target and
+ *   guardrail can change.
+ */
+export type EditScope = 'checking' | 'full' | 'evaluation'
+
 export interface ABTestFormValues {
   name: string
   experimentType: ABTestExperimentType
-  controlAlgorithmId: string
-  variantAlgorithmId: string
-  variantSplitPct: number
+  /** Only used in algorithm_comparison mode. */
+  controlSource: ControlSource
+  /** Only used in algorithm_comparison mode, when `controlSource` is not `current`. */
+  control: ArmLayersForm
+  /** One or more variants, each compared with control. In sr_config_tuning mode control always
+   * uses the live SR config. */
+  variants: VariantForm[]
+  /** Endpoints the experiment splits traffic on. */
+  endpoints: ExperimentEndpoint[]
   minSampleSize: number
   guardrailThresholdPp: number
-  /** Only used in sr_config_tuning mode. Control always uses the live SR config. */
-  variantSrConfig: SrConfigOverrideForm
 }
 
 export interface SrConfigOverridePayload {
@@ -51,14 +97,23 @@ export interface SrConfigOverridePayload {
   use_autopilot?: boolean
 }
 
+export interface ExperimentArmPayload {
+  rule_algorithm_id?: string
+  sr?: SrConfigOverridePayload
+}
+
+export interface ExperimentVariantPayload extends ExperimentArmPayload {
+  id: string
+  name: string
+  split_pct: number
+}
+
 export interface ABTestAlgorithmPayload {
-  control_algorithm_id: string
-  variant_algorithm_id: string
-  variant_split_pct: number
+  control: ExperimentArmPayload
+  variants: ExperimentVariantPayload[]
+  endpoints: ExperimentEndpoint[]
   min_sample_size: number
   guardrail_threshold_pp: number
-  variant_sr_config?: SrConfigOverridePayload
-  control_sr_config?: SrConfigOverridePayload
 }
 
 export interface ABTestCreatePayload {

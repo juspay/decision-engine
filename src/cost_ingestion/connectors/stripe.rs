@@ -38,8 +38,8 @@
 //! dashboard upload (which only calls `parse_rows`). The webhook/download methods return a
 //! descriptive error until Stripe's report-ready webhook and download auth are wired.
 
-use std::sync::OnceLock;
-use std::time::Duration;
+use super::common::{not_implemented, to_float};
+use crate::cost_ingestion::card_network::network_key;
 
 use async_trait::async_trait;
 use axum::http::HeaderMap;
@@ -57,9 +57,6 @@ use crate::cost_ingestion::types::{
 /// filter and Braintree's sale-only filter).
 const SETTLE_FLAG: &str = "settle";
 
-#[allow(dead_code)] // used once download_report is implemented
-const DOWNLOAD_TIMEOUT: Duration = Duration::from_secs(120);
-
 pub struct StripeReportSource;
 
 impl StripeReportSource {
@@ -74,17 +71,6 @@ impl Default for StripeReportSource {
     }
 }
 
-#[allow(dead_code)] // used once download_report is implemented
-fn http_client() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(DOWNLOAD_TIMEOUT)
-            .build()
-            .expect("failed to build stripe report reqwest client")
-    })
-}
-
 #[async_trait]
 impl SettlementReportSource for StripeReportSource {
     fn connector(&self) -> &'static str {
@@ -94,7 +80,7 @@ impl SettlementReportSource for StripeReportSource {
     fn peek_account(&self, _raw_body: &[u8]) -> Result<String, IngestError> {
         // TODO(stripe-webhook): extract the connected-account id from the unverified event body
         // once Stripe's report-ready webhook is wired. Manual upload passes the account explicitly.
-        Err(not_implemented("peek_account"))
+        Err(not_implemented("stripe", "peek_account"))
     }
 
     fn verify_and_parse_notification(
@@ -105,7 +91,7 @@ impl SettlementReportSource for StripeReportSource {
     ) -> Result<ReportNotification, IngestError> {
         // TODO(stripe-webhook): verify the `Stripe-Signature` header (HMAC-SHA256 over
         // `timestamp.payload`) and pull the report handle from the event.
-        Err(not_implemented("verify_and_parse_notification"))
+        Err(not_implemented("stripe", "verify_and_parse_notification"))
     }
 
     async fn download_report(
@@ -114,7 +100,7 @@ impl SettlementReportSource for StripeReportSource {
         _note: &ReportNotification,
     ) -> Result<Bytes, IngestError> {
         // TODO(stripe-webhook): fetch the report file via the Files API using the merchant's key.
-        Err(not_implemented("download_report"))
+        Err(not_implemented("stripe", "download_report"))
     }
 
     fn parse_rows(
@@ -170,7 +156,7 @@ impl SettlementReportSource for StripeReportSource {
             let gross = to_float(get(c_gross));
             let total_fee = to_float(get(c_cost));
 
-            let card_network = normalize_network(get(c_brand));
+            let card_network = network_key(get(c_brand));
             let variant = get(c_variant).trim().to_lowercase();
             let funding = funding_from_source(get(c_funding));
             let currency = {
@@ -226,13 +212,6 @@ impl SettlementReportSource for StripeReportSource {
     }
 }
 
-/// Placeholder error for the not-yet-wired notification/download path.
-fn not_implemented(method: &str) -> IngestError {
-    IngestError::MalformedNotification(format!(
-        "stripe connector: {method} not yet implemented (webhook/download shape TBD)"
-    ))
-}
-
 /// Build a deterministic key from a row's identifying parts, joined with a delimiter unlikely to
 /// appear in the values.
 fn synth_ref(parts: &[&str]) -> String {
@@ -246,20 +225,6 @@ fn funding_from_source(source: &str) -> String {
         "credit" => "credit".to_string(),
         "prepaid" => "prepaid".to_string(),
         _ => String::new(),
-    }
-}
-
-/// Canonicalize a Stripe card-brand label to the lowercased network ids the rest of the pipeline
-fn normalize_network(raw: &str) -> String {
-    match raw.trim().to_lowercase().as_str() {
-        "" => String::new(),
-        "mastercard" | "master card" => "mc".to_string(),
-        "visa" => "visa".to_string(),
-        "american express" | "amex" => "amex".to_string(),
-        "discover" => "discover".to_string(),
-        "diners" | "diners club" => "diners".to_string(),
-        "jcb" => "jcb".to_string(),
-        other => other.replace(' ', ""),
     }
 }
 
@@ -282,11 +247,6 @@ fn parse_month(s: &str) -> Option<chrono::NaiveDate> {
     let year: i32 = year.trim().parse().ok()?;
     let month: u32 = month.trim().parse().ok()?;
     chrono::NaiveDate::from_ymd_opt(year, month, 1)
-}
-
-/// Parse a money cell; blanks/garbage become `0.0` (mirrors the Adyen/Braintree parsers).
-fn to_float(s: &str) -> f64 {
-    s.trim().parse::<f64>().unwrap_or(0.0)
 }
 
 #[cfg(test)]
@@ -363,9 +323,9 @@ mc,Ecommerce,DOMESTIC,CREDIT,mccommercialcredit,Scheme Fee,100000,150,USD,USD,20
         assert_eq!(funding_from_source("CREDIT"), "credit");
         assert_eq!(funding_from_source("PREPAID"), "prepaid");
         assert_eq!(funding_from_source(""), "");
-        assert_eq!(normalize_network("mc"), "mc");
-        assert_eq!(normalize_network("MasterCard"), "mc");
-        assert_eq!(normalize_network("Visa"), "visa");
+        assert_eq!(network_key("mc"), "mc");
+        assert_eq!(network_key("MasterCard"), "mc");
+        assert_eq!(network_key("Visa"), "visa");
         assert_eq!(channel_from_interaction("Ecommerce"), "ecom");
         assert_eq!(channel_from_interaction("ContAuth"), "ecom");
         assert_eq!(channel_from_interaction("CardPresent"), "pos");

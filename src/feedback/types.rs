@@ -240,9 +240,10 @@ pub enum TxnObjectType {
 
 pub use gsm::{GsmErrorInfo, GsmInfo};
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+#[derive(Debug, Serialize, Deserialize, Clone, crate::auth::MerchantScoped)]
 #[serde(rename_all = "camelCase")]
 pub struct UpdateScorePayload {
+    #[merchant]
     pub merchant_id: String,
     pub gateway: String,
     pub gateway_reference_id: Option<String>,

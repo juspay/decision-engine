@@ -21,10 +21,19 @@ import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
+import { overlayInsetClass } from '../../lib/embedMode'
 import { Play, RefreshCw, ChevronDown, ChevronUp, Activity, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings } from 'lucide-react'
 
 import { PageHeading } from '../ui/PageHeading'
 import { Notice } from '../ui/Notice'
+import {
+  eventPhase,
+  eventTypeLabel,
+  flowTypeValue,
+  humanizeAuditValue,
+  routeLabel,
+  stageLabel,
+} from '../../lib/auditLabels'
 // UI-local algorithm tokens for the simulation dropdown. Both map to
 // { rankingAlgorithm: 'SR_BASED_ROUTING' } on the backend /decide-gateway request;
 // the dropdown no longer forces multi-objective. Whether cost-savings (multi-objective)
@@ -63,14 +72,14 @@ const CARD_PROGRAM_OPTIONS = ['STANDARD', 'PREMIUM'] as const
 const MULTI_OBJECTIVE_CARD_BRANDS = ['VISA', 'MASTERCARD'] as const
 
 const MULTI_OBJECTIVE_CLUSTER_VARIANTS: Array<{
-  paymentMethod: 'CREDIT'
+  paymentMethodType: 'CREDIT'
   cardSwitchProvider: 'VISA' | 'MASTERCARD'
   cardProgram: 'STANDARD' | 'PREMIUM'
 }> = [
-  { paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD' },
-  { paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'PREMIUM'  },
-  { paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD' },
-  { paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'PREMIUM'  },
+  { paymentMethodType: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD' },
+  { paymentMethodType: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'PREMIUM'  },
+  { paymentMethodType: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD' },
+  { paymentMethodType: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'PREMIUM'  },
 ]
 
 interface DebitRoutingFormState {
@@ -440,61 +449,6 @@ function formatDateTime(ms: number) {
   }).format(new Date(ms))
 }
 
-function humanizeAuditValue(value?: string | null) {
-  if (!value) return ''
-  const normalized = value
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase()
-
-  return normalized.replace(/\b\w/g, (char) => char.toUpperCase())
-}
-
-function routeLabel(route?: string | null) {
-  if (!route) return 'Unknown route'
-  if (route === 'decision_gateway' || route === 'decide_gateway') return 'Decide Gateway'
-  if (route === 'update_gateway_score') return 'Update Gateway'
-  if (route === 'routing_evaluate') return 'Rule Evaluate'
-  return humanizeAuditValue(route)
-}
-
-function eventTypeLabel(eventType?: string | null) {
-  if (!eventType) return 'Unknown event'
-  if (eventType === 'decide_gateway_decision') return 'Decide Gateway'
-  if (
-    eventType === 'update_gateway_score_update' ||
-    eventType === 'update_gateway_score_score_snapshot' ||
-    eventType === 'update_score_legacy_score_snapshot'
-  ) return 'Update Gateway'
-  if (eventType === 'decide_gateway_rule_hit') return 'Rule Evaluate'
-  if (eventType.startsWith('routing_evaluate_') && eventType !== 'routing_evaluate_request_hit') return 'Decision Result'
-  if (eventType.endsWith('_error')) return 'Errors'
-  return humanizeAuditValue(eventType)
-}
-
-function flowTypeValue(event: PaymentAuditEvent) {
-  return event.flow_type || ''
-}
-
-function stageLabel(event: PaymentAuditEvent) {
-  const flowType = flowTypeValue(event)
-  if (event.event_stage === 'gateway_decided') return 'Decide Gateway'
-  if (event.event_stage === 'score_updated') return 'Update Gateway'
-  if (event.event_stage === 'rule_applied') return 'Rule Evaluate'
-  if (event.event_stage === 'preview_evaluated' || (flowType.startsWith('routing_evaluate_') && flowType !== 'routing_evaluate_request_hit')) return 'Decision Result'
-  if (flowType.endsWith('_error')) return 'Errors'
-  return humanizeAuditValue(event.event_stage || flowType)
-}
-
-function eventPhase(event: PaymentAuditEvent) {
-  const flowType = flowTypeValue(event)
-  if ((flowType.startsWith('decide_gateway_') && flowType !== 'decide_gateway_rule_hit') || event.event_stage === 'gateway_decided') return 'Decide Gateway'
-  if (flowType === 'decide_gateway_rule_hit' || event.event_stage === 'rule_applied') return 'Rule Evaluate'
-  if (flowType.startsWith('update_gateway_score_') || flowType.startsWith('update_score_legacy_') || event.event_stage === 'score_updated') return 'Update Gateway'
-  if ((flowType.startsWith('routing_evaluate_') && flowType !== 'routing_evaluate_request_hit') || event.event_stage === 'preview_evaluated') return 'Decision'
-  return 'Errors'
-}
 
 function badgeVariantForEvent(event: PaymentAuditEvent): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
   const flowType = flowTypeValue(event)
@@ -533,7 +487,7 @@ function summaryBadgeVariant(status?: string | null): 'blue' | 'green' | 'purple
 }
 
 function phaseBadgeVariant(phase: string): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
-  if (phase === 'Decide Gateway') return 'blue'
+  if (phase === 'Auth Rate') return 'blue'
   if (phase === 'Rule Evaluate') return 'purple'
   if (phase === 'Decision') return 'purple'
   if (phase === 'Update Gateway') return 'green'
@@ -568,6 +522,7 @@ function buildAuditUrl(paymentId: string) {
     page: 1,
     page_size: 25,
     payment_id: paymentId,
+    scope: 'dynamic',
   })
   return `/analytics/payment-audit?${qs}`
 }
@@ -636,7 +591,7 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
     ...(event.merchant_id ? [{ label: 'Merchant', value: event.merchant_id }] : []),
     ...(event.payment_id ? [{ label: 'Payment ID', value: event.payment_id }] : []),
     ...(event.request_id ? [{ label: 'Request ID', value: event.request_id }] : []),
-    ...(event.gateway ? [{ label: 'Gateway', value: event.gateway }] : []),
+    ...(event.gateway ? [{ label: 'Connector', value: event.gateway }] : []),
     ...(event.status ? [{ label: 'Status', value: humanizeAuditValue(event.status) }] : []),
   ]
 
@@ -721,7 +676,7 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
 
   return {
     title: 'Configure auth-rate routing first',
-    body: 'Auth-rate simulation needs success-rate routing configured before it can run gateway decisions.',
+    body: 'Auth-rate simulation needs success-rate routing configured before it can run connector decisions.',
     detail,
     configurePath: '/routing/sr',
   }
@@ -940,9 +895,9 @@ export function DecisionExplorerPage() {
   )
   const gsmRules = gsmOptionsData?.rules ?? []
 
-  const { data: eliminationConfig } = useSWR<{ config: { data: { threshold: number } } } | null>(
+  const { data: eliminationConfig } = useSWR<{ config: { data: { threshold: number } } | null } | null>(
     effectiveMerchantId ? ['rule-elimination', effectiveMerchantId] : null,
-    () => apiPost<{ config: { data: { threshold: number } } }>('/rule/get', { merchant_id: effectiveMerchantId, algorithm: 'elimination' }).catch(() => null),
+    () => apiPost<{ config: { data: { threshold: number } } | null }>('/rule/get', { merchant_id: effectiveMerchantId, algorithm: 'elimination' }).catch(() => null),
     { revalidateOnFocus: false, dedupingInterval: 60_000 },
   )
   const eliminationConfigured = eliminationConfig?.config?.data?.threshold != null
@@ -1455,8 +1410,8 @@ export function DecisionExplorerPage() {
           amount: parseFloat(form.amount) || 1000,
           currency: form.currency,
           paymentType: 'ORDER_PAYMENT',
-          paymentMethodType: form.payment_method_type,
-          paymentMethod: form.payment_method,
+          paymentMethod: form.payment_method_type,
+          paymentMethodType: form.payment_method,
           authType: form.auth_type,
           cardBrand: form.card_brand,
           cardSwitchProvider: form.card_brand,
@@ -1533,7 +1488,7 @@ export function DecisionExplorerPage() {
     if (!debitRoutingFlag.isEnabled) return openSetupPrompt('debit', 'Debit routing is disabled.')
 
     const gateways = debitForm.eligible_gateways.split(',').map(s => s.trim()).filter(Boolean)
-    if (gateways.length === 0) return setError('Add at least one eligible gateway')
+    if (gateways.length === 0) return setError('Add at least one eligible connector')
 
     setLoading(true)
     setError(null)
@@ -1549,8 +1504,8 @@ export function DecisionExplorerPage() {
           amount: parseFloat(debitForm.amount) || 1000,
           currency: debitForm.currency,
           paymentType: 'ORDER_PAYMENT',
-          paymentMethodType: 'CARD',
-          paymentMethod: 'DEBIT',
+          paymentMethod: 'CARD',
+          paymentMethodType: 'DEBIT',
           authType: debitForm.auth_type,
           metadata: buildDebitRoutingMetadata(),
         },
@@ -1601,8 +1556,9 @@ export function DecisionExplorerPage() {
         // multi-objective leg has meaningful choices to make. Form values still
         // seed everything else (currency, eligible_gateways, etc).
         const variant = isMultiObjective ? MULTI_OBJECTIVE_CLUSTER_VARIANTS[i % MULTI_OBJECTIVE_CLUSTER_VARIANTS.length] : null
-        const paymentMethodType = isMultiObjective ? 'CARD' : form.payment_method_type
-        const paymentMethod = variant ? variant.paymentMethod : form.payment_method
+        // The method is the category (CARD), its type the specific method (CREDIT).
+        const paymentMethod = isMultiObjective ? 'CARD' : form.payment_method_type
+        const paymentMethodType = variant ? variant.paymentMethodType : form.payment_method
         const cardBrand = variant ? variant.cardSwitchProvider : form.card_brand
         const cardProgram = variant ? variant.cardProgram : form.card_program
         const amount = isMultiObjective
@@ -1622,7 +1578,7 @@ export function DecisionExplorerPage() {
               authType: form.auth_type,
               cardBrand,
               cardSwitchProvider: cardBrand,
-              cardType: paymentMethod,
+              cardType: paymentMethodType,
               cardProgram,
             },
             eligibleGatewayList: gateways,
@@ -2372,7 +2328,7 @@ export function DecisionExplorerPage() {
 
                 {/* Fallback Gateways */}
                 <div className="space-y-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-[#78849a] leading-4">Fallback Gateways</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-[#78849a] leading-4">Fallback Connectors</p>
                   <div className="space-y-1.5">
                     {fallbackConnectors.map((connector, idx) => (
                       <div key={idx} className="group flex items-center gap-0 rounded-xl border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] overflow-hidden transition-shadow hover:shadow-sm">
@@ -2380,14 +2336,14 @@ export function DecisionExplorerPage() {
                           {idx + 1}
                         </span>
                         <input
-                          placeholder="gateway name"
+                          placeholder="connector name"
                           value={connector.gateway_name}
                           onChange={e => updateFallbackConnector(idx, 'gateway_name', e.target.value)}
                           className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-[#c8d0de] focus:outline-none"
                         />
                         <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2 py-2.5 text-[11px] font-bold text-slate-500 dark:text-[#3a4258] select-none leading-4">/</span>
                         <input
-                          placeholder="gateway id (optional)"
+                          placeholder="connector id (optional)"
                           value={connector.gateway_id || ''}
                           onChange={e => updateFallbackConnector(idx, 'gateway_id', e.target.value)}
                           className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-500 dark:text-[#8090a8] focus:outline-none"
@@ -2405,7 +2361,7 @@ export function DecisionExplorerPage() {
                     onClick={addFallbackConnector}
                     className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10 transition-colors"
                   >
-                    <Plus size={12} /> Add Gateway
+                    <Plus size={12} /> Add Connector
                   </button>
                 </div>
               </>
@@ -2473,7 +2429,7 @@ export function DecisionExplorerPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Eligible Gateways (comma-separated)</label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Eligible Connectors (comma-separated)</label>
                   <input
                     value={debitForm.eligible_gateways}
                     onChange={e => setDebitField('eligible_gateways', e.target.value)}
@@ -2677,7 +2633,7 @@ export function DecisionExplorerPage() {
                         <option value="FAILURE">Failure (FAILURE)</option>
                       </select>
                       <p className="mt-1 text-xs text-slate-500 max-w-[57ch]">
-                        After deciding the gateway, single test will post feedback with this outcome so the payment appears in Decision Audit.
+                        After deciding the connector, single test will post feedback with this outcome so the payment appears in Decision Audit.
                       </p>
                     </div>
                     {singleRunOutcome === 'FAILURE' && <ErrorInfoFields info={errorInfo} onChange={setErrorField} rules={gsmRules} />}
@@ -2760,7 +2716,7 @@ export function DecisionExplorerPage() {
                                   <span className="text-[11px] text-slate-500 dark:text-slate-400 tabular-nums leading-4">100%</span>
                                 </div>
                               </div>
-                              <UiTooltip text="Simulated success rate for this gateway">
+                              <UiTooltip text="Simulated success rate for this connector">
                                 <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-bold tabular-nums shrink-0 ${ratePillClass}`}>
                                   {gwRate}%
                                 </span>
@@ -2818,7 +2774,7 @@ export function DecisionExplorerPage() {
                                   {gwFailureMode === 'timeout' && (
                                     <p className={`text-xs px-3 py-2 rounded-lg ${eliminationConfigured ? 'bg-amber-50 text-amber-700 dark:bg-amber-950/30 dark:text-amber-400' : 'bg-red-50 text-red-600 dark:bg-red-950/30 dark:text-red-400'} max-w-[68ch]`}>
                                       {eliminationConfigured
-                                        ? `Removed from routing below ${eliminationConfig!.config.data.threshold} threshold.`
+                                        ? `Removed from routing below ${eliminationConfig!.config!.data.threshold} threshold.`
                                         : 'Elimination not configured. Set it up in SR Routing settings.'}
                                     </p>
                                   )}
@@ -2943,7 +2899,7 @@ export function DecisionExplorerPage() {
                       className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
                     />
                     <span className="text-xs text-slate-600 dark:text-slate-400">
-                      Smart retry — on GSM <code className="text-[11px] leading-4">retry</code> decision, attempt next fallback gateway
+                      Smart retry — on GSM <code className="text-[11px] leading-4">retry</code> decision, attempt next fallback connector
                       {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-700">(enable GSM scoring filter first)</span>}
                     </span>
                   </label>
@@ -2978,7 +2934,7 @@ export function DecisionExplorerPage() {
                       className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
                     />
                     <span className="text-xs text-slate-600 dark:text-slate-400">
-                      Smart retry — on GSM <code className="text-[11px] leading-4">retry</code> decision, attempt next fallback gateway
+                      Smart retry — on GSM <code className="text-[11px] leading-4">retry</code> decision, attempt next fallback connector
                       {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-700">(enable GSM scoring filter first)</span>}
                     </span>
                   </label>
@@ -3133,7 +3089,7 @@ export function DecisionExplorerPage() {
                     <div>
                       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-[#8f9bb0]">
                         <span>Observed percentage split</span>
-                        <span>{sortedVolumeDistribution.length} gateways</span>
+                        <span>{sortedVolumeDistribution.length} connectors</span>
                       </div>
                       <div className="mt-2 flex h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-[#1d2633]">
                         {sortedVolumeDistribution.map((item) => (
@@ -3184,7 +3140,7 @@ export function DecisionExplorerPage() {
                           <tr>
                             <th className="w-16 px-4 py-2 text-left">#</th>
                             <th className="px-4 py-2 text-left">payment_id</th>
-                            <th className="px-4 py-2 text-left">gateway</th>
+                            <th className="px-4 py-2 text-left">connector</th>
                             <th className="w-24 px-4 py-2 text-right">trace</th>
                           </tr>
                         </thead>
@@ -3348,7 +3304,7 @@ export function DecisionExplorerPage() {
                 <Card className="shrink-0">
                   <CardHeader className="!py-3">
                     <div className="flex items-center justify-between gap-3">
-                      <h3 className="text-sm font-medium text-slate-800 dark:text-white">Gateway Selection Summary</h3>
+                      <h3 className="text-sm font-medium text-slate-800 dark:text-white">Connector Selection Summary</h3>
                       <div className="flex items-center gap-1.5">
                         {totalSimulationPayments > 0 && (() => {
                           const r = 6
@@ -3547,7 +3503,7 @@ export function DecisionExplorerPage() {
                     })()}
                     {Object.keys(gatewayStats).length === 1 && eligibleGatewaysParsed.length > 1 && (
                       <p className="text-[11px] text-slate-500 pt-1 max-w-[57ch] leading-4">
-                        SR routing concentrates traffic on the highest-scoring gateway. Run with a "Gateway Down" scenario to see score drop and traffic shift to the next gateway.
+                        SR routing concentrates traffic on the highest-scoring connector. Run with a "Connector Down" scenario to see score drop and traffic shift to the next connector.
                       </p>
                     )}
                   </CardBody>
@@ -3569,11 +3525,11 @@ export function DecisionExplorerPage() {
                             <tr>
                               <th className="text-left px-3 py-2 w-10">#</th>
                               <th className="text-left px-3 py-2">Payment ID</th>
-                              <th className="text-left px-3 py-2 whitespace-nowrap">Gateway</th>
+                              <th className="text-left px-3 py-2 whitespace-nowrap">Connector</th>
                               <th className="text-left px-3 py-2">Routing</th>
                               <th className="text-left px-3 py-2">Outcome</th>
                               <th className="text-right px-3 py-2 whitespace-nowrap">Cost Savings</th>
-                              {smartRetryEnabled && <th className="text-left px-3 py-2 whitespace-nowrap">Retry Gateway</th>}
+                              {smartRetryEnabled && <th className="text-left px-3 py-2 whitespace-nowrap">Retry Connector</th>}
                               {smartRetryEnabled && <th className="text-left px-3 py-2">Retry Outcome</th>}
                               <th className="w-8" />
                             </tr>
@@ -3673,8 +3629,8 @@ export function DecisionExplorerPage() {
                     decideParams={{
                       amount: form.amount,
                       currency: form.currency,
-                      paymentMethodType: form.payment_method_type,
-                      paymentMethod: form.payment_method,
+                      paymentMethod: form.payment_method_type,
+                      paymentMethodType: form.payment_method,
                       authType: form.auth_type,
                       cardBrand: form.card_brand,
                       rankingAlgorithm: 'SR_BASED_ROUTING',
@@ -3691,7 +3647,7 @@ export function DecisionExplorerPage() {
                   <CardBody>
                     <div className="flex items-start justify-between mb-3">
                       <div>
-                        <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Decided Gateway</p>
+                        <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Decided Connector</p>
                         <p className="text-3xl font-bold text-slate-900">{result.decided_gateway}</p>
                       </div>
                       <div className="text-right space-y-2">
@@ -3760,7 +3716,7 @@ export function DecisionExplorerPage() {
                   <Card>
                     <CardHeader>
                       <div className="flex items-center justify-between">
-                        <h3 className="text-sm font-medium text-slate-800">Gateway Scores</h3>
+                        <h3 className="text-sm font-medium text-slate-800">Connector Scores</h3>
                         <Button size="sm" variant="ghost" onClick={run} className="text-xs">
                           <RefreshCw size={12} /> Refresh
                         </Button>
@@ -3854,7 +3810,7 @@ export function DecisionExplorerPage() {
               <Card>
                 <CardBody className="py-16 text-center">
                   <Play size={32} className="text-gray-500 mx-auto mb-3" />
-                  <p className="text-slate-500 text-sm mx-auto max-w-[57ch]">Fill in the parameters and click "Run Single Transaction" to decide a gateway, post feedback, and inspect the audit trail.</p>
+                  <p className="text-slate-500 text-sm mx-auto max-w-[57ch]">Fill in the parameters and click "Run Single Transaction" to decide a connector, post feedback, and inspect the audit trail.</p>
                 </CardBody>
               </Card>
             )
@@ -3863,7 +3819,7 @@ export function DecisionExplorerPage() {
       </div>
 
       {setupPrompt && (
-        <div className="fixed bottom-0 left-0 right-0 top-[76px] z-[140] flex items-center justify-center p-4">
+        <div className={`fixed ${overlayInsetClass(false)} z-[140] flex items-center justify-center p-4`}>
           <button
             type="button"
             aria-label="Close setup prompt"
@@ -3926,7 +3882,7 @@ export function DecisionExplorerPage() {
       )}
 
       {selectedAuditPaymentId && (
-        <div className="fixed bottom-0 left-64 right-0 top-[76px] z-[130] p-8">
+        <div className={`fixed ${overlayInsetClass()} z-[130] p-8`}>
           <button
             type="button"
             aria-label="Close payment audit"
@@ -4021,7 +3977,7 @@ export function DecisionExplorerPage() {
                                     </p>
                                   </div>
                                   <Badge variant={badgeVariantForEvent(event)}>
-                                    {humanizeAuditValue(event.status) || eventTypeLabel(event.flow_type)}
+                                    {humanizeAuditValue(event.status) || eventTypeLabel(event)}
                                   </Badge>
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-2">
@@ -4038,7 +3994,7 @@ export function DecisionExplorerPage() {
                   ) : (
                     <EmptyAuditState
                       title="No audit trail captured yet"
-                      body="Run a simulated payment and gateway update first, then reopen the row once the audit payload is available."
+                      body="Run a simulated payment and connector update first, then reopen the row once the audit payload is available."
                     />
                   )}
                 </div>
@@ -4154,7 +4110,7 @@ export function DecisionExplorerPage() {
       )}
 
       {selectedPreviewPaymentId && (
-        <div className="fixed bottom-0 left-64 right-0 top-[76px] z-[130] p-8">
+        <div className={`fixed ${overlayInsetClass()} z-[130] p-8`}>
           <button
             type="button"
             aria-label="Close decision trace"
@@ -4254,7 +4210,7 @@ export function DecisionExplorerPage() {
                                     </p>
                                   </div>
                                   <Badge variant={badgeVariantForEvent(event)}>
-                                    {humanizeAuditValue(event.status) || eventTypeLabel(event.flow_type)}
+                                    {humanizeAuditValue(event.status) || eventTypeLabel(event)}
                                   </Badge>
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-2">

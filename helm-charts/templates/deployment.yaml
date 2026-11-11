@@ -6,7 +6,9 @@ metadata:
     {{- include "decision-engine.labels" . | nindent 4 }}
     app.kubernetes.io/component: {{ .Values.decisionEngine.metadata.labels.component }}
 spec:
+  {{- if not .Values.autoscaling.enabled }}
   replicas: {{ .Values.replicaCount }}
+  {{- end }}
   selector:
     matchLabels:
       {{- include "decision-engine.selectorLabels" . | nindent 6 }}
@@ -26,6 +28,7 @@ spec:
         {{- toYaml . | nindent 8 }}
       {{- end }}
       serviceAccountName: {{ include "decision-engine.serviceAccountName" . }}
+      terminationGracePeriodSeconds: {{ .Values.terminationGracePeriodSeconds | default 35 }}
       securityContext:
         {{- toYaml .Values.podSecurityContext | nindent 8 }}
       {{- if .Values.initContainers.enabled }}
@@ -34,29 +37,37 @@ spec:
         - name: wait-for-postgresql
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
           imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.initContainers.securityContext | nindent 12 }}
           command: ['sh', '-c', 'until nc -z {{ include "decision-engine.postgresqlHost" . }} 5432; do echo waiting for postgresql; sleep 2; done;']
         {{- end }}
         {{- if .Values.decisionEngine.useRedis }}
         - name: wait-for-redis
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
           imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.initContainers.securityContext | nindent 12 }}
           command: ['sh', '-c', 'until nc -z {{ include "decision-engine.redisHost" . }} 6379; do echo waiting for redis; sleep 2; done;']
         {{- end }}
         - name: wait-for-groovy-runner
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
           imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.initContainers.securityContext | nindent 12 }}
           command: ['sh', '-c', 'until nc -z {{ include "decision-engine.groovyRunnerName" . }} {{ .Values.groovyRunner.service.port }}; do echo waiting for groovy-runner; sleep 2; done;']
         {{- if .Values.decisionEngine.useMySQL }}
         - name: wait-for-mysql
           image: "{{ .Values.initContainers.busybox.repository }}:{{ .Values.initContainers.busybox.tag }}"
           imagePullPolicy: {{ .Values.initContainers.busybox.pullPolicy }}
+          securityContext:
+            {{- toYaml .Values.initContainers.securityContext | nindent 12 }}
           command: ['sh', '-c', 'until nc -z {{ include "decision-engine.mysqlHost" . }} 3306; do echo waiting for mysql; sleep 2; done;']
         {{- end }}
       {{- end }}
       containers:
         - name: {{ .Chart.Name }}
           securityContext:
-            {{- toYaml .Values.securityContext | nindent 12 }}
+            {{- include "decision-engine.containerSecurityContext" (dict "global" .Values.securityContext "component" .Values.decisionEngine.securityContext) | nindent 12 }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.version | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports:
@@ -101,9 +112,10 @@ spec:
             initialDelaySeconds: 30
             periodSeconds: 10
             timeoutSeconds: 5
+          # Readiness uses /health/ready (400 on SIGTERM); liveness stays on /health so a draining pod isn't restarted.
           readinessProbe:
             httpGet:
-              path: /health
+              path: /health/ready
               port: http
             initialDelaySeconds: 10
             periodSeconds: 5

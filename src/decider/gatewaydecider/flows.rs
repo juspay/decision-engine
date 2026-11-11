@@ -37,7 +37,7 @@ use crate::types::card::txn_card_info::TxnCardInfo;
 use crate::types::gateway_card_info::ValidationType;
 use crate::types::merchant as ETM;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
-use crate::types::payment::payment_method_type_const::*;
+use crate::types::payment_instrument::PaymentMethod;
 use crate::types::txn_details::types as ETTD;
 // use utils::errors::predefined_errors as Errs;
 // use juspay::extra::parsing::{Parsed, parse};
@@ -130,6 +130,39 @@ pub async fn decider_full_payload_hs_function(
     dreq: T::DomainDeciderRequest,
     redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Result<(T::DecidedGateway, Vec<(String, Vec<String>)>), T::ErrorResponse> {
+    // The merchant account drives decider behaviour (e.g. whether priority logic
+    // scripts run), so it is loaded from storage rather than taken from the
+    // request body.
+    let merchant_account = match ETM::merchant_account::load_merchant_by_merchant_id(
+        dreq.txnDetail.merchantId.0.clone(),
+    )
+    .await
+    {
+        Some(account) => account,
+        None => {
+            logger::error!(
+                tag = "loadMerchantByMerchantId",
+                action = "loadMerchantByMerchantId",
+                "Merchant account not found for id: {:?}",
+                dreq.txnDetail.merchantId
+            );
+            Err(T::ErrorResponse {
+                status: "400".to_string(),
+                error_code: "DATA_NOT_FOUND".to_string(),
+                error_message: "Merchant not found".to_string(),
+                priority_logic_tag: None,
+                routing_approach: None,
+                filter_wise_gateways: None,
+                error_info: UnifiedError {
+                    code: "MERCHANT_NOT_FOUND".to_string(),
+                    user_message: "Merchant not found".to_string(),
+                    developer_message: "Merchant not found".to_string(),
+                },
+                priority_logic_output: None,
+                is_dynamic_mga_enabled: false,
+            })?
+        }
+    };
     let merchant_prefs = match ETM::merchant_iframe_preferences::getMerchantIPrefsByMId(
         dreq.txnDetail.merchantId.0.clone(),
     )
@@ -191,7 +224,7 @@ pub async fn decider_full_payload_hs_function(
     };
 
     let decider_params = T::DeciderParams {
-        dpMerchantAccount: dreq.merchantAccount,
+        dpMerchantAccount: merchant_account,
         dpOrder: dreq.orderReference,
         dpTxnDetail: dreq.txnDetail,
         dpTxnOfferDetails: dreq.txnOfferDetails,
@@ -528,6 +561,7 @@ pub async fn run_decider_flow(
                 &mut decider_flow,
                 uniqueFunctionalGateways.clone(),
                 updatedPriorityLogicOutput.gws.clone(),
+                None,
                 None,
                 None,
             )
@@ -1142,7 +1176,7 @@ pub async fn getFailureReasonWithFilter(
         "filterFunctionalGatewaysForPaymentMethod" => {
             format!(
                 "No functional gateways supporting {} payment method.",
-                txn_card_info.paymentMethod
+                txn_card_info.instrument.method_type_code()
             )
         }
         "filterFunctionalGatewaysForTokenProvider" => {
@@ -1167,14 +1201,14 @@ pub async fn getFailureReasonWithFilter(
             }
         }
         "filterFunctionalGatewaysForConsumerFinance" => {
-            if txn_card_info.paymentMethodType == CONSUMER_FINANCE {
+            if txn_card_info.instrument.is(PaymentMethod::ConsumerFinance) {
                 "No functional gateways supporting Consumer Finance transaction.".to_string()
             } else {
                 "Gateways configured supports only Consumer Finance transaction.".to_string()
             }
         }
         "filterFunctionalGatewaysForUpi" => {
-            if txn_card_info.paymentMethodType == UPI {
+            if txn_card_info.instrument.is(PaymentMethod::Upi) {
                 "No functional gateways supporting UPI transaction.".to_string()
             } else if !is_google_pay_txn(txn_card_info.clone()) {
                 "Gateways configured supports only UPI transaction.".to_string()
@@ -1197,7 +1231,7 @@ pub async fn getFailureReasonWithFilter(
         }
         "filterFunctionalGatewaysForReward" => {
             if txn_card_info.card_type == Some(CardType::Reward)
-                || txn_card_info.paymentMethodType == REWARD
+                || txn_card_info.instrument.is(PaymentMethod::Reward)
             {
                 "No functional gateways supporting Reward transaction.".to_string()
             } else {
@@ -1205,7 +1239,7 @@ pub async fn getFailureReasonWithFilter(
             }
         }
         "filterFunctionalGatewaysForCash" => {
-            if txn_card_info.paymentMethodType == CASH {
+            if txn_card_info.instrument.is(PaymentMethod::Cash) {
                 "No functional gateways supporting CASH transaction.".to_string()
             } else {
                 "Gateways configured supports only CASH transaction.".to_string()

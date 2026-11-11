@@ -40,6 +40,36 @@ export class EuclidRuleBuilder extends RoutingListPage {
     await this.page.getByRole('button', { name: 'Add Rule', exact: true }).click()
   }
 
+  /** The grip in a rule block's header — the only element that starts a reorder. */
+  ruleDragHandle(index = 0): Locator {
+    return this.ruleBlock(index).locator('[aria-label^="Reorder"]').first()
+  }
+
+  /** dnd-kit's live region, where it announces the pick-up, every move, and the drop. */
+  private dragAnnouncement(): Promise<string> {
+    return this.page
+      .locator('[role="status"]')
+      .allTextContents()
+      .then((texts) => texts.join(' '))
+  }
+
+  async moveRuleBlock(index: number, direction: 'up' | 'down', steps = 1): Promise<void> {
+    await this.ruleDragHandle(index).focus()
+    await this.page.keyboard.press(' ')
+    // Picking a block up scrolls it into view, and an arrow key pressed while that scroll is in
+    // flight is spent scrolling the container instead of moving the block (dnd-kit's keyboard
+    // sensor handles scrolling first and returns). Waiting for the pick-up announcement is the
+    // signal that the drag is settled and the arrows will land on the block.
+    await expect.poll(() => this.dragAnnouncement()).toMatch(/draggable item/i)
+    for (let i = 0; i < steps; i += 1) {
+      const before = await this.dragAnnouncement()
+      await this.page.keyboard.press(direction === 'down' ? 'ArrowDown' : 'ArrowUp')
+      // Each move is announced, so the text changing is the signal that this step landed.
+      await expect.poll(() => this.dragAnnouncement()).not.toBe(before)
+    }
+    await this.page.keyboard.press(' ')
+  }
+
   /** The nth nested (OR) branch inside a rule block — the sky-bordered, indented group. */
   nestedBranch(blockIndex: number, index: number): Locator {
     return this.ruleBlock(blockIndex).locator('.border-l-2.border-sky-200').nth(index)
@@ -78,16 +108,16 @@ export class EuclidRuleBuilder extends RoutingListPage {
 
   async addGatewayToBlock(blockIndex: number, gatewayName: string, gatewayId = ''): Promise<void> {
     const then = this.thenSection(blockIndex)
-    await then.locator('input[placeholder="Gateway name"]').fill(gatewayName)
-    if (gatewayId) await then.locator('input[placeholder="Gateway ID (optional)"]').fill(gatewayId)
+    await then.locator('input[placeholder="Connector name"]').fill(gatewayName)
+    if (gatewayId) await then.locator('input[placeholder="Connector ID (optional)"]').fill(gatewayId)
     await then.getByRole('button', { name: 'Add', exact: true }).click()
   }
 
   async addVolumeSplitEntry(blockIndex: number, split: number, gatewayName: string, gatewayId = ''): Promise<void> {
     const then = this.thenSection(blockIndex)
     await then.locator('input[placeholder="Split %"]').fill(String(split))
-    await then.locator('input[placeholder="Gateway name"]').fill(gatewayName)
-    if (gatewayId) await then.locator('input[placeholder="Gateway ID (optional)"]').fill(gatewayId)
+    await then.locator('input[placeholder="Connector name"]').fill(gatewayName)
+    if (gatewayId) await then.locator('input[placeholder="Connector ID (optional)"]').fill(gatewayId)
     await then.getByRole('button', { name: 'Add', exact: true }).click()
   }
 
@@ -102,14 +132,14 @@ export class EuclidRuleBuilder extends RoutingListPage {
       .locator('[class*="p-3"]')
       .filter({ has: this.page.locator('p', { hasText: 'Priority list for this split' }) })
       .nth(rowIndex)
-    await row.locator('input[placeholder="Gateway name"]').fill(gatewayName)
-    if (gatewayId) await row.locator('input[placeholder="Gateway ID (optional)"]').fill(gatewayId)
+    await row.locator('input[placeholder="Connector name"]').fill(gatewayName)
+    if (gatewayId) await row.locator('input[placeholder="Connector ID (optional)"]').fill(gatewayId)
     await row.getByRole('button', { name: 'Add', exact: true }).click()
   }
 
   /** Open the gateway-name dropdown of a rule block's THEN section without typing anything. */
   async openGatewayDropdown(blockIndex: number): Promise<void> {
-    await this.thenSection(blockIndex).getByRole('button', { name: 'Show gateway list' }).click()
+    await this.thenSection(blockIndex).getByRole('button', { name: 'Show connector list' }).click()
   }
 
   /** Pick a gateway from the dropdown (rather than typing it) and commit the row. */
@@ -123,8 +153,8 @@ export class EuclidRuleBuilder extends RoutingListPage {
     const section = this.page
       .locator('.rounded-xl')
       .filter({ has: this.page.locator('p', { hasText: 'Default Fallback' }) })
-    await section.locator('input[placeholder="Gateway name"]').fill(gatewayName)
-    if (gatewayId) await section.locator('input[placeholder="Gateway ID (optional)"]').fill(gatewayId)
+    await section.locator('input[placeholder="Connector name"]').fill(gatewayName)
+    if (gatewayId) await section.locator('input[placeholder="Connector ID (optional)"]').fill(gatewayId)
     await section.getByRole('button', { name: 'Add', exact: true }).click()
   }
 
@@ -152,7 +182,7 @@ export class EuclidRuleBuilder extends RoutingListPage {
     await this.selectFromPortal(value)
   }
 
-  /** Select multiple enum values in the SearchableMultiSelect (skips already-checked options). */
+  /** Select multiple enum values in a multi-value SearchableSelect (skips already-checked options). */
   async selectMultiCondVals(index: number, values: string[]): Promise<void> {
     await this.page.locator('[data-cy="cond-val"]').nth(index).click()
     const search = this.page.locator('input[placeholder="Search…"]')
@@ -169,7 +199,7 @@ export class EuclidRuleBuilder extends RoutingListPage {
   }
 
   /**
-   * Close an open SearchableSelect / SearchableMultiSelect.
+   * Close an open SearchableSelect.
    *
    * Not a body click: the dropdown is portalled to <body>, so a click at the body's centre lands on
    * whichever option happens to sit under that point and silently toggles it.

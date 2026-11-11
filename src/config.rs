@@ -25,7 +25,6 @@ use std::{
 #[derive(Clone, serde::Deserialize, Debug)]
 pub struct GlobalConfig {
     pub server: Server,
-    pub metrics: Server,
     #[cfg(feature = "mysql")]
     pub database: Database,
     #[cfg(feature = "postgres")]
@@ -164,6 +163,12 @@ pub struct UserAuthConfig {
     /// and a caller that omits them is a bug rather than an old build.
     #[serde(default)]
     pub require_explicit_permissions: bool,
+    /// How long (ms) a token found *not* revoked is trusted without re-reading `jwt_revoked:<jti>`
+    /// from Redis, saving one round-trip per authenticated request. The cost is revocation latency:
+    /// a token revoked by `/auth/logout` stays usable for up to this long. Only the "not revoked"
+    /// answer is cached; a revoked token is refused and never re-admitted. `0` disables the cache.
+    #[serde(default)]
+    pub jwt_revocation_cache_ttl_ms: u64,
 }
 
 /// Deserialize a `Vec<String>` from either a sequence (TOML array) or a single comma-separated
@@ -254,6 +259,7 @@ impl Default for UserAuthConfig {
             signup_requires_admin_secret: true,
             super_admin_emails: Vec::new(),
             require_explicit_permissions: false,
+            jwt_revocation_cache_ttl_ms: 0,
         }
     }
 }
@@ -416,6 +422,52 @@ pub struct VolumeCommitmentConfig {
     pub tick_secs: u64,
     /// How often a merchant's plan is rebuilt — the only scheduled job. Per-merchant overridable.
     pub default_forecast_interval_secs: u64,
+    /// Whether `test_minutes` billing cycles may be written. A contract whose "day" lasts
+    /// seconds is a demo device, meaningless against real billing, so it is off unless a
+    /// deployment's own config turns it on.
+    #[serde(default)]
+    pub allow_test_cycles: bool,
+    /// How long one contract "day" lasts on a `test_minutes` cycle. It sets the speed of a demo:
+    /// the whole cycle is `anchor` of these, so halving it halves the wait and doubles the rate
+    /// the promise line paces at. Read through `test_day_secs()`, which holds it to a range a
+    /// demo can be watched at.
+    #[serde(default)]
+    pub test_day_secs: u64,
+    /// The demo contract library — whole documents, not a recipe for building them, so a
+    /// deployment tunes a scenario without a build. A config that lists none (the default, and
+    /// what production ships) serves none: that empty list *is* the production gate.
+    #[serde(default)]
+    pub samples: Vec<SampleScenario>,
+}
+
+impl VolumeCommitmentConfig {
+    /// The configured test contract-day length, held to something a demo can be watched at: at
+    /// least a second, and under an hour, so a "day" stays shorter than the calendar day every
+    /// reader of `day_secs` distinguishes it from.
+    pub fn test_day_secs(&self) -> u64 {
+        self.test_day_secs.clamp(1, 3_600)
+    }
+}
+
+/// One demo contract a merchant can activate to watch a single engine behaviour happen on
+/// purpose: the document verbatim, plus what a reader should watch for.
+///
+/// The document is the same shape the contract builder writes, so a sample is a template and
+/// nothing more — once activated it is an ordinary contract, paced by the ordinary engine.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+// Read from TOML in snake_case like every other config key; served to the dashboard in
+// camelCase like every other API field.
+#[serde(deny_unknown_fields, rename_all(serialize = "camelCase"))]
+pub struct SampleScenario {
+    /// Stable identifier, used as a key and a deep link.
+    pub id: String,
+    pub title: String,
+    /// One line: the situation the contract puts the engine in.
+    pub summary: String,
+    /// What the dashboard should show if the engine is working.
+    pub expected_outcome: String,
+    /// The contract itself, exactly as it would be stored.
+    pub contract: crate::euclid::volume_contract::VolumeContractConfig,
 }
 
 impl Default for VolumeCommitmentConfig {
@@ -425,10 +477,41 @@ impl Default for VolumeCommitmentConfig {
             server: Server {
                 host: "127.0.0.1".to_string(),
                 port: 9095,
+                shutdown_timeout: Server::default_shutdown_timeout(),
+                shutdown_drain_delay: Server::default_shutdown_drain_delay(),
+                routing_request_timeout_ms: Server::default_routing_request_timeout_ms(),
             },
             main_server_url: "http://127.0.0.1:8080".to_string(),
             tick_secs: 30,
             default_forecast_interval_secs: 3600,
+            // `config/` ships only `development.toml`, so a deployment whose config omits this
+            // key must land on production behaviour, not on demo behaviour.
+            allow_test_cycles: false,
+            test_day_secs:
+                crate::decider::gatewaydecider::volume_commitment::math::DEFAULT_TEST_DAY_SECS,
+            samples: Vec::new(),
+        }
+    }
+}
+
+/// Server-owned report API endpoints for a connector, grouped by environment.
+/// Missing settings retain the connector production endpoints for existing deployments.
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct ConnectorReportApiConfig {
+    pub checkout_production_api_base_url: String,
+    pub checkout_sandbox_api_base_url: String,
+    pub chase_token_url: String,
+    pub chase_reports_url: String,
+}
+
+impl Default for ConnectorReportApiConfig {
+    fn default() -> Self {
+        Self {
+            checkout_production_api_base_url: "https://api.checkout.com".to_string(),
+            checkout_sandbox_api_base_url: "https://api.sandbox.checkout.com".to_string(),
+            chase_token_url: "https://idag2.jpmorganchase.com/adfs/oauth2/token".to_string(),
+            chase_reports_url: "https://api.reports.jpmorgan.com/api/v1/reports".to_string(),
         }
     }
 }
@@ -438,6 +521,8 @@ impl Default for VolumeCommitmentConfig {
 #[derive(Clone, Debug, serde::Deserialize)]
 #[serde(default)]
 pub struct CostIngestionConfig {
+    /// Connector settlement report API endpoints.
+    pub connector: ConnectorReportApiConfig,
     /// Key id used to encrypt *new* connector credentials. Must name a key present in
     /// `creds_encryption_keys`. Rotate by adding a new key there and pointing this at it —
     /// old keys stay in the ring so existing credentials still decrypt. Empty ⇒ storage disabled.
@@ -471,6 +556,7 @@ pub struct CostIngestionConfig {
 impl Default for CostIngestionConfig {
     fn default() -> Self {
         Self {
+            connector: ConnectorReportApiConfig::default(),
             creds_encryption_current: String::new(),
             creds_encryption_keys: std::collections::HashMap::new(),
             worker_enabled: false,
@@ -647,6 +733,27 @@ pub struct Limit {
 pub struct Server {
     pub host: String,
     pub port: u16,
+    #[serde(default = "Server::default_shutdown_timeout")]
+    pub shutdown_timeout: u64,
+    #[serde(default = "Server::default_shutdown_drain_delay")]
+    pub shutdown_drain_delay: u64,
+    /// Longest a routing hot-path request (decide, evaluate, hybrid, score update) may run before
+    /// it is answered with `504`. Bounds how long a slow Redis or database holds a connection.
+    #[serde(default = "Server::default_routing_request_timeout_ms")]
+    pub routing_request_timeout_ms: u64,
+}
+
+impl Server {
+    // drain_delay + shutdown_timeout + 5s feedback drain must stay under terminationGracePeriodSeconds (chart default 35).
+    fn default_shutdown_timeout() -> u64 {
+        20
+    }
+    fn default_shutdown_drain_delay() -> u64 {
+        5
+    }
+    fn default_routing_request_timeout_ms() -> u64 {
+        2000
+    }
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]
@@ -680,9 +787,15 @@ pub struct PgDatabase {
 pub struct CacheConfig {
     pub service_config_redis_prefix: String,
     pub service_config_ttl: i64,
+    #[serde(default = "CacheConfig::default_invalidation_channel")]
+    pub invalidation_channel: String,
 }
 
 impl CacheConfig {
+    fn default_invalidation_channel() -> String {
+        "decision_engine_invalidate".to_string()
+    }
+
     pub fn add_prefix(&self, key: &str) -> String {
         format!("{}{}", self.service_config_redis_prefix, key)
     }
@@ -974,10 +1087,19 @@ impl GlobalConfig {
             )
             .build()?;
 
-        serde_path_to_error::deserialize(config).map_err(|error| {
-            logger::error!("Unable to deserialize application configuration: {error}");
-            error.into_inner()
-        })
+        let mut global_config: Self =
+            serde_path_to_error::deserialize(config).map_err(|error| {
+                logger::error!("Unable to deserialize application configuration: {error}");
+                error.into_inner()
+            })?;
+        // Payment method keys come from the code, not the file.
+        global_config.routing_config =
+            global_config
+                .routing_config
+                .map(|routing_config| TomlConfig {
+                    keys: routing_config.keys.with_payment_method_keys(),
+                });
+        Ok(global_config)
     }
 
     pub fn builder(

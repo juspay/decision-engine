@@ -81,7 +81,9 @@ async fn run_once(batch: usize, clickhouse: &ClickHouseAnalyticsConfig) {
                 }
                 // Serve the freshly-fitted models immediately (don't wait for the periodic refresh).
                 // Per-merchant: only this merchant is rebuilt, off the global-refresh path.
-                if let Err(e) = super::serving::refresh_merchant(clickhouse, &merchant_id).await {
+                if let Err(e) =
+                    super::serving::refresh_merchant_everywhere(clickhouse, &merchant_id).await
+                {
                     logger::warn!(
                         tag = "ingest_worker",
                         "serving refresh after ingest failed: {}",
@@ -120,8 +122,10 @@ async fn process(
     .ok_or_else(|| {
         IngestError::Storage("credential encryption keyring not configured".to_string())
     })?;
+    // A claimed job from the ingestion queue: work Decision Engine runs itself.
+    let merchant = crate::auth::AuthorizedMerchant::internal(job.merchant_id.clone());
     let resolved = store_
-        .get(&job.merchant_id, &job.connector, &job.account)
+        .get(&merchant, &job.connector, &job.account)
         .await?
         .ok_or_else(|| {
             IngestError::Storage(format!(

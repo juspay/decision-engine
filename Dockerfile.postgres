@@ -37,6 +37,7 @@ RUN PROFILE_FLAG=$([ "$BUILD_MODE" = "debug" ] && echo "" || echo "--profile ${B
 # ── Stage 3: build the binary ─────────────────────────────────────────────────
 # Dependencies are already compiled above. Only changed crates are recompiled.
 COPY . .
+ARG VERGEN_GIT_DESCRIBE
 RUN PROFILE_FLAG=$([ "$BUILD_MODE" = "debug" ] && echo "" || echo "--profile ${BUILD_MODE}") && \
     RUSTFLAGS="-A warnings" cargo build $PROFILE_FLAG --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES}
 
@@ -55,10 +56,18 @@ RUN apt-get update \
 
 EXPOSE 8080
 
-RUN mkdir -p ${CONFIG_DIR}
+# Unprivileged runtime user. The UID is numeric so Kubernetes can verify
+# `runAsNonRoot` without resolving names inside the image.
+ARG APP_UID=10001
+RUN groupadd --system --gid ${APP_UID} app \
+    && useradd --system --uid ${APP_UID} --gid app --no-create-home --shell /usr/sbin/nologin app \
+    && mkdir -p ${CONFIG_DIR}
 
 COPY --from=builder /open_router/target/${BUILD_MODE}/${BINARY} ${BIN_DIR}/${BINARY}
 
+USER ${APP_UID}:${APP_UID}
+
 WORKDIR ${BIN_DIR}
 
-CMD ["sh", "-c", "./${BINARY}"]
+# `exec` makes the binary PID 1 so it receives SIGTERM (plain `sh -c` keeps dash as PID 1 and swallows it).
+CMD ["sh", "-c", "exec ./${BINARY}"]

@@ -67,8 +67,8 @@ export function PenaltyClassificationGuide({ merchantId, gsmRules, decideParams 
           amount: parseFloat(decideParams.amount) || 1000,
           currency: decideParams.currency || 'USD',
           paymentType: 'ORDER_PAYMENT',
-          paymentMethodType: decideParams.paymentMethodType || 'CARD',
-          paymentMethod: decideParams.paymentMethod || 'CREDIT',
+          paymentMethod: decideParams.paymentMethod || 'CARD',
+          paymentMethodType: decideParams.paymentMethodType || 'CREDIT',
           authType: decideParams.authType || 'NO_THREE_DS',
           cardBrand: decideParams.cardBrand || 'VISA',
         },
@@ -124,7 +124,7 @@ export function PenaltyClassificationGuide({ merchantId, gsmRules, decideParams 
         <div>
           <h3 className="text-sm font-medium text-slate-800 dark:text-white">Penalty Classification Guide</h3>
           <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
-            How the routing engine decides whether a failed payment penalises the gateway score.
+            How the routing engine decides whether a failed payment penalises the connector score.
           </p>
         </div>
       </CardHeader>
@@ -140,7 +140,7 @@ export function PenaltyClassificationGuide({ merchantId, gsmRules, decideParams 
               return (
                 <div key={kind}>
                   <p className={`text-[11px] font-semibold uppercase tracking-wider mb-2 ${isProtected ? 'text-emerald-700 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'} max-w-[68ch] leading-4`}>
-                    {isProtected ? '✓ Protected — gateway score unchanged' : '✗ Penalised — gateway score decremented'}
+                    {isProtected ? '✓ Protected — connector score unchanged' : '✗ Penalised — connector score decremented'}
                   </p>
                   <div className="space-y-2">
                     {group.map(scenario => {
@@ -276,12 +276,12 @@ export function PenaltyClassificationGuide({ merchantId, gsmRules, decideParams 
                                       } leading-4`}>
                                         {isProtected
                                           ? isUnexpected
-                                            ? `⚠ Score decreased — gateway was penalised (${scoreDelta!.toFixed(3)})`
+                                            ? `⚠ Score decreased — connector was penalised (${scoreDelta!.toFixed(3)})`
                                             : scoreDelta != null && scoreDelta > 0.001
                                               ? `✓ Score increased (+${scoreDelta.toFixed(3)}) — no penalty applied (hedging)`
-                                              : '✓ Score unchanged — gateway not penalised as expected'
+                                              : '✓ Score unchanged — connector not penalised as expected'
                                           : scoreChanged
-                                            ? `✗ Gateway penalised (score dropped ${Math.abs(scoreDelta!).toFixed(3)})`
+                                            ? `✗ Connector penalised (score dropped ${Math.abs(scoreDelta!).toFixed(3)})`
                                             : '⚠ Score unchanged — penalty may not have applied yet'
                                         }
                                       </p>

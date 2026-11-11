@@ -66,6 +66,16 @@ export class ApiClient {
     return client
   }
 
+  /**
+   * A client sharing this request context as a service caller: the admin secret and no session, the
+   * way Hyperswitch calls Decision Engine. A session may only name its own merchant; a service caller
+   * acts for whichever merchant the request names — use this to reach another merchant, or one that
+   * does not exist.
+   */
+  asService(): ApiClient {
+    return new ApiClient(this.request)
+  }
+
   /** Core request primitive — mirrors Cypress `requestApi`. */
   async raw<T = any>(method: string, path: string, options: RequestOptions = {}): Promise<ApiResponse<T>> {
     const { body, failOnStatusCode = true, headers = {}, qs } = options
@@ -121,6 +131,17 @@ export class ApiClient {
 
   deleteMerchantAccount(merchantId: string, options: RequestOptions = {}) {
     return this.raw('DELETE', `/merchant-account/${merchantId}`, options)
+  }
+
+  setMerchantFeature(merchantId: string, feature: string, enabled: boolean, options: RequestOptions = {}) {
+    return this.raw('POST', `/merchant-account/${merchantId}/features/${feature}`, {
+      ...options,
+      body: { enabled },
+    })
+  }
+
+  getMerchantFeatures(merchantId: string, options: RequestOptions = {}) {
+    return this.raw('GET', `/merchant-account/${merchantId}/features`, options)
   }
 
   cleanupTestData(merchantId: string) {
@@ -217,7 +238,7 @@ export class ApiClient {
   }
 
   listActiveRoutingAlgorithms(createdBy: string, options: RequestOptions = {}) {
-    return this.raw('POST', `/routing/list/active/${createdBy}`, options)
+    return this.raw('GET', `/routing/list/active/${createdBy}`, options)
   }
 
   evaluateRoutingAlgorithm(payload: unknown, options: RequestOptions = {}) {

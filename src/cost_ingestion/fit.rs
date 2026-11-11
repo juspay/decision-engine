@@ -430,8 +430,7 @@ async fn insert_segments(
         "INSERT INTO {}.cost_fee_model_segment FORMAT JSONEachRow",
         cfg.database
     );
-    let mut req = client()
-        .post(cfg.url.trim_end_matches('/'))
+    let mut req = super::ch_http::post(client(), &cfg.url)
         .query(&[("query", query.as_str())])
         .body(body);
     if !cfg.user.is_empty() {
@@ -627,8 +626,7 @@ async fn exec(
         .iter()
         .map(|(k, v)| (format!("param_{k}"), v.clone()))
         .collect();
-    let mut req = client()
-        .post(cfg.url.trim_end_matches('/'))
+    let mut req = super::ch_http::post(client(), &cfg.url)
         .query(&q)
         .body(query.to_string());
     if !cfg.user.is_empty() {

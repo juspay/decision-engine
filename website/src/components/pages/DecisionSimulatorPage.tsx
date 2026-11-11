@@ -14,12 +14,20 @@ import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { useAuthStore } from '../../store/authStore'
+import { useFeatureReleased } from '../../lib/featureReleases'
 import { apiErrorStatus, apiPost, fetcher } from '../../lib/api'
-import { ContractSimulationPanel } from './ContractSimulationPanel'
-import { VolumeCommitmentRunChart } from './VolumeCommitmentRunChart'
+import {
+  VolumeCommitmentRunChart,
+  countPayment,
+  emptyRunTally,
+  tallyOf,
+  type ContractRunPreset,
+  type ContractRunTally,
+} from './VolumeCommitmentRunChart'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
-import { DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RankedPsp, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
+import { BlockedCommitment, DecideGatewayResponse, GatewayConnector, MultiObjectiveInfo, PaymentAuditEvent, PaymentAuditResponse, RankedPsp, RoutingEvent, RoutingEventType, UpdateScoreResponse } from '../../types/api'
 import { ROUTING_APPROACH_COLORS } from '../../lib/constants'
+import { RULE_DECIDED_APPROACH, SIMULATION_ENDPOINTS, SimulationEndpoint, decideSimulatedPayment, savedSimulationEndpoint, simulatedDecisionFromDecideGateway } from '../../features/routing/simulator/decide'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
 import {
@@ -31,10 +39,19 @@ import {
 } from '../../hooks/useCostRouting'
 import { describeRoutingEvent, useRoutingEvents } from '../../hooks/useRoutingEvents'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
+import { overlayInsetClass } from '../../lib/embedMode'
 import { Play, Pause, RefreshCw, ChevronDown, ChevronUp, Code, Plus, Trash2, PieChart as PieChartIcon, X, Network, Settings, ArrowRightLeft, Target, TrendingDown, Flag, SlidersHorizontal } from 'lucide-react'
 
 import { PageHeading } from '../ui/PageHeading'
 import { Notice } from '../ui/Notice'
+import {
+  eventPhase,
+  eventTypeLabel,
+  flowTypeValue,
+  humanizeAuditValue,
+  routeLabel,
+  stageLabel,
+} from '../../lib/auditLabels'
 // UI-local algorithm tokens for the simulation dropdown. Both map to
 // { rankingAlgorithm: 'SR_BASED_ROUTING' } on the backend /decide-gateway request;
 // the dropdown no longer forces multi-objective. Whether cost-savings (multi-objective)
@@ -73,26 +90,26 @@ const MULTI_OBJECTIVE_CARD_BRANDS = ['VISA', 'MASTERCARD'] as const
 // falling back to the seed table.
 const MULTI_OBJECTIVE_CLUSTER_VARIANTS: Array<{
   label: string
-  paymentMethod: 'CREDIT' | 'DEBIT'
+  paymentMethodType: 'CREDIT' | 'DEBIT'
   cardSwitchProvider: 'VISA' | 'MASTERCARD' | 'AMEX'
   cardProgram: 'STANDARD' | 'PREMIUM' | 'COMMERCIAL'
   // Raw issuer country a BIN lookup would supply (ISO-2, e.g. 'US', 'FR', 'AU'). The engine buckets
   // it to a pricing region for the coarse fallback and uses the raw value for the fine predictor.
   cardIssuerCountry: string
 }> = [
-  { label: 'US debit', paymentMethod: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD',   cardIssuerCountry: 'US'   },
-  { label: 'US standard credit', paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD',   cardIssuerCountry: 'US'   },
-  { label: 'US premium credit', paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'PREMIUM',    cardIssuerCountry: 'US'   },
-  { label: 'US corporate',       paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'COMMERCIAL', cardIssuerCountry: 'US'   },
-  { label: 'Amex US consumer',   paymentMethod: 'CREDIT', cardSwitchProvider: 'AMEX',       cardProgram: 'PREMIUM',    cardIssuerCountry: 'US'   },
+  { label: 'US debit', paymentMethodType: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD',   cardIssuerCountry: 'US'   },
+  { label: 'US standard credit', paymentMethodType: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD',   cardIssuerCountry: 'US'   },
+  { label: 'US premium credit', paymentMethodType: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'PREMIUM',    cardIssuerCountry: 'US'   },
+  { label: 'US corporate',       paymentMethodType: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'COMMERCIAL', cardIssuerCountry: 'US'   },
+  { label: 'Amex US consumer',   paymentMethodType: 'CREDIT', cardSwitchProvider: 'AMEX',       cardProgram: 'PREMIUM',    cardIssuerCountry: 'US'   },
   // EU / AU scenarios carry a *raw* issuer country (as a BIN lookup would supply), so the in-house
   // category predictor resolves the specific fitted cluster. Pair the EU cards with EUR and the AU
   // card with AUD to land on in-house models.
-  { label: 'FR debit (Visa)',        paymentMethod: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'FR' },
-  { label: 'IT debit (Mastercard)',  paymentMethod: 'DEBIT',  cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD', cardIssuerCountry: 'IT' },
-  { label: 'FR credit (Visa)',       paymentMethod: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'FR' },
-  { label: 'IT credit (Mastercard)', paymentMethod: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD', cardIssuerCountry: 'IT' },
-  { label: 'AU debit (Visa)',        paymentMethod: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'AU' },
+  { label: 'FR debit (Visa)',        paymentMethodType: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'FR' },
+  { label: 'IT debit (Mastercard)',  paymentMethodType: 'DEBIT',  cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD', cardIssuerCountry: 'IT' },
+  { label: 'FR credit (Visa)',       paymentMethodType: 'CREDIT', cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'FR' },
+  { label: 'IT credit (Mastercard)', paymentMethodType: 'CREDIT', cardSwitchProvider: 'MASTERCARD', cardProgram: 'STANDARD', cardIssuerCountry: 'IT' },
+  { label: 'AU debit (Visa)',        paymentMethodType: 'DEBIT',  cardSwitchProvider: 'VISA',       cardProgram: 'STANDARD', cardIssuerCountry: 'AU' },
 ]
 
 // Scenario the simulator opens on. 'US debit' is the headline Adyen-wins-on-cost case, so it's the
@@ -105,7 +122,7 @@ const DEFAULT_MULTI_OBJ_SCENARIO: number | 'ALL' =
 // (jaywan, mada, …) and an optional representative ticket.
 type MoClusterVariant = {
   label: string
-  paymentMethod: 'CREDIT' | 'DEBIT'
+  paymentMethodType: 'CREDIT' | 'DEBIT'
   cardSwitchProvider: string
   cardProgram: string
   cardIssuerCountry?: string
@@ -225,7 +242,7 @@ function seedRowsToVariants(
       'Scenario'
     out.push({
       label,
-      paymentMethod: (r.payment_method_type ?? '').toUpperCase() === 'DEBIT' ? 'DEBIT' : 'CREDIT',
+      paymentMethodType: (r.payment_method_type ?? '').toUpperCase() === 'DEBIT' ? 'DEBIT' : 'CREDIT',
       cardSwitchProvider: (r.card_network ?? '').toUpperCase() || 'VISA',
       cardProgram: (r.card_type ?? '').toUpperCase() || 'STANDARD',
       cardIssuerCountry: issuerCountryFor(r, ccy, clusters),
@@ -259,6 +276,8 @@ interface SimulationConfig {
   // (uniform). Drives how much the fixed-fee term shows up in cost.
   minAmount: number
   maxAmount: number
+  // API each batch transaction is routed through. Read once at run start.
+  endpoint: SimulationEndpoint
 }
 
 interface GatewaySimConfig {
@@ -326,6 +345,8 @@ interface SimulationResult {
   // approval-rate routing had picked. Drives the per-PSP steering chart above the results.
   steerOutcome?: 'STEERED' | 'SR_PREVAILED' | null
   steerSrHead?: string | null
+  /** Commitments that wanted this payment and the gate that stopped each. */
+  steerBlocked?: BlockedCommitment[] | null
 }
 
 // Soft, sentence-case stat label (vs the all-caps SurfaceLabel) for the cost/auth summary.
@@ -391,6 +412,26 @@ interface RuleEvaluateResponse {
   eligible_connectors?: GatewayConnector[]
 }
 
+/**
+ * Label and badge for a routing approach — one source for both the cell and the filter.
+ * An approach with no entry falls through to its raw value, unstyled.
+ */
+function routingApproachDisplay(approach?: string | null): { label: string; badgeClass: string | null } {
+  if (approach?.includes('HEDGING')) {
+    return { label: 'Hedging', badgeClass: 'bg-amber-50 text-amber-700 ring-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:ring-amber-800' }
+  }
+  if (approach === 'SR_SELECTION_MULTI_OBJECTIVE') {
+    return { label: 'Cost Based', badgeClass: 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:ring-emerald-800' }
+  }
+  if (approach === 'SR_SELECTION_V3_ROUTING') {
+    return { label: 'Auth Based', badgeClass: 'bg-brand-50 text-brand-700 ring-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:ring-brand-800' }
+  }
+  if (approach === RULE_DECIDED_APPROACH) {
+    return { label: 'Rule Based', badgeClass: 'bg-indigo-50 text-indigo-700 ring-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-300 dark:ring-indigo-800' }
+  }
+  return { label: approach ?? '—', badgeClass: null }
+}
+
 function approachColor(approach: string): string {
   for (const [k, v] of Object.entries(ROUTING_APPROACH_COLORS)) {
     if (approach.includes(k) || k.includes(approach)) return v
@@ -430,6 +471,8 @@ type VolumePaymentEntry = {
 
 const EXPLORER_STORAGE_KEY_PREFIX = 'decision-explorer-state-v2'
 const EXPLORER_RESULT_TTL_MS = 10 * 60 * 1000
+// Cap on persisted simulationResults/volumeEvaluationLog, so no stored entry can approach localStorage's per-origin quota.
+const EXPLORER_RESULT_HISTORY_PERSIST_LIMIT = 200
 
 /**
  * Run control and the committed rows, held outside the component tree.
@@ -455,10 +498,19 @@ const runProgressRef = { current: 0 }
 const liveRun: {
   running: boolean
   results: SimulationResult[]
+  /**
+   * The volume-contract card's counters, folded in as each row lands.
+   *
+   * Kept beside the rows rather than derived from them: the card needs counts, and recounting
+   * every row on every flush costs more the further into a run you are — which showed up as a
+   * simulation that slowed 8x across one billing cycle while the backend stayed within 2x.
+   */
+  contractTally: ContractRunTally
   subscribers: Set<() => void>
 } = {
   running: false,
   results: [],
+  contractTally: emptyRunTally(),
   subscribers: new Set(),
 }
 
@@ -522,6 +574,18 @@ function unionConnectors(...lists: string[][]): string[] {
 // and stops at this many transactions.
 const SIMULATION_TOTAL_PAYMENTS = '5000'
 
+/**
+ * Transactions kept in the DOM at once.
+ *
+ * The table is a live view of a run, and a run is thousands of payments long. Rendering every one
+ * puts a row per payment in the document — reconciled on every commit, laid out by the browser on
+ * every paint — so the page grows heavier the longer the run goes, on the same thread the run
+ * dispatches its requests from. That is most of why a simulation's rate decayed several times
+ * over inside one billing cycle. The newest couple of hundred is what anyone actually reads; the
+ * count beside the table still reports the true total, and the filters still run over every row.
+ */
+const TX_TABLE_MAX_ROWS = 200
+
 // Default / ceiling for the parallel-requests (TPS) lever. 1 preserves the original
 // sequential cadence; the ceiling caps how many decide+feedback round-trips we fan out
 // at once so a slider drag can't flood the backend.
@@ -546,6 +610,7 @@ const DEFAULT_SIMULATION_CONFIG: SimulationConfig = {
   tps: DEFAULT_SIMULATION_TPS,
   minAmount: DEFAULT_SIMULATION_MIN_AMOUNT,
   maxAmount: DEFAULT_SIMULATION_MAX_AMOUNT,
+  endpoint: 'decide_gateway',
 }
 
 
@@ -581,6 +646,8 @@ interface ExplorerPersistedState {
   volumeEvaluationLog: VolumePaymentEntry[]
   volumeProgress: number
   simulationResults: SimulationResult[]
+  // Persisted as its own value, not derived from the (capped) simulationResults on load — see EXPLORER_RESULT_HISTORY_PERSIST_LIMIT.
+  contractTally: ContractRunTally
   responseOpen: boolean
   debitResponseOpen: boolean
   volumeResponseOpen: boolean
@@ -630,6 +697,7 @@ function getDefaultExplorerState(): ExplorerPersistedState {
     volumeEvaluationLog: [],
     volumeProgress: 0,
     simulationResults: [],
+    contractTally: emptyRunTally(),
     responseOpen: false,
     debitResponseOpen: false,
     volumeResponseOpen: false,
@@ -659,12 +727,55 @@ function hasExpiredExplorerResults(resultDataUpdatedAtMs?: number | null) {
 
 function removeExplorerState(scopeKey: string) {
   if (typeof window === 'undefined') return
-  window.localStorage.removeItem(explorerStorageKey(scopeKey))
+  // Same failure guard as saveExplorerState/sweepExpiredExplorerState — this runs from mount/render paths too.
+  try {
+    window.localStorage.removeItem(explorerStorageKey(scopeKey))
+  } catch (err) {
+    console.warn('Could not clear explorer state; localStorage is unavailable', err)
+  }
 }
 
 function saveExplorerState(scopeKey: string, state: ExplorerPersistedState) {
   if (typeof window === 'undefined') return
-  window.localStorage.setItem(explorerStorageKey(scopeKey), JSON.stringify(state))
+  const key = explorerStorageKey(scopeKey)
+  // Bound on every write, not only after a failure — a reload of a paused run longer than this cap will show only the kept tail until resumed.
+  const bounded: ExplorerPersistedState = {
+    ...state,
+    simulationResults: state.simulationResults.slice(-EXPLORER_RESULT_HISTORY_PERSIST_LIMIT),
+    volumeEvaluationLog: state.volumeEvaluationLog.slice(-EXPLORER_RESULT_HISTORY_PERSIST_LIMIT),
+  }
+  try {
+    window.localStorage.setItem(key, JSON.stringify(bounded))
+  } catch (err) {
+    // Last-resort net for anything still outsized after capping — skip the save rather than let setItem's throw crash the page via the ErrorBoundary.
+    console.warn('Explorer state still exceeded localStorage quota after capping run history; skipping this save', err)
+  }
+}
+
+// Evicts every stored scope past its result TTL (or unparsable), not just the active one — call once per mount, safe to call repeatedly.
+function sweepExpiredExplorerState() {
+  if (typeof window === 'undefined') return
+  // Everything below, including obtaining window.localStorage itself, can throw in a browser where storage is blocked (e.g. some private-browsing modes) — never let mount-time housekeeping crash the page over it.
+  try {
+    const storage = window.localStorage
+    const prefix = `${EXPLORER_STORAGE_KEY_PREFIX}:`
+    const staleKeys: string[] = []
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i)
+      if (!key || !key.startsWith(prefix)) continue
+      const raw = storage.getItem(key)
+      if (!raw) continue
+      try {
+        const parsed = JSON.parse(raw) as Partial<ExplorerPersistedState>
+        if (hasExpiredExplorerResults(parsed.resultDataUpdatedAtMs)) staleKeys.push(key)
+      } catch {
+        staleKeys.push(key)
+      }
+    }
+    staleKeys.forEach(staleKey => storage.removeItem(staleKey))
+  } catch (err) {
+    console.warn('Skipping explorer-state housekeeping; localStorage is unavailable', err)
+  }
 }
 
 function loadExplorerState(scopeKey: string): ExplorerPersistedState {
@@ -694,7 +805,12 @@ function loadExplorerState(scopeKey: string): ExplorerPersistedState {
         // dynamic simulator drives the transaction variant, not the form.
         ranking_algorithm: 'SR_MULTI_OBJECTIVE',
       },
-      simulationConfig: { ...defaults.simulationConfig, ...(parsed.simulationConfig || {}), totalPayments: SIMULATION_TOTAL_PAYMENTS },
+      simulationConfig: {
+        ...defaults.simulationConfig,
+        ...(parsed.simulationConfig || {}),
+        totalPayments: SIMULATION_TOTAL_PAYMENTS,
+        endpoint: savedSimulationEndpoint(parsed.simulationConfig?.endpoint) ?? defaults.simulationConfig.endpoint,
+      },
       gatewaySimConfigs: parsed.gatewaySimConfigs || defaults.gatewaySimConfigs,
       errorInfo: { ...defaults.errorInfo, ...(parsed.errorInfo || {}) },
       debitForm: {
@@ -707,6 +823,8 @@ function loadExplorerState(scopeKey: string): ExplorerPersistedState {
       volumeDistribution: parsed.volumeDistribution || defaults.volumeDistribution,
       volumeEvaluationLog: parsed.volumeEvaluationLog || defaults.volumeEvaluationLog,
       simulationResults: parsed.simulationResults || defaults.simulationResults,
+      // Prefer the persisted tally; recompute from rows only for an entry saved before this field existed.
+      contractTally: parsed.contractTally || tallyOf(parsed.simulationResults || []),
       extraConnectors: parsed.extraConnectors || defaults.extraConnectors,
       removedConnectors: parsed.removedConnectors || defaults.removedConnectors,
     }
@@ -758,61 +876,6 @@ function formatDateTime(ms: number) {
   }).format(new Date(ms))
 }
 
-function humanizeAuditValue(value?: string | null) {
-  if (!value) return ''
-  const normalized = value
-    .replace(/[_-]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .toLowerCase()
-
-  return normalized.replace(/\b\w/g, (char) => char.toUpperCase())
-}
-
-function routeLabel(route?: string | null) {
-  if (!route) return 'Unknown route'
-  if (route === 'decision_gateway' || route === 'decide_gateway') return 'Decide Gateway'
-  if (route === 'update_gateway_score') return 'Update Gateway'
-  if (route === 'routing_evaluate') return 'Rule Evaluate'
-  return humanizeAuditValue(route)
-}
-
-function eventTypeLabel(eventType?: string | null) {
-  if (!eventType) return 'Unknown event'
-  if (eventType === 'decide_gateway_decision') return 'Decide Gateway'
-  if (
-    eventType === 'update_gateway_score_update' ||
-    eventType === 'update_gateway_score_score_snapshot' ||
-    eventType === 'update_score_legacy_score_snapshot'
-  ) return 'Update Gateway'
-  if (eventType === 'decide_gateway_rule_hit') return 'Rule Evaluate'
-  if (eventType.startsWith('routing_evaluate_') && eventType !== 'routing_evaluate_request_hit') return 'Decision Result'
-  if (eventType.endsWith('_error')) return 'Errors'
-  return humanizeAuditValue(eventType)
-}
-
-function flowTypeValue(event: PaymentAuditEvent) {
-  return event.flow_type || ''
-}
-
-function stageLabel(event: PaymentAuditEvent) {
-  const flowType = flowTypeValue(event)
-  if (event.event_stage === 'gateway_decided') return 'Decide Gateway'
-  if (event.event_stage === 'score_updated') return 'Update Gateway'
-  if (event.event_stage === 'rule_applied') return 'Rule Evaluate'
-  if (event.event_stage === 'preview_evaluated' || (flowType.startsWith('routing_evaluate_') && flowType !== 'routing_evaluate_request_hit')) return 'Decision Result'
-  if (flowType.endsWith('_error')) return 'Errors'
-  return humanizeAuditValue(event.event_stage || flowType)
-}
-
-function eventPhase(event: PaymentAuditEvent) {
-  const flowType = flowTypeValue(event)
-  if ((flowType.startsWith('decide_gateway_') && flowType !== 'decide_gateway_rule_hit') || event.event_stage === 'gateway_decided') return 'Decide Gateway'
-  if (flowType === 'decide_gateway_rule_hit' || event.event_stage === 'rule_applied') return 'Rule Evaluate'
-  if (flowType.startsWith('update_gateway_score_') || flowType.startsWith('update_score_legacy_') || event.event_stage === 'score_updated') return 'Update Gateway'
-  if ((flowType.startsWith('routing_evaluate_') && flowType !== 'routing_evaluate_request_hit') || event.event_stage === 'preview_evaluated') return 'Decision'
-  return 'Errors'
-}
 
 function badgeVariantForEvent(event: PaymentAuditEvent): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
   const flowType = flowTypeValue(event)
@@ -851,7 +914,7 @@ function summaryBadgeVariant(status?: string | null): 'blue' | 'green' | 'purple
 }
 
 function phaseBadgeVariant(phase: string): 'blue' | 'green' | 'purple' | 'red' | 'orange' | 'gray' {
-  if (phase === 'Decide Gateway') return 'blue'
+  if (phase === 'Auth Rate') return 'blue'
   if (phase === 'Rule Evaluate') return 'purple'
   if (phase === 'Decision') return 'purple'
   if (phase === 'Update Gateway') return 'green'
@@ -886,6 +949,7 @@ function buildAuditUrl(paymentId: string) {
     page: 1,
     page_size: 25,
     payment_id: paymentId,
+    scope: 'dynamic',
   })
   return `/analytics/payment-audit?${qs}`
 }
@@ -905,12 +969,14 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
 
   const details = isRecord(event.details_json) ? event.details_json : {}
   const explicitResponse =
+    details.api_response ??
     details.response ??
     details.response_payload ??
     details.result ??
     details.output ??
     null
   const requestPayload =
+    details.api_request ??
     details.request ??
     details.request_payload ??
     details.input ??
@@ -954,7 +1020,7 @@ function buildInspectorModel(event: PaymentAuditEvent | null) {
     ...(event.merchant_id ? [{ label: 'Merchant', value: event.merchant_id }] : []),
     ...(event.payment_id ? [{ label: 'Payment ID', value: event.payment_id }] : []),
     ...(event.request_id ? [{ label: 'Request ID', value: event.request_id }] : []),
-    ...(event.gateway ? [{ label: 'Gateway', value: event.gateway }] : []),
+    ...(event.gateway ? [{ label: 'Connector', value: event.gateway }] : []),
     ...(event.status ? [{ label: 'Status', value: humanizeAuditValue(event.status) }] : []),
   ]
 
@@ -1033,7 +1099,7 @@ function setupPromptForTab(tab: TabType, detail?: string): SetupPromptState {
 
   return {
     title: 'Configure auth-rate routing first',
-    body: 'Auth-rate simulation needs success-rate routing configured before it can run gateway decisions.',
+    body: 'Auth-rate simulation needs success-rate routing configured before it can run connector decisions.',
     detail,
     configurePath: '/routing/sr',
   }
@@ -1179,6 +1245,9 @@ export function DecisionSimulatorPage() {
   const navigate = useNavigate()
   const { merchantId } = useMerchantStore()
   const authUser = useAuthStore((state) => state.user)
+  // Volume Contracts is gated by the release roster (featureReleases.ts): the contract loader
+  // and commitment run chart on the Batch tab are shown only to its audience.
+  const volumeContractsBeta = useFeatureReleased('volume-contracts')
   const authMerchantId = authUser?.merchantId || ''
   const effectiveMerchantId = merchantId || authMerchantId
   const currentScopeKey = explorerScopeKey(
@@ -1210,6 +1279,8 @@ export function DecisionSimulatorPage() {
   const hasRoutingKeys = Object.keys(routingKeysConfig).length > 0
   const routingConfigUnavailable = !routingKeysLoading && (!hasRoutingKeys || Boolean(routingKeysError))
   const initialState = useMemo(() => loadExplorerState(currentScopeKey), [currentScopeKey])
+  // Housekeeping for every merchant scope this browser has stored, not just this one — see sweepExpiredExplorerState.
+  useEffect(() => { sweepExpiredExplorerState() }, [])
   const [activeTab, setActiveTab] = useState<TabType>(initialState.activeTab)
   const [stateScopeKey, setStateScopeKey] = useState(initialState.scopeKey || currentScopeKey)
   const [resultDataUpdatedAtMs, setResultDataUpdatedAtMs] = useState<number | null>(
@@ -1241,7 +1312,13 @@ export function DecisionSimulatorPage() {
    * out of `SimulationConfig` (which is persisted) and cleared whenever the contract goes away or
    * the tab is reset: loading a contract once must never leave later simulations throttled.
    */
-  const [contractPaceMs, setContractPaceMs] = useState(0)
+  // What the volume-contract card needs done before a run's first payment — opening the billing
+  // cycle the run is to race. Held as a ref because the card registers it once and `runSimulation`
+  // has to reach the current one.
+  const contractPrepareRef = useRef<null | (() => Promise<ContractRunPreset | null>)>(null)
+  // The volume-contract card's counters for the run on screen, adopted from `liveRun` like the
+  // rows are — so a page mounted mid-run shows what has been counted rather than starting at zero.
+  const [contractTally, setContractTally] = useState<ContractRunTally>(emptyRunTally)
   const [gatewaySimConfigs, setGatewaySimConfigs] = useState<Record<string, GatewaySimConfig>>(initialState.gatewaySimConfigs)
   const gatewaySimConfigsRef = useRef(gatewaySimConfigs)
   useEffect(() => { gatewaySimConfigsRef.current = gatewaySimConfigs }, [gatewaySimConfigs])
@@ -1405,7 +1482,7 @@ export function DecisionSimulatorPage() {
   // Poll tightly while a run is producing events so the Autopilot feed keeps up;
   // relax back to the idle cadence once it finishes.
   const routingEvents = useRoutingEvents('1h', {
-    refreshInterval: isSimulating && !isPaused ? 500 : 15_000,
+    refreshInterval: isSimulating && !isPaused ? 2_000 : 15_000,
   })
   const sessionRoutingEvents = useMemo(() => {
     if (simulationStartedAtMs == null) return []
@@ -1728,7 +1805,9 @@ export function DecisionSimulatorPage() {
     setVolumeEvaluationLog(defaults.volumeEvaluationLog)
     setVolumeProgress(defaults.volumeProgress)
     liveRun.results = defaults.simulationResults
+    liveRun.contractTally = tallyOf(defaults.simulationResults)
     setSimulationResults(defaults.simulationResults)
+    setContractTally(liveRun.contractTally)
     setSimulationStartedAtMs(null)
     setResponseOpen(defaults.responseOpen)
     setDebitResponseOpen(defaults.debitResponseOpen)
@@ -1778,9 +1857,11 @@ export function DecisionSimulatorPage() {
     setVolumeEvaluationLog(nextState.volumeEvaluationLog)
     setVolumeProgress(nextState.volumeProgress)
     liveRun.results = nextState.simulationResults
+    // The persisted tally, not tallyOf(nextState.simulationResults) — that array is only a capped tail.
+    liveRun.contractTally = nextState.contractTally
     liveRun.running = false
-    setContractPaceMs(0)
     setSimulationResults(nextState.simulationResults)
+    setContractTally(liveRun.contractTally)
     setSimulationStartedAtMs(null)
     setResponseOpen(nextState.responseOpen)
     setDebitResponseOpen(nextState.debitResponseOpen)
@@ -1814,6 +1895,7 @@ export function DecisionSimulatorPage() {
   useEffect(() => {
     const sync = () => {
       setSimulationResults(liveRun.results)
+      setContractTally(liveRun.contractTally)
       setIsSimulating(liveRun.running)
       setIsPaused(liveRun.running && simulationPausedRef.current)
     }
@@ -1888,6 +1970,7 @@ export function DecisionSimulatorPage() {
       volumeEvaluationLog,
       volumeProgress,
       simulationResults,
+      contractTally,
       responseOpen,
       debitResponseOpen,
       volumeResponseOpen,
@@ -1927,6 +2010,7 @@ export function DecisionSimulatorPage() {
     volumeEvaluationLog,
     volumeProgress,
     simulationResults,
+    contractTally,
     responseOpen,
     debitResponseOpen,
     volumeResponseOpen,
@@ -2190,8 +2274,8 @@ export function DecisionSimulatorPage() {
           amount: parseFloat(form.amount) || 1000,
           currency: form.currency,
           paymentType: 'ORDER_PAYMENT',
-          paymentMethodType: form.payment_method_type,
-          paymentMethod: form.payment_method,
+          paymentMethod: form.payment_method_type,
+          paymentMethodType: form.payment_method,
           authType: form.auth_type,
           cardBrand: form.card_brand,
           cardSwitchProvider: form.card_brand,
@@ -2268,7 +2352,7 @@ export function DecisionSimulatorPage() {
     if (!debitRoutingFlag.isEnabled) return openSetupPrompt('debit', 'Debit routing is disabled.')
 
     const gateways = debitForm.eligible_gateways.split(',').map(s => s.trim()).filter(Boolean)
-    if (gateways.length === 0) return setError('Add at least one eligible gateway')
+    if (gateways.length === 0) return setError('Add at least one eligible connector')
 
     setLoading(true)
     setError(null)
@@ -2284,8 +2368,8 @@ export function DecisionSimulatorPage() {
           amount: parseFloat(debitForm.amount) || 1000,
           currency: debitForm.currency,
           paymentType: 'ORDER_PAYMENT',
-          paymentMethodType: 'CARD',
-          paymentMethod: 'DEBIT',
+          paymentMethod: 'CARD',
+          paymentMethodType: 'DEBIT',
           authType: debitForm.auth_type,
           metadata: buildDebitRoutingMetadata(),
         },
@@ -2319,12 +2403,14 @@ export function DecisionSimulatorPage() {
       })
       // Clear local state so the UI reflects the fresh-scores starting point.
       liveRun.results = []
+      liveRun.contractTally = emptyRunTally()
       setSimulationResults([])
+      setContractTally(liveRun.contractTally)
       setTxFilters({})
       routingEvents.refresh()
       setError(null)
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to flush gateway scores')
+      setError(e instanceof Error ? e.message : 'Failed to flush connector scores')
     } finally {
       setIsHardRefreshing(false)
     }
@@ -2333,6 +2419,14 @@ export function DecisionSimulatorPage() {
   async function runSimulation(opts: { resumeFrom?: number } = {}) {
     if (!effectiveMerchantId) return setError('Sign in with a merchant-linked account to continue')
     if (routingConfigUnavailable) return setError('Routing key config unavailable. Fix /config/routing-keys and retry.')
+
+    // A contract-driven run races a whole billing cycle, so the cycle is opened here — before a
+    // single payment goes out, and before `isSimulating` is set. Doing it once the run is under
+    // way put payments into the cycle being replaced and read, for an instant, as the cycle
+    // ending, which aborted the run through `onCycleEnded`.
+    if (!opts.resumeFrom && contractPrepareRef.current) {
+      await contractPrepareRef.current()
+    }
 
     const total = parseInt(simulationConfig.totalPayments) || 0
 
@@ -2355,7 +2449,9 @@ export function DecisionSimulatorPage() {
     setSetupPrompt(null)
     if (!isResume) {
       liveRun.results = []
+      liveRun.contractTally = emptyRunTally()
       setSimulationResults([])
+      setContractTally(liveRun.contractTally)
     }
     simulationAbortRef.current = false
     // Claim ownership of the shared run state. Any earlier run still unwinding is now superseded and
@@ -2399,7 +2495,7 @@ export function DecisionSimulatorPage() {
     // pool size below). Read once here so a mid-run slider change can't reshape an in-flight run.
     // 1 reproduces the original strictly-sequential loop.
     const concurrency = Math.max(1, Math.min(MAX_SIMULATION_TPS, Math.round(simulationConfig.tps) || 1))
-    const paceMs = Math.max(0, Math.round(contractPaceMs))
+    const endpoint = simulationConfig.endpoint
 
     // One full transaction (decide → score → optional smart retry). Returns the row to
     // append; throws on a backend error so the batch can tally it. `drawSuccess` mutates
@@ -2420,8 +2516,9 @@ export function DecisionSimulatorPage() {
             ? activeVars[i % activeVars.length]
             : (activeVars[scenarioSel] ?? activeVars[0]))
         : null
-      const paymentMethodType = isMultiObjective ? 'CARD' : form.payment_method_type
-      const paymentMethod = variant ? variant.paymentMethod : form.payment_method
+      // The method is the category (CARD), its type the specific method (CREDIT).
+      const paymentMethod = isMultiObjective ? 'CARD' : form.payment_method_type
+      const paymentMethodType = variant ? variant.paymentMethodType : form.payment_method
       const cardBrand = variant ? variant.cardSwitchProvider : form.card_brand
       const cardProgram = variant ? variant.cardProgram : form.card_program
       const cardIssuerCountry = variant ? variant.cardIssuerCountry : undefined
@@ -2434,7 +2531,7 @@ export function DecisionSimulatorPage() {
         ? Math.floor(amtLo + Math.random() * (amtHi - amtLo + 1))
         : (parseFloat(form.amount) || 1000)
 
-      const decideRes = await apiPost<DecideGatewayResponse>('/decide-gateway', {
+      const decideRequest = {
         merchantId: effectiveMerchantId,
         paymentInfo: {
           paymentId: paymentId,
@@ -2446,7 +2543,7 @@ export function DecisionSimulatorPage() {
           authType: form.auth_type,
           cardBrand,
           cardSwitchProvider: cardBrand,
-          cardType: paymentMethod,
+          cardType: paymentMethodType,
           cardProgram,
           ...(cardIssuerCountry && { cardIssuerCountry }),
           channel: moChannel,
@@ -2455,9 +2552,26 @@ export function DecisionSimulatorPage() {
         rankingAlgorithm: 'SR_BASED_ROUTING',
         // Cost savings is driven by the merchant Autopilot flag, not this request.
         eliminationEnabled: eliminationEnabled,
-      })
+      }
 
-      const decidedGateway = decideRes.decided_gateway
+      const decision = endpoint === 'decide'
+        ? await decideSimulatedPayment({
+          merchantId: effectiveMerchantId,
+          paymentId,
+          amount,
+          currency: formRef.current.currency,
+          paymentMethod,
+          paymentMethodType,
+          authType: form.auth_type,
+          cardNetwork: cardBrand,
+          cardProgram,
+          cardIssuerCountry,
+          gateways,
+          eliminationEnabled,
+        })
+        : simulatedDecisionFromDecideGateway(await apiPost<DecideGatewayResponse>('/decide-gateway', decideRequest))
+
+      const { decidedGateway, fallbackGateways } = decision
 
       const isSuccess = drawSuccess(decidedGateway)
       const failureMode = getGwFailureMode(decidedGateway)
@@ -2469,7 +2583,7 @@ export function DecisionSimulatorPage() {
       const retryable =
         smartRetryEnabledRef.current &&
         outcome === 'FAILURE' &&
-        decideRes.fallback_gateways.length > 0 &&
+        fallbackGateways.length > 0 &&
         Math.random() < SIM_RETRYABLE_FAILURE_SHARE
 
       await apiPost<UpdateScoreResponse>('/update-gateway-score', {
@@ -2486,7 +2600,7 @@ export function DecisionSimulatorPage() {
       let retryStatus: TransactionOutcome | undefined
 
       if (retryable) {
-        retryGateway = decideRes.fallback_gateways[0]
+        retryGateway = fallbackGateways[0]
         const retrySuccess = drawSuccess(retryGateway)
         const retryFailureMode = getGwFailureMode(retryGateway)
         retryStatus = retrySuccess ? 'CHARGED' : (retryFailureMode === 'timeout' ? 'PENDING_VBV' : 'FAILURE')
@@ -2502,31 +2616,20 @@ export function DecisionSimulatorPage() {
         })
       }
 
-      const mo = decideRes.multi_objective_info ?? null
+      const { fallbackGateways: _fallbacks, ...decisionFields } = decision
       return {
+        ...decisionFields,
         paymentId,
-        decidedGateway,
         status: outcome,
         timestamp: new Date().toISOString(),
-        routingApproach: decideRes.routing_approach ?? null,
-        gatewayPriorityMap: decideRes.gateway_priority_map ?? null,
         retryGateway,
         retryStatus,
-        costSavedBps: mo?.costSavedBps ?? null,
-        costWon: mo?.outcome === 'COST_WON',
-        authWon: mo?.outcome === 'AUTH_WON',
-        headAuthRate: mo?.ranked?.find((r) => r.isSrHead)?.authRate ?? null,
-        chosenAuthRate: mo?.ranked?.find((r) => r.isChosen)?.authRate ?? null,
-        margin: mo?.margin ?? null,
-        evGapTop2: mo?.evGapTop2 ?? null,
         amount,
         currency: formRef.current.currency,
         cardNetwork: cardBrand,
         cardProgram,
         cardIssuerRegion: cardIssuerCountry,
         cardScenario: variant?.label,
-        steerOutcome: decideRes.volume_steer_info?.outcome ?? null,
-        steerSrHead: decideRes.volume_steer_info?.srHead ?? null,
       }
     }
 
@@ -2538,7 +2641,24 @@ export function DecisionSimulatorPage() {
       // times and stream each result the moment it lands: completions (and the chart) flow
       // smoothly, and one slow request no longer stalls the other in-flight ones.
       let dispatched = resumeFrom
+      // Absolute completed count, decoupled from results.length (which is only a capped tail after a reload) — used for the persisted resume index so a second pause/resume can't replay completed transactions.
+      let completedCount = resumeFrom
       let lastError: unknown = null
+
+      // How long to leave between UI commits, as a function of how much there is to redraw.
+      //
+      // A commit costs work proportional to the rows already on screen: a dozen memos on this
+      // page each fold the whole result array, and the table maps every row. The run loop shares
+      // that thread, so at a fixed cadence every payment costs more than the last — measured
+      // across one cycle as 22ms of client time per payment at the start and 310ms by the end,
+      // against a backend answering in under 50ms throughout. The traffic rate then decays 8x
+      // inside a single billing cycle, which is no basis for a demo whose promises are sized
+      // against that rate.
+      //
+      // Widening the gap as rows accumulate holds the *rate* of that work roughly constant: the
+      // page still commits several times a second early on and a few times a second deep into a
+      // long run, which is far more often than anyone reads it, and the run keeps its pace.
+      const uiThrottleMs = () => Math.min(1_000, 150 + results.length / 4)
 
       // Commit the accumulated rows + refresh the events feed, throttled so a fast loop can't
       // spam re-renders (force=true bypasses the throttle for pause/end-of-run flushes).
@@ -2547,13 +2667,15 @@ export function DecisionSimulatorPage() {
         // run's rows are not wanted.
         if (!isCurrentRun()) return
         const now = Date.now()
-        if (force || now - lastUIUpdate > 150) {
+        if (force || now - lastUIUpdate > uiThrottleMs()) {
           liveRun.results = [...results]
+          liveRun.contractTally = { ...liveRun.contractTally }
           publishLiveRun()
           markExplorerRunDataUpdated()
           lastUIUpdate = now
         }
-        if (force || now - lastEventsRefresh > 250) {
+        // The events feed is a refetch and a render of its own, so it widens with the rest.
+        if (force || now - lastEventsRefresh > uiThrottleMs() + 100) {
           routingEvents.refresh()
           lastEventsRefresh = now
         }
@@ -2569,7 +2691,7 @@ export function DecisionSimulatorPage() {
           // and the resume index stays put; a Stop still breaks out. Flush once on the way in so a
           // page-leave/return resumes from exactly the committed rows.
           if (simulationPausedRef.current) {
-            runProgressRef.current = results.length
+            runProgressRef.current = completedCount
             flushResults(true)
             while (simulationPausedRef.current && !simulationAbortRef.current && isCurrentRun()) {
               await new Promise(resolve => setTimeout(resolve, 120))
@@ -2584,6 +2706,8 @@ export function DecisionSimulatorPage() {
           try {
             const row = await runTxn(i)
             results.push(row)
+            countPayment(liveRun.contractTally, row)
+            completedCount++
             consecutiveErrors = 0
           } catch (e) {
             lastError = e
@@ -2601,14 +2725,9 @@ export function DecisionSimulatorPage() {
           // point, which now belongs to whichever run replaced this one.
           if (!isCurrentRun()) return
           // Record the resume point as the committed count and flush on the shared throttle.
-          runProgressRef.current = results.length
+          runProgressRef.current = completedCount
           flushResults(false)
 
-          // Hold the configured rate. Each of the `concurrency` workers waits its own share, so
-          // the run as a whole dispatches one payment every `paceMs`.
-          if (paceMs > 0) {
-            await new Promise(resolve => setTimeout(resolve, paceMs * concurrency))
-          }
         }
       }
 
@@ -2629,6 +2748,7 @@ export function DecisionSimulatorPage() {
       if (isCurrentRun()) {
         liveRun.running = false
         liveRun.results = [...results]
+        liveRun.contractTally = { ...liveRun.contractTally }
         simulationPausedRef.current = false
         publishLiveRun()
       }
@@ -3040,13 +3160,7 @@ export function DecisionSimulatorPage() {
 
   // Human-readable routing label, shared by the Transaction Log cell and its filter.
   const routingApproachLabel = (approach?: string | null): string =>
-    approach?.includes('HEDGING')
-      ? 'Hedging'
-      : approach === 'SR_SELECTION_MULTI_OBJECTIVE'
-        ? 'Cost Based'
-        : approach === 'SR_SELECTION_V3_ROUTING'
-          ? 'Auth Based'
-          : approach ?? '—'
+    routingApproachDisplay(approach).label
 
   // Distinct values that populate the categorical Transaction Log column filters.
   const txFilterOptions = useMemo(() => {
@@ -3108,6 +3222,13 @@ export function DecisionSimulatorPage() {
       return true
     })
   }, [deferredSimulationResults, txFilters])
+
+  // The newest rows, oldest first: the log reads top to bottom and auto-scrolls to the latest
+  // transaction as rows arrive (see the `txLogRef` effect).
+  const txVisibleRows = useMemo(
+    () => txFilteredRows.slice(-TX_TABLE_MAX_ROWS),
+    [txFilteredRows],
+  )
 
   // Column totals over the currently filtered rows, for the Transaction Log footer.
   // Only the numeric columns are summable: Amount (all rows) and Cost Savings (realized —
@@ -3205,12 +3326,15 @@ export function DecisionSimulatorPage() {
     }
   }, [deferredSimulationResults])
 
-  // Multi-objective outcome counts: how often the auth objective vs the cost
-  // objective won the routing decision across the run.
+  // Each decision comes from cost, the static rule, or SR. On a /decide run the rule answers
+  // whenever SR doesn't run; those decisions count as rule-based, not SR-based.
   const multiObjectiveStats = useMemo(() => {
     let costWon = 0
     let costSuccess = 0
     let costFailure = 0
+    let ruleBased = 0
+    let ruleSuccess = 0
+    let ruleFailure = 0
     let srSuccess = 0
     let srFailure = 0
     let total = 0
@@ -3227,21 +3351,31 @@ export function DecisionSimulatorPage() {
         costWon++
         if (r.status === 'CHARGED') costSuccess++
         else costFailure++
+      } else if (r.routingApproach === RULE_DECIDED_APPROACH) {
+        // On /decide, the static rule produced the answer and SR never scored this payment.
+        ruleBased++
+        if (r.status === 'CHARGED') ruleSuccess++
+        else ruleFailure++
       } else {
         // Everything else is SR-based — auth-won AND hedged decisions.
         if (r.status === 'CHARGED') srSuccess++
         else srFailure++
       }
     }
-    // Total = SR-based + cost-based by construction, and matches the Gateway Summary total.
-    const srBased = total - costWon
-    return { srBased, srSuccess, srFailure, costWon, costSuccess, costFailure, total, tpv, currency }
+    // Total = SR-based + rule-based + cost-based by construction, and matches the Gateway
+    // Summary total.
+    const srBased = total - costWon - ruleBased
+    return {
+      srBased, srSuccess, srFailure,
+      ruleBased, ruleSuccess, ruleFailure,
+      costWon, costSuccess, costFailure,
+      total, tpv, currency,
+    }
   }, [deferredSimulationResults])
 
-  // Auth-rate view of the run. Each row is one decision: `status` is the first-attempt
-  // outcome and `retryStatus` is the smart-retry outcome (only set when a soft decline was
-  // retried on an alternate PSP). FAAR credits only first-attempt charges; NAR credits the
-  // final outcome (first attempt OR a successful retry), so NAR ≥ FAAR whenever retry helps.
+  // Over every decision the run made, rule-decided included. `status` is the first attempt,
+  // `retryStatus` the smart-retry outcome. FAAR credits only first-attempt charges; NAR credits the
+  // final outcome, so NAR ≥ FAAR whenever retry helps.
   const authRateStats = useMemo(() => {
     let total = 0
     let firstAttemptSuccess = 0
@@ -3444,7 +3578,9 @@ export function DecisionSimulatorPage() {
   function clearBatchResults() {
     const defaults = getDefaultExplorerState()
     liveRun.results = defaults.simulationResults
+    liveRun.contractTally = tallyOf(defaults.simulationResults)
     setSimulationResults(defaults.simulationResults)
+    setContractTally(liveRun.contractTally)
     setResumableRun(defaults.resumableRun)
     // Abort any in-flight run and drop the run-start timestamp so the
     // Autopilot Actions feed (scoped to simulationStartedAtMs) clears back
@@ -3478,7 +3614,6 @@ export function DecisionSimulatorPage() {
       resetBatchInputs()
       clearBatchResults()
       // A pace only belongs to a loaded contract; resetting the tab drops it with everything else.
-      setContractPaceMs(0)
     } else if (activeTab === 'rule') {
       setRuleResetSignal(n => n + 1)
     } else if (activeTab === 'volume') {
@@ -3536,7 +3671,7 @@ export function DecisionSimulatorPage() {
           onClick={() => setHardRefreshConfirmOpen(true)}
           disabled={isSimulating || !effectiveMerchantId || isHardRefreshing}
           title="Hard refresh — flush this merchant's SR scores from Redis so the next run starts fresh. Use sparingly."
-          aria-label="Hard refresh gateway scores"
+          aria-label="Hard refresh connector scores"
           className="inline-flex h-7 w-7 items-center justify-center rounded-md text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-600 disabled:pointer-events-none disabled:opacity-40 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-slate-300"
         >
           <RefreshCw size={14} className={isHardRefreshing ? 'animate-spin' : ''} />
@@ -3800,12 +3935,31 @@ export function DecisionSimulatorPage() {
               </div>
             )}
 
+            {showMoreInputs && (
+              <div className="flex w-[170px] flex-col gap-1.5">
+                <SurfaceLabel>
+                  <span title="API each transaction is routed through. Decide also evaluates the active routing rule on the payment's attributes, and returns the rule output when Auth Rate routing doesn't run. Applies on the next run.">Endpoint</span>
+                </SurfaceLabel>
+                <select
+                  value={simulationConfig.endpoint}
+                  disabled={isSimulating}
+                  title={SIMULATION_ENDPOINTS.find(e => e.value === simulationConfig.endpoint)?.path}
+                  onChange={e => setSimulationConfig(c => ({ ...c, endpoint: e.target.value as SimulationEndpoint }))}
+                  className="w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-1.5 text-sm font-medium text-slate-800 focus:outline-none focus:border-brand-500 disabled:cursor-not-allowed disabled:opacity-50 dark:border-[#222226] dark:bg-[#0d0d13] dark:text-slate-100"
+                >
+                  {SIMULATION_ENDPOINTS.map(e => (
+                    <option key={e.value} value={e.value} title={e.path}>{e.label}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             {showMoreInputs && (() => {
               const tps = Math.max(1, Math.min(MAX_SIMULATION_TPS, simulationConfig.tps || 1))
               return (
                 <div className="flex w-[62px] flex-col gap-1.5">
                   <SurfaceLabel>
-                    <span title={`Transactions kept in flight at once (1–${MAX_SIMULATION_TPS}). Higher = more decide+feedback round-trips per second, so gateway scores move faster. Applies on the next run.`}>TPS</span>
+                    <span title={`Transactions kept in flight at once (1–${MAX_SIMULATION_TPS}). Higher = more decide+feedback round-trips per second, so connector scores move faster. Applies on the next run.`}>TPS</span>
                   </SurfaceLabel>
                   <input
                     type="number"
@@ -3890,11 +4044,14 @@ export function DecisionSimulatorPage() {
                 spacer had, but without carrying 22px of dead space above the buttons once the cluster
                 wraps onto a line of its own (where the spacer aligned it with nothing). */}
             <div className="flex flex-wrap items-center gap-3 self-end lg:ml-auto">
+                <span className="text-xs text-slate-500 dark:text-slate-400" title="Routing endpoint used for each simulated payment; change it under More">
+                  {SIMULATION_ENDPOINTS.find(e => e.value === simulationConfig.endpoint)?.label}
+                </span>
                 <Button
                   size="sm"
                   variant="ghost"
                   onClick={() => setShowMoreInputs(v => !v)}
-                  title="Show or hide the advanced controls (TPS, Add processor)"
+                  title="Show or hide the advanced controls (endpoint, TPS, Add processor)"
                 >
                   <SlidersHorizontal size={14} />
                   {showMoreInputs ? 'Less' : 'More'}
@@ -3956,37 +4113,47 @@ export function DecisionSimulatorPage() {
         style={activeTab === 'rule' ? { display: 'none' } : undefined}
       >
         <div className={`flex flex-col gap-6 min-w-0 ${activeTab === 'batch' ? 'lg:min-h-0' : 'self-start'}`}>
-        {activeTab === 'batch' && (
-          <ContractSimulationPanel
+        {activeTab === 'batch' && volumeContractsBeta && (
+          <VolumeCommitmentRunChart
             merchantId={effectiveMerchantId}
+            tally={contractTally}
+            colorFor={colorForGateway}
             isSimulating={isSimulating}
-            tps={simulationConfig.tps}
-            onContractGone={() => setContractPaceMs(0)}
+            onPrepareRun={prepare => {
+              contractPrepareRef.current = prepare
+            }}
+            onContractGone={() => {}}
             onCycleEnded={() => {
               // Volume sent past the cycle end lands in the next period, against goals that have
               // just reset — stop rather than quietly mis-attribute it.
               simulationAbortRef.current = true
-              setContractPaceMs(0)
             }}
-            onLoad={({ gateways, amount, totalPayments, paceMs }) => {
-              setContractPaceMs(paceMs)
-              // `form.amount` drives the fixed-amount path and the min/max pair drives the
-              // multi-objective one; setting both keeps the ticket exact either way.
-              setForm(f => ({ ...f, eligible_gateways: gateways.join(', '), amount: String(amount) }))
-              setSimulationConfig(c => ({
-                ...c,
-                minAmount: amount,
-                maxAmount: amount,
-                totalPayments: String(totalPayments),
+            onLoad={({ gateways, ticket }) => {
+              // Who the payments may go to, and what each one is worth. The rate stays this page's
+              // own — a contract run goes as fast as any other — but the ticket is a contract term:
+              // every goal on the card is denominated in it, and the card derives it from the
+              // volume the document declares per contract day.
+              //
+              // Both amount inputs are set, because which one a payment reads depends on the
+              // ranking algorithm: SR routing sends `form.amount`, multi-objective draws from the
+              // range. Setting one alone leaves the other path racing the contract's promises with
+              // this page's default $10-$100 ticket, which no target here is sized for.
+              setForm(f => ({
+                ...f,
+                eligible_gateways: gateways.join(', '),
+                ...(ticket == null ? {} : { amount: String(ticket) }),
               }))
+              if (ticket == null) return
+              const pinned = Math.min(
+                SIMULATION_AMOUNT_BOUND_MAX,
+                Math.max(SIMULATION_AMOUNT_BOUND_MIN, Math.round(ticket)),
+              )
+              setSimulationConfig(c =>
+                c.minAmount === pinned && c.maxAmount === pinned
+                  ? c
+                  : { ...c, minAmount: pinned, maxAmount: pinned },
+              )
             }}
-          />
-        )}
-        {activeTab === 'batch' && (
-          <VolumeCommitmentRunChart
-            merchantId={effectiveMerchantId}
-            results={simulationResults}
-            colorFor={colorForGateway}
           />
         )}
         {activeTab === 'batch' && (
@@ -4336,7 +4503,7 @@ export function DecisionSimulatorPage() {
                     })()}
                     {Object.keys(gatewayStats).length === 1 && eligibleGatewaysParsed.length > 1 && (
                       <p className="text-[11px] text-slate-500 pt-1 mx-auto max-w-[57ch] leading-4">
-                        SR routing concentrates traffic on the highest-scoring gateway. Run with a "Gateway Down" scenario to see score drop and traffic shift to the next gateway.
+                        SR routing concentrates traffic on the highest-scoring connector. Run with a "Connector Down" scenario to see score drop and traffic shift to the next connector.
                       </p>
                     )}
                   </CardBody>
@@ -4471,7 +4638,7 @@ export function DecisionSimulatorPage() {
 
                 {/* Fallback Gateways */}
                 <div className="space-y-2">
-                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-[#78849a] leading-4">Fallback Gateways</p>
+                  <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500 dark:text-[#78849a] leading-4">Fallback Connectors</p>
                   <div className="space-y-1.5">
                     {fallbackConnectors.map((connector, idx) => (
                       <div key={idx} className="group flex items-center gap-0 rounded-xl border border-slate-200 dark:border-[#1e2330] bg-white dark:bg-[#0c0f17] overflow-hidden transition-shadow hover:shadow-sm">
@@ -4479,14 +4646,14 @@ export function DecisionSimulatorPage() {
                           {idx + 1}
                         </span>
                         <input
-                          placeholder="gateway name"
+                          placeholder="connector name"
                           value={connector.gateway_name}
                           onChange={e => updateFallbackConnector(idx, 'gateway_name', e.target.value)}
                           className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm font-medium text-slate-700 dark:text-[#c8d0de] focus:outline-none"
                         />
                         <span className="shrink-0 border-x border-slate-100 dark:border-[#1e2330] bg-slate-50 dark:bg-[#10131c] px-2 py-2.5 text-[11px] font-bold text-slate-500 dark:text-[#3a4258] select-none leading-4">/</span>
                         <input
-                          placeholder="gateway id (optional)"
+                          placeholder="connector id (optional)"
                           value={connector.gateway_id || ''}
                           onChange={e => updateFallbackConnector(idx, 'gateway_id', e.target.value)}
                           className="flex-1 min-w-0 bg-transparent px-3 py-2.5 text-sm text-slate-500 dark:text-[#8090a8] focus:outline-none"
@@ -4504,7 +4671,7 @@ export function DecisionSimulatorPage() {
                     onClick={addFallbackConnector}
                     className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs font-medium text-brand-600 hover:bg-brand-50 dark:hover:bg-brand-500/10 transition-colors"
                   >
-                    <Plus size={12} /> Add Gateway
+                    <Plus size={12} /> Add Connector
                   </button>
                 </div>
               </>
@@ -4572,7 +4739,7 @@ export function DecisionSimulatorPage() {
                 </div>
 
                 <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">Eligible Gateways (comma-separated)</label>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Eligible Connectors (comma-separated)</label>
                   <input
                     value={debitForm.eligible_gateways}
                     onChange={e => setDebitField('eligible_gateways', e.target.value)}
@@ -4727,7 +4894,7 @@ export function DecisionSimulatorPage() {
                         <option value="FAILURE">Failure (FAILURE)</option>
                       </select>
                       <p className="mt-1 text-xs text-slate-500 max-w-[57ch]">
-                        After deciding the gateway, single test will post feedback with this outcome so the payment appears in Decision Audit.
+                        After deciding the connector, single test will post feedback with this outcome so the payment appears in Decision Audit.
                       </p>
                     </div>
                     {singleRunOutcome === 'FAILURE' && <ErrorInfoFields info={errorInfo} onChange={setErrorField} rules={gsmRules} />}
@@ -4762,7 +4929,7 @@ export function DecisionSimulatorPage() {
                       className="rounded border-slate-300 dark:border-slate-600 disabled:cursor-not-allowed"
                     />
                     <span className="text-xs text-slate-600 dark:text-slate-400">
-                      Smart retry — on GSM <code className="text-[11px] leading-4">retry</code> decision, attempt next fallback gateway
+                      Smart retry — on GSM <code className="text-[11px] leading-4">retry</code> decision, attempt next fallback connector
                       {!gsmScoringFilterEnabled && <span className="ml-1 text-amber-700">(enable GSM scoring filter first)</span>}
                     </span>
                   </label>
@@ -4856,6 +5023,21 @@ export function DecisionSimulatorPage() {
                           </span>
                         </p>
                       </div>
+                      {(simulationConfig.endpoint === 'decide' || multiObjectiveStats.ruleBased > 0) && (
+                        <div className="flex min-w-0 flex-col gap-1.5">
+                          <StatLabel label="Rule-based decisions" />
+                          <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-700 dark:text-sky-400">
+                            {multiObjectiveStats.ruleBased.toLocaleString()}
+                            <span className="ml-1.5 text-xs font-medium tabular-nums" title="Charged / Failed">
+                              <span className="text-slate-500">(</span>
+                              <span className="text-emerald-700 dark:text-emerald-400">{multiObjectiveStats.ruleSuccess.toLocaleString()}</span>
+                              <span className="text-slate-500"> / </span>
+                              <span className="text-red-600 dark:text-red-400">{multiObjectiveStats.ruleFailure.toLocaleString()}</span>
+                              <span className="text-slate-500">)</span>
+                            </span>
+                          </p>
+                        </div>
+                      )}
                       <div className="flex min-w-0 flex-col gap-1.5">
                         <StatLabel label="Cost-based decisions" />
                         <p className="py-1.5 text-lg font-semibold leading-snug tabular-nums text-sky-700 dark:text-sky-400">
@@ -5016,7 +5198,7 @@ export function DecisionSimulatorPage() {
                     <div>
                       <div className="flex items-center justify-between text-xs text-slate-500 dark:text-[#8f9bb0]">
                         <span>Observed percentage split</span>
-                        <span>{sortedVolumeDistribution.length} gateways</span>
+                        <span>{sortedVolumeDistribution.length} connectors</span>
                       </div>
                       <div className="mt-2 flex h-2.5 overflow-hidden rounded-full bg-slate-100 dark:bg-[#1d2633]">
                         {sortedVolumeDistribution.map((item) => (
@@ -5067,13 +5249,13 @@ export function DecisionSimulatorPage() {
                           <tr>
                             <th className="w-16 px-4 py-2 text-left">#</th>
                             <th className="px-4 py-2 text-left">payment_id</th>
-                            <th className="px-4 py-2 text-left">gateway</th>
+                            <th className="px-4 py-2 text-left">connector</th>
                             <th className="w-24 px-4 py-2 text-right">trace</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 dark:divide-[#263141]">
-                          {volumeEvaluationLog.slice(-200).map((entry, idx) => {
-                            const absIdx = Math.max(0, volumeEvaluationLog.length - 200) + idx
+                          {volumeEvaluationLog.slice(-EXPLORER_RESULT_HISTORY_PERSIST_LIMIT).map((entry, idx) => {
+                            const absIdx = Math.max(0, volumeEvaluationLog.length - EXPLORER_RESULT_HISTORY_PERSIST_LIMIT) + idx
                             return (
                             <tr
                               key={entry.paymentId}
@@ -5234,7 +5416,7 @@ export function DecisionSimulatorPage() {
                 <Card className="lg:shrink-0">
                   <CardHeader className="flex flex-row items-start justify-between gap-3">
                     <div>
-                      <h3 className="text-[14px] font-semibold text-slate-500 dark:text-slate-400 leading-5">Gateway Selection Summary</h3>
+                      <h3 className="text-[14px] font-semibold text-slate-500 dark:text-slate-400 leading-5">Connector Selection Summary</h3>
                       {/* <p className="text-[13px] text-slate-500 dark:text-slate-400 mt-0.5 leading-[18px]">Overall success rate &amp; routed share across the run</p> */}
                     </div>
                     <span className="text-[13px] tabular-nums flex items-center gap-1.5 shrink-0 leading-[18px]">
@@ -5290,7 +5472,7 @@ export function DecisionSimulatorPage() {
                     <div className="py-12 text-center">
                       <p className="text-sm text-slate-500 dark:text-slate-400">No events yet</p>
                       <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 mx-auto max-w-[57ch]">
-                        Start a simulation — leader changes and auth-band crossings appear here as gateway scores shift.
+                        Start a simulation — leader changes and auth-band crossings appear here as connector scores shift.
                       </p>
                     </div>
                   ) : routingEvents.isUnavailable ? (
@@ -5414,8 +5596,8 @@ export function DecisionSimulatorPage() {
                     decideParams={{
                       amount: form.amount,
                       currency: form.currency,
-                      paymentMethodType: form.payment_method_type,
-                      paymentMethod: form.payment_method,
+                      paymentMethod: form.payment_method_type,
+                      paymentMethodType: form.payment_method,
                       authType: form.auth_type,
                       cardBrand: form.card_brand,
                       rankingAlgorithm: 'SR_BASED_ROUTING',
@@ -5433,7 +5615,7 @@ export function DecisionSimulatorPage() {
                   <CardBody>
                     <div className="flex items-start justify-between mb-3">
                       <div>
-                        <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Decided Gateway</p>
+                        <p className="text-xs text-slate-500 uppercase tracking-wide mb-1">Decided Connector</p>
                         <p className="text-3xl font-bold text-slate-900">{result.decided_gateway}</p>
                       </div>
                       <div className="text-right space-y-2">
@@ -5502,7 +5684,7 @@ export function DecisionSimulatorPage() {
                   <Card>
                     <CardHeader>
                       <div className="flex items-center justify-between">
-                        <h3 className="text-sm font-medium text-slate-800">Gateway Scores</h3>
+                        <h3 className="text-sm font-medium text-slate-800">Connector Scores</h3>
                         <Button size="sm" variant="ghost" onClick={run} className="text-xs">
                           <RefreshCw size={12} /> Refresh
                         </Button>
@@ -5596,7 +5778,7 @@ export function DecisionSimulatorPage() {
               <Card>
                 <CardBody className="py-16 text-center">
                   <Play size={32} className="text-gray-500 mx-auto mb-3" />
-                  <p className="text-slate-500 text-sm mx-auto max-w-[57ch]">Fill in the parameters and click "Run Single Transaction" to decide a gateway, post feedback, and inspect the audit trail.</p>
+                  <p className="text-slate-500 text-sm mx-auto max-w-[57ch]">Fill in the parameters and click "Run Single Transaction" to decide a connector, post feedback, and inspect the audit trail.</p>
                 </CardBody>
               </Card>
             )
@@ -5628,6 +5810,9 @@ export function DecisionSimulatorPage() {
                     ? `${txFilteredRows.length} / ${deferredSimulationResults.length}`
                     : deferredSimulationResults.length}{' '}
                   transactions
+                  {/* Say so rather than let a reader take the newest rows for all of them. */}
+                  {txFilteredRows.length > txVisibleRows.length &&
+                    ` · showing the latest ${txVisibleRows.length}`}
                 </span>
               </span>
             )}
@@ -5642,13 +5827,13 @@ export function DecisionSimulatorPage() {
                       <th className="text-left px-3 py-2">Amount</th>
                       <th className="text-left px-3 py-2 whitespace-nowrap w-20">Network</th>
                       <th className="text-left px-3 py-2 whitespace-nowrap ">Program</th>
-                      <th className="text-left px-3 py-2 whitespace-nowrap">Gateway</th>
+                      <th className="text-left px-3 py-2 whitespace-nowrap">Connector</th>
                       <th className="text-right px-3 py-2 whitespace-nowrap w-20">SR Score</th>
                       <th className="text-right px-3 py-2 whitespace-nowrap w-20" title="Expected-value gap between the top-two EV-ranked PSPs (% of ticket) — the decision's margin of victory. Small values mean it was a close call.">EV Δ (top 2)</th>
                       <th className="text-left px-3 py-2">Routing</th>
                       <th className="text-left px-3 py-2">Outcome</th>
                       <th className="text-right px-3 py-2 whitespace-nowrap">Cost Savings</th>
-                      {smartRetryEnabled && <th className="text-left px-3 py-2 whitespace-nowrap">Retry Gateway</th>}
+                      {smartRetryEnabled && <th className="text-left px-3 py-2 whitespace-nowrap">Retry Connector</th>}
                       {smartRetryEnabled && <th className="text-left px-3 py-2">Retry Outcome</th>}
                     </tr>
                     {(() => {
@@ -5691,7 +5876,7 @@ export function DecisionSimulatorPage() {
                     })()}
                   </thead>
                   <tbody className="divide-y divide-slate-100 dark:divide-[#1a1a22]">
-                    {txFilteredRows.map(({ res, idx }) => (
+                    {txVisibleRows.map(({ res, idx }) => (
                       <tr
                         key={res.paymentId}
                         className="group cursor-pointer hover:bg-slate-50 dark:hover:bg-[#0d0d14] transition-colors"
@@ -5728,15 +5913,14 @@ export function DecisionSimulatorPage() {
                           )}
                         </td>
                         <td className="px-3 py-2">
-                          {res.routingApproach?.includes('HEDGING') ? (
-                            <span className="inline-flex items-center rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700 ring-1 ring-inset ring-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:ring-amber-800 leading-4">Hedging</span>
-                          ) : res.routingApproach === 'SR_SELECTION_MULTI_OBJECTIVE' ? (
-                            <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-inset ring-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-300 dark:ring-emerald-800 leading-4">Cost Based</span>
-                          ) : res.routingApproach === 'SR_SELECTION_V3_ROUTING' ? (
-                            <span className="inline-flex items-center rounded-full bg-brand-50 px-2 py-0.5 text-[11px] font-medium text-brand-700 ring-1 ring-inset ring-brand-200 dark:bg-brand-900/20 dark:text-brand-300 dark:ring-brand-800 leading-4">Auth Based</span>
-                          ) : (
-                            <span className="text-[11px] text-slate-500 leading-4">{res.routingApproach ?? '—'}</span>
-                          )}
+                          {(() => {
+                            const { label, badgeClass } = routingApproachDisplay(res.routingApproach)
+                            return badgeClass ? (
+                              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-medium leading-4 ring-1 ring-inset ${badgeClass}`}>{label}</span>
+                            ) : (
+                              <span className="text-[11px] text-slate-500 leading-4">{label}</span>
+                            )
+                          })()}
                         </td>
                         <td className="px-3 py-2">
                           <span className={`text-xs font-semibold ${res.status === 'CHARGED' ? 'text-emerald-700 dark:text-emerald-400' : res.status === 'PENDING_VBV' ? 'text-amber-700 dark:text-amber-400' : 'text-red-600 dark:text-red-400'}`}>{res.status}</span>
@@ -5805,7 +5989,7 @@ export function DecisionSimulatorPage() {
       )}
 
       {setupPrompt && (
-        <div className="fixed bottom-0 left-0 right-0 top-[76px] z-[140] flex items-center justify-center p-4">
+        <div className={`fixed ${overlayInsetClass(false)} z-[140] flex items-center justify-center p-4`}>
           <button
             type="button"
             aria-label="Close setup prompt"
@@ -5868,7 +6052,7 @@ export function DecisionSimulatorPage() {
       )}
 
       {selectedAuditPaymentId && (
-        <div className="fixed bottom-0 left-64 right-0 top-[76px] z-[130] p-8">
+        <div className={`fixed ${overlayInsetClass()} z-[130] p-8`}>
           <button
             type="button"
             aria-label="Close payment audit"
@@ -5963,7 +6147,7 @@ export function DecisionSimulatorPage() {
                                     </p>
                                   </div>
                                   <Badge variant={badgeVariantForEvent(event)}>
-                                    {humanizeAuditValue(event.status) || eventTypeLabel(event.flow_type)}
+                                    {humanizeAuditValue(event.status) || eventTypeLabel(event)}
                                   </Badge>
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-2">
@@ -5980,7 +6164,7 @@ export function DecisionSimulatorPage() {
                   ) : (
                     <EmptyAuditState
                       title="No audit trail captured yet"
-                      body="Run a simulated payment and gateway update first, then reopen the row once the audit payload is available."
+                      body="Run a simulated payment and connector update first, then reopen the row once the audit payload is available."
                     />
                   )}
                 </div>
@@ -6096,7 +6280,7 @@ export function DecisionSimulatorPage() {
       )}
 
       {selectedPreviewPaymentId && (
-        <div className="fixed bottom-0 left-64 right-0 top-[76px] z-[130] p-8">
+        <div className={`fixed ${overlayInsetClass()} z-[130] p-8`}>
           <button
             type="button"
             aria-label="Close decision trace"
@@ -6196,7 +6380,7 @@ export function DecisionSimulatorPage() {
                                     </p>
                                   </div>
                                   <Badge variant={badgeVariantForEvent(event)}>
-                                    {humanizeAuditValue(event.status) || eventTypeLabel(event.flow_type)}
+                                    {humanizeAuditValue(event.status) || eventTypeLabel(event)}
                                   </Badge>
                                 </div>
                                 <div className="mt-3 flex flex-wrap gap-2">

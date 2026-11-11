@@ -270,8 +270,11 @@ pub fn parse_from_api_txn_card_info(apiType: T::ApiTxnCardInfo) -> Option<ETCa::
         // cardReferenceId: apiType.cardReferenceId,
         // txnDetailId: apiType.txnDetailId.and_then(|id_str| id_str.parse::<i64>().ok()).map(ETTD::to_txn_detail_id)?,
         dateCreated: apiType.dateCreated?,
-        paymentMethodType: apiType.paymentMethodType?,
-        paymentMethod: apiType.paymentMethod?,
+        // The legacy API sends the legacy transaction fields.
+        instrument: crate::types::payment_instrument::PaymentInstrument::from_legacy_txn(
+            &apiType.paymentMethodType?,
+            &apiType.paymentMethod?,
+        ),
         // cardGlobalFingerprint: apiType.cardGlobalFingerprint,
         paymentSource: apiType.paymentSource,
         authType: apiType

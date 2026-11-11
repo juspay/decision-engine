@@ -1,7 +1,7 @@
 use clickhouse::Row;
 use serde::Deserialize;
 
-use crate::analytics::models::{PaymentAuditEvent, PaymentAuditQuery};
+use crate::analytics::models::{PaymentAuditEvent, PaymentAuditQuery, PaymentAuditScope};
 use crate::error::ApiError;
 
 use super::super::common::{fetch_all, DOMAIN_TABLE};
@@ -39,7 +39,7 @@ struct AuditEventRow {
 pub async fn load(
     client: &clickhouse::Client,
     query: &PaymentAuditQuery,
-    preview_only: bool,
+    scope: PaymentAuditScope,
     lookup_key: &str,
 ) -> Result<Vec<PaymentAuditEvent>, ApiError> {
     let mut builder = BoundQueryBuilder::new(DOMAIN_TABLE);
@@ -69,7 +69,7 @@ pub async fn load(
         "details".to_string(),
         "created_at_ms".to_string(),
     ]);
-    builder.extend_filters(payment_audit_timeline_filters(query, preview_only));
+    builder.extend_filters(payment_audit_timeline_filters(query, scope));
     builder.add_filter(FilterClause::eq("lookup_key", lookup_key.to_string()));
     builder.add_order_by(OrderClause::asc("created_at_ms"));
     builder.add_order_by(OrderClause::asc("event_id"));

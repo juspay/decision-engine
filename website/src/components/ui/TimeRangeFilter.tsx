@@ -3,6 +3,7 @@ import { AnalyticsRangeValue } from '../../types/api'
 import { Button } from './Button'
 import { DateRangeCalendar } from './DateRangeCalendar'
 import { RANGE_OPTIONS, customWindowFrom, formatWindowLabel } from '../../lib/timeRange'
+import { useCloseOnFrameBlur } from '../../hooks/useCloseOnFrameBlur'
 
 type TimeRangeFilterProps = {
   range: AnalyticsRangeValue
@@ -51,6 +52,8 @@ export function TimeRangeFilter({
     }
   }, [open])
 
+  useCloseOnFrameBlur(open, () => setOpen(false))
+
   // A page can drop out of custom on its own (a URL change, a reset); the popover follows.
   useEffect(() => {
     if (range !== 'custom') setOpen(false)
@@ -71,7 +74,7 @@ export function TimeRangeFilter({
 
   return (
     <div ref={containerRef} className={`relative ${className}`}>
-      <div className="flex flex-wrap items-center gap-1 rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
+      <div className="flex flex-nowrap items-center gap-1 rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d]">
         {RANGE_OPTIONS.map((option) => (
           <Button
             key={option.value}

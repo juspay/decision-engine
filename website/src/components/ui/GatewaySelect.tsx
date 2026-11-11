@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ChevronDown } from 'lucide-react'
 import type { GatewayOption } from '../../lib/connectors'
+import { useCloseOnFrameBlur } from '../../hooks/useCloseOnFrameBlur'
 
 const MAX_LIST_HEIGHT = 272
 const MIN_LIST_HEIGHT = 160
@@ -23,7 +24,7 @@ export function GatewaySelect({
   value,
   onChange,
   options,
-  placeholder = 'Gateway name',
+  placeholder = 'Connector name',
   className = '',
   dataCy,
   onEnter,
@@ -37,7 +38,11 @@ export function GatewaySelect({
   const dropdownRef = useRef<HTMLDivElement>(null)
 
   const query = value.trim().toLowerCase()
-  const filtered = query ? options.filter((o) => o.name.toLowerCase().includes(query)) : options
+  const filtered = query
+    ? options.filter(
+        (o) => o.name.toLowerCase().includes(query) || o.label?.toLowerCase().includes(query),
+      )
+    : options
 
   function openDropdown() {
     const rect = inputRef.current?.getBoundingClientRect()
@@ -70,6 +75,8 @@ export function GatewaySelect({
     document.addEventListener('mousedown', onOutside)
     return () => document.removeEventListener('mousedown', onOutside)
   }, [open])
+
+  useCloseOnFrameBlur(open, close)
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
     if (e.key === 'ArrowDown') {
@@ -124,7 +131,7 @@ export function GatewaySelect({
       <button
         type="button"
         tabIndex={-1}
-        aria-label={open ? 'Hide gateway list' : 'Show gateway list'}
+        aria-label={open ? 'Hide connector list' : 'Show connector list'}
         // Keeps focus in the input, so the editors' commit-on-leave never fires from a toggle click.
         onMouseDown={(e) => {
           e.preventDefault()
@@ -151,7 +158,7 @@ export function GatewaySelect({
               <p className="px-3 py-2.5 text-sm text-slate-500">
                 {value.trim()
                   ? <>No connector matches — <span className="font-mono">{value.trim()}</span> is used as typed</>
-                  : 'No gateways'}
+                  : 'No connectors'}
               </p>
             ) : (
               filtered.map((o, i) => (
@@ -166,9 +173,21 @@ export function GatewaySelect({
                     i === highlight ? 'bg-slate-50 dark:bg-[#1c1c24]' : ''
                   } ${o.name === value ? 'bg-brand-50/50 font-medium text-brand-600 dark:bg-brand-900/10 dark:text-brand-400' : ''}`}
                 >
-                  {o.name}
-                  {/* The merchant may run several accounts of one connector, so the id is what
-                      actually tells two options apart. */}
+                  {/* The merchant may run several accounts of one connector, so the label (their
+                      own name for the account) and the id are what tell two options apart. */}
+                  <span className="flex min-w-0 items-baseline gap-2">
+                    <span>{o.name}</span>
+                    {o.label && (
+                      <span className="min-w-0 truncate font-sans text-xs font-normal text-slate-600 dark:text-slate-400">
+                        {o.label}
+                      </span>
+                    )}
+                    {o.disabled && (
+                      <span className="shrink-0 font-sans text-xs font-normal text-slate-500">
+                        (disabled)
+                      </span>
+                    )}
+                  </span>
                   {o.gatewayId && (
                     <span
                       data-gateway-id={o.gatewayId}

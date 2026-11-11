@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { Network } from 'lucide-react'
 import { Card, CardBody, CardHeader, SurfaceLabel } from '../ui/Card'
 import { Button } from '../ui/Button'
 import { ErrorMessage } from '../ui/ErrorMessage'
@@ -54,13 +53,8 @@ export function DebitRoutingPage() {
 
       <Card>
         <CardHeader>
-          <div className="flex items-center gap-2">
-            <Network size={16} className="text-brand-600" />
-            <div>
-              <SurfaceLabel>Debit routing access</SurfaceLabel>
-              <h2 className="mt-2 font-medium text-slate-800 dark:text-white">Debit Routing Runtime Access</h2>
-            </div>
-          </div>
+          <SurfaceLabel>Debit routing access</SurfaceLabel>
+          <h2 className="mt-2 font-medium text-slate-800 dark:text-white">Debit Routing Runtime Access</h2>
         </CardHeader>
         <CardBody className="space-y-5">
           {!merchantId && (

@@ -1,5 +1,7 @@
 // Dev uses the Vite proxy; production uses the hosted dashboard API path.
 import { tokenRef } from './tokenRef'
+import { isEmbedded } from './embedMode'
+import { postToDashboard } from './embedBridge'
 
 const DEBUG_API = import.meta.env.DEV
 const DEFAULT_TENANT_ID = import.meta.env.VITE_DEFAULT_TENANT_ID ?? 'public'
@@ -227,7 +229,13 @@ export async function apiFetch<T>(
         import('../store/authStore').then(({ useAuthStore }) => {
           useAuthStore.getState().clearAuth()
         })
-        window.location.href = `${import.meta.env.BASE_URL}login`
+        if (isEmbedded()) {
+          // In the dashboard's iframe the login page is a dead end (the SSO user is synthetic) —
+          // ask the dashboard for a fresh hand-off instead of navigating the frame.
+          postToDashboard({ type: 'de:session-expired' })
+        } else {
+          window.location.href = `${import.meta.env.BASE_URL}login`
+        }
         throw new Error('Session expired')
       }
     }

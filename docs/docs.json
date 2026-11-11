@@ -25,9 +25,11 @@
               "dashboard-guide"
             ]
           },
+          "sub-merchants",
           "api-reference",
           "analytics",
           "payment-audit",
+          "payment-methods",
           "clickhouse-analytics",
           "benchmarks"
         ]
@@ -71,7 +73,8 @@
           "api-reference/endpoint/listRoutingRules",
           "api-reference/endpoint/getActiveRoutingRule",
           "api-reference/endpoint/evaluateRoutingRule",
-          "api-reference/endpoint/hybridRouting"
+          "api-reference/endpoint/hybridRouting",
+          "api-reference/endpoint/decide"
         ]
       },
       {

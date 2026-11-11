@@ -12,8 +12,9 @@ import { Spinner } from '../ui/Spinner'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useAuthStore } from '../../store/authStore'
 import { useCanEditRouting } from '../../store/authStore'
+import { releaseAdmits, useFeatureReleased, type ReleasedFeature } from '../../lib/featureReleases'
 import { apiPost, fetcher } from '../../lib/api'
-import { PAYMENT_METHOD_TYPES, PAYMENT_METHODS } from '../../lib/constants'
+import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import {
   Plus,
   Trash2,
@@ -30,6 +31,7 @@ import { useMerchantFeatures, type KnownFeature } from '../../hooks/useMerchantF
 import { BucketHedgingTuner } from './BucketHedgingTuner'
 import { CostEstimationPanel } from './CostEstimationPanel'
 import { VolumeContractsPage } from './VolumeContractsPage'
+import { VolumeContractFeatureNotice } from './VolumeContractFeatureNotice'
 
 import { PageHeading } from '../ui/PageHeading'
 import { Notice } from '../ui/Notice'
@@ -39,7 +41,7 @@ const configInputClass =
   'focus:outline-none focus:border-brand-500 dark:border-[#222226]'
 
 // Ensures a stored value is always selectable in a dropdown, even when it isn't in the known
-// option list (e.g. auto-calibration writes the casing live txns use, "CARD"/"CREDIT", while the
+// option list (e.g. the calibration job writes the casing live txns use, "CARD"/"CREDIT", while the
 // option lists are lowercase). Prepends the value so the <select> renders it instead of going blank.
 function optionsWithValue(options: readonly string[], value: string): string[] {
   return value && !options.includes(value) ? [value, ...options] : [...options]
@@ -83,52 +85,54 @@ async function enableAutopilotSrDimensions(merchantId: string): Promise<void> {
 // Optional cluster dimensions — empty string normalizes to null so the decider treats them as
 // "any" (a stored "" would never match a real value).
 const optionalDim = z.preprocess(
-  (v) => (v === '' || v === null || v === undefined ? null : v),
+  (v: string | null | undefined) => (v === '' || v === null || v === undefined ? null : v),
   z.string().nullable()
 )
 
 const subLevelSchema = z.object({
-  paymentMethodType: z.string().min(1),
+  // The method is the category (card), its type the specific method (credit).
   paymentMethod: z.string().min(1),
+  paymentMethodType: optionalDim,
   cardNetwork: optionalDim,
   currency: optionalDim,
   country: optionalDim,
   authType: optionalDim,
   // Provenance passthrough: "autopilot" for auto-calibrated rows, null for human-authored.
   source: optionalDim,
-  bucketSize: z.coerce.number().int().positive(),
+  bucketSize: z.coerce.number<number | string>().int().positive(),
   hedgingPercent: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().nullable()
   ),
   latencyThreshold: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().nullable()
   ),
 })
 
 const srFormSchema = z.object({
-  defaultBucketSize: z.coerce.number().int().positive(),
+  defaultBucketSize: z.coerce.number<number | string>().int().positive(),
   defaultSuccessRate: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().min(0).max(1).nullable()
   ),
   defaultLatencyThreshold: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().nullable()
   ),
   defaultHedgingPercent: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().nullable()
   ),
   margin: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().min(0).max(100).nullable()
   ),
   subLevelInputConfig: z.array(subLevelSchema),
 })
 
-type SRForm = z.infer<typeof srFormSchema>
+type SRFormInput = z.input<typeof srFormSchema>
+type SRForm = z.output<typeof srFormSchema>
 
 interface SRConfigResponse {
   merchant_id: string
@@ -142,7 +146,7 @@ interface SRConfigResponse {
       defaultHedgingPercent: number | null
       margin: number | null
       subLevelInputConfig: {
-        paymentMethodType: string
+        paymentMethodType?: string | null
         paymentMethod: string
         cardNetwork?: string | null
         currency?: string | null
@@ -154,7 +158,7 @@ interface SRConfigResponse {
         latencyThreshold: number | null
       }[] | null
     }
-  }
+  } | null
 }
 
 interface EliminationConfigResponse {
@@ -166,7 +170,7 @@ interface EliminationConfigResponse {
       threshold: number
       txnLatency: { gatewayLatency: number | null } | null
     }
-  }
+  } | null
 }
 
 type SRTab = 'autopilot' | 'manual' | 'flags' | 'cost' | 'volume'
@@ -206,17 +210,24 @@ export function SRRoutingPage() {
   const selectedMerchantId = useMerchantStore((state) => state.merchantId)
   const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
   const merchantId = selectedMerchantId || authMerchantId
+  // Payment methods (`card`) and each method's types (`credit`), from the routing keys the backend
+  // generates from its payment method vocabulary.
+  const { getKeyValues } = useDynamicRoutingConfig()
   // When Autopilot is on, its calibration job owns bucket size + hedging % on the Auto-badged
   // sub-level rows and overwrites human edits there on the next cycle — so those two fields are
   // locked in the UI to match. Manual rows, defaults, and latency are never touched, so they stay
   // editable. (See sr_auto_calibration.rs — it skips non-autopilot rows and never sets defaults.)
   const features = useMerchantFeatures(merchantId ?? undefined)
   const autopilotOn = features.isEnabled('autopilot')
+  // Volume Contracts is gated by the release roster (featureReleases.ts). A shared
+  // ?tab=volume link opened outside the audience falls back to Autopilot like any unknown tab.
+  const volumeContractsBeta = useFeatureReleased('volume-contracts')
   // Active tab is kept in the URL (?tab=…) so a reload or shared link reopens it directly.
   // Unknown/absent values fall back to Autopilot, and the default is left out of the URL.
   const [searchParams, setSearchParams] = useSearchParams()
   const tabParam = searchParams.get('tab')
-  const activeTab: SRTab = SR_TABS.includes(tabParam as SRTab) ? (tabParam as SRTab) : 'autopilot'
+  const requestedTab: SRTab = SR_TABS.includes(tabParam as SRTab) ? (tabParam as SRTab) : 'autopilot'
+  const activeTab: SRTab = requestedTab === 'volume' && !volumeContractsBeta ? 'autopilot' : requestedTab
   const setActiveTab = (tab: SRTab) => {
     setSearchParams(
       (prev) => {
@@ -275,7 +286,7 @@ export function SRRoutingPage() {
     reset,
     watch,
     formState: { errors },
-  } = useForm<SRForm>({
+  } = useForm<SRFormInput, unknown, SRForm>({
     resolver: zodResolver(srFormSchema),
     defaultValues: {
       defaultBucketSize: 200,
@@ -293,8 +304,9 @@ export function SRRoutingPage() {
       const d = existing.config.data
       // Normalize so the optional dimension fields are always present (controlled inputs).
       const subLevelRows = (d.subLevelInputConfig ?? []).map((r) => ({
-        paymentMethodType: r.paymentMethodType,
-        paymentMethod: r.paymentMethod,
+        // Stored as codes (CARD, CREDIT); the dropdowns use lower-case names.
+        paymentMethod: r.paymentMethod?.toLowerCase() ?? '',
+        paymentMethodType: r.paymentMethodType?.toLowerCase() ?? null,
         cardNetwork: r.cardNetwork ?? null,
         currency: r.currency ?? null,
         country: r.country ?? null,
@@ -323,7 +335,7 @@ export function SRRoutingPage() {
 
   function addSubLevelOverride() {
     setShowSubLevelOverrides(true)
-    append({ paymentMethodType: 'card', paymentMethod: 'credit', cardNetwork: null, currency: null, country: null, authType: null, source: null, bucketSize: 20, hedgingPercent: null, latencyThreshold: null })
+    append({ paymentMethod: 'card', paymentMethodType: 'credit', cardNetwork: null, currency: null, country: null, authType: null, source: null, bucketSize: 20, hedgingPercent: null, latencyThreshold: null })
   }
 
   function removeSubLevelOverride(index: number) {
@@ -347,7 +359,7 @@ export function SRRoutingPage() {
     setSaving(true); setSaveError(null); setSaveSuccess(false)
     try {
       if (!existing) await ensureMerchantExists()
-      const endpoint = existing ? '/rule/update' : '/rule/create'
+      const endpoint = existing?.config ? '/rule/update' : '/rule/create'
       await apiPost(endpoint, {
         merchant_id: merchantId,
         config: {
@@ -376,6 +388,13 @@ export function SRRoutingPage() {
     }
   }
 
+  // Every tab here configures the decider, which doesn't run while Auth Rate routing is off. The
+  // tabs stay open so settings can be explored and saved first; a notice says they aren't in
+  // effect yet. `isEnabled` answers false while the features request is in flight, so wait for the
+  // response before showing it, or it would flash on every load.
+  const srRoutingResolved = Boolean(merchantId) && !features.isLoading && features.data != null
+  const srRoutingOff = srRoutingResolved && !features.isEnabled('sr-routing')
+
   const tabClass = (tab: SRTab) =>
     `px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
       activeTab === tab
@@ -384,14 +403,17 @@ export function SRRoutingPage() {
     }`
 
   return (
-    // Cost Estimation and Manual are rail + content dashboards, so they take the full page width —
-    // constraining them would spend a quarter of an already-narrow column on the rail. The
-    // single-column tabs (Autopilot, Flags) still read better constrained.
-    <div className={`space-y-6 ${WIDE_TABS.includes(activeTab) ? 'w-full' : 'max-w-4xl'}`}>
-      {/* Page header */}
-      <div>
-        <PageHeading title="Multi Objective Routing" description="Dynamic gateway scoring based on real-time success rates." />
-      </div>
+    // The header and tabs span the page on every tab, so the Auth Rate routing switch stays at the right
+    // edge. Only the tab content narrows: Cost Estimation and Manual are rail + content dashboards
+    // that need the full width, while the single-column tabs (Autopilot, Flags) read better
+    // constrained.
+    <div className="w-full space-y-6">
+      {/* The heading and its tabs sit closer together than the page's sections. */}
+      <div className="space-y-4">
+      <PageHeading
+        title="Multi Objective Routing"
+        description="Dynamic connector scoring based on real-time success rates."
+      />
 
       {!merchantId && (
         <Notice tone="warning">
@@ -399,26 +421,43 @@ export function SRRoutingPage() {
         </Notice>
       )}
 
-      {/* Tab navigation */}
-      <div className="border-b border-slate-200 dark:border-[#1c1c23]">
+      {/* Tab navigation. Auth Rate routing is the parent of everything on this page — Autopilot, the
+          Manual scoring config and every Feature Flags row only take effect while it is on — so its
+          switch sits with the tabs it governs, set apart from the page title. */}
+      <div className="flex flex-wrap items-center gap-x-4 border-b border-slate-200 dark:border-[#1c1c23]">
         <nav className="-mb-px flex gap-1">
           <button type="button" className={tabClass('autopilot')} onClick={() => setActiveTab('autopilot')}>Autopilot</button>
           <button type="button" className={tabClass('manual')} onClick={() => setActiveTab('manual')}>Manual</button>
           <button type="button" className={tabClass('flags')} onClick={() => setActiveTab('flags')}>Feature Flags</button>
           <button type="button" className={tabClass('cost')} onClick={() => setActiveTab('cost')}>Cost Estimation</button>
-          <button type="button" className={`${tabClass('volume')} inline-flex items-center gap-1.5`} onClick={() => setActiveTab('volume')}>
-            Volume Contracts
-            <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-wide text-violet-600 dark:bg-violet-500/15 dark:text-violet-400">
-              Beta
-            </span>
-          </button>
+          {volumeContractsBeta && (
+            <button type="button" className={`${tabClass('volume')} inline-flex items-center gap-1.5`} onClick={() => setActiveTab('volume')}>
+              Volume Contracts
+              <span className="rounded-full bg-violet-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-wide text-violet-600 dark:bg-violet-500/15 dark:text-violet-400">
+                Beta
+              </span>
+            </button>
+          )}
         </nav>
+        <div className="flex items-center gap-4 pb-2 pt-1">
+          <span className="h-5 w-px bg-slate-200 dark:bg-[#2a2f3a]" aria-hidden />
+          <SrRoutingMasterToggle features={features} />
+        </div>
+      </div>
       </div>
 
+      <div className={`space-y-6 ${WIDE_TABS.includes(activeTab) ? '' : 'max-w-4xl'}`}>
       {isLoading ? (
         <div className="flex justify-center py-12"><Spinner /></div>
       ) : (
         <>
+          {srRoutingOff && (
+            <Notice tone="warning">
+              Auth Rate routing is off for this merchant, so these settings aren't in effect yet. You
+              can still set them up here; they apply once you turn it on with the switch above.
+            </Notice>
+          )}
+
           {/* ── Autopilot tab ── */}
           {activeTab === 'autopilot' && <AutopilotConfig merchantId={merchantId} />}
 
@@ -447,7 +486,7 @@ export function SRRoutingPage() {
                     />
                     {errors.defaultBucketSize && <p className="text-[13px] text-red-600 leading-[18px]">{errors.defaultBucketSize.message}</p>}
                     <p className={type.hint}>
-                      Recent payments per gateway score. Lower adapts faster, higher stays steadier.
+                      Recent payments per connector score. Lower adapts faster, higher stays steadier.
                     </p>
                   </label>
 
@@ -460,7 +499,7 @@ export function SRRoutingPage() {
                       className={configInputClass}
                     />
                     <p className={type.hint}>
-                      Traffic share sent to non-top gateways to keep their scores fresh. Needs Explore-exploit on.
+                      Traffic share sent to non-top connectors to keep their scores fresh. Needs Explore-exploit on.
                     </p>
                   </label>
 
@@ -496,8 +535,8 @@ export function SRRoutingPage() {
                         <thead>
                           <tr className="text-left text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] border-b border-slate-200 dark:border-[#1c1c24] bg-slate-50 dark:bg-[#0a0a0f] leading-4">
                             <th className="px-4 py-2">Source</th>
-                            <th className="px-4 py-2">Method Type</th>
-                            <th className="px-4 py-2">Method</th>
+                            <th className="px-4 py-2">Payment Method</th>
+                            <th className="px-4 py-2">Payment Method Type</th>
                             <th className="px-4 py-2">Card Network</th>
                             <th className="px-4 py-2">Currency</th>
                             <th className="px-4 py-2">Country</th>
@@ -510,14 +549,13 @@ export function SRRoutingPage() {
                         </thead>
                         <tbody>
                           {fields.map((field, idx) => {
-                            const methodType = watchedRows?.[idx]?.paymentMethodType || ''
                             const method = watchedRows?.[idx]?.paymentMethod || ''
-                            // PAYMENT_METHODS is keyed lowercase; match case-insensitively. Always
-                            // include the stored value as an option so auto-calibrated rows (which
-                            // use the casing live txns send, e.g. "CARD"/"CREDIT") still display.
-                            const baseMethodOptions = PAYMENT_METHODS[methodType.toLowerCase()] || ['credit', 'debit']
-                            const typeOptions = optionsWithValue(PAYMENT_METHOD_TYPES, methodType)
-                            const methodOptions = optionsWithValue(baseMethodOptions, method)
+                            const methodType = watchedRows?.[idx]?.paymentMethodType || ''
+                            // The method's own types come from its routing key (`card` lists credit,
+                            // debit). The stored value is always an option, so a row saved before the
+                            // routing keys loaded still displays.
+                            const methodOptions = optionsWithValue(getKeyValues('payment_method'), method)
+                            const typeOptions = optionsWithValue(getKeyValues(method), methodType)
                             // An Auto row is fully owned by the calibration job while Autopilot is on
                             // (it re-tunes bucket/hedging and matches its own rows by the dimension
                             // keys), so the whole row is locked. Locked cells render as plain text —
@@ -545,24 +583,25 @@ export function SRRoutingPage() {
                                       input that round-trips the value on save. */}
                                   {autopilotOwned ? (
                                     <>
-                                      <input type="hidden" {...register(`subLevelInputConfig.${idx}.paymentMethodType`)} />
-                                      <span className={lockedTextCls} title={lockedTitle}>{methodType || '—'}</span>
-                                    </>
-                                  ) : (
-                                    <select {...register(`subLevelInputConfig.${idx}.paymentMethodType`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg pl-2 pr-7 py-1 text-sm min-w-[6rem] focus:outline-none focus:border-brand-500">
-                                      {typeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
-                                    </select>
-                                  )}
-                                </td>
-                                <td className="px-4 py-2">
-                                  {autopilotOwned ? (
-                                    <>
                                       <input type="hidden" {...register(`subLevelInputConfig.${idx}.paymentMethod`)} />
                                       <span className={lockedTextCls} title={lockedTitle}>{method || '—'}</span>
                                     </>
                                   ) : (
                                     <select {...register(`subLevelInputConfig.${idx}.paymentMethod`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg pl-2 pr-7 py-1 text-sm min-w-[6rem] focus:outline-none focus:border-brand-500">
                                       {methodOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+                                    </select>
+                                  )}
+                                </td>
+                                <td className="px-4 py-2">
+                                  {autopilotOwned ? (
+                                    <>
+                                      <input type="hidden" {...register(`subLevelInputConfig.${idx}.paymentMethodType`)} />
+                                      <span className={lockedTextCls} title={lockedTitle}>{methodType || 'Any'}</span>
+                                    </>
+                                  ) : (
+                                    <select {...register(`subLevelInputConfig.${idx}.paymentMethodType`)} className="border border-slate-200 dark:border-[#222226] bg-transparent rounded-lg pl-2 pr-7 py-1 text-sm min-w-[6rem] focus:outline-none focus:border-brand-500">
+                                      <option value="">Any</option>
+                                      {typeOptions.map((t) => <option key={t} value={t}>{t}</option>)}
                                     </select>
                                   )}
                                 </td>
@@ -614,9 +653,10 @@ export function SRRoutingPage() {
 
           {/* ── Volume Contracts tab: the contract editor, hosted here beside the other routing
               objectives. It keeps its own data hooks; only the page chrome is dropped. ── */}
-          {activeTab === 'volume' && <VolumeContractsPage embedded />}
+          {activeTab === 'volume' && volumeContractsBeta && <VolumeContractsPage embedded />}
         </>
       )}
+      </div>
     </div>
   )
 }
@@ -661,13 +701,14 @@ function ManualSectionRail({
   )
 }
 
-// Small on/off switch used by the Autopilot decision rows.
-function Switch({ on, onClick, disabled }: { on: boolean; onClick: () => void; disabled?: boolean }) {
+// Small on/off switch used by the page header and the Autopilot decision rows.
+function Switch({ on, onClick, disabled, labelledBy }: { on: boolean; onClick: () => void; disabled?: boolean; labelledBy?: string }) {
   return (
     <button
       type="button"
       role="switch"
       aria-checked={on}
+      aria-labelledby={labelledBy}
       disabled={disabled}
       onClick={onClick}
       className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
@@ -683,11 +724,60 @@ function Switch({ on, onClick, disabled }: { on: boolean; onClick: () => void; d
   )
 }
 
+/** Parent switch for the whole Multi Objective page. Off means hybrid routing never enters the
+ *  decider (see `SR_ROUTING_FEATURE_FLAG` in hybrid_routing.rs) and answers from the static
+ *  routing result, so Autopilot, the Manual config and every scoring flag are inert until it
+ *  is back on. */
+function SrRoutingMasterToggle({ features }: { features: ReturnType<typeof useMerchantFeatures> }) {
+  const canEditRouting = useCanEditRouting()
+  const [toggling, setToggling] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const on = features.isEnabled('sr-routing')
+
+  async function toggle(next: boolean) {
+    setToggling(true)
+    setError(null)
+    try {
+      await features.setFeatureEnabled('sr-routing', next)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setToggling(false)
+    }
+  }
+
+  return (
+    <div
+      className={`inline-flex items-center gap-2.5 rounded-full border py-1 pl-3 pr-1.5 ${
+        error
+          ? 'border-red-200 bg-red-50 dark:border-red-500/30 dark:bg-red-500/10'
+          : on
+            ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10'
+            : 'border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10'
+      }`}
+      title={error ?? (on ? 'Scoring eligible connectors on every payment.' : 'Connector scoring is paused for this merchant.')}
+    >
+      <span id="sr-routing-switch-label" className="whitespace-nowrap text-sm font-medium text-slate-800 dark:text-white">Auth Rate routing</span>
+      {error && (
+        <span className="text-xs font-semibold text-red-700 dark:text-red-300" aria-live="polite">
+          Couldn’t update
+        </span>
+      )}
+      <Switch
+        on={on}
+        labelledBy="sr-routing-switch-label"
+        disabled={!canEditRouting || features.isLoading || toggling}
+        onClick={() => toggle(!on)}
+      />
+    </div>
+  )
+}
+
 // Autopilot reframes routing as a set of outcomes rather than raw flags. The single master
-// toggle is the real switch: it enables self-tuning (auto-calibration) plus cost savings, and
+// toggle is the real switch: it enables self-tuning plus cost savings, and
 // turning it OFF hard-disables those backend flags so the engine falls back to the Manual
 // configuration. SR base routing ("switch PSP on low auth") is always on and shown as a status
-// pill. Cost savings (`multi-objective-routing`) is surfaced independently in the Feature Flags
+// pill. Cost savings (`cost-savings`) is surfaced independently in the Feature Flags
 // tab so a Manual-config merchant can run cost-aware routing without Autopilot.
 function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
   const features = useMerchantFeatures(merchantId ?? undefined)
@@ -700,33 +790,35 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
 
   // Master is its own persisted backend flag (`autopilot`) so the toggle survives reloads.
   // Autopilot subsumes self-tuning: the only thing that distinguishes it from Manual is that the
-  // engine adapts settings to your traffic, so a single toggle drives both `autopilot` and
-  // `auto-calibration` (the calibration job requires both — see sr_auto_calibration.rs). Cost
-  // savings (`multi-objective-routing`) is orthogonal and now lives in the Feature Flags tab.
+  // engine adapts settings to your traffic, so `autopilot` alone gates the calibration job (see
+  // sr_auto_calibration.rs). Cost savings (`cost-savings`) is orthogonal and now
+  // lives in the Feature Flags tab.
   const autopilotOn = features.isEnabled('autopilot')
 
   async function toggleMaster(next: boolean) {
     setToggling('master'); setError(null); setMessage(null)
     try {
+      // Autopilot tunes Auth Rate routing, so turning it on turns that on first; if that fails,
+      // Autopilot is left as it was. Turning Autopilot off leaves Auth Rate routing on, running
+      // the Manual configuration.
+      if (next) await features.setFeatureEnabled('sr-routing', true)
       await features.setFeatureEnabled('autopilot', next)
       if (next) {
         // Turning Autopilot on enables its decisions by default — cost savings (multi-objective
-        // economic routing) and auto-calibration — and activates all low-cardinality SR
+        // economic routing) — and activates all low-cardinality SR
         // dimensions so scoring clusters split on them (card scheme / currency / country /
         // auth type) and the calibrator can tune each cluster.
         // Enable unconditionally: the toggle is idempotent, and the captured `costOn` /
         // `autoCalibrationOn` booleans can be stale (the features list is SWR-cached for 5 min),
         // so guarding on them would silently skip the POST and leave the decision off.
-        await features.setFeatureEnabled('multi-objective-routing', true)
-        await features.setFeatureEnabled('auto-calibration', true)
+        await features.setFeatureEnabled('cost-savings', true)
         if (merchantId) await enableAutopilotSrDimensions(merchantId)
       } else {
         // Hard-disable: turn every autopilot decision off so routing uses manual config.
         // Unconditional for the same reason as the enable path — stale cached booleans must not
         // gate the POST, or a flag that is actually on server-side would be left enabled.
         await features.setFeatureEnabled('elimination', false)
-        await features.setFeatureEnabled('multi-objective-routing', false)
-        await features.setFeatureEnabled('auto-calibration', false)
+        await features.setFeatureEnabled('cost-savings', false)
       }
       setMessage(next
         ? 'Autopilot on — the engine self-tunes to your traffic (cost savings also enabled).'
@@ -749,7 +841,7 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
         <p className="rounded-lg border border-emerald-500/20 bg-emerald-500/8 px-3 py-2 text-xs text-emerald-500">{message}</p>
       )}
 
-      {/* Master toggle — the single Autopilot input. It bundles self-tuning (auto-calibration) and,
+      {/* Master toggle — the single Autopilot input. It bundles self-tuning and,
           for convenience, enables cost savings; cost can be turned back off independently from the
           Feature Flags tab. Turning Autopilot off falls back to the Manual configuration. */}
       <Card>
@@ -800,18 +892,33 @@ function AutopilotConfig({ merchantId }: { merchantId: string | null }) {
   )
 }
 
-const SR_FEATURES: { feature: KnownFeature; title: string; description: string; docsUrl?: string }[] = [
+// A row with a `gate` is shown only to that feature's release audience (featureReleases.ts).
+const SR_FEATURES: { feature: KnownFeature; title: string; description: string; docsUrl?: string; gate?: ReleasedFeature }[] = [
+  {
+    // The threshold this drops a PSP at lives in Manual → Elimination; this row is only the
+    // on/off switch. Both the decider and the score writer read the same flag.
+    feature: 'elimination',
+    title: 'Elimination (pause PSPs with low auth rate)',
+    description:
+      'Stop routing to a connector once its recent authorization rate falls below the elimination threshold, and let it back in when it recovers. Set the threshold itself under Manual → Elimination.',
+  },
   {
     feature: 'gsm-scoring-filter',
     title: 'GSM scoring filter',
     description:
-      'Skip gateway penalization for failures classified by GSM as user or issuer-originated. Keeps gateway scores accurate by excluding faults that are not the gateway\'s responsibility.',
+      'Skip connector penalization for failures classified by GSM as user or issuer-originated. Keeps connector scores accurate by excluding faults that are not the connector\'s responsibility.',
   },
   {
     feature: 'explore-exploit-srv3',
     title: 'Explore-exploit on SRv3 (Card)',
     description:
-      'Keeps all gateway ratings fresh by regularly sending a small share of payments to every gateway — not just the top performer. This ensures the system can quickly detect when a backup gateway becomes better than the current top, and reroute accordingly. The Hedging % setting controls how large this share is.',
+      'Keeps all connector ratings fresh by regularly sending a small share of payments to every connector — not just the top performer. This ensures the system can quickly detect when a backup connector becomes better than the current top, and reroute accordingly. The Hedging % setting controls how large this share is.',
+  },
+  {
+    feature: 'sr-scores-from-rule-routing',
+    title: 'Learn from rule-routed payments',
+    description:
+      'Hybrid routing payments decided by a routing rule, without SR (Auth Rate routing is off, or their A/B arm has no SR layer), also update connector scores. Keeps scores warm for when SR routes them. Scores then reflect the rule\'s connector mix, not only payments SR routed.',
   },
   {
     feature: 'ab-test-real-payments',
@@ -823,7 +930,7 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string; 
     // Cost savings is orthogonal to Autopilot vs Manual — it applies to either scoring config.
     // Autopilot enables it as a convenience, but it lives here as the single, ungated source of
     // truth so a Manual-config merchant can run cost-aware routing without Autopilot.
-    feature: 'multi-objective-routing',
+    feature: 'cost-savings',
     title: 'Cost savings (optimize for economic value)',
     description:
       'Multi-objective routing: alongside approval rate, weighs each PSP\'s expected cost and picks the highest expected-value option. Works with either the Autopilot or Manual scoring config.',
@@ -831,6 +938,7 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string; 
   },
   {
     feature: 'volume-contracts',
+    gate: 'volume-contracts',
     title: 'Volume contracts (meet PSP commitments)',
     description:
       'Multi-objective routing: keeps approval-rate routing in charge, but when a contracted volume commitment is drifting behind pace, steers a little extra volume to that PSP — only onto payments where it approves about as well, so approvals barely move. Runs alongside Cost savings; when both are on, a behind-pace commitment takes priority for eligible payments.',
@@ -925,6 +1033,11 @@ function SrDimensionsConfig({ merchantId }: { merchantId: string | null }) {
 
 function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
   const features = useMerchantFeatures(merchantId ?? undefined)
+  const user = useAuthStore((s) => s.user)
+  // Listed alphabetically by title.
+  const visibleFeatures = SR_FEATURES
+    .filter((f) => !f.gate || releaseAdmits(user, f.gate))
+    .sort((a, b) => a.title.localeCompare(b.title))
   const [toggling, setToggling] = useState<KnownFeature | null>(null)
   const [message, setMessage] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -961,7 +1074,7 @@ function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
       )}
 
       <Card>
-        {SR_FEATURES.map(({ feature, title, description, docsUrl }, idx) => {
+        {visibleFeatures.map(({ feature, title, description, docsUrl }, idx) => {
           const enabled = features.isEnabled(feature)
           return (
             <div
@@ -993,6 +1106,11 @@ function SRFeatureFlags({ merchantId }: { merchantId: string | null }) {
                   ) : null}
                 </div>
                 <p className={`mt-1 ${type.hint} max-w-[68ch]`}>{description}</p>
+                {feature === 'volume-contracts' && (
+                  // Renders only when a contract is live and this flag is off — the one feature
+                  // here whose effect depends on configuration made on another page.
+                  <VolumeContractFeatureNotice merchantId={merchantId} className="mt-3" />
+                )}
               </div>
               <div>
                 {enabled ? (
@@ -1058,7 +1176,7 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
     }
     setSaving(true); setSaveError(null); setSaveSuccess(false)
     try {
-      const endpoint = existing ? '/rule/update' : '/rule/create'
+      const endpoint = existing?.config ? '/rule/update' : '/rule/create'
       const parsedLatency = gatewayLatency !== '' ? parseFloat(gatewayLatency) : null
       await apiPost(endpoint, {
         merchant_id: merchantId,
@@ -1134,7 +1252,7 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
         <CardHeader>
           <h2 className={type.heading}>Elimination</h2>
           <p className={`mt-1 ${type.subheading} max-w-[68ch]`}>
-            Each gateway carries a health score that decays on consecutive failures and recovers on
+            Each connector carries a health score that decays on consecutive failures and recovers on
             successes. Below the threshold, it drops out of routing until it recovers.
           </p>
         </CardHeader>
@@ -1149,11 +1267,11 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
               className={configInputClass}
             />
             <p className={type.hint}>
-              Health score from 0 to 1, not success rate. Lower tolerates more failures before dropping a gateway.
+              Health score from 0 to 1, not success rate. Lower tolerates more failures before dropping a connector.
             </p>
           </label>
           <label className="space-y-1.5">
-            <span className={type.label}>Gateway latency threshold (ms)</span>
+            <span className={type.label}>Connector latency threshold (ms)</span>
             <input
               type="number"
               value={gatewayLatency}
@@ -1162,7 +1280,7 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
               className={configInputClass}
             />
             <p className={type.hint}>
-              Gateways slower than this are eliminated too. Leave blank to disable.
+              Connectors slower than this are eliminated too. Leave blank to disable.
             </p>
           </label>
         </CardBody>

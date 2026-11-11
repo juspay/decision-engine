@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 // Original Haskell data type: FeatureConf
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FeatureConf {
     #[serde(rename = "enableAll")]
     pub enableAll: bool,
@@ -18,7 +18,7 @@ pub struct FeatureConf {
 }
 
 // Original Haskell data type: MerchantFeature
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MerchantFeature {
     #[serde(rename = "merchantId")]
     pub merchantId: String,

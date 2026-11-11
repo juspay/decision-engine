@@ -107,14 +107,15 @@ test.describe('Volume Split', () => {
       await expect(volume.ruleRow(ruleName).getByText('Inactive')).toBeVisible()
     })
 
-    test('blocks Edit and Delete while the rule is active', async ({ authedPage }) => {
+    test('blocks Edit while active and hides Delete', async ({ authedPage }) => {
       await volume.ruleAction(ruleName, 'Activate')
       await expect(authedPage.getByText('Rule activated.')).toBeVisible()
 
-      // /routing/update and /routing/delete both reject an active algorithm.
+      // /routing/update rejects an active algorithm, so Edit is disabled. Delete is hidden
+      // entirely (RULE_DELETION feature flag off) for parity with the Hyperswitch dashboard.
       await volume.openRuleMenu(ruleName)
       await expect(volume.menuItem('Edit')).toBeDisabled()
-      await expect(volume.menuItem('Delete')).toBeDisabled()
+      await expect(volume.menuItem('Delete')).toHaveCount(0)
     })
 
     test('edits an inactive rule and sends the update to the backend', async ({ authedPage }) => {
@@ -142,13 +143,11 @@ test.describe('Volume Split', () => {
       await expect(authedPage.getByPlaceholder('e.g. ab-test-split')).toHaveValue(`copy-of-${ruleName}`)
     })
 
-    test('deletes an inactive rule', async ({ authedPage }) => {
-      await volume.ruleAction(ruleName, 'Delete')
-
-      await expect(authedPage.getByText('Delete this rule?')).toBeVisible()
-      await authedPage.locator('.fixed.inset-0').getByRole('button', { name: 'Delete' }).click()
-
-      await expect(volume.ruleRow(ruleName)).toHaveCount(0)
+    test('does not offer Delete for an inactive rule', async ({ authedPage }) => {
+      // Deletion is disabled for parity with the Hyperswitch dashboard: no Delete action is
+      // rendered even for an inactive rule (RULE_DELETION feature flag off).
+      await volume.openRuleMenu(ruleName)
+      await expect(volume.menuItem('Delete')).toHaveCount(0)
     })
 
     test('filters the list by status from the column header', async ({ authedPage }) => {

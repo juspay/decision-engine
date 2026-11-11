@@ -1,5 +1,8 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useSearchParams } from 'react-router-dom'
+import { releaseAdmits, type ReleasedFeature } from '../../lib/featureReleases'
+import { useCloseOnFrameBlur } from '../../hooks/useCloseOnFrameBlur'
+import { useAuthStore } from '../../store/authStore'
 import useSWR from 'swr'
 import {
   Bar,
@@ -15,10 +18,12 @@ import {
 } from 'recharts'
 import { CheckCircle2, ChevronRight, RefreshCw } from 'lucide-react'
 import { fetcher } from '../../lib/api'
+import { overviewRouteLabel } from '../../lib/auditLabels'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { CHART_TOOLTIP_ITEM_STYLE, CHART_TOOLTIP_LABEL_STYLE, CHART_TOOLTIP_STYLE } from '../../lib/chartStyles'
 import {
   AnalyticsCostSavingsResponse,
+  AnalyticsHybridSplit,
   AnalyticsOverviewResponse,
   AnalyticsRange,
   AnalyticsRangeValue,
@@ -59,6 +64,7 @@ import { Badge } from '../ui/Badge'
 import { Spinner } from '../ui/Spinner'
 import { ErrorMessage } from '../ui/ErrorMessage'
 import { VolumeCommitmentAnalytics } from './VolumeCommitmentAnalytics'
+import { SelectMenu } from '../ui/SelectMenu'
 import { TimeRangeFilter } from '../ui/TimeRangeFilter'
 import {
   TimeWindow,
@@ -73,13 +79,23 @@ type RoutingFilters = {
   gateways: string[]
 }
 
-type AnalyticsView = 'transactions' | 'rule_based' | 'volume_commitments'
-const ANALYTICS_VIEWS: readonly AnalyticsView[] = ['transactions', 'rule_based', 'volume_commitments']
-const ANALYTICS_VIEW_LABELS: Record<AnalyticsView, string> = {
-  transactions: 'Multi-objective',
-  rule_based: 'Rule based / Volume based',
-  volume_commitments: 'Volume commitments',
+const ANALYTICS_VIEW_TABS = [
+  { value: 'multi_objective', label: 'Multi Objective' },
+  { value: 'auth_rate', label: 'Auth Rate' },
+  { value: 'rule_based', label: 'Rule based / Volume based' },
+  { value: 'volume_commitments', label: 'Volume commitments', gate: 'volume-contracts' },
+] as const satisfies readonly { value: string; label: string; gate?: ReleasedFeature }[]
+
+type AnalyticsView = (typeof ANALYTICS_VIEW_TABS)[number]['value']
+const DEFAULT_ANALYTICS_VIEW: AnalyticsView = 'multi_objective'
+
+function unhandledView(view: never): null {
+  console.warn(`Analytics view has no panel: ${String(view)}`)
+  return null
 }
+
+// The `routing_kind` the analytics API takes: `hybrid` is the /decide + /routing/hybrid event family.
+type AnalyticsRoutingKindValue = 'multi_objective' | 'hybrid'
 
 type PreviewTraceKey = readonly [
   'preview-trace-analytics',
@@ -139,7 +155,9 @@ const MAX_VISIBLE_DIMENSIONS = 3
 const PREVIEW_TRACE_PAGE_SIZE = 50
 const MAX_PREVIEW_TRACE_PAGES = 5
 const PREVIEW_LIST_PAGE_SIZE = 10
-const CATCH_UP_REFRESH_DELAYS_MS = [750, 2000, 4000]
+// One delayed re-read picks up events still being ingested when the page opens. Each re-read of
+// the rule-based view queries ClickHouse several times, so it is not repeated.
+const CATCH_UP_REFRESH_DELAY_MS = 3000
 const CARD_INFO: Record<'hits' | 'share' | 'alignment' | 'sr' | 'preview_hits' | 'preview_activity' | 'preview_share', InfoContent> = {
   hits: {
     title: 'API call counts',
@@ -148,16 +166,16 @@ const CARD_INFO: Record<'hits' | 'share' | 'alignment' | 'sr' | 'preview_hits' |
     source: 'Counts come from ClickHouse-backed API analytics rows ingested from Kafka into `analytics_api_events`.',
   },
   share: {
-    title: 'Selected gateways over time',
+    title: 'Selected connectors over time',
     purpose: 'Use this to see when traffic shifted from one connector to another for the selected merchant and routing slice.',
-    calculation: 'Decision events are grouped by time and chosen connector. The chart shows how many filtered decisions each gateway received over time.',
+    calculation: 'Decision events are grouped by time and chosen connector. The chart shows how many filtered decisions each connector received over time.',
     source: 'Reads ClickHouse-backed domain analytics rows from `analytics_domain_events`.',
   },
   alignment: {
     title: 'Routing alignment',
     purpose: 'Use this to see whether the best-scoring connector is also leading traffic share.',
-    calculation: 'Compares the latest connector success-rate score with the gateways actually selected in the same time window.',
-    source: 'Reads the same ClickHouse-backed routing-stats response used by the gateway share and connector success-rate charts.',
+    calculation: 'Compares the latest connector success-rate score with the connectors actually selected in the same time window.',
+    source: 'Reads the same ClickHouse-backed routing-stats response used by the connector share and connector success-rate charts.',
   },
   sr: {
     title: 'Connector success rate over time',
@@ -168,7 +186,7 @@ const CARD_INFO: Record<'hits' | 'share' | 'alignment' | 'sr' | 'preview_hits' |
   preview_hits: {
     title: 'Rule-based summary',
     purpose: 'Use these cards to distinguish rule decision volume from the connector coverage produced by rule-based routing.',
-    calculation: 'Rule Evaluate counts come from request-hit analytics for `/routing/evaluate`. Gateway coverage counts the unique connectors selected in rule decisions for this window.',
+    calculation: 'Rule Evaluate counts come from request-hit analytics for `/routing/evaluate`. Connector coverage counts the unique connectors selected in rule decisions for this window.',
     source: 'Reads request-hit and rule decision analytics associated with rule-based routing activity.',
   },
   preview_activity: {
@@ -178,7 +196,7 @@ const CARD_INFO: Record<'hits' | 'share' | 'alignment' | 'sr' | 'preview_hits' |
     source: 'Reads rule decision activity through `/analytics/preview-trace`.',
   },
   preview_share: {
-    title: 'Rule-based gateway selection mix',
+    title: 'Rule-based connector selection mix',
     purpose: 'Use this to see which connectors lead selected rule decisions, separate from multi-objective transaction decisions.',
     calculation: 'Returned decision traces are grouped by latest selected connector and displayed as share of selected rule decisions.',
     source: 'Reads rule decision activity through `/analytics/preview-trace`.',
@@ -200,12 +218,14 @@ function buildAnalyticsUrl(
   range: AnalyticsRangeValue,
   customWindow?: TimeWindow,
   routingFilters?: RoutingFilters,
+  routingKind?: AnalyticsRoutingKindValue,
 ) {
   const params: Record<string, string | number | undefined> = {
     range: range === 'custom' ? '1h' : range,
     start_ms: customWindow?.start_ms,
     end_ms: customWindow?.end_ms,
     gateway: routingFilters?.gateways.length ? routingFilters.gateways.join(',') : undefined,
+    routing_kind: routingKind === 'hybrid' ? 'hybrid' : undefined,
   }
 
   Object.entries(routingFilters?.dimensions || {}).forEach(([key, value]) => {
@@ -252,23 +272,18 @@ async function loadPreviewTraceSample(
     return firstPage
   }
 
-  const remainingPages = await Promise.all(
-    Array.from({ length: totalPages - 1 }, (_, index) =>
-      fetcher<PaymentAuditResponse>(
-        buildPreviewTraceUrl(
-          range,
-          index + 2,
-          PREVIEW_TRACE_PAGE_SIZE,
-          customWindow,
-        ),
-      ),
-    ),
-  )
-
-  return {
-    ...firstPage,
-    results: [firstPage.results, ...remainingPages.map((page) => page.results)].flat(),
+  // One page at a time: every page is its own set of ClickHouse queries, so they are not sent
+  // in parallel.
+  const results = [...firstPage.results]
+  for (let page = 2; page <= totalPages; page += 1) {
+    const nextPage = await fetcher<PaymentAuditResponse>(
+      buildPreviewTraceUrl(range, page, PREVIEW_TRACE_PAGE_SIZE, customWindow),
+    )
+    results.push(...nextPage.results)
+    if (nextPage.results.length < PREVIEW_TRACE_PAGE_SIZE) break
   }
+
+  return { ...firstPage, results }
 }
 
 function formatNumber(value: number | string | undefined, digits = 2) {
@@ -401,12 +416,6 @@ function controlClassName() {
   return 'h-11 w-full rounded-2xl border border-slate-200 bg-white px-4 text-[13px] text-slate-700 shadow-sm outline-none transition focus:border-brand-500 dark:border-[#27272a] dark:bg-[#121214] dark:text-[#e5e7eb]'
 }
 
-function sectionButtonClass(active: boolean) {
-  return active
-    ? '!border-brand-500/70 !bg-white !text-slate-950 shadow-[0_14px_30px_-24px_rgba(59,130,246,0.55)] ring-2 ring-brand-500/55 dark:!border-brand-500/70 dark:!bg-[#161b24] dark:!text-white dark:ring-brand-500/55'
-    : '!border-transparent !bg-slate-100 !text-slate-600 hover:!bg-slate-200 hover:!text-slate-900 dark:!bg-[#161b24] dark:!text-[#a7b2c6] dark:hover:!bg-[#1c2330] dark:hover:!text-white'
-}
-
 function InfoButton({ content }: { content: InfoContent }) {
   const [open, setOpen] = useState(false)
   const containerRef = useRef<HTMLDivElement | null>(null)
@@ -428,6 +437,8 @@ function InfoButton({ content }: { content: InfoContent }) {
     document.addEventListener('mousedown', handlePointerDown)
     return () => document.removeEventListener('mousedown', handlePointerDown)
   }, [open])
+
+  useCloseOnFrameBlur(open, () => setOpen(false))
 
   useLayoutEffect(() => {
     if (!open || !containerRef.current) return
@@ -686,12 +697,151 @@ function RoutingAlignmentCard({
   )
 }
 
-function analyticsRouteLabel(route: string) {
-  if (route === '/decide_gateway') return 'Decide Gateway'
-  if (route === '/update_gateway') return 'Update Gateway'
-  if (route === '/rule_evaluate') return 'Rule Evaluate'
-  return route
+/** One labelled bar in the hybrid split cards: name, figure, bar, and an optional note under it. */
+function HybridBarRow({
+  label,
+  value,
+  pct,
+  color,
+  hint,
+}: {
+  label: string
+  value: string
+  pct: number
+  color: string
+  hint?: string
+}) {
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between gap-3">
+        <p className="text-[13px] font-medium text-slate-900 dark:text-white leading-[18px]">{label}</p>
+        <p className="text-[13px] font-semibold tabular-nums text-slate-500 dark:text-[#8a8a93] leading-[18px]">
+          {value}
+        </p>
+      </div>
+      <div className="h-2 overflow-hidden rounded-full bg-slate-100 dark:bg-[#141822]">
+        <div className="h-full rounded-full" style={{ width: `${pct}%`, backgroundColor: color }} />
+      </div>
+      {hint ? (
+        <p className="text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">{hint}</p>
+      ) : null}
+    </div>
+  )
 }
+
+function HybridRoutingSplitCard({ split }: { split: AnalyticsHybridSplit | null }) {
+  const outcomes = useMemo(() => {
+    if (!split) return []
+    return [
+      {
+        key: 'dynamic',
+        label: 'Auth Rate decided',
+        count: split.dynamic_success,
+        color: '#22c55e',
+        hint: 'The dynamic decider scored the shortlist and picked the winner.',
+      },
+      {
+        key: 'fallback',
+        label: 'Fell back to rule output',
+        count: split.dynamic_fallback,
+        color: '#f97316',
+        hint: 'The dynamic half failed, so the rule-selected connectors answered.',
+      },
+      {
+        key: 'static',
+        label: 'Rule decided alone',
+        count: split.dynamic_skipped,
+        color: '#3b82f6',
+        hint: 'No dynamic request was made — the static rule was the whole decision.',
+      },
+      {
+        key: 'failed',
+        label: 'Failed',
+        count: split.failed,
+        color: '#ef4444',
+        hint: 'The call returned an error and selected no connector.',
+      },
+    ].filter((row) => row.count > 0)
+  }, [split])
+
+  const total = outcomes.reduce((sum, row) => sum + row.count, 0)
+  const maxConnectorCount = Math.max(1, ...(split?.static_connectors ?? []).map((row) => row.count))
+
+  return (
+    <div className="grid gap-5 lg:grid-cols-2">
+      <Card className="!rounded-2xl h-full overflow-visible">
+        <CardHeader>
+          <div>
+            <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">
+              Static vs dynamic outcome
+            </h2>
+            <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
+              Which half of the hybrid call produced the answer, per decision in this window.
+            </p>
+          </div>
+        </CardHeader>
+        <CardBody>
+          {total ? (
+            <div className="space-y-5">
+              {outcomes.map((row) => {
+                const pct = (row.count / total) * 100
+                return (
+                  <HybridBarRow
+                    key={row.key}
+                    label={row.label}
+                    value={`${formatNumber(row.count, 0)} · ${formatPercent(pct / 100)}`}
+                    pct={pct}
+                    color={row.color}
+                    hint={row.hint}
+                  />
+                )
+              })}
+            </div>
+          ) : (
+            <EmptyState
+              title="No hybrid decisions yet"
+              body="Calls to /decide or /routing/hybrid will appear here once they are recorded in this window."
+            />
+          )}
+        </CardBody>
+      </Card>
+
+      <Card className="!rounded-2xl h-full overflow-visible">
+        <CardHeader>
+          <div>
+            <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">
+              Rule-shortlisted connectors
+            </h2>
+            <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
+              What the static rule step put forward, before the dynamic half chose between them.
+            </p>
+          </div>
+        </CardHeader>
+        <CardBody>
+          {split?.static_connectors.length ? (
+            <div className="space-y-3">
+              {split.static_connectors.map((item, index) => (
+                <HybridBarRow
+                  key={item.connector}
+                  label={item.connector}
+                  value={formatNumber(item.count, 0)}
+                  pct={(item.count / maxConnectorCount) * 100}
+                  color={CHART_COLORS[index % CHART_COLORS.length]}
+                />
+              ))}
+            </div>
+          ) : (
+            <EmptyState
+              title="No rule shortlist recorded"
+              body="Hybrid calls that send a static_routing_request will list the connectors their rule selected here."
+            />
+          )}
+        </CardBody>
+      </Card>
+    </div>
+  )
+}
+
 
 function authRateColor(rate: number) {
   if (rate >= 0.85) return 'text-emerald-700 dark:text-emerald-400'
@@ -719,7 +869,7 @@ function SmartRetrySection({ stats }: { stats: SmartRetryStats | null }) {
         <CardHeader>
           <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Smart Retry</h2>
           <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
-            Payments retried on a fallback gateway after GSM classified the failure as retryable.
+            Payments retried on a fallback connector after GSM classified the failure as retryable.
           </p>
         </CardHeader>
         <CardBody>
@@ -826,17 +976,23 @@ export function AnalyticsPage() {
   const location = useLocation()
   const [range, setRange] = useState<AnalyticsRangeValue>('1d')
   // View is kept in the URL (?view=…) so a reload or shared/searched link
-  // reopens it directly; the default (transactions) is left out of the URL.
+  // reopens it directly; the default view is left out of the URL.
   const [searchParams, setSearchParams] = useSearchParams()
   const viewParam = searchParams.get('view')
-  const view: AnalyticsView = ANALYTICS_VIEWS.includes(viewParam as AnalyticsView)
+  // A gated tab is hidden outside its release audience (featureReleases.ts), and a ?view= link to
+  // one behaves like an unknown view, canonicalised back to the default by the effect below.
+  const user = useAuthStore((s) => s.user)
+  const visibleViewTabs = ANALYTICS_VIEW_TABS.filter(
+    (tab) => !('gate' in tab) || releaseAdmits(user, tab.gate),
+  )
+  const view: AnalyticsView = visibleViewTabs.some((tab) => tab.value === viewParam)
     ? (viewParam as AnalyticsView)
-    : 'transactions'
+    : DEFAULT_ANALYTICS_VIEW
   const setView = (nextView: AnalyticsView) => {
     setSearchParams(
       (prev) => {
         const next = new URLSearchParams(prev)
-        if (nextView === 'transactions') next.delete('view')
+        if (nextView === DEFAULT_ANALYTICS_VIEW) next.delete('view')
         else next.set('view', nextView)
         return next
       },
@@ -847,7 +1003,7 @@ export function AnalyticsPage() {
   // to the canonical form (default omitted) so the URL never disagrees with the
   // rendered view and default links stay shareable/canonical.
   useEffect(() => {
-    const canonical = view === 'transactions' ? null : view
+    const canonical = view === DEFAULT_ANALYTICS_VIEW ? null : view
     if (viewParam !== canonical) setView(view)
     // setView is stable enough for this purpose; re-run only on the derived state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -873,24 +1029,30 @@ export function AnalyticsPage() {
 
   const costCurrency = 'USD'
 
+  // The Multi Objective tab (/decide and /routing/hybrid) reads the same metrics as the Auth Rate
+  // tab (/decide-gateway), only over
+  // `routing_hybrid_*` events. Everything below is shared; only this key changes.
+  const routingKind: AnalyticsRoutingKindValue = view === 'multi_objective' ? 'hybrid' : 'multi_objective'
+  const isDecisionView = view === 'multi_objective' || view === 'auth_rate'
+
   const overviewUrl =
     activeQueryWindow
-      ? buildAnalyticsUrl('/analytics/overview', range, activeQueryWindow)
+      ? buildAnalyticsUrl('/analytics/overview', range, activeQueryWindow, undefined, routingKind)
       : null
   const routingUrl =
     activeQueryWindow
-      ? buildAnalyticsUrl('/analytics/routing-stats', range, activeQueryWindow)
+      ? buildAnalyticsUrl('/analytics/routing-stats', range, activeQueryWindow, undefined, routingKind)
       : null
   const costSavingsUrl = (() => {
     if (!activeQueryWindow) return null
-    const base = buildAnalyticsUrl('/analytics/cost-savings', range, activeQueryWindow)
+    const base = buildAnalyticsUrl('/analytics/cost-savings', range, activeQueryWindow, undefined, routingKind)
     if (!costCurrency) return base
     const sep = base.includes('?') ? '&' : '?'
     return `${base}${sep}currency=${encodeURIComponent(costCurrency)}`
   })()
   const filteredRoutingUrl =
     activeQueryWindow
-      ? buildAnalyticsUrl('/analytics/routing-stats', range, activeQueryWindow, routingFilters)
+      ? buildAnalyticsUrl('/analytics/routing-stats', range, activeQueryWindow, routingFilters, routingKind)
       : null
   const previewTraceKey =
     activeQueryWindow
@@ -963,10 +1125,13 @@ export function AnalyticsPage() {
     previewListSwrOptions,
   )
 
+  // SWR already fetches every key when the page mounts, so the first run of the effect below only
+  // schedules the catch-up re-read.
+  const hasMountedRef = useRef(false)
   useEffect(() => {
     const revalidateCurrentView = () => {
       void overview.mutate()
-      if (view === 'transactions') {
+      if (view === 'multi_objective' || view === 'auth_rate') {
         void routing.mutate()
         void filteredRouting.mutate()
         return
@@ -975,24 +1140,25 @@ export function AnalyticsPage() {
       void previewList.mutate()
     }
 
-    revalidateCurrentView()
-    const timers = CATCH_UP_REFRESH_DELAYS_MS.map((delay) =>
-      window.setTimeout(revalidateCurrentView, delay),
-    )
+    if (hasMountedRef.current) {
+      revalidateCurrentView()
+    }
+    hasMountedRef.current = true
+    const timer = window.setTimeout(revalidateCurrentView, CATCH_UP_REFRESH_DELAY_MS)
 
     return () => {
-      timers.forEach((timer) => window.clearTimeout(timer))
+      window.clearTimeout(timer)
     }
   }, [location.key, view])
 
-  const transactionLoading =
+  const decisionLoading =
     (!overview.data && overview.isLoading) ||
     (!routing.data && routing.isLoading) ||
     (!filteredRouting.data && filteredRouting.isLoading)
   const ruleBasedLoading =
     (!overview.data && overview.isLoading) ||
     (!previewTrace.data && previewTrace.isLoading)
-  const transactionError =
+  const decisionError =
     overview.error?.message ||
     routing.error?.message ||
     filteredRouting.error?.message ||
@@ -1002,8 +1168,8 @@ export function AnalyticsPage() {
     previewTrace.error?.message ||
     previewList.error?.message ||
     null
-  const loading = view === 'transactions' ? transactionLoading : ruleBasedLoading
-  const error = view === 'transactions' ? transactionError : ruleBasedError
+  const loading = isDecisionView ? decisionLoading : ruleBasedLoading
+  const error = isDecisionView ? decisionError : ruleBasedError
 
   const availableFilters: RoutingFilterOptions = {
     dimensions:
@@ -1075,7 +1241,9 @@ export function AnalyticsPage() {
 
   const routeHits = useMemo(() => {
     const fallback = [
+      { route: '/decide', count: 0 },
       { route: '/decide_gateway', count: 0 },
+      { route: '/routing_hybrid', count: 0 },
       { route: '/update_gateway', count: 0 },
       { route: '/rule_evaluate', count: 0 },
     ]
@@ -1085,17 +1253,22 @@ export function AnalyticsPage() {
       count: overview.data?.route_hits.find((row) => row.route === item.route)?.count || 0,
     }))
   }, [overview.data])
-  const transactionRouteHits = useMemo(
-    () => routeHits.filter((item) => item.route !== '/rule_evaluate'),
-    [routeHits],
-  )
-  const overallAuthRate = useMemo(() => {
-    const scores = overview.data?.top_scores ?? []
-    const totalTx = scores.reduce((sum, s) => sum + s.transaction_count, 0)
-    if (!totalTx) return null
-    const weightedSum = scores.reduce((sum, s) => sum + s.score_value * s.transaction_count, 0)
-    return weightedSum / totalTx
-  }, [overview.data])
+  // Each decision tab counts only its own entry points: `/decide` and `/routing/hybrid` on the
+  // Multi Objective tab, `/decide-gateway` on the Auth Rate tab. Score feedback is shared.
+  const decisionRouteHits = useMemo(() => {
+    const entryPoints = view === 'multi_objective' ? ['/decide', '/routing_hybrid'] : ['/decide_gateway']
+    return routeHits.filter(
+      (item) => entryPoints.includes(item.route) || item.route === '/update_gateway',
+    )
+  }, [routeHits, view])
+  // From reported outcomes, not the SR score store — that holds one merchant-wide estimate over
+  // the model's fixed window, so every view read the same number.
+  const authRateCounts = overview.data?.auth_rate
+  const authRateSuccess = authRateCounts?.success_count ?? 0
+  const authRateTotal = authRateCounts
+    ? authRateCounts.success_count + authRateCounts.failure_count
+    : 0
+  const overallAuthRate = authRateTotal > 0 ? authRateSuccess / authRateTotal : null
   const ruleEvaluateHits = useMemo(
     () => routeHits.find((item) => item.route === '/rule_evaluate')?.count || 0,
     [routeHits],
@@ -1106,7 +1279,7 @@ export function AnalyticsPage() {
     const counts = new Map<string, number>()
 
     for (const row of previewRows) {
-      const gateway = row.latest_gateway || 'No gateway selected'
+      const gateway = row.latest_gateway || 'No connector selected'
       counts.set(gateway, (counts.get(gateway) || 0) + 1)
     }
 
@@ -1162,7 +1335,7 @@ export function AnalyticsPage() {
     }
 
     for (const row of previewRows) {
-      const gateway = row.latest_gateway || 'No gateway selected'
+      const gateway = row.latest_gateway || 'No connector selected'
       if (!gateways.includes(gateway)) continue
       const bucket_ms = bucketTimestamp(row.last_seen_ms, chartBucketSize)
       const bucket =
@@ -1190,7 +1363,7 @@ export function AnalyticsPage() {
     Math.ceil(previewListTotalResults / PREVIEW_LIST_PAGE_SIZE),
   )
   const previewGatewaysTouched = previewGatewaySummary.filter(
-    (item) => item.gateway !== 'No gateway selected',
+    (item) => item.gateway !== 'No connector selected',
   ).length
   const previewGatewayMaxCount = previewGatewaySummary[0]?.count || 1
   const previewIngestionPending =
@@ -1213,7 +1386,7 @@ export function AnalyticsPage() {
 
   const gatewayShareData = useMemo(() => {
     const gatewaySharePoints = filteredRouting.data?.gateway_share || []
-    const gateways = sortedGateways(gatewaySharePoints.map((point) => point.gateway || 'No gateway selected'))
+    const gateways = sortedGateways(gatewaySharePoints.map((point) => point.gateway || 'No connector selected'))
     if (!gateways.length) {
       return {
         gateways,
@@ -1237,7 +1410,7 @@ export function AnalyticsPage() {
     }
 
     for (const point of gatewaySharePoints) {
-      const gateway = point.gateway || 'No gateway selected'
+      const gateway = point.gateway || 'No connector selected'
       if (!gateways.includes(gateway)) continue
       const row =
         buckets.get(point.bucket_ms) ||
@@ -1621,39 +1794,11 @@ export function AnalyticsPage() {
 
   return (
     <div className="space-y-8 px-5 sm:px-5 lg:px-8 xl:px-8">
-      <div className="grid grid-cols-1 items-center gap-3 xl:grid-cols-[1fr_auto_1fr]">
-        <div className="space-y-2">
-          <PageHeading title="Analytics" description="Real-time multi-gateway routing performance overview." />
-        </div>
+      <div className="grid grid-cols-1 items-center gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
+        <PageHeading title="Analytics" description="Real-time multi-connector routing performance overview." />
 
-        <div className="inline-flex max-w-full flex-wrap items-center gap-1 justify-self-start rounded-[18px] border border-slate-200 bg-white/70 p-1 dark:border-[#2a303a] dark:bg-[#11151d] xl:justify-self-center">
-          <Button
-            size="sm"
-            variant="secondary"
-            className={sectionButtonClass(view === 'transactions')}
-            onClick={() => setView('transactions')}
-          >
-            {ANALYTICS_VIEW_LABELS.transactions}
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            className={sectionButtonClass(view === 'rule_based')}
-            onClick={() => setView('rule_based')}
-          >
-            {ANALYTICS_VIEW_LABELS.rule_based}
-          </Button>
-          <Button
-            size="sm"
-            variant="secondary"
-            className={sectionButtonClass(view === 'volume_commitments')}
-            onClick={() => setView('volume_commitments')}
-          >
-            {ANALYTICS_VIEW_LABELS.volume_commitments}
-          </Button>
-        </div>
-
-        <div className="flex items-center gap-2 justify-self-start xl:justify-self-end">
+        <div className="flex flex-wrap items-center gap-2 justify-self-start xl:justify-self-end">
+          <SelectMenu label="View" items={visibleViewTabs} value={view} onSelect={setView} />
           <TimeRangeFilter
             range={range}
             customStart={customStart}
@@ -1687,7 +1832,7 @@ export function AnalyticsPage() {
       ) : null}
 
       <div className="relative">
-      {view === 'transactions' ? (
+      {isDecisionView ? (
         <div className="space-y-5">
           <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
             <Card className="!rounded-2xl">
@@ -1701,29 +1846,29 @@ export function AnalyticsPage() {
                       {formatPercent(overallAuthRate)}
                     </p>
                     <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
-                      Weighted across all gateways
+                      {formatNumber(authRateSuccess, 0)} of {formatNumber(authRateTotal, 0)} reported outcomes
                     </p>
                   </>
                 ) : (
                   <>
                     <p className="mt-2 text-[34px] font-semibold text-slate-500 dark:text-slate-400 leading-[42px]">—</p>
-                    <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">No score data yet</p>
+                    <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">No reported outcomes yet</p>
                   </>
                 )}
               </CardBody>
             </Card>
 
-            {transactionRouteHits.map((item) => (
+            {decisionRouteHits.map((item) => (
               <Card key={item.route} className="!rounded-2xl">
                 <CardBody>
                   <p className="text-[13px] font-medium text-slate-500 dark:text-[#8a8a93] leading-[18px]">
-                    {analyticsRouteLabel(item.route)}
+                    {overviewRouteLabel(item.route)}
                   </p>
                   <p className="mt-2 text-[34px] font-semibold tabular-nums text-slate-950 dark:text-white leading-[42px]">
                     {formatNumber(item.count, 0)}
                   </p>
                   <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
-                    {item.route === '/decide_gateway' ? 'routing decisions' : 'score feedback calls'}
+                    {item.route === '/update_gateway' ? 'score feedback calls' : 'routing decisions'}
                   </p>
                 </CardBody>
               </Card>
@@ -1762,13 +1907,17 @@ export function AnalyticsPage() {
             onToggle={() => setRoutingAlignmentOpen((value) => !value)}
           />
 
+          {view === 'multi_objective' ? (
+            <HybridRoutingSplitCard split={overview.data?.hybrid_split ?? null} />
+          ) : null}
+
           {FEATURE_FLAGS.SMART_RETRY_IN_ANALYTICS && <SmartRetrySection stats={overview.data?.smart_retry_stats ?? null} />}
 
           <Card className="!rounded-2xl overflow-visible">
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Selected gateways over time</h2>
+              <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Selected connectors over time</h2>
               <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                 Connector decision counts for the same active filters used by the success-rate chart.
               </p>
@@ -1806,8 +1955,8 @@ export function AnalyticsPage() {
             </div>
           ) : (
             <EmptyState
-              title="No gateway share history yet"
-              body="Gateway traffic will appear here after payments are routed in this window."
+              title="No connector share history yet"
+              body="Connector traffic will appear here after payments are routed in this window."
             />
           )}
         </CardBody>
@@ -2045,7 +2194,7 @@ export function AnalyticsPage() {
         </div>
       ) : view === 'volume_commitments' ? (
         <VolumeCommitmentAnalytics />
-      ) : (
+      ) : view === 'rule_based' ? (
         <div className="space-y-5">
           <Card className="!rounded-2xl">
             <CardBody>
@@ -2127,7 +2276,7 @@ export function AnalyticsPage() {
                             key={gateway}
                             dataKey={gateway}
                             fill={
-                              gateway === 'No gateway selected'
+                              gateway === 'No connector selected'
                                 ? '#64748b'
                                 : CHART_COLORS[index % CHART_COLORS.length]
                             }
@@ -2212,9 +2361,9 @@ export function AnalyticsPage() {
               <Card className="!rounded-2xl h-full overflow-visible">
                 <CardHeader>
                   <div>
-                    <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Gateway activity</h2>
+                    <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Connector activity</h2>
                     <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
-                      Recent decisions grouped by latest chosen gateway.
+                      Recent decisions grouped by latest chosen connector.
                     </p>
                   </div>
                 </CardHeader>
@@ -2241,12 +2390,12 @@ export function AnalyticsPage() {
                     </div>
                   ) : previewIngestionPending ? (
                     <PendingState
-                      title="Waiting for gateway activity"
-                      body="Recent rule decisions are still being processed. Gateway activity will appear automatically once rows are available."
+                      title="Waiting for connector activity"
+                      body="Recent rule decisions are still being processed. Connector activity will appear automatically once rows are available."
                     />
                   ) : (
                     <EmptyState
-                      title="No gateway activity yet"
+                      title="No connector activity yet"
                       body="Once rule decisions are captured, this panel will show which connectors are being selected."
                     />
                   )}
@@ -2303,6 +2452,8 @@ export function AnalyticsPage() {
             </div>
           </div>
         </div>
+      ) : (
+        unhandledView(view)
       )}
       </div>
     </div>

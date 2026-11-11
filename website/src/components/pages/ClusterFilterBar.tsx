@@ -6,6 +6,7 @@ import {
   type ClusterFacet,
   type ClusterFilters,
 } from '../../hooks/useCostRouting'
+import { useCloseOnFrameBlur } from '../../hooks/useCloseOnFrameBlur'
 
 /**
  * Shared cluster filter bar — used by BOTH the read-only Ingested Data table and the editable Costs
@@ -79,6 +80,9 @@ function MultiSelect({
       document.removeEventListener('keydown', onKey)
     }
   }, [open])
+
+  // Embedded, a click on the dashboard around the frame never reaches this document.
+  useCloseOnFrameBlur(open, () => setOpen(false))
 
   const visible = useMemo(() => {
     const q = search.trim().toLowerCase()

@@ -1,13 +1,17 @@
 use serde::{Deserialize, Serialize};
 
-use crate::analytics::flow::AnalyticsRoute;
+use crate::analytics::flow::{
+    AnalyticsRoute, SUMMARY_KIND_DYNAMIC, SUMMARY_KIND_HYBRID, SUMMARY_KIND_PREVIEW,
+};
 
 pub const MAX_ANALYTICS_LOOKBACK_MS: i64 = 18 * 30 * 24 * 60 * 60 * 1000;
 pub const MIN_ANALYTICS_PAGE: usize = 1;
 pub const MIN_ANALYTICS_PAGE_SIZE: usize = 1;
 pub const MAX_ANALYTICS_PAGE_SIZE: usize = 50;
 pub const DEFAULT_ANALYTICS_PAGE_SIZE: usize = 10;
-pub const DEFAULT_PAYMENT_AUDIT_PAGE_SIZE: usize = 12;
+pub const DEFAULT_PAYMENT_AUDIT_PAGE_SIZE: usize = 20;
+/// The payment audit pages up to 100 payments; each page is one keyed lookup, not a scan.
+pub const MAX_PAYMENT_AUDIT_PAGE_SIZE: usize = 100;
 
 pub fn normalise_page(page: Option<u32>) -> usize {
     page.unwrap_or(MIN_ANALYTICS_PAGE as u32)
@@ -15,10 +19,14 @@ pub fn normalise_page(page: Option<u32>) -> usize {
 }
 
 pub fn normalise_page_size(page_size: Option<u32>, default: usize) -> usize {
-    page_size.unwrap_or(default as u32).clamp(
-        MIN_ANALYTICS_PAGE_SIZE as u32,
-        MAX_ANALYTICS_PAGE_SIZE as u32,
-    ) as usize
+    normalise_page_size_up_to(page_size, default, MAX_ANALYTICS_PAGE_SIZE)
+}
+
+/// Like [`normalise_page_size`], with its own upper bound.
+pub fn normalise_page_size_up_to(page_size: Option<u32>, default: usize, max: usize) -> usize {
+    page_size
+        .unwrap_or(default as u32)
+        .clamp(MIN_ANALYTICS_PAGE_SIZE as u32, max as u32) as usize
 }
 
 fn normalise_gateways(raw: Option<String>) -> Vec<String> {
@@ -27,6 +35,38 @@ fn normalise_gateways(raw: Option<String>) -> Vec<String> {
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
         .collect()
+}
+
+/// Which decision family the analytics charts read. `/decide_gateway` and `/routing/hybrid`
+/// both run the same decider and record the same columns, but under different flow types and
+/// with the decider payload nested one level deeper in `details`. Every decision-based metric
+/// resolves its flow type and JSON paths through this so the two never have to be special-cased
+/// at the call site.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AnalyticsRoutingKind {
+    #[default]
+    MultiObjective,
+    Hybrid,
+}
+
+impl AnalyticsRoutingKind {
+    pub fn from_query(value: Option<&str>) -> Self {
+        match value
+            .map(|value| value.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("hybrid") => Self::Hybrid,
+            _ => Self::MultiObjective,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MultiObjective => "multi_objective",
+            Self::Hybrid => "hybrid",
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,6 +85,7 @@ pub struct AnalyticsQuery {
     pub country: Option<String>,
     pub auth_type: Option<String>,
     pub gateways: Vec<String>,
+    pub routing_kind: AnalyticsRoutingKind,
 }
 
 impl AnalyticsQuery {
@@ -64,6 +105,7 @@ impl AnalyticsQuery {
         country: Option<String>,
         auth_type: Option<String>,
         gateways: Option<String>,
+        routing_kind: Option<String>,
     ) -> Self {
         let range = AnalyticsRange::from_query(range.as_deref());
         let (start_ms, end_ms) = match (start_ms, end_ms) {
@@ -88,6 +130,7 @@ impl AnalyticsQuery {
             country: country.filter(|value| !value.is_empty()),
             auth_type: auth_type.filter(|value| !value.is_empty()),
             gateways: normalise_gateways(gateways),
+            routing_kind: AnalyticsRoutingKind::from_query(routing_kind.as_deref()),
         }
     }
 }
@@ -154,14 +197,56 @@ pub struct SmartRetryStats {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsGatewayVolume {
+    pub gateway: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsOverviewTotals {
+    pub request_count: i64,
+    pub error_count: i64,
+    pub auth_rate: AnalyticsAuthRate,
+    pub gateway_volumes: Vec<AnalyticsGatewayVolume>,
+    pub requests_by_route: Vec<AnalyticsRouteHit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AnalyticsOverviewResponse {
     pub merchant_id: String,
+    pub totals: AnalyticsOverviewTotals,
     pub kpis: Vec<AnalyticsKpi>,
     pub route_hits: Vec<AnalyticsRouteHit>,
     pub top_scores: Vec<GatewayScoreSnapshot>,
     pub top_errors: Vec<AnalyticsErrorSummary>,
     pub top_rules: Vec<AnalyticsRuleHit>,
     pub smart_retry_stats: SmartRetryStats,
+    pub auth_rate: AnalyticsAuthRate,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hybrid_split: Option<AnalyticsHybridSplit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsAuthRate {
+    pub success_count: i64,
+    pub failure_count: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsHybridSplit {
+    pub decisions: i64,
+    pub dynamic_success: i64,
+    pub dynamic_fallback: i64,
+    pub dynamic_skipped: i64,
+    pub static_decided: i64,
+    pub failed: i64,
+    pub static_connectors: Vec<AnalyticsHybridConnectorPick>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AnalyticsHybridConnectorPick {
+    pub connector: String,
+    pub count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -327,6 +412,80 @@ pub struct AnalyticsRuleHit {
     pub count: i64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentAuditScope {
+    #[default]
+    All,
+    Dynamic,
+    Preview,
+}
+
+impl PaymentAuditScope {
+    pub fn from_query(value: Option<&str>) -> Self {
+        match value
+            .map(|value| value.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("dynamic") => Self::Dynamic,
+            Some("preview") => Self::Preview,
+            _ => Self::All,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::All => "all",
+            Self::Dynamic => "dynamic",
+            Self::Preview => "preview",
+        }
+    }
+
+    pub const fn summary_kinds(self) -> Option<&'static [&'static str]> {
+        match self {
+            Self::All => None,
+            Self::Dynamic => Some(&[SUMMARY_KIND_DYNAMIC, SUMMARY_KIND_HYBRID]),
+            Self::Preview => Some(&[SUMMARY_KIND_PREVIEW]),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentAuditRoutingKind {
+    /// Multi Objective: `/decide` and `/routing/hybrid`, the endpoint it replaces.
+    MultiObjective,
+    /// `/decide-gateway` without debit routing.
+    AuthRate,
+    RuleBased,
+    DebitRouting,
+}
+
+impl PaymentAuditRoutingKind {
+    pub fn from_query(value: Option<&str>) -> Option<Self> {
+        match value
+            .map(|value| value.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            // `hybrid` named the view before `/decide` joined it.
+            Some("multi_objective" | "hybrid") => Some(Self::MultiObjective),
+            Some("auth_rate") => Some(Self::AuthRate),
+            Some("rule_based") => Some(Self::RuleBased),
+            Some("debit_routing") => Some(Self::DebitRouting),
+            _ => None,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::MultiObjective => "multi_objective",
+            Self::AuthRate => "auth_rate",
+            Self::RuleBased => "rule_based",
+            Self::DebitRouting => "debit_routing",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PaymentAuditQuery {
     pub merchant_id: String,
@@ -337,25 +496,207 @@ pub struct PaymentAuditQuery {
     pub page_size: usize,
     pub payment_id: Option<String>,
     pub request_id: Option<String>,
-    pub gateway: Option<String>,
-    pub route: Option<String>,
+    /// Gateways and routes: a payment matches when it went through any of them.
+    pub gateway: Vec<String>,
+    pub route: Vec<String>,
     pub status: Option<String>,
     pub flow_type: Option<String>,
     pub routing_approach: Option<String>,
     pub exclude_routing_approach: Option<String>,
-    pub error_code: Option<String>,
+    /// Payments that hit any of these error codes.
+    pub error_code: Vec<String>,
+    pub scope: PaymentAuditScope,
+    pub routing_kind: Option<PaymentAuditRoutingKind>,
+    pub payment_filters: PaymentAuditPaymentFilters,
+}
+
+/// A payment's outcome, from the statuses its score updates reported.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PaymentAuditOutcome {
+    /// Some attempt succeeded, including a success after failed retries.
+    Success,
+    /// A terminal failure was reported and no attempt succeeded.
+    Failure,
+    /// No terminal status reported yet.
+    Pending,
+}
+
+impl PaymentAuditOutcome {
+    pub fn from_query(value: Option<&str>) -> Option<Self> {
+        match value?.trim().to_ascii_lowercase().as_str() {
+            "success" => Some(Self::Success),
+            "failure" => Some(Self::Failure),
+            "pending" => Some(Self::Pending),
+            _ => None,
+        }
+    }
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Success => "success",
+            Self::Failure => "failure",
+            Self::Pending => "pending",
+        }
+    }
+}
+
+/// Payment attributes the audit list filters on. Each is matched per payment rather than per
+/// event: a payment matches when any of its events carries the value, so its other events (score
+/// updates, rule evaluations) stay in its summary.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PaymentAuditPaymentFilters {
+    /// Only payments whose latest routing decision differs from a reported update connector.
+    #[serde(default)]
+    pub connector_mismatch: bool,
+    /// Payments with any of these outcomes; empty means unfiltered.
+    pub outcome: Vec<PaymentAuditOutcome>,
+    /// Each attribute matches a payment carrying any of its values; empty means unfiltered.
+    pub currency: Vec<String>,
+    pub payment_method: Vec<String>,
+    pub payment_method_type: Vec<String>,
+    pub card_network: Vec<String>,
+    pub auth_type: Vec<String>,
+    pub min_amount: Option<f64>,
+    pub max_amount: Option<f64>,
+    /// Routing keys and metadata keys, each matching a payment whose requests carried its value;
+    /// a payment must match all of them.
+    #[serde(default)]
+    pub fields: Vec<PaymentFieldFilter>,
+}
+
+/// A payment field the audit list narrows by, as it was sent on any routing request.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct PaymentFieldFilter {
+    pub field: PaymentField,
+    /// The value, plus its configured routing name where requests carry one (an ISO country
+    /// code's country name). Matched ignoring case.
+    pub values: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", content = "name", rename_all = "snake_case")]
+pub enum PaymentField {
+    /// A configured routing key, such as `card_bin` or `billing_country`.
+    RoutingKey(String),
+    /// A key of the request's metadata, sent as `metadata.<key>`.
+    Metadata(String),
+}
+
+impl PaymentFieldFilter {
+    const METADATA_PREFIX: &'static str = "metadata.";
+
+    /// The `payment_fields` param: a JSON object of field names to values, such as
+    /// `{"card_bin":"424242","metadata.segment":"premium"}`. A field is a routing key the
+    /// configuration defines (other than a numeric one: amounts filter by `min_amount` /
+    /// `max_amount`) or `metadata.<key>`.
+    pub fn parse_all(
+        raw: Option<&str>,
+        keys: &std::collections::BTreeMap<String, crate::euclid::types::KeyConfig>,
+    ) -> Result<Vec<Self>, &'static str> {
+        let Some(raw) = raw.map(str::trim).filter(|raw| !raw.is_empty()) else {
+            return Ok(Vec::new());
+        };
+        let fields: serde_json::Map<String, serde_json::Value> = serde_json::from_str(raw)
+            .map_err(|_| "payment_fields must be a JSON object of field names to values")?;
+        fields
+            .into_iter()
+            .map(|(name, value)| {
+                let value = match value {
+                    serde_json::Value::String(text) => text.trim().to_string(),
+                    serde_json::Value::Number(number) => number.to_string(),
+                    _ => return Err("payment_fields values must be text"),
+                };
+                if value.is_empty() {
+                    return Err("payment_fields values must not be empty");
+                }
+                Self::parse(&name, value, keys)
+            })
+            .collect()
+    }
+
+    fn parse(
+        name: &str,
+        value: String,
+        keys: &std::collections::BTreeMap<String, crate::euclid::types::KeyConfig>,
+    ) -> Result<Self, &'static str> {
+        use crate::euclid::types::KeyDataType;
+
+        if let Some(key) = name.strip_prefix(Self::METADATA_PREFIX) {
+            let valid = !key.is_empty()
+                && key.len() <= 64
+                && key
+                    .chars()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '.'));
+            if !valid {
+                return Err(
+                    "payment_fields metadata keys must be letters, digits, '_', '-' or '.'",
+                );
+            }
+            return Ok(Self {
+                field: PaymentField::Metadata(key.to_string()),
+                values: vec![value],
+            });
+        }
+        match keys.get(name).map(|config| &config.data_type) {
+            None | Some(KeyDataType::Udf) => {
+                Err("payment_fields names a field that is not a routing key or metadata.<key>")
+            }
+            Some(KeyDataType::Integer) => {
+                Err("payment_fields cannot filter numeric fields; use min_amount and max_amount")
+            }
+            Some(_) => {
+                let country_name = matches!(
+                    name,
+                    "billing_country" | "business_country" | "issuer_country"
+                )
+                .then(|| {
+                    crate::types::country::routing_names::routing_country_name(
+                        &value.to_ascii_uppercase(),
+                    )
+                })
+                .flatten();
+                let mut values = vec![value];
+                values.extend(country_name.map(str::to_string));
+                Ok(Self {
+                    field: PaymentField::RoutingKey(name.to_string()),
+                    values,
+                })
+            }
+        }
+    }
+}
+
+impl PaymentAuditPaymentFilters {
+    /// The values of a comma-separated query param (`currency=USD,EUR`), blanks dropped.
+    pub fn values(param: Option<&str>) -> Vec<String> {
+        param
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .collect()
+    }
 }
 
 impl PaymentAuditQuery {
-    fn normalise_route_filter(route: Option<String>) -> Option<String> {
-        route.and_then(|value| {
-            let trimmed = value.trim();
-            if trimmed.is_empty() {
-                return None;
-            }
-
-            AnalyticsRoute::from_filter_value(trimmed).map(|route| route.as_str().to_string())
-        })
+    /// Sets the payment-attribute filters, dropping non-finite amount bounds.
+    pub fn with_payment_filters(mut self, filters: PaymentAuditPaymentFilters) -> Self {
+        self.payment_filters = PaymentAuditPaymentFilters {
+            min_amount: filters.min_amount.filter(|v| v.is_finite()),
+            max_amount: filters.max_amount.filter(|v| v.is_finite()),
+            ..filters
+        };
+        self
+    }
+    /// The comma-separated routes, as their analytics route names. Unknown routes are dropped.
+    fn normalise_route_filter(route: Option<String>) -> Vec<String> {
+        PaymentAuditPaymentFilters::values(route.as_deref())
+            .iter()
+            .filter_map(|value| AnalyticsRoute::from_filter_value(value))
+            .map(|route| route.as_str().to_string())
+            .collect()
     }
 
     fn normalise_status_filter(status: Option<String>) -> Option<String> {
@@ -390,6 +731,8 @@ impl PaymentAuditQuery {
         routing_approach: Option<String>,
         exclude_routing_approach: Option<String>,
         error_code: Option<String>,
+        scope: Option<String>,
+        routing_kind: Option<String>,
     ) -> Self {
         let range = AnalyticsRange::from_query(range.as_deref());
         let (start_ms, end_ms) = match (start_ms, end_ms) {
@@ -405,16 +748,23 @@ impl PaymentAuditQuery {
             start_ms,
             end_ms,
             page: normalise_page(page),
-            page_size: normalise_page_size(page_size, DEFAULT_PAYMENT_AUDIT_PAGE_SIZE),
+            page_size: normalise_page_size_up_to(
+                page_size,
+                DEFAULT_PAYMENT_AUDIT_PAGE_SIZE,
+                MAX_PAYMENT_AUDIT_PAGE_SIZE,
+            ),
             payment_id,
             request_id,
-            gateway,
+            gateway: PaymentAuditPaymentFilters::values(gateway.as_deref()),
             route: Self::normalise_route_filter(route),
             status: Self::normalise_status_filter(status),
             flow_type,
             routing_approach,
             exclude_routing_approach,
-            error_code,
+            error_code: PaymentAuditPaymentFilters::values(error_code.as_deref()),
+            scope: PaymentAuditScope::from_query(scope.as_deref()),
+            routing_kind: PaymentAuditRoutingKind::from_query(routing_kind.as_deref()),
+            payment_filters: PaymentAuditPaymentFilters::default(),
         }
     }
 }
@@ -429,10 +779,17 @@ pub struct PaymentAuditSummary {
     pub last_seen_ms: i64,
     pub event_count: usize,
     pub latest_status: Option<String>,
+    /// The payment's outcome from the statuses its score updates reported, unlike
+    /// `latest_status`, which is whichever event came last (a routing call's `success` included).
+    pub outcome: PaymentAuditOutcome,
     pub latest_gateway: Option<String>,
     pub latest_stage: Option<String>,
     pub gateways: Vec<String>,
     pub routes: Vec<String>,
+    /// A/B experiments that routed this payment, with the arm it was assigned; empty when it was
+    /// not routed under one. Absent when the lookup failed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub experiments: Option<Vec<PaymentAuditExperiment>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -476,6 +833,8 @@ pub struct PaymentAuditResponse {
     pub flow_type: Option<String>,
     pub routing_approach: Option<String>,
     pub error_code: Option<String>,
+    pub scope: String,
+    pub routing_kind: Option<String>,
     pub page: usize,
     pub page_size: usize,
     pub total_results: usize,
@@ -485,35 +844,64 @@ pub struct PaymentAuditResponse {
     pub timeline: Vec<PaymentAuditEvent>,
 }
 
+/// The values the payment audit's dropdown filters can take for a merchant: what its own
+/// payments in the window carried, lower-cased as the filters match them (gateways as recorded).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct PaymentAuditFilterOptions {
+    pub gateways: Vec<String>,
+    pub payment_methods: Vec<String>,
+    pub payment_method_types: Vec<String>,
+    pub card_networks: Vec<String>,
+    pub auth_types: Vec<String>,
+    pub currencies: Vec<String>,
+    /// Error codes as recorded (matched exactly).
+    pub error_codes: Vec<String>,
+}
+
+/// A payment's assignment to an A/B experiment on one routing endpoint.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaymentAuditExperiment {
+    pub experiment_id: String,
+    /// `control`, or the id of the variant (`variant` for single-variant experiments).
+    pub arm: String,
+    /// The endpoint that routed it under the experiment: `hybrid_routing`, `decide_gateway` or
+    /// `evaluate`.
+    pub endpoint: String,
+    /// When the payment was first routed under this assignment.
+    pub routed_at_ms: i64,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExperimentArmMetrics {
     pub arm: String,
+    /// Payments routed under the arm, including those with no terminal status reported yet.
     pub transaction_count: i64,
     pub success_count: i64,
     /// Payments that resolved without ever succeeding (a fail-then-retry-success payment counts
     /// only as a success).
     pub failure_count: i64,
-    /// NAR — net auth rate: payments that eventually succeeded (any attempt) / all payments.
+    /// NAR — net auth rate: payments that eventually succeeded (any attempt) / resolved payments
+    /// (success + failure). Payments still awaiting a terminal status are left out.
     pub auth_rate: f64,
-    /// FAAR — first-attempt auth rate: payments whose first attempt succeeded / all payments.
+    /// FAAR — first-attempt auth rate: payments whose first attempt succeeded / resolved payments.
     pub first_attempt_auth_rate: f64,
     /// TCS — total cost saved in money on successful payments: Σ (saved_bps/10⁴)·amount.
     /// `None` for arms that never ran cost routing (they save nothing by definition).
     pub total_cost_saved: Option<f64>,
     pub avg_latency_ms: Option<f64>,
-    /// Average chosen-PSP cost (bps) over outcome events that carried cost data. `None` for
+    /// Average chosen-PSP cost (bps) over payments whose decision carried cost data. `None` for
     /// auth-only arms / experiments where multi-objective did not run.
     pub avg_chosen_cost_bps: Option<f64>,
     /// Average cost saved vs the SR head (bps); positive only on CostWon decisions. `None` when
     /// no cost data was recorded.
     pub avg_cost_saved_bps: Option<f64>,
-    /// Economic value per transaction in bps of ticket: the arm's mean of
+    /// Economic value per resolved transaction in bps of ticket: the arm's mean of
     /// `v = success · (M·10_000 + saved_bps)` at the experiment's common business margin `M` —
     /// a success earns the margin plus whatever fee it saved vs the SR head (the gateway a
     /// cost-blind arm would have used on that transaction), a failure earns 0. Arms that never
     /// ran multi-objective record no cost_saved_bps (extracted as 0) — they truly saved
     /// nothing, so their EV is `auth_rate · M·10_000`, a pure auth comparison. `None` only when
-    /// the arm has no transactions.
+    /// the arm has no resolved transactions.
     pub net_ev_bps: Option<f64>,
 }
 
@@ -528,8 +916,33 @@ pub enum ExperimentVerdict {
     VariantWins,
     /// Variant is statistically significantly worse than control.
     VariantLoses,
-    /// Variant auth rate dropped beyond the guardrail threshold — merchant should pause.
+    /// Completed-payment auth rate dropped beyond the query's guardrail threshold, even if the
+    /// significance sample target has not been reached. Reporting a breach here warns earlier
+    /// than the live stop, which waits for a tenth of the target to resolve.
     GuardrailBreached,
+}
+
+/// One variant's results and how it compares with control.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExperimentVariantComparison {
+    /// The variant's id and metrics (`metrics.arm` is the id).
+    pub metrics: ExperimentArmMetrics,
+    /// Auth rate delta in percentage points (variant - control); 0 until both arms have a
+    /// resolved payment. Context metric — the verdict comes from the EV z-test.
+    pub delta_pp: f64,
+    /// Two-tailed p-value of the EV z-test against control on the per-transaction value
+    /// distribution. For auth-only comparisons (saved ≡ 0 on both arms) this is exactly the
+    /// (unpooled) two-proportion auth z-test. Compared with `significance_level`, not 0.05.
+    pub p_value: Option<f64>,
+    /// Confidence interval on the tested delta at `1 − significance_level`. Units match what the
+    /// UI displays: bps of EV delta for cost experiments, auth percentage points for auth-only
+    /// ones.
+    pub confidence_interval: Option<(f64, f64)>,
+    pub verdict: ExperimentVerdict,
+    /// EV delta in bps of ticket (variant − control), valued at `evaluation_margin`. The verdict
+    /// metric when at least one arm of the experiment ran multi-objective; `None` for auth-only
+    /// experiments, which are judged on the auth z-test instead.
+    pub net_delta_bps: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -537,26 +950,30 @@ pub struct ExperimentResultsResponse {
     pub experiment_id: String,
     pub merchant_id: String,
     pub control: ExperimentArmMetrics,
+    /// Every variant compared with control, in the experiment's order.
+    pub variants: Vec<ExperimentVariantComparison>,
+    /// Per-comparison significance level: 0.05 divided by the number of variants compared
+    /// (Bonferroni) — every requested variant and every variant that recorded payments — so the
+    /// chance of any false "wins"/"loses" across all variants stays at 5%.
+    pub significance_level: f64,
+    /// The first variant's metrics. Kept for single-variant clients; read `variants`.
     pub variant: ExperimentArmMetrics,
-    /// Auth rate delta in percentage points (variant - control). Context metric — the verdict
-    /// comes from the EV z-test.
+    /// The first variant's `delta_pp`. Kept for single-variant clients; read `variants`.
     pub delta_pp: f64,
-    /// Two-tailed p-value of the EV z-test on the per-transaction value distribution. For
-    /// auth-only experiments (saved ≡ 0 on both arms) this is exactly the (unpooled)
-    /// two-proportion auth z-test.
+    /// The first variant's `p_value`. Kept for single-variant clients; read `variants`.
     pub p_value: Option<f64>,
-    /// 95% CI on the tested delta. Units match what the UI displays: bps of EV delta for cost
-    /// experiments, auth percentage points for auth-only experiments.
+    /// The first variant's `confidence_interval`. Kept for single-variant clients; read
+    /// `variants`.
     pub confidence_interval: Option<(f64, f64)>,
+    /// The first variant's `verdict`. Kept for single-variant clients; read `variants`.
     pub verdict: ExperimentVerdict,
-    /// Min sample size from experiment config; used to show progress.
+    /// Min sample size from experiment config; used to show progress. Each comparison needs this
+    /// many resolved payments across control and that variant.
     pub min_sample_size: u32,
-    /// EV delta in bps of ticket (variant − control), valued at `evaluation_margin`. The verdict
-    /// metric when at least one arm ran multi-objective; `None` for auth-only experiments
-    /// (no cost data on either arm), which are judged on the auth z-test instead.
+    /// The first variant's `net_delta_bps`. Kept for single-variant clients; read `variants`.
     pub net_delta_bps: Option<f64>,
     /// The common business margin (fraction of ticket, net of baseline processing fees) used to
-    /// value both arms' EV.
+    /// value every arm's EV.
     pub evaluation_margin: f64,
 }
 
@@ -570,6 +987,13 @@ pub struct ExperimentResultsQuery {
     /// Common business margin (fraction of ticket) used to score net value for both arms.
     /// Defaults to `DEFAULT_EVALUATION_MARGIN` when the caller omits it.
     pub evaluation_margin: f64,
+    /// Restricts results to one endpoint. An experiment applies different layers per endpoint,
+    /// so arms are only comparable within one. `None` reads every endpoint together.
+    pub endpoint: Option<crate::euclid::types::ExperimentEndpoint>,
+    /// The variants to report, in order. Every one of them, and every variant that recorded
+    /// payments, counts toward the Bonferroni correction, including those with nothing recorded
+    /// yet. Empty reports the variants named by the recorded payments.
+    pub variant_ids: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -594,6 +1018,7 @@ pub struct ExperimentTransactionsQuery {
     pub start_ms: Option<i64>,
     pub page: u64,
     pub page_size: u64,
+    pub endpoint: Option<crate::euclid::types::ExperimentEndpoint>,
 }
 
 pub const ROUTING_EVENTS_BUCKET_MS: i64 = 5 * 60 * 1000;
@@ -803,8 +1228,9 @@ impl RoutingEventsQuery {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalise_page, normalise_page_size, DEFAULT_ANALYTICS_PAGE_SIZE,
-        DEFAULT_PAYMENT_AUDIT_PAGE_SIZE, MAX_ANALYTICS_PAGE_SIZE, MIN_ANALYTICS_PAGE,
+        normalise_page, normalise_page_size, PaymentAuditQuery, DEFAULT_ANALYTICS_PAGE_SIZE,
+        DEFAULT_PAYMENT_AUDIT_PAGE_SIZE, MAX_ANALYTICS_PAGE_SIZE, MAX_PAYMENT_AUDIT_PAGE_SIZE,
+        MIN_ANALYTICS_PAGE,
     };
 
     #[test]
@@ -829,4 +1255,396 @@ mod tests {
             MAX_ANALYTICS_PAGE_SIZE
         );
     }
+
+    #[test]
+    fn payment_audit_pages_up_to_100_while_other_analytics_stay_at_50() {
+        let audit = |page_size| {
+            PaymentAuditQuery::from_request(
+                "m_1".to_string(),
+                None,
+                None,
+                None,
+                None,
+                Some(page_size),
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .page_size
+        };
+        assert_eq!(audit(100), 100);
+        assert_eq!(audit(500), MAX_PAYMENT_AUDIT_PAGE_SIZE);
+        assert_eq!(
+            normalise_page_size(Some(100), DEFAULT_ANALYTICS_PAGE_SIZE),
+            MAX_ANALYTICS_PAGE_SIZE
+        );
+    }
+}
+
+#[cfg(test)]
+mod payment_audit_filter_tests {
+    use super::{PaymentAuditRoutingKind, PaymentAuditScope};
+
+    #[test]
+    fn scope_defaults_to_all_and_only_narrow_scopes_pin_a_summary_kind() {
+        assert_eq!(PaymentAuditScope::from_query(None), PaymentAuditScope::All);
+        assert_eq!(
+            PaymentAuditScope::from_query(Some("nonsense")),
+            PaymentAuditScope::All
+        );
+        assert_eq!(
+            PaymentAuditScope::from_query(Some(" Dynamic ")),
+            PaymentAuditScope::Dynamic
+        );
+        assert_eq!(
+            PaymentAuditScope::from_query(Some("preview")),
+            PaymentAuditScope::Preview
+        );
+        assert_eq!(PaymentAuditScope::All.summary_kinds(), None);
+        assert_eq!(
+            PaymentAuditScope::Dynamic.summary_kinds(),
+            Some(&["dynamic", "hybrid"][..])
+        );
+        assert_eq!(
+            PaymentAuditScope::Preview.summary_kinds(),
+            Some(&["preview"][..])
+        );
+    }
+
+    fn routing_keys() -> std::collections::BTreeMap<String, crate::euclid::types::KeyConfig> {
+        serde_json::from_value(serde_json::json!({
+            "card_bin": {"type": "str_value"},
+            "billing_country": {"type": "enum", "values": "India, UnitedStatesOfAmerica"},
+            "amount": {"type": "integer"},
+            "metadata": {"type": "udf"},
+        }))
+        .unwrap_or_default()
+    }
+
+    #[test]
+    fn payment_fields_name_routing_keys_or_metadata_keys() {
+        use super::{PaymentField, PaymentFieldFilter};
+        let parsed = PaymentFieldFilter::parse_all(
+            Some(
+                r#"{"card_bin": " 424242 ", "billing_country": "us", "metadata.segment": "premium"}"#,
+            ),
+            &routing_keys(),
+        );
+        assert_eq!(
+            parsed,
+            Ok(vec![
+                PaymentFieldFilter {
+                    field: PaymentField::RoutingKey("card_bin".into()),
+                    values: vec!["424242".into()],
+                },
+                PaymentFieldFilter {
+                    field: PaymentField::RoutingKey("billing_country".into()),
+                    // The ISO code, and the country name rule parameters carry.
+                    values: vec!["us".into(), "UnitedStatesOfAmerica".into()],
+                },
+                PaymentFieldFilter {
+                    field: PaymentField::Metadata("segment".into()),
+                    values: vec!["premium".into()],
+                },
+            ])
+        );
+        assert_eq!(
+            PaymentFieldFilter::parse_all(None, &routing_keys()),
+            Ok(Vec::new())
+        );
+        assert_eq!(
+            PaymentFieldFilter::parse_all(Some(" "), &routing_keys()),
+            Ok(Vec::new())
+        );
+    }
+
+    #[test]
+    fn payment_fields_reject_what_they_cannot_match() {
+        use super::PaymentFieldFilter;
+        for raw in [
+            "card_bin=424242",
+            r#"["card_bin"]"#,
+            r#"{"card_bni": "424242"}"#,
+            r#"{"amount": "100"}"#,
+            r#"{"metadata": "x"}"#,
+            r#"{"metadata.": "x"}"#,
+            r#"{"metadata.a'b": "x"}"#,
+            r#"{"card_bin": ""}"#,
+            r#"{"card_bin": {"value": "424242"}}"#,
+        ] {
+            assert!(
+                PaymentFieldFilter::parse_all(Some(raw), &routing_keys()).is_err(),
+                "{raw}"
+            );
+        }
+    }
+
+    #[test]
+    fn routing_kind_parses_the_dashboard_filter_values_and_ignores_the_rest() {
+        assert_eq!(
+            PaymentAuditRoutingKind::from_query(Some("multi_objective")),
+            Some(PaymentAuditRoutingKind::MultiObjective)
+        );
+        assert_eq!(
+            PaymentAuditRoutingKind::from_query(Some("auth_rate")),
+            Some(PaymentAuditRoutingKind::AuthRate)
+        );
+        assert_eq!(PaymentAuditRoutingKind::from_query(Some("decide")), None);
+        assert_eq!(
+            PaymentAuditRoutingKind::from_query(Some("RULE_BASED")),
+            Some(PaymentAuditRoutingKind::RuleBased)
+        );
+        assert_eq!(
+            PaymentAuditRoutingKind::from_query(Some("debit_routing")),
+            Some(PaymentAuditRoutingKind::DebitRouting)
+        );
+        assert_eq!(
+            PaymentAuditRoutingKind::from_query(Some("hybrid")),
+            Some(PaymentAuditRoutingKind::MultiObjective)
+        );
+        assert_eq!(PaymentAuditRoutingKind::from_query(Some("")), None);
+        assert_eq!(PaymentAuditRoutingKind::from_query(Some("tabs")), None);
+        assert_eq!(PaymentAuditRoutingKind::from_query(None), None);
+        assert_eq!(
+            PaymentAuditRoutingKind::MultiObjective.as_str(),
+            "multi_objective"
+        );
+    }
+
+    #[test]
+    fn analytics_routing_kind_defaults_to_multi_objective_for_anything_but_hybrid() {
+        use super::AnalyticsRoutingKind;
+
+        assert_eq!(
+            AnalyticsRoutingKind::from_query(Some("hybrid")),
+            AnalyticsRoutingKind::Hybrid
+        );
+        assert_eq!(
+            AnalyticsRoutingKind::from_query(Some(" HYBRID ")),
+            AnalyticsRoutingKind::Hybrid
+        );
+        assert_eq!(
+            AnalyticsRoutingKind::from_query(Some("rule_based")),
+            AnalyticsRoutingKind::MultiObjective
+        );
+        assert_eq!(
+            AnalyticsRoutingKind::from_query(None),
+            AnalyticsRoutingKind::MultiObjective
+        );
+        assert_eq!(
+            AnalyticsRoutingKind::default(),
+            AnalyticsRoutingKind::MultiObjective
+        );
+    }
+}
+
+// ── Volume commitments ───────────────────────────────────────────────────────────────────────
+//
+// A billing cycle is not a time range, so these do not use `AnalyticsQuery`: buckets are numbered
+// from the instant a cycle opened rather than from the wall clock, and each connector can be on a
+// cycle of its own. What analytics needs is only the windows to read; nothing here knows what a
+// contract is.
+
+/// One connector's cycle: the span to read, and how long a contract "day" lasts inside it.
+#[derive(Debug, Clone)]
+pub struct CommitmentWindow {
+    pub connector: String,
+    pub cycle_start_ms: i64,
+    pub cycle_end_ms: i64,
+    /// 86_400 on a calendar cycle, 60 on a test cycle, where a minute stands in for a day.
+    pub day_secs: u64,
+}
+
+/// Everything the commitment dashboard reads, in one query.
+#[derive(Debug, Clone)]
+pub struct CommitmentAnalyticsQuery {
+    pub merchant_id: String,
+    /// Empty means there is nothing to read; every metric returns empty rather than querying.
+    pub windows: Vec<CommitmentWindow>,
+    /// Buckets per contract day: 1 for a day-resolution series, more for an intraday one.
+    pub per_day: u32,
+    /// How many events each half of the audit trail may return.
+    pub audit_limit: u64,
+    /// The `routing_approach` value the nudge stamps on a diverted decision. Passed in so this
+    /// layer keeps no dependency on the decider's enums — the caller owns that vocabulary.
+    pub steered_approach: String,
+    /// Multiplier that puts a measured payment amount on the same scale as the contract's goals.
+    /// Traffic reaches `/decide-gateway` in major currency units while goals are stored in minor
+    /// ones; `1.0` where a contract counts transactions rather than money.
+    pub amount_scale: f64,
+}
+
+impl CommitmentAnalyticsQuery {
+    /// The cycle spanning every window — the widest audit range worth reading.
+    pub fn span_ms(&self) -> Option<(i64, i64)> {
+        let start = self.windows.iter().map(|w| w.cycle_start_ms).min()?;
+        let end = self.windows.iter().map(|w| w.cycle_end_ms).max()?;
+        Some((start, end))
+    }
+
+    pub fn connectors(&self) -> Vec<String> {
+        self.windows.iter().map(|w| w.connector.clone()).collect()
+    }
+
+    /// The same connectors over the period immediately before each one's *own* cycle — the
+    /// comparison the impact view makes. Every window is shifted back by its own length, because
+    /// cycles can differ in both start and duration: shifting them all by one shared figure reads
+    /// part of a later-starting connector's current cycle as its history.
+    pub fn previous_cycle(&self) -> Self {
+        Self {
+            windows: self
+                .windows
+                .iter()
+                .map(|w| CommitmentWindow {
+                    connector: w.connector.clone(),
+                    cycle_start_ms: w
+                        .cycle_start_ms
+                        .saturating_sub((w.cycle_end_ms - w.cycle_start_ms).max(1)),
+                    cycle_end_ms: w.cycle_start_ms,
+                    day_secs: w.day_secs,
+                })
+                .collect(),
+            ..self.clone()
+        }
+    }
+
+    /// The same windows read at a different bucket size.
+    pub fn at_resolution(&self, per_day: u32) -> Self {
+        Self {
+            per_day,
+            ..self.clone()
+        }
+    }
+}
+
+#[cfg(test)]
+mod commitment_query_tests {
+    use super::*;
+
+    fn window(connector: &str, start_ms: i64, end_ms: i64) -> CommitmentWindow {
+        CommitmentWindow {
+            connector: connector.to_string(),
+            cycle_start_ms: start_ms,
+            cycle_end_ms: end_ms,
+            day_secs: 86_400,
+        }
+    }
+
+    fn query(windows: Vec<CommitmentWindow>) -> CommitmentAnalyticsQuery {
+        CommitmentAnalyticsQuery {
+            merchant_id: "m1".to_string(),
+            windows,
+            per_day: 24,
+            audit_limit: 50,
+            steered_approach: "SR_SELECTION_VOLUME_COMMITMENT".to_string(),
+            amount_scale: 100.0,
+        }
+    }
+
+    const DAY: i64 = 86_400_000;
+
+    /// Each commitment's history is the period before *its* cycle. A document whose cycles open on
+    /// different days would otherwise read the later one's opening days as its own baseline.
+    #[test]
+    fn every_window_steps_back_by_its_own_length() {
+        let q = query(vec![
+            window("stripe", 30 * DAY, 61 * DAY),
+            window("adyen", 33 * DAY, 64 * DAY),
+        ]);
+        let previous = q.previous_cycle();
+        let bounds: Vec<(i64, i64)> = previous
+            .windows
+            .iter()
+            .map(|w| (w.cycle_start_ms / DAY, w.cycle_end_ms / DAY))
+            .collect();
+        assert_eq!(bounds, vec![(-1, 30), (2, 33)]);
+    }
+
+    #[test]
+    fn resolution_changes_the_bucket_size_and_nothing_else() {
+        let q = query(vec![window("stripe", 0, 31 * DAY)]);
+        let daily = q.at_resolution(1);
+        assert_eq!(daily.per_day, 1);
+        assert_eq!(daily.windows.len(), 1);
+        assert_eq!(daily.amount_scale, q.amount_scale);
+    }
+}
+
+/// One PSP's volume in one bucket of its cycle, for the pacing chart.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitmentDayVolume {
+    pub connector: String,
+    /// Whole contract days since this PSP's cycle opened (0 = the first day).
+    pub day_index: u32,
+    /// Where the bucket starts in fractional contract days, at the resolution asked for.
+    pub day: f64,
+    pub total: f64,
+    /// Of `total`, what the nudge moved here.
+    pub steered: f64,
+    pub payments: u64,
+    pub steered_payments: u64,
+}
+
+/// What kind of audit entry an event is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CommitmentAuditKind {
+    Forecast,
+    Steered,
+    Eliminated,
+}
+
+/// One entry in the audit trail, reconstructed from stored events so it survives restarts.
+#[derive(Debug, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitmentAuditEvent {
+    pub at_epoch_ms: i64,
+    pub kind: CommitmentAuditKind,
+    /// The contract execution this belongs to. `None` on events written before runs were named.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub run_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub connector: Option<String>,
+    pub message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub amount: Option<f64>,
+}
+
+/// Per-PSP totals over one window: `steered_*` moved *to* it, `ceded_*` moved *away* from it.
+#[derive(Debug, Clone, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitmentWindowTotals {
+    pub connector: String,
+    pub payments: u64,
+    pub volume: f64,
+    pub steered_payments: u64,
+    pub steered_volume: f64,
+    pub ceded_payments: u64,
+    pub ceded_volume: f64,
+}
+
+/// What the pacing dashboard reads from analytics, gathered in one pass.
+#[derive(Debug, Clone, Default)]
+pub struct CommitmentAnalytics {
+    pub series: Vec<CommitmentDayVolume>,
+    pub audit: Vec<CommitmentAuditEvent>,
+}
+
+/// The impact view's own read: this cycle against the one before it, totals and day-by-day.
+/// Separate from `CommitmentAnalytics` because it spans two windows, and only one page asks for it.
+#[derive(Debug, Clone, Default)]
+pub struct CommitmentImpactData {
+    pub before: Vec<CommitmentWindowTotals>,
+    pub during: Vec<CommitmentWindowTotals>,
+    pub baseline_days: Vec<CommitmentDayVolume>,
+    pub cycle_days: Vec<CommitmentDayVolume>,
 }

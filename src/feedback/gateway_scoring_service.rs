@@ -85,7 +85,7 @@ use super::constants::{
 };
 use super::utils::get_time_from_txn_created_in_mills;
 use crate::logger;
-use crate::types::payment::payment_method_type_const::*;
+use crate::types::payment_instrument::PaymentMethod;
 // Converted data types
 // Original Haskell data type: GatewayLatencyForScoring
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -326,10 +326,10 @@ pub async fn get_gateway_scoring_type(
     let time_difference = get_time_from_txn_created_in_mills(txn_detail.clone());
     let merchant_sr_v3_input_config =
         findByNameFromRedis(SrV3InputConfig(get_m_id(merchant_id)).get_key()).await;
-    let pmt = txn_card_info.paymentMethodType;
+    let pmt = txn_card_info.instrument.method_code();
     let pm = get_payment_method(
         pmt.to_string(),
-        txn_card_info.paymentMethod,
+        txn_card_info.instrument.method_type_code().into_owned(),
         txn_detail.sourceObject.unwrap_or_default(),
     );
     // Extract the new parameters from txn_card_info
@@ -447,22 +447,40 @@ pub fn invalid_request_error(detail: &str, e: &impl std::fmt::Display) -> T::Err
     }
 }
 
+/// What `check_and_update_gateway_score_` returns when the payment has no scoring context (it was
+/// never routed by the decider, and no context was stored for it), so no score was updated.
+pub const SCORE_UPDATE_SKIPPED: &str = "Skipped";
+
 pub async fn check_and_update_gateway_score_(
     api_payload: FT::UpdateScorePayload,
 ) -> Result<String, T::ErrorResponse> {
-    // Emit AB test outcome unconditionally — before any early returns.
-    // emit_if_in_flight only needs payment_id, merchant_id, and is_success; it does
-    // not depend on gateway scoring data or GSM lookups, so it must not be gated on
-    // either. Moving it here ensures the outcome is recorded even when:
-    //   (a) the GSM scoring filter skips gateway penalisation, or
-    //   (b) GatewayScoringData is absent from Redis (expired/not cached).
+    // Before any early return, because the guardrail needs only the payment's outcome and must
+    // not be gated on the GSM scoring filter or on GatewayScoringData still being cached.
     let is_success = is_transaction_success(api_payload.status.clone());
-    crate::decider::gatewaydecider::ab_test::emit_if_in_flight(
-        &api_payload.payment_id,
-        &api_payload.merchant_id,
-        is_success,
-    )
-    .await;
+    if is_success || is_transaction_failure(api_payload.status.clone()) {
+        let experiments_to_stop =
+            crate::decider::gatewaydecider::ab_test::guardrail::record_outcome(
+                &api_payload.merchant_id,
+                &api_payload.payment_id,
+                is_success,
+            );
+        for breached in experiments_to_stop {
+            if let Err(error) =
+                crate::euclid::handlers::routing_rules::stop_breached_payment_experiment(
+                    &api_payload.merchant_id,
+                    &breached.experiment_id,
+                    &breached.variant_id,
+                    breached.run,
+                )
+                .await
+            {
+                logger::error!(merchant_id = %api_payload.merchant_id,
+                    experiment_id = %breached.experiment_id, variant_id = %breached.variant_id,
+                    error = %error,
+                    "Failed to stop breached A/B variant; later payment feedback will retry");
+            }
+        }
+    }
 
     // GSM-based scoring filter: skip penalization for failures where the gateway
     // is healthy (user/issuer-originated errors). Gated per merchant so it can be
@@ -586,7 +604,28 @@ pub async fn check_and_update_gateway_score_(
             Ok("Success".to_string())
         }
         Err(e) => {
-            // Return error response if gateway scoring data is not found
+            // With compression on, a missing key also reads as `GetFailed`, which is otherwise a
+            // read or decode failure. Only a key confirmed absent is skipped.
+            let scoring_data_absent = match e.current_context() {
+                redis_interface::errors::RedisError::NotFound => true,
+                redis_interface::errors::RedisError::GetFailed => {
+                    matches!(app_state.redis_conn.key_exists(&redis_key).await, Ok(false))
+                }
+                _ => false,
+            };
+            if scoring_data_absent {
+                logger::info!(
+                    action = "GATEWAY_SCORING_DATA_NOT_FOUND_SKIP",
+                    tag = "GATEWAY_SCORING_DATA_NOT_FOUND_SKIP",
+                    "No GatewayScoringData in redis for merchant={} gateway={} payment_id={}; \
+                     skipping score update: {}",
+                    api_payload.merchant_id,
+                    api_payload.gateway,
+                    api_payload.payment_id,
+                    e,
+                );
+                return Ok(SCORE_UPDATE_SKIPPED.to_string());
+            }
             Err(T::ErrorResponse {
                 status: "400".to_string(),
                 error_code: "GATEWAY_SCORING_DATA_NOT_FOUND".to_string(),
@@ -708,12 +747,16 @@ pub async fn update_gateway_score(
     score_snapshot_flow: crate::analytics::AnalyticsFlowContext,
     redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> () {
-    let mer_acc: MerchantAccount =
-        MA::load_merchant_by_merchant_id(MID::merchant_id_to_text(txn_detail.clone().merchantId))
-            .await
-            .expect("Merchant account not found");
-
-    //let mer_acc =
+    let merchant_id = MID::merchant_id_to_text(txn_detail.clone().merchantId);
+    let Some(mer_acc) = MA::load_merchant_by_merchant_id(merchant_id.clone()).await else {
+        // Unknown merchant, or the lookup failed: there is no score to update.
+        logger::error!(
+            action = "update_gateway_score",
+            merchant_id = %merchant_id,
+            "Skipping gateway score update: merchant account not found"
+        );
+        return;
+    };
     let routing_approach = get_routing_approach(txn_detail.clone());
     logger::debug!(
         action = "routing_approach_value",
@@ -722,10 +765,10 @@ pub async fn update_gateway_score(
         routing_approach
     );
 
-    let m_source_object = if txn_card_info.paymentMethodType == UPI {
+    let m_source_object = if txn_card_info.instrument.is(PaymentMethod::Upi) {
         txn_detail.sourceObject.clone()
     } else {
-        Some(txn_card_info.paymentMethod.clone())
+        Some(txn_card_info.instrument.method_type_code().into_owned())
     };
 
     let should_update_gateway_score = if gateway_scoring_type.clone() == GST::PenaliseSrv3 {
@@ -752,7 +795,7 @@ pub async fn update_gateway_score(
     };
 
     let should_update_explore_txn = if Cutover::is_feature_enabled(
-        DC::EnableExploreAndExploitOnSrv3(txn_card_info.clone().paymentMethodType.to_string())
+        DC::EnableExploreAndExploitOnSrv3(txn_card_info.instrument.method_code().to_string())
             .get_key(),
         MID::merchant_id_to_text(txn_detail.clone().merchantId),
         C::kvRedis(),
@@ -801,7 +844,7 @@ pub async fn update_gateway_score(
     let m_metric_entry: Option<MetricEntry> = match mb_gateway_scoring_data.clone() {
         None => {
             let merchant_id_str = MID::merchant_id_to_text(txn_detail.clone().merchantId);
-            let pmt_str = txn_card_info.paymentMethodType.to_string();
+            let pmt_str = txn_card_info.instrument.method_code().to_string();
             let txn_obj_type_str = txn_detail
                 .txnObjectType
                 .clone()
@@ -816,12 +859,13 @@ pub async fn update_gateway_score(
                 card_type_str,
                 false,
                 None,
+                txn_card_info.instrument.is(PaymentMethod::Card),
             )
             .await
         }
         Some(gateway_scoring_data) => {
             let merchant_id_str = MID::merchant_id_to_text(txn_detail.clone().merchantId);
-            let pmt_str = txn_card_info.paymentMethodType.to_string();
+            let pmt_str = txn_card_info.instrument.method_code().to_string();
             let txn_obj_type_str = txn_detail
                 .txnObjectType
                 .clone()
@@ -836,6 +880,7 @@ pub async fn update_gateway_score(
                 card_type_str,
                 gateway_scoring_data.isGriEnabledForElimination,
                 gateway_scoring_data.gatewayReferenceId,
+                txn_card_info.instrument.is(PaymentMethod::Card),
             )
             .await
         }
@@ -860,8 +905,8 @@ pub async fn update_gateway_score(
             crate::analytics::DomainAnalyticsEvent::record_score_snapshot(
                 score_snapshot_flow,
                 Some(MID::merchant_id_to_text(txn_detail.clone().merchantId)),
-                Some(txn_card_info.paymentMethodType.to_string()),
-                Some(m_source_object.clone().unwrap_or_default()),
+                Some(txn_card_info.instrument.method_type_code().into_owned()),
+                Some(txn_card_info.instrument.method_code().to_string()),
                 txn_card_info
                     .cardSwitchProvider
                     .as_ref()
@@ -925,7 +970,7 @@ pub async fn update_gateway_score(
             let gateway_name = txn_detail.gateway.clone().unwrap_or_default();
             if !gateway_name.is_empty() {
                 let merchant_id = MID::merchant_id_to_text(txn_detail.clone().merchantId);
-                let pmt_str = txn_card_info.paymentMethodType.to_string();
+                let pmt_str = txn_card_info.instrument.method_code().to_string();
                 let pm_str = m_source_object.clone().unwrap_or_default();
                 let sr_routing_dimensions = SrRoutingDimensions {
                     card_network: txn_card_info
@@ -980,8 +1025,9 @@ pub async fn update_gateway_score(
                     crate::analytics::DomainAnalyticsEvent::record_score_snapshot(
                         score_snapshot_flow,
                         Some(merchant_id),
-                        Some(pmt_str),
+                        // Analytics columns in Hyperswitch's meaning: type, then category.
                         Some(pm_str),
+                        Some(pmt_str),
                         sr_routing_dimensions.card_network.clone(),
                         sr_routing_dimensions.card_isin.clone(),
                         sr_routing_dimensions.currency.clone(),
@@ -1137,7 +1183,11 @@ pub fn isRoutingApproachInSRV2(maybe_text: Option<String>) -> bool {
 // chosen gateway's score never moves on success or failure.
 pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
     match maybe_text {
-        Some(text) => text.contains("V3") || text.contains("MULTI_OBJECTIVE"),
+        Some(text) => {
+            text.contains("V3")
+                || text.contains("MULTI_OBJECTIVE")
+                || text.contains("PREFERRED_CONNECTOR")
+        }
         None => false,
     }
 }
@@ -1151,7 +1201,11 @@ pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
 // cost-routed outcomes are excluded from scoring whenever explore/exploit is enabled.
 pub fn is_routing_approach_in_explore(maybe_text: Option<String>) -> bool {
     match maybe_text {
-        Some(text) => text.contains("HEDGING") || text.contains("MULTI_OBJECTIVE"),
+        Some(text) => {
+            text.contains("HEDGING")
+                || text.contains("MULTI_OBJECTIVE")
+                || text.contains("PREFERRED_CONNECTOR")
+        }
         None => false,
     }
 }
@@ -1184,10 +1238,10 @@ pub async fn is_update_within_latency_window(
                         .unwrap_or(C::defaultGatewayScoreLatencyCheckInMins());
                 let gw_wise_latency_threshold = get_gateway_wise_latency(
                     &default_gw_latency_check_in_mins(),
-                    &txn_card_info.paymentMethodType.to_string(),
+                    &txn_card_info.instrument.method_code(),
                     &GU::get_payment_method(
-                        txn_card_info.paymentMethodType.to_string(),
-                        txn_card_info.paymentMethod.clone(),
+                        txn_card_info.instrument.method_code().to_string(),
+                        txn_card_info.instrument.method_type_code().into_owned(),
                         txn_detail.sourceObject.clone().unwrap_or_default(),
                     ),
                     &txn_detail.gateway.clone().unwrap_or_default(), // Convert Option to String
@@ -1212,10 +1266,10 @@ pub async fn is_update_within_latency_window(
                 //     .await
                 //     .unwrap_or(C.defaultGatewayScoreLatencyCheckInMins);
                 let _merchant_id = MID::merchant_id_to_text(txn_detail.merchantId.clone());
-                let pmt = txn_card_info.paymentMethodType;
+                let pmt = txn_card_info.instrument.method_code().to_string();
                 let _pm = GU::get_payment_method(
                     pmt,
-                    txn_card_info.paymentMethod,
+                    txn_card_info.instrument.method_type_code().into_owned(),
                     txn_detail.sourceObject.clone().unwrap_or_default(),
                 );
 
@@ -1244,7 +1298,7 @@ pub async fn is_update_within_latency_window(
 
 async fn checkExemptIfMandateTxn(txn_detail: &TxnDetail, txn_card_info: &TxnCardInfo) -> bool {
     let is_recurring = isRecurringTxn(txn_detail.txnObjectType.clone());
-    let is_nb_pmt = txn_card_info.paymentMethodType == (NB);
+    let is_nb_pmt = txn_card_info.instrument.is(PaymentMethod::NetBanking);
     let is_penny_reg_txn = isPennyMandateRegTxn(txn_detail.clone());
     is_recurring || (is_nb_pmt && is_penny_reg_txn)
 }
@@ -1513,3 +1567,22 @@ mod tests {
 }
 
 // Helper function to filter by gateway only
+
+#[cfg(test)]
+mod preferred_connector_feedback_tests {
+    use super::{is_routing_approach_in_explore, is_routing_approach_in_srv3};
+
+    #[test]
+    fn preferred_connector_pins_keep_training_scores_during_downtime() {
+        for suffix in [
+            "ROUTING",
+            "ALL_DOWNTIME_ROUTING",
+            "DOWNTIME_ROUTING",
+            "GLOBAL_DOWNTIME_ROUTING",
+        ] {
+            let label = format!("PREFERRED_CONNECTOR_{suffix}");
+            assert!(is_routing_approach_in_srv3(Some(label.clone())));
+            assert!(is_routing_approach_in_explore(Some(label)));
+        }
+    }
+}

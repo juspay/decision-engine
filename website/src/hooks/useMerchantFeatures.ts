@@ -6,11 +6,12 @@ export type KnownFeature =
   | 'gsm-scoring-filter'
   | 'explore-exploit-srv3'
   | 'ab-test-real-payments'
-  | 'multi-objective-routing'
+  | 'cost-savings'
   | 'elimination'
-  | 'auto-calibration'
   | 'autopilot'
   | 'volume-contracts'
+  | 'sr-routing'
+  | 'sr-scores-from-rule-routing'
 
 export function useMerchantFeatures(merchantId?: string) {
   const path = merchantId ? `/merchant-account/${merchantId}/features` : null

@@ -6,6 +6,7 @@ use crate::analytics::store::SegmentTraffic;
 use crate::error::ApiError;
 
 use super::super::common::{fetch_all, DOMAIN_TABLE};
+use super::super::filters::partition_lower_bound;
 use super::super::query::{BoundQueryBuilder, FilterClause};
 
 /// Low-cardinality cluster dimensions the calibrator can group on (BIN is intentionally
@@ -63,6 +64,7 @@ pub async fn load(
     builder.extend_selects(selects);
     builder.add_filter(FilterClause::eq("merchant_id", merchant_id.to_string()));
     builder.add_filter(FilterClause::raw(format!("created_at_ms >= {since_ms}")));
+    builder.add_filter(partition_lower_bound(since_ms));
     builder.add_filter(FilterClause::raw(format!(
         "flow_type = '{}'",
         FlowType::DecideGatewayDecision.as_str()

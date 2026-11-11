@@ -7,9 +7,6 @@ dump.rdb
 **/node_modules
 **/.env.local
 **/.env.*.local
-cypress/screenshots
-cypress/videos
-cypress/fixtures
 
 # Playwright generated artifacts (HTML report, traces, screenshots)
 playwright-report/
@@ -31,3 +28,6 @@ scripts/load-test/k6_timeseries.json
 # Python bytecode from scripts/
 __pycache__/
 *.pyc
+
+# Local infra state from `nix run .#infra` and npm prefix from `nix develop`
+.nix-infra/

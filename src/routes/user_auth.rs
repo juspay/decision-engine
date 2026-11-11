@@ -1,6 +1,8 @@
 use crate::app::{get_tenant_app_state, APP_STATE};
 use crate::auth::{self, TOKEN_TYPE_HS_REDIRECT, TOKEN_TYPE_STANDARD, TOKEN_TYPE_SUPER_ADMIN_VIEW};
+use crate::custom_extractors::Json;
 use crate::error::{self, ContainerError, ResultContainerExt, UserAuthError};
+use crate::generics::Repository;
 use crate::storage::types::{
     MerchantAccountNew, NewUser, NewUserMerchant, User, UserEmailVerifiedUpdate, UserMerchant,
     UserMerchantIdUpdate,
@@ -10,22 +12,15 @@ use crate::types::merchant::merchant_account::load_merchant_by_merchant_id;
 use crate::utils::date_time;
 use axum::extract::Query;
 use axum::http::HeaderMap;
-use axum::Json;
 use diesel::associations::HasTable;
 use diesel::{BoolExpressionMethods, ExpressionMethods};
 use error_stack::ResultExt;
 use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::users::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::users::dsl;
+use crate::storage::backend::schema::users::dsl;
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::user_merchants::dsl as um_dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::user_merchants::dsl as um_dsl;
+use crate::storage::backend::schema::user_merchants::dsl as um_dsl;
 
 const JWT_DENYLIST_PREFIX: &str = "jwt_revoked:";
 
@@ -34,8 +29,26 @@ const JWT_DENYLIST_PREFIX: &str = "jwt_revoked:";
 const HS_SSO_CODE_PREFIX: &str = "hs_sso_code:";
 const HS_SSO_CODE_TTL_SECONDS: i64 = 60;
 
+diesel::define_sql_function!(fn lower(x: diesel::sql_types::Text) -> diesel::sql_types::Text);
+
+/// An email as accounts are keyed: trimmed and lowercased. Every request that names an account by
+/// email is read through this, and lookups compare against `lower(email)`, so `Admin@x.com` and
+/// `admin@x.com` are one account — never a second one that the case-insensitive super-admin
+/// roster would also admit.
+fn normalize_email(email: &str) -> String {
+    email.trim().to_lowercase()
+}
+
+fn deserialize_email<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    String::deserialize(deserializer).map(|email| normalize_email(&email))
+}
+
 #[derive(Debug, Deserialize)]
 pub struct SignupRequest {
+    #[serde(deserialize_with = "deserialize_email")]
     pub email: String,
     pub password: String,
     pub merchant_id: Option<String>,
@@ -43,6 +56,7 @@ pub struct SignupRequest {
 
 #[derive(Debug, Deserialize)]
 pub struct LoginRequest {
+    #[serde(deserialize_with = "deserialize_email")]
     pub email: String,
     pub password: String,
 }
@@ -50,6 +64,9 @@ pub struct LoginRequest {
 #[derive(Debug, Deserialize)]
 pub struct CreateMerchantRequest {
     pub merchant_name: String,
+    /// Creates a sub-merchant of this merchant instead of a standalone one. Only its admins may.
+    #[serde(default)]
+    pub parent_merchant_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -64,11 +81,15 @@ pub struct SwitchMerchantRequest {
 /// scope split into its account-tree levels, so the picker can group and search by level instead of
 /// re-parsing the label. They are absent for a scope with no Hyperswitch ancestry — every DE-native
 /// merchant — which is why every one of them is optional.
+///
+/// A sub-merchant carries `parent_merchant_id` instead, and follows its merchant in the list.
 #[derive(Debug, Serialize, Clone)]
 pub struct MerchantInfo {
     pub merchant_id: String,
     pub merchant_name: String,
     pub role: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub parent_merchant_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub profile_name: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -140,22 +161,16 @@ pub async fn signup(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    if global_config.user_auth.signup_requires_admin_secret {
-        let provided_admin_secret = headers
-            .get("x-admin-secret")
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        if provided_admin_secret != global_config.admin_secret.secret.peek().as_str() {
-            return Err(error::ContainerError::from(UserAuthError::Unauthorized));
-        }
+    let admin_secret_ok =
+        crate::auth::presents_admin_secret(&headers, global_config.admin_secret.secret.peek());
+
+    if global_config.user_auth.signup_requires_admin_secret && !admin_secret_ok {
+        return Err(error::ContainerError::from(UserAuthError::Unauthorized));
     }
 
-    let existing = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::email.eq(payload.email.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let existing = User::find_all(&app_state.db, lower(dsl::email).eq(payload.email.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
 
     if !existing.is_empty() {
         return Err(error::ContainerError::from(
@@ -180,16 +195,13 @@ pub async fn signup(
         .map(str::to_string);
 
     if let Some(merchant_id) = requested_merchant_id.as_ref() {
-        #[cfg(feature = "mysql")]
-        use crate::storage::schema::merchant_account::dsl as ma_dsl;
-        #[cfg(feature = "postgres")]
-        use crate::storage::schema_pg::merchant_account::dsl as ma_dsl;
+        if !admin_secret_ok {
+            return Err(error::ContainerError::from(UserAuthError::Forbidden));
+        }
 
-        let existing_merchant = crate::generics::generic_find_all::<
-            <crate::storage::types::MerchantAccount as HasTable>::Table,
-            _,
-            crate::storage::types::MerchantAccount,
-        >(
+        use crate::storage::backend::schema::merchant_account::dsl as ma_dsl;
+
+        let existing_merchant = crate::storage::types::MerchantAccount::find_all(
             &app_state.db,
             ma_dsl::merchant_id.eq(Some(merchant_id.clone())),
         )
@@ -382,12 +394,9 @@ pub async fn login(
         .map(|s| s.global_config.clone())
         .ok_or(UserAuthError::StorageError)?;
 
-    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::email.eq(payload.email.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let mut users = User::find_all(&app_state.db, lower(dsl::email).eq(payload.email.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
 
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
 
@@ -432,12 +441,13 @@ pub async fn login(
             .map(|m| m.merchant_id.clone())
             .unwrap_or_default()
     });
+    let role = role_on(&merchants, &active_merchant_id, &user.role);
 
     let token = auth::generate_jwt(
         &user.user_id,
         &user.email,
         &active_merchant_id,
-        &user.role,
+        &role,
         TOKEN_TYPE_STANDARD,
         global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
@@ -449,7 +459,7 @@ pub async fn login(
         user_id: user.user_id,
         email: user.email,
         merchant_id: active_merchant_id,
-        role: user.role,
+        role,
         merchants,
     }))
 }
@@ -478,9 +488,15 @@ pub async fn create_merchant(
 
     let app_state = get_tenant_app_state().await;
 
+    let parent = payload.parent_merchant_id.clone();
+    if let Some(parent_id) = &parent {
+        ensure_can_add_sub_merchant(&app_state, &claims.user_id, parent_id).await?;
+    }
+
+    // A sub-merchant is a merchant like any other, and is named like one.
     let merchant_id = format!(
         "merchant_{}",
-        &uuid::Uuid::new_v4().to_string().replace('-', "")[..12]
+        &uuid::Uuid::new_v4().simple().to_string()[..12]
     );
     let now = date_time::now();
 
@@ -492,11 +508,34 @@ pub async fn create_merchant(
         gateway_success_rate_based_decider_input: None,
         internal_metadata: None,
         enabled: crate::storage::types::BitBoolWrite(true),
+        parent_merchant_id: parent.clone(),
     };
 
     crate::generics::generic_insert(&app_state.db, new_merchant)
         .await
         .change_context(UserAuthError::StorageError)?;
+
+    // A sub-merchant takes its members from its merchant, so it gets no membership of its own, and the
+    // creator — an admin of that merchant — is an admin of it.
+    if parent.is_some() {
+        let merchants = fetch_user_merchants(&app_state, &claims.user_id).await?;
+        let new_token = auth::generate_jwt(
+            &claims.user_id,
+            &claims.email,
+            &merchant_id,
+            "admin",
+            TOKEN_TYPE_STANDARD,
+            global_config.user_auth.jwt_secret.peek(),
+            global_config.user_auth.jwt_expiry_seconds,
+        )
+        .change_context(UserAuthError::TokenGenerationFailed)?;
+        return Ok(Json(CreateMerchantResponse {
+            token: new_token,
+            merchant_id,
+            merchant_name: payload.merchant_name,
+            merchants,
+        }));
+    }
 
     let new_user_merchant = NewUserMerchant {
         user_id: claims.user_id.clone(),
@@ -511,10 +550,7 @@ pub async fn create_merchant(
 
     // Update users.merchant_id to the newly created merchant
     {
-        #[cfg(feature = "mysql")]
-        use crate::storage::schema::users::dsl as u_dsl;
-        #[cfg(feature = "postgres")]
-        use crate::storage::schema_pg::users::dsl as u_dsl;
+        use crate::storage::backend::schema::users::dsl as u_dsl;
 
         let conn = &app_state
             .db
@@ -538,11 +574,13 @@ pub async fn create_merchant(
 
     let merchants = fetch_user_merchants(&app_state, &claims.user_id).await?;
 
+    // The token is for the merchant just created, where the user holds the admin membership
+    // inserted above.
     let new_token = auth::generate_jwt(
         &claims.user_id,
         &claims.email,
         &merchant_id,
-        &claims.role,
+        "admin",
         TOKEN_TYPE_STANDARD,
         global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
@@ -725,12 +763,9 @@ pub async fn change_password(
 
     let app_state = get_tenant_app_state().await;
 
-    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::user_id.eq(claims.sub.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let mut users = User::find_all(&app_state.db, dsl::user_id.eq(claims.sub.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
 
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
 
@@ -773,6 +808,7 @@ pub async fn change_password(
 
 #[derive(Debug, Deserialize)]
 pub struct InviteMemberRequest {
+    #[serde(deserialize_with = "deserialize_email")]
     pub email: String,
     pub role: Option<String>,
 }
@@ -844,47 +880,35 @@ pub async fn invite_member(
     };
 
     let app_state = get_tenant_app_state().await;
+    // Members belong to the merchant: from inside a sub-merchant, this is its parent's.
+    let merchant_id = membership_owner(&claims.merchant_id).await;
 
-    #[cfg(feature = "mysql")]
-    use crate::storage::schema::merchant_account::dsl as ma_dsl;
-    #[cfg(feature = "postgres")]
-    use crate::storage::schema_pg::merchant_account::dsl as ma_dsl;
+    use crate::storage::backend::schema::merchant_account::dsl as ma_dsl;
 
-    let merchant_name = crate::generics::generic_find_all::<
-        <crate::storage::types::MerchantAccount as HasTable>::Table,
-        _,
-        crate::storage::types::MerchantAccount,
-    >(
+    let merchant_name = crate::storage::types::MerchantAccount::find_all(
         &app_state.db,
-        ma_dsl::merchant_id.eq(Some(claims.merchant_id.clone())),
+        ma_dsl::merchant_id.eq(Some(merchant_id.clone())),
     )
     .await
     .change_error(UserAuthError::StorageError)?
     .into_iter()
     .next()
     .and_then(|m| m.merchant_name)
-    .unwrap_or_else(|| claims.merchant_id.clone());
+    .unwrap_or_else(|| merchant_id.clone());
 
-    let existing_users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::email.eq(payload.email.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let existing_users = User::find_all(&app_state.db, lower(dsl::email).eq(payload.email.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
 
     let now = date_time::now();
 
     if let Some(existing_user) = existing_users.into_iter().next() {
         // Check if already a member
-        let existing_membership = crate::generics::generic_find_all::<
-            <UserMerchant as HasTable>::Table,
-            _,
-            UserMerchant,
-        >(
+        let existing_membership = UserMerchant::find_all(
             &app_state.db,
             um_dsl::user_id
                 .eq(existing_user.user_id.clone())
-                .and(um_dsl::merchant_id.eq(claims.merchant_id.clone())),
+                .and(um_dsl::merchant_id.eq(merchant_id.clone())),
         )
         .await
         .change_error(UserAuthError::StorageError)?;
@@ -895,7 +919,7 @@ pub async fn invite_member(
 
         let new_user_merchant = NewUserMerchant {
             user_id: existing_user.user_id.clone(),
-            merchant_id: claims.merchant_id.clone(),
+            merchant_id: merchant_id.clone(),
             role: role.clone(),
             created_at: now,
         };
@@ -965,7 +989,7 @@ pub async fn invite_member(
 
         let new_user_merchant = NewUserMerchant {
             user_id: user_id.clone(),
-            merchant_id: claims.merchant_id.clone(),
+            merchant_id: merchant_id.clone(),
             role: role.clone(),
             created_at: now,
         };
@@ -1031,26 +1055,22 @@ pub async fn list_members(
 
     let claims = verify_jwt_not_revoked(token, global_config.user_auth.jwt_secret.peek()).await?;
     let app_state = get_tenant_app_state().await;
+    // Members belong to the merchant: from inside a sub-merchant, this is its parent's.
+    let merchant_id = membership_owner(&claims.merchant_id).await;
 
     let memberships =
-        crate::generics::generic_find_all::<<UserMerchant as HasTable>::Table, _, UserMerchant>(
-            &app_state.db,
-            um_dsl::merchant_id.eq(claims.merchant_id.clone()),
-        )
-        .await
-        .change_error(UserAuthError::StorageError)?;
+        UserMerchant::find_all(&app_state.db, um_dsl::merchant_id.eq(merchant_id.clone()))
+            .await
+            .change_error(UserAuthError::StorageError)?;
 
     let user_ids: Vec<String> = memberships.iter().map(|m| m.user_id.clone()).collect();
 
     let users = if user_ids.is_empty() {
         Vec::new()
     } else {
-        crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-            &app_state.db,
-            dsl::user_id.eq_any(user_ids),
-        )
-        .await
-        .change_error(UserAuthError::StorageError)?
+        User::find_all(&app_state.db, dsl::user_id.eq_any(user_ids))
+            .await
+            .change_error(UserAuthError::StorageError)?
     };
 
     let users_by_id: std::collections::HashMap<String, User> =
@@ -1172,12 +1192,9 @@ pub async fn me(
 
     let app_state = get_tenant_app_state().await;
 
-    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::user_id.eq(claims.user_id.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let mut users = User::find_all(&app_state.db, dsl::user_id.eq(claims.user_id.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
 
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
     // A session carrying a grant lists what that grant reaches; one without lists the user's own
@@ -1198,7 +1215,8 @@ pub async fn me(
         permissions,
         email: user.email,
         merchant_id: claims.merchant_id,
-        role: user.role,
+        // The role the session's token carries, which is what its requests are checked against.
+        role: claims.role,
         #[cfg(feature = "mysql")]
         email_verified: user.email_verified != 0,
         #[cfg(feature = "postgres")]
@@ -1274,30 +1292,30 @@ fn roster_admits(roster: &[String], claims: &auth::JwtClaims) -> bool {
             .any(|allowed| allowed.eq_ignore_ascii_case(&claims.email))
 }
 
+/// The role a session on `merchant_id` holds: the user's membership there (a sub-merchant carries
+/// its merchant's), or `fallback` for a user with no membership on it.
+fn role_on(merchants: &[MerchantInfo], merchant_id: &str, fallback: &str) -> String {
+    merchants
+        .iter()
+        .find(|m| m.merchant_id == merchant_id)
+        .map_or(fallback, |m| m.role.as_str())
+        .to_string()
+}
+
 async fn fetch_user_merchants(
     app_state: &crate::app::TenantAppState,
     user_id: &String,
 ) -> Result<Vec<MerchantInfo>, ContainerError<UserAuthError>> {
-    #[cfg(feature = "mysql")]
-    use crate::storage::schema::merchant_account::dsl as ma_dsl;
-    #[cfg(feature = "postgres")]
-    use crate::storage::schema_pg::merchant_account::dsl as ma_dsl;
+    use crate::storage::backend::schema::merchant_account::dsl as ma_dsl;
 
-    let user_merchant_rows = crate::generics::generic_find_all::<
-        <UserMerchant as HasTable>::Table,
-        _,
-        UserMerchant,
-    >(&app_state.db, um_dsl::user_id.eq(user_id.clone()))
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let user_merchant_rows =
+        UserMerchant::find_all(&app_state.db, um_dsl::user_id.eq(user_id.clone()))
+            .await
+            .change_error(UserAuthError::StorageError)?;
 
     let mut result = Vec::new();
     for um in user_merchant_rows {
-        let mut accounts = crate::generics::generic_find_all::<
-            <crate::storage::types::MerchantAccount as HasTable>::Table,
-            _,
-            crate::storage::types::MerchantAccount,
-        >(
+        let mut accounts = crate::storage::types::MerchantAccount::find_all(
             &app_state.db,
             ma_dsl::merchant_id.eq(Some(um.merchant_id.clone())),
         )
@@ -1316,21 +1334,97 @@ async fn fetch_user_merchants(
             .and_then(|a| hierarchy::from_internal_metadata(a.internal_metadata.as_deref()));
 
         result.push(MerchantInfo {
-            merchant_id: um.merchant_id,
+            merchant_id: um.merchant_id.clone(),
             merchant_name: name,
-            role: um.role,
+            role: um.role.clone(),
+            parent_merchant_id: account.as_ref().and_then(|a| a.parent_merchant_id.clone()),
             profile_name: ancestry.as_ref().and_then(|h| h.profile_name.clone()),
             hs_merchant_id: ancestry.as_ref().map(|h| h.hs_merchant_id.clone()),
             hs_merchant_name: ancestry.as_ref().and_then(|h| h.hs_merchant_name.clone()),
             hs_org_id: ancestry.as_ref().map(|h| h.hs_org_id.clone()),
             hs_org_name: ancestry.as_ref().and_then(|h| h.hs_org_name.clone()),
         });
+
+        // A merchant's sub-merchants follow it, with the role held on the merchant: a sub-merchant has no
+        // members of its own.
+        let mut sub_merchants = crate::storage::types::MerchantAccount::find_all(
+            &app_state.db,
+            ma_dsl::parent_merchant_id.eq(Some(um.merchant_id.clone())),
+        )
+        .await
+        .change_error(UserAuthError::StorageError)?;
+        sub_merchants.sort_by_key(|sub| sub.date_created);
+        for sub in sub_merchants {
+            let Some(sub_id) = sub.merchant_id else {
+                continue;
+            };
+            result.push(MerchantInfo {
+                merchant_name: sub.merchant_name.unwrap_or_else(|| sub_id.clone()),
+                merchant_id: sub_id,
+                role: um.role.clone(),
+                parent_merchant_id: Some(um.merchant_id.clone()),
+                profile_name: None,
+                hs_merchant_id: None,
+                hs_merchant_name: None,
+                hs_org_id: None,
+                hs_org_name: None,
+            });
+        }
     }
+    // A membership held directly on a sub-merchant would list it twice; the first entry stands.
+    let mut seen = std::collections::HashSet::new();
+    result.retain(|merchant| seen.insert(merchant.merchant_id.clone()));
     Ok(result)
+}
+
+/// The merchant that holds the memberships for `merchant_id`: its parent when it is a sub-merchant,
+/// which has no members of its own.
+async fn membership_owner(merchant_id: &str) -> String {
+    load_merchant_by_merchant_id(merchant_id.to_string())
+        .await
+        .and_then(|account| account.parentMerchantId)
+        .unwrap_or_else(|| merchant_id.to_string())
+}
+
+/// Refuses a sub-merchant under `parent_id` unless `user_id` is an admin of it, and it is a Decision
+/// Engine merchant: not itself a sub-merchant, and not synced from Hyperswitch, whose tree is managed
+/// there.
+async fn ensure_can_add_sub_merchant(
+    app_state: &crate::app::TenantAppState,
+    user_id: &str,
+    parent_id: &str,
+) -> Result<(), ContainerError<UserAuthError>> {
+    // Checked on the merchant that holds the memberships, so Acme's admin naming one of Acme's
+    // sub-merchants hears why it cannot be a parent, while anyone else is simply refused.
+    let is_admin = UserMerchant::find_all(
+        &app_state.db,
+        um_dsl::user_id
+            .eq(user_id.to_owned())
+            .and(um_dsl::merchant_id.eq(membership_owner(parent_id).await))
+            .and(um_dsl::role.eq("admin")),
+    )
+    .await
+    .change_error(UserAuthError::StorageError)?
+    .into_iter()
+    .next()
+    .is_some();
+    if !is_admin {
+        return Err(error::ContainerError::from(UserAuthError::Forbidden));
+    }
+    let parent = load_merchant_by_merchant_id(parent_id.to_owned())
+        .await
+        .ok_or_else(|| error::ContainerError::from(UserAuthError::MerchantNotFound))?;
+    if parent.parentMerchantId.is_some() || hierarchy::of_account(&parent).is_some() {
+        return Err(error::ContainerError::from(
+            UserAuthError::InvalidSubMerchantParent,
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ForgotPasswordRequest {
+    #[serde(deserialize_with = "deserialize_email")]
     pub email: String,
 }
 
@@ -1376,12 +1470,9 @@ pub async fn forgot_password(
 
     let app_state = get_tenant_app_state().await;
 
-    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::email.eq(payload.email.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let mut users = User::find_all(&app_state.db, lower(dsl::email).eq(payload.email.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
 
     let user = match users.pop() {
         Some(user) => user,
@@ -1582,15 +1673,47 @@ pub async fn verify_jwt_not_revoked(
 ) -> Result<auth::JwtClaims, ContainerError<UserAuthError>> {
     let claims = auth::verify_jwt(token, secret).change_context(UserAuthError::InvalidToken)?;
 
+    // A token confirmed live stays trusted for the configured window, keeping the denylist read
+    // off the hot path. Only that answer is cached, so the cache can let a session live slightly
+    // too long but can never resurrect one that was refused.
+    let cache_ttl_ms = APP_STATE
+        .get()
+        .map(|state| state.global_config.user_auth.jwt_revocation_cache_ttl_ms)
+        .unwrap_or(0);
+
+    if cache_ttl_ms > 0 && jwt_live_cache(cache_ttl_ms).get(&claims.jti).is_some() {
+        return Ok(claims);
+    }
+
     let app_state = get_tenant_app_state().await;
     let deny_key = format!("{}{}", JWT_DENYLIST_PREFIX, claims.jti);
-    if let Ok(val) = app_state.redis_conn.get_key_string(&deny_key).await {
-        if !val.is_empty() {
-            return Err(ContainerError::from(UserAuthError::InvalidToken));
+    match app_state.redis_conn.get_key_string(&deny_key).await {
+        // On the denylist: refused, and never cached.
+        Ok(value) if !value.is_empty() => {
+            return Err(ContainerError::from(UserAuthError::InvalidToken))
         }
+        // Confirmed absent from the denylist — the only answer worth remembering.
+        Ok(_) => {
+            if cache_ttl_ms > 0 {
+                jwt_live_cache(cache_ttl_ms).store(claims.jti.clone(), true);
+            }
+        }
+        // Denylist unreadable: admit the request, but store nothing. Caching an unverified
+        // token would turn a momentary Redis failure into a full TTL of accepting revoked
+        // sessions; the next request reads the denylist again.
+        Err(_) => {}
     }
 
     Ok(claims)
+}
+
+/// Tokens seen as not revoked, keyed by `jti`. Built on the first call, so the TTL is whatever
+/// config held then — config is read once per process and never changes at runtime. Capacity is
+/// sized for the concurrent sessions one process serves; entries expire on their own.
+fn jwt_live_cache(ttl_ms: u64) -> &'static crate::redis::mem_cache::TypedCache<bool> {
+    static CACHE: std::sync::OnceLock<crate::redis::mem_cache::TypedCache<bool>> =
+        std::sync::OnceLock::new();
+    CACHE.get_or_init(|| crate::redis::mem_cache::TypedCache::new(ttl_ms, 50_000))
 }
 
 #[derive(Debug, Deserialize)]
@@ -1680,6 +1803,7 @@ async fn granted_merchants(grant: &ScopeGrant, role: &str) -> Vec<MerchantInfo> 
             merchant_name: switcher_label(&scope),
             merchant_id: scope.profile_id,
             role: role.to_string(),
+            parent_merchant_id: None,
             profile_name: scope.profile_name,
             hs_merchant_id: scope.hs_merchant_id,
             hs_merchant_name: scope.hs_merchant_name,
@@ -1716,23 +1840,8 @@ pub struct AdminMerchantCodeResponse {
 /// history, and the `Referer` header.
 #[axum::debug_handler]
 pub async fn admin_merchant_token(
-    headers: HeaderMap,
     Json(payload): Json<AdminMerchantTokenRequest>,
 ) -> Result<Json<AdminMerchantCodeResponse>, error::ContainerError<UserAuthError>> {
-    let global_config = APP_STATE
-        .get()
-        .map(|s| s.global_config.clone())
-        .ok_or(UserAuthError::StorageError)?;
-
-    let provided = headers
-        .get("x-admin-secret")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-
-    if provided != global_config.admin_secret.secret.peek().as_str() {
-        return Err(error::ContainerError::from(UserAuthError::InvalidToken));
-    }
-
     // Verify the merchant actually exists in DE before issuing a code.
     load_merchant_by_merchant_id(payload.merchant_id.clone())
         .await
@@ -1949,12 +2058,9 @@ pub async fn exit_merchant(
 
     let app_state = get_tenant_app_state().await;
 
-    let mut users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::user_id.eq(claims.user_id.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let mut users = User::find_all(&app_state.db, dsl::user_id.eq(claims.user_id.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
 
     let merchants = fetch_user_merchants(&app_state, &user.user_id).await?;
@@ -1964,12 +2070,13 @@ pub async fn exit_merchant(
             .map(|m| m.merchant_id.clone())
             .unwrap_or_default()
     });
+    let role = role_on(&merchants, &home_merchant_id, &user.role);
 
     let new_token = auth::generate_jwt(
         &user.user_id,
         &user.email,
         &home_merchant_id,
-        &user.role,
+        &role,
         TOKEN_TYPE_STANDARD,
         global_config.user_auth.jwt_secret.peek(),
         global_config.user_auth.jwt_expiry_seconds,
@@ -1981,7 +2088,7 @@ pub async fn exit_merchant(
         user_id: user.user_id,
         email: user.email,
         merchant_id: home_merchant_id,
-        role: user.role,
+        role,
         merchants,
     }))
 }
@@ -2017,7 +2124,7 @@ pub struct MerchantLookupResult {
 const MERCHANT_LOOKUP_LIMIT: usize = 25;
 
 /// Minimum query length. A 1-character substring (e.g. "a" or "@") matches nearly every user and
-/// merchant, and `generic_find_all` has no DB-side LIMIT — so require a couple of characters to keep
+/// merchant, and `find_all` has no DB-side LIMIT — so require a couple of characters to keep
 /// a broad match from loading a huge row set. (Pushing a SQL LIMIT down is a follow-up.)
 const MERCHANT_LOOKUP_MIN_QUERY_LEN: usize = 2;
 
@@ -2060,10 +2167,7 @@ pub async fn lookup_merchants(
         return Ok(Json(vec![]));
     }
 
-    #[cfg(feature = "mysql")]
-    use crate::storage::schema::merchant_account::dsl as ma_dsl;
-    #[cfg(feature = "postgres")]
-    use crate::storage::schema_pg::merchant_account::dsl as ma_dsl;
+    use crate::storage::backend::schema::merchant_account::dsl as ma_dsl;
 
     // `.like`/`.ilike` live on different traits and only one backend has ILIKE, so the substring
     // predicates below are cfg-split; everything else is shared.
@@ -2079,40 +2183,27 @@ pub async fn lookup_merchants(
 
     // 1. Users whose email matches → the merchants they belong to.
     #[cfg(feature = "mysql")]
-    let matched_users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::email.like(pattern.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let matched_users = User::find_all(&app_state.db, dsl::email.like(pattern.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
     #[cfg(feature = "postgres")]
-    let matched_users = crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-        &app_state.db,
-        dsl::email.ilike(pattern.clone()),
-    )
-    .await
-    .change_error(UserAuthError::StorageError)?;
+    let matched_users = User::find_all(&app_state.db, dsl::email.ilike(pattern.clone()))
+        .await
+        .change_error(UserAuthError::StorageError)?;
 
     let matched_user_ids: Vec<String> = matched_users.into_iter().map(|u| u.user_id).collect();
 
     let people_memberships = if matched_user_ids.is_empty() {
         Vec::new()
     } else {
-        crate::generics::generic_find_all::<<UserMerchant as HasTable>::Table, _, UserMerchant>(
-            &app_state.db,
-            um_dsl::user_id.eq_any(matched_user_ids),
-        )
-        .await
-        .change_error(UserAuthError::StorageError)?
+        UserMerchant::find_all(&app_state.db, um_dsl::user_id.eq_any(matched_user_ids))
+            .await
+            .change_error(UserAuthError::StorageError)?
     };
 
     // 2. Merchants whose name matches, or whose ID is exactly the query.
     #[cfg(feature = "mysql")]
-    let matched_merchants = crate::generics::generic_find_all::<
-        <MerchantAccount as HasTable>::Table,
-        _,
-        MerchantAccount,
-    >(
+    let matched_merchants = MerchantAccount::find_all(
         &app_state.db,
         ma_dsl::merchant_name
             .like(pattern.clone())
@@ -2121,11 +2212,7 @@ pub async fn lookup_merchants(
     .await
     .change_error(UserAuthError::StorageError)?;
     #[cfg(feature = "postgres")]
-    let matched_merchants = crate::generics::generic_find_all::<
-        <MerchantAccount as HasTable>::Table,
-        _,
-        MerchantAccount,
-    >(
+    let matched_merchants = MerchantAccount::find_all(
         &app_state.db,
         ma_dsl::merchant_name
             .ilike(pattern.clone())
@@ -2157,11 +2244,7 @@ pub async fn lookup_merchants(
 
     // 3. Names for the result merchants, and the full membership of each (not just the matched
     // person) so the super-admin can confirm the target.
-    let name_rows = crate::generics::generic_find_all::<
-        <MerchantAccount as HasTable>::Table,
-        _,
-        MerchantAccount,
-    >(
+    let name_rows = MerchantAccount::find_all(
         &app_state.db,
         ma_dsl::merchant_id.eq_any(ordered_ids.iter().cloned().map(Some).collect::<Vec<_>>()),
     )
@@ -2182,13 +2265,12 @@ pub async fn lookup_merchants(
         })
         .collect();
 
-    let memberships =
-        crate::generics::generic_find_all::<<UserMerchant as HasTable>::Table, _, UserMerchant>(
-            &app_state.db,
-            um_dsl::merchant_id.eq_any(ordered_ids.clone()),
-        )
-        .await
-        .change_error(UserAuthError::StorageError)?;
+    let memberships = UserMerchant::find_all(
+        &app_state.db,
+        um_dsl::merchant_id.eq_any(ordered_ids.clone()),
+    )
+    .await
+    .change_error(UserAuthError::StorageError)?;
 
     let member_user_ids: Vec<String> = memberships
         .iter()
@@ -2199,12 +2281,9 @@ pub async fn lookup_merchants(
     let member_users = if member_user_ids.is_empty() {
         Vec::new()
     } else {
-        crate::generics::generic_find_all::<<User as HasTable>::Table, _, User>(
-            &app_state.db,
-            dsl::user_id.eq_any(member_user_ids),
-        )
-        .await
-        .change_error(UserAuthError::StorageError)?
+        User::find_all(&app_state.db, dsl::user_id.eq_any(member_user_ids))
+            .await
+            .change_error(UserAuthError::StorageError)?
     };
     let email_by_user_id: std::collections::HashMap<String, String> = member_users
         .into_iter()
@@ -2285,6 +2364,35 @@ mod tests {
         }
     }
 
+    fn membership(merchant_id: &str, role: &str) -> MerchantInfo {
+        MerchantInfo {
+            merchant_id: merchant_id.to_string(),
+            merchant_name: merchant_id.to_string(),
+            role: role.to_string(),
+            parent_merchant_id: None,
+            profile_name: None,
+            hs_merchant_id: None,
+            hs_merchant_name: None,
+            hs_org_id: None,
+            hs_org_name: None,
+        }
+    }
+
+    #[test]
+    fn a_session_takes_the_role_held_on_its_merchant() {
+        // An invited member who later creates a merchant of their own: the user row says
+        // "member", the membership on their own merchant says "admin".
+        let merchants = [
+            membership("theirs", "admin"),
+            membership("invited_to", "member"),
+        ];
+        assert_eq!(role_on(&merchants, "theirs", "member"), "admin");
+        // An admin elsewhere holds only the role granted on the merchant they were invited to.
+        assert_eq!(role_on(&merchants, "invited_to", "admin"), "member");
+        // No membership at all: the user row is all there is.
+        assert_eq!(role_on(&[], "", "admin"), "admin");
+    }
+
     #[test]
     fn a_handed_over_session_is_never_a_super_admin() {
         // The invariant this centralisation exists to hold. A session handed over from Hyperswitch
@@ -2332,6 +2440,25 @@ mod tests {
             &[],
             &claims_for(TOKEN_TYPE_STANDARD, "admin@example.com")
         ));
+    }
+
+    #[test]
+    fn an_email_in_any_case_names_the_same_account() {
+        for body in [
+            r#"{"email":"TEST@Gmail.com","password":"x"}"#,
+            r#"{"email":"  test@gmail.com ","password":"x"}"#,
+        ] {
+            let login: LoginRequest = serde_json::from_str(body).expect("request");
+            assert_eq!(login.email, "test@gmail.com");
+            let signup: SignupRequest = serde_json::from_str(body).expect("request");
+            assert_eq!(signup.email, "test@gmail.com");
+        }
+        let invite: InviteMemberRequest =
+            serde_json::from_str(r#"{"email":"Member@X.com"}"#).expect("request");
+        assert_eq!(invite.email, "member@x.com");
+        let forgot: ForgotPasswordRequest =
+            serde_json::from_str(r#"{"email":"Member@X.com"}"#).expect("request");
+        assert_eq!(forgot.email, "member@x.com");
     }
 
     #[test]

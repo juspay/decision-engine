@@ -1,0 +1,81 @@
+---
+title: "Payment Methods"
+description: "How Decision Engine names a payment's method, and what changed when it adopted one meaning everywhere"
+---
+
+## One meaning everywhere
+
+Decision Engine uses one standard for a payment's method:
+
+| Field | Meaning | Examples |
+| --- | --- | --- |
+| `paymentMethod` (`payment_method`) | The category | `card`, `wallet`, `upi`, `bank_redirect` |
+| `paymentMethodType` (`payment_method_type`) | The specific method within it | `credit`, `debit`, `google_pay`, `upi_collect` |
+
+The same meaning applies to the `/decide-gateway` request, the `/routing/hybrid` rule parameters, success-rate config rows, analytics columns and the dashboard. Every request is parsed into one internal form when it arrives, and routing reads only that. A card payment is routed as a card whichever endpoint it comes through.
+
+The standard is compatible with Hyperswitch's `payment_method` and `payment_method_type`, so Hyperswitch payments need no translation.
+
+## The vocabulary
+
+The engine knows 16 payment methods and their payment method types. Each type belongs to one method, or to a few where routing rules allow it (ACH as a bank debit or a bank transfer, for instance). They are defined in code (`src/types/payment_instrument.rs`) and served as routing keys by `GET /config/routing-keys`:
+
+- `payment_method`: the methods.
+- `payment_method_type`: every type.
+- One key per method listing its types, such as `card` → `card, credit, debit`.
+
+The rule builder and the dashboard read these keys, and configuration files no longer declare them.
+
+The list is not an allowlist. A method or type that is not on it, such as one added after this build, is accepted and routed by its name. Its success-rate scores are keyed like any other payment's. Card- and UPI-specific routing (card type, auth level, bank, UPI handle and app) applies only to the methods the engine knows.
+
+## What is checked
+
+`/decide-gateway` requests and success-rate config rows (`subLevelInputConfig`, on create and update) are rejected only for clear mistakes:
+
+- **No `paymentMethod`.** It is required; `paymentMethodType` is optional.
+- **Swapped fields.** `paymentMethod` names a payment method type (`credit`), or `paymentMethodType` names a payment method (`card`) while `paymentMethod` does not.
+- **A known type under a known method it does not belong to,** such as `card` with `google_pay`.
+
+Case is ignored: `card` and `CARD` are the same. Config rows are stored and returned as upper-case codes (`CARD`, `CREDIT`). `/routing/hybrid` is never rejected on these fields, because its rule parameters have already been validated by the caller.
+
+A rejected `/decide-gateway` request gets a 400 with `error_info.code` `INVALID_PAYMENT_METHOD`:
+
+```json
+{
+  "status": "400",
+  "error_code": "400",
+  "error_message": "Invalid payment method",
+  "error_info": {
+    "code": "INVALID_PAYMENT_METHOD",
+    "user_message": "paymentMethod and paymentMethodType are missing, swapped or do not fit together.",
+    "developer_message": "paymentMethod `CREDIT` and paymentMethodType `CARD` look swapped. paymentMethod is the category and paymentMethodType the specific method: send the category (card) as paymentMethod and the specific method (credit) as paymentMethodType."
+  }
+}
+```
+
+## Legacy endpoints
+
+The legacy endpoints that take the legacy transaction format (`/decision_gateway` and `/update-score`) keep its meaning: `paymentMethodType` is the category and `paymentMethod` the specific method (for a card, its brand). They are translated into the same internal form when they arrive, and their score keys keep the legacy order (`CARD_VISA`), so their routing and learned scores carry over. Two legacy spellings are translated to the engine's codes, and scores for those payments start again under the new keys:
+
+- the category `PAYLATER` becomes `PAY_LATER`;
+- the method `GOOGLEPAY` becomes `GOOGLE_PAY`.
+
+## Upgrading
+
+This is a breaking change for `/decide-gateway` callers and for stored success-rate configs.
+
+1. **`/decide-gateway` requests:** send the category as `paymentMethod` and the specific method as `paymentMethodType`.
+
+   ```json
+   // Before
+   { "paymentMethodType": "CARD", "paymentMethod": "CREDIT" }
+   // After
+   { "paymentMethod": "CARD", "paymentMethodType": "CREDIT" }
+   ```
+
+2. **Success-rate config rows** saved the old way (`"paymentMethodType": "CARD"`) no longer match. Read the config with `/rule/get`, move the category into `paymentMethod` and the specific method (if any) into `paymentMethodType`, and save it with `/rule/update`.
+3. **Routing of `/routing/hybrid` traffic.** Card and UPI logic now applies to `/routing/hybrid` payments, which were previously routed as if they had no category:
+   - A card payment's routing dimension becomes card-level, for example `UNKNOWN, CREDIT, CARD, CREDIT` at `CARD_LEVEL` instead of `UNKNOWN, CREDIT, CARD` at `PM_LEVEL`.
+   - Per-category settings apply: the `explore-exploit-srv3` feature (keyed on `CARD`), the SR-enabled payment method types, and success-rate config rows for the category.
+4. **Score keys.** `/routing/hybrid` success-rate scores keep their keys for every payment that names a type. `/decide-gateway` scores now use the same keys as hybrid (`CREDIT_CARD` where they were `CARD_CREDIT`), so scores learned through `/decide-gateway` start again. A payment without a type is keyed `UNKNOWN` instead of `NULL` in that position. Elimination and outage scores for card payments move to keys that include the card type; these scores expire within 2.5 hours (30 minutes for global keys), so they rebuild without a migration.
+5. **Auth type.** A card payment's auth type is kept as sent (`NO_THREE_DS`), so success-rate config rows that constrain `authType` match on its score update as well as its decision. The auth-level dimension still groups auth types into `THREE_DS`, `OTP` and `UNKNOWN`.

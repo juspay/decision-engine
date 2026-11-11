@@ -1,9 +1,6 @@
 use super::ast::ConnectorInfo;
 use crate::euclid::ast::{Output, Program, ValueType};
-#[cfg(feature = "mysql")]
-use crate::storage::schema;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg;
+use crate::storage::backend::schema;
 use diesel::prelude::AsChangeset;
 use diesel::Identifiable;
 use diesel::Insertable;
@@ -29,7 +26,7 @@ pub enum DataType {
     GlobalRef,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, crate::auth::MerchantScoped)]
 pub struct RoutingRule {
     pub rule_id: Option<String>,
     pub name: String,
@@ -37,6 +34,7 @@ pub struct RoutingRule {
     /// string, which is what the column requires.
     #[serde(default)]
     pub description: Option<String>,
+    #[merchant]
     pub created_by: String,
     pub algorithm: StaticRoutingAlgorithm,
     #[serde(default)]
@@ -52,7 +50,7 @@ pub enum StaticRoutingAlgorithm {
     Priority(Vec<ConnectorInfo>),
     VolumeSplit(Vec<super::ast::VolumeSplit<ConnectorInfo>>),
     Advanced(Program),
-    AbTest(ABTestData),
+    AbTest(Box<ABTestData>),
     /// Volume-commitment contract configuration — a stored document, not an evaluable
     /// algorithm. Must ride the `algorithm_for = "volume_commitment"` slot (validated), so the
     /// payment/payout/3DS evaluate paths never see it.
@@ -63,7 +61,7 @@ pub enum StaticRoutingAlgorithm {
 /// multi-objective post-step before gateway selection, so no isolated score pools are
 /// needed. All fields are optional — an absent field falls through to the merchant
 /// config / feature flag / default, exactly as if no override were present.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct SrConfigOverride {
     /// Share of traffic (0–100) sent to non-top gateways to keep scores fresh (explore-exploit).
     /// Overrides `defaultHedgingPercent` from the merchant's SR config.
@@ -74,7 +72,7 @@ pub struct SrConfigOverride {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub elimination_threshold: Option<f64>,
     /// Whether the multi-objective (cost-aware) post-step runs for this arm. Overrides the
-    /// merchant `multi_objective_routing_enabled` flag / per-request value. Used by the
+    /// merchant `cost_savings_enabled` flag / per-request value. Used by the
     /// "Turn cost on" experiment (control = false, variant = true).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub enable_multi_objective: Option<bool>,
@@ -90,23 +88,126 @@ pub struct SrConfigOverride {
     pub use_autopilot: Option<bool>,
 }
 
+/// The routing API an experiment is applied on. Each endpoint applies only the arm layers it
+/// supports: `/routing/evaluate` the rule layer, `/decide-gateway` the SR layer, and
+/// `/routing/hybrid` both.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExperimentEndpoint {
+    HybridRouting,
+    DecideGateway,
+    Evaluate,
+    /// An endpoint name this build does not know. Never matches a live endpoint.
+    #[serde(other)]
+    Unknown,
+}
+
+impl ExperimentEndpoint {
+    pub const ALL: [Self; 3] = [Self::HybridRouting, Self::DecideGateway, Self::Evaluate];
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::HybridRouting => "hybrid_routing",
+            Self::DecideGateway => "decide_gateway",
+            Self::Evaluate => "evaluate",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// One side of an A/B experiment, as a bundle of routing layers. An absent layer is not applied
+/// by that arm; an endpoint that supports the layer runs without it (no rule → the request's
+/// fallback connectors, no SR layer → the merchant's live SR config).
+#[derive(Debug, Clone, Default, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ExperimentArm {
+    /// Saved routing algorithm (single / priority / volume split / rule-based) that produces the
+    /// arm's candidate connectors.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule_algorithm_id: Option<String>,
+    /// SR routing with per-arm overrides (autopilot, cost savings, hedging, elimination).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sr: Option<SrConfigOverride>,
+}
+
+impl ExperimentArm {
+    pub fn is_empty(&self) -> bool {
+        self.rule_algorithm_id.is_none() && self.sr.is_none()
+    }
+}
+
+/// Algorithm id the single-strategy arm format uses for "SR routing" rather than a saved
+/// algorithm.
+pub const SR_ROUTING_ARM_ID: &str = "sr_routing";
+
+/// Arm id the single-variant format records its variant under.
+pub const LEGACY_VARIANT_ARM_ID: &str = "variant";
+/// Arm id the control arm is recorded under. No variant may use it.
+pub const CONTROL_ARM_ID: &str = "control";
+/// Most variants one experiment may run beside its control.
+pub const MAX_EXPERIMENT_VARIANTS: usize = 5;
+/// Most traffic all variants together may take, so control always keeps the majority.
+pub const MAX_TOTAL_VARIANT_SPLIT_PCT: u32 = 50;
+
+/// One variant of a multi-variant experiment: an arm, its id and its share of traffic.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct ExperimentVariant {
+    /// Stable id the variant's decisions are recorded under (`variant_arm` in analytics). Unique
+    /// within the experiment and never `control`.
+    pub id: String,
+    /// Display name. Absent shows the id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    /// Percentage of traffic routed to this variant.
+    pub split_pct: u8,
+    #[serde(flatten)]
+    pub arm: ExperimentArm,
+    /// Set when the auth-rate guardrail stopped this variant while the experiment kept running.
+    /// Its payments are then routed by the live setup, untracked, like payments the experiment
+    /// doesn't cover. A deliberate activation clears it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub stopped: bool,
+}
+
+fn is_zero_pct(pct: &u8) -> bool {
+    *pct == 0
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ABTestData {
-    pub control_algorithm_id: String,
-    pub variant_algorithm_id: String,
-    /// Percentage of traffic routed to the variant arm (1–49).
+    /// Layered control arm. When present it defines control and the single-strategy control
+    /// fields below are ignored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control: Option<ExperimentArm>,
+    /// Variants compared against control, each with its own traffic share. When present they
+    /// define the experiment's variants and every single-variant field (`variant`,
+    /// `variant_algorithm_id`, `variant_sr_config`, `variant_split_pct`) is ignored.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variants: Option<Vec<ExperimentVariant>>,
+    /// Single-variant format: the one layered variant arm, recorded as `variant`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant: Option<ExperimentArm>,
+    /// Endpoints the experiment splits traffic on. Absent means every endpoint.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub endpoints: Option<Vec<ExperimentEndpoint>>,
+    /// Single-strategy arm format: `sr_routing` or a saved algorithm id, read as an arm with only
+    /// that layer (see `ab_test::arms::resolved_arm`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_algorithm_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub variant_algorithm_id: Option<String>,
+    /// Single-variant format: percentage of traffic routed to the variant arm (1–50). Zero, and
+    /// left out of the stored definition, for multi-variant experiments.
+    #[serde(default, skip_serializing_if = "is_zero_pct")]
     pub variant_split_pct: u8,
     /// Minimum transactions to collect before reporting a significance verdict.
     pub min_sample_size: u32,
-    /// Auto-pause threshold: if variant auth rate drops more than this many pp below control, flag for pause.
+    /// Stop a variant for new payments when its auth rate drops more than this many pp below
+    /// control, once a tenth of the sample target has resolved.
     pub guardrail_threshold_pp: f64,
-    /// Routing overrides for the variant arm. Absent means the variant uses the live SR config
-    /// (standard A/B test / algorithm comparison).
+    /// SR overrides for a single-strategy `sr_routing` variant arm.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub variant_sr_config: Option<SrConfigOverride>,
-    /// Routing overrides for the control arm. Absent means the control uses the live SR config
-    /// (the common case). Set by experiments that need to pin the control arm — e.g. "Turn cost
-    /// on" (control = multi-objective off) or "Autopilot value" (control = manual config).
+    /// SR overrides for a single-strategy `sr_routing` control arm.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub control_sr_config: Option<SrConfigOverride>,
 }
@@ -134,9 +235,10 @@ pub enum AlgorithmType {
     VolumeCommitment,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Serialize, Deserialize, Eq, PartialEq, crate::auth::MerchantScoped)]
 pub struct RoutingRequest {
     pub payment_id: Option<String>,
+    #[merchant]
     pub created_by: String,
     pub fallback_output: Option<Vec<ConnectorInfo>>,
     pub parameters: HashMap<String, Option<ValueType>>,
@@ -156,8 +258,9 @@ pub struct RoutingBatchEntry {
 
 /// Evaluates the caller's active algorithm against several parameter sets in one round
 /// trip. The algorithm is resolved and parsed once; results are positional.
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct RoutingBatchRequest {
+    #[merchant]
     pub created_by: String,
     pub fallback_output: Option<Vec<ConnectorInfo>>,
     /// Transaction type whose active rule should be evaluated; absent keeps the
@@ -208,11 +311,15 @@ impl RoutingDictionaryRecord {
     }
 }
 
-#[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Default, Clone, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped,
+)]
 pub struct SrDimensionConfig {
+    #[merchant]
     pub merchant_id: String,
     pub paymentInfo: SrDimensionInfo,
 }
+
 #[derive(Debug, Default, Clone, serde::Serialize, serde::Deserialize)]
 pub struct SrDimensionInfo {
     pub udfs: Vec<i32>,
@@ -232,6 +339,29 @@ pub struct RoutingEvaluateResponse {
     pub output: serde_json::Value,
     pub evaluated_output: Vec<ConnectorInfo>,
     pub eligible_connectors: Vec<ConnectorInfo>,
+    /// Why `evaluated_output` holds what it does. `status` reports several of these as
+    /// `default_selection`; `/decide` reports each one by name.
+    #[serde(skip)]
+    pub selection: RuleSelection,
+}
+
+/// How the rule layer arrived at its connectors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum RuleSelection {
+    /// A rule, or a single, priority or volume-split algorithm, chose the connectors.
+    Matched,
+    /// No rule matched and no candidates were supplied, so the algorithm's default selection
+    /// answered.
+    #[default]
+    DefaultSelection,
+    /// No rule matched, so the supplied candidates answered in their own order.
+    NoRuleMatched,
+    /// None of the connectors the rule chose were candidates, so the candidates answered.
+    OutputNotEligible,
+    /// Some connectors the rule chose were not candidates and were dropped.
+    OutputPartiallyEligible,
+    /// The merchant has no active algorithm, so the candidates answered.
+    NoActiveAlgorithm,
 }
 
 // #[derive(AsChangeset, Debug, Clone, Identifiable, Insertable, Queryable, Selectable)]
@@ -245,8 +375,7 @@ pub struct RoutingEvaluateResponse {
     Queryable,
     Selectable,
 )]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm))]
+#[diesel(table_name = schema::routing_algorithm)]
 pub struct RoutingAlgorithm {
     pub id: String,
     pub created_by: String,
@@ -281,7 +410,6 @@ impl From<RoutingAlgorithm> for JsonifiedRoutingAlgorithm {
     fn from(ra: RoutingAlgorithm) -> Self {
         let algorithm_data: serde_json::Value =
             serde_json::from_str(&ra.algorithm_data).unwrap_or_else(|_| serde_json::Value::Null);
-
         Self {
             id: ra.id,
             created_by: ra.created_by,
@@ -298,8 +426,7 @@ impl From<RoutingAlgorithm> for JsonifiedRoutingAlgorithm {
 #[derive(
     AsChangeset, Insertable, Debug, serde::Serialize, serde::Deserialize, Identifiable, Queryable,
 )]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm_mapper))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm_mapper))]
+#[diesel(table_name = schema::routing_algorithm_mapper)]
 #[diesel(primary_key(id))]
 pub struct RoutingAlgorithmMapper {
     pub id: i32,
@@ -309,8 +436,7 @@ pub struct RoutingAlgorithmMapper {
 }
 
 #[derive(Insertable, Debug, serde::Serialize, serde::Deserialize)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm_mapper))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm_mapper))]
+#[diesel(table_name = schema::routing_algorithm_mapper)]
 pub struct RoutingAlgorithmMapperNew {
     pub created_by: String,
     pub routing_algorithm_id: String,
@@ -327,30 +453,34 @@ impl RoutingAlgorithmMapperNew {
     }
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct ActivateRoutingConfigRequest {
+    #[merchant]
     pub created_by: String,
     pub routing_algorithm_id: String,
 }
 
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct DeactivateRoutingConfigRequest {
+    #[merchant]
     pub created_by: String,
     pub routing_algorithm_id: String,
 }
 
 /// Delete an existing routing algorithm (e.g. an A/B experiment). Only permitted while the
 /// algorithm is inactive.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct DeleteRoutingConfigRequest {
+    #[merchant]
     pub created_by: String,
     pub routing_algorithm_id: String,
 }
 
 /// Edit an existing (inactive) routing algorithm in place — updates its name/description and
 /// algorithm definition without minting a new id.
-#[derive(Debug, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, serde::Serialize, serde::Deserialize, crate::auth::MerchantScoped)]
 pub struct UpdateRoutingConfigRequest {
+    #[merchant]
     pub created_by: String,
     pub routing_algorithm_id: String,
     pub name: String,
@@ -360,8 +490,7 @@ pub struct UpdateRoutingConfigRequest {
 }
 
 #[derive(AsChangeset, Debug, serde::Serialize, serde::Deserialize, Queryable, Selectable)]
-#[cfg_attr(feature = "mysql", diesel(table_name = schema::routing_algorithm_mapper))]
-#[cfg_attr(feature = "postgres", diesel(table_name = schema_pg::routing_algorithm_mapper))]
+#[diesel(table_name = schema::routing_algorithm_mapper)]
 pub struct RoutingAlgorithmMapperUpdate {
     pub routing_algorithm_id: String,
     pub algorithm_for: String,
@@ -502,6 +631,30 @@ pub struct KeysConfig {
     /// field dropdown changed on every restart.
     #[serde(flatten)]
     pub keys: BTreeMap<String, KeyConfig>,
+}
+
+impl KeysConfig {
+    /// Sets the keys that name payment methods from the code's vocabulary, replacing any the
+    /// config file declares, so the rule engine, the dashboard and request checks agree. See
+    /// [`crate::types::payment_instrument::payment_method_routing_keys`].
+    pub fn with_payment_method_keys(mut self) -> Self {
+        for (key, values) in crate::types::payment_instrument::payment_method_routing_keys() {
+            self.keys.insert(
+                key,
+                KeyConfig {
+                    data_type: KeyDataType::Enum,
+                    values: Some(values.join(", ")),
+                    min_value: None,
+                    max_value: None,
+                    min_length: None,
+                    max_length: None,
+                    exact_length: None,
+                    regex: None,
+                },
+            );
+        }
+        self
+    }
 }
 
 /// The complete TOML configuration structure

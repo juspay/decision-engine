@@ -14,7 +14,9 @@ use crate::{
 
 use crate::feedback::constants as C;
 
-use crate::decider::gatewaydecider::constants::{EnableEliminationV2, EnableOutageV2};
+use crate::decider::gatewaydecider::constants::{
+    EnableEliminationV2, EnableOutageV2, ENABLE_GW_LEVEL_SR_ELIMINATION,
+};
 
 // use crate::feedback::types as F_TYPES;
 
@@ -586,7 +588,14 @@ pub async fn getAllUnifiedKeys(
         C::kvRedis(),
     )
     .await;
+    let is_elimination_feature_flag_enabled = is_feature_enabled(
+        ENABLE_GW_LEVEL_SR_ELIMINATION.get_key(),
+        merchant_id.clone(),
+        C::kvRedis(),
+    )
+    .await;
     let is_key_enabled_for_merchant_gateway_scoring = gateway_scoring_data.eliminationEnabled
+        || is_elimination_feature_flag_enabled
         || MCU::isPaymentFlowEnabledWithHierarchyCheckCached(
             mer_acc_p_id,
             mer_acc.tenantAccountId.clone(),
@@ -787,10 +796,18 @@ pub async fn eliminationV2RewardFactor(
     is_gri_enabled_for_elimination: bool,
     gateway_reference_id: Option<String>,
 ) -> Option<f64> {
-    let merch_acc: MerchantAccount =
+    let Some(merch_acc) =
         MA::load_merchant_by_merchant_id(MID::merchant_id_to_text(txn_detail.clone().merchantId))
             .await
-            .expect("Merchant account not found");
+    else {
+        // No merchant, no reward factor: callers fall back to the failure-key score.
+        logger::error!(
+            action = "eliminationV2RewardFactor",
+            merchant_id = merchant_id,
+            "No reward factor: merchant account not found"
+        );
+        return None;
+    };
 
     let error_tag = "Gateway Decider Input Decode Error";
     let m_gateway_success_rate_merchant_input =
@@ -836,8 +853,8 @@ pub async fn eliminationV2RewardFactor(
         }
         None => {
             logger::info!("ELIMINATION_V2_VALUES_NOT_FOUND:ALPHA:PMT_PM_TXNOBJECTTYPE_SOURCEOBJECT {:?} {:?} {:?} {:?}",
-                    txn_card_info.paymentMethodType,
-                    if txn_card_info.paymentMethod.is_empty() { "Nothing".to_string() } else { txn_card_info.paymentMethod.clone() },
+                    txn_card_info.instrument.method_code(),
+                    if txn_card_info.instrument.method_type_code().is_empty() { "Nothing".to_string() } else { txn_card_info.instrument.method_type_code().into_owned() },
                     txn_detail.txnObjectType,
                     txn_detail.sourceObject.as_ref().map_or_else(|| "Nothing".to_string(), |s| s.clone()),
                 );

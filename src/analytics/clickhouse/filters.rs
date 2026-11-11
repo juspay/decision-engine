@@ -1,11 +1,16 @@
-use crate::analytics::flow::AnalyticsRoute;
-use crate::analytics::models::{AnalyticsQuery, PaymentAuditQuery};
+use crate::analytics::flow::{
+    AnalyticsRoute, FlowType, SUMMARY_KIND_DYNAMIC, SUMMARY_KIND_HYBRID, SUMMARY_KIND_PREVIEW,
+};
+use crate::analytics::models::{
+    AnalyticsQuery, PaymentAuditQuery, PaymentAuditRoutingKind, PaymentAuditScope, PaymentField,
+    PaymentFieldFilter,
+};
 
 use super::common::{
-    payment_audit_summary_kind, static_flow_type_in_sql, PAYMENT_AUDIT_DYNAMIC_FLOW_TYPES,
-    PAYMENT_AUDIT_PREVIEW_FLOW_TYPES,
+    payment_audit_flow_types_in_sql, static_flow_type_in_sql, PAYMENT_AUDIT_HYBRID_FLOW_TYPES,
+    PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES, PAYMENT_AUDIT_PREVIEW_FLOW_TYPES,
 };
-use super::query::FilterClause;
+use super::query::{BindArg, FilterClause};
 use super::time::{effective_payment_audit_window_bounds, payment_audit_summary_bucket_bounds};
 
 const DEBIT_ROUTING_APPROACH: &str = "NTW_BASED_ROUTING";
@@ -15,7 +20,30 @@ pub fn base_window_filters(start_ms: i64, end_ms: i64) -> Vec<FilterClause> {
     vec![
         FilterClause::gte("created_at_ms", start_ms),
         FilterClause::lte("created_at_ms", end_ms),
+        partition_lower_bound(start_ms),
+        FilterClause::new(
+            "created_at <= fromUnixTimestamp64Milli(toInt64(?))",
+            vec![end_ms.into()],
+        ),
     ]
+}
+
+/// `analytics_domain_events` is partitioned by `toYYYYMM(created_at)` and its sort key does not
+/// lead with time, so a predicate on `created_at_ms` alone reads every monthly partition of the
+/// merchant. The same bound on the partition column lets ClickHouse skip the months outside it.
+pub fn partition_lower_bound(start_ms: i64) -> FilterClause {
+    FilterClause::new(
+        "created_at >= fromUnixTimestamp64Milli(toInt64(?))",
+        vec![start_ms.into()],
+    )
+}
+
+/// Upper counterpart of [`partition_lower_bound`] for half-open windows (`created_at_ms < end`).
+pub fn partition_upper_bound_exclusive(end_ms: i64) -> FilterClause {
+    FilterClause::new(
+        "created_at < fromUnixTimestamp64Milli(toInt64(?))",
+        vec![end_ms.into()],
+    )
 }
 
 pub fn merchant_filter(merchant_id: &str) -> Vec<FilterClause> {
@@ -60,37 +88,47 @@ pub fn score_filters(query: &AnalyticsQuery, start_ms: i64, end_ms: i64) -> Vec<
     filters
 }
 
+/// The flow-type category of a scope. The preview trail is pinned to the `routing_evaluate`
+/// route, the dynamic trail is its flow-type list, and `All` is the union of both with no pin.
+pub(crate) fn scope_flow_type_filters(scope: PaymentAuditScope) -> Vec<FilterClause> {
+    let mut filters = Vec::new();
+    if scope == PaymentAuditScope::Preview {
+        filters.push(FilterClause::raw(format!(
+            "route = '{}'",
+            AnalyticsRoute::RoutingEvaluate.as_str()
+        )));
+    }
+    filters.push(FilterClause::raw(format!(
+        "flow_type IN {}",
+        payment_audit_flow_types_in_sql(scope)
+    )));
+    filters
+}
+
+/// The `summary_kind` predicate for a scope, or `None` when the scope reads every kind.
+pub fn summary_kind_filter(scope: PaymentAuditScope) -> Option<FilterClause> {
+    let kinds = scope
+        .summary_kinds()?
+        .iter()
+        .map(|kind| kind.to_string())
+        .collect::<Vec<_>>();
+    FilterClause::in_list("summary_kind", &kinds)
+}
+
 pub fn payment_audit_raw_filters(
     query: &PaymentAuditQuery,
-    preview_only: bool,
+    scope: PaymentAuditScope,
 ) -> Vec<FilterClause> {
     let (start_ms, end_ms) = effective_payment_audit_window_bounds(query);
     let mut filters = base_window_filters(start_ms, end_ms);
 
     filters.extend(merchant_filter(&query.merchant_id));
-
-    if preview_only {
-        filters.push(FilterClause::raw(format!(
-            "route = '{}'",
-            AnalyticsRoute::RoutingEvaluate.as_str()
-        )));
-        filters.push(FilterClause::raw(format!(
-            "flow_type IN {}",
-            static_flow_type_in_sql(PAYMENT_AUDIT_PREVIEW_FLOW_TYPES)
-        )));
-    } else {
-        filters.push(FilterClause::raw(format!(
-            "flow_type IN {}",
-            static_flow_type_in_sql(PAYMENT_AUDIT_DYNAMIC_FLOW_TYPES)
-        )));
-        if let Some(route) = &query.route {
-            filters.push(FilterClause::eq("route", route.clone()));
-        }
+    filters.extend(scope_flow_type_filters(scope));
+    if scope != PaymentAuditScope::Preview {
+        filters.extend(FilterClause::in_list("route", &query.route));
     }
 
-    if let Some(gateway) = &query.gateway {
-        filters.push(FilterClause::eq("gateway", gateway.clone()));
-    }
+    filters.extend(FilterClause::in_list("gateway", &query.gateway));
     if let Some(status) = &query.status {
         filters.push(FilterClause::eq("status", status.clone()));
     }
@@ -103,9 +141,7 @@ pub fn payment_audit_raw_filters(
     if let Some(routing_approach) = &query.exclude_routing_approach {
         filters.push(routing_approach_exclusion_filter(routing_approach));
     }
-    if let Some(error_code) = &query.error_code {
-        filters.push(FilterClause::eq("error_code", error_code.clone()));
-    }
+    filters.extend(FilterClause::in_list("error_code", &query.error_code));
 
     filters
 }
@@ -118,34 +154,215 @@ pub fn payment_audit_raw_filters(
 /// fragment it — e.g. a `status=failure` filter drops the `decide_gateway` events (whose status is
 /// `received`/`success`) and leaves only the `update_gateway_score` failure event. Once a transaction
 /// is selected (via `lookup_key`, added by the caller), its full trace should be returned. Only the
-/// scope needed to identify that trace is kept: time window, merchant, and the preview/live flow-type
-/// category (plus the preview route for preview traces).
+/// scope needed to identify that trace is kept: merchant and the preview/live flow-type category
+/// (plus the preview route for preview traces). Exact ID searches read all retained history;
+/// browsing without an ID keeps the selected time window.
 pub fn payment_audit_timeline_filters(
     query: &PaymentAuditQuery,
-    preview_only: bool,
+    scope: PaymentAuditScope,
 ) -> Vec<FilterClause> {
-    let (start_ms, end_ms) = effective_payment_audit_window_bounds(query);
-    let mut filters = base_window_filters(start_ms, end_ms);
+    let exact_lookup = crate::analytics::derive_lookup_key(
+        query.payment_id.as_deref(),
+        query.request_id.as_deref(),
+    )
+    .is_some();
+    let mut filters = if exact_lookup {
+        Vec::new()
+    } else {
+        let (start_ms, end_ms) = effective_payment_audit_window_bounds(query);
+        base_window_filters(start_ms, end_ms)
+    };
 
     filters.extend(merchant_filter(&query.merchant_id));
-
-    if preview_only {
-        filters.push(FilterClause::raw(format!(
-            "route = '{}'",
-            AnalyticsRoute::RoutingEvaluate.as_str()
-        )));
-        filters.push(FilterClause::raw(format!(
-            "flow_type IN {}",
-            static_flow_type_in_sql(PAYMENT_AUDIT_PREVIEW_FLOW_TYPES)
-        )));
-    } else {
-        filters.push(FilterClause::raw(format!(
-            "flow_type IN {}",
-            static_flow_type_in_sql(PAYMENT_AUDIT_DYNAMIC_FLOW_TYPES)
-        )));
-    }
+    filters.extend(scope_flow_type_filters(scope));
 
     filters
+}
+
+/// Whether the summary must be aggregated from raw `analytics_domain_events` rows instead of
+/// the pre-aggregated lookup summaries: any filter on `routing_approach`, which the summary
+/// table does not carry. The Auth Rate and Debit routing kinds are such filters (they
+/// exclude / require `NTW_BASED_ROUTING`, exactly what the old tabs sent).
+pub fn payment_audit_needs_raw_rows(query: &PaymentAuditQuery) -> bool {
+    query.routing_approach.is_some()
+        || query.exclude_routing_approach.is_some()
+        || matches!(
+            query.routing_kind,
+            Some(PaymentAuditRoutingKind::AuthRate | PaymentAuditRoutingKind::DebitRouting)
+        )
+}
+
+/// The bit a payment's aggregated `routing_families` carries for each event family it produced
+/// (`flow::SUMMARY_KIND_*`). One family per event, so a payment's families fit in one byte.
+pub const PREVIEW_FAMILY_BIT: u8 = 1;
+pub const DYNAMIC_FAMILY_BIT: u8 = 2;
+pub const HYBRID_FAMILY_BIT: u8 = 4;
+
+/// `routing_families` over raw `analytics_domain_events` rows, decided by flow type.
+pub fn raw_routing_families_sql() -> String {
+    format!(
+        "groupBitOr(multiIf(flow_type IN {}, {PREVIEW_FAMILY_BIT}, flow_type IN {}, {DYNAMIC_FAMILY_BIT}, flow_type IN {}, {HYBRID_FAMILY_BIT}, 0)) AS routing_families",
+        static_flow_type_in_sql(PAYMENT_AUDIT_PREVIEW_FLOW_TYPES),
+        static_flow_type_in_sql(PAYMENT_AUDIT_MULTI_OBJECTIVE_FLOW_TYPES),
+        static_flow_type_in_sql(PAYMENT_AUDIT_HYBRID_FLOW_TYPES),
+    )
+}
+
+/// `routing_families` over summary rows, whose `summary_kind` is the family the write path
+/// derived from the same flow-type sets.
+pub fn summary_routing_families_sql() -> String {
+    format!(
+        "groupBitOr(multiIf(summary_kind = '{SUMMARY_KIND_PREVIEW}', {PREVIEW_FAMILY_BIT}, summary_kind = '{SUMMARY_KIND_DYNAMIC}', {DYNAMIC_FAMILY_BIT}, summary_kind = '{SUMMARY_KIND_HYBRID}', {HYBRID_FAMILY_BIT}, 0)) AS routing_families"
+    )
+}
+
+fn has_family(bit: u8) -> FilterClause {
+    FilterClause::raw(format!("bitAnd(routing_families, {bit}) != 0"))
+}
+
+fn lacks_family(bit: u8) -> FilterClause {
+    FilterClause::raw(format!("bitAnd(routing_families, {bit}) = 0"))
+}
+
+/// The routing-kind filter over a payment's aggregated `routing_families`. A payment is listed
+/// under exactly one kind, by precedence: `multi_objective` when it went through `/decide` or
+/// `/routing/hybrid` (both record the hybrid family); otherwise `auth_rate` when an SR decision (or
+/// its score feedback) exists; otherwise `rule_based` when only rule evaluations exist. So a
+/// payment id that carries both a rule evaluation and an SR decision shows up under Auth Rate only,
+/// with its whole trail. Debit routing is decided by `routing_approach` on the raw rows instead
+/// (see `payment_audit_summary_scope_filters`).
+pub fn payment_audit_routing_kind_filters(kind: PaymentAuditRoutingKind) -> Vec<FilterClause> {
+    match kind {
+        PaymentAuditRoutingKind::MultiObjective => vec![has_family(HYBRID_FAMILY_BIT)],
+        PaymentAuditRoutingKind::AuthRate => vec![
+            has_family(DYNAMIC_FAMILY_BIT),
+            lacks_family(HYBRID_FAMILY_BIT),
+        ],
+        // Rule based = the rule evaluations recorded by direct `/routing/evaluate` calls, i.e.
+        // the same family the preview scope reads.
+        PaymentAuditRoutingKind::RuleBased => vec![
+            has_family(PREVIEW_FAMILY_BIT),
+            lacks_family(HYBRID_FAMILY_BIT),
+            lacks_family(DYNAMIC_FAMILY_BIT),
+        ],
+        PaymentAuditRoutingKind::DebitRouting => Vec::new(),
+    }
+}
+
+/// The `paymentInfo` field the success-rate decider's request carries for a routing key: on
+/// `/decide-gateway`, and as the dynamic half of `/routing/hybrid` and `/decide`.
+fn payment_info_field(routing_key: &str) -> Option<&'static str> {
+    Some(match routing_key {
+        "card_bin" => "cardIsin",
+        "card_type" => "cardType",
+        "card_network" => "cardSwitchProvider",
+        "issuer_country" => "cardIssuerCountry",
+        "issuer_name" => "cardIssuerBankName",
+        "billing_country" => "country",
+        "currency" => "currency",
+        "payment_method" => "paymentMethod",
+        "payment_method_type" => "paymentMethodType",
+        "authentication_type" => "authType",
+        _ => return None,
+    })
+}
+
+/// The JSON paths, under an event's `details`, of each request's `paymentInfo`.
+const PAYMENT_INFO_PATHS: [&str; 2] = [
+    "'request', 'paymentInfo'",
+    "'request', 'dynamic_routing_request', 'paymentInfo'",
+];
+
+/// The JSON paths, under an event's `details`, of each request's rule parameters: the static half
+/// of `/routing/hybrid` and `/decide`, and `/routing/evaluate`'s own.
+const RULE_PARAMETER_PATHS: [&str; 2] = [
+    "'request', 'static_routing_request', 'parameters'",
+    "'request', 'parameters'",
+];
+
+/// One rule parameter's value as text, read only from parameters of the field's kind: a metadata
+/// variant's value for a metadata field, and an enum, string or number value as it was sent for a
+/// routing key. A parameter of the other kind reads as empty, which no value matches. Every
+/// placeholder is the parameter's name; the second item is how many there are.
+fn rule_parameter_sql(parameters: &str, field: &PaymentField) -> (String, usize) {
+    let parameter = format!("assumeNotNull(details), {parameters}, ?");
+    let is_metadata = format!("JSONExtractString({parameter}, 'type') = 'metadata_variant'");
+    match field {
+        PaymentField::Metadata(_) => (
+            format!("if({is_metadata}, JSONExtractString({parameter}, 'value', 'value'), '')"),
+            2,
+        ),
+        PaymentField::RoutingKey(_) => {
+            let value = format!("{parameter}, 'value'");
+            (
+                format!(
+                    "if({is_metadata}, '', if(JSONType({value}) = 'Object', JSONExtractString({value}, 'value'), trim(BOTH '\"' FROM JSONExtractRaw({value}))))"
+                ),
+                4,
+            )
+        }
+    }
+}
+
+/// The events that store a routing request: `/decide-gateway` decisions, `/decide` and
+/// `/routing/hybrid` decisions and errors, and `/routing/evaluate` results. Score updates and
+/// request hits, most of a payment's events, are skipped before any request is parsed.
+pub fn payment_request_events_filter() -> FilterClause {
+    let flow_types = [
+        FlowType::DecideGatewayDecision,
+        FlowType::RoutingHybridDecision,
+        FlowType::RoutingHybridError,
+    ]
+    .into_iter()
+    .chain(PAYMENT_AUDIT_PREVIEW_FLOW_TYPES.iter().copied())
+    .collect::<Vec<_>>();
+    FilterClause::raw(format!(
+        "flow_type IN {}",
+        static_flow_type_in_sql(&flow_types)
+    ))
+}
+
+/// Matches an event whose request carried the field's value, ignoring case. Rule parameters are
+/// read by the field's name; the decider's `paymentInfo` by its own name for the field, and its
+/// metadata, a JSON string, by key.
+pub fn payment_field_match(filter: &PaymentFieldFilter) -> FilterClause {
+    let (name, info_field) = match &filter.field {
+        PaymentField::RoutingKey(key) => (key, payment_info_field(key)),
+        PaymentField::Metadata(key) => (key, None),
+    };
+    let mut candidates = Vec::new();
+    let mut binds = Vec::new();
+    for parameters in RULE_PARAMETER_PATHS {
+        let (sql, name_binds) = rule_parameter_sql(parameters, &filter.field);
+        candidates.push(sql);
+        binds.extend(std::iter::repeat_n(
+            BindArg::from(name.as_str()),
+            name_binds,
+        ));
+    }
+    for payment_info in PAYMENT_INFO_PATHS {
+        match (&filter.field, info_field) {
+            (PaymentField::RoutingKey(_), Some(field)) => candidates.push(format!(
+                "JSONExtractString(assumeNotNull(details), {payment_info}, '{field}')"
+            )),
+            (PaymentField::Metadata(_), _) => {
+                candidates.push(format!(
+                    "JSONExtractString(JSONExtractString(assumeNotNull(details), {payment_info}, 'metadata'), ?)"
+                ));
+                binds.push(BindArg::from(name.as_str()));
+            }
+            (PaymentField::RoutingKey(_), None) => {}
+        }
+    }
+    let placeholders = vec!["lowerUTF8(?)"; filter.values.len()].join(", ");
+    binds.extend(filter.values.iter().cloned().map(BindArg::from));
+    FilterClause::new(
+        format!(
+            "hasAny(arrayMap(value -> lowerUTF8(value), [{}]), [{placeholders}])",
+            candidates.join(", ")
+        ),
+        binds,
+    )
 }
 
 /// Filters for the raw (non-materialized) summary aggregation.
@@ -160,9 +377,9 @@ pub fn payment_audit_timeline_filters(
 /// at all, since the summary table carries no routing_approach — are applied here.
 pub fn payment_audit_summary_scope_filters(
     query: &PaymentAuditQuery,
-    preview_only: bool,
+    scope: PaymentAuditScope,
 ) -> Vec<FilterClause> {
-    let mut filters = payment_audit_timeline_filters(query, preview_only);
+    let mut filters = payment_audit_timeline_filters(query, scope);
 
     if let Some(routing_approach) = &query.routing_approach {
         filters.push(routing_approach_match_filter(routing_approach));
@@ -170,27 +387,43 @@ pub fn payment_audit_summary_scope_filters(
     if let Some(routing_approach) = &query.exclude_routing_approach {
         filters.push(routing_approach_exclusion_filter(routing_approach));
     }
+    // The routing-kind filter's routing_approach half; skipped when the explicit param already
+    // carries the same predicate.
+    match query.routing_kind {
+        Some(PaymentAuditRoutingKind::DebitRouting)
+            if query.routing_approach.as_deref() != Some(DEBIT_ROUTING_APPROACH) =>
+        {
+            filters.push(routing_approach_match_filter(DEBIT_ROUTING_APPROACH));
+        }
+        Some(PaymentAuditRoutingKind::AuthRate)
+            if query.exclude_routing_approach.as_deref() != Some(DEBIT_ROUTING_APPROACH) =>
+        {
+            filters.push(routing_approach_exclusion_filter(DEBIT_ROUTING_APPROACH));
+        }
+        _ => {}
+    }
 
     filters
 }
 
 pub fn payment_audit_summary_bucket_filters(
     query: &PaymentAuditQuery,
-    preview_only: bool,
+    scope: PaymentAuditScope,
 ) -> Vec<FilterClause> {
     let (start_ms, end_ms) = payment_audit_summary_bucket_bounds(query);
-    vec![
+    let mut filters = vec![
         FilterClause::eq("merchant_id", query.merchant_id.clone()),
         FilterClause::new(
-            "bucket_start >= fromUnixTimestamp64Milli(?)",
+            "bucket_start >= fromUnixTimestamp64Milli(toInt64(?))",
             vec![start_ms.into()],
         ),
         FilterClause::new(
-            "bucket_start <= fromUnixTimestamp64Milli(?)",
+            "bucket_start <= fromUnixTimestamp64Milli(toInt64(?))",
             vec![end_ms.into()],
         ),
-        FilterClause::eq("summary_kind", payment_audit_summary_kind(preview_only)),
-    ]
+    ];
+    filters.extend(summary_kind_filter(scope));
+    filters
 }
 
 fn routing_approach_match_filter(routing_approach: &str) -> FilterClause {
@@ -222,11 +455,16 @@ fn routing_approach_exclusion_filter(routing_approach: &str) -> FilterClause {
 
 #[cfg(test)]
 mod tests {
-    use crate::analytics::models::{AnalyticsQuery, AnalyticsRange, PaymentAuditQuery};
+    use crate::analytics::models::{
+        AnalyticsQuery, AnalyticsRange, AnalyticsRoutingKind, PaymentAuditQuery,
+        PaymentAuditRoutingKind, PaymentAuditScope,
+    };
 
     use super::{
-        analytics_dimension_filters, merchant_filter, payment_audit_raw_filters,
-        payment_audit_summary_bucket_filters, payment_audit_timeline_filters,
+        analytics_dimension_filters, merchant_filter, payment_audit_needs_raw_rows,
+        payment_audit_raw_filters, payment_audit_routing_kind_filters,
+        payment_audit_summary_bucket_filters, payment_audit_summary_scope_filters,
+        payment_audit_timeline_filters,
     };
 
     fn analytics_query() -> AnalyticsQuery {
@@ -245,6 +483,7 @@ mod tests {
             country: None,
             auth_type: None,
             gateways: vec!["adyen".to_string()],
+            routing_kind: AnalyticsRoutingKind::default(),
         }
     }
 
@@ -258,14 +497,24 @@ mod tests {
             page_size: 20,
             payment_id: None,
             request_id: Some("req_1".to_string()),
-            gateway: None,
-            route: None,
+            gateway: Vec::new(),
+            route: Vec::new(),
             status: None,
             flow_type: None,
             routing_approach: None,
             exclude_routing_approach: None,
-            error_code: None,
+            error_code: Vec::new(),
+            scope: PaymentAuditScope::All,
+            routing_kind: None,
+            payment_filters: Default::default(),
         }
+    }
+
+    fn predicates(filters: &[super::FilterClause]) -> Vec<String> {
+        filters
+            .iter()
+            .map(|filter| filter.predicate().to_string())
+            .collect()
     }
 
     #[test]
@@ -301,7 +550,7 @@ mod tests {
 
     #[test]
     fn payment_audit_filters_switch_preview_flow_types() {
-        let filters = payment_audit_raw_filters(&payment_audit_query(), true);
+        let filters = payment_audit_raw_filters(&payment_audit_query(), PaymentAuditScope::Preview);
         let predicates = filters
             .iter()
             .map(|filter| filter.predicate().to_string())
@@ -318,7 +567,10 @@ mod tests {
 
     #[test]
     fn payment_audit_summary_bucket_filters_use_bucket_time_and_kind() {
-        let filters = payment_audit_summary_bucket_filters(&payment_audit_query(), true);
+        let filters = payment_audit_summary_bucket_filters(
+            &payment_audit_query(),
+            PaymentAuditScope::Preview,
+        );
         let predicates = filters
             .iter()
             .map(|filter| filter.predicate().to_string())
@@ -328,13 +580,13 @@ mod tests {
             .any(|predicate| predicate == "merchant_id = ?"));
         assert!(predicates
             .iter()
-            .any(|predicate| predicate == "bucket_start >= fromUnixTimestamp64Milli(?)"));
+            .any(|predicate| predicate == "bucket_start >= fromUnixTimestamp64Milli(toInt64(?))"));
         assert!(predicates
             .iter()
-            .any(|predicate| predicate == "bucket_start <= fromUnixTimestamp64Milli(?)"));
+            .any(|predicate| predicate == "bucket_start <= fromUnixTimestamp64Milli(toInt64(?))"));
         assert!(predicates
             .iter()
-            .any(|predicate| predicate == "summary_kind = ?"));
+            .any(|predicate| predicate == "summary_kind IN (?)"));
     }
 
     #[test]
@@ -342,7 +594,7 @@ mod tests {
         let mut query = payment_audit_query();
         query.routing_approach = Some("NTW_BASED_ROUTING".to_string());
 
-        let predicates = payment_audit_raw_filters(&query, false)
+        let predicates = payment_audit_raw_filters(&query, PaymentAuditScope::Dynamic)
             .iter()
             .map(|filter| filter.predicate().to_string())
             .collect::<Vec<_>>();
@@ -361,10 +613,10 @@ mod tests {
         let mut query = payment_audit_query();
         query.status = Some("FAILURE".to_string());
         query.exclude_routing_approach = Some("NTW_BASED_ROUTING".to_string());
-        query.gateway = Some("adyen".to_string());
-        query.error_code = Some("DECLINED".to_string());
+        query.gateway = vec!["adyen".to_string()];
+        query.error_code = vec!["DECLINED".to_string()];
 
-        let predicates = payment_audit_timeline_filters(&query, false)
+        let predicates = payment_audit_timeline_filters(&query, PaymentAuditScope::Dynamic)
             .iter()
             .map(|filter| filter.predicate().to_string())
             .collect::<Vec<_>>();
@@ -385,7 +637,7 @@ mod tests {
         let mut query = payment_audit_query();
         query.exclude_routing_approach = Some("NTW_BASED_ROUTING".to_string());
 
-        let predicates = payment_audit_raw_filters(&query, false)
+        let predicates = payment_audit_raw_filters(&query, PaymentAuditScope::Dynamic)
             .iter()
             .map(|filter| filter.predicate().to_string())
             .collect::<Vec<_>>();
@@ -396,5 +648,247 @@ mod tests {
                 && predicate.contains("rankingAlgorithm")
                 && predicate.contains("NTW_BASED_ROUTING")
         }));
+    }
+
+    #[test]
+    fn timeline_filters_for_all_scope_union_both_trails_without_a_route_pin() {
+        let predicates = predicates(&payment_audit_timeline_filters(
+            &payment_audit_query(),
+            PaymentAuditScope::All,
+        ));
+        let flow_clause = predicates
+            .iter()
+            .find(|predicate| predicate.contains("flow_type IN"))
+            .expect("flow_type clause");
+        assert!(flow_clause.contains("decide_gateway_decision"));
+        assert!(flow_clause.contains("routing_evaluate_advanced"));
+        assert!(flow_clause.contains("routing_hybrid_decision"));
+        assert!(flow_clause.contains("update_gateway_score_update"));
+        assert!(!predicates
+            .iter()
+            .any(|p| p.contains("route = 'routing_evaluate'")));
+    }
+
+    #[test]
+    fn narrow_scopes_keep_their_own_trails() {
+        let dynamic = predicates(&payment_audit_timeline_filters(
+            &payment_audit_query(),
+            PaymentAuditScope::Dynamic,
+        ));
+        assert!(dynamic
+            .iter()
+            .any(|p| p.contains("routing_hybrid_decision")));
+        assert!(!dynamic
+            .iter()
+            .any(|p| p.contains("routing_evaluate_advanced")));
+
+        let preview = predicates(&payment_audit_timeline_filters(
+            &payment_audit_query(),
+            PaymentAuditScope::Preview,
+        ));
+        assert!(preview.iter().any(|p| p == "route = 'routing_evaluate'"));
+        assert!(preview
+            .iter()
+            .any(|p| p.contains("routing_evaluate_advanced")));
+        assert!(!preview
+            .iter()
+            .any(|p| p.contains("routing_hybrid_decision")));
+    }
+
+    #[test]
+    fn a_payment_field_reads_every_endpoint_request_with_one_bind_per_placeholder() {
+        use crate::analytics::models::{PaymentField, PaymentFieldFilter};
+        let card_bin = super::payment_field_match(&PaymentFieldFilter {
+            field: PaymentField::RoutingKey("card_bin".into()),
+            values: vec!["424242".into()],
+        });
+        let sql = card_bin.predicate();
+        // /decide and /routing/hybrid's rule half, /routing/evaluate, and the decider's request.
+        assert!(sql.contains("'static_routing_request', 'parameters', ?"));
+        assert!(sql.contains("'request', 'parameters', ?"));
+        assert!(sql.contains("'request', 'paymentInfo', 'cardIsin'"));
+        assert!(sql.contains("'dynamic_routing_request', 'paymentInfo', 'cardIsin'"));
+        assert_eq!(sql.matches('?').count(), card_bin.binds().len());
+
+        let segment = super::payment_field_match(&PaymentFieldFilter {
+            field: PaymentField::Metadata("segment".into()),
+            values: vec!["premium".into(), "gold".into()],
+        });
+        assert!(segment
+            .predicate()
+            .contains("'paymentInfo', 'metadata'), ?)"));
+        assert_eq!(
+            segment.predicate().matches('?').count(),
+            segment.binds().len()
+        );
+        // A key with no decider field reads rule parameters only.
+        let label = super::payment_field_match(&PaymentFieldFilter {
+            field: PaymentField::RoutingKey("business_label".into()),
+            values: vec!["eu".into()],
+        });
+        assert!(!label.predicate().contains("paymentInfo"));
+        // card_network is the decider's cardSwitchProvider.
+        let network = super::payment_field_match(&PaymentFieldFilter {
+            field: PaymentField::RoutingKey("card_network".into()),
+            values: vec!["visa".into()],
+        });
+        assert!(network
+            .predicate()
+            .contains("'paymentInfo', 'cardSwitchProvider'"));
+    }
+
+    #[test]
+    fn a_payment_field_reads_only_rule_parameters_of_its_kind() {
+        use crate::analytics::models::{PaymentField, PaymentFieldFilter};
+        let metadata = super::payment_field_match(&PaymentFieldFilter {
+            field: PaymentField::Metadata("currency".into()),
+            values: vec!["USD".into()],
+        });
+        let routing_key = super::payment_field_match(&PaymentFieldFilter {
+            field: PaymentField::RoutingKey("currency".into()),
+            values: vec!["USD".into()],
+        });
+        let is_metadata = "'type') = 'metadata_variant', ";
+        // A metadata field reads a metadata variant's value, and nothing from other parameters.
+        assert!(metadata
+            .predicate()
+            .contains(&format!("{is_metadata}JSONExtractString(")));
+        assert!(metadata.predicate().contains("'value', 'value'), '')"));
+        // A routing key reads nothing from a metadata variant.
+        assert!(routing_key
+            .predicate()
+            .contains(&format!("{is_metadata}'', ")));
+        for clause in [&metadata, &routing_key] {
+            assert_eq!(
+                clause.predicate().matches('?').count(),
+                clause.binds().len()
+            );
+        }
+    }
+
+    #[test]
+    fn payment_fields_parse_only_events_that_store_a_request() {
+        let predicate = super::payment_request_events_filter()
+            .predicate()
+            .to_string();
+        for flow_type in [
+            "decide_gateway_decision",
+            "routing_hybrid_decision",
+            "routing_hybrid_error",
+            "routing_evaluate_advanced",
+        ] {
+            assert!(predicate.contains(flow_type), "{flow_type}");
+        }
+        for flow_type in ["update_gateway_score_update", "routing_hybrid_request_hit"] {
+            assert!(!predicate.contains(flow_type), "{flow_type}");
+        }
+    }
+
+    #[test]
+    fn routing_kind_decides_which_summary_path_is_needed() {
+        let mut query = payment_audit_query();
+        assert!(!payment_audit_needs_raw_rows(&query));
+        query.routing_kind = Some(PaymentAuditRoutingKind::RuleBased);
+        assert!(!payment_audit_needs_raw_rows(&query));
+        query.routing_kind = Some(PaymentAuditRoutingKind::MultiObjective);
+        assert!(!payment_audit_needs_raw_rows(&query));
+        query.routing_kind = Some(PaymentAuditRoutingKind::AuthRate);
+        assert!(payment_audit_needs_raw_rows(&query));
+        query.routing_kind = Some(PaymentAuditRoutingKind::DebitRouting);
+        assert!(payment_audit_needs_raw_rows(&query));
+        query.routing_kind = None;
+        query.exclude_routing_approach = Some("NTW_BASED_ROUTING".to_string());
+        assert!(payment_audit_needs_raw_rows(&query));
+    }
+
+    #[test]
+    fn routing_kinds_are_exclusive_over_the_aggregated_families() {
+        let predicates = |kind| {
+            payment_audit_routing_kind_filters(kind)
+                .into_iter()
+                .map(|filter| filter.predicate().to_string())
+                .collect::<Vec<_>>()
+        };
+
+        // `/decide` and `/routing/hybrid` both record the hybrid family.
+        assert_eq!(
+            predicates(PaymentAuditRoutingKind::MultiObjective),
+            vec!["bitAnd(routing_families, 4) != 0"]
+        );
+        // an SR decision on the same payment id takes precedence: rule based excludes it
+        assert_eq!(
+            predicates(PaymentAuditRoutingKind::RuleBased),
+            vec![
+                "bitAnd(routing_families, 1) != 0",
+                "bitAnd(routing_families, 4) = 0",
+                "bitAnd(routing_families, 2) = 0",
+            ]
+        );
+        assert_eq!(
+            predicates(PaymentAuditRoutingKind::AuthRate),
+            vec![
+                "bitAnd(routing_families, 2) != 0",
+                "bitAnd(routing_families, 4) = 0",
+            ]
+        );
+        assert!(predicates(PaymentAuditRoutingKind::DebitRouting).is_empty());
+    }
+
+    #[test]
+    fn family_bits_follow_the_flow_type_families() {
+        let raw = super::raw_routing_families_sql();
+        let preview_arm = raw.split(", 1,").next().expect("preview arm");
+        assert!(preview_arm.contains("routing_evaluate_advanced"));
+        assert!(!preview_arm.contains("routing_hybrid_decision"));
+        assert!(raw.contains("'routing_hybrid_decision', 'routing_hybrid_error'), 4, 0)"));
+
+        let summary = super::summary_routing_families_sql();
+        assert!(summary.contains("summary_kind = 'preview', 1"));
+        assert!(summary.contains("summary_kind = 'dynamic', 2"));
+        assert!(summary.contains("summary_kind = 'hybrid', 4"));
+    }
+
+    #[test]
+    fn debit_and_auth_rate_kinds_add_the_routing_approach_scope_the_tabs_sent() {
+        let mut query = payment_audit_query();
+        query.routing_kind = Some(PaymentAuditRoutingKind::DebitRouting);
+        let debit = predicates(&payment_audit_summary_scope_filters(
+            &query,
+            PaymentAuditScope::All,
+        ));
+        assert!(debit
+            .iter()
+            .any(|p| p.contains("routing_approach = ?") && p.contains("rankingAlgorithm")));
+
+        query.routing_kind = Some(PaymentAuditRoutingKind::AuthRate);
+        let multi = predicates(&payment_audit_summary_scope_filters(
+            &query,
+            PaymentAuditScope::All,
+        ));
+        assert!(multi
+            .iter()
+            .any(|p| p.contains("routing_approach IS NULL") && p.contains("AND NOT")));
+
+        // An explicit param carrying the same predicate is not duplicated.
+        query.exclude_routing_approach = Some("NTW_BASED_ROUTING".to_string());
+        let deduped = predicates(&payment_audit_summary_scope_filters(
+            &query,
+            PaymentAuditScope::All,
+        ));
+        assert_eq!(
+            deduped
+                .iter()
+                .filter(|p| p.contains("routing_approach IS NULL"))
+                .count(),
+            1
+        );
+
+        query.routing_kind = Some(PaymentAuditRoutingKind::RuleBased);
+        query.exclude_routing_approach = None;
+        let rule = predicates(&payment_audit_summary_scope_filters(
+            &query,
+            PaymentAuditScope::All,
+        ));
+        assert!(!rule.iter().any(|p| p.contains("routing_approach")));
     }
 }

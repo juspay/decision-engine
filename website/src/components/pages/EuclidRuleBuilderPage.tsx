@@ -1,6 +1,21 @@
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import useSWR from 'swr'
+import {
+  DndContext,
+  DragEndEvent,
+  KeyboardSensor,
+  PointerSensor,
+  closestCenter,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
 import { Plus, ArrowLeft } from 'lucide-react'
 import { Card, CardBody } from '../ui/Card'
 import { Button } from '../ui/Button'
@@ -8,7 +23,7 @@ import { ErrorMessage } from '../ui/ErrorMessage'
 import { FieldError, invalidFieldClass } from '../ui/FieldError'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useCanEditRouting } from '../../store/authStore'
-import { apiPost } from '../../lib/api'
+import { apiPost, fetcher } from '../../lib/api'
 import { RoutingAlgorithm } from '../../types/api'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import {
@@ -72,7 +87,7 @@ export function EuclidRuleBuilderPage() {
   )
   const { data: activeAlgorithms } = useSWR<RoutingAlgorithm[]>(
     merchantId ? `/routing/list/active/${merchantId}` : null,
-    () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`)
+    () => fetcher<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`)
   )
 
   const sourceId = editId || cloneFromId
@@ -158,7 +173,7 @@ export function EuclidRuleBuilderPage() {
         (block.outputType === 'volume_split' && block.volumeSplitEntries.length === 0) ||
         (block.outputType === 'volume_split_priority' && block.volumeSplitPriorityEntries.length === 0)
       if (empty) {
-        nextBlockErrors[block.id] = 'Add at least one destination gateway to route to.'
+        nextBlockErrors[block.id] = 'Add at least one destination connector to route to.'
       }
     })
 
@@ -220,6 +235,25 @@ export function EuclidRuleBuilderPage() {
         volumeSplitPriorityEntries: [],
       },
     ])
+  }
+
+  // A few pixels of travel before a drag starts, so a click on the grip is still a click.
+  const ruleSensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 4 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
+  )
+
+  // Rules are evaluated top-down and the first match wins, so their array order is their
+  // priority. Moving the block is the whole change.
+  function handleRuleDragEnd(event: DragEndEvent) {
+    const { active, over } = event
+    if (!over || active.id === over.id) return
+    setRuleBlocks((prev) => {
+      const from = prev.findIndex((b) => b.id === active.id)
+      const to = prev.findIndex((b) => b.id === over.id)
+      if (from === -1 || to === -1) return prev
+      return arrayMove(prev, from, to)
+    })
   }
 
   function switchToCode() {
@@ -339,6 +373,13 @@ export function EuclidRuleBuilderPage() {
               <p className="border-b border-slate-100 pb-2.5 text-xs font-semibold uppercase tracking-widest text-slate-500 dark:border-[#1c1c24] dark:text-[#8d96a8]">
                 Configured Rules
               </p>
+              {/* Same warning the Hyperswitch dashboard shows on its rule builder — amounts are
+                  easy to get wrong by a factor of 100 without it. */}
+              <p className="text-[13px] text-slate-500 dark:text-[#8d96a8] leading-[18px]">
+                Enter payment amounts in the smallest currency unit (cents for USD, yen for JPY).
+                For instance, <code className="font-mono">100</code> matches $1.00 (USD) but ¥100
+                (JPY), since ¥ is a zero-decimal currency.
+              </p>
               {routingKeysLoading && (
                 <p className="text-sm text-slate-500">Loading routing keys from backend...</p>
               )}
@@ -347,26 +388,39 @@ export function EuclidRuleBuilderPage() {
               )}
               {editorMode === 'visual' ? (
                 <>
-                  {ruleBlocks.map((block, i) => (
-                    <RuleBlockEditor
-                      key={block.id}
-                      block={block}
-                      index={i}
-                      routingKeys={routingKeys}
-                      gatewaySuggestions={gatewaySuggestions}
-                      error={blockErrors[block.id]}
-                      onChange={(updated) => {
-                        setRuleBlocks((prev) => prev.map((b) => (b.id === block.id ? updated : b)))
-                        if (blockErrors[block.id]) {
-                          setBlockErrors(({ [block.id]: _removed, ...rest }) => rest)
-                        }
-                      }}
-                      onRemove={() => {
-                        setRuleBlocks((prev) => prev.filter((b) => b.id !== block.id))
-                        setBlockErrors(({ [block.id]: _removed, ...rest }) => rest)
-                      }}
-                    />
-                  ))}
+                  <DndContext
+                    sensors={ruleSensors}
+                    collisionDetection={closestCenter}
+                    onDragEnd={handleRuleDragEnd}
+                  >
+                    <SortableContext
+                      items={ruleBlocks.map((b) => b.id)}
+                      strategy={verticalListSortingStrategy}
+                    >
+                      <div className="space-y-3">
+                        {ruleBlocks.map((block, i) => (
+                          <RuleBlockEditor
+                            key={block.id}
+                            block={block}
+                            index={i}
+                            routingKeys={routingKeys}
+                            gatewaySuggestions={gatewaySuggestions}
+                            error={blockErrors[block.id]}
+                            onChange={(updated) => {
+                              setRuleBlocks((prev) => prev.map((b) => (b.id === block.id ? updated : b)))
+                              if (blockErrors[block.id]) {
+                                setBlockErrors(({ [block.id]: _removed, ...rest }) => rest)
+                              }
+                            }}
+                            onRemove={() => {
+                              setRuleBlocks((prev) => prev.filter((b) => b.id !== block.id))
+                              setBlockErrors(({ [block.id]: _removed, ...rest }) => rest)
+                            }}
+                          />
+                        ))}
+                      </div>
+                    </SortableContext>
+                  </DndContext>
                   <Button
                     type="button"
                     variant="secondary"
@@ -389,9 +443,9 @@ export function EuclidRuleBuilderPage() {
             </div>
 
             <div className="rounded-xl border border-dashed border-slate-300 px-4 py-4 dark:border-[#2a303a]">
-              <p className="text-[15px] font-semibold text-slate-800 dark:text-slate-200 leading-[22px]">Default Fallback Gateway</p>
+              <p className="text-[15px] font-semibold text-slate-800 dark:text-slate-200 leading-[22px]">Default Fallback Connector</p>
               <p className="mb-4 mt-1 text-[13px] text-slate-500 dark:text-[#8d96a8] leading-[18px]">
-                This gateway handles any transactions that do not match the custom rules configured
+                This connector handles any transactions that do not match the custom rules configured
                 above. Per-request overrides are possible via <code className="font-mono">fallback_output</code>.
               </p>
               <PriorityEditor

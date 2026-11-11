@@ -3,6 +3,10 @@ name: ci-pr
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  # The merge queue runs the same jobs on the PR combined with the latest main, so a PR doesn't
+  # need updating with main itself, and `CI Gate` reports for the queue as it does for the PR.
+  merge_group:
+    types: [checks_requested]
 
 permissions:
   contents: read
@@ -16,6 +20,10 @@ env:
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
   RUST_BACKTRACE: short
+  # The stable Rust toolchain for clippy, tests and builds. Keep this identical in ci-pr.yml and
+  # ci-push.yml: when the two drift, code that one clippy version accepts passes the PR checks and
+  # then fails on main. Bump it in both files together.
+  STABLE_RUST_TOOLCHAIN: "1.99.1"
 
 jobs:
   # Which of this PR's files decide whether the expensive jobs below have anything to say. The
@@ -34,6 +42,10 @@ jobs:
       - uses: dorny/paths-filter@v3
         id: filter
         with:
+          # In the merge queue there is no PR to list files from: compare the queued commit with
+          # the main it was built on. Both are empty, so unset, on a pull request.
+          base: ${{ github.event.merge_group.base_sha }}
+          ref: ${{ github.event.merge_group.head_sha }}
           filters: |
             # Everything the E2E job builds, boots or runs. Listed wide on purpose: an extra run
             # costs a runner, a missed one costs a regression that reaches main.
@@ -73,11 +85,14 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
+    # ci-push denies warnings, so a lint that only warns here would pass the PR and fail on main.
+    env:
+      RUSTFLAGS: "-D warnings"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable
+          toolchain: ${{ env.STABLE_RUST_TOOLCHAIN }}
           components: clippy
       - name: Install native deps for rdkafka
         run: |
@@ -98,7 +113,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: crate-ci/typos@master
+      - uses: crate-ci/typos@v1
 
   ci-hack:
     name: Cargo Hack
@@ -111,7 +126,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable
+          toolchain: ${{ env.STABLE_RUST_TOOLCHAIN }}
       - name: Install native deps for rdkafka
         run: |
           sudo apt-get update
@@ -139,7 +154,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable
+          toolchain: ${{ env.STABLE_RUST_TOOLCHAIN }}
       - name: Install native deps for rdkafka
         run: |
           sudo apt-get update
@@ -208,7 +223,7 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable
+          toolchain: ${{ env.STABLE_RUST_TOOLCHAIN }}
 
       - name: Install native deps for rdkafka
         run: |

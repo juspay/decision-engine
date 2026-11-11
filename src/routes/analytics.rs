@@ -1,18 +1,24 @@
+use crate::analytics::models::{
+    PaymentAuditOutcome, PaymentAuditPaymentFilters, PaymentFieldFilter,
+};
 use crate::analytics::{
     cost_savings as fetch_cost_savings, decisions as fetch_decisions,
     experiment_results as fetch_experiment_results,
     experiment_transactions as fetch_experiment_transactions,
     gateway_scores as fetch_gateway_scores, log_summaries as fetch_log_summaries,
     overview as fetch_overview, payment_audit as fetch_payment_audit,
+    payment_audit_filter_options as fetch_payment_audit_filter_options,
     preview_trace as fetch_preview_trace, routing_events as fetch_routing_events,
     routing_stats as fetch_routing_stats, AnalyticsQuery, AuthBandSpec, ExperimentResultsQuery,
     ExperimentTransactionsQuery, PaymentAuditQuery, RoutingEventsQuery,
 };
 use crate::custom_extractors::{AuthenticatedAnalyticsContext, TenantStateResolver};
 use crate::error;
+use crate::middleware::metered;
 use axum::extract::Query;
 use axum::Json;
 use serde::Deserialize;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -38,6 +44,17 @@ pub struct AnalyticsQueryParams {
     pub routing_approach: Option<String>,
     pub exclude_routing_approach: Option<String>,
     pub error_code: Option<String>,
+    pub scope: Option<String>,
+    pub routing_kind: Option<String>,
+    /// Payment audit only: `success`, `failure` or `pending`.
+    pub outcome: Option<String>,
+    /// Payment audit only: amount bounds, inclusive.
+    pub min_amount: Option<f64>,
+    pub max_amount: Option<f64>,
+    /// Payment audit only: compare routing decisions with reported update connectors.
+    pub connector_mismatch: Option<bool>,
+    /// Payment audit only: a JSON object of routing keys or `metadata.<key>` names to values.
+    pub payment_fields: Option<String>,
 }
 
 fn analytics_query_from_params(
@@ -59,14 +76,24 @@ fn analytics_query_from_params(
         params.country.clone(),
         params.auth_type.clone(),
         params.gateway.clone(),
+        params.routing_kind.clone(),
     )
 }
 
 fn payment_audit_query_from_params(
+    state: &crate::app::TenantAppState,
     merchant_id: String,
     params: &AnalyticsQueryParams,
-) -> PaymentAuditQuery {
-    PaymentAuditQuery::from_request(
+) -> Result<PaymentAuditQuery, error::ContainerError<error::ApiError>> {
+    let no_keys = BTreeMap::new();
+    let routing_keys = state
+        .config
+        .routing_config
+        .as_ref()
+        .map_or(&no_keys, |config| &config.keys.keys);
+    let fields = PaymentFieldFilter::parse_all(params.payment_fields.as_deref(), routing_keys)
+        .map_err(error::ApiError::ValidationError)?;
+    Ok(PaymentAuditQuery::from_request(
         merchant_id,
         params.range.clone(),
         params.start_ms,
@@ -82,28 +109,51 @@ fn payment_audit_query_from_params(
         params.routing_approach.clone(),
         params.exclude_routing_approach.clone(),
         params.error_code.clone(),
+        params.scope.clone(),
+        params.routing_kind.clone(),
     )
+    .with_payment_filters(PaymentAuditPaymentFilters {
+        connector_mismatch: params.connector_mismatch.unwrap_or(false),
+        outcome: PaymentAuditPaymentFilters::values(params.outcome.as_deref())
+            .iter()
+            .filter_map(|value| PaymentAuditOutcome::from_query(Some(value)))
+            .collect(),
+        currency: PaymentAuditPaymentFilters::values(params.currency.as_deref()),
+        payment_method: PaymentAuditPaymentFilters::values(params.payment_method.as_deref()),
+        payment_method_type: PaymentAuditPaymentFilters::values(
+            params.payment_method_type.as_deref(),
+        ),
+        card_network: PaymentAuditPaymentFilters::values(params.card_network.as_deref()),
+        auth_type: PaymentAuditPaymentFilters::values(params.auth_type.as_deref()),
+        min_amount: params.min_amount,
+        max_amount: params.max_amount,
+        fields,
+    }))
 }
 
 pub fn serve() -> axum::Router<Arc<crate::tenant::GlobalAppState>> {
     axum::Router::<Arc<crate::tenant::GlobalAppState>>::new()
-        .route("/", axum::routing::get(overview))
-        .route("/overview", axum::routing::get(overview))
-        .route("/gateway-scores", axum::routing::get(gateway_scores))
-        .route("/decisions", axum::routing::get(decisions))
-        .route("/routing-stats", axum::routing::get(routing_stats))
-        .route("/cost-savings", axum::routing::get(cost_savings))
-        .route("/routing-events", axum::routing::get(routing_events))
-        .route("/log-summaries", axum::routing::get(log_summaries))
-        .route("/payment-audit", axum::routing::get(payment_audit))
-        .route("/preview-trace", axum::routing::get(preview_trace))
+        .route("/", metered!(get, overview))
+        .route("/overview", metered!(get, overview))
+        .route("/gateway-scores", metered!(get, gateway_scores))
+        .route("/decisions", metered!(get, decisions))
+        .route("/routing-stats", metered!(get, routing_stats))
+        .route("/cost-savings", metered!(get, cost_savings))
+        .route("/routing-events", metered!(get, routing_events))
+        .route("/log-summaries", metered!(get, log_summaries))
+        .route("/payment-audit", metered!(get, payment_audit))
+        .route(
+            "/payment-audit/filter-options",
+            metered!(get, payment_audit_filter_options),
+        )
+        .route("/preview-trace", metered!(get, preview_trace))
         .route(
             "/experiment/:experiment_id/results",
-            axum::routing::get(experiment_results),
+            metered!(get, experiment_results),
         )
         .route(
             "/experiment/:experiment_id/transactions",
-            axum::routing::get(experiment_transactions),
+            metered!(get, experiment_transactions),
         )
 }
 
@@ -181,8 +231,22 @@ pub async fn payment_audit(
     AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> Result<Json<crate::analytics::PaymentAuditResponse>, error::ContainerError<error::ApiError>> {
-    let query = payment_audit_query_from_params(auth_context.merchant_id.clone(), &params);
+    let query = payment_audit_query_from_params(&state, auth_context.merchant_id.clone(), &params)?;
     Ok(Json(fetch_payment_audit(&state, &query).await?))
+}
+
+/// The values the payment audit's dropdown filters can take: what the merchant's payments in the
+/// window (`range` or `start_ms`/`end_ms`) carried.
+pub async fn payment_audit_filter_options(
+    TenantStateResolver(state): TenantStateResolver,
+    AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
+    Query(params): Query<AnalyticsQueryParams>,
+) -> Result<Json<crate::analytics::PaymentAuditFilterOptions>, error::ContainerError<error::ApiError>>
+{
+    let query = payment_audit_query_from_params(&state, auth_context.merchant_id.clone(), &params)?;
+    Ok(Json(
+        fetch_payment_audit_filter_options(&state, &query).await?,
+    ))
 }
 
 pub async fn preview_trace(
@@ -190,7 +254,7 @@ pub async fn preview_trace(
     AuthenticatedAnalyticsContext(auth_context): AuthenticatedAnalyticsContext,
     Query(params): Query<AnalyticsQueryParams>,
 ) -> Result<Json<crate::analytics::PaymentAuditResponse>, error::ContainerError<error::ApiError>> {
-    let query = payment_audit_query_from_params(auth_context.merchant_id.clone(), &params);
+    let query = payment_audit_query_from_params(&state, auth_context.merchant_id.clone(), &params)?;
     Ok(Json(fetch_preview_trace(&state, &query).await?))
 }
 
@@ -248,7 +312,7 @@ pub async fn routing_events(
 ///
 /// ```ignore
 /// let multi_objective_on = crate::redis::feature::is_feature_enabled(
-///     "multi_objective_routing_enabled".to_string(),
+///     "cost_savings_enabled".to_string(),
 ///     merchant_id.to_string(),
 ///     crate::feedback::constants::kvRedis(),
 /// ).await;
@@ -266,6 +330,23 @@ async fn resolve_auth_band(_merchant_id: &str, _explicit: Option<f64>) -> AuthBa
     AuthBandSpec::Off
 }
 
+/// Rejects an `endpoint` query value this build does not recognise, which would otherwise match
+/// no events and read as an experiment with no traffic.
+fn known_experiment_endpoint(
+    endpoint: Option<crate::euclid::types::ExperimentEndpoint>,
+) -> Result<Option<crate::euclid::types::ExperimentEndpoint>, error::ContainerError<error::ApiError>>
+{
+    match endpoint {
+        Some(crate::euclid::types::ExperimentEndpoint::Unknown) => {
+            Err(error::ApiError::ValidationError(
+                "endpoint must be one of hybrid_routing, decide_gateway, evaluate",
+            )
+            .into())
+        }
+        other => Ok(other),
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct ExperimentResultsParams {
     pub start_ms: Option<i64>,
@@ -275,6 +356,12 @@ pub struct ExperimentResultsParams {
     /// Common business margin (fraction of ticket) to value net EV for cost/autopilot
     /// experiments. Omitted → `DEFAULT_EVALUATION_MARGIN`.
     pub evaluation_margin: Option<f64>,
+    /// `hybrid_routing`, `decide_gateway` or `evaluate`. Omitted → every endpoint.
+    pub endpoint: Option<crate::euclid::types::ExperimentEndpoint>,
+    /// Variant ids to report, comma-separated, in order. The significance level is corrected for
+    /// these and for every other variant that recorded payments. Omitted → the variants the
+    /// recorded payments name.
+    pub variants: Option<String>,
 }
 
 pub async fn experiment_results(
@@ -294,6 +381,16 @@ pub async fn experiment_results(
         evaluation_margin: params.evaluation_margin.unwrap_or(
             crate::analytics::clickhouse::endpoints::experiment_results::DEFAULT_EVALUATION_MARGIN,
         ),
+        endpoint: known_experiment_endpoint(params.endpoint)?,
+        variant_ids: params
+            .variants
+            .as_deref()
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|id| !id.is_empty())
+            .map(str::to_string)
+            .collect(),
     };
     Ok(Json(fetch_experiment_results(&state, &query).await?))
 }
@@ -303,6 +400,7 @@ pub struct ExperimentTransactionsParams {
     pub start_ms: Option<i64>,
     pub page: Option<u64>,
     pub page_size: Option<u64>,
+    pub endpoint: Option<crate::euclid::types::ExperimentEndpoint>,
 }
 
 pub async fn experiment_transactions(
@@ -320,6 +418,7 @@ pub async fn experiment_transactions(
         start_ms: params.start_ms,
         page: params.page.unwrap_or(1),
         page_size: params.page_size.unwrap_or(50).min(100),
+        endpoint: known_experiment_endpoint(params.endpoint)?,
     };
     Ok(Json(fetch_experiment_transactions(&state, &query).await?))
 }

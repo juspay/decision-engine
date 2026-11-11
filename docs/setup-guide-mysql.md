@@ -17,7 +17,7 @@ COMPOSE_PROFILES= docker compose --profile mysql-ghcr up -d
 With dashboard + docs:
 
 ```bash
-COMPOSE_PROFILES= docker compose --profile dashboard-mysql-ghcr up -d
+COMPOSE_PROFILES= docker compose --profile dashboard-mysql-ghcr up -d --build
 ```
 
 ## Docker Compose (Local build track)

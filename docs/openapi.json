@@ -2,7 +2,7 @@
   "openapi": "3.1.0",
   "info": {
     "title": "Decision Engine",
-    "description": "Open-source payment gateway routing service by Juspay. Selects the optimal payment processor for each transaction in real-time using success-rate scoring, rule-based routing, and elimination logic.\n\n## Authentication\n\nThis API supports two authentication methods:\n\n1. **JWT Bearer Token** - For dashboard/user sessions\n   - Header: `Authorization: Bearer <jwt_token>`\n   - Obtain via `/auth/login` endpoint\n\n2. **API Key** - For service-to-service/programmatic access\n   - Header: `x-api-key: DE_<64_char_hex>`\n   - Create via `/api-key/create` endpoint\n\nProtected endpoints require one of these authentication methods.",
+    "description": "Open-source payment gateway routing service by Juspay. Selects the optimal payment processor for each transaction in real-time using success-rate scoring, rule-based routing, and elimination logic.\n\n## Authentication\n\nThis API supports two authentication methods:\n\n1. **JWT Bearer Token** - For dashboard/user sessions\n   - Header: `Authorization: Bearer <jwt_token>`\n   - Obtain via `/auth/login` endpoint\n\n2. **API Key** - For service-to-service/programmatic access\n   - Header: `x-api-key: DE_<64_char_hex>`\n   - Create via `/api-key/create` endpoint\n\nProtected endpoints require one of these authentication methods.\n\n### Merchant scope\n\nA JWT session or API key belongs to one merchant and may only act on that merchant. A request that names any other merchant — in the path (the `{merchant_id}` segment) or in the body (`merchant_id`, `merchantId`, `created_by`, including nested ones such as `dynamic_routing_request.merchantId`) — is refused with `403 Forbidden`. An object that belongs to another merchant — a routing algorithm, an API key — reads as not found, whichever credential is used. Requests made with the admin secret (`x-admin-secret`) act for the merchant the request names; a request that names its merchant in more than one place (for example both halves of `/routing/hybrid`) must name the same one in each, or it is refused with `400`.\n\n### Admin endpoints\n\n`/merchant-account/create`, `/admin/hierarchy/*`, `/admin/profiles/{profile_id}/connectors` and `/auth/admin/merchant-token` accept only the admin secret (`x-admin-secret`). Any other credential, or none, is refused with `401 Unauthorized`.",
     "version": "1.4.0",
     "contact": {
       "name": "Juspay",
@@ -940,6 +940,15 @@
         ],
         "parameters": [
           {
+            "name": "connector_mismatch",
+            "in": "query",
+            "description": "Only payments whose latest Decide Gateway or Hybrid Routing connector differs from a reported update connector in the selected window. Compares connector names without case or account suffixes. Keeps complete payment summaries and timelines; ignored for exact ID lookup.",
+            "schema": {
+              "type": "boolean",
+              "default": false
+            }
+          },
+          {
             "name": "x-tenant-id",
             "in": "header",
             "required": true,
@@ -987,7 +996,10 @@
             "in": "query",
             "required": false,
             "schema": {
-              "type": "integer"
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
             }
           },
           {
@@ -1052,7 +1064,8 @@
             "required": false,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Payment audit: comma-separated to match payments that went through any of them."
           },
           {
             "name": "payment_id",
@@ -1076,14 +1089,54 @@
             "required": false,
             "schema": {
               "type": "string"
-            }
+            },
+            "description": "Payment audit: comma-separated to match payments that went through any of them."
           },
           {
             "name": "status",
             "in": "query",
             "required": false,
+            "description": "Matches payments with an event of exactly this status (e.g. `FAILURE`, `CHARGED`; `success` / `failure` also match routing calls). To filter by what happened to the payment, use `outcome`.",
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "outcome",
+            "in": "query",
+            "required": false,
+            "description": "The payment's outcome from its reported statuses: `success` (any attempt succeeded), `failure` (failed terminally, never succeeded) or `pending` (no terminal status yet). Comma-separated to match any of several, e.g. `failure,pending`.",
+            "schema": {
+              "type": "string",
+              "example": "failure,pending"
+            }
+          },
+          {
+            "name": "min_amount",
+            "in": "query",
+            "required": false,
+            "description": "Payment audit only: payments whose routed amount is at least this. Like `currency`, `payment_method`, `payment_method_type`, `card_network` and `auth_type` (which on the payment audit take comma-separated values and match any of them, case-insensitively), it matches the whole payment by its routing decision.",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "max_amount",
+            "in": "query",
+            "required": false,
+            "description": "Payment audit only: payments whose routed amount is at most this.",
+            "schema": {
+              "type": "number"
+            }
+          },
+          {
+            "name": "payment_fields",
+            "in": "query",
+            "required": false,
+            "description": "Payment audit only: a JSON object of payment field names to values; a payment must carry every value, matched case-insensitively. A field is a routing key from `/config/routing-keys` (other than a numeric one) or `metadata.<key>`, read from every endpoint's stored request. An unknown field returns 400.",
+            "schema": {
+              "type": "string",
+              "example": "{\"card_bin\":\"424242\",\"metadata.segment\":\"premium\"}"
             }
           },
           {
@@ -1116,6 +1169,38 @@
             "required": false,
             "schema": {
               "type": "string"
+            },
+            "description": "Payment audit: comma-separated to match payments that hit any of these error codes."
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "description": "Which audit kinds to read: all (default, merged per payment), dynamic, or preview.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "dynamic",
+                "preview"
+              ],
+              "default": "all"
+            }
+          },
+          {
+            "name": "routing_kind",
+            "in": "query",
+            "required": false,
+            "description": "List only payments whose trail holds this kind of event (the dashboard's Routing type filter): `multi_objective` (`/decide` and `/routing/hybrid`), `auth_rate` (`/decide-gateway` without debit routing), `rule_based` (`/routing/evaluate`) or `debit_routing`. `hybrid`, the older name, reads as `multi_objective`.",
+            "schema": {
+              "type": "string",
+              "enum": [
+                "multi_objective",
+                "auth_rate",
+                "rule_based",
+                "debit_routing",
+                "hybrid"
+              ]
             }
           }
         ],
@@ -2094,8 +2179,8 @@
                       "country": "US",
                       "customerId": "cust_123",
                       "paymentType": "ORDER_PAYMENT",
-                      "paymentMethodType": "CARD",
-                      "paymentMethod": "CREDIT",
+                      "paymentMethod": "CARD",
+                      "paymentMethodType": "CREDIT",
                       "authType": "THREE_DS",
                       "cardIsin": "411111"
                     },
@@ -2117,8 +2202,8 @@
                       "amount": 1000,
                       "currency": "USD",
                       "paymentType": "ORDER_PAYMENT",
-                      "paymentMethodType": "CARD",
-                      "paymentMethod": "DEBIT",
+                      "paymentMethod": "CARD",
+                      "paymentMethodType": "DEBIT",
                       "authType": "THREE_DS",
                       "metadata": "{\"merchant_category_code\":\"merchant_category_code_0001\",\"acquirer_country\":\"US\",\"co_badged_card_data\":{\"co_badged_card_networks\":[\"VISA\",\"NYCE\",\"PULSE\",\"STAR\"],\"issuer_country\":\"US\",\"is_regulated\":false,\"regulated_name\":null,\"card_type\":\"debit\"}}"
                     },
@@ -2139,8 +2224,8 @@
                       "amount": 750,
                       "currency": "USD",
                       "paymentType": "ORDER_PAYMENT",
-                      "paymentMethodType": "CARD",
-                      "paymentMethod": "DEBIT"
+                      "paymentMethod": "CARD",
+                      "paymentMethodType": "DEBIT"
                     },
                     "eligibleGatewayList": [
                       "stripe",
@@ -2161,8 +2246,8 @@
                       "currency": "USD",
                       "country": "US",
                       "paymentType": "ORDER_PAYMENT",
-                      "paymentMethodType": "CARD",
-                      "paymentMethod": "CREDIT",
+                      "paymentMethod": "CARD",
+                      "paymentMethodType": "CREDIT",
                       "authType": "THREE_DS",
                       "cardIsin": "424242"
                     },
@@ -3220,7 +3305,7 @@
         }
       }
     },
-    "/routing/list/{created_by}": {
+    "/routing/list/{merchant_id}": {
       "post": {
         "operationId": "listRoutingRules",
         "tags": [
@@ -3230,7 +3315,7 @@
         "description": "List all routing rules for a merchant.",
         "parameters": [
           {
-            "name": "created_by",
+            "name": "merchant_id",
             "in": "path",
             "required": true,
             "schema": {
@@ -3264,8 +3349,8 @@
         ]
       }
     },
-    "/routing/list/active/{created_by}": {
-      "post": {
+    "/routing/list/active/{merchant_id}": {
+      "get": {
         "operationId": "getActiveRoutingRule",
         "tags": [
           "Routing Rules"
@@ -3274,7 +3359,7 @@
         "description": "Retrieve the currently active routing rule for a merchant.",
         "parameters": [
           {
-            "name": "created_by",
+            "name": "merchant_id",
             "in": "path",
             "required": true,
             "schema": {
@@ -3428,7 +3513,7 @@
           "Rule Configuration"
         ],
         "summary": "Get rule config",
-        "description": "Retrieve an existing rule configuration by merchant and type.",
+        "description": "Retrieve a saved rule configuration by merchant and type. An existing merchant with no saved configuration returns 200 with config: null. An unknown merchant returns 404.",
         "requestBody": {
           "required": true,
           "content": {
@@ -3445,7 +3530,7 @@
         },
         "responses": {
           "200": {
-            "description": "Rule config",
+            "description": "Saved rule config, or config: null when not configured",
             "content": {
               "application/json": {
                 "schema": {
@@ -3453,7 +3538,8 @@
                 }
               }
             }
-          }
+          },
+          "404": { "description": "Merchant not found, configuration storage read failure, or invalid stored configuration. Underlying read and parsing errors are retained in server logs." }
         },
         "security": [
           {
@@ -4021,6 +4107,15 @@
             "schema": {
               "type": "number"
             }
+          },
+          {
+            "name": "variants",
+            "in": "query",
+            "required": false,
+            "description": "Variant ids to report, comma-separated, in order. The significance level is corrected for these and for every other variant that recorded payments. Omitted, the variants named by the recorded payments are reported.",
+            "schema": {
+              "type": "string"
+            }
           }
         ],
         "responses": {
@@ -4165,7 +4260,7 @@
           "Cost Ingestion"
         ],
         "summary": "Set connector credentials",
-        "description": "Store the webhook secret and report-download credential for one connector account.",
+        "description": "Store the webhook secret and report-download credential for one registered connector account. Unregistered connector IDs are rejected with HTTP 400 before credentials are encoded or saved.",
         "security": [
           {
             "BearerAuth": []
@@ -4929,7 +5024,7 @@
               "type": "string"
             },
             "description": "Feature slug.",
-            "example": "multi-objective-routing"
+            "example": "cost-savings"
           }
         ],
         "requestBody": {
@@ -5037,6 +5132,216 @@
           }
         }
       }
+    },
+    "/analytics/payment-audit/filter-options": {
+      "get": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Payment audit filter options",
+        "description": "The values the payment audit dropdown filters can take for the merchant: the distinct gateways, payment methods, method types, card networks, auth types and currencies its payments carried in the window, in the form the filters match (attributes lower-cased). Up to 200 per field.",
+        "operationId": "analyticsPaymentAuditFilterOptions",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-tenant-id",
+            "in": "header",
+            "required": true,
+            "description": "Tenant to resolve. The shipped config files define only the \"public\" tenant. No fallback — omitting this fails with TE_03.",
+            "schema": {
+              "type": "string",
+              "default": "public"
+            },
+            "example": "public"
+          },
+          {
+            "name": "range",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "start_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          },
+          {
+            "name": "end_ms",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Filter options",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PaymentAuditFilterOptions"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/decide": {
+      "post": {
+        "operationId": "decide",
+        "tags": [
+          "Routing Rules"
+        ],
+        "summary": "Decide routing",
+        "description": "Route a payment: evaluate the active rule, then rank by success rate, cost and volume commitments. Codes (`status`, `reason`, `code`) are snake_case and may gain values; `message` is human-readable text.",
+        "security": [
+          {
+            "BearerAuth": []
+          },
+          {
+            "ApiKeyAuth": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "x-connected-merchant-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "The merchant to decide for. Optional with a session or API key (defaults to its own merchant; it may name a sub-merchant, any other is `403`). Required with a service credential."
+          },
+          {
+            "name": "x-request-id",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "Identifies the call; generated if absent and returned as a response header."
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecideRequest"
+              },
+              "example": {
+                "payment_id": "pay_demo",
+                "merchant_reference_id": "order_demo",
+                "amount": 1000,
+                "currency": "USD",
+                "payment_method_type": "card",
+                "payment_method_sub_type": "credit",
+                "authentication_type": null,
+                "capture_method": null,
+                "payment_type": null,
+                "setup_future_usage": null,
+                "transaction_initiator": null,
+                "surcharge_amount": null,
+                "business_country": null,
+                "billing_country": "US",
+                "business_label": null,
+                "card": {
+                  "card_isin": "001234",
+                  "card_extended_bin": "00123456",
+                  "card_network": "Visa",
+                  "card_type": "credit",
+                  "card_issuer": null,
+                  "card_issuing_country_code": "US",
+                  "card_subtype": null,
+                  "card_discovery": null,
+                  "card_switch_provider": null
+                },
+                "customer_device_platform": null,
+                "customer_device_type": null,
+                "customer_device_display_size": null,
+                "pay_later": null,
+                "wallet": null,
+                "upi": null,
+                "voucher": null,
+                "bank_redirect": null,
+                "bank_debit": null,
+                "bank_transfer": null,
+                "real_time_payment": null,
+                "gift_card": null,
+                "card_redirect": null,
+                "open_banking": null,
+                "mobile_payment": null,
+                "crypto": null,
+                "reward": null,
+                "network_token": null,
+                "metadata": {
+                  "segment": "premium"
+                },
+                "customer_id": null,
+                "routing_config": {
+                  "algorithm_for": "payment",
+                  "decision_arm": null,
+                  "elimination_enabled": null,
+                  "enable_multi_objective": null,
+                  "ranking_algorithm": null,
+                  "eligible_connectors": [
+                    {
+                      "connector": "worldpay",
+                      "merchant_connector_id": "mca_wp"
+                    },
+                    {
+                      "connector": "checkout",
+                      "merchant_connector_id": "mca_cko"
+                    }
+                  ],
+                  "preferred_connectors": null
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Routing decision.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DecideResponse"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "`TE_03`: invalid body or field (named by its path), or routing could not be evaluated. Also returned when a service credential sends no `x-connected-merchant-id`."
+          },
+          "401": {
+            "description": "Authentication required."
+          },
+          "403": {
+            "description": "`x-connected-merchant-id` is not the caller's own merchant."
+          },
+          "404": {
+            "description": "`TE_02`: the merchant's routing configuration was not found."
+          },
+          "500": {
+            "description": "`TE_00` `The request could not be completed`."
+          }
+        }
+      }
     }
   },
   "components": {
@@ -5128,11 +5433,13 @@
           },
           "paymentMethodType": {
             "type": "string",
-            "example": "CARD"
+            "description": "The specific method within `paymentMethod`: `CREDIT` or `DEBIT` for cards, `UPI_COLLECT`, `GOOGLE_PAY` and so on.",
+            "example": "CREDIT"
           },
           "paymentMethod": {
             "type": "string",
-            "example": "CREDIT"
+            "description": "The payment method category: `CARD`, `UPI`, `WALLET` and so on. Before this release `/decide-gateway` read the two fields the other way round.",
+            "example": "CARD"
           },
           "country": {
             "type": [
@@ -5161,11 +5468,15 @@
             },
             "description": "Positional user-defined fields."
           },
-          "preferredGateway": {
+          "preferredConnectors": {
             "type": [
-              "string",
+              "array",
               "null"
-            ]
+            ],
+            "items": {
+              "type": "string"
+            },
+            "description": "Ordered connector:mca_id preferences from the customer's profile-scoped history. The first entry is considered; health and eligibility checks still apply."
           },
           "metadata": {
             "type": [
@@ -5337,7 +5648,7 @@
           },
           "enableMultiObjective": {
             "type": "boolean",
-            "description": "Per-request override for the multi-objective (cost-aware) post-step. true forces it on, false forces it off; omitted falls back to the merchant's multi_objective_routing_enabled feature flag."
+            "description": "Per-request override for the multi-objective (cost-aware) post-step. true forces it on, false forces it off; omitted falls back to the merchant's cost_savings_enabled feature flag."
           }
         }
       },
@@ -5642,6 +5953,11 @@
               "string",
               "null"
             ]
+          },
+          "parent_merchant_id": {
+            "type": "string",
+            "description": "Create the account as a sub-merchant of this existing merchant. A sub-merchant gets no api_key of its own; its parent's keys reach it.",
+            "example": "merchant_demo"
           }
         }
       },
@@ -5941,6 +6257,10 @@
           },
           "role": {
             "type": "string"
+          },
+          "parent_merchant_id": {
+            "type": "string",
+            "description": "Set on a sub-merchant: the merchant it belongs to, whose members and API keys reach it. Absent on a standalone or parent merchant."
           }
         }
       },
@@ -5953,6 +6273,11 @@
           "merchant_name": {
             "type": "string",
             "example": "Demo Merchant"
+          },
+          "parent_merchant_id": {
+            "type": "string",
+            "description": "Add a sub-merchant to this merchant instead of creating a standalone merchant. Only its admins may. The parent must not be a sub-merchant or a Hyperswitch-synced account.",
+            "example": "merchant_demo"
           }
         }
       },
@@ -6667,19 +6992,21 @@
       },
       "SRSubLevelInputConfig": {
         "type": "object",
+        "required": [
+          "paymentMethod"
+        ],
         "properties": {
+          "paymentMethod": {
+            "type": "string",
+            "description": "The payment method category (`card`, `wallet`, `upi`). Stored and returned as an upper-case code.",
+            "example": "CARD"
+          },
           "paymentMethodType": {
             "type": [
               "string",
               "null"
             ],
-            "example": "CARD"
-          },
-          "paymentMethod": {
-            "type": [
-              "string",
-              "null"
-            ],
+            "description": "The specific method within `paymentMethod` (`credit`, `google_pay`); omit it to cover the whole method. Must belong to `paymentMethod`. Stored and returned as an upper-case code.",
             "example": "CREDIT"
           },
           "cardNetwork": {
@@ -6919,10 +7246,14 @@
             "example": "merchant_demo"
           },
           "config": {
-            "$ref": "#/components/schemas/ConfigVariant"
+            "oneOf": [
+              { "$ref": "#/components/schemas/ConfigVariant" },
+              { "type": "null" }
+            ]
           }
         },
-        "description": "`POST /rule/get` returns the stored config without a `message` field."
+        "required": ["merchant_id", "config"],
+        "description": "`POST /rule/get` returns the stored config, or config: null when no configuration is saved for an existing merchant. No message field is returned."
       },
       "HybridRoutingRequest": {
         "type": "object",
@@ -7730,6 +8061,15 @@
             ],
             "example": "success"
           },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "success",
+              "failure",
+              "pending"
+            ],
+            "description": "The payment's outcome from its reported statuses. Unlike `latest_status`, a routing call's own `success` does not count."
+          },
           "latest_gateway": {
             "type": [
               "string",
@@ -7754,6 +8094,13 @@
             "type": "array",
             "items": {
               "type": "string"
+            }
+          },
+          "experiments": {
+            "type": "array",
+            "description": "A/B experiments that routed this payment, with the arm it was assigned; empty when it was not routed under one. Omitted when the lookup failed.",
+            "items": {
+              "$ref": "#/components/schemas/PaymentAuditExperiment"
             }
           }
         }
@@ -7917,6 +8264,44 @@
           }
         }
       },
+      "PaymentAuditExperiment": {
+        "type": "object",
+        "description": "A payment's assignment to an A/B experiment on one routing endpoint.",
+        "required": [
+          "experiment_id",
+          "arm",
+          "endpoint",
+          "routed_at_ms"
+        ],
+        "properties": {
+          "experiment_id": {
+            "type": "string",
+            "example": "routing_dd6ec3ad-aac4-4c8c-b6f7-03c732163f90"
+          },
+          "arm": {
+            "type": "string",
+            "enum": [
+              "control",
+              "variant"
+            ],
+            "example": "variant"
+          },
+          "endpoint": {
+            "type": "string",
+            "enum": [
+              "hybrid_routing",
+              "decide_gateway",
+              "evaluate"
+            ],
+            "example": "hybrid_routing"
+          },
+          "routed_at_ms": {
+            "type": "integer",
+            "format": "int64",
+            "description": "When the payment was first routed under this assignment."
+          }
+        }
+      },
       "PaymentAuditResponse": {
         "type": "object",
         "properties": {
@@ -7982,7 +8367,7 @@
           },
           "page_size": {
             "type": "integer",
-            "example": 12
+            "example": 20
           },
           "total_results": {
             "type": "integer",
@@ -8007,6 +8392,14 @@
             "items": {
               "$ref": "#/components/schemas/PaymentAuditEvent"
             }
+          },
+          "scope": {
+            "type": "string",
+            "description": "all | dynamic | preview"
+          },
+          "routing_kind": {
+            "type": "string",
+            "nullable": true
           }
         }
       },
@@ -8413,6 +8806,55 @@
           }
         }
       },
+      "ExperimentVariantComparison": {
+        "type": "object",
+        "description": "One variant's results and how it compares with control.",
+        "properties": {
+          "metrics": {
+            "$ref": "#/components/schemas/ExperimentArmMetrics"
+          },
+          "delta_pp": {
+            "type": "number",
+            "format": "double",
+            "description": "Variant minus control auth rate, in percentage points; 0 until both arms have a resolved payment."
+          },
+          "p_value": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double",
+            "description": "Compared with significance_level, not 0.05."
+          },
+          "confidence_interval": {
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": "number",
+              "format": "double"
+            }
+          },
+          "verdict": {
+            "type": "string",
+            "enum": [
+              "collecting_data",
+              "not_significant",
+              "variant_wins",
+              "variant_loses",
+              "guardrail_breached"
+            ]
+          },
+          "net_delta_bps": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "format": "double"
+          }
+        }
+      },
       "ExperimentResultsResponse": {
         "type": "object",
         "properties": {
@@ -8425,8 +8867,21 @@
           "control": {
             "$ref": "#/components/schemas/ExperimentArmMetrics"
           },
+          "variants": {
+            "type": "array",
+            "description": "Every variant compared with control, in the experiment's order.",
+            "items": {
+              "$ref": "#/components/schemas/ExperimentVariantComparison"
+            }
+          },
+          "significance_level": {
+            "type": "number",
+            "format": "double",
+            "description": "Per-comparison significance level: 0.05 divided by the number of variants compared (Bonferroni): every requested variant and every variant that recorded payments."
+          },
           "variant": {
-            "$ref": "#/components/schemas/ExperimentArmMetrics"
+            "$ref": "#/components/schemas/ExperimentArmMetrics",
+            "description": "The first variant's metrics, kept for single-variant clients; read variants."
           },
           "delta_pp": {
             "type": "number",
@@ -9088,6 +9543,11 @@
           "download_auth_hint": {
             "type": "string",
             "example": "reportuser:••••"
+          },
+          "environment": {
+            "type": "string",
+            "enum": ["prod", "sandbox"],
+            "description": "Checkout only. Derived from the stored URL and current server configuration. Omitted when credentials cannot be read."
           }
         },
         "description": "Connector credentials with secrets masked. Secrets are never returned in full."
@@ -9101,10 +9561,12 @@
               "gsm-scoring-filter",
               "explore-exploit-srv3",
               "ab-test-real-payments",
-              "multi-objective-routing",
+              "cost-savings",
               "elimination",
-              "auto-calibration",
-              "autopilot"
+              "autopilot",
+              "volume-contracts",
+              "sr-routing",
+              "sr-scores-from-rule-routing"
             ]
           },
           "enabled": {
@@ -9237,7 +9699,13 @@
           },
           "download_auth": {
             "type": "string",
-            "description": "Report-download credential: either Basic auth as `user:password`, or a Report Service API key on its own (sent as `X-API-Key`)."
+            "description": "For Checkout, the secret key is treated as an opaque credential; the API URL is selected from server configuration using environment. For Adyen, Basic auth as user:password or a Report Service API key (X-API-Key). For Chase, JSON authentication credentials; token_url and reports_url fields are ignored in favor of server configuration."
+          },
+          "environment": {
+            "type": "string",
+            "enum": ["prod", "sandbox"],
+            "default": "prod",
+            "description": "Checkout only. Selects the report API URL from cost_ingestion.connector server configuration; omitted means production. Missing endpoint settings default to https://api.checkout.com and https://api.sandbox.checkout.com. The backend stores the existing secret_key/api_base_url JSON internally."
           }
         }
       },
@@ -9459,6 +9927,839 @@
           }
         },
         "description": "Generic API error envelope: an error code, a human-readable message, and an optional structured payload."
+      },
+      "PaymentAuditFilterOptions": {
+        "type": "object",
+        "required": [
+          "gateways",
+          "payment_methods",
+          "payment_method_types",
+          "card_networks",
+          "auth_types",
+          "currencies",
+          "error_codes"
+        ],
+        "properties": {
+          "gateways": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "payment_methods": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "payment_method_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "card_networks": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "auth_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "currencies": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "error_codes": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Error codes as recorded (matched exactly)."
+          }
+        }
+      },
+      "DecideRequest": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "payment_id",
+          "amount",
+          "currency",
+          "routing_config"
+        ],
+        "properties": {
+          "payment_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "merchant_reference_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Your own reference; echoed in the response."
+          },
+          "amount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "description": "Amount in currency minor units."
+          },
+          "currency": {
+            "type": "string",
+            "description": "Currency code, e.g. USD."
+          },
+          "payment_method_type": {
+            "type": "string",
+            "nullable": true,
+            "description": "Payment method family, e.g. card."
+          },
+          "payment_method_sub_type": {
+            "type": "string",
+            "nullable": true,
+            "description": "Payment method subtype, e.g. credit."
+          },
+          "authentication_type": {
+            "type": "string",
+            "nullable": true
+          },
+          "capture_method": {
+            "type": "string",
+            "nullable": true
+          },
+          "payment_type": {
+            "type": "string",
+            "nullable": true,
+            "description": "The `payment_type` rule key: `normal`, `new_mandate`, `update_mandate`, `setup_mandate`, `recurring_mandate`, `non_mandate` or `ppt_mandate`. A rule that tests `payment_type` matches only when it is sent."
+          },
+          "setup_future_usage": {
+            "type": "string",
+            "nullable": true
+          },
+          "transaction_initiator": {
+            "type": "string",
+            "nullable": true
+          },
+          "surcharge_amount": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 18446744073709551615,
+            "nullable": true,
+            "description": "Amount in currency minor units."
+          },
+          "business_country": {
+            "type": "string",
+            "nullable": true,
+            "description": "ISO 3166 alpha-2 country code."
+          },
+          "billing_country": {
+            "type": "string",
+            "nullable": true,
+            "description": "ISO 3166 alpha-2 country code."
+          },
+          "business_label": {
+            "type": "string",
+            "nullable": true
+          },
+          "card": {
+            "$ref": "#/components/schemas/DecideCard"
+          },
+          "customer_device_platform": {
+            "type": "string",
+            "nullable": true
+          },
+          "customer_device_type": {
+            "type": "string",
+            "nullable": true
+          },
+          "customer_device_display_size": {
+            "type": "string",
+            "nullable": true
+          },
+          "pay_later": {
+            "type": "string",
+            "nullable": true
+          },
+          "wallet": {
+            "type": "string",
+            "nullable": true
+          },
+          "upi": {
+            "type": "string",
+            "nullable": true
+          },
+          "voucher": {
+            "type": "string",
+            "nullable": true
+          },
+          "bank_redirect": {
+            "type": "string",
+            "nullable": true
+          },
+          "bank_debit": {
+            "type": "string",
+            "nullable": true
+          },
+          "bank_transfer": {
+            "type": "string",
+            "nullable": true
+          },
+          "real_time_payment": {
+            "type": "string",
+            "nullable": true
+          },
+          "gift_card": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_redirect": {
+            "type": "string",
+            "nullable": true
+          },
+          "open_banking": {
+            "type": "string",
+            "nullable": true
+          },
+          "mobile_payment": {
+            "type": "string",
+            "nullable": true
+          },
+          "crypto": {
+            "type": "string",
+            "nullable": true
+          },
+          "reward": {
+            "type": "string",
+            "nullable": true
+          },
+          "network_token": {
+            "type": "string",
+            "nullable": true
+          },
+          "metadata": {
+            "type": "object",
+            "nullable": true,
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "customer_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "routing_config": {
+            "$ref": "#/components/schemas/DecideRoutingConfig"
+          }
+        }
+      },
+      "DecideCard": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "card_isin": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_extended_bin": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_network": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_type": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_issuer": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_issuing_country_code": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_subtype": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_discovery": {
+            "type": "string",
+            "nullable": true
+          },
+          "card_switch_provider": {
+            "type": "string",
+            "nullable": true
+          }
+        },
+        "nullable": true
+      },
+      "DecideRoutingConfig": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "algorithm_for",
+          "eligible_connectors"
+        ],
+        "properties": {
+          "algorithm_for": {
+            "type": "string",
+            "minLength": 1
+          },
+          "decision_arm": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "control",
+              "variant",
+              null
+            ],
+            "description": "Caller-assigned decision arm, retained in the request audit. Does not override Decision Engine's internal experiment assignment. Omit or send null when unspecified."
+          },
+          "elimination_enabled": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "enable_multi_objective": {
+            "type": "boolean",
+            "nullable": true
+          },
+          "ranking_algorithm": {
+            "type": "string",
+            "nullable": true,
+            "enum": [
+              "SR_BASED_ROUTING",
+              "PL_BASED_ROUTING",
+              "NTW_BASED_ROUTING",
+              "NTW_SR_HYBRID_ROUTING",
+              null
+            ]
+          },
+          "eligible_connectors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecideConnector"
+            }
+          },
+          "preferred_connectors": {
+            "type": "array",
+            "nullable": true,
+            "items": {
+              "$ref": "#/components/schemas/DecideConnector"
+            }
+          }
+        }
+      },
+      "DecideConnector": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "connector"
+        ],
+        "properties": {
+          "connector": {
+            "type": "string",
+            "minLength": 1
+          },
+          "merchant_connector_id": {
+            "type": "string",
+            "nullable": true,
+            "minLength": 1,
+            "description": "The connector account. Omit to name the connector by name alone."
+          }
+        }
+      },
+      "DecideResultConnector": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "connector",
+          "merchant_connector_id"
+        ],
+        "properties": {
+          "connector": {
+            "type": "string"
+          },
+          "merchant_connector_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "Null for a connector named without an account."
+          }
+        }
+      },
+      "DecideResponse": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "id",
+          "payment_id",
+          "merchant_reference_id",
+          "created_at",
+          "connectors",
+          "outcome",
+          "rule",
+          "success_rate",
+          "cost",
+          "volume_steering",
+          "debit_routing",
+          "warnings"
+        ],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique per decision."
+          },
+          "payment_id": {
+            "type": "string"
+          },
+          "merchant_reference_id": {
+            "type": "string",
+            "nullable": true,
+            "description": "The request's `merchant_reference_id`."
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "connectors": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecideResultConnector"
+            },
+            "description": "The order to try connectors in: the first is the choice, the rest the retry order. Empty when no connector is left."
+          },
+          "outcome": {
+            "$ref": "#/components/schemas/DecideOutcome"
+          },
+          "rule": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DecideRuleSection"
+              }
+            ],
+            "nullable": true,
+            "description": "The rule layer's result. Null when it failed; a `warnings` entry then says why."
+          },
+          "success_rate": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DecideSuccessRateSection"
+              }
+            ],
+            "nullable": true,
+            "description": "Null when success-rate routing did not run (the `sr-routing` setting is off, or the A/B arm has no SR layer)."
+          },
+          "cost": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DecideCostSection"
+              }
+            ],
+            "nullable": true,
+            "description": "Null when the cost step did not run."
+          },
+          "volume_steering": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DecideVolumeSteeringSection"
+              }
+            ],
+            "nullable": true,
+            "description": "Null when no volume commitment was considered."
+          },
+          "debit_routing": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DebitRoutingOutput"
+              }
+            ],
+            "nullable": true
+          },
+          "warnings": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecideWarning"
+            },
+            "description": "Problems the decision routed around. Routing problems never fail the call."
+          }
+        }
+      },
+      "DecideOutcome": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "type",
+          "strategy",
+          "reason",
+          "message"
+        ],
+        "description": "How the order was reached. Enums may gain values.",
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "routed",
+              "fallback",
+              "no_connector"
+            ]
+          },
+          "strategy": {
+            "type": "string",
+            "enum": [
+              "rule",
+              "success_rate",
+              "cost",
+              "volume_commitment",
+              "debit_network",
+              "candidate_order",
+              "none"
+            ],
+            "description": "The layer that set the final order."
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "rule_matched",
+              "rule_default_selection",
+              "rule_output_partially_eligible",
+              "priority_logic",
+              "priority_logic_downtime",
+              "merchant_preference",
+              "experiment_rule",
+              "success_rate_ranked",
+              "success_rate_downtime",
+              "success_rate_exploration",
+              "decider_default",
+              "preferred_connector",
+              "cost_optimized",
+              "volume_commitment",
+              "debit_network_optimized",
+              "no_rule_matched",
+              "no_active_rule",
+              "rule_output_not_eligible",
+              "rule_input_invalid",
+              "success_rate_unavailable",
+              "no_eligible_connectors",
+              "no_active_rule_no_candidates"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable; branch on `reason`."
+          }
+        }
+      },
+      "DecideWarning": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "code",
+          "param",
+          "message"
+        ],
+        "properties": {
+          "code": {
+            "type": "string",
+            "enum": [
+              "rule_input_invalid",
+              "rule_evaluation_failed",
+              "rule_output_not_eligible",
+              "rule_output_partially_eligible",
+              "success_rate_failed"
+            ]
+          },
+          "param": {
+            "type": "string",
+            "nullable": true,
+            "description": "The request field the warning is about, such as `card.card_network`, when there is one."
+          },
+          "message": {
+            "type": "string"
+          }
+        }
+      },
+      "DecideRuleSection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "output",
+          "selected",
+          "eligible"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "matched",
+              "default_selection",
+              "no_active_rule"
+            ]
+          },
+          "output": {
+            "type": "object",
+            "description": "The algorithm's output by `type` (`straight_through`, `priority`, `volume_split`, `volume_split_priority`), laid out as in `RoutingEvaluateResponse.output` with connectors in the `DecideResultConnector` shape."
+          },
+          "selected": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecideResultConnector"
+            },
+            "description": "The connectors the rule layer chose, narrowed to the eligible ones."
+          },
+          "eligible": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecideResultConnector"
+            },
+            "description": "The connectors the payment method can use."
+          }
+        }
+      },
+      "DecideConnectorScore": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/DecideResultConnector"
+          },
+          {
+            "type": "object",
+            "required": [
+              "score"
+            ],
+            "properties": {
+              "score": {
+                "type": "number"
+              }
+            }
+          }
+        ]
+      },
+      "DecideSuccessRateSection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "approach",
+          "scores",
+          "diagnostics"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "applied",
+              "failed"
+            ]
+          },
+          "approach": {
+            "type": "string",
+            "nullable": true,
+            "description": "The decider's approach, e.g. `sr_selection_v3_routing`."
+          },
+          "scores": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecideConnectorScore"
+            },
+            "description": "Every scored connector, best first."
+          },
+          "diagnostics": {
+            "type": "object",
+            "nullable": true,
+            "description": "Decider internals for support. May change."
+          }
+        }
+      },
+      "DecideRankedConnector": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/DecideResultConnector"
+          },
+          {
+            "type": "object",
+            "required": [
+              "auth_rate",
+              "cost_bps",
+              "cost_source",
+              "cost_model",
+              "ev",
+              "is_sr_head",
+              "is_chosen"
+            ],
+            "properties": {
+              "auth_rate": {
+                "type": "number"
+              },
+              "cost_bps": {
+                "type": "number",
+                "nullable": true
+              },
+              "cost_source": {
+                "type": "string",
+                "nullable": true,
+                "enum": [
+                  "in_house",
+                  "seed",
+                  "hypersense"
+                ]
+              },
+              "cost_model": {
+                "type": "object",
+                "nullable": true,
+                "description": "`brand`, `variant`, `issuer`, `ccy`, `ic_category`, `pct_bps`, `fixed_fee`."
+              },
+              "ev": {
+                "type": "number"
+              },
+              "is_sr_head": {
+                "type": "boolean"
+              },
+              "is_chosen": {
+                "type": "boolean"
+              }
+            }
+          }
+        ]
+      },
+      "DecideCostSection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "message",
+          "cost_saved_bps",
+          "qualified_count",
+          "margin",
+          "ev_gap_top2",
+          "ranked"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "cost_won",
+              "auth_won"
+            ],
+            "description": "`cost_won`: a cheaper connector won. `auth_won`: the success-rate head kept it."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable; branch on `status`."
+          },
+          "cost_saved_bps": {
+            "type": "number",
+            "nullable": true
+          },
+          "qualified_count": {
+            "type": "integer"
+          },
+          "margin": {
+            "type": "number"
+          },
+          "ev_gap_top2": {
+            "type": "number",
+            "nullable": true
+          },
+          "ranked": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/DecideRankedConnector"
+            },
+            "description": "Every connector ranked on expected value, best first."
+          }
+        }
+      },
+      "DecideVolumeSteeringSection": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "status",
+          "message",
+          "sr_head",
+          "chosen",
+          "sr_gap_conceded",
+          "steer_rate",
+          "steering_count",
+          "run_id",
+          "blocked"
+        ],
+        "properties": {
+          "status": {
+            "type": "string",
+            "enum": [
+              "steered",
+              "sr_prevailed"
+            ],
+            "description": "`steered`: a connector behind on its commitment took it. `sr_prevailed`: normal routing kept it."
+          },
+          "message": {
+            "type": "string",
+            "description": "Human-readable; branch on `status`."
+          },
+          "sr_head": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DecideResultConnector"
+              }
+            ],
+            "nullable": true
+          },
+          "chosen": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/DecideResultConnector"
+              }
+            ],
+            "nullable": true
+          },
+          "sr_gap_conceded": {
+            "type": "number",
+            "nullable": true
+          },
+          "steer_rate": {
+            "type": "number",
+            "nullable": true
+          },
+          "steering_count": {
+            "type": "integer"
+          },
+          "run_id": {
+            "type": "string",
+            "nullable": true
+          },
+          "blocked": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "connector",
+                "reason"
+              ],
+              "properties": {
+                "connector": {
+                  "$ref": "#/components/schemas/DecideResultConnector"
+                },
+                "reason": {
+                  "type": "string",
+                  "enum": [
+                    "already_chosen",
+                    "not_offered",
+                    "cycle_closed",
+                    "outside_tolerance",
+                    "lost_roll"
+                  ],
+                  "description": "Why this commitment did not get the payment."
+                }
+              }
+            }
+          }
+        }
       }
     }
   }

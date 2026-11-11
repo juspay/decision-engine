@@ -1,6 +1,7 @@
 use masking::{PeekInterface, Secret};
 
 use crate::redis::types as SC;
+use crate::types::service_configuration::MerchantConfig;
 
 pub struct EnableOptimizationDuringDowntime;
 impl SC::ServiceConfigKey for EnableOptimizationDuringDowntime {
@@ -26,7 +27,7 @@ pub const DEFAULT_SRBASED_GATEWAY_ELIMINATION_INPUT: DefaultSrBasedGatewayElimin
 pub struct SrV3InputConfig(String);
 impl SC::ServiceConfigKey for SrV3InputConfig {
     fn get_key(&self) -> String {
-        format!("SR_V3_INPUT_CONFIG_{}", self.0)
+        crate::types::service_configuration::SrV3Input::name(&self.0)
     }
 }
 

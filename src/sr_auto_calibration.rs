@@ -1,12 +1,13 @@
 //! Runtime auto-calibration of the SRv3 bucket size and hedging %.
 //!
-//! A periodic background job (gated per-merchant by the `sr_auto_calibration_enabled` feature
+//! A periodic background job (gated per-merchant by the `autopilot_enabled` feature
 //! flag) derives both knobs purely from observed traffic — no merchant input. Volume and the
 //! distinct-PSP count come from ClickHouse (off the decision hot path, zero new Redis keys);
 //! the result is written back into the merchant's `SR_V3_INPUT_CONFIG_<merchant>` and applied
 //! by the decider on the next decision. Bucket-size changes are non-destructive thanks to the
 //! resize-in-place window (LPUSH + LTRIM), so re-tuning never wipes accumulated history.
 
+use crate::types::service_configuration::MerchantConfig;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -21,13 +22,8 @@ use crate::config::SrAutoCalibrationConfig;
 use crate::euclid::types::SrDimensionConfig;
 use crate::logger;
 use crate::types::merchant_config::types::FeatureConf;
-use crate::types::service_configuration::{find_config_by_name, insert_config, update_config};
+use crate::types::service_configuration::{find_config_by_name, upsert_config};
 
-/// Service-configuration key whose FeatureConf lists the merchants opted into auto-calibration
-/// ("Self-tune routing settings…").
-const FEATURE_CONF_KEY: &str = "sr_auto_calibration_enabled";
-/// FeatureConf key for the Autopilot master toggle. Auto-calibration runs only when a merchant
-/// has BOTH this and self-tuning enabled.
 const AUTOPILOT_CONF_KEY: &str = "autopilot_enabled";
 /// Default recalc cadence. 15 min tracks within-day traffic shifts while each tick still sees a
 /// statistically meaningful volume delta and stays clear of analytics ingestion lag. Override
@@ -243,20 +239,7 @@ async fn run_once(runtime: &AnalyticsRuntime, params: CalibrationParams, interva
 }
 
 async fn enrolled_merchants() -> Vec<String> {
-    // Calibrate only merchants who enabled BOTH self-tuning (this job's flag) AND Autopilot.
-    let self_tuning = merchants_for_flag(FEATURE_CONF_KEY).await;
-    if self_tuning.is_empty() {
-        return Vec::new();
-    }
-    let autopilot: std::collections::HashSet<String> = merchants_for_flag(AUTOPILOT_CONF_KEY)
-        .await
-        .into_iter()
-        .map(|m| m.to_lowercase())
-        .collect();
-    self_tuning
-        .into_iter()
-        .filter(|m| autopilot.contains(&m.to_lowercase()))
-        .collect()
+    merchants_for_flag(AUTOPILOT_CONF_KEY).await
 }
 
 /// Merchant IDs listed in a feature flag's FeatureConf `merchants` array.
@@ -305,9 +288,8 @@ async fn calibrate_merchant(
         return Err("no segment with enough volume / PSPs".into());
     }
 
-    let name = format!("SR_V3_INPUT_CONFIG_{merchant_id}");
+    let name = crate::types::service_configuration::SrV3Input::name(merchant_id);
     let existing = find_config_by_name(name.clone()).await.ok().flatten();
-    let exists = existing.is_some();
     // Edit as raw JSON so fields we don't manage (defaults, margin, dimension-scoped sub-level
     // entries…) are preserved verbatim.
     let mut cfg: serde_json::Value = existing
@@ -375,15 +357,9 @@ async fn calibrate_merchant(
     cfg["subLevelInputConfig"] = serde_json::Value::Array(entries);
     let serialized = cfg.to_string();
 
-    if exists {
-        update_config(name, Some(serialized))
-            .await
-            .map_err(|e| format!("config update failed: {e:?}"))?;
-    } else {
-        insert_config(name, Some(serialized))
-            .await
-            .map_err(|e| format!("config insert failed: {e:?}"))?;
-    }
+    upsert_config(name, Some(serialized))
+        .await
+        .map_err(|e| format!("config write failed: {e:?}"))?;
 
     Ok(())
 }
@@ -395,7 +371,11 @@ const LOW_CARD_DIMS: [&str; 4] = ["card_network", "currency", "country", "auth_t
 /// The merchant's active SR dimensions, filtered to the low-cardinality set we calibrate on.
 /// Empty when the merchant has no dimension config (then clustering is just (pmt, pm)).
 async fn active_low_card_dims(merchant_id: &str) -> Vec<String> {
-    let fields = match find_config_by_name(format!("SR_DIMENSION_CONFIG_{merchant_id}")).await {
+    let fields = match find_config_by_name(crate::types::service_configuration::SrDimensions::name(
+        merchant_id,
+    ))
+    .await
+    {
         Ok(Some(cfg)) => cfg
             .value
             .and_then(|v| serde_json::from_str::<SrDimensionConfig>(&v).ok())

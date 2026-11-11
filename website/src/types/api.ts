@@ -93,10 +93,41 @@ export interface SrConfigOverride {
   use_autopilot?: boolean
 }
 
+/** Routing API an experiment applies to. Each applies only the arm layers it supports. */
+export type ExperimentEndpoint = 'hybrid_routing' | 'decide_gateway' | 'evaluate'
+
+/** One experiment arm as a bundle of layers. An absent layer is not applied by the arm. */
+export interface ExperimentArm {
+  /** Saved routing config (rule-based / priority / volume split / single) for the rule layer. */
+  rule_algorithm_id?: string
+  /** SR routing with this arm's overrides (autopilot, cost savings, hedging, elimination). */
+  sr?: SrConfigOverride
+}
+
+/** One variant of a multi-variant experiment: its arm layers, id and traffic share. */
+export interface ExperimentVariant extends ExperimentArm {
+  /** Recorded as `variant_arm` in analytics. Unique within the experiment, never `control`. */
+  id: string
+  name?: string
+  split_pct: number
+  /** Set when the guardrail stopped this variant while the others kept running. */
+  stopped?: boolean
+}
+
 export interface ABTestAlgorithmData {
-  control_algorithm_id: string
-  variant_algorithm_id: string
-  variant_split_pct: number
+  /** Layered control arm. When present it defines control and the single-strategy control fields are ignored. */
+  control?: ExperimentArm
+  /** Variants compared with control. When present every single-variant field is ignored. */
+  variants?: ExperimentVariant[]
+  /** Single-variant format: the one variant, recorded as `variant`. */
+  variant?: ExperimentArm
+  /** Endpoints the experiment splits traffic on. Absent means every endpoint. */
+  endpoints?: ExperimentEndpoint[]
+  /** Single-strategy arm format: 'sr_routing' or a saved algorithm id. */
+  control_algorithm_id?: string
+  variant_algorithm_id?: string
+  /** Single-variant format: the variant's traffic share. */
+  variant_split_pct?: number
   min_sample_size: number
   guardrail_threshold_pp: number
   variant_sr_config?: SrConfigOverride
@@ -156,7 +187,6 @@ export interface VolumeContractConfig {
   currency: { denomination: string; amount_units?: 'major' | 'minor' }
   expected_daily_traffic: VolumeContractAmount
   forecast_interval_secs?: number
-  steering_interval_secs?: number
   volume_contracts: VolumeContract[]
 }
 
@@ -236,10 +266,25 @@ export interface ExperimentArmMetrics {
   net_ev_bps: number | null
 }
 
+/** One variant's results compared with control. */
+export interface ExperimentVariantComparison {
+  metrics: ExperimentArmMetrics
+  delta_pp: number
+  p_value: number | null
+  confidence_interval: [number, number] | null
+  verdict: ExperimentVerdict
+  net_delta_bps: number | null
+}
+
 export interface ExperimentResultsResponse {
   experiment_id: string
   merchant_id: string
   control: ExperimentArmMetrics
+  /** Every variant compared with control, in the experiment's order. */
+  variants: ExperimentVariantComparison[]
+  /** Per-comparison significance level after the Bonferroni correction (0.05 / variant count). */
+  significance_level: number
+  /** First variant only; kept for single-variant clients. */
   variant: ExperimentArmMetrics
   delta_pp: number
   p_value: number | null
@@ -262,6 +307,159 @@ export interface ExperimentTransactionsResponse {
   experiment_id: string
   total: number
   transactions: ExperimentTransaction[]
+}
+
+export interface DecideRequest {
+  payment_id: string
+  merchant_reference_id?: string | null
+  amount: number
+  currency: string
+  payment_method_type?: string | null
+  payment_method_sub_type?: string | null
+  authentication_type?: string | null
+  capture_method?: string | null
+  // The payment_type rule key: non_mandate, setup_mandate, ppt_mandate, …
+  payment_type?: string | null
+  setup_future_usage?: string | null
+  transaction_initiator?: string | null
+  surcharge_amount?: number | null
+  business_country?: string | null
+  billing_country?: string | null
+  business_label?: string | null
+  card?: DecideCard | null
+  customer_device_platform?: string | null
+  customer_device_type?: string | null
+  customer_device_display_size?: string | null
+  pay_later?: string | null
+  wallet?: string | null
+  upi?: string | null
+  voucher?: string | null
+  bank_redirect?: string | null
+  bank_debit?: string | null
+  bank_transfer?: string | null
+  real_time_payment?: string | null
+  gift_card?: string | null
+  card_redirect?: string | null
+  open_banking?: string | null
+  mobile_payment?: string | null
+  crypto?: string | null
+  reward?: string | null
+  network_token?: string | null
+  metadata?: Record<string, string> | null
+  customer_id?: string | null
+  routing_config: DecideRoutingConfig
+}
+
+export interface DecideCard {
+  card_isin?: string | null
+  card_extended_bin?: string | null
+  card_network?: string | null
+  card_type?: string | null
+  card_issuer?: string | null
+  card_issuing_country_code?: string | null
+  card_subtype?: string | null
+  card_discovery?: string | null
+  card_switch_provider?: string | null
+}
+
+export type DecisionArm = 'control' | 'variant'
+
+export interface DecideRoutingConfig {
+  algorithm_for: string
+  // Caller-assigned arm for the request audit; does not override DE experiment assignment.
+  decision_arm?: DecisionArm | null
+  elimination_enabled?: boolean | null
+  enable_multi_objective?: boolean | null
+  ranking_algorithm?: 'SR_BASED_ROUTING' | 'PL_BASED_ROUTING' | 'NTW_BASED_ROUTING' | 'NTW_SR_HYBRID_ROUTING' | null
+  eligible_connectors: DecideConnector[]
+  preferred_connectors?: DecideConnector[] | null
+}
+
+export interface DecideConnector {
+  connector: string
+  // Omitted or null names the connector by its name alone, as a hybrid fallback entry without gateway_id.
+  merchant_connector_id?: string | null
+}
+
+// The /decide answer. `connectors` is the order to try: the first is the choice, the rest the
+// retry order. Each routing layer has a section, null when that layer did not run.
+export interface DecideResponse {
+  id: string
+  payment_id: string
+  merchant_reference_id: string | null
+  created_at: string
+  connectors: DecideConnector[]
+  outcome: DecideOutcome
+  rule: DecideRuleSection | null
+  success_rate: DecideSuccessRateSection | null
+  cost: DecideCostSection | null
+  volume_steering: DecideVolumeSteeringSection | null
+  debit_routing: DebitRoutingOutput | null
+  warnings: DecideWarning[]
+}
+
+export interface DecideOutcome {
+  type: 'routed' | 'fallback' | 'no_connector'
+  strategy: 'rule' | 'success_rate' | 'cost' | 'volume_commitment' | 'debit_network' | 'candidate_order' | 'none'
+  reason: string
+  message: string
+}
+
+export interface DecideWarning {
+  code: string
+  param: string | null
+  message: string
+}
+
+export interface DecideRuleSection {
+  status: 'matched' | 'default_selection' | 'no_active_rule'
+  // The algorithm's output by `type`, with connectors in the DecideConnector shape.
+  output: unknown
+  selected: DecideConnector[]
+  eligible: DecideConnector[]
+}
+
+export interface DecideConnectorScore extends DecideConnector {
+  score: number
+}
+
+export interface DecideSuccessRateSection {
+  status: 'applied' | 'failed'
+  approach: string | null
+  scores: DecideConnectorScore[]
+  diagnostics: Record<string, unknown> | null
+}
+
+export interface DecideRankedConnector extends DecideConnector {
+  auth_rate: number
+  cost_bps: number | null
+  cost_source: Lowercase<CostSource> | null
+  cost_model: Record<string, string | number | null> | null
+  ev: number
+  is_sr_head: boolean
+  is_chosen: boolean
+}
+
+export interface DecideCostSection {
+  status: Lowercase<MultiObjectiveOutcome>
+  message: string
+  cost_saved_bps: number | null
+  qualified_count: number
+  margin: number
+  ev_gap_top2: number | null
+  ranked: DecideRankedConnector[]
+}
+
+export interface DecideVolumeSteeringSection {
+  status: Lowercase<VolumeSteerInfo['outcome']>
+  message: string
+  sr_head: DecideConnector | null
+  chosen: DecideConnector | null
+  sr_gap_conceded: number | null
+  steer_rate: number | null
+  steering_count: number
+  run_id: string | null
+  blocked: { connector: DecideConnector; reason: Lowercase<SteerBlock> }[]
 }
 
 export interface CreateRoutingRequest {
@@ -296,9 +494,11 @@ export interface SRConfigData {
   subLevelInputConfig: SubLevelConfig[] | null
 }
 
+/** One sub-level SR override: `paymentMethod` is the category (`CARD`),
+ *  `paymentMethodType` the specific method within it (`CREDIT`), or null for the whole method. */
 export interface SubLevelConfig {
-  paymentMethodType: string
   paymentMethod: string
+  paymentMethodType: string | null
   bucketSize: number
   hedgingPercent: number | null
   latencyThreshold: number | null
@@ -314,6 +514,11 @@ export interface EliminationData {
 export interface RuleConfig {
   type: 'successRate' | 'elimination' | 'debitRouting'
   data?: SRConfigData | EliminationData | DebitRoutingData
+}
+
+export interface FetchedRuleConfig {
+  merchant_id: string
+  config: RuleConfig | null
 }
 
 export interface CreateRuleRequest {
@@ -423,14 +628,52 @@ export interface SmartRetryStats {
   by_fallback: SmartRetryFallback[]
 }
 
+export interface AnalyticsGatewayVolume {
+  gateway: string
+  count: number
+}
+
+export interface AnalyticsOverviewTotals {
+  request_count: number
+  error_count: number
+  auth_rate: AnalyticsAuthRate
+  gateway_volumes: AnalyticsGatewayVolume[]
+  requests_by_route: AnalyticsRouteHit[]
+}
+
 export interface AnalyticsOverviewResponse {
   merchant_id: string
+  totals: AnalyticsOverviewTotals
   kpis: AnalyticsKpi[]
   route_hits: AnalyticsRouteHit[]
   top_scores: GatewayScoreSnapshot[]
   top_errors: AnalyticsErrorSummary[]
   top_rules: AnalyticsRuleHit[]
   smart_retry_stats: SmartRetryStats
+  auth_rate: AnalyticsAuthRate
+  hybrid_split?: AnalyticsHybridSplit
+}
+
+/** Reported outcomes for the payments the selected view decided. Statuses that are neither a
+ *  success nor a failure state (a payment still pending, say) are in neither count. */
+export interface AnalyticsAuthRate {
+  success_count: number
+  failure_count: number
+}
+
+export interface AnalyticsHybridSplit {
+  decisions: number
+  dynamic_success: number
+  dynamic_fallback: number
+  dynamic_skipped: number
+  static_decided: number
+  failed: number
+  static_connectors: AnalyticsHybridConnectorPick[]
+}
+
+export interface AnalyticsHybridConnectorPick {
+  connector: string
+  count: number
 }
 
 export interface AnalyticsRouteHit {
@@ -564,10 +807,14 @@ export interface PaymentAuditSummary {
   last_seen_ms: number
   event_count: number
   latest_status?: string | null
+  /** The payment's outcome from its reported statuses; `latest_status` is whichever event came last. */
+  outcome: 'success' | 'failure' | 'pending'
   latest_gateway?: string | null
   latest_stage?: string | null
   gateways: string[]
   routes: string[]
+  /** A/B experiments that routed this payment; empty when it wasn't in one, absent if the lookup failed. */
+  experiments?: PaymentAuditExperiment[]
 }
 
 export interface PaymentAuditEvent {
@@ -656,9 +903,28 @@ export interface RoutingEventsResponse {
   generated_at_ms: number
 }
 
+/** What a merchant's payments in the window carried, for the payment audit's dropdown filters. */
+export interface PaymentAuditFilterOptions {
+  gateways: string[]
+  payment_methods: string[]
+  payment_method_types: string[]
+  card_networks: string[]
+  auth_types: string[]
+  currencies: string[]
+  error_codes: string[]
+}
+
+/** A payment's assignment to an A/B experiment on one routing endpoint. */
+export interface PaymentAuditExperiment {
+  experiment_id: string
+  arm: 'control' | 'variant'
+  endpoint: 'hybrid_routing' | 'decide_gateway' | 'evaluate'
+  routed_at_ms: number
+}
+
 export interface PaymentAuditResponse {
   merchant_id: string
-  range: AnalyticsRangeValue
+  range: AnalyticsRangeValue | 'all'
   payment_id?: string | null
   request_id?: string | null
   gateway?: string | null
@@ -667,6 +933,8 @@ export interface PaymentAuditResponse {
   flow_type?: string | null
   routing_approach?: string | null
   error_code?: string | null
+  scope?: string
+  routing_kind?: string | null
   page: number
   page_size: number
   total_results: number
@@ -704,21 +972,72 @@ export interface EliminatedPspView {
 
 export interface VolumeCommitmentView {
   merchantId: string
+  /** A contract document is live *and* the feature is on — i.e. payments are being paced. */
   active: boolean
+  /** A contract document is activated, whether or not the feature is switched on. */
+  contractConfigured: boolean
+  /** The merchant's volume-contract routing flag. Off means nothing is steered. */
+  featureEnabled: boolean
   computedAtEpochSecs?: number | null
   tolerance?: number | null
-  /** Total volume the merchant expects per day, from the contract document. */
+  /** Total volume the merchant expects per day, from the contract document — a declaration. */
   expectedDailyTraffic?: number | null
+  /** Total volume per day actually flowing across every PSP; what feasibility and steer rates
+   *  are judged against. A wide gap from `expectedDailyTraffic` means the declaration is wrong. */
+  measuredDailyTraffic?: number | null
   /** How long one contract day lasts in seconds — 86400 for calendar cycles, 60 on a test cycle. */
   daySecs?: number | null
   /** Routing rule holding the active contract, so the dashboard can act on it. */
   ruleId?: string | null
   rewardAtStake: number
+  /** RFC 3339 bounds of the billing cycle these commitments race. */
+  cycleStart?: string | null
+  cycleEnd?: string | null
+  /** Contract days in the cycle — minutes on a test cycle. */
+  daysTotal?: number | null
+  /** ISO-4217 code every amount here is denominated in, for rendering major units. */
+  currency?: string | null
+  /** False when a measurement query failed: positions are floors, not readings. */
+  measurementAvailable: boolean
   psps: PspPacing[]
   eliminated: EliminatedPspView[]
 }
 
 /** One PSP-day of delivered volume on the commitment chart. */
+/**
+ * Why a commitment that wanted a payment did not get it. `UNKNOWN` covers a gate written by a
+ * newer backend than this build knows about.
+ */
+export type SteerBlock =
+  | 'ALREADY_CHOSEN'
+  | 'NOT_OFFERED'
+  | 'CYCLE_CLOSED'
+  | 'OUTSIDE_TOLERANCE'
+  | 'LOST_ROLL'
+  | 'UNKNOWN'
+
+/** One commitment that wanted a payment, and the gate that stopped it. */
+export interface BlockedCommitment {
+  connector: string
+  gate: SteerBlock
+}
+
+/** A demo contract template the deployment offers, ready to load into the builder. */
+export interface VolumeContractSample {
+  id: string
+  title: string
+  /** One line: the situation the contract puts the engine in. */
+  summary: string
+  /** What the dashboard should show if the engine is working. */
+  expectedOutcome: string
+  contract: VolumeContractConfig
+}
+
+export interface VolumeContractSamplesResponse {
+  merchantId: string
+  samples: VolumeContractSample[]
+}
+
 export interface CommitmentDayVolume {
   connector: string
   dayIndex: number
@@ -842,4 +1161,14 @@ export interface VolumeSteerInfo {
   steeringCount: number
   /** The contract execution this steer belongs to. */
   runId?: string | null
+  /** Every commitment that wanted this payment and did not get it, with the gate that stopped it.
+   *  Absent when nothing was behind, or the first commitment considered took it. */
+  blocked?: BlockedCommitment[]
+}
+
+/** Pacing, series and audit for one merchant, composed server-side into a single request. */
+export interface CommitmentDashboardResponse {
+  pacing: VolumeCommitmentView
+  series: CommitmentSeriesResponse
+  audit: CommitmentAuditResponse
 }

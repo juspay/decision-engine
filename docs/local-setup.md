@@ -15,7 +15,7 @@ This is the canonical local startup guide for Decision Engine.
 
 Required for source runs:
 
-- Rust 1.85+
+- Rust 1.88+
 - PostgreSQL or MySQL
 - Redis
 - [`just`](https://just.systems) — required for PostgreSQL source runs (`just migrate-pg`); MySQL can use `diesel migration run` directly
@@ -58,7 +58,7 @@ You must pass at least one profile.
 
 | Profile | Adds |
 |---|---|
-| `monitoring` | Prometheus + Grafana |
+| `monitoring` | OpenTelemetry collector + Prometheus + Grafana |
 | `groovy-ghcr` | Groovy runner image |
 | `groovy-local` | Groovy runner built from local source |
 | `analytics-clickhouse` | Kafka topic init + ClickHouse analytics bootstrap only |
@@ -73,7 +73,7 @@ For local source-run development with the full PostgreSQL analytics stack:
 ./oneclick.sh
 ```
 
-For the full end-to-end regression gate owned by the Cypress branch:
+For the full end-to-end regression gate:
 
 ```bash
 npm run test:e2e
@@ -83,7 +83,7 @@ That command runs:
 
 - source-run validation through `oneclick.sh`
 - Docker Compose validation through `dashboard-postgres-local`
-- the full Cypress API/UI/docs smoke contract against both modes
+- the full Playwright API/UI/docs smoke contract against both modes
 
 Mode-specific entrypoints:
 
@@ -94,11 +94,13 @@ npm run test:e2e:docker
 
 This flow:
 
-- starts PostgreSQL, Redis, Kafka, ClickHouse, and the analytics init jobs with Docker Compose
+- starts PostgreSQL, Redis, Kafka, ClickHouse, the analytics init jobs, an OpenTelemetry collector and Prometheus with Docker Compose
 - waits for infra health
 - runs PostgreSQL migrations
-- starts the API locally with `cargo run --no-default-features --features postgres`
+- starts the API locally with `cargo run --no-default-features --features postgres`, with metrics enabled and pushed to the collector at `localhost:4317`
 - starts the dashboard locally with Vite on `http://localhost:5173/`
+
+Metrics show up at `http://localhost:9898/metrics` (the collector's Prometheus-format view) and in Prometheus at `http://localhost:9090`. Grafana is not started by `oneclick.sh` because its port 3000 is taken by the docs preview; use the `monitoring` Compose profile for Grafana.
 
 By default, `Ctrl+C` stops the local API/dashboard processes and any infra services that `oneclick.sh`
 started itself. To keep infra running after exit:
@@ -106,6 +108,22 @@ started itself. To keep infra running after exit:
 ```bash
 ONECLICK_KEEP_INFRA=1 ./oneclick.sh
 ```
+
+### Without Docker (Nix)
+
+On machines without Docker, such as NixOS dev boxes, the flake runs the same infrastructure as plain processes, with the same ports, credentials, Kafka topics and ClickHouse init scripts. Prometheus is not included.
+
+```bash
+# Terminal 1: Postgres, Redis, Kafka, ClickHouse, Mailpit and the OpenTelemetry collector
+nix run .#infra
+
+# Terminal 2: toolchain + tools, then the usual bring-up
+nix develop
+npm install -g mint   # once; the docs preview CLI, installed under .nix-infra/
+./oneclick.sh
+```
+
+`oneclick.sh` finds every service already healthy and skips Docker Compose. State lives in `.nix-infra/` (set `DE_INFRA_DIR` to move it); delete it for a clean slate.
 
 ### API Only
 
@@ -116,8 +134,13 @@ docker compose --profile postgres-ghcr up -d
 ### API + Dashboard + Docs
 
 ```bash
-docker compose --profile dashboard-postgres-ghcr up -d
+docker compose --profile dashboard-postgres-ghcr up -d --build
 ```
+
+All `dashboard-*` profiles build the frontend from the current `website` source inside Docker,
+including profiles that pull the API image from GHCR. No host Node.js installation or prebuilt
+`website/dist` is required. After changing frontend source, rerun the command with `--build`;
+restarting containers alone does not rebuild the dashboard.
 
 ### With Monitoring
 
@@ -224,8 +247,11 @@ Dashboard profiles also expose:
 
 Monitoring profile also exposes:
 
-- Prometheus: `http://localhost:9090`
+- OpenTelemetry collector: OTLP/gRPC on `localhost:4317`, Prometheus-format metrics at `http://localhost:9898/metrics`
+- Prometheus: `http://localhost:9090` (scrapes the collector)
 - Grafana: `http://localhost:3000`
+
+The app only pushes metrics when telemetry is enabled. `oneclick.sh` turns it on for the natively run binary; for the Compose app profiles set `DE_METRICS_ENABLED=true` (the endpoint `http://otel-collector:4317` is already configured). For any other setup set `DECISION_ENGINE__LOG__TELEMETRY__METRICS_ENABLED=true` and, if needed, `DECISION_ENGINE__LOG__TELEMETRY__OTEL_EXPORTER_OTLP_ENDPOINT`.
 
 ## Troubleshooting
 

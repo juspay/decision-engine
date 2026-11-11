@@ -6,7 +6,7 @@ import { test, expect } from '../../fixtures/test'
  * Autopilot's tuning math (bucket size / hedging %) is a background job best tested with Rust
  * property tests (see docs/testing-strategy.md). What we CAN and must guard end-to-end here is the
  * control surface an operator touches:
- *  - the autopilot / auto-calibration feature flags toggle and persist,
+ *  - the autopilot feature flag toggles and persists,
  *  - the "hard refresh" (/gateway-score/reset) flushes scores AND — critically — clears only
  *    autopilot-authored sub-level overrides while PRESERVING human-authored config.
  */
@@ -24,17 +24,6 @@ test.describe('Autopilot control surface (API)', () => {
     expect(disable.status).toBe(200)
 
     list = await api.raw('GET', base)
-    expect(list.body.features.find((f: any) => f.feature === 'autopilot')?.enabled).toBe(false)
-  })
-
-  test('sr auto-calibration feature toggles independently of autopilot', async ({ api, merchant }) => {
-    const base = `/merchant-account/${merchant.id}/features`
-
-    await api.raw('POST', `${base}/auto-calibration`, { body: { enabled: true } })
-
-    const list = await api.raw('GET', base)
-    expect(list.body.features.find((f: any) => f.feature === 'auto-calibration')?.enabled).toBe(true)
-    // Enabling auto-calibration must not implicitly flip the autopilot master flag.
     expect(list.body.features.find((f: any) => f.feature === 'autopilot')?.enabled).toBe(false)
   })
 

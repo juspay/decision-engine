@@ -15,6 +15,7 @@ export type SlotKind = 'rule' | 'volume' | 'ab' | 'none'
 export interface StackState {
   slot: SlotKind
   slotAlgorithm: RoutingAlgorithm | null
+  experimentAlgorithm: RoutingAlgorithm | null
   srConfigured: boolean
   autopilotOn: boolean
   srData: SRConfigData | null
@@ -48,7 +49,8 @@ export function isRuleBasedAlgorithmType(type: string) {
 export type StackFeature =
   | 'autopilot'
   | 'elimination'
-  | 'multi-objective-routing'
+  | 'cost-savings'
+  | 'sr-routing'
   | 'volume-contracts'
   | 'ab-test-real-payments'
 
@@ -66,20 +68,20 @@ export function deriveStack(input: {
   const volumeAlgorithm = paymentAlgorithms.find((a) => algorithmType(a) === 'volume_split')
   const abAlgorithm = paymentAlgorithms.find((a) => algorithmType(a) === 'ab_test')
 
-  // The payment slot holds one algorithm; when several rows exist the experiment wins the
-  // billing as "the live strategy" because the interceptor consults it first.
-  const slotAlgorithm = abAlgorithm ?? ruleAlgorithm ?? volumeAlgorithm ?? null
-  const slot: SlotKind = abAlgorithm ? 'ab' : ruleAlgorithm ? 'rule' : volumeAlgorithm ? 'volume' : 'none'
+  // Experiments have their own activation slot and can run beside the payment strategy.
+  const slotAlgorithm = ruleAlgorithm ?? volumeAlgorithm ?? abAlgorithm ?? null
+  const slot: SlotKind = ruleAlgorithm ? 'rule' : volumeAlgorithm ? 'volume' : abAlgorithm ? 'ab' : 'none'
 
   return {
     slot,
     slotAlgorithm,
-    srConfigured: Boolean(input.srData) || input.isFeatureEnabled('autopilot'),
+    experimentAlgorithm: abAlgorithm ?? null,
+    srConfigured: input.isFeatureEnabled('sr-routing'),
     autopilotOn: input.isFeatureEnabled('autopilot'),
     srData: input.srData,
-    eliminationConfigured: Boolean(input.eliminationData) || input.isFeatureEnabled('elimination'),
+    eliminationConfigured: input.isFeatureEnabled('elimination'),
     eliminationData: input.eliminationData,
-    costOn: input.isFeatureEnabled('multi-objective-routing'),
+    costOn: input.isFeatureEnabled('cost-savings'),
     volumeCommitmentOn: input.isFeatureEnabled('volume-contracts'),
     debitOn: input.debitEnabled,
     abRealPaymentsOn: input.isFeatureEnabled('ab-test-real-payments'),
@@ -197,8 +199,7 @@ export function slotAlgorithmSummary(stack: StackState): { kicker: string; name:
 }
 
 export function abTestData(stack: StackState): ABTestAlgorithmData | null {
-  if (stack.slot !== 'ab') return null
-  return (algorithmData(stack.slotAlgorithm) as ABTestAlgorithmData) ?? null
+  return (algorithmData(stack.experimentAlgorithm) as ABTestAlgorithmData) ?? null
 }
 
 export function euclidData(stack: StackState): EuclidAlgorithmData | null {
