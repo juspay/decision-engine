@@ -10,7 +10,9 @@ use serde::Deserialize;
 
 use super::inputs::{Commitment, MeasuredVolume};
 use super::math;
-use crate::analytics::clickhouse::common::{fetch_all, payment_amount_expr, DOMAIN_TABLE};
+use crate::analytics::clickhouse::common::{
+    fetch_all_with_upstream_retry, payment_amount_expr, DOMAIN_TABLE,
+};
 use crate::analytics::clickhouse::filters::partition_lower_bound;
 use crate::analytics::clickhouse::guard;
 use crate::analytics::clickhouse::query::{BoundQueryBuilder, FilterClause};
@@ -155,7 +157,10 @@ impl ClickHouseVolumeSource {
         // merchant routed to, not just the ones under contract.
         builder.extend_group_bys(["gateway"]);
 
-        let rows = match fetch_all::<VolumeRow>(builder.build(&guard::bounded(&self.client))).await
+        let rows = match fetch_all_with_upstream_retry::<VolumeRow>(
+            builder.build(&guard::bounded(&self.client)),
+        )
+        .await
         {
             Ok(rows) => rows,
             Err(error) => {
