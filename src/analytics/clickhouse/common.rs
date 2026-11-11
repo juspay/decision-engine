@@ -1,3 +1,6 @@
+use std::future::Future;
+use std::time::Duration;
+
 use clickhouse::{query::Query, Row};
 use serde::Deserialize;
 
@@ -93,6 +96,19 @@ where
         })
 }
 
+/// `fetch_all` with one retry on a 502/503 upstream error, for the volume-commitment forecast read.
+pub async fn fetch_all_with_upstream_retry<T>(query: Query) -> Result<Vec<T>, ApiError>
+where
+    T: Row + for<'de> Deserialize<'de>,
+{
+    super::guard::run(retry_on_upstream_error(|| query.clone().fetch_all::<T>()))
+        .await?
+        .map_err(|error| {
+            crate::logger::error!(?error, "clickhouse fetch_all failed");
+            ApiError::DatabaseError
+        })
+}
+
 pub async fn fetch_one<T>(query: Query) -> Result<T, ApiError>
 where
     T: Row + for<'de> Deserialize<'de>,
@@ -103,6 +119,39 @@ where
             crate::logger::error!(?error, "clickhouse fetch_one failed");
             ApiError::DatabaseError
         })
+}
+
+/// Pause before the retry so it does not hit the same stale connection.
+const UPSTREAM_RETRY_DELAY: Duration = Duration::from_millis(150);
+
+/// Run a read, and once more only if it failed with a 502/503 upstream error.
+async fn retry_on_upstream_error<T, F, Fut>(mut attempt: F) -> clickhouse::error::Result<T>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = clickhouse::error::Result<T>>,
+{
+    match attempt().await {
+        Err(error) if is_upstream_error(&error) => {
+            crate::logger::warn!(
+                ?error,
+                "clickhouse read got a 502/503 upstream error; retrying the read once"
+            );
+            tokio::time::sleep(UPSTREAM_RETRY_DELAY).await;
+            attempt().await
+        }
+        outcome => outcome,
+    }
+}
+
+/// A 502/503 upstream error page; ClickHouse's own errors start with `Code:` and are not retried.
+fn is_upstream_error(error: &clickhouse::error::Error) -> bool {
+    match error {
+        clickhouse::error::Error::BadResponse(body) => {
+            !body.starts_with("Code:")
+                && (body.contains("502 Bad Gateway") || body.contains("503 Service Unavailable"))
+        }
+        _ => false,
+    }
 }
 
 pub fn static_flow_type_in_sql(flow_types: &[FlowType]) -> String {
@@ -289,5 +338,22 @@ mod tests {
             payment_audit_route_label("routing_hybrid".into()),
             "/routing/hybrid"
         );
+    }
+
+    /// A 502 on every attempt gets exactly one retry, then its error is returned.
+    #[tokio::test(start_paused = true)]
+    async fn an_upstream_502_is_retried_only_once() {
+        let attempts = std::sync::atomic::AtomicUsize::new(0);
+        let result: clickhouse::error::Result<u32> = retry_on_upstream_error(|| {
+            attempts.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            async {
+                Err(clickhouse::error::Error::BadResponse(
+                    "<html><head><title>502 Bad Gateway</title></head></html>".to_string(),
+                ))
+            }
+        })
+        .await;
+        assert!(result.is_err());
+        assert_eq!(attempts.into_inner(), 2);
     }
 }
