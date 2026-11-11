@@ -186,8 +186,8 @@ pub async fn transform_fallback(
         let state = get_tenant_app_state().await;
         let bytes: Vec<u8> = state
             .redis_conn
-            .conn
-            .get_key(&redis_key(&request.created_by))
+            .commands()
+            .get_key(&redis_key(&request.created_by).into())
             .await
             .map_err(|_| EuclidErrors::StorageError)?;
         if !bytes.is_empty() {
@@ -394,14 +394,18 @@ mod tests {
             default_ttl: 1,
             ..Default::default()
         };
-        let redis = redis_interface::RedisConnectionPool::new(&settings)
-            .await
-            .map_err(|error| error.to_string())?;
+        let redis = std::sync::Arc::new(
+            redis_interface::RedisConnectionPool::new_without_event_emitter(&settings)
+                .await
+                .map_err(|error| error.to_string())?,
+        );
+        let commands =
+            redis_interface::RedisConnectionWithContext::new_without_context(redis.clone());
         let profile = format!("eligibility_test_{}", uuid::Uuid::new_v4());
         let key = redis_key(&profile);
         let snapshot = compact_snapshot("profile", vec![input("card", "card", "credit", false)])?;
-        redis
-            .serialize_and_set_key(&key, &snapshot)
+        commands
+            .serialize_and_set_key(&key.as_str().into(), &snapshot)
             .await
             .map_err(|error| error.to_string())?;
         let old_ttl: i64 = redis
@@ -418,19 +422,19 @@ mod tests {
             .await
             .map_err(|error| error.to_string())?;
         tokio::time::sleep(std::time::Duration::from_millis(1100)).await;
-        let first: Vec<u8> = redis
-            .get_key(&key)
+        let first: Vec<u8> = commands
+            .get_key(&key.as_str().into())
             .await
             .map_err(|error| error.to_string())?;
-        let second: Vec<u8> = redis
-            .get_key(&key)
+        let second: Vec<u8> = commands
+            .get_key(&key.as_str().into())
             .await
             .map_err(|error| error.to_string())?;
         store_snapshot(&redis, &profile, &[])
             .await
             .map_err(|error| error.to_string())?;
-        let replacement: Vec<u8> = redis
-            .get_key(&key)
+        let replacement: Vec<u8> = commands
+            .get_key(&key.as_str().into())
             .await
             .map_err(|error| error.to_string())?;
         let replacement_ttl: i64 = redis
@@ -438,8 +442,8 @@ mod tests {
             .ttl(redis.add_prefix(&key))
             .await
             .map_err(|error| error.to_string())?;
-        redis
-            .delete_key(&key)
+        commands
+            .delete_key(&key.as_str().into())
             .await
             .map_err(|error| error.to_string())?;
         assert!((0..=1).contains(&old_ttl));

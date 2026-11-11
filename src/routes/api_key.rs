@@ -128,7 +128,11 @@ pub async fn revoke_api_key(
         .map_err(|_| ApiKeyError::RevocationFailed)?;
 
     let cache_key = format!("api_key:{}", key.key_hash);
-    let _ = app_state.redis_conn.conn.delete_key(&cache_key).await;
+    let _ = app_state
+        .redis_conn
+        .commands()
+        .delete_key(&cache_key.into())
+        .await;
 
     Ok(Json(RevokeApiKeyResponse {
         key_id,

@@ -103,7 +103,7 @@ Every route follows one auth pattern; the full guide is the module docs of `src/
 
 ## Coding Expectations
 
-- Rust edition is 2021; MSRV in `Cargo.toml` is `1.88.0`
+- Rust edition is 2021; MSRV in `Cargo.toml` is `1.94.1`
 - `unsafe` is forbidden
 - Treat clippy warnings around `unwrap`, `expect`, `panic`, `todo`, and `unimplemented` as meaningful design constraints
 - Verify both DB tracks when changing shared core logic; do not assume only one backend is affected

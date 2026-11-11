@@ -2,10 +2,12 @@ use aws_config::meta::region::RegionProviderChain;
 use aws_config::BehaviorVersion;
 use aws_sdk_sesv2::error::{ProvideErrorMetadata, SdkError};
 use aws_sdk_sesv2::types::{Body, Content, Destination, EmailContent, Message};
-use aws_smithy_runtime::client::http::hyper_014::HyperClientBuilder;
+use aws_smithy_http_client::pool::{self, ConnectionPool};
+use aws_smithy_http_client::proxy::ProxyConfig;
+use aws_smithy_http_client::tls::{self, rustls_provider::CryptoMode};
+use aws_smithy_runtime_api::client::http::SharedHttpClient;
 use aws_smithy_runtime_api::client::orchestrator::HttpResponse;
 use error_stack::ResultExt;
-use hyper_proxy::{Intercept, Proxy, ProxyConnector};
 
 use crate::config::AwsSesEmailConfig;
 
@@ -83,16 +85,15 @@ impl AwsSesEmailClient {
     }
 }
 
-fn build_proxied_http_client(
-    proxy_url: &str,
-) -> Result<aws_smithy_runtime_api::client::http::SharedHttpClient, EmailError> {
-    let proxy_uri = proxy_url
-        .parse::<hyper014::Uri>()
+fn build_proxied_http_client(proxy_url: &str) -> Result<SharedHttpClient, EmailError> {
+    let proxy = ProxyConfig::all(proxy_url).map_err(|_| EmailError::MissingConfig)?;
+    let pool = ConnectionPool::builder()
+        .proxy_config(proxy)
+        .tls_provider(tls::Provider::Rustls(CryptoMode::AwsLc))
+        .build_https()
         .map_err(|_| EmailError::MissingConfig)?;
-    let proxy = Proxy::new(Intercept::All, proxy_uri);
-    let connector = ProxyConnector::from_proxy(hyper014::client::HttpConnector::new(), proxy)
-        .map_err(|_| EmailError::MissingConfig)?;
-    Ok(HyperClientBuilder::new().build(connector))
+    let client = pool::Client::new(&pool).map_err(|_| EmailError::MissingConfig)?;
+    Ok(SharedHttpClient::new(client))
 }
 
 /// `SdkError`'s own `Display` renders as just "service error" or "dispatch failure",
