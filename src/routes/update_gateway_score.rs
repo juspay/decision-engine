@@ -279,7 +279,7 @@ pub async fn update_gateway_score(
                                         },
                                         selection_reason: UpdateGatewayScoreSelectionReason {
                                             transaction_status: &transaction_status,
-                                            stage: "no scoring context; nothing to update",
+                                            stage: "no scoring context, nothing to update",
                                         },
                                     },
                                 ),

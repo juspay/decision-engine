@@ -82,7 +82,7 @@ export function RoutingHubPage() {
 
   const { data: activeAlgorithms, isLoading: activeLoading, mutate: mutateActiveAlgorithms } = useSWR<RoutingAlgorithm[]>(
     merchantId ? `/routing/list/active/${merchantId}` : null,
-    () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`),
+    () => fetcher<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`),
   )
 
   const { data: srConfig, isLoading: srLoading } = useSWR<FetchedRuleConfig>(
@@ -177,7 +177,7 @@ export function RoutingHubPage() {
       id: 'auth-rate',
       title: 'Multi-objective',
       description: 'Steers traffic toward the best authorization rate using live connector score signals.',
-      useCase: 'Use when you want automatic gateway selection driven by real-time success-rate data.',
+      useCase: 'Use when you want automatic connector selection driven by real-time success-rate data.',
       icon: TrendingUp,
       state: !authRateRoutingOn ? 'off' : autopilotOn ? 'autopilot' : hasMultiObjectiveConfig ? 'configured' : 'default',
       canDeactivate: authRateRoutingKnown && authRateRoutingOn,
@@ -197,8 +197,8 @@ export function RoutingHubPage() {
     {
       id: 'volume',
       title: 'Volume split',
-      description: 'Distributes payments by configured percentages across gateways.',
-      useCase: 'Use for ramp-ups, new gateway rollout, traffic balancing, or controlled migrations.',
+      description: 'Distributes payments by configured percentages across connectors.',
+      useCase: 'Use for ramp-ups, new connector rollout, traffic balancing, or controlled migrations.',
       icon: PieChart,
       state: hasVolumeSplit ? 'enabled' : 'not_set',
       canDeactivate: Boolean(activeVolumeAlgorithm),
@@ -218,7 +218,7 @@ export function RoutingHubPage() {
       id: 'ab-test',
       title: 'A/B Testing',
       description: 'Tests two routing strategies against each other with statistical significance reporting.',
-      useCase: 'Use when validating a new algorithm, rule, or gateway before full rollout.',
+      useCase: 'Use when validating a new algorithm, rule, or connector before full rollout.',
       icon: FlaskConical,
       state: hasAbTest ? 'enabled' : 'not_set',
       canDeactivate: false,
@@ -239,7 +239,7 @@ export function RoutingHubPage() {
         open={pendingDeactivateStrategy !== null}
         title={`Deactivate ${pendingDeactivateStrategy ? strategyLabels[pendingDeactivateStrategy] : ''}?`}
         description={pendingDeactivateStrategy === 'auth-rate'
-          ? 'Routing stops scoring gateways by auth rate, and hybrid routing answers from your routing rules. Your saved settings and Autopilot are kept, so turning it back on restores them.'
+          ? 'Routing stops scoring connectors by auth rate, and hybrid routing answers from your routing rules. Your saved settings and Autopilot are kept, so turning it back on restores them.'
           : 'This will stop routing decisions from using this strategy. You can reactivate it at any time.'}
         confirmLabel="Deactivate"
         variant="danger"

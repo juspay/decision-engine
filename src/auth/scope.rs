@@ -5,8 +5,8 @@
 //! Only this module constructs it, so a handler that skips authorization has nothing to hand to
 //! storage.
 //!
-//! - A per-merchant session (JWT or api key) is authorized for its own merchant only. A request
-//!   that names any other merchant is refused with `403`.
+//! - A per-merchant session (JWT or api key) is authorized for its own merchant and that merchant's
+//!   sub-merchants. A request that names any other merchant is refused with `403`.
 //! - A service credential (the admin secret, or the `api_key_auth_enabled = false` compat lane)
 //!   carries no session and acts on behalf of whichever merchant the request names. This is how
 //!   Hyperswitch calls Decision Engine.
@@ -154,32 +154,84 @@ impl IntoResponse for MerchantScopeViolation {
     }
 }
 
-/// Resolve the merchant a body-addressed request may act on.
+/// Resolve the merchant a body-addressed request may act on: the one it names, or else the
+/// session's own.
 ///
-/// Every merchant the request names must be the same one. A session must name only its own
-/// merchant, and a request that names none acts on the session's. A service credential acts on the
-/// merchant the request names.
+/// Every merchant the request names must be the same one. A session may act on its own merchant and
+/// on that merchant's sub-merchants; anything else is refused. A service credential acts on whatever
+/// the request names.
 pub fn authorize(
     session: Option<&AuthContext>,
     request: &(impl MerchantScoped + ?Sized),
+) -> impl std::future::Future<Output = Result<AuthorizedMerchant, MerchantScopeViolation>> + Send + 'static
+{
+    // Copied out before the lookup, so the future borrows neither the request nor the session.
+    let named: Vec<String> = request
+        .merchant_ids()
+        .into_iter()
+        .map(str::to_owned)
+        .collect();
+    let session_merchant = session.map(|session| session.merchant_id.clone());
+    async move {
+        let named: Vec<&str> = named.iter().map(String::as_str).collect();
+        let Some(target) = named.first().copied().or(session_merchant.as_deref()) else {
+            return Err(MerchantScopeViolation::NoMerchant);
+        };
+        // The parent is read only when a session names a merchant other than its own, so a request
+        // on the session's own merchant — nearly every one — costs no lookup.
+        let parent = match session_merchant.as_deref() {
+            Some(own) if own != target => parent_of(target).await,
+            _ => None,
+        };
+        resolve(
+            session_merchant.as_deref(),
+            &named,
+            target,
+            parent.as_deref(),
+        )
+    }
+}
+
+/// The decision [`authorize`] makes, given the parent of the merchant the request is for.
+fn resolve(
+    session_merchant: Option<&str>,
+    named: &[&str],
+    target: &str,
+    parent: Option<&str>,
 ) -> Result<AuthorizedMerchant, MerchantScopeViolation> {
-    let named = request.merchant_ids();
-    if let Some(session) = session {
-        if named
-            .iter()
-            .any(|merchant_id| *merchant_id != session.merchant_id)
-        {
+    if let Some(own) = session_merchant {
+        if target != own && parent != Some(own) {
             return Err(MerchantScopeViolation::ForeignMerchant);
         }
-        return Ok(AuthorizedMerchant(session.merchant_id.clone()));
     }
-    let Some((first, rest)) = named.split_first() else {
-        return Err(MerchantScopeViolation::NoMerchant);
-    };
-    if rest.iter().any(|merchant_id| merchant_id != first) {
-        return Err(MerchantScopeViolation::ConflictingMerchants);
+    if named.iter().any(|merchant_id| *merchant_id != target) {
+        return Err(match session_merchant {
+            Some(_) => MerchantScopeViolation::ForeignMerchant,
+            None => MerchantScopeViolation::ConflictingMerchants,
+        });
     }
-    Ok(AuthorizedMerchant((*first).to_string()))
+    Ok(AuthorizedMerchant(target.to_string()))
+}
+
+/// The merchant `merchant_id` is a sub-merchant of. Served from the cached account that routing
+/// reads anyway, and never stale in a way that matters: a sub-merchant's parent is set once, when it
+/// is created.
+async fn parent_of(merchant_id: &str) -> Option<String> {
+    // Without storage — a unit test — nothing has been created as a sub-merchant.
+    crate::app::APP_STATE.get()?;
+    crate::types::merchant::merchant_account::load_merchant_by_merchant_id(merchant_id.to_string())
+        .await
+        .and_then(|account| account.parentMerchantId)
+}
+
+/// The merchant that holds the API keys for `merchant`: its parent when it is a sub-merchant, which
+/// has none of its own, and otherwise itself. Authorization for a sub-merchant carries this one step
+/// up for managing keys only — never for acting on the parent's routing.
+pub async fn key_holder(merchant: &AuthorizedMerchant) -> AuthorizedMerchant {
+    match parent_of(merchant.as_str()).await {
+        Some(parent) => AuthorizedMerchant(parent),
+        None => merchant.clone(),
+    }
 }
 
 /// The merchant a session is authorized for, for a route that names no merchant of its own (such as
@@ -192,7 +244,8 @@ pub fn session_merchant(session: Option<&AuthContext>) -> Option<AuthorizedMerch
 pub fn authorize_merchant_id(
     session: Option<&AuthContext>,
     merchant_id: &str,
-) -> Result<AuthorizedMerchant, MerchantScopeViolation> {
+) -> impl std::future::Future<Output = Result<AuthorizedMerchant, MerchantScopeViolation>> + Send + 'static
+{
     authorize(session, merchant_id)
 }
 
@@ -200,20 +253,46 @@ pub fn authorize_merchant_id(
 mod tests {
     use super::*;
 
-    struct Names(Vec<&'static str>);
-
-    impl MerchantScoped for Names {
-        fn merchant_ids(&self) -> Vec<&str> {
-            self.0.clone()
-        }
-    }
-
+    /// `resolve` as `authorize` calls it, with `sub_a1` and `sub_a2` the sub-merchants of `a`.
     fn authorized(
         session: Option<&str>,
         names: Vec<&'static str>,
     ) -> Result<String, MerchantScopeViolation> {
-        let session = session.map(AuthContext::from_api_key);
-        authorize(session.as_ref(), &Names(names)).map(|merchant| merchant.as_str().to_string())
+        let Some(target) = names.first().copied().or(session) else {
+            return Err(MerchantScopeViolation::NoMerchant);
+        };
+        let parent = target.starts_with("sub_a").then_some("a");
+        resolve(session, &names, target, parent).map(|merchant| merchant.to_string())
+    }
+
+    #[test]
+    fn a_session_reaches_its_sub_merchants_and_nothing_else() {
+        assert_eq!(authorized(Some("a"), vec!["sub_a1"]), Ok("sub_a1".into()));
+        assert_eq!(
+            authorized(Some("b"), vec!["sub_a1"]),
+            Err(MerchantScopeViolation::ForeignMerchant)
+        );
+        // A session on a sub-merchant does not reach its parent or its siblings.
+        assert_eq!(
+            authorized(Some("sub_a1"), vec!["a"]),
+            Err(MerchantScopeViolation::ForeignMerchant)
+        );
+        assert_eq!(
+            authorized(Some("sub_a1"), vec!["sub_a2"]),
+            Err(MerchantScopeViolation::ForeignMerchant)
+        );
+    }
+
+    #[test]
+    fn a_parent_and_its_sub_merchant_named_together_still_conflict() {
+        assert_eq!(
+            authorized(None, vec!["sub_a1", "a"]),
+            Err(MerchantScopeViolation::ConflictingMerchants)
+        );
+        assert_eq!(
+            authorized(Some("a"), vec!["a", "sub_a1"]),
+            Err(MerchantScopeViolation::ForeignMerchant)
+        );
     }
 
     #[test]
@@ -289,9 +368,10 @@ mod tests {
 
     #[test]
     fn a_derived_request_is_authorized_on_all_its_merchants() {
-        let session = AuthContext::from_api_key("a".to_string());
+        let request = request(None);
+        let named = request.merchant_ids();
         assert_eq!(
-            authorize(Some(&session), &request(None)),
+            resolve(Some("a"), &named, "a", None),
             Err(MerchantScopeViolation::ForeignMerchant)
         );
     }

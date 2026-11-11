@@ -23,7 +23,7 @@ import { ErrorMessage } from '../ui/ErrorMessage'
 import { FieldError, invalidFieldClass } from '../ui/FieldError'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useCanEditRouting } from '../../store/authStore'
-import { apiPost } from '../../lib/api'
+import { apiPost, fetcher } from '../../lib/api'
 import { RoutingAlgorithm } from '../../types/api'
 import { useDynamicRoutingConfig } from '../../hooks/useDynamicRoutingConfig'
 import {
@@ -87,7 +87,7 @@ export function EuclidRuleBuilderPage() {
   )
   const { data: activeAlgorithms } = useSWR<RoutingAlgorithm[]>(
     merchantId ? `/routing/list/active/${merchantId}` : null,
-    () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`)
+    () => fetcher<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`)
   )
 
   const sourceId = editId || cloneFromId
@@ -173,7 +173,7 @@ export function EuclidRuleBuilderPage() {
         (block.outputType === 'volume_split' && block.volumeSplitEntries.length === 0) ||
         (block.outputType === 'volume_split_priority' && block.volumeSplitPriorityEntries.length === 0)
       if (empty) {
-        nextBlockErrors[block.id] = 'Add at least one destination gateway to route to.'
+        nextBlockErrors[block.id] = 'Add at least one destination connector to route to.'
       }
     })
 
@@ -443,9 +443,9 @@ export function EuclidRuleBuilderPage() {
             </div>
 
             <div className="rounded-xl border border-dashed border-slate-300 px-4 py-4 dark:border-[#2a303a]">
-              <p className="text-[15px] font-semibold text-slate-800 dark:text-slate-200 leading-[22px]">Default Fallback Gateway</p>
+              <p className="text-[15px] font-semibold text-slate-800 dark:text-slate-200 leading-[22px]">Default Fallback Connector</p>
               <p className="mb-4 mt-1 text-[13px] text-slate-500 dark:text-[#8d96a8] leading-[18px]">
-                This gateway handles any transactions that do not match the custom rules configured
+                This connector handles any transactions that do not match the custom rules configured
                 above. Per-request overrides are possible via <code className="font-mono">fallback_output</code>.
               </p>
               <PriorityEditor

@@ -1,12 +1,26 @@
 import { ABTestAlgorithmData, ExperimentArm, ExperimentEndpoint, SrConfigOverride } from '../../../types/api'
 
 // Mirrors the backend's `ab_test::arms`: an arm is a bundle of layers, and each endpoint applies
-// only the layers it supports. Traffic splits on an endpoint only when it is in the experiment's
-// scope and the two arms differ there; elsewhere the control arm is served untracked.
-
-export type ArmSide = 'control' | 'variant'
+// only the layers it supports. An experiment has one control and one or more variants. A variant's
+// traffic is split on an endpoint only when it is in the experiment's scope, the variant is still
+// running, and it differs from control there; elsewhere the control arm is served untracked.
 
 export const SR_ROUTING_ARM_ID = 'sr_routing'
+export const CONTROL_ARM_ID = 'control'
+/** Arm id the single-variant format records its variant under. */
+export const LEGACY_VARIANT_ARM_ID = 'variant'
+/** Same limits the backend validates. */
+export const MAX_VARIANTS = 5
+export const MAX_TOTAL_VARIANT_PCT = 50
+
+/** One variant with the single-variant format already read into the multi-variant shape. */
+export interface ResolvedVariant {
+  id: string
+  name: string
+  splitPct: number
+  arm: ExperimentArm
+  stopped: boolean
+}
 
 export const EXPERIMENT_ENDPOINTS: ExperimentEndpoint[] = ['hybrid_routing', 'decide_gateway', 'evaluate']
 
@@ -29,15 +43,52 @@ export const ENDPOINT_LAYERS: Record<ExperimentEndpoint, string> = {
   evaluate: 'Applies rules only',
 }
 
-/** The arm for `side`, reading the single-strategy format as an arm with just that one layer. */
-export function resolvedArm(data: ABTestAlgorithmData, side: ArmSide): ExperimentArm {
-  const layered = side === 'control' ? data.control : data.variant
-  if (layered) return layered
-  const id = side === 'control' ? data.control_algorithm_id : data.variant_algorithm_id
-  const sr = side === 'control' ? data.control_sr_config : data.variant_sr_config
+function singleStrategyArm(id?: string, sr?: SrConfigOverride): ExperimentArm {
   if (id === SR_ROUTING_ARM_ID) return { sr: sr ?? {} }
   if (id) return { rule_algorithm_id: id }
   return {}
+}
+
+/** The control arm, reading the single-strategy format as an arm with just that one layer. */
+export function resolvedControl(data: ABTestAlgorithmData): ExperimentArm {
+  return data.control ?? singleStrategyArm(data.control_algorithm_id, data.control_sr_config)
+}
+
+/** The variants in order. The single-variant format reads as one variant with the id `variant`. */
+export function resolvedVariants(data: ABTestAlgorithmData): ResolvedVariant[] {
+  if (data.variants) {
+    return data.variants.map(({ id, name, split_pct, stopped, rule_algorithm_id, sr }) => ({
+      id,
+      name: name || id,
+      splitPct: split_pct,
+      arm: { ...(rule_algorithm_id && { rule_algorithm_id }), ...(sr && { sr }) },
+      stopped: stopped === true,
+    }))
+  }
+  return [{
+    id: LEGACY_VARIANT_ARM_ID,
+    name: 'Variant',
+    splitPct: data.variant_split_pct ?? 0,
+    arm: data.variant ?? singleStrategyArm(data.variant_algorithm_id, data.variant_sr_config),
+    stopped: false,
+  }]
+}
+
+/** The arm recorded under `armId` (`control` or a variant id); `undefined` for an unknown id. */
+export function armById(data: ABTestAlgorithmData, armId: string): ExperimentArm | undefined {
+  if (armId === CONTROL_ARM_ID) return resolvedControl(data)
+  return resolvedVariants(data).find(v => v.id === armId)?.arm
+}
+
+/** Display name of the arm recorded under `armId`. */
+export function armName(data: ABTestAlgorithmData | undefined, armId: string): string {
+  if (armId === CONTROL_ARM_ID) return 'Control'
+  return (data && resolvedVariants(data).find(v => v.id === armId)?.name) || armId
+}
+
+/** Control's share of traffic: whatever the variants don't take. */
+export function controlSplitPct(data: ABTestAlgorithmData): number {
+  return 100 - resolvedVariants(data).reduce((sum, v) => sum + v.splitPct, 0)
 }
 
 export function projectArm(arm: ExperimentArm, endpoint: ExperimentEndpoint): ExperimentArm {
@@ -69,12 +120,36 @@ function routingBehaviour(arm: ExperimentArm, endpoint: ExperimentEndpoint): Exp
   return endpoint === 'decide_gateway' ? { sr: projection.sr ?? {} } : projection
 }
 
-export function splitsOn(data: ABTestAlgorithmData, endpoint: ExperimentEndpoint): boolean {
-  return scopedEndpoints(data).includes(endpoint)
-    && !sameArm(routingBehaviour(resolvedArm(data, 'control'), endpoint), routingBehaviour(resolvedArm(data, 'variant'), endpoint))
+export function routesDifferently(a: ExperimentArm, b: ExperimentArm, endpoint: ExperimentEndpoint): boolean {
+  return !sameArm(routingBehaviour(a, endpoint), routingBehaviour(b, endpoint))
 }
 
-/** Endpoints where traffic is actually split, in display order. */
-export function splitEndpoints(data: ABTestAlgorithmData): ExperimentEndpoint[] {
-  return EXPERIMENT_ENDPOINTS.filter(e => splitsOn(data, e))
+/**
+ * Whether this variant is compared with control on `endpoint`: the endpoint is in scope and the
+ * variant routes differently from control there. A stopped variant still is, since the payments it
+ * recorded before it stopped are still read as its results.
+ */
+export function variantComparedOn(data: ABTestAlgorithmData, variant: ResolvedVariant, endpoint: ExperimentEndpoint): boolean {
+  return scopedEndpoints(data).includes(endpoint)
+    && routesDifferently(resolvedControl(data), variant.arm, endpoint)
+}
+
+/** Whether this variant's traffic is split from control on `endpoint` now. */
+export function variantSplitsOn(data: ABTestAlgorithmData, variant: ResolvedVariant, endpoint: ExperimentEndpoint): boolean {
+  return !variant.stopped && variantComparedOn(data, variant, endpoint)
+}
+
+/** Whether some running variant is split from control on `endpoint`. */
+export function splitsOn(data: ABTestAlgorithmData, endpoint: ExperimentEndpoint): boolean {
+  return resolvedVariants(data).some(v => variantSplitsOn(data, v, endpoint))
+}
+
+/** The variants compared with control on `endpoint`, stopped ones included, in order. */
+export function comparedVariants(data: ABTestAlgorithmData, endpoint: ExperimentEndpoint): ResolvedVariant[] {
+  return resolvedVariants(data).filter(v => variantComparedOn(data, v, endpoint))
+}
+
+/** Endpoints with results to read: some variant is compared with control there, in display order. */
+export function comparedEndpoints(data: ABTestAlgorithmData): ExperimentEndpoint[] {
+  return EXPERIMENT_ENDPOINTS.filter(e => comparedVariants(data, e).length > 0)
 }

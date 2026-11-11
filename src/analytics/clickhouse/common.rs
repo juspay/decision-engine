@@ -32,6 +32,14 @@ pub const ROUTE_HIT_FLOW_TYPES: &[FlowType] = &[
     FlowType::RoutingEvaluateRequestHit,
     FlowType::RoutingHybridRequestHit,
 ];
+/// The overview's request-hit cards, in the order they are rendered.
+pub const ROUTE_HIT_ROUTES: &[AnalyticsRoute] = &[
+    AnalyticsRoute::Decide,
+    AnalyticsRoute::DecideGateway,
+    AnalyticsRoute::UpdateGatewayScore,
+    AnalyticsRoute::RoutingEvaluate,
+    AnalyticsRoute::RoutingHybrid,
+];
 pub const ROUTE_HIT_ENTRY_POINT_FLOW_TYPES: &[FlowType] = &[
     FlowType::DecideGatewayRequestHit,
     FlowType::RoutingEvaluateRequestHit,
@@ -185,36 +193,51 @@ fn flow_type_list_sql<'a>(flow_types: impl IntoIterator<Item = &'a FlowType>) ->
 }
 
 /// Roll request-hit rows up into the fixed card set the overview renders.
-///
-/// Keyed by `flow_type`, never by `route`: hybrid request hits were recorded under the
-/// `decide_gateway` route before they got their own, so grouping by route would fold historical
-/// hybrid traffic into the decide-gateway card and split the hybrid card at the cutover date.
 pub fn ordered_route_hits_from_counts(
-    flow_type_counts: impl IntoIterator<Item = (String, i64)>,
+    route_counts: impl IntoIterator<Item = (AnalyticsRoute, i64)>,
 ) -> Vec<AnalyticsRouteHit> {
-    let mut counts = std::collections::HashMap::new();
-    for (flow_type, count) in flow_type_counts {
-        counts.insert(flow_type, count);
+    let mut counts: std::collections::HashMap<AnalyticsRoute, i64> =
+        std::collections::HashMap::new();
+    for (route, count) in route_counts {
+        *counts.entry(route).or_default() += count;
     }
 
-    ROUTE_HIT_FLOW_TYPES
+    ROUTE_HIT_ROUTES
         .iter()
-        .map(|flow_type| {
-            let route = route_for_request_hit(*flow_type);
-            AnalyticsRouteHit {
-                route: route.overview_label().unwrap_or(route.as_str()).to_string(),
-                count: counts.get(flow_type.as_str()).copied().unwrap_or(0),
-            }
+        .map(|route| AnalyticsRouteHit {
+            route: route.overview_label().unwrap_or(route.as_str()).to_string(),
+            count: counts.get(route).copied().unwrap_or(0),
         })
         .collect()
 }
 
-const fn route_for_request_hit(flow_type: FlowType) -> AnalyticsRoute {
-    match flow_type {
+/// The request-hit flow type a stored value names, when the overview counts that flow type.
+pub(crate) fn request_hit_flow_type(value: &str) -> Option<FlowType> {
+    ROUTE_HIT_FLOW_TYPES
+        .iter()
+        .copied()
+        .find(|flow_type| flow_type.as_str() == value)
+}
+
+/// The card a request-hit row belongs to.
+///
+/// Only the hybrid flow type has two entry points, so only it reads the stored route.
+pub(crate) fn route_for_request_hit(
+    flow_type: FlowType,
+    stored_route: Option<&str>,
+) -> AnalyticsRoute {
+    let default_route = match flow_type {
         FlowType::UpdateGatewayScoreRequestHit => AnalyticsRoute::UpdateGatewayScore,
         FlowType::RoutingEvaluateRequestHit => AnalyticsRoute::RoutingEvaluate,
         FlowType::RoutingHybridRequestHit => AnalyticsRoute::RoutingHybrid,
         _ => AnalyticsRoute::DecideGateway,
+    };
+    if !matches!(flow_type, FlowType::RoutingHybridRequestHit) {
+        return default_route;
+    }
+    match stored_route.and_then(AnalyticsRoute::from_stored_value) {
+        Some(route @ (AnalyticsRoute::Decide | AnalyticsRoute::RoutingHybrid)) => route,
+        _ => default_route,
     }
 }
 
@@ -355,5 +378,81 @@ mod tests {
         .await;
         assert!(result.is_err());
         assert_eq!(attempts.into_inner(), 2);
+    }
+
+    #[test]
+    fn the_stored_route_tells_the_two_hybrid_entry_points_apart() {
+        let hybrid = FlowType::RoutingHybridRequestHit;
+        assert_eq!(
+            route_for_request_hit(hybrid, Some("decide")),
+            AnalyticsRoute::Decide
+        );
+        assert_eq!(
+            route_for_request_hit(hybrid, Some("routing_hybrid")),
+            AnalyticsRoute::RoutingHybrid
+        );
+    }
+
+    #[test]
+    fn hybrid_hits_stored_under_the_old_decide_gateway_route_stay_on_the_hybrid_card() {
+        let hybrid = FlowType::RoutingHybridRequestHit;
+        assert_eq!(
+            route_for_request_hit(hybrid, Some("decide_gateway")),
+            AnalyticsRoute::RoutingHybrid
+        );
+        assert_eq!(
+            route_for_request_hit(hybrid, None),
+            AnalyticsRoute::RoutingHybrid
+        );
+    }
+
+    #[test]
+    fn every_other_flow_type_keeps_its_own_card_whatever_the_row_says() {
+        assert_eq!(
+            route_for_request_hit(FlowType::DecideGatewayRequestHit, Some("decide")),
+            AnalyticsRoute::DecideGateway
+        );
+        assert_eq!(
+            route_for_request_hit(FlowType::RoutingEvaluateRequestHit, Some("decide")),
+            AnalyticsRoute::RoutingEvaluate
+        );
+        assert_eq!(
+            route_for_request_hit(FlowType::UpdateGatewayScoreRequestHit, Some("decide")),
+            AnalyticsRoute::UpdateGatewayScore
+        );
+    }
+
+    #[test]
+    fn the_two_hybrid_entry_points_are_counted_on_separate_cards() {
+        let hits = ordered_route_hits_from_counts([
+            (AnalyticsRoute::Decide, 348),
+            (AnalyticsRoute::RoutingHybrid, 1),
+            (AnalyticsRoute::UpdateGatewayScore, 348),
+        ]);
+        let count_for = |label: &str| {
+            hits.iter()
+                .find(|hit| hit.route == label)
+                .map(|hit| hit.count)
+        };
+
+        assert_eq!(count_for("/decide"), Some(348));
+        assert_eq!(count_for("/routing_hybrid"), Some(1));
+        assert_eq!(count_for("/update_gateway"), Some(348));
+        assert_eq!(count_for("/decide_gateway"), Some(0));
+    }
+
+    #[test]
+    fn rows_landing_on_the_same_card_are_summed_rather_than_overwritten() {
+        let hits = ordered_route_hits_from_counts([
+            (AnalyticsRoute::RoutingHybrid, 19563),
+            (AnalyticsRoute::RoutingHybrid, 206),
+        ]);
+
+        assert_eq!(
+            hits.iter()
+                .find(|hit| hit.route == "/routing_hybrid")
+                .map(|hit| hit.count),
+            Some(19769)
+        );
     }
 }

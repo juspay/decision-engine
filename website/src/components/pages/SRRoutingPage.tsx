@@ -85,7 +85,7 @@ async function enableAutopilotSrDimensions(merchantId: string): Promise<void> {
 // Optional cluster dimensions — empty string normalizes to null so the decider treats them as
 // "any" (a stored "" would never match a real value).
 const optionalDim = z.preprocess(
-  (v) => (v === '' || v === null || v === undefined ? null : v),
+  (v: string | null | undefined) => (v === '' || v === null || v === undefined ? null : v),
   z.string().nullable()
 )
 
@@ -99,39 +99,40 @@ const subLevelSchema = z.object({
   authType: optionalDim,
   // Provenance passthrough: "autopilot" for auto-calibrated rows, null for human-authored.
   source: optionalDim,
-  bucketSize: z.coerce.number().int().positive(),
+  bucketSize: z.coerce.number<number | string>().int().positive(),
   hedgingPercent: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().nullable()
   ),
   latencyThreshold: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().nullable()
   ),
 })
 
 const srFormSchema = z.object({
-  defaultBucketSize: z.coerce.number().int().positive(),
+  defaultBucketSize: z.coerce.number<number | string>().int().positive(),
   defaultSuccessRate: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().min(0).max(1).nullable()
   ),
   defaultLatencyThreshold: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().nullable()
   ),
   defaultHedgingPercent: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().nullable()
   ),
   margin: z.preprocess(
-    (v) => (v === '' || v === null ? null : Number(v)),
+    (v: number | string | null) => (v === '' || v === null ? null : Number(v)),
     z.number().min(0).max(100).nullable()
   ),
   subLevelInputConfig: z.array(subLevelSchema),
 })
 
-type SRForm = z.infer<typeof srFormSchema>
+type SRFormInput = z.input<typeof srFormSchema>
+type SRForm = z.output<typeof srFormSchema>
 
 interface SRConfigResponse {
   merchant_id: string
@@ -285,7 +286,7 @@ export function SRRoutingPage() {
     reset,
     watch,
     formState: { errors },
-  } = useForm<SRForm>({
+  } = useForm<SRFormInput, unknown, SRForm>({
     resolver: zodResolver(srFormSchema),
     defaultValues: {
       defaultBucketSize: 200,
@@ -411,7 +412,7 @@ export function SRRoutingPage() {
       <div className="space-y-4">
       <PageHeading
         title="Multi Objective Routing"
-        description="Dynamic gateway scoring based on real-time success rates."
+        description="Dynamic connector scoring based on real-time success rates."
       />
 
       {!merchantId && (
@@ -485,7 +486,7 @@ export function SRRoutingPage() {
                     />
                     {errors.defaultBucketSize && <p className="text-[13px] text-red-600 leading-[18px]">{errors.defaultBucketSize.message}</p>}
                     <p className={type.hint}>
-                      Recent payments per gateway score. Lower adapts faster, higher stays steadier.
+                      Recent payments per connector score. Lower adapts faster, higher stays steadier.
                     </p>
                   </label>
 
@@ -498,7 +499,7 @@ export function SRRoutingPage() {
                       className={configInputClass}
                     />
                     <p className={type.hint}>
-                      Traffic share sent to non-top gateways to keep their scores fresh. Needs Explore-exploit on.
+                      Traffic share sent to non-top connectors to keep their scores fresh. Needs Explore-exploit on.
                     </p>
                   </label>
 
@@ -754,7 +755,7 @@ function SrRoutingMasterToggle({ features }: { features: ReturnType<typeof useMe
             ? 'border-emerald-200 bg-emerald-50 dark:border-emerald-500/30 dark:bg-emerald-500/10'
             : 'border-amber-200 bg-amber-50 dark:border-amber-500/30 dark:bg-amber-500/10'
       }`}
-      title={error ?? (on ? 'Scoring eligible gateways on every payment.' : 'Gateway scoring is paused for this merchant.')}
+      title={error ?? (on ? 'Scoring eligible connectors on every payment.' : 'Connector scoring is paused for this merchant.')}
     >
       <span id="sr-routing-switch-label" className="whitespace-nowrap text-sm font-medium text-slate-800 dark:text-white">Auth Rate routing</span>
       {error && (
@@ -899,25 +900,25 @@ const SR_FEATURES: { feature: KnownFeature; title: string; description: string; 
     feature: 'elimination',
     title: 'Elimination (pause PSPs with low auth rate)',
     description:
-      'Stop routing to a gateway once its recent authorization rate falls below the elimination threshold, and let it back in when it recovers. Set the threshold itself under Manual → Elimination.',
+      'Stop routing to a connector once its recent authorization rate falls below the elimination threshold, and let it back in when it recovers. Set the threshold itself under Manual → Elimination.',
   },
   {
     feature: 'gsm-scoring-filter',
     title: 'GSM scoring filter',
     description:
-      'Skip gateway penalization for failures classified by GSM as user or issuer-originated. Keeps gateway scores accurate by excluding faults that are not the gateway\'s responsibility.',
+      'Skip connector penalization for failures classified by GSM as user or issuer-originated. Keeps connector scores accurate by excluding faults that are not the connector\'s responsibility.',
   },
   {
     feature: 'explore-exploit-srv3',
     title: 'Explore-exploit on SRv3 (Card)',
     description:
-      'Keeps all gateway ratings fresh by regularly sending a small share of payments to every gateway — not just the top performer. This ensures the system can quickly detect when a backup gateway becomes better than the current top, and reroute accordingly. The Hedging % setting controls how large this share is.',
+      'Keeps all connector ratings fresh by regularly sending a small share of payments to every connector — not just the top performer. This ensures the system can quickly detect when a backup connector becomes better than the current top, and reroute accordingly. The Hedging % setting controls how large this share is.',
   },
   {
     feature: 'sr-scores-from-rule-routing',
     title: 'Learn from rule-routed payments',
     description:
-      'Hybrid routing payments decided by a routing rule, without SR (Auth Rate routing is off, or their A/B arm has no SR layer), also update gateway scores. Keeps scores warm for when SR routes them. Scores then reflect the rule\'s gateway mix, not only payments SR routed.',
+      'Hybrid routing payments decided by a routing rule, without SR (Auth Rate routing is off, or their A/B arm has no SR layer), also update connector scores. Keeps scores warm for when SR routes them. Scores then reflect the rule\'s connector mix, not only payments SR routed.',
   },
   {
     feature: 'ab-test-real-payments',
@@ -1251,7 +1252,7 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
         <CardHeader>
           <h2 className={type.heading}>Elimination</h2>
           <p className={`mt-1 ${type.subheading} max-w-[68ch]`}>
-            Each gateway carries a health score that decays on consecutive failures and recovers on
+            Each connector carries a health score that decays on consecutive failures and recovers on
             successes. Below the threshold, it drops out of routing until it recovers.
           </p>
         </CardHeader>
@@ -1266,11 +1267,11 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
               className={configInputClass}
             />
             <p className={type.hint}>
-              Health score from 0 to 1, not success rate. Lower tolerates more failures before dropping a gateway.
+              Health score from 0 to 1, not success rate. Lower tolerates more failures before dropping a connector.
             </p>
           </label>
           <label className="space-y-1.5">
-            <span className={type.label}>Gateway latency threshold (ms)</span>
+            <span className={type.label}>Connector latency threshold (ms)</span>
             <input
               type="number"
               value={gatewayLatency}
@@ -1279,7 +1280,7 @@ function EliminationConfig({ merchantId }: { merchantId: string | null }) {
               className={configInputClass}
             />
             <p className={type.hint}>
-              Gateways slower than this are eliminated too. Leave blank to disable.
+              Connectors slower than this are eliminated too. Leave blank to disable.
             </p>
           </label>
         </CardBody>

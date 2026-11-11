@@ -1,7 +1,7 @@
 ---
 title: "Get Active Routing Rule"
 description: "Retrieve the currently active routing rule for a merchant."
-openapi: "openapi.json POST /routing/list/active/{created_by}"
+openapi: "openapi.json GET /routing/list/active/{merchant_id}"
 ---
 
 # Get Active Routing Rule
@@ -26,10 +26,10 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 ## Request
 
-- Method and path: `POST /routing/list/active/{created_by}`
+- Method and path: `GET /routing/list/active/{merchant_id}`
 - Parameters:
-  - `created_by` (path, required, string)
-- Body: Path parameter `created_by`; request body can be `{}`.
+  - `merchant_id` (path, required, string)
+- Body: none.
 
 ## Example
 
@@ -37,9 +37,7 @@ export AUTH_HEADER="Authorization: Bearer <jwt_token>"
 
 ```bash
 curl --location "$BASE_URL/routing/list/active/merchant_demo" \
-  --header "$AUTH_HEADER" \
-  --header "Content-Type: application/json" \
-  --data '{}'
+  --header "$AUTH_HEADER"
 ```
 
 ## Response

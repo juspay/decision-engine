@@ -1,5 +1,5 @@
 import { ABTestAlgorithmData } from '../../../types/api'
-import { ABTestFormValues, ABTestCreatePayload, ABTestAlgorithmPayload, ArmLayersForm, ExperimentArmPayload, SrConfigOverrideForm, SrConfigOverridePayload, SrStrategy } from './types'
+import { ABTestFormValues, ABTestCreatePayload, ABTestAlgorithmPayload, ArmLayersForm, ExperimentArmPayload, ExperimentVariantPayload, SrConfigOverrideForm, SrConfigOverridePayload, SrStrategy, VariantForm } from './types'
 
 function toSrConfigPayload(form: SrConfigOverrideForm): SrConfigOverridePayload {
   const out: SrConfigOverridePayload = {}
@@ -8,9 +8,11 @@ function toSrConfigPayload(form: SrConfigOverrideForm): SrConfigOverridePayload 
   return out
 }
 
-const DESCRIPTIONS: Record<ABTestFormValues['experimentType'], (pct: number) => string> = {
-  sr_config_tuning: (pct) => `SR config tuning: ${pct}% variant traffic`,
-  algorithm_comparison: (pct) => `A/B test: ${pct}% variant traffic`,
+function description(values: ABTestFormValues): string {
+  const prefix = values.experimentType === 'sr_config_tuning' ? 'SR config tuning' : 'A/B test'
+  const total = values.variants.reduce((sum, v) => sum + v.splitPct, 0)
+  if (values.variants.length === 1) return `${prefix}: ${total}% variant traffic`
+  return `${prefix}: ${values.variants.length} variants, ${total}% variant traffic`
 }
 
 // The SR override each strategy stores. Two independent dials — cost-awareness
@@ -39,21 +41,32 @@ export function toABTestCreatePayload(
   values: ABTestFormValues,
   merchantId: string,
 ): ABTestCreatePayload {
-  const base = {
+  const tuning = values.experimentType === 'sr_config_tuning'
+  // SR config tuning: every arm runs SR; control uses the live config, each variant tweaks
+  // hedging/elimination.
+  // In algorithm comparison, a variant's SR layer keeps any hedging/elimination overrides it was
+  // read with, so duplicating or editing a mixed experiment saves them unchanged.
+  const comparisonArm = (v: VariantForm): ExperimentArmPayload => {
+    const arm = toArmPayload(v.layers)
+    return arm.sr ? { ...arm, sr: { ...arm.sr, ...toSrConfigPayload(v.srConfig) } } : arm
+  }
+  const variant = (v: VariantForm): ExperimentVariantPayload => ({
+    id: v.id,
+    name: v.name.trim() || v.id,
+    split_pct: v.splitPct,
+    ...(tuning ? { sr: toSrConfigPayload(v.srConfig) } : comparisonArm(v)),
+  })
+  const data: ABTestAlgorithmPayload = {
+    control: tuning ? { sr: {} } : toArmPayload(values.control),
+    variants: values.variants.map(variant),
     endpoints: values.endpoints,
-    variant_split_pct: values.variantSplitPct,
     min_sample_size: values.minSampleSize,
     guardrail_threshold_pp: values.guardrailThresholdPp,
   }
 
-  const data: ABTestAlgorithmPayload = values.experimentType === 'sr_config_tuning'
-    // Both arms SR; control uses live config, variant tweaks hedging/elimination.
-    ? { ...base, control: { sr: {} }, variant: { sr: toSrConfigPayload(values.variantSrConfig) } }
-    : { ...base, control: toArmPayload(values.control), variant: toArmPayload(values.variant) }
-
   return {
     name: values.name.trim(),
-    description: DESCRIPTIONS[values.experimentType](values.variantSplitPct),
+    description: description(values),
     created_by: merchantId,
     algorithm_for: 'payment',
     metadata: {},

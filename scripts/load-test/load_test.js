@@ -561,7 +561,6 @@ function _runDecide(merchantId, headers, idx) {
   // what SR ranks, as on hybrid.
   const body = JSON.stringify({
     payment_id:              paymentId,
-    merchant_id:             merchantId,
     amount:                  ruleVariant.amount,
     currency:                srVariant.currency,
     authentication_type:     ruleVariant.authentication_type,
@@ -577,7 +576,7 @@ function _runDecide(merchantId, headers, idx) {
   const res = http.post(
     `${envDefaults.baseUrl}/decide`,
     body,
-    { headers, tags: { name: "decide" } }
+    { headers: { ...headers, "x-connected-merchant-id": merchantId }, tags: { name: "decide" } }
   );
   latencyTrend.add(res.timings.duration);
 
@@ -600,14 +599,14 @@ function _runDecide(merchantId, headers, idx) {
     try {
       const json = JSON.parse(res.body);
       const head = json.connectors?.[0];
-      const gw = head?.gateway_name;
+      const gw = head?.connector;
       if (gw) {
         gatewaySelected.add(1, { gateway: gw });
         const status  = Math.random() < 0.85 ? "CHARGED" : "FAILURE";
         const fbBody  = JSON.stringify({
           merchantId,
           // The decider's identifier: "name:id", or the bare name without an account.
-          gateway: head.payment_merchant_connector_id ? `${gw}:${head.payment_merchant_connector_id}` : gw,
+          gateway: head.merchant_connector_id ? `${gw}:${head.merchant_connector_id}` : gw,
           paymentId,
           status,
         });

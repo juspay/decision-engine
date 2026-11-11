@@ -223,7 +223,7 @@ pub async fn update_score(
             let gateway_reference_id = payload.gateway_reference_id.clone();
             let txn_latency = payload.txn_latency.clone();
 
-            jemalloc_ctl::epoch::advance().unwrap();
+            let _ = jemalloc_ctl::epoch::advance();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
 
             let redis_comp_config: Option<HashMap<String, RedisCompressionConfig>> =
@@ -257,7 +257,7 @@ pub async fn update_score(
             )
             .await;
 
-            jemalloc_ctl::epoch::advance().unwrap();
+            let _ = jemalloc_ctl::epoch::advance();
             let allocated_after = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
             let bytes_allocated = allocated_after.saturating_sub(allocated_before);
 

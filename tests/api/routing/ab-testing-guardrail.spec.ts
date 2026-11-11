@@ -1,18 +1,25 @@
 import { test, expect, factory } from '../../fixtures/test'
 import type { ApiClient } from '../../fixtures/api-client'
 
-function deterministicVariant(paymentId: string, splitPct: number): boolean {
+/** The payment id's bucket in 0..100, as the engine assigns arms from it. */
+function bucket(paymentId: string): bigint {
   let hash = 5381n
   for (const byte of Buffer.from(paymentId)) hash = (hash * 33n + BigInt(byte)) & ((1n << 64n) - 1n)
-  return hash % 100n < BigInt(splitPct)
+  return hash % 100n
+}
+
+/** A fresh payment id whose bucket is in `[from, to)`: variants own consecutive slices in order. */
+function paymentInBuckets(from: number, to: number): string {
+  for (let i = 0; i < 2000; i++) {
+    const candidate = factory.paymentId('guardrail_variant')
+    const b = bucket(candidate)
+    if (b >= BigInt(from) && b < BigInt(to)) return candidate
+  }
+  throw new Error(`Unable to find a payment ID in buckets ${from}..${to}`)
 }
 
 function paymentForVariant(): string {
-  for (let i = 0; i < 1000; i++) {
-    const candidate = factory.paymentId('guardrail_variant')
-    if (deterministicVariant(candidate, 20)) return candidate
-  }
-  throw new Error('Unable to find a deterministic variant payment ID')
+  return paymentInBuckets(0, 20)
 }
 
 async function createExperiment(api: ApiClient, merchantId: string) {
@@ -70,7 +77,8 @@ test('payment feedback stops a breached experiment and leaves the active rule in
     await feedback(api, merchant.id, controls[0], 'checkout', 'AUTHORIZED')
     expect(await experimentActive(api, merchant.id, experimentId)).toBe(true) // Both arms need an outcome.
     await feedback(api, merchant.id, variants[0], 'adyen', 'FAILURE')
-    expect(await experimentActive(api, merchant.id, experimentId)).toBe(false)
+    // Feedback is processed after the response, so the stop lands shortly after.
+    await expect.poll(() => experimentActive(api, merchant.id, experimentId), { timeout: 10_000, intervals: [200] }).toBe(false)
     expect(await route(api, merchant.id, paymentForVariant())).toBe('stripe')
 
     // Duplicate feedback and a successful retry cannot restart the experiment.
@@ -81,6 +89,77 @@ test('payment feedback stops a breached experiment and leaves the active rule in
     await api.activateRoutingAlgorithm(merchant.id, experimentId)
     expect(await experimentActive(api, merchant.id, experimentId)).toBe(true)
     expect(await route(api, merchant.id, paymentForVariant())).toBe('adyen')
+  } finally {
+    await api.raw('POST', '/routing/deactivate', {
+      failOnStatusCode: false,
+      body: { created_by: merchant.id, routing_algorithm_id: experimentId },
+    })
+  }
+})
+
+test('with several variants, feedback stops only the breached variant', async ({ api, merchant }) => {
+  test.setTimeout(90_000)
+  const baseline = await api.createRoutingAlgorithm(factory.singleRoutingPayload(merchant.id, { gateway: 'stripe' }))
+  const control = await api.createRoutingAlgorithm(factory.singleRoutingPayload(merchant.id, { gateway: 'checkout' }))
+  const failing = await api.createRoutingAlgorithm(factory.singleRoutingPayload(merchant.id, { gateway: 'adyen' }))
+  const healthy = await api.createRoutingAlgorithm(factory.singleRoutingPayload(merchant.id, { gateway: 'razorpay' }))
+  await api.activateRoutingAlgorithm(merchant.id, baseline.body.rule_id)
+  const created = await api.createRoutingAlgorithm({
+    name: factory.ruleName('guardrail_multi'), description: 'Feedback-triggered variant stop',
+    created_by: merchant.id, algorithm_for: 'payment', metadata: {},
+    algorithm: { type: 'ab_test', data: {
+      control: { rule_algorithm_id: control.body.rule_id },
+      variants: [
+        // Buckets 0..20 and 20..40; control keeps 40..100.
+        { id: 'failing', split_pct: 20, rule_algorithm_id: failing.body.rule_id },
+        { id: 'healthy', split_pct: 20, rule_algorithm_id: healthy.body.rule_id },
+      ],
+      endpoints: ['evaluate'],
+      min_sample_size: 20, guardrail_threshold_pp: 10,
+    } },
+  })
+  expect(created.status, JSON.stringify(created.body)).toBe(200)
+  const experimentId = created.body.rule_id as string
+  await api.setMerchantFeature(merchant.id, 'ab-test-real-payments', true)
+  await api.activateRoutingAlgorithm(merchant.id, experimentId)
+  try {
+    // Feature-flag reads are cached for five seconds. Wait for a real variant decision.
+    await expect.poll(() => route(api, merchant.id, paymentInBuckets(0, 20)), { timeout: 15_000, intervals: [500] }).toBe('adyen')
+
+    const controlPayment = paymentInBuckets(40, 100)
+    const failingPayment = paymentInBuckets(0, 20)
+    const healthyPayment = paymentInBuckets(20, 40)
+    expect(await route(api, merchant.id, controlPayment)).toBe('checkout')
+    expect(await route(api, merchant.id, failingPayment)).toBe('adyen')
+    expect(await route(api, merchant.id, healthyPayment)).toBe('razorpay')
+
+    await feedback(api, merchant.id, controlPayment, 'checkout', 'AUTHORIZED')
+    await feedback(api, merchant.id, healthyPayment, 'razorpay', 'AUTHORIZED')
+    await feedback(api, merchant.id, failingPayment, 'adyen', 'FAILURE')
+
+    // Feedback is processed after the response, so the stop lands shortly after.
+    const stoppedVariants = async () => {
+      const listed = await api.listActiveRoutingAlgorithms(merchant.id)
+      const stored = listed.body.find((algorithm: { id: string }) => algorithm.id === experimentId)
+      if (!stored) return null
+      const algorithm = typeof stored.algorithm_data === 'string' ? JSON.parse(stored.algorithm_data) : (stored.algorithm_data ?? stored.algorithm)
+      return algorithm.data.variants.map((v: { id: string; stopped?: boolean }) => [v.id, v.stopped === true])
+    }
+    await expect.poll(stoppedVariants, { timeout: 10_000, intervals: [200] })
+      .toEqual([['failing', true], ['healthy', false]])
+
+    // The experiment keeps running. The breached variant's payments are untracked and route by the
+    // active rule, like payments the experiment doesn't cover; the other variant keeps its own.
+    expect(await experimentActive(api, merchant.id, experimentId)).toBe(true)
+    expect(await route(api, merchant.id, paymentInBuckets(0, 20))).toBe('stripe')
+    expect(await route(api, merchant.id, paymentInBuckets(20, 40))).toBe('razorpay')
+
+    // A deliberate reactivation starts a new observation period with every variant running.
+    await api.raw('POST', '/routing/deactivate', {
+      body: { created_by: merchant.id, routing_algorithm_id: experimentId },
+    })
+    await api.activateRoutingAlgorithm(merchant.id, experimentId)
+    expect(await route(api, merchant.id, paymentInBuckets(0, 20))).toBe('adyen')
   } finally {
     await api.raw('POST', '/routing/deactivate', {
       failOnStatusCode: false,

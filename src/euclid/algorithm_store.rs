@@ -107,6 +107,33 @@ pub async fn update_definition(
     .map(|_| ())
 }
 
+/// Replace the merchant's algorithm definition only while it still reads `expected`, so two
+/// writers that each read the same definition cannot silently drop one another's change. `false`
+/// when the stored definition no longer matches (or the algorithm is gone).
+pub async fn replace_definition_if_unchanged(
+    db: &Storage,
+    merchant: &AuthorizedMerchant,
+    id: &str,
+    expected: &str,
+    algorithm_data: String,
+    modified_at: PrimitiveDateTime,
+) -> StoreResult<bool> {
+    let conn = db.get_conn().await.map_err(Report::new)?;
+    generics::generic_update_if_present::<<RoutingAlgorithm as HasTable>::Table, _, _>(
+        &conn,
+        dsl::id
+            .eq(id.to_string())
+            .and(dsl::created_by.eq(merchant.as_str().to_string()))
+            .and(dsl::algorithm_data.eq(expected.to_string())),
+        (
+            dsl::algorithm_data.eq(algorithm_data),
+            dsl::modified_at.eq(modified_at),
+        ),
+    )
+    .await
+    .map(|updated| updated > 0)
+}
+
 /// Delete the merchant's algorithm. Deleting one the merchant does not own deletes nothing.
 pub async fn delete(db: &Storage, merchant: &AuthorizedMerchant, id: &str) -> StoreResult<()> {
     let conn = db.get_conn().await.map_err(Report::new)?;

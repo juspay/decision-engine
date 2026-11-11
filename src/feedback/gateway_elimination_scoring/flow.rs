@@ -796,10 +796,18 @@ pub async fn eliminationV2RewardFactor(
     is_gri_enabled_for_elimination: bool,
     gateway_reference_id: Option<String>,
 ) -> Option<f64> {
-    let merch_acc: MerchantAccount =
+    let Some(merch_acc) =
         MA::load_merchant_by_merchant_id(MID::merchant_id_to_text(txn_detail.clone().merchantId))
             .await
-            .expect("Merchant account not found");
+    else {
+        // No merchant, no reward factor: callers fall back to the failure-key score.
+        logger::error!(
+            action = "eliminationV2RewardFactor",
+            merchant_id = merchant_id,
+            "No reward factor: merchant account not found"
+        );
+        return None;
+    };
 
     let error_tag = "Gateway Decider Input Decode Error";
     let m_gateway_success_rate_merchant_input =

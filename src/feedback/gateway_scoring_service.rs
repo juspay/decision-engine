@@ -469,13 +469,15 @@ pub async fn check_and_update_gateway_score_(
                 crate::euclid::handlers::routing_rules::stop_breached_payment_experiment(
                     &api_payload.merchant_id,
                     &breached.experiment_id,
+                    &breached.variant_id,
                     breached.run,
                 )
                 .await
             {
                 logger::error!(merchant_id = %api_payload.merchant_id,
-                    experiment_id = %breached.experiment_id, error = %error,
-                    "Failed to stop breached A/B experiment; later payment feedback will retry");
+                    experiment_id = %breached.experiment_id, variant_id = %breached.variant_id,
+                    error = %error,
+                    "Failed to stop breached A/B variant; later payment feedback will retry");
             }
         }
     }
@@ -745,12 +747,16 @@ pub async fn update_gateway_score(
     score_snapshot_flow: crate::analytics::AnalyticsFlowContext,
     redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> () {
-    let mer_acc: MerchantAccount =
-        MA::load_merchant_by_merchant_id(MID::merchant_id_to_text(txn_detail.clone().merchantId))
-            .await
-            .expect("Merchant account not found");
-
-    //let mer_acc =
+    let merchant_id = MID::merchant_id_to_text(txn_detail.clone().merchantId);
+    let Some(mer_acc) = MA::load_merchant_by_merchant_id(merchant_id.clone()).await else {
+        // Unknown merchant, or the lookup failed: there is no score to update.
+        logger::error!(
+            action = "update_gateway_score",
+            merchant_id = %merchant_id,
+            "Skipping gateway score update: merchant account not found"
+        );
+        return;
+    };
     let routing_approach = get_routing_approach(txn_detail.clone());
     logger::debug!(
         action = "routing_approach_value",

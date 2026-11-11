@@ -169,7 +169,8 @@ pub async fn delete_ingestion(
     // (dropping it), so the router stops using models with no supporting data right away instead of
     // after the 300s tick. Per-merchant: other merchants' cached models are left untouched.
     if let Err(e) =
-        crate::cost_ingestion::serving::refresh_merchant(&clickhouse, merchant.as_str()).await
+        crate::cost_ingestion::serving::refresh_merchant_everywhere(&clickhouse, merchant.as_str())
+            .await
     {
         logger::warn!(
             tag = "report_upload",
@@ -774,7 +775,8 @@ async fn finish_ingest(
             // Per-merchant: only this merchant's models are rebuilt, keeping the upload off the
             // ~2s global-refresh path (the periodic ticker still does the full rebuild).
             if let Err(e) =
-                crate::cost_ingestion::serving::refresh_merchant(clickhouse, merchant_id).await
+                crate::cost_ingestion::serving::refresh_merchant_everywhere(clickhouse, merchant_id)
+                    .await
             {
                 logger::warn!(
                     tag = "report_upload",

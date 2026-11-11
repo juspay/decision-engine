@@ -515,6 +515,12 @@ impl RouteError {
         }
     }
 
+    /// Keeps `cause` for the log alongside the caller's message.
+    pub fn with_cause(mut self, cause: impl std::fmt::Debug) -> Self {
+        self.cause = Some(format!("{cause:?}"));
+        self
+    }
+
     pub fn status(&self) -> StatusCode {
         self.status
     }
@@ -528,6 +534,19 @@ impl RouteError {
             StatusCode::NOT_FOUND => error_codes::TE_02,
             status if status.is_client_error() => error_codes::TE_03,
             _ => error_codes::TE_00,
+        }
+    }
+}
+
+/// A caller error keeps its status and message; a server error answers as [`RouteError::internal`].
+/// Either way the full report is logged.
+impl From<ContainerError<crate::euclid::errors::EuclidErrors>> for RouteError {
+    fn from(error: ContainerError<crate::euclid::errors::EuclidErrors>) -> Self {
+        let status = error.get_inner().status_code();
+        if status.is_server_error() {
+            Self::internal(error)
+        } else {
+            Self::new(status, error.get_inner().message()).with_cause(error)
         }
     }
 }
@@ -573,6 +592,31 @@ mod route_error_tests {
             body(RouteError::bad_request("empty report body")).await.1["code"],
             "TE_03"
         );
+    }
+
+    #[tokio::test]
+    async fn a_euclid_error_keeps_its_status_and_hides_server_detail() {
+        use crate::error::ContainerError;
+        use crate::euclid::errors::EuclidErrors;
+
+        let caller: ContainerError<EuclidErrors> =
+            EuclidErrors::InvalidRequest("fallback connector `x` is unknown".into()).into();
+        assert_eq!(
+            body(caller.into()).await,
+            (
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({
+                    "code": "TE_03",
+                    "message": "Invalid request received : fallback connector `x` is unknown",
+                    "data": null
+                })
+            )
+        );
+
+        let server: ContainerError<EuclidErrors> = EuclidErrors::StorageError.into();
+        let (status, json) = body(server.into()).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(json["message"], "The request could not be completed");
     }
 
     #[tokio::test]

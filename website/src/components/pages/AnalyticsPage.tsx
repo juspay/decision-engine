@@ -166,16 +166,16 @@ const CARD_INFO: Record<'hits' | 'share' | 'alignment' | 'sr' | 'preview_hits' |
     source: 'Counts come from ClickHouse-backed API analytics rows ingested from Kafka into `analytics_api_events`.',
   },
   share: {
-    title: 'Selected gateways over time',
+    title: 'Selected connectors over time',
     purpose: 'Use this to see when traffic shifted from one connector to another for the selected merchant and routing slice.',
-    calculation: 'Decision events are grouped by time and chosen connector. The chart shows how many filtered decisions each gateway received over time.',
+    calculation: 'Decision events are grouped by time and chosen connector. The chart shows how many filtered decisions each connector received over time.',
     source: 'Reads ClickHouse-backed domain analytics rows from `analytics_domain_events`.',
   },
   alignment: {
     title: 'Routing alignment',
     purpose: 'Use this to see whether the best-scoring connector is also leading traffic share.',
-    calculation: 'Compares the latest connector success-rate score with the gateways actually selected in the same time window.',
-    source: 'Reads the same ClickHouse-backed routing-stats response used by the gateway share and connector success-rate charts.',
+    calculation: 'Compares the latest connector success-rate score with the connectors actually selected in the same time window.',
+    source: 'Reads the same ClickHouse-backed routing-stats response used by the connector share and connector success-rate charts.',
   },
   sr: {
     title: 'Connector success rate over time',
@@ -186,7 +186,7 @@ const CARD_INFO: Record<'hits' | 'share' | 'alignment' | 'sr' | 'preview_hits' |
   preview_hits: {
     title: 'Rule-based summary',
     purpose: 'Use these cards to distinguish rule decision volume from the connector coverage produced by rule-based routing.',
-    calculation: 'Rule Evaluate counts come from request-hit analytics for `/routing/evaluate`. Gateway coverage counts the unique connectors selected in rule decisions for this window.',
+    calculation: 'Rule Evaluate counts come from request-hit analytics for `/routing/evaluate`. Connector coverage counts the unique connectors selected in rule decisions for this window.',
     source: 'Reads request-hit and rule decision analytics associated with rule-based routing activity.',
   },
   preview_activity: {
@@ -196,7 +196,7 @@ const CARD_INFO: Record<'hits' | 'share' | 'alignment' | 'sr' | 'preview_hits' |
     source: 'Reads rule decision activity through `/analytics/preview-trace`.',
   },
   preview_share: {
-    title: 'Rule-based gateway selection mix',
+    title: 'Rule-based connector selection mix',
     purpose: 'Use this to see which connectors lead selected rule decisions, separate from multi-objective transaction decisions.',
     calculation: 'Returned decision traces are grouped by latest selected connector and displayed as share of selected rule decisions.',
     source: 'Reads rule decision activity through `/analytics/preview-trace`.',
@@ -869,7 +869,7 @@ function SmartRetrySection({ stats }: { stats: SmartRetryStats | null }) {
         <CardHeader>
           <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Smart Retry</h2>
           <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
-            Payments retried on a fallback gateway after GSM classified the failure as retryable.
+            Payments retried on a fallback connector after GSM classified the failure as retryable.
           </p>
         </CardHeader>
         <CardBody>
@@ -1279,7 +1279,7 @@ export function AnalyticsPage() {
     const counts = new Map<string, number>()
 
     for (const row of previewRows) {
-      const gateway = row.latest_gateway || 'No gateway selected'
+      const gateway = row.latest_gateway || 'No connector selected'
       counts.set(gateway, (counts.get(gateway) || 0) + 1)
     }
 
@@ -1335,7 +1335,7 @@ export function AnalyticsPage() {
     }
 
     for (const row of previewRows) {
-      const gateway = row.latest_gateway || 'No gateway selected'
+      const gateway = row.latest_gateway || 'No connector selected'
       if (!gateways.includes(gateway)) continue
       const bucket_ms = bucketTimestamp(row.last_seen_ms, chartBucketSize)
       const bucket =
@@ -1363,7 +1363,7 @@ export function AnalyticsPage() {
     Math.ceil(previewListTotalResults / PREVIEW_LIST_PAGE_SIZE),
   )
   const previewGatewaysTouched = previewGatewaySummary.filter(
-    (item) => item.gateway !== 'No gateway selected',
+    (item) => item.gateway !== 'No connector selected',
   ).length
   const previewGatewayMaxCount = previewGatewaySummary[0]?.count || 1
   const previewIngestionPending =
@@ -1386,7 +1386,7 @@ export function AnalyticsPage() {
 
   const gatewayShareData = useMemo(() => {
     const gatewaySharePoints = filteredRouting.data?.gateway_share || []
-    const gateways = sortedGateways(gatewaySharePoints.map((point) => point.gateway || 'No gateway selected'))
+    const gateways = sortedGateways(gatewaySharePoints.map((point) => point.gateway || 'No connector selected'))
     if (!gateways.length) {
       return {
         gateways,
@@ -1410,7 +1410,7 @@ export function AnalyticsPage() {
     }
 
     for (const point of gatewaySharePoints) {
-      const gateway = point.gateway || 'No gateway selected'
+      const gateway = point.gateway || 'No connector selected'
       if (!gateways.includes(gateway)) continue
       const row =
         buckets.get(point.bucket_ms) ||
@@ -1795,7 +1795,7 @@ export function AnalyticsPage() {
   return (
     <div className="space-y-8 px-5 sm:px-5 lg:px-8 xl:px-8">
       <div className="grid grid-cols-1 items-center gap-3 xl:grid-cols-[minmax(0,1fr)_auto]">
-        <PageHeading title="Analytics" description="Real-time multi-gateway routing performance overview." />
+        <PageHeading title="Analytics" description="Real-time multi-connector routing performance overview." />
 
         <div className="flex flex-wrap items-center gap-2 justify-self-start xl:justify-self-end">
           <SelectMenu label="View" items={visibleViewTabs} value={view} onSelect={setView} />
@@ -1917,7 +1917,7 @@ export function AnalyticsPage() {
         <CardHeader>
           <div className="flex items-start justify-between gap-3">
             <div>
-              <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Selected gateways over time</h2>
+              <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Selected connectors over time</h2>
               <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
                 Connector decision counts for the same active filters used by the success-rate chart.
               </p>
@@ -1955,8 +1955,8 @@ export function AnalyticsPage() {
             </div>
           ) : (
             <EmptyState
-              title="No gateway share history yet"
-              body="Gateway traffic will appear here after payments are routed in this window."
+              title="No connector share history yet"
+              body="Connector traffic will appear here after payments are routed in this window."
             />
           )}
         </CardBody>
@@ -2276,7 +2276,7 @@ export function AnalyticsPage() {
                             key={gateway}
                             dataKey={gateway}
                             fill={
-                              gateway === 'No gateway selected'
+                              gateway === 'No connector selected'
                                 ? '#64748b'
                                 : CHART_COLORS[index % CHART_COLORS.length]
                             }
@@ -2361,9 +2361,9 @@ export function AnalyticsPage() {
               <Card className="!rounded-2xl h-full overflow-visible">
                 <CardHeader>
                   <div>
-                    <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Gateway activity</h2>
+                    <h2 className="text-[13px] font-semibold text-slate-800 dark:text-white leading-[18px]">Connector activity</h2>
                     <p className="mt-2 text-[13px] text-slate-500 dark:text-[#8a8a93] leading-[18px]">
-                      Recent decisions grouped by latest chosen gateway.
+                      Recent decisions grouped by latest chosen connector.
                     </p>
                   </div>
                 </CardHeader>
@@ -2390,12 +2390,12 @@ export function AnalyticsPage() {
                     </div>
                   ) : previewIngestionPending ? (
                     <PendingState
-                      title="Waiting for gateway activity"
-                      body="Recent rule decisions are still being processed. Gateway activity will appear automatically once rows are available."
+                      title="Waiting for connector activity"
+                      body="Recent rule decisions are still being processed. Connector activity will appear automatically once rows are available."
                     />
                   ) : (
                     <EmptyState
-                      title="No gateway activity yet"
+                      title="No connector activity yet"
                       body="Once rule decisions are captured, this panel will show which connectors are being selected."
                     />
                   )}

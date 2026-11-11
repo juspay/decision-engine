@@ -10,7 +10,7 @@ import { ConfirmDialog } from '../ui/ConfirmDialog'
 import { PageHeading } from '../ui/PageHeading'
 import { useMerchantStore } from '../../store/merchantStore'
 import { useCanEditRouting } from '../../store/authStore'
-import { apiPost } from '../../lib/api'
+import { apiPost, fetcher } from '../../lib/api'
 import { formatLastModified, lastModifiedMs } from '../../lib/routingRuleTimestamps'
 import { FEATURE_FLAGS } from '../../lib/featureFlags'
 import { RoutingAlgorithm } from '../../types/api'
@@ -35,7 +35,7 @@ export function useRoutingAlgorithms() {
   )
   const active = useSWR<RoutingAlgorithm[]>(
     merchantId ? `/routing/list/active/${merchantId}` : null,
-    () => apiPost<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`)
+    () => fetcher<RoutingAlgorithm[]>(`/routing/list/active/${merchantId}`)
   )
   return { merchantId, all, active }
 }
@@ -263,11 +263,11 @@ export function RoutingRuleListPage({ config }: { config: RoutingRuleListConfig 
                           label={column.header}
                           value={gatewayFilter}
                           options={[
-                            { value: 'all', label: 'All gateways' },
+                            { value: 'all', label: 'All connectors' },
                             ...gatewayOptions.map((g) => ({ value: g, label: g })),
                           ]}
                           onChange={setGatewayFilter}
-                          ariaLabel="Filter by gateway"
+                          ariaLabel="Filter by connector"
                         />
                       ) : (
                         column.header

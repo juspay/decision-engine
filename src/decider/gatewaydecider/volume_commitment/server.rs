@@ -12,7 +12,7 @@ use super::Deps;
 use crate::error::ConfigurationError;
 use crate::logger;
 
-/// Serve the scheduler's port, and run its loop, until SIGTERM. A no-op unless
+/// Serve the scheduler's port, and run its loop, until SIGTERM or SIGINT. A no-op unless
 /// `volume_commitment.enabled` — two schedulers would double every run.
 pub async fn volume_commitment_server_builder(
     deps: Arc<Deps>,
@@ -40,13 +40,21 @@ pub async fn volume_commitment_server_builder(
     let router = Router::new()
         .route("/health", get(|| async { "ok" }))
         .route("/schedule", get(schedule))
+        .layer(axum::middleware::from_fn(
+            crate::middleware::default_response_headers,
+        ))
         .with_state(scheduler);
 
+    // Same signals as the main server; it handles SIGINT, so Ctrl-C no longer kills the process by default.
     let mut sigterm = signal(SignalKind::terminate())?;
+    let mut sigint = signal(SignalKind::interrupt())?;
 
     axum::serve(listener, router.into_make_service())
         .with_graceful_shutdown(async move {
-            let _ = sigterm.recv().await;
+            tokio::select! {
+                _ = sigterm.recv() => {}
+                _ = sigint.recv() => {}
+            }
             logger::info!(
                 tag = "volume_commitment",
                 "volume commitment scheduler shutting down gracefully"

@@ -11,8 +11,8 @@ use uuid::Uuid;
 
 pub use context::{AuthContext, AuthKind};
 pub use scope::{
-    authorize, authorize_merchant_id, session_merchant, AuthorizedMerchant, MerchantScopeViolation,
-    MerchantScoped,
+    authorize, authorize_merchant_id, key_holder, session_merchant, AuthorizedMerchant,
+    MerchantScopeViolation, MerchantScoped,
 };
 
 const KEY_PREFIX: &str = "DE_";

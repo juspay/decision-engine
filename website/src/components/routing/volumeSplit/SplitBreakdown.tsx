@@ -15,7 +15,7 @@ export function SplitBreakdown({ gateways }: { gateways: VolumeSplitGatewayFormE
   if (named.length === 0) {
     return (
       <p className="text-[13px] text-slate-500 dark:text-[#78849a] leading-[18px]">
-        No gateways yet — add at least one to split traffic across.
+        No connectors yet — add at least one to split traffic across.
       </p>
     )
   }

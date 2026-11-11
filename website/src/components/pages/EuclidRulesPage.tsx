@@ -1,5 +1,5 @@
 import { ABTestAlgorithmData, RoutingAlgorithm } from '../../types/api'
-import { resolvedArm } from '../../features/routing/abTesting/arms'
+import { resolvedControl, resolvedVariants } from '../../features/routing/abTesting/arms'
 import { RuleBreakdown } from '../routing/euclid/RuleBreakdown'
 import {
   summarizeConditions, summarizeDestination, destinationGateways,
@@ -20,13 +20,13 @@ function abTestArmIds(active: RoutingAlgorithm[]): Set<string> {
   const d = abTest && ((abTest.algorithm_data || abTest.algorithm)?.data as ABTestAlgorithmData | undefined)
   if (!d) return new Set()
   return new Set(
-    [resolvedArm(d, 'control').rule_algorithm_id, resolvedArm(d, 'variant').rule_algorithm_id].filter(Boolean) as string[],
+    [resolvedControl(d), ...resolvedVariants(d).map(v => v.arm)].map(arm => arm.rule_algorithm_id).filter(Boolean) as string[],
   )
 }
 
 const config: RoutingRuleListConfig = {
   title: 'Rule-Based Routing',
-  description: 'Create conditions to route card and alternative payment transactions dynamically across multiple active gateways.',
+  description: 'Create conditions to route card and alternative payment transactions dynamically across multiple active connectors.',
   cellAlign: 'top',
   basePath: '/routing/rules',
   emptyText: 'No rule-based rules yet.',
@@ -46,7 +46,7 @@ const config: RoutingRuleListConfig = {
       },
     },
     {
-      header: 'Destination Gateway',
+      header: 'Destination Connector',
       gatewayFilter: true,
       cellClassName: 'max-w-[300px]',
       render: (algo) => {

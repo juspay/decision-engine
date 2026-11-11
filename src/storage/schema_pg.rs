@@ -254,6 +254,8 @@ diesel::table! {
         merchant_category_code -> Nullable<Text>,
         #[max_length = 255]
         merchant_name -> Nullable<Varchar>,
+        #[max_length = 255]
+        parent_merchant_id -> Nullable<Varchar>,
     }
 }
 

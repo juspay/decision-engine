@@ -38,6 +38,6 @@ export class VolumeSplitBuilder extends RoutingListPage {
   }
 
   async addGateway(): Promise<void> {
-    await this.page.getByRole('button', { name: 'Add Gateway' }).click()
+    await this.page.getByRole('button', { name: 'Add Connector' }).click()
   }
 }
