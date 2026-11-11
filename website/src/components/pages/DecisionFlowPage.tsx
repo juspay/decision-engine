@@ -1,5 +1,6 @@
 import type { ElementType, ReactNode } from 'react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { Link } from 'react-router-dom'
 import useSWR from 'swr'
 import {
@@ -9,6 +10,7 @@ import {
   Coins,
   Filter,
   FlaskConical,
+  Info,
   Network,
   RefreshCcw,
   Flag,
@@ -498,9 +500,12 @@ export function DecisionFlowView() {
 
   return (
     <div className="max-w-[1100px] space-y-6">
-      <p className={type.subheading}>
-        Follow your connectors through every stage — read live from your configuration.
-      </p>
+      <div className="flex items-center gap-1.5">
+        <p className={type.subheading}>
+          Follow your connectors through every stage — read live from your configuration.
+        </p>
+        <DecisionFlowInfo />
+      </div>
 
       <StackBoard stack={stack} loading={loading} loadFailed={loadFailed} hasMerchant={Boolean(merchantId)} />
 
@@ -544,6 +549,86 @@ export function DecisionFlowView() {
 }
 
 /* ── the read-only routing-stack status board ─────────────────────────────── */
+
+function DecisionFlowInfo() {
+  const tooltipId = useId()
+  const buttonRef = useRef<HTMLButtonElement>(null)
+  const hideTimer = useRef<number | undefined>(undefined)
+  const [position, setPosition] = useState<{ left: number; top: number } | null>(null)
+
+  function show() {
+    window.clearTimeout(hideTimer.current)
+    const rect = buttonRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const width = Math.min(352, window.innerWidth - 24)
+    setPosition({
+      left: Math.max(12, Math.min(rect.left, window.innerWidth - width - 12)),
+      top: rect.bottom + 8,
+    })
+  }
+
+  function scheduleHide() {
+    if (document.activeElement === buttonRef.current) return
+    window.clearTimeout(hideTimer.current)
+    hideTimer.current = window.setTimeout(() => setPosition(null), 120)
+  }
+
+  useEffect(() => () => window.clearTimeout(hideTimer.current), [])
+
+  useEffect(() => {
+    if (!position) return
+    const hide = () => {
+      window.clearTimeout(hideTimer.current)
+      setPosition(null)
+    }
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') hide()
+    }
+    document.addEventListener('scroll', hide, true)
+    document.addEventListener('keydown', onKeyDown)
+    window.addEventListener('resize', hide)
+    return () => {
+      document.removeEventListener('scroll', hide, true)
+      document.removeEventListener('keydown', onKeyDown)
+      window.removeEventListener('resize', hide)
+    }
+  }, [position])
+
+  return (
+    <span className="inline-flex shrink-0">
+      <button
+        ref={buttonRef}
+        type="button"
+        aria-label="About Decision Flow"
+        aria-describedby={position ? tooltipId : undefined}
+        className="inline-flex h-6 w-6 cursor-help items-center justify-center rounded-full text-slate-400 transition-colors hover:text-slate-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-500 dark:text-slate-500 dark:hover:text-slate-300"
+        onMouseEnter={show}
+        onMouseLeave={scheduleHide}
+        onFocus={show}
+        onBlur={() => setPosition(null)}
+        onClick={show}
+      >
+        <Info size={15} aria-hidden="true" />
+      </button>
+      {position && createPortal(
+        <span
+          id={tooltipId}
+          role="tooltip"
+          onMouseEnter={() => window.clearTimeout(hideTimer.current)}
+          onMouseLeave={scheduleHide}
+          style={{ position: 'fixed', ...position, width: 'min(352px, calc(100vw - 24px))' }}
+          className="z-[200] rounded-lg bg-slate-900 px-3 py-2.5 text-[12px] font-normal leading-5 text-white shadow-lg dark:bg-slate-700"
+        >
+          Decision Flow explains how routing stages work together using your saved configuration.
+          It is not a payment simulation or a trace of a real payment, and does not predict the exact
+          routing outcome. Animated paths and connector order are illustrative; actual decisions
+          depend on payment details, rule matches, connector eligibility, and live routing signals.
+        </span>,
+        document.body,
+      )}
+    </span>
+  )
+}
 
 function StackBoard({
   stack,

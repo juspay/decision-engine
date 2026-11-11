@@ -287,7 +287,7 @@ export function RoutingHubPage() {
           >
             Decision Flow
             <span className="rounded-full bg-sky-100 px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-4 tracking-wide text-sky-600 dark:bg-sky-500/15 dark:text-sky-300">
-              New
+              Beta
             </span>
           </button>
         </nav>
