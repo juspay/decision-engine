@@ -617,7 +617,7 @@ function DecisionFlowInfo() {
           onMouseEnter={() => window.clearTimeout(hideTimer.current)}
           onMouseLeave={scheduleHide}
           style={{ position: 'fixed', ...position, width: 'min(352px, calc(100vw - 24px))' }}
-          className="z-[200] rounded-lg bg-slate-900 px-3 py-2.5 text-[12px] font-normal leading-5 text-white shadow-lg dark:bg-slate-700"
+          className="z-[200] rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-[12px] font-normal leading-5 text-slate-700 shadow-lg shadow-slate-200/50 dark:border-slate-600 dark:bg-slate-700 dark:text-white dark:shadow-black/20"
         >
           Decision Flow explains how routing stages work together using your saved configuration.
           It is not a payment simulation or a trace of a real payment, and does not predict the exact
