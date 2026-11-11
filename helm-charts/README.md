@@ -8,7 +8,7 @@ This chart bootstraps a [Decision Engine](https://github.com/juspay/decision-eng
 
 ## Prerequisites
 
-- Kubernetes 1.19+
+- Kubernetes 1.23+
 - Helm 3.2.0+
 - PV provisioner support in the underlying infrastructure (if persistence is needed)
 
@@ -96,6 +96,12 @@ helm delete my-release
 |---------------------|---------------------------------------------------------------------------------------|-----------------|
 | `replicaCount`      | Number of Decision Engine replicas                                                    | `1`             |
 | `terminationGracePeriodSeconds` | Seconds Kubernetes waits after SIGTERM before SIGKILL; must exceed the app's drain delay + shutdown timeout + 5s | `35` |
+| `resources` | Decision Engine container resources; the HPA needs `requests.cpu` (and `requests.memory` for the memory target) | `requests: {cpu: 400m, memory: 400Mi}` |
+| `autoscaling.enabled` | Create an HPA for the Decision Engine deployment; the HPA then owns the replica count and `replicaCount` is ignored | `false` |
+| `autoscaling.minReplicas` | HPA minimum replicas | `2` |
+| `autoscaling.maxReplicas` | HPA maximum replicas | `4` |
+| `autoscaling.targetCPUUtilizationPercentage` | Average CPU utilization (of requests) the HPA scales to | `80` |
+| `autoscaling.targetMemoryUtilizationPercentage` | Average memory utilization the HPA scales to; unset means CPU only | unset |
 | `image.repository`  | Decision Engine image repository                                                      | `ghcr.io/juspay/decision-engine/postgres` |
 | `image.version`         | Decision Engine image tag                                                             | `v1.4`          |
 | `image.pullPolicy`  | Decision Engine image pull policy                                                     | `Always`        |

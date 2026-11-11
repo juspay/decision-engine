@@ -4,6 +4,13 @@ replicaCount: 1
 # Must exceed server.shutdown_drain_delay (5s) + server.shutdown_timeout (20s) + 5s feedback drain.
 terminationGracePeriodSeconds: 35
 
+# When enabled, the HPA owns the replica count and replicaCount is ignored.
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 80
+
 image:
   # Updated to include the registry URL
   repository: ghcr.io/juspay/decision-engine/postgres
@@ -90,13 +97,11 @@ ingress:
   #    hosts:
   #      - chart-example.local
 
-resources: {}
-  # limits:
-  #   cpu: 100m
-  #   memory: 128Mi
-  # requests:
-  #   cpu: 100m
-  #   memory: 128Mi
+# Requests are needed by the HPA to compute CPU/memory utilization. Limits are left to each environment.
+resources:
+  requests:
+    cpu: 400m
+    memory: 400Mi
 
 nodeSelector: {}
 
