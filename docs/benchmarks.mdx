@@ -52,8 +52,7 @@ the [saturation test](#saturation-point) below.
 <Note>
 [`POST /decide`](/api-reference/endpoint/decide) runs the same routing evaluator as
 `/routing/hybrid`, and also translates its flat request and builds the standardised `/decide`
-response. It has not yet been measured on this host; run the
-[benchmark workflow](#reproducing-these-results) to measure it alongside the endpoints above.
+response. It has not yet been measured on this host.
 </Note>
 
 ---
@@ -305,31 +304,6 @@ runs 2 concurrent async workers, which is the binding constraint for SR routing 
 ---
 
 ## Reproducing These Results
-
-### Benchmark workflow (GitHub-hosted runner)
-
-The `benchmark` workflow (`.github/workflows/benchmark.yml`, run by hand from the Actions tab)
-builds the server, pins it to two cores of an `ubuntu-latest` runner, and measures `/decide`,
-`/routing/hybrid`, `/decide-gateway` and `/routing/evaluate`:
-
-1. **Latency:** each endpoint at a fixed rate (default 200 req/s), over several rounds with the
-   endpoints alternating so that drift during the run spreads across all of them.
-2. **Throughput:** each endpoint at a series of fixed rates. A step is sustained when k6 dropped
-   no iterations, every check passed and no routing or feedback call errored; the highest
-   sustained step is the endpoint's throughput. SR, hybrid and decide iterations each also send
-   an `/update-gateway-score` call, so the server handles twice that many HTTP requests.
-
-The report appears in the run's summary and in its `benchmark-results` artifact. Hosted runners
-are shared machines, so compare endpoints within one run rather than across runs.
-
-The same phases run against any server that is already up:
-
-```bash
-bash scripts/load-test/ci_benchmark.sh                       # server on http://127.0.0.1:8080
-python3 scripts/load-test/summarize_ci_benchmark.py <results dir>
-```
-
-### Stepped VU and saturation runs
 
 ```bash
 # SR + Rule-based routing (sleep-based, realistic think-time)
