@@ -1896,8 +1896,8 @@ pub async fn delete_score_key_if_bucket_size_changes(
                 match get_tenant_app_state()
                     .await
                     .redis_conn
-                    .conn
-                    .delete_key(&[sr_redis_key, "}score".to_string()].concat())
+                    .commands()
+                    .delete_key(&[sr_redis_key, "}score".to_string()].concat().into())
                     .await
                 {
                     Ok(_res) => (),
@@ -1939,8 +1939,8 @@ pub async fn check_if_bucket_size_changed(
     match get_tenant_app_state()
         .await
         .redis_conn
-        .conn
-        .get_list_length(queue_key.as_str())
+        .commands()
+        .get_list_length(&queue_key.into())
         .await
     {
         Ok(redis_bucket_size) => redis_bucket_size != merchant_bucket_size as usize,

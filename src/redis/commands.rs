@@ -10,9 +10,10 @@ use fred::{
     interfaces::{HashesInterface, KeysInterface, ListInterface, TransactionInterface},
     types::{Expiration, FromRedis, MultipleValues},
 };
-use redis_interface::{errors, types::DelReply, RedisConnectionPool};
+use redis_interface::{errors, types::DelReply, RedisConnectionPool, RedisConnectionWithContext};
 use std::fmt::Debug;
 use std::str;
+use std::sync::Arc;
 
 use crate::config::CompressionFilepath;
 #[cfg(feature = "redis_compression")]
@@ -39,7 +40,7 @@ use zstd::bulk::Compressor;
 use zstd::stream::read::Decoder;
 
 pub struct RedisConnectionWrapper {
-    pub conn: RedisConnectionPool,
+    pub conn: Arc<RedisConnectionPool>,
     pub compression_file_path: Option<CompressionFilepath>,
 }
 
@@ -52,9 +53,15 @@ impl RedisConnectionWrapper {
         compression_file_path: Option<CompressionFilepath>,
     ) -> Self {
         Self {
-            conn: redis_conn,
+            conn: Arc::new(redis_conn),
             compression_file_path,
         }
+    }
+
+    /// Handle for the `redis_interface` command helpers, which take the connection
+    /// through a request-scoped wrapper.
+    pub fn commands(&self) -> RedisConnectionWithContext {
+        RedisConnectionWithContext::new_without_context(Arc::clone(&self.conn))
     }
 
     #[cfg(feature = "redis_compression")]
@@ -208,7 +215,9 @@ impl RedisConnectionWrapper {
     where
         V: serde::Serialize + Debug,
     {
-        self.conn.serialize_and_set_key(key, value).await
+        self.commands()
+            .serialize_and_set_key(&key.into(), value)
+            .await
     }
 
     #[cfg(feature = "redis_compression")]
@@ -252,8 +261,8 @@ impl RedisConnectionWrapper {
     where
         V: serde::Serialize + Debug,
     {
-        self.conn
-            .serialize_and_set_key_with_expiry(key, value, ttl)
+        self.commands()
+            .serialize_and_set_key_with_expiry(&key.into(), value, ttl)
             .await
     }
 
@@ -342,7 +351,7 @@ impl RedisConnectionWrapper {
     where
         T: DeserializeOwned,
     {
-        let raw_bytes: Vec<u8> = self.conn.get_key(key).await?;
+        let raw_bytes: Vec<u8> = self.commands().get_key(&key.into()).await?;
 
         if raw_bytes.is_empty() {
             return Err(errors::RedisError::GetFailed.into());
@@ -410,7 +419,9 @@ impl RedisConnectionWrapper {
     where
         T: serde::de::DeserializeOwned,
     {
-        self.conn.get_and_deserialize_key(key, type_name).await
+        self.commands()
+            .get_and_deserialize_key(&key.into(), type_name)
+            .await
     }
 
     #[cfg(feature = "redis_compression")]
@@ -637,7 +648,7 @@ impl RedisConnectionWrapper {
     }
     /// `EXISTS` on a key read through `get_key`, which applies the connection's key prefix.
     pub async fn key_exists(&self, key: &str) -> Result<bool, errors::RedisError> {
-        self.conn.exists::<String>(key).await
+        self.commands().exists::<String>(&key.into()).await
     }
 
     pub async fn exists(&self, key: &str) -> Result<bool, errors::RedisError> {

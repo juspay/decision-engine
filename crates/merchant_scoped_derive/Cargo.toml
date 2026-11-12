@@ -2,7 +2,7 @@
 name = "merchant_scoped_derive"
 version = "0.1.0"
 edition = "2021"
-rust-version = "1.88.0"
+rust-version = "1.94.1"
 description = "#[derive(MerchantScoped)] for request types that name the merchant they act on"
 license = "Apache-2.0"
 

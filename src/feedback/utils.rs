@@ -786,7 +786,11 @@ pub async fn deleteFromCache(redis_name: String, key: String) -> Result<i32, Sto
 // Original Haskell function: delCache
 pub async fn delCache(_dbName: String, key: String) -> Result<i32, StorageError> {
     let app_state = get_tenant_app_state().await;
-    let data = app_state.redis_conn.conn.delete_key(&key).await;
+    let data = app_state
+        .redis_conn
+        .commands()
+        .delete_key(&key.into())
+        .await;
     // convert data to Result<StorageError, i32>
     match data {
         Ok(res) => Ok(res as i32),

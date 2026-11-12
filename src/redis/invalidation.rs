@@ -56,7 +56,7 @@ pub async fn publish(kind: CacheKind) {
             .redis_conn
             .conn
             .publisher
-            .publish::<i64, _, _>(channel, payload)
+            .publish(channel, redis_interface::RedisValue::new(payload.into()))
             .await
             .map_err(|error| format!("{error:?}")),
         Err(error) => Err(format!("encode failed: {error}")),
@@ -96,13 +96,14 @@ pub fn spawn_subscriber(clickhouse: ClickHouseAnalyticsConfig) {
         let channel = cache_config.invalidation_channel.clone();
         let subscriber = state.redis_conn.conn.subscriber.clone();
 
-        let mut messages = subscriber.on_message();
+        let mut messages = subscriber.message_rx();
         // Resubscribes after a Redis reconnect, otherwise invalidations silently stop arriving.
         let _resubscriber = subscriber.manage_subscriptions();
 
         // A failed first subscribe would otherwise disable invalidation on this pod until restart.
+        // The fred client subscribes directly so retries don't each start another resubscribe task.
         let mut retry_in = SUBSCRIBE_RETRY_START;
-        while let Err(error) = subscriber.subscribe::<(), _>(channel.as_str()).await {
+        while let Err(error) = PubsubInterface::subscribe(&**subscriber, channel.as_str()).await {
             logger::warn!(tag = "cache_invalidation", ?error, channel = %channel, retry_in_secs = retry_in.as_secs(), "Subscribe failed; retrying");
             tokio::time::sleep(retry_in).await;
             retry_in = (retry_in * 2).min(SUBSCRIBE_RETRY_MAX);
@@ -129,7 +130,7 @@ pub fn spawn_subscriber(clickhouse: ClickHouseAnalyticsConfig) {
                     break;
                 }
             };
-            if *message.channel == *channel {
+            if message.channel == channel {
                 handle(&message.value, &cache_config, &clickhouse);
             }
         }

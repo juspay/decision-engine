@@ -301,9 +301,10 @@ impl TenantAppState {
         .await
         .change_context(error::ConfigurationError::DatabaseError)?;
 
-        let redis_conn = redis_interface::RedisConnectionPool::new(&global_config.redis)
-            .await
-            .expect("Failed to create Redis connection Pool");
+        let redis_conn =
+            redis_interface::RedisConnectionPool::new_without_event_emitter(&global_config.redis)
+                .await
+                .expect("Failed to create Redis connection Pool");
 
         Ok(Self {
             db,
