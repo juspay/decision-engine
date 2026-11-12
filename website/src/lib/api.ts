@@ -259,7 +259,9 @@ export async function apiFetch<T>(
           message.includes('expired') ||
           message.includes('invalid or expired')
       } catch {
-        // Ignore non-JSON 401s; not every unauthorized response should clear the session.
+        // Auth answers as `text/plain`, so the parse above throws on the one 401 that does end
+        // the session. Match it exactly; other unparsable 401s must not clear a valid session.
+        isTokenExpiry = responseText.trim().toLowerCase() === 'invalid or expired token'
       }
 
       if (isTokenExpiry) endExpiredSession()
