@@ -121,9 +121,9 @@ const decideReqs       = new Counter("decide_reqs");
 // ── SR payload variants ───────────────────────────────────────────────────────
 
 const srPayloads = [
-  { paymentMethodType: "CARD", paymentMethod: "DEBIT",  authType: "THREE_DS",    cardBrand: "VISA",       currency: "AED", amount: 1000, eligibleGatewayList: ["stripe", "adyen"] },
-  { paymentMethodType: "CARD", paymentMethod: "CREDIT", authType: "NO_THREE_DS", cardBrand: "MASTERCARD", currency: "USD", amount: 5000, eligibleGatewayList: ["stripe", "adyen", "checkout"] },
-  { paymentMethodType: "CARD", paymentMethod: "DEBIT",  authType: "THREE_DS",    cardBrand: "AMEX",       currency: "EUR", amount: 2500, eligibleGatewayList: ["adyen", "braintree"] },
+  { paymentMethod: "CARD", paymentMethodType: "DEBIT",  authType: "THREE_DS",    cardBrand: "VISA",       currency: "AED", amount: 1000, eligibleGatewayList: ["stripe", "adyen"] },
+  { paymentMethod: "CARD", paymentMethodType: "CREDIT", authType: "NO_THREE_DS", cardBrand: "MASTERCARD", currency: "USD", amount: 5000, eligibleGatewayList: ["stripe", "adyen", "checkout"] },
+  { paymentMethod: "CARD", paymentMethodType: "DEBIT",  authType: "THREE_DS",    cardBrand: "AMEX",       currency: "EUR", amount: 2500, eligibleGatewayList: ["adyen", "braintree"] },
 ];
 
 // ── Rule-based (routing/evaluate) parameter variants ─────────────────────────
@@ -429,6 +429,7 @@ function _runRuleEvaluate(merchantId, headers, idx) {
     },
   });
 
+  decideReqs.add(1);
   const res   = http.post(`${envDefaults.baseUrl}/routing/evaluate`, body, { headers });
   latencyTrend.add(res.timings.duration);
 
