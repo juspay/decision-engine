@@ -165,11 +165,49 @@ export function apiErrorMessage(err: unknown, fallback = 'Something went wrong')
   return message || fallback
 }
 
+/**
+ * Set once this page has ended an expired session, until a new token arrives. Requests made in that
+ * gap — polls and retries still running while the page hands over to login or to the dashboard's
+ * re-mint — would carry no token and only be refused, so they are not sent.
+ */
+let sessionEnded = false
+
+/**
+ * Drop a session whose token the backend would refuse, and hand the user to where a new one comes
+ * from. Throws, so the request that found out goes no further.
+ */
+function endExpiredSession(): never {
+  sessionEnded = true
+  tokenRef.set(null)
+  import('../store/authStore').then(({ useAuthStore }) => {
+    useAuthStore.getState().clearAuth()
+  })
+  if (isEmbedded()) {
+    // In the dashboard's iframe the login page is a dead end (the SSO user is synthetic) —
+    // ask the dashboard for a fresh hand-off instead of navigating the frame.
+    postToDashboard({ type: 'de:session-expired' })
+  } else {
+    window.location.href = `${import.meta.env.BASE_URL}login`
+  }
+  throw new Error('Session expired')
+}
+
 export async function apiFetch<T>(
   path: string,
   options?: RequestInit
 ): Promise<T> {
   const requestPath = resolveApiPath(path)
+
+  // A token that has already lapsed would only come back as a 401, so end the session here instead
+  // of sending it. `/auth/` routes are left to the server, as for the 401 below: they mint and
+  // refresh sessions, and AuthGuard owns the session check on `/auth/me`.
+  if (!path.startsWith('/auth/')) {
+    if (tokenRef.isExpired()) endExpiredSession()
+    if (sessionEnded) {
+      if (!tokenRef.get()) throw new Error('Session expired')
+      sessionEnded = false
+    }
+  }
 
   // logRequest(method, requestPath, body)
 
@@ -224,20 +262,7 @@ export async function apiFetch<T>(
         // Ignore non-JSON 401s; not every unauthorized response should clear the session.
       }
 
-      if (isTokenExpiry) {
-        tokenRef.set(null)
-        import('../store/authStore').then(({ useAuthStore }) => {
-          useAuthStore.getState().clearAuth()
-        })
-        if (isEmbedded()) {
-          // In the dashboard's iframe the login page is a dead end (the SSO user is synthetic) —
-          // ask the dashboard for a fresh hand-off instead of navigating the frame.
-          postToDashboard({ type: 'de:session-expired' })
-        } else {
-          window.location.href = `${import.meta.env.BASE_URL}login`
-        }
-        throw new Error('Session expired')
-      }
+      if (isTokenExpiry) endExpiredSession()
     }
 
     if (!res.ok) {

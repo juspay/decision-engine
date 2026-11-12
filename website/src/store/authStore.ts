@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { clearDashboardHandoff } from '../lib/dashboardHandoff'
 import { persist } from 'zustand/middleware'
 import { tokenRef } from '../lib/tokenRef'
+import { measureClockSkew } from '../lib/sessionExpiry'
 
 /**
  * One scope this session can switch to.
@@ -72,6 +73,12 @@ export interface AuthUser {
 
 interface AuthStore {
   token: string | null
+  /**
+   * Seconds the server's clock was ahead of this device's when `token` arrived, so its expiry can
+   * be read on the server's clock (see `lib/sessionExpiry`). `null` for a session stored before this
+   * was tracked; such a session is left to the server to expire.
+   */
+  tokenClockSkew: number | null
   user: AuthUser | null
   merchants: MerchantInfo[]
   hasHydrated: boolean
@@ -98,28 +105,41 @@ export function useCanEditRouting(): boolean {
   return useAuthStore((s) => sessionAllows(s.user, 'routing:write'))
 }
 
+/**
+ * The skew to keep for `token`: measured afresh for a new token, kept for the one already held (the
+ * `/auth/me` refresh re-sets the same token long after it arrived, and re-measuring then would
+ * understate the skew).
+ */
+function skewFor(token: string, current: { token: string | null; tokenClockSkew: number | null }) {
+  return token === current.token ? current.tokenClockSkew : measureClockSkew(token)
+}
+
 export const useAuthStore = create<AuthStore>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       token: null,
+      tokenClockSkew: null,
       user: null,
       merchants: [],
       hasHydrated: false,
       setAuth: (token, user, merchants = []) => {
-        tokenRef.set(token)
-        set({ token, user, merchants })
+        const tokenClockSkew = skewFor(token, get())
+        tokenRef.set(token, tokenClockSkew)
+        set({ token, tokenClockSkew, user, merchants })
       },
       updateMerchant: (token, merchantId, merchants) => {
-        tokenRef.set(token)
+        const tokenClockSkew = skewFor(token, get())
+        tokenRef.set(token, tokenClockSkew)
         set((state) => ({
           token,
+          tokenClockSkew,
           merchants,
           user: state.user ? { ...state.user, merchantId } : null,
         }))
       },
       clearAuth: () => {
         tokenRef.set(null)
-        set({ token: null, user: null, merchants: [] })
+        set({ token: null, tokenClockSkew: null, user: null, merchants: [] })
         clearDashboardHandoff()
       },
       setHasHydrated: (hasHydrated) => set({ hasHydrated }),
@@ -128,7 +148,7 @@ export const useAuthStore = create<AuthStore>()(
       name: 'auth-store',
       onRehydrateStorage: () => (state) => {
         if (state?.token) {
-          tokenRef.set(state.token)
+          tokenRef.restore(state.token, state.tokenClockSkew ?? null)
         }
         state?.setHasHydrated(true)
       },
