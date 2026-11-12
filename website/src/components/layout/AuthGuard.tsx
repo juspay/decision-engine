@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Navigate, Outlet } from 'react-router-dom'
 import { Loader2 } from 'lucide-react'
 import useSWR from 'swr'
@@ -8,6 +8,7 @@ import { fetcher } from '../../lib/api'
 import { refreshSessionScopedSWRCache } from '../../lib/swrCache'
 import { isEmbedded } from '../../lib/embedMode'
 import { postToDashboard } from '../../lib/embedBridge'
+import { tokenRef } from '../../lib/tokenRef'
 
 interface MeResponse {
   user_id: string
@@ -112,9 +113,15 @@ export function AuthGuard() {
   // A redirect (HS SSO) session that 401s can't recover on the DE login page — remember it so we
   // show the "reopen from Hyperswitch" screen instead of bouncing to /login.
   const [redirectSessionExpired, setRedirectSessionExpired] = useState(false)
+  // Re-renders on return to the tab, so a token that lapsed while it was hidden is caught on sight.
+  const [, setVisibilityChecks] = useState(0)
+
+  // A token already past its expiry is never sent: `/auth/me` would only answer 401. Ending the
+  // session here leads to the same screen that 401 would.
+  const tokenExpired = hasHydrated && !!token && tokenRef.get() === token && tokenRef.isExpired()
 
   const { data: me, error, isValidating } = useSWR<MeResponse>(
-    token && hasHydrated ? ['/auth/me', token] : null,
+    token && hasHydrated && !tokenExpired ? ['/auth/me', token] : null,
     ([url]) => fetcher(url),
     { revalidateOnFocus: false, shouldRetryOnError: false },
   )
@@ -133,16 +140,30 @@ export function AuthGuard() {
   }, [me, token, setAuth, setMerchantId])
 
   useEffect(() => {
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') setVisibilityChecks((n) => n + 1)
+    }
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', onVisibilityChange)
+  }, [])
+
+  const endSession = useCallback(() => {
+    if (user?.isRedirectSession) setRedirectSessionExpired(true)
+    clearAuth()
+    setMerchantId('')
+  }, [user, clearAuth, setMerchantId])
+
+  useEffect(() => {
+    if (tokenExpired) endSession()
+  }, [tokenExpired, endSession])
+
+  useEffect(() => {
     // Don't clear auth while SWR is revalidating — the stale error may be from a previous
     // session and the fresh request (with the new token) could still succeed.
     if (!error || isValidating) return
     const statusCode = (error as { status?: number }).status
-    if (statusCode === 401 || statusCode === 403) {
-      if (user?.isRedirectSession) setRedirectSessionExpired(true)
-      clearAuth()
-      setMerchantId('')
-    }
-  }, [error, isValidating, clearAuth, setMerchantId, user])
+    if (statusCode === 401 || statusCode === 403) endSession()
+  }, [error, isValidating, endSession])
 
   if (!hasHydrated) return <SessionSpinner label="Restoring session" />
   if (redirectSessionExpired) return <RedirectSessionExpired />
@@ -150,6 +171,8 @@ export function AuthGuard() {
   // so ask the dashboard to re-mint instead of navigating to it.
   if (!token && isEmbedded()) return <EmbedSessionRefresh />
   if (!token) return <Navigate to="/login" replace />
+  // Held for the one commit until the effect above ends the session.
+  if (tokenExpired) return <SessionSpinner label="Validating session" />
   if (!me && !error) return <SessionSpinner label="Validating session" />
 
   if (error) {
