@@ -31,8 +31,8 @@ where
 }
 
 #[serde_as]
-#[serde(rename_all = "camelCase")]
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct OrderMetadataV2 {
     pub id: OrderMetadataV2PId,
     #[serde(with = "time::serde::iso8601")]

@@ -13,6 +13,8 @@ pub const ID_LENGTH: usize = 20;
 pub const X_TENANT_ID: &str = "x-tenant-id";
 /// Header key for request ID
 pub const X_REQUEST_ID: &str = "x-request-id";
+/// Header naming the merchant a call acts on.
+pub const X_CONNECTED_MERCHANT_ID: &str = "x-connected-merchant-id";
 /// Header key for udf order id
 pub const UDF_ORDER_ID: &str = "x-order-id";
 /// Header key for udf customer id
@@ -21,6 +23,9 @@ pub const UDF_CUSTOMER_ID: &str = "customer_id";
 pub const UDF_TXN_UUID: &str = "x-txn-uuid";
 /// Header key for global request ID
 pub const X_GLOBAL_REQUEST_ID: &str = "x-global-request-id";
+pub const TRACEPARENT: &str = "traceparent";
+pub const X_TRACE_ID: &str = "x-trace-id";
+pub const X_B3_TRACE_ID: &str = "x-b3-traceid";
 
 pub const EULER_REQUEST_ID: &str = "euler-request-id";
 

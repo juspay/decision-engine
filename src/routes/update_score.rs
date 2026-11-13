@@ -1,75 +1,106 @@
+use crate::custom_extractors::{RequestIds, ScopedJson, ScopedJsonRejection};
 use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
-use crate::feedback::gateway_scoring_service::check_and_update_gateway_score;
-use crate::metrics::{API_LATENCY_HISTOGRAM, API_REQUEST_COUNTER, API_REQUEST_TOTAL_COUNTER};
-use crate::types::card::txn_card_info::TxnCardInfo;
-use crate::types::txn_details::types::TxnDetail;
-use crate::{logger, metrics};
-use axum::body::to_bytes;
+use crate::feedback::gateway_scoring_service::{
+    check_and_update_gateway_score, invalid_request_error,
+};
+use crate::logger;
+use crate::redis::feature::{
+    check_redis_comp_merchant_flag, is_feature_enabled, RedisCompressionConfig,
+    RedisCompressionConfigCombined,
+};
+use crate::types::card::txn_card_info::{convert_safe_to_txn_card_info, SafeTxnCardInfo};
+use crate::types::txn_details::types::{
+    convert_safe_txn_detail_to_txn_detail, SafeTxnDetail, TransactionLatency,
+};
 use cpu_time::ProcessTime;
 use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-struct UpdateScoreRequest {
-    txn_detail: TxnDetail,
-    txn_card_info: TxnCardInfo,
+#[derive(Debug, Serialize, Deserialize, PartialEq, Clone, crate::auth::MerchantScoped)]
+pub struct UpdateScoreRequest {
+    #[merchant]
+    txn_detail: SafeTxnDetail,
+    txn_card_info: SafeTxnCardInfo,
     log_message: String,
     enforce_dynaic_routing_failure: Option<bool>,
     gateway_reference_id: Option<String>,
+    txn_latency: Option<TransactionLatency>,
+}
+
+#[derive(Debug, Serialize)]
+struct UpdateScoreReadFailureDetail<'a> {
+    request_id: &'a str,
+    query_params: &'a str,
+}
+
+#[derive(Debug, Serialize)]
+struct UpdateScoreValidationFailureDetail<'a> {
+    request_id: &'a str,
+    reason: &'static str,
 }
 
 #[axum::debug_handler]
 pub async fn update_score(
-    req: axum::http::Request<axum::body::Body>,
+    headers: axum::http::HeaderMap,
+    uri: axum::http::Uri,
+    request: Result<ScopedJson<UpdateScoreRequest>, ScopedJsonRejection>,
 ) -> Result<&'static str, ErrorResponse> {
     // Extract headers and URI
     let cpu_start = ProcessTime::now();
-    let timer = API_LATENCY_HISTOGRAM
-        .with_label_values(&["update_score"])
-        .start_timer();
-    API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["update_score"])
-        .inc();
 
-    let headers = req.headers().clone();
     // let req_headers = serde_json::to_string(&headers).unwrap_or("{}".to_string());
-    let original_url = req.uri().to_string();
-    let x_request_id = headers
-        .get("x-request-id")
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("unknown");
+    let original_url = uri.to_string();
+    let ids = RequestIds::from_headers(&headers);
+    let x_request_id = ids.request_id.as_deref().unwrap_or("unknown");
+    let global_request_id = ids.global_request_id.clone();
+    let trace_id = ids.trace_id.clone();
     let start_time = std::time::Instant::now();
     let request_time = time::OffsetDateTime::now_utc()
         .format(&time::format_description::well_known::Rfc3339)
         .unwrap_or_else(|_| "unknown".to_string());
-    let query_params = original_url.splitn(2, '?').nth(1).unwrap_or("").to_string();
-
-    // Buffer the body into memory
-    let body_bytes = match to_bytes(req.into_body(), usize::MAX).await {
-        Ok(bytes) => bytes,
-        Err(e) => {
-            API_REQUEST_COUNTER
-                .with_label_values(&["update_score", "failure"])
-                .inc();
-            timer.observe_duration();
-            let error_response = ErrorResponse {
-                status: "400".to_string(),
-                error_code: "400".to_string(),
-                error_message: "Error parsing request".to_string(),
-                priority_logic_tag: None,
-                routing_approach: None,
-                filter_wise_gateways: None,
-                error_info: UnifiedError {
-                    code: "INVALID_INPUT".to_string(),
-                    user_message: "Invalid request params. Please verify your input.".to_string(),
-                    developer_message: e.to_string(),
-                },
-                priority_logic_output: None,
-                is_dynamic_mga_enabled: false,
-            };
+    let query_params = original_url
+        .split_once('?')
+        .map(|x| x.1)
+        .unwrap_or("")
+        .to_string();
+    tracing::Span::current().record("is_audit_trail_log", "true");
+    let (body_bytes, update_score_request) = match request {
+        Ok(ScopedJson { payload, body, .. }) => (body, Ok(payload)),
+        Err(ScopedJsonRejection::Parse { body, error }) => (body, Err(error)),
+        Err(ScopedJsonRejection::Scope(violation)) => {
+            return Err(violation.into());
+        }
+        Err(ScopedJsonRejection::Read(e)) => {
+            let analytics_stage = e.analytics_stage().to_string();
+            let error_response = e.into_error_response();
 
             // Log the error
             let latency = start_time.elapsed().as_millis() as u64;
             let cpu_time = cpu_start.elapsed().as_millis() as u64;
+
+            crate::analytics::DomainAnalyticsEvent::record_error(
+                crate::analytics::AnalyticsFlowContext::new(
+                    crate::analytics::ApiFlow::DynamicRouting,
+                    crate::analytics::FlowType::UpdateScoreLegacyError,
+                ),
+                crate::analytics::AnalyticsRoute::UpdateScore,
+                None,
+                None,
+                None,
+                global_request_id.clone(),
+                trace_id.clone(),
+                None,
+                None,
+                error_response.error_code.clone(),
+                error_response.error_message.clone(),
+                crate::analytics::serialize_details(&UpdateScoreReadFailureDetail {
+                    request_id: x_request_id,
+                    query_params: &query_params,
+                }),
+                Some(analytics_stage),
+                None,
+            );
+
             logger::error!(
                 url = original_url,
                 method = "POST",
@@ -79,14 +110,14 @@ pub async fn update_score(
                 latency = latency.to_string(),
                 request_cputime = cpu_time.to_string(),
                 x_request_id = x_request_id,
-                env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
+                env = crate::logger::env::app_env(),
                 action = "POST",
-                error_code = error_response.error_code,
-                error_message = error_response.error_message,
-                developer_message = error_response.error_info.developer_message,
-                user_message = error_response.error_info.user_message,
+                error_code = error_response.error_code.clone(),
+                error_message = error_response.error_message.clone(),
+                developer_message = error_response.error_info.developer_message.clone(),
+                user_message = error_response.error_info.user_message.clone(),
                 req_body = "Failed to parse body",
-                req_headers = format!("{:?}", headers),
+                req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                 level = "Error",
                 category = "INCOMING_API",
                 "Error occurred while parsing request"
@@ -99,8 +130,6 @@ pub async fn update_score(
     // Convert the body to a string for logging
     let req_body = String::from_utf8_lossy(&body_bytes).to_string();
 
-    // Deserialize the body into the expected type
-    let update_score_request: Result<UpdateScoreRequest, _> = serde_json::from_slice(&body_bytes);
     match update_score_request {
         Ok(payload) => {
             let merchant_id = payload.txn_detail.merchantId.clone();
@@ -126,6 +155,30 @@ pub async fn update_score(
                 // Log the error
                 let latency = start_time.elapsed().as_millis() as u64;
                 let cpu_time = cpu_start.elapsed().as_millis() as u64;
+
+                crate::analytics::DomainAnalyticsEvent::record_error(
+                    crate::analytics::AnalyticsFlowContext::new(
+                        crate::analytics::ApiFlow::DynamicRouting,
+                        crate::analytics::FlowType::UpdateScoreLegacyError,
+                    ),
+                    crate::analytics::AnalyticsRoute::UpdateScore,
+                    Some(merchant_id_txt.clone()),
+                    None,
+                    None,
+                    global_request_id.clone(),
+                    trace_id.clone(),
+                    None,
+                    None,
+                    error_response.error_code.clone(),
+                    error_response.error_message.clone(),
+                    crate::analytics::serialize_details(&UpdateScoreValidationFailureDetail {
+                        request_id: x_request_id,
+                        reason: "gateway_missing",
+                    }),
+                    Some("validation_failed".to_string()),
+                    None,
+                );
+
                 logger::error!(
                     url = original_url,
                     method = "POST",
@@ -135,34 +188,58 @@ pub async fn update_score(
                     request_time = request_time,
                     query_params = query_params,
                     x_request_id = x_request_id,
-                    env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
+                    env = crate::logger::env::app_env(),
                     action = "POST",
                     error_code = error_response.error_code,
                     error_message = error_response.error_message,
                     developer_message = error_response.error_info.developer_message,
                     user_message = error_response.error_info.user_message,
                     req_body = req_body,
-                    req_headers = format!("{:?}", headers),
+                    req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                     category = "INCOMING_API",
                     "Gateway field is empty"
                 );
 
-                API_REQUEST_COUNTER
-                    .with_label_values(&["update_score", "failure"])
-                    .inc();
-                timer.observe_duration();
                 return Err(error_response);
             }
 
             // Process the request
-            let txn_detail = payload.txn_detail;
-            let txn_card_info = payload.txn_card_info;
-            let log_message = payload.log_message;
-            let enforce_failure = payload.enforce_dynaic_routing_failure.unwrap_or(false);
-            let gateway_reference_id = payload.gateway_reference_id;
+            let txn_detail = match convert_safe_txn_detail_to_txn_detail(payload.txn_detail.clone())
+            {
+                Ok(detail) => detail,
+                Err(e) => {
+                    return Err(invalid_request_error("transaction details", &e));
+                }
+            };
+            let txn_card_info = match convert_safe_to_txn_card_info(payload.txn_card_info.clone()) {
+                Ok(card_info) => card_info,
+                Err(e) => {
+                    return Err(invalid_request_error("transaction Card Info", &e));
+                }
+            };
 
-            jemalloc_ctl::epoch::advance().unwrap();
+            let log_message = payload.log_message.clone();
+            let enforce_failure = payload.enforce_dynaic_routing_failure.unwrap_or(false);
+            let gateway_reference_id = payload.gateway_reference_id.clone();
+            let txn_latency = payload.txn_latency.clone();
+
+            let _ = jemalloc_ctl::epoch::advance();
             let allocated_before = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
+
+            let redis_comp_config: Option<HashMap<String, RedisCompressionConfig>> =
+                check_redis_comp_merchant_flag(merchant_id_txt.clone()).await;
+
+            let redis_comp_enabled_de = is_feature_enabled(
+                "REDIS_COMPRESSION_ENABLED_MERCHANT_DE".to_string(),
+                merchant_id_txt.clone(),
+                "kv_redis".to_string(),
+            )
+            .await;
+
+            let redis_comp_config_final = Some(RedisCompressionConfigCombined {
+                redisCompressionConfig: redis_comp_config,
+                isRedisCompEnabled: redis_comp_enabled_de,
+            });
 
             check_and_update_gateway_score(
                 txn_detail,
@@ -170,10 +247,17 @@ pub async fn update_score(
                 log_message.as_str(),
                 enforce_failure,
                 gateway_reference_id,
+                txn_latency,
+                crate::analytics::AnalyticsRoute::UpdateScore,
+                crate::analytics::AnalyticsFlowContext::new(
+                    crate::analytics::ApiFlow::DynamicRouting,
+                    crate::analytics::FlowType::UpdateScoreLegacyScoreSnapshot,
+                ),
+                redis_comp_config_final,
             )
             .await;
 
-            jemalloc_ctl::epoch::advance().unwrap();
+            let _ = jemalloc_ctl::epoch::advance();
             let allocated_after = jemalloc_ctl::stats::allocated::read().unwrap_or(0);
             let bytes_allocated = allocated_after.saturating_sub(allocated_before);
 
@@ -190,19 +274,15 @@ pub async fn update_score(
                 bytes_allocated = bytes_allocated.to_string(),
                 x_request_id = x_request_id,
                 request_time = request_time,
-                env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
+                env = crate::logger::env::app_env(),
                 action = "POST",
-                req_body = req_body,
+                req_body = format!("{:?}", payload.clone()),
                 category = "INCOMING_API",
-                req_headers = format!("{:?}", headers),
+                req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                 "Successfully updated score"
             );
 
-            API_REQUEST_COUNTER
-                .with_label_values(&["update_score", "success"])
-                .inc();
-            timer.observe_duration();
-            return Ok("Success");
+            Ok("Success")
         }
         Err(e) => {
             let error_response = ErrorResponse {
@@ -233,23 +313,19 @@ pub async fn update_score(
                 request_cputime = cpu_time.to_string(),
                 query_params = query_params,
                 x_request_id = x_request_id,
-                env = std::env::var("APP_ENV").unwrap_or_else(|_| "development".to_string()),
+                env = crate::logger::env::app_env(),
                 action = "POST",
                 error_code = error_response.error_code,
                 error_message = error_response.error_message,
                 developer_message = error_response.error_info.developer_message,
                 user_message = error_response.error_info.user_message,
                 req_body = req_body,
-                req_headers = format!("{:?}", headers),
+                req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                 category = "INCOMING_API",
                 "Error occurred while parsing request payload"
             );
 
-            API_REQUEST_COUNTER
-                .with_label_values(&["update_score", "failure"])
-                .inc();
-            timer.observe_duration();
-            return Err(error_response);
+            Err(error_response)
         }
     }
 }

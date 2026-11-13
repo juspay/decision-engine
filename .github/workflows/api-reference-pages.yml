@@ -1,0 +1,399 @@
+name: API Reference Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "README.md"
+      - "docs/openapi.json"
+      - "docs/api-reference.md"
+      - "docs/api-reference/**"
+      - "docs/api-refs/**"
+      - ".github/workflows/api-reference-pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: github-pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build API reference
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install pandoc
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pandoc
+
+      - name: Validate OpenAPI contract
+        run: jq empty docs/openapi.json
+
+      - name: Build static Pages artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          rm -rf public
+          mkdir -p public/api-docs
+
+          cp docs/openapi.json public/openapi.json
+          cp docs/openapi.json public/api-docs/openapi.json
+          cp docs/favicon.svg public/api-docs/favicon.svg
+          cp docs/favicon.svg public/favicon.svg
+          touch public/.nojekyll
+
+          # Rewrite relative doc links to their GitHub equivalents so they
+          # resolve correctly from the GitHub Pages landing page.
+          REPO="https://github.com/juspay/decision-engine/blob/main"
+          sed \
+            -e "s|](docs/|]($REPO/docs/|g" \
+            -e "s|](CONTRIBUTING.md)|]($REPO/CONTRIBUTING.md)|g" \
+            README.md > /tmp/readme-rewritten.md
+
+          # --from=gfm-raw_html strips raw HTML from README (e.g. <div align="center">)
+          # preventing any injected markup from reaching the published page.
+          README_BODY=$(pandoc /tmp/readme-rewritten.md \
+            --from=gfm-raw_html \
+            --to=html \
+            --no-highlight)
+
+          cat > public/index.html <<LANDING
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1" />
+              <title>Decision Engine</title>
+              <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src https: data:; font-src https:; connect-src 'none'; script-src 'none';" />
+              <link rel="icon" href="./favicon.svg" />
+              <style>
+                *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+                :root {
+                  --bg:                #f8fafc;
+                  --bg-header:         #ffffff;
+                  --bg-secondary:      #f1f5f9;
+                  --bg-code:           #f1f5f9;
+                  --bg-pre:            #f8fafc;
+                  --border:            #e2e8f0;
+                  --border-strong:     #e2e8f0;
+                  --text:              #1e293b;
+                  --text-muted:        #475569;
+                  --text-heading:      #0f172a;
+                  --text-subheading:   #1e293b;
+                  --text-secondary:    #334155;
+                  --text-faint:        #94a3b8;
+                  --text-code:         #0369a1;
+                  --text-pre:          #334155;
+                  --text-th:           #0f172a;
+                  --text-td:           #475569;
+                  --link:              #2563eb;
+                  --spec-note:         #94a3b8;
+                  --spec-note-link:    #64748b;
+                }
+                @media (prefers-color-scheme: dark) {
+                  :root {
+                    --bg:                #05070d;
+                    --bg-header:         #05070d;
+                    --bg-secondary:      #1e293b;
+                    --bg-code:           #0f172a;
+                    --bg-pre:            #0f172a;
+                    --border:            #1e293b;
+                    --border-strong:     #334155;
+                    --text:              #e2e8f0;
+                    --text-muted:        #94a3b8;
+                    --text-heading:      #f8fafc;
+                    --text-subheading:   #e2e8f0;
+                    --text-secondary:    #e2e8f0;
+                    --text-faint:        #475569;
+                    --text-code:         #7dd3fc;
+                    --text-pre:          #cbd5e1;
+                    --text-th:           #e2e8f0;
+                    --text-td:           #94a3b8;
+                    --link:              #60a5fa;
+                    --spec-note:         #475569;
+                    --spec-note-link:    #64748b;
+                  }
+                }
+                body {
+                  background: var(--bg);
+                  color: var(--text);
+                  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                }
+                /* ── header ── */
+                .site-header {
+                  display: flex;
+                  align-items: center;
+                  justify-content: space-between;
+                  padding: 16px 32px;
+                  border-bottom: 1px solid var(--border);
+                  position: sticky;
+                  top: 0;
+                  background: var(--bg-header);
+                  z-index: 10;
+                }
+                .site-header h1 {
+                  font-size: 1rem;
+                  font-weight: 600;
+                  color: var(--text-heading);
+                  letter-spacing: -0.01em;
+                }
+                .header-links { display: flex; gap: 20px; }
+                .header-links a {
+                  color: var(--text-muted);
+                  font-size: 0.875rem;
+                  text-decoration: none;
+                }
+                .header-links a:hover { color: var(--text); }
+                .header-links a.cta {
+                  color: #fff;
+                  background: #3b82f6;
+                  padding: 6px 14px;
+                  border-radius: 6px;
+                  font-weight: 500;
+                }
+                .header-links a.cta:hover { background: #2563eb; }
+                /* ── hero ── */
+                .hero {
+                  text-align: center;
+                  padding: 72px 24px 56px;
+                  border-bottom: 1px solid var(--border);
+                }
+                .hero h2 {
+                  font-size: 2.5rem;
+                  font-weight: 700;
+                  letter-spacing: -0.03em;
+                  color: var(--text-heading);
+                  margin-bottom: 16px;
+                }
+                .hero p {
+                  color: var(--text-muted);
+                  font-size: 1.05rem;
+                  line-height: 1.6;
+                  max-width: 520px;
+                  margin: 0 auto 36px;
+                }
+                .hero-links { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+                .hero-links a {
+                  padding: 12px 22px;
+                  border-radius: 8px;
+                  font-size: 0.95rem;
+                  font-weight: 500;
+                  text-decoration: none;
+                  transition: opacity 0.15s;
+                }
+                .hero-links a:hover { opacity: 0.85; }
+                .hero-links a.primary { background: #3b82f6; color: #fff; }
+                .hero-links a.secondary { background: var(--bg-secondary); color: var(--text-secondary); border: 1px solid var(--border-strong); }
+                .spec-note {
+                  margin-top: 20px;
+                  font-size: 0.8rem;
+                  color: var(--spec-note);
+                }
+                .spec-note a { color: var(--spec-note-link); text-decoration: underline; }
+                /* ── readme body ── */
+                .readme {
+                  max-width: 860px;
+                  margin: 0 auto;
+                  padding: 56px 24px 80px;
+                }
+                /* strip the h1 pandoc renders from the README — hero already has it */
+                .readme > h1:first-child { display: none; }
+                .readme h2 {
+                  font-size: 1.35rem;
+                  font-weight: 600;
+                  color: var(--text-heading);
+                  margin: 48px 0 16px;
+                  padding-bottom: 8px;
+                  border-bottom: 1px solid var(--border);
+                }
+                .readme h3 {
+                  font-size: 1.05rem;
+                  font-weight: 600;
+                  color: var(--text-subheading);
+                  margin: 28px 0 10px;
+                }
+                .readme p { color: var(--text-muted); line-height: 1.7; margin-bottom: 14px; }
+                .readme a { color: var(--link); text-decoration: none; }
+                .readme a:hover { text-decoration: underline; }
+                .readme ul, .readme ol {
+                  color: var(--text-muted);
+                  padding-left: 24px;
+                  margin-bottom: 14px;
+                  line-height: 1.7;
+                }
+                .readme li { margin-bottom: 4px; }
+                .readme strong { color: var(--text-subheading); }
+                .readme code {
+                  background: var(--bg-code);
+                  color: var(--text-code);
+                  padding: 2px 6px;
+                  border-radius: 4px;
+                  font-size: 0.875em;
+                  font-family: "JetBrains Mono", "Fira Code", ui-monospace, monospace;
+                }
+                .readme pre {
+                  background: var(--bg-pre);
+                  border: 1px solid var(--border);
+                  border-radius: 8px;
+                  padding: 16px 20px;
+                  overflow-x: auto;
+                  margin-bottom: 16px;
+                }
+                .readme pre code {
+                  background: none;
+                  padding: 0;
+                  color: var(--text-pre);
+                  font-size: 0.875rem;
+                }
+                .readme table {
+                  width: 100%;
+                  border-collapse: collapse;
+                  margin-bottom: 16px;
+                  font-size: 0.9rem;
+                }
+                .readme th {
+                  text-align: left;
+                  color: var(--text-th);
+                  border-bottom: 1px solid var(--border-strong);
+                  padding: 8px 12px;
+                }
+                .readme td {
+                  color: var(--text-td);
+                  border-bottom: 1px solid var(--border);
+                  padding: 8px 12px;
+                  vertical-align: top;
+                }
+                .readme img { max-width: 100%; border-radius: 8px; margin: 8px 0; }
+                .readme hr { border: none; border-top: 1px solid var(--border); margin: 40px 0; }
+                /* hide the div align=center wrappers pandoc passes through */
+                .readme div[align="center"] { text-align: center; }
+              </style>
+            </head>
+            <body>
+              <header class="site-header">
+                <h1>Decision Engine</h1>
+                <nav class="header-links">
+                  <a href="https://github.com/juspay/decision-engine">GitHub</a>
+                  <a href="./openapi.json">OpenAPI JSON</a>
+                  <a class="cta" href="./api-docs/">API Reference</a>
+                </nav>
+              </header>
+
+              <section class="hero">
+                <h2>Decision Engine</h2>
+                <p>Open-source payment gateway routing — rule-based, success-rate aware, and self-hosted.</p>
+                <div class="hero-links">
+                  <a class="primary" href="./api-docs/">API Reference (Swagger)</a>
+                  <a class="secondary" href="https://github.com/juspay/decision-engine">GitHub Repository</a>
+                  <a class="secondary" href="https://juspay.io/blog/juspay-orchestrator-and-merchant-controlled-routing-engine">How It Works</a>
+                </div>
+                <p class="spec-note">Raw OpenAPI spec: <a href="./openapi.json">openapi.json</a></p>
+              </section>
+
+              <article class="readme">
+                ${README_BODY}
+              </article>
+            </body>
+          </html>
+          LANDING
+
+          cat > public/api-docs/index.html <<'HTML'
+          <!doctype html>
+          <html lang="en">
+            <head>
+              <meta charset="utf-8" />
+              <meta name="viewport" content="width=device-width, initial-scale=1" />
+              <title>Decision Engine API Reference</title>
+              <link rel="icon" href="./favicon.svg" />
+              <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+              <style>
+                :root {
+                  --bg:         #f8fafc;
+                  --bg-header:  #ffffff;
+                  --border:     #e2e8f0;
+                  --text:       #0f172a;
+                  --link:       #2563eb;
+                }
+                @media (prefers-color-scheme: dark) {
+                  :root {
+                    --bg:         #0f172a;
+                    --bg-header:  #05070d;
+                    --border:     #1e293b;
+                    --text:       #f8fafc;
+                    --link:       #93c5fd;
+                  }
+                }
+                body {
+                  margin: 0;
+                  background: var(--bg);
+                }
+                header {
+                  align-items: center;
+                  background: var(--bg-header);
+                  border-bottom: 1px solid var(--border);
+                  color: var(--text);
+                  display: flex;
+                  justify-content: space-between;
+                  padding: 16px 24px;
+                }
+                header h1 {
+                  font: 600 18px/1.3 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                  margin: 0;
+                }
+                header a {
+                  color: var(--link);
+                  font: 500 13px/1.3 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+                  text-decoration: none;
+                }
+                #swagger-ui {
+                  max-width: 1280px;
+                  margin: 0 auto;
+                }
+              </style>
+            </head>
+            <body>
+              <header>
+                <h1>Decision Engine API Reference</h1>
+                <a href="./openapi.json">OpenAPI JSON</a>
+              </header>
+              <div id="swagger-ui"></div>
+              <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+              <script>
+                window.ui = SwaggerUIBundle({
+                  url: "./openapi.json",
+                  dom_id: "#swagger-ui",
+                  deepLinking: true,
+                  presets: [SwaggerUIBundle.presets.apis],
+                  layout: "BaseLayout"
+                });
+              </script>
+            </body>
+          </html>
+          HTML
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    name: Deploy API reference
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

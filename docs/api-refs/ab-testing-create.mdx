@@ -1,0 +1,189 @@
+---
+title: "A/B Testing: Create An Experiment"
+description: "Curl examples for creating and activating a routing A/B test via /routing/create."
+---
+
+# A/B Testing: Create An Experiment
+
+A/B testing lets you compare two routing setups on a live split of traffic, with built-in guardrails and statistical significance checks. There is no separate create/manage API: an experiment is just another `algorithm.type` on the existing [`/routing/create`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-create.mdx) endpoint, alongside `single`, `priority`, `volume_split`, and `advanced`.
+
+Each arm is a bundle of **layers** — a routing rule, an SR strategy, or both — and each endpoint applies only the layers it supports:
+
+| Endpoint | Layers applied |
+| --- | --- |
+| `/routing/hybrid` | rule + SR |
+| `/decide-gateway` | SR |
+| `/routing/evaluate` | rule |
+
+## algorithm.type = "ab_test"
+
+```bash
+curl --location "$BASE_URL/routing/create" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "name": "paypal-plus-cost-savings",
+    "description": "A/B test: 10% variant traffic",
+    "created_by": "merchant_demo",
+    "algorithm_for": "payment",
+    "metadata": {},
+    "algorithm": {
+      "type": "ab_test",
+      "data": {
+        "control": {
+          "rule_algorithm_id": "routing_rule_stripe_adyen",
+          "sr": { "enable_multi_objective": false, "use_autopilot": true }
+        },
+        "variant": {
+          "rule_algorithm_id": "routing_rule_stripe_adyen_paypal",
+          "sr": { "enable_multi_objective": true, "use_autopilot": true }
+        },
+        "endpoints": ["hybrid_routing", "decide_gateway", "evaluate"],
+        "variant_split_pct": 10,
+        "min_sample_size": 1000,
+        "guardrail_threshold_pp": 3.0
+      }
+    }
+  }'
+```
+
+With this experiment:
+
+| Endpoint | Control | Variant | Change measured |
+| --- | --- | --- | --- |
+| `/routing/hybrid` | rule₁ + SR autopilot | rule₂ + SR autopilot + cost savings | Adding PayPal and cost savings together |
+| `/decide-gateway` | SR autopilot | SR autopilot + cost savings | Cost savings only |
+| `/routing/evaluate` | rule₁ | rule₂ | Adding PayPal to the candidates only |
+
+Response is the standard routing-algorithm create response:
+
+```json
+{
+  "rule_id": "routing_a1b2c3d4-1111-2222-3333-444455556666",
+  "name": "cost-vs-auth-test",
+  "created_at": "2026-07-16 10:00:00",
+  "modified_at": "2026-07-16 10:00:00"
+}
+```
+
+## algorithm.data (ABTestData) Fields
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `control` | object | Control arm layers — see [Arm](#arm). |
+| `variants` | array, optional | One or more [variants](#variant), each compared with control. When present, `variant`, `variant_algorithm_id`, `variant_sr_config` and `variant_split_pct` must be left out. |
+| `variant` | object | Single-variant format: the one variant's arm layers. Its decisions are recorded under the arm id `variant`. |
+| `endpoints` | array, optional | Endpoints the experiment splits traffic on: any of `hybrid_routing`, `decide_gateway`, `evaluate`. Omitted means all three. Experiments saved from a Hyperswitch SSO dashboard session are always scoped to `["hybrid_routing"]`. |
+| `variant_split_pct` | integer, 1–50 | Single-variant format: percentage of traffic sent to the variant arm. |
+| `min_sample_size` | integer | Transactions each arm needs before results are considered statistically meaningful. |
+| `guardrail_threshold_pp` | number | Guardrail: when a variant's auth rate on completed payments drops this many percentage points below control, that variant stops (see [Guardrail](#guardrail)) and its results are marked `guardrail_breached`. |
+
+### Variant
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `id` | string | 1–32 lowercase letters, digits, `_` or `-`; unique within the experiment and not `control`. Decisions are recorded under it as `variant_arm`. |
+| `name` | string, optional | Display name. |
+| `split_pct` | integer, ≥ 1 | Percentage of traffic sent to this variant. All variants together take at most 50%, so control keeps the majority. |
+| `rule_algorithm_id`, `sr` | | The variant's [arm](#arm) layers, inline. |
+| `stopped` | boolean | Set by the guardrail; not sent on create. |
+
+An experiment has at most 5 variants. Each variant must apply different layers from control, and from every other variant, on at least one selected endpoint.
+
+```json
+"data": {
+  "control": { "rule_algorithm_id": "routing_control" },
+  "variants": [
+    { "id": "rule_b", "name": "Rule B", "split_pct": 15, "rule_algorithm_id": "routing_b" },
+    { "id": "sr_cost", "name": "SR + cost", "split_pct": 15, "sr": { "enable_multi_objective": true } }
+  ],
+  "min_sample_size": 5000,
+  "guardrail_threshold_pp": 3
+}
+```
+
+### Guardrail
+
+Each variant is compared with control on its own. When a variant breaches the guardrail, it stops: its payments are no longer recorded and are routed like payments the experiment doesn't cover, while the other variants keep running. The stopped variant is marked `"stopped": true` in the stored definition. When the last running variant breaches (always the case for a single-variant experiment), the whole experiment is deactivated. Activating the experiment again clears `stopped` and starts a new observation period.
+
+### Arm
+
+| Field | Type | Meaning |
+| --- | --- | --- |
+| `rule_algorithm_id` | string, optional | Rule layer: the `rule_id` of an existing `single`/`priority`/`volume_split`/`advanced` algorithm. |
+| `sr` | object, optional | SR layer with this arm's [SR Config Override](#sr-config-override). `{}` is SR on the merchant's live config. |
+
+An arm needs at least one layer. On an endpoint that supports a layer the arm leaves out, that endpoint runs without it: `/routing/evaluate` answers with the request's `fallback_output`, and `/decide-gateway` uses the merchant's live SR config. On `/routing/hybrid`, the arm decides whether the dynamic half runs for its payments, whatever the merchant's `sr-routing` feature says: an arm with an SR layer runs SR, and an arm with only a rule layer is decided by its rule output, so the response carries no `dynamic_routing`. A dynamic-only hybrid request has no rule output to serve, so there `sr-routing` decides and a rule-only arm's payment is left out of the experiment. Both arms share one set of SR scores. Outcomes of a rule-only arm's payments update them only when the merchant's `sr-scores-from-rule-routing` feature is on; otherwise SR learns only from payments it routed.
+
+Creation is rejected when the two arms would apply the same layers on every selected endpoint.
+
+### Single-strategy arm format
+
+Experiments can also be written with one strategy per arm, which is read as an arm with that single layer:
+
+| Field | Read as |
+| --- | --- |
+| `control_algorithm_id` / `variant_algorithm_id` = `"sr_routing"` | `{ "sr": <control_sr_config / variant_sr_config, or {}> }` |
+| `control_algorithm_id` / `variant_algorithm_id` = `<rule_id>` | `{ "rule_algorithm_id": "<rule_id>" }` |
+
+### SR Config Override
+
+```json
+{
+  "hedging_percent": 5.0,
+  "elimination_threshold": 0.35,
+  "enable_multi_objective": true,
+  "margin": 0.2,
+  "use_autopilot": false
+}
+```
+
+All fields are optional — set only the ones you want to override for that arm; anything omitted falls back to the merchant's live SR config. `enable_multi_objective` and `use_autopilot` are the same dials used by [multi-objective routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-multi-objective.mdx) and [autopilot](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/merchant-features.mdx), scoped to just this arm.
+
+## Common Experiment Shapes
+
+The dashboard's A/B test builder resolves its SR strategy dropdown into these four `sr` overrides — useful presets when constructing the payload by hand:
+
+| SR strategy | arm `sr` |
+| --- | --- |
+| SR routing (auth based) | `{ "enable_multi_objective": false, "use_autopilot": false }` |
+| SR routing (auth based, autopilot) | `{ "enable_multi_objective": false, "use_autopilot": true }` |
+| SR routing (multi-objective, manual) | `{ "enable_multi_objective": true, "use_autopilot": false }` |
+| SR routing (multi-objective, autopilot) | `{ "enable_multi_objective": true, "use_autopilot": true }` |
+
+An SR config tuning experiment (compare two SR tunings rather than two strategies) gives both arms only an SR layer — `{ "sr": {} }` for control and `hedging_percent`/`elimination_threshold` on the variant. It splits `/routing/hybrid` and `/decide-gateway`; `/routing/evaluate` has no SR layer to compare.
+
+## Activate The Experiment
+
+Creating an experiment does not make it active. Activate it like any other routing algorithm:
+
+```bash
+curl --location "$BASE_URL/routing/activate" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "created_by": "merchant_demo",
+    "routing_algorithm_id": "routing_a1b2c3d4-1111-2222-3333-444455556666"
+  }'
+```
+
+An experiment is active beside the merchant's active routing rule, not in its place. The rule stays active and is still returned by [`/routing/list/active`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-list-active.mdx), next to the experiment. Payments the experiment covers are routed by their arm; every other payment is routed by the active rule. Activating a different rule while the experiment runs leaves the experiment running, and deactivating the experiment leaves the rule in place. Activating a second experiment replaces the first.
+
+## How Traffic Is Split
+
+Arm assignment is deterministic per payment: `payment_id` is hashed and taken modulo 100. Variants own consecutive buckets in list order (the first `[0, split₁)`, the next `[split₁, split₁ + split₂)`, …) and control owns the rest; the single-variant format's variant owns `[0, variant_split_pct)`. A stopped variant keeps its buckets, so stopping one never moves payments between the others. Assignment is the same for retries of the same payment, so retries of the same payment — and calls to different endpoints for the same payment — always land in the same arm. `/routing/hybrid` uses the dynamic request's `payment_id` for its static half when the static request carries none.
+
+A variant's traffic on an endpoint is split only when the endpoint is in `endpoints`, the variant is running, **and** it differs from control once reduced to that endpoint's layers. Control's payments are recorded on an endpoint where at least one variant is split. Everywhere else payments aren't covered by the experiment: they're routed by the active rule and the merchant's SR settings and aren't recorded, so an experiment that changes only rules does not run an A/A test on `/decide-gateway`.
+
+Decisions are recorded for the experiment's results only when the merchant feature `ab-test-real-payments` is enabled — see [Merchant Features](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/merchant-features.mdx) — and the request carries a `payment_id`. Each recorded decision is tagged with its endpoint, and [results](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-results.mdx) are read per endpoint. With the feature off, every endpoint ignores the experiment and routes by the active rule.
+
+## Editing Or Removing An Experiment
+
+Only an **inactive** experiment can be edited or deleted — see [Update & Delete Routing Algorithm](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-update-delete.mdx). Deactivate first with [`/routing/deactivate`](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-deactivate.mdx) if it's currently live.
+
+## Related
+
+- [A/B Testing: Results](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-results.mdx)
+- [Merchant Features](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/merchant-features.mdx) — enabling `ab-test-real-payments` and autopilot.
+- [Multi-Objective Routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-multi-objective.mdx)
+- [Create Routing Algorithm](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-create.mdx)

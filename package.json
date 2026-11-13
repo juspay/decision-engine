@@ -1,0 +1,24 @@
+{
+  "name": "decision-engine-e2e-tests",
+  "version": "1.0.0",
+  "description": "Playwright end-to-end tests for Decision Engine routing flows",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "playwright test",
+    "test:api": "playwright test --project=api",
+    "test:ui": "playwright test --project=ui",
+    "test:e2e": "node scripts/run-e2e.js all",
+    "test:e2e:source": "node scripts/run-e2e.js source",
+    "test:e2e:docker": "node scripts/run-e2e.js docker",
+    "e2e": "node scripts/run-e2e.js source",
+    "e2e:docker": "node scripts/run-e2e.js docker"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0",
+    "@types/node": "^24.13.6"
+  },
+  "dependencies": {
+    "typescript": "^6.0.3",
+    "uuid": "^11.1.1"
+  }
+}

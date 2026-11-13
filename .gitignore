@@ -4,3 +4,30 @@ routing-config/venv
 routing-config/output.sql
 dump.rdb
 .vscode
+**/node_modules
+**/.env.local
+**/.env.*.local
+
+# Playwright generated artifacts (HTML report, traces, screenshots)
+playwright-report/
+test-results/
+blob-report/
+.playwright/
+.mintlify-dev.log
+**/gsm.csv
+**/scratch
+
+# Load test outputs (generated artifacts — re-run with `just load-test-local/sandbox`)
+scripts/load-test/load_test_raw_*.json
+scripts/load-test/load_test_results_*.json
+scripts/load-test/load_test_report_*.html
+scripts/load-test/profile_results/
+scripts/load-test/profile.json.gz
+scripts/load-test/k6_timeseries.json
+
+# Python bytecode from scripts/
+__pycache__/
+*.pyc
+
+# Local infra state from `nix run .#infra` and npm prefix from `nix develop`
+.nix-infra/

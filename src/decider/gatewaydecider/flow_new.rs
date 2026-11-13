@@ -3,48 +3,44 @@ use super::types::RankingAlgorithm;
 use super::types::UnifiedError;
 use crate::app::get_tenant_app_state;
 use crate::decider::network_decider;
-use axum::response::IntoResponse;
-use diesel::expression::is_aggregate::No;
+use crate::types::service_configuration::MerchantConfig;
 use serde_json::json;
 use serde_json::Value as AValue;
 use std::collections::HashMap;
 use std::option::Option;
 use std::string::String;
+use std::time::Instant;
 use std::vec::Vec;
 // use eulerhs::prelude::*;
 // use eulerhs::language as L;
 // use eulerhs::framework as Framework;
 // use gatewaydecider::flow::*;
 use super::gw_scoring as GS;
+use super::multi_objective;
 use super::runner::handle_fallback_logic;
 use super::types as T;
 use super::types::PriorityLogicFailure;
 use super::utils as Utils;
-use super::utils::is_card_transaction;
-use super::utils::is_emandate_transaction;
-use super::utils::is_mandate_transaction;
-use super::utils::is_tpv_mandate_transaction;
-use super::utils::is_tpv_transaction;
-use crate::decider::storage::utils::txn_card_info::is_google_pay_txn;
-use crate::types::card::card_type::card_type_to_text;
-use crate::types::card::card_type::CardType;
-use crate::types::card::txn_card_info::AuthType;
-// use crate::types::card::txn_card_info::TxnCardInfo;
-use crate::types::card::vault_provider::VaultProvider;
+use super::volume_commitment;
 // use optics_core::{preview, review};
 use crate::decider::gatewaydecider::constants as C;
+use crate::feedback::constants::kvRedis;
 use crate::logger;
+use crate::redis::feature::is_feature_enabled;
+use crate::redis::feature::RedisDataStruct;
 use crate::types::card::txn_card_info::TxnCardInfo;
-use crate::types::gateway_card_info::ValidationType;
 use crate::types::merchant as ETM;
+use crate::types::merchant::id::merchant_id_to_text;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
-use crate::types::txn_details::types as ETTD;
+use crate::types::routing_configuration::SuccessRateData;
+use crate::types::service_configuration;
 
-pub async fn deciderFullPayloadHSFunction(
-    dreq_: T::DomainDeciderRequestForApiCallV2,
-) -> Result<(T::DecidedGateway), T::ErrorResponse> {
+/// Loads the merchant and enriches the card details a decider run works from.
+async fn prepare_decider_params(
+    dreq_: &T::DomainDeciderRequestForApiCallV2,
+) -> Result<T::DeciderParams, T::ErrorResponse> {
     let merchant_account =
-        ETM::merchant_account::load_merchant_by_merchant_id(dreq_.merchantId.clone())
+        ETM::merchant_account::load_merchant_by_merchant_id(dreq_.merchant_id.clone())
             .await
             .ok_or(T::ErrorResponse {
                 status: "Invalid Request".to_string(),
@@ -61,17 +57,17 @@ pub async fn deciderFullPayloadHSFunction(
                 priority_logic_output: None,
                 is_dynamic_mga_enabled: false,
             })?;
-    let enforced_gateway_filter = handleEnforcedGateway(dreq_.clone().eligibleGatewayList);
+    let enforced_gateway_filter = handle_enforced_gateway(dreq_.clone().eligible_gateway_list);
 
     // check if type formation is correct
     let merchant_prefs = ETM::merchant_iframe_preferences::MerchantIframePreferences {
         id: ETM::merchant_iframe_preferences::to_merchant_iframe_prefs_pid(
-            crate::types::merchant::id::merchant_pid_to_text(merchant_account.id.clone()),
+            crate::types::merchant::id::merchant_pid_to_text(merchant_account.id),
         ),
         merchantId: merchant_account.merchantId.clone(),
         dynamicSwitchingEnabled: enforced_gateway_filter
             .as_ref()
-            .map(|list| !(list.len() <= 1))
+            .map(|list| list.len() > 1)
             .unwrap_or(false),
         isinRoutingEnabled: false,
         issuerRoutingEnabled: false,
@@ -79,12 +75,12 @@ pub async fn deciderFullPayloadHSFunction(
         cardBrandRoutingEnabled: false,
     };
 
-    let dreq = dreq_.to_domain_decider_request().await;
+    let dreq = dreq_.to_domain_decider_request(merchant_account.clone());
     let resolve_bin = match Utils::fetch_extended_card_bin(&dreq.txnCardInfo.clone()) {
         Some(card_bin) => Some(card_bin),
         None => match dreq.txnCardInfo.card_isin {
             Some(c_isin) => {
-                let res_bin = Utils::get_card_bin_from_token_bin(6, c_isin.as_str()).await;
+                let res_bin = Utils::get_card_bin_from_token_bin(6, c_isin.as_str(), None).await;
                 Some(res_bin)
             }
             None => dreq.txnCardInfo.card_isin.clone(),
@@ -97,10 +93,65 @@ pub async fn deciderFullPayloadHSFunction(
         resolve_bin.clone()
     );
     let m_vault_provider = Utils::get_vault_provider(dreq.cardToken.as_deref());
-    let update_txn_card_info = TxnCardInfo {
+    let mut update_txn_card_info = TxnCardInfo {
         card_isin: resolve_bin,
         ..dreq.txnCardInfo
     };
+
+    // BIN enrichment: when the request carries a card BIN but leaves the card attributes blank or missing
+    let bin_present = update_txn_card_info
+        .card_isin
+        .as_deref()
+        .map(|isin| !isin.is_empty())
+        .unwrap_or(false);
+    let missing_card_attrs = update_txn_card_info.cardSwitchProvider.is_none()
+        || update_txn_card_info.card_type.is_none()
+        || update_txn_card_info.card_program.is_none()
+        || update_txn_card_info.card_issuer_country.is_none();
+    if bin_present && missing_card_attrs {
+        match crate::types::card::card_info_api::get_card_info_by_bin(
+            update_txn_card_info.card_isin.clone(),
+        )
+        .await
+        {
+            Some(card_info) => {
+                if update_txn_card_info.cardSwitchProvider.is_none()
+                    && !card_info.card_switch_provider.is_empty()
+                {
+                    update_txn_card_info.cardSwitchProvider =
+                        Some(masking::Secret::new(card_info.card_switch_provider));
+                }
+                if update_txn_card_info.card_type.is_none() {
+                    update_txn_card_info.card_type = card_info.card_type;
+                }
+                if update_txn_card_info.card_program.is_none() {
+                    // cardProgram is populated from the card sub-type (e.g. "DEBIT STANDARD").
+                    update_txn_card_info.card_program = card_info.card_sub_type;
+                }
+                if update_txn_card_info.card_issuer_country.is_none() {
+                    update_txn_card_info.card_issuer_country = card_info.card_issuer_country;
+                }
+                logger::debug!(
+                    action = "binEnrichmentFromCardInfo",
+                    tag = "binEnrichmentFromCardInfo",
+                    "Enriched card attributes from card_info for bin {:?}: card_type={:?}, card_program={:?}, card_issuer_country={:?}, cardSwitchProvider set={}",
+                    update_txn_card_info.card_isin,
+                    update_txn_card_info.card_type,
+                    update_txn_card_info.card_program,
+                    update_txn_card_info.card_issuer_country,
+                    update_txn_card_info.cardSwitchProvider.is_some(),
+                );
+            }
+            None => {
+                logger::debug!(
+                    action = "binEnrichmentFromCardInfo",
+                    tag = "binEnrichmentFromCardInfo",
+                    "No card_info row found for bin {:?}; card attributes left as sent",
+                    update_txn_card_info.card_isin,
+                );
+            }
+        }
+    }
 
     let decider_params = T::DeciderParams {
         dpMerchantAccount: dreq.merchantAccount,
@@ -118,23 +169,179 @@ pub async fn deciderFullPayloadHSFunction(
         dpPriorityLogicScript: dreq.priorityLogicScript,
         dpEDCCApplied: dreq.isEdccApplied,
         dpShouldConsumeResult: dreq.shouldConsumeResult,
+        dpRedisCompressionConfig: None,
     };
+    Ok(decider_params)
+}
 
-    if dreq_.rankingAlgorithm == Some(RankingAlgorithm::NTW_BASED_ROUTING) {
-        logger::debug!("Performing debit routing");
-        network_decider::debit_routing::perform_debit_routing(dreq_).await
+/// `experiment_endpoint` selects which layers of an active A/B experiment apply: the SR layer on
+/// `/decide-gateway`, and on the dynamic half of `/routing/hybrid` the SR layer or, for an arm
+/// without one, its rule output.
+pub async fn decider_full_payload_hs_function(
+    dreq_: T::DomainDeciderRequestForApiCallV2,
+    cpu_start: Instant,
+    experiment_endpoint: crate::euclid::types::ExperimentEndpoint,
+) -> Result<T::DecidedGateway, T::ErrorResponse> {
+    let decider_params = prepare_decider_params(&dreq_).await?;
+
+    // AB test intercept — must run before SR routing. Feature-flagged per merchant.
+    // Disabled by default; enable via service config AB_TEST_REAL_PAYMENTS_ENABLED_{merchant_id}.
+    let mut ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride> = None;
+    // Keep the assignment and layers so the routing event can include the final gateway.
+    let mut ab_test_experiment = None;
+    match super::ab_test::intercept(&dreq_, experiment_endpoint).await {
+        super::ab_test::AbTestIntercept::SrArm {
+            projection,
+            experiment,
+        } => {
+            ab_test_sr_override = projection.sr.clone();
+            ab_test_experiment = Some((experiment, projection));
+        }
+        super::ab_test::AbTestIntercept::Disabled => {}
+    }
+
+    let is_hybrid_routing = dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwSrHybridRouting);
+
+    if dreq_.ranking_algorithm == Some(RankingAlgorithm::NtwBasedRouting) || is_hybrid_routing {
+        // Preserve attribution for the network routing path, which does not use the SR
+        // experiment overrides or the SR completion tracking below.
+        if let Some((assignment, projection)) = &ab_test_experiment {
+            super::ab_test::interceptor::emit_routing_event(
+                dreq_.payment_id(),
+                &dreq_.merchant_id,
+                assignment,
+                projection,
+                None,
+                &super::ab_test::CostOutcome::default(),
+                Some(dreq_.payment_info.amount),
+            );
+        }
+        let config_name =
+            crate::types::service_configuration::DebitRoutingEnabled::name(&dreq_.merchant_id);
+        let debit_routing_enabled = service_configuration::find_config_by_name(config_name)
+            .await
+            .ok()
+            .flatten()
+            .and_then(|c| c.value)
+            .and_then(|v| v.parse::<bool>().ok())
+            .unwrap_or(false);
+
+        if !debit_routing_enabled {
+            logger::warn!(
+                "Debit routing requested but not enabled for merchant: {}",
+                dreq_.merchant_id
+            );
+            return Err(T::ErrorResponse {
+                status: "Forbidden".to_string(),
+                error_code: "debit_routing_not_enabled".to_string(),
+                error_message: format!(
+                    "Debit routing is not enabled for merchant: {}",
+                    dreq_.merchant_id
+                ),
+                priority_logic_tag: None,
+                routing_approach: None,
+                filter_wise_gateways: None,
+                error_info: UnifiedError {
+                    code: crate::error::error_codes::TE_05.to_string(),
+                    user_message: "Debit routing is not enabled for this merchant".to_string(),
+                    developer_message: format!(
+                        "Merchant {} does not have debit routing enabled. Enable it via the /merchant-account/:merchant_id/debit-routing API.",
+                        dreq_.merchant_id
+                    ),
+                },
+                priority_logic_output: None,
+                is_dynamic_mga_enabled: false,
+            });
+        }
+
+        if is_hybrid_routing {
+            logger::debug!("Performing hybrid routing (SR-based + debit routing)");
+            perform_hybrid_routing(decider_params, dreq_, cpu_start).await
+        } else {
+            logger::debug!("Performing debit routing");
+            network_decider::debit_routing::perform_debit_routing(dreq_).await
+        }
     } else {
         logger::debug!("Performing gateway routing");
-        runDeciderFlow(
+        let result = run_decider_flow(
             decider_params,
-            dreq_.clone().rankingAlgorithm,
-            dreq_.clone().eliminationEnabled,
+            dreq_.clone().ranking_algorithm,
+            dreq_.clone().elimination_enabled,
+            false,
+            cpu_start,
+            ab_test_sr_override,
+            dreq_.enable_multi_objective,
         )
-        .await
+        .await;
+
+        // The routing event carries the decided gateway and the multi-objective cost outcome, so
+        // the experiment results can attribute cost per arm. Cost is empty when the arm ran
+        // auth-only.
+        if let Some((assignment, projection)) = &ab_test_experiment {
+            let decided = result.as_ref().ok();
+            let mo = decided.and_then(|d| d.multi_objective_info.as_ref());
+            super::ab_test::interceptor::emit_routing_event(
+                dreq_.payment_id(),
+                &dreq_.merchant_id,
+                assignment,
+                projection,
+                decided.map(|d| d.decided_gateway.as_str()),
+                &super::ab_test::CostOutcome {
+                    cost_saved_bps: mo.and_then(|m| m.cost_saved_bps),
+                    chosen_cost_bps: mo.and_then(|m| {
+                        m.ranked
+                            .iter()
+                            .find(|r| r.is_chosen)
+                            .and_then(|r| r.summary.cost_bps)
+                    }),
+                    margin: mo.map(|m| m.margin),
+                },
+                Some(dreq_.payment_info.amount),
+            );
+        }
+
+        result
     }
 }
 
-fn handleEnforcedGateway(gateway_list: Option<Vec<String>>) -> Option<Vec<String>> {
+async fn perform_hybrid_routing(
+    decider_params: T::DeciderParams,
+    dreq_: T::DomainDeciderRequestForApiCallV2,
+    cpu_start: Instant,
+) -> Result<T::DecidedGateway, T::ErrorResponse> {
+    // Run SR-based routing first to get gateway priority map and decided gateway
+    let sr_result = run_decider_flow(
+        decider_params,
+        Some(RankingAlgorithm::SrBasedRouting),
+        dreq_.clone().elimination_enabled,
+        false,
+        cpu_start,
+        None,
+        dreq_.enable_multi_objective,
+    )
+    .await;
+
+    // Get debit routing output
+    let debit_routing_result = network_decider::debit_routing::perform_debit_routing(dreq_).await;
+
+    match (sr_result, debit_routing_result) {
+        (Ok(mut sr_gateway), Ok(debit_gateway)) => {
+            // Merge results: keep SR-based gateway selection but add debit routing output
+            sr_gateway.debit_routing_output = debit_gateway.debit_routing_output;
+            Ok(sr_gateway)
+        }
+        (Ok(sr_gateway), Err(_)) => {
+            logger::warn!("Debit routing failed in hybrid mode, returning SR-based result only");
+            Ok(sr_gateway)
+        }
+        (Err(e), _) => {
+            logger::warn!("SR-based routing failed in hybrid mode, propagating error");
+            Err(e)
+        }
+    }
+}
+
+fn handle_enforced_gateway(gateway_list: Option<Vec<String>>) -> Option<Vec<String>> {
     match gateway_list {
         None => None,
         Some(list) if list.is_empty() => None,
@@ -142,11 +349,112 @@ fn handleEnforcedGateway(gateway_list: Option<Vec<String>>) -> Option<Vec<String
     }
 }
 
-pub async fn runDeciderFlow(
+/// The merchant's configured margin (fraction of ticket) from
+/// `SR_V3_INPUT_CONFIG_<merchant_id>`. Used in the multi-objective expected-value
+/// ranking `EV = auth·(margin − cost/10_000)` — there is no auth band or admission
+/// gate. Falls back to [`multi_objective::DEFAULT_MARGIN`] when unset.
+pub async fn load_margin(merchant_id: &str) -> f64 {
+    let read = || async {
+        let key = crate::types::service_configuration::SrV3Input::name(merchant_id);
+        let row = service_configuration::find_config_by_name(key)
+            .await
+            .ok()??;
+        let value = row.value?;
+        let cfg: SuccessRateData = serde_json::from_str(&value).ok()?;
+        cfg.margin
+    };
+    read()
+        .await
+        .filter(|m| *m > 0.0)
+        .unwrap_or(multi_objective::DEFAULT_MARGIN)
+}
+
+/// The merchant's configured default SRV3 bucket size (`defaultBucketSize` from
+/// `SR_V3_INPUT_CONFIG_<merchant_id>`). Shared with the routing-events analytics so the
+/// historically-detected auth band uses the same `B` the live decider does when sizing
+/// its noise floor. Falls back to [`C::DEFAULT_SR_V3_BASED_BUCKET_SIZE`] when unset.
+pub async fn load_srv3_default_bucket_size(merchant_id: &str) -> i32 {
+    let read = || async {
+        let key = crate::types::service_configuration::SrV3Input::name(merchant_id);
+        let row = service_configuration::find_config_by_name(key)
+            .await
+            .ok()??;
+        let value = row.value?;
+        let cfg: SuccessRateData = serde_json::from_str(&value).ok()?;
+        cfg.default_bucket_size
+    };
+    read()
+        .await
+        .filter(|b| *b > 0)
+        .unwrap_or(C::DEFAULT_SR_V3_BASED_BUCKET_SIZE)
+}
+
+/// Saves the scoring context `/update-gateway-score` reads to update SR scores for the payment.
+async fn write_gateway_scoring_data(txn_uuid: &str, data: &T::GatewayScoringData) {
+    let key = [C::GATEWAY_SCORING_DATA, txn_uuid].concat();
+    get_tenant_app_state()
+        .await
+        .redis_conn
+        .setx(
+            &key,
+            serde_json::to_string(data).unwrap_or_default().as_str(),
+            C::GATEWAY_SCORE_KEYS_TTL,
+            None,
+            RedisDataStruct::STRING,
+        )
+        .await
+        .unwrap_or_default();
+}
+
+/// Saves the scoring context for a payment routed without the decider, such as one decided by a
+/// hybrid call's rule output, so its outcome still updates SR scores. `routing_approach` is
+/// recorded as how the payment was routed.
+pub async fn store_scoring_context_without_decider(
+    dreq_: &T::DomainDeciderRequestForApiCallV2,
+    routing_approach: &str,
+) -> Result<(), T::ErrorResponse> {
+    let decider_params = prepare_decider_params(dreq_).await?;
+    let mut decider_state = T::initial_decider_state(
+        decider_params
+            .dpTxnDetail
+            .dateCreated
+            .to_string()
+            .replace(" ", "T")
+            .replace(" UTC", "Z"),
+    );
+    let mut logger = HashMap::new();
+    let mut decider_flow =
+        T::initial_decider_flow(decider_params.clone(), &mut logger, &mut decider_state).await;
+    let scoring_data = Utils::get_gateway_scoring_data(
+        &mut decider_flow,
+        decider_params.dpTxnDetail.clone(),
+        decider_params.dpTxnCardInfo.clone(),
+        decider_params.dpMerchantAccount.clone(),
+        false,
+    )
+    .await;
+    write_gateway_scoring_data(
+        &decider_params.dpTxnDetail.txnUuid,
+        &T::GatewayScoringData {
+            routingApproach: Some(routing_approach.to_string()),
+            eliminationEnabled: dreq_.elimination_enabled.unwrap_or_default(),
+            udfs: Some(decider_params.dpOrder.udfs.clone()),
+            ..scoring_data
+        },
+    )
+    .await;
+    Ok(())
+}
+
+pub async fn run_decider_flow(
     deciderParams: T::DeciderParams,
     rankingAlgorithm: Option<RankingAlgorithm>,
-    eliminationEnabled: Option<bool>,
-) -> Result<(T::DecidedGateway), T::ErrorResponse> {
+    mut eliminationEnabled: Option<bool>,
+    is_legacy_decider_flow: bool,
+    cpu_start: Instant,
+    ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride>,
+    enable_multi_objective_override: Option<bool>,
+) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let txnCreationTime = deciderParams
         .dpTxnDetail
         .dateCreated
@@ -155,6 +463,7 @@ pub async fn runDeciderFlow(
         .replace(" ", "T")
         .replace(" UTC", "Z");
     let mut deciderState = T::initial_decider_state(txnCreationTime.clone());
+    deciderState.ab_test_sr_override = ab_test_sr_override;
     let mut logger = HashMap::new();
 
     let mut decider_flow =
@@ -164,9 +473,10 @@ pub async fn runDeciderFlow(
         deciderParams.dpTxnDetail.clone(),
         deciderParams.dpTxnCardInfo.clone(),
         deciderParams.dpMerchantAccount.clone(),
+        is_legacy_decider_flow,
     )
     .await;
-    let (functionalGateways) = deciderParams
+    let functionalGateways = deciderParams
         .dpEnforceGatewayList
         .clone()
         .unwrap_or_default();
@@ -190,79 +500,46 @@ pub async fn runDeciderFlow(
 
     let dResult = match (
         preferredGateway.clone(),
-        deciderParams
-            .dpMerchantPrefs
-            .dynamicSwitchingEnabled
-            .clone(),
+        deciderParams.dpMerchantPrefs.dynamicSwitchingEnabled,
     ) {
-        (Some(pgw), false) => {
-            if functionalGateways.contains(&pgw) {
-                Utils::log_gateway_decider_approach(
-                    &mut decider_flow,
-                    Some(pgw.clone()),
-                    None,
-                    Vec::new(),
-                    T::GatewayDeciderApproach::MERCHANT_PREFERENCE,
-                    None,
-                    functionalGateways,
-                    None,
-                )
-                .await;
-                Ok(T::DecidedGateway {
-                    decided_gateway: pgw.clone(),
-                    gateway_priority_map: Some(json!(HashMap::from([(pgw.to_string(), 1.0)]))),
-                    filter_wise_gateways: None,
-                    priority_logic_tag: None,
-                    routing_approach: T::GatewayDeciderApproach::MERCHANT_PREFERENCE,
-                    gateway_before_evaluation: Some(pgw.clone()),
-                    priority_logic_output: None,
-                    reset_approach: T::ResetApproach::NO_RESET,
-                    routing_dimension: None,
-                    routing_dimension_level: None,
-                    is_scheduled_outage: false,
-                    is_dynamic_mga_enabled: decider_flow.writer.is_dynamic_mga_enabled,
-                    gateway_mga_id_map: None,
-                    debit_routing_output: None,
-                })
-            } else {
-                decider_flow
-                    .writer
-                    .debugFilterList
-                    .push(T::DebugFilterEntry {
-                        filterName: "preferredGateway".to_string(),
-                        gateways: vec![],
-                    });
-                logger::info!(
-                    action = "PreferredGateway",
-                    tag = "PreferredGateway",
-                    "Preferred gateway {:?} functional/valid for merchant {:?} in txn {:?}",
-                    pgw,
-                    &deciderParams.dpMerchantAccount.merchantId,
-                    deciderParams.dpTxnDetail.txnId
-                );
-                Utils::log_gateway_decider_approach(
-                    &mut decider_flow,
-                    None,
-                    None,
-                    Vec::new(),
-                    T::GatewayDeciderApproach::NONE,
-                    None,
-                    functionalGateways,
-                    None,
-                )
-                .await;
-                Err((
-                    decider_flow.writer.debugFilterList.clone(),
-                    decider_flow.writer.debugScoringList.clone(),
-                    None,
-                    T::GatewayDeciderApproach::NONE,
-                    None,
-                    decider_flow.writer.is_dynamic_mga_enabled,
-                ))
-            }
+        (Some(pgw), false) if functionalGateways.contains(&pgw) => {
+            eliminationEnabled = Some(true);
+            Utils::log_gateway_decider_approach(
+                &mut decider_flow,
+                Some(pgw.clone()),
+                None,
+                Vec::new(),
+                T::GatewayDeciderApproach::MerchantPreference,
+                None,
+                functionalGateways,
+                None,
+            )
+            .await;
+            let cpu_time = cpu_start.elapsed().as_millis() as u64;
+            Ok(T::DecidedGateway {
+                decided_gateway: pgw.clone(),
+                fallback_gateways: vec![],
+                gateway_priority_map: Some(json!(HashMap::from([(pgw.to_string(), 1.0)]))),
+                filter_wise_gateways: None,
+                priority_logic_tag: None,
+                routing_approach: T::GatewayDeciderApproach::MerchantPreference,
+                gateway_before_evaluation: Some(pgw.clone()),
+                priority_logic_output: None,
+                reset_approach: T::ResetApproach::NoReset,
+                routing_dimension: None,
+                routing_dimension_level: None,
+                is_scheduled_outage: false,
+                is_dynamic_mga_enabled: decider_flow.writer.is_dynamic_mga_enabled,
+                gateway_mga_id_map: None,
+                debit_routing_output: None,
+                is_rust_based_decider: true,
+                latency: Some(cpu_time),
+                multi_objective_info: None,
+                volume_steer_info: None,
+            })
         }
         _ => {
-            let gwPLogic = if rankingAlgorithm != Some(RankingAlgorithm::SR_BASED_ROUTING) {
+            let gwPLogic = if rankingAlgorithm != Some(RankingAlgorithm::SrBasedRouting) {
                 match deciderParams.dpPriorityLogicOutput {
                     Some(ref plOp) => plOp.clone(),
                     None => {
@@ -281,16 +558,18 @@ pub async fn runDeciderFlow(
             } else {
                 T::GatewayPriorityLogicOutput {
                     gws: functionalGateways.clone(),
-                    isEnforcement: false,
-                    priorityLogicTag: None,
-                    primaryLogic: None,
-                    gatewayReferenceIds: HashMap::new(),
-                    fallbackLogic: None,
+                    is_enforcement: false,
+                    priority_logic_tag: None,
+                    primary_logic: None,
+                    gateway_reference_ids: HashMap::new(),
+                    fallback_logic: None,
                 }
             };
 
-            let gatewayPriorityList =
-                addPreferredGatewaysToPriorityList(gwPLogic.gws.clone(), preferredGateway.clone());
+            let gatewayPriorityList = add_preferred_gateways_to_priority_list(
+                gwPLogic.gws.clone(),
+                preferredGateway.clone(),
+            );
             logger::info!(
                 tag = "gatewayPriorityList",
                 action = "gatewayPriorityList",
@@ -299,14 +578,16 @@ pub async fn runDeciderFlow(
                 gatewayPriorityList
             );
 
-            let (mut functionalGateways, updatedPriorityLogicOutput) = if gwPLogic.isEnforcement {
+            let preferred_connector_candidate = preferredGateway.clone();
+
+            let (mut functionalGateways, updatedPriorityLogicOutput) = if gwPLogic.is_enforcement {
                 logger::info!(
                     tag = "gatewayPriorityList",
                     action = "Enforcing Priority Logic",
                     "Enforcing Priority Logic for {:?}",
                     deciderParams.dpTxnDetail.txnId
                 );
-                let (res, priorityLogicOutput) = filterFunctionalGatewaysWithEnforcment(
+                let (res, priorityLogicOutput) = filter_functional_gateways_with_enforcement(
                     &mut decider_flow,
                     &functionalGateways,
                     &gatewayPriorityList,
@@ -356,14 +637,39 @@ pub async fn runDeciderFlow(
             //     updatedPriorityLogicOutput.gws.clone(),
             // );
 
-            let currentGatewayScoreMap = GS::scoring_flow(
+            let functional_preferred_connector = preferred_connector_candidate
+                .filter(|preferred| uniqueFunctionalGateways.contains(preferred));
+            if functional_preferred_connector.is_some() {
+                eliminationEnabled = Some(true);
+            }
+            let scoring_priority_list = add_preferred_gateways_to_priority_list(
+                updatedPriorityLogicOutput.gws.clone(),
+                functional_preferred_connector.clone(),
+            );
+
+            let mut currentGatewayScoreMap = GS::scoring_flow(
                 &mut decider_flow,
                 uniqueFunctionalGateways.clone(),
-                updatedPriorityLogicOutput.gws.clone(),
+                scoring_priority_list,
                 rankingAlgorithm,
                 eliminationEnabled,
+                functional_preferred_connector.clone(),
             )
             .await;
+
+            if let Some(pin) = &functional_preferred_connector {
+                if currentGatewayScoreMap
+                    .get(pin)
+                    .is_some_and(|score| *score < 1.0)
+                {
+                    let min_score = currentGatewayScoreMap
+                        .values()
+                        .fold(f64::INFINITY, |acc, score| acc.min(*score));
+                    if let Some(score) = currentGatewayScoreMap.get_mut(pin) {
+                        *score = min_score - 1.0;
+                    }
+                }
+            }
 
             logger::info!(
                 tag = "GW_Scoring",
@@ -382,6 +688,37 @@ pub async fn runDeciderFlow(
                     .collect::<HashMap<_, _>>()
             );
 
+            let merchant_id_text =
+                merchant_id_to_text(deciderParams.dpMerchantAccount.merchantId.clone());
+            // Cost-savings (multi-objective economic reorder) enablement:
+            //   - an A/B arm override (`SrConfigOverride.enable_multi_objective`) wins first,
+            //     letting the "Turn cost on" experiment run cost off on control and on in variant,
+            //   - else if the request explicitly sets `enableMultiObjective`, honor it (per-request
+            //     override), otherwise
+            //   - fall back to the merchant's `cost_savings_enabled` feature flag.
+            // The feature flag is the primary rollout switch, so a caller that omits the field
+            // must not silently lose multi-objective routing.
+            let multi_obj_on = match decider_flow
+                .writer
+                .ab_test_sr_override
+                .as_ref()
+                .and_then(|o| o.enable_multi_objective)
+            {
+                Some(b) => b,
+                None => match enable_multi_objective_override {
+                    Some(b) => b,
+                    None => {
+                        is_feature_enabled(
+                            multi_objective::COST_SAVINGS_FEATURE_FLAG.to_string(),
+                            merchant_id_text.clone(),
+                            kvRedis(),
+                        )
+                        .await
+                    }
+                },
+            };
+            let hedging_on = decider_flow.writer.gwDeciderApproach.is_hedging();
+
             let scoreList = currentGatewayScoreMap.iter().collect::<Vec<_>>();
             logger::debug!(action = "scoreList", tag = "scoreList", "{:?}", scoreList);
 
@@ -394,15 +731,15 @@ pub async fn runDeciderFlow(
                 [] => Err((
                     decider_flow.writer.debugFilterList.clone(),
                     decider_flow.writer.debugScoringList.clone(),
-                    updatedPriorityLogicOutput.priorityLogicTag.clone(),
-                    T::GatewayDeciderApproach::NONE,
+                    updatedPriorityLogicOutput.priority_logic_tag.clone(),
+                    T::GatewayDeciderApproach::None,
                     Some(updatedPriorityLogicOutput),
                     decider_flow.writer.is_dynamic_mga_enabled,
                 )),
-                gs => {
+                _gs => {
                     let maxScore = Utils::get_max_score_gateway(&currentGatewayScoreMap)
-                        .map(|(gw, score)| score);
-                    let decidedGateway = Utils::random_gateway_selection_for_same_score(
+                        .map(|(_gw, score)| score);
+                    let mut decidedGateway = Utils::random_gateway_selection_for_same_score(
                         &currentGatewayScoreMap,
                         maxScore,
                     );
@@ -412,6 +749,79 @@ pub async fn runDeciderFlow(
                         "{:?}",
                         decidedGateway
                     );
+
+                    let mut cost_fallbacks_override: Option<Vec<String>> = None;
+                    if multi_obj_on && !hedging_on && functional_preferred_connector.is_none() {
+                        // An A/B arm can override the EV margin (the auth↔cost dial); otherwise
+                        // load it from the merchant SR config (default 1.0 ≈ auth-dominant).
+                        let margin = match decider_flow
+                            .writer
+                            .ab_test_sr_override
+                            .as_ref()
+                            .and_then(|o| o.margin)
+                        {
+                            Some(m) => m,
+                            None => load_margin(&merchant_id_text).await,
+                        };
+                        let outcome =
+                            multi_objective::algorithm::try_apply_multi_objective_post_step(
+                                &currentGatewayScoreMap,
+                                &merchant_id_text,
+                                &deciderParams.dpTxnDetail,
+                                &deciderParams.dpTxnCardInfo,
+                                margin,
+                            )
+                            .await;
+                        // Only a cost-driven promotion relabels the approach as multi-objective.
+                        if outcome.info.outcome == multi_objective::MultiObjectiveOutcome::CostWon {
+                            decider_flow.writer.gwDeciderApproach =
+                                T::GatewayDeciderApproach::SrSelectionMultiObjective;
+                        }
+                        // Adopt the multi-objective pick whenever it produced one — including
+                        // AUTH_WON, where the chosen PSP is the EV-best SR head. This keeps
+                        // decidedGateway consistent with multi_objective_info and makes tied-score
+                        // selection deterministic and cost-optimal, instead of leaving the earlier
+                        // arbitrary same-score tie-break in place.
+                        if let Some(decision) = outcome.cost_decision {
+                            decidedGateway = Some(decision.chosen);
+                            cost_fallbacks_override = Some(decision.fallbacks);
+                        }
+                        decider_flow.writer.multi_objective_info = Some(outcome.info);
+                    }
+
+                    // Volume-commitment nudge runs last on its own flag; fails open when flag,
+                    // deps or plan is absent. Under hedging the flag is not even read.
+                    let volume_commitment_on = !hedging_on
+                        && functional_preferred_connector.is_none()
+                        && is_feature_enabled(
+                            volume_commitment::FEATURE_FLAG.to_string(),
+                            merchant_id_text.clone(),
+                            kvRedis(),
+                        )
+                        .await;
+                    if volume_commitment_on {
+                        if let Some(vc_deps) = volume_commitment::deps() {
+                            if let Some(plan) = vc_deps.state.load_plan(&merchant_id_text).await {
+                                // Sampling, not counting: the forecast already decided each PSP's
+                                // share of the eligible flow, so this payment only has to roll.
+                                let mut roll = || rand::random::<f64>();
+                                let outcome = volume_commitment::nudge::choose(
+                                    &currentGatewayScoreMap,
+                                    &plan,
+                                    chrono::Utc::now(),
+                                    &mut roll,
+                                );
+                                // Only an actual diversion relabels the approach.
+                                if let Some(chosen) = outcome.chosen {
+                                    decidedGateway = Some(chosen);
+                                    cost_fallbacks_override = Some(outcome.fallbacks);
+                                    decider_flow.writer.gwDeciderApproach =
+                                        T::GatewayDeciderApproach::SrSelectionVolumeCommitment;
+                                }
+                                decider_flow.writer.volume_steer_info = Some(outcome.info);
+                            }
+                        }
+                    }
 
                     let stateBindings = (
                         decider_flow.writer.srElminiationApproachInfo.clone(),
@@ -427,8 +837,8 @@ pub async fn runDeciderFlow(
 
                     let (
                         srEliminationInfo,
-                        isOptimizedBasedOnSRMetricEnabled,
-                        isSrV3MetricEnabled,
+                        _isOptimizedBasedOnSRMetricEnabled,
+                        _isSrV3MetricEnabled,
                         topGatewayBeforeSRDowntimeEvaluation,
                         isPrimaryGateway,
                         experimentTag,
@@ -438,6 +848,52 @@ pub async fn runDeciderFlow(
                         &currentGatewayScoreMap,
                         decider_flow.writer.gwDeciderApproach.clone(),
                     );
+                    if let Some(rule_name) = updatedPriorityLogicOutput.priority_logic_tag.clone() {
+                        crate::analytics::DomainAnalyticsEvent::record_rule_hit(
+                            crate::analytics::AnalyticsFlowContext::new(
+                                crate::analytics::ApiFlow::DynamicRouting,
+                                crate::analytics::FlowType::DecideGatewayRuleHit,
+                            ),
+                            crate::analytics::AnalyticsRoute::DecideGateway,
+                            Some(crate::types::merchant::id::merchant_id_to_text(
+                                deciderParams.dpMerchantAccount.merchantId.clone(),
+                            )),
+                            rule_name,
+                            decidedGateway.clone(),
+                            Some(format!("{:?}", finalDeciderApproach.clone())),
+                            serde_json::to_string(&serde_json::json!({
+                                "functional_gateways": uniqueFunctionalGateways.clone(),
+                                "experiment_tag": experimentTag.clone(),
+                            }))
+                            .ok(),
+                            Some(deciderParams.dpTxnDetail.txnUuid.clone()),
+                            decider_flow
+                                .logger
+                                .get(crate::storage::consts::X_REQUEST_ID)
+                                .cloned(),
+                            decider_flow
+                                .logger
+                                .get(crate::storage::consts::X_GLOBAL_REQUEST_ID)
+                                .cloned(),
+                            decider_flow
+                                .logger
+                                .get(crate::storage::consts::TRACEPARENT)
+                                .and_then(|value| crate::analytics::normalize_trace_id(value))
+                                .or_else(|| {
+                                    decider_flow
+                                        .logger
+                                        .get(crate::storage::consts::X_TRACE_ID)
+                                        .cloned()
+                                })
+                                .or_else(|| {
+                                    decider_flow
+                                        .logger
+                                        .get(crate::storage::consts::X_B3_TRACE_ID)
+                                        .cloned()
+                                }),
+                            Some("rule_applied".to_string()),
+                        );
+                    }
                     Utils::log_gateway_decider_approach(
                         &mut decider_flow,
                         decidedGateway.clone(),
@@ -467,37 +923,58 @@ pub async fn runDeciderFlow(
                     //     &currentGatewayScoreMap
                     // ).await?;
 
-                    logger::info!(
-                        action = "GATEWAY_PRIORITY_MAP",
-                        tag = "GATEWAY_PRIORITY_MAP",
-                        "{:?}",
-                        gatewayPriorityMap
-                    );
+                    if let Some(ref priority_map) = gatewayPriorityMap {
+                        logger::debug!(
+                            action = "GATEWAY_PRIORITY_MAP",
+                            tag = "GATEWAY_PRIORITY_MAP",
+                            gateway_priority_map = %priority_map
+                        );
+                    }
 
                     match decidedGateway {
-                        Some(decideGatewayOutput) => Ok(T::DecidedGateway {
-                            decided_gateway: decideGatewayOutput,
-                            gateway_priority_map: gatewayPriorityMap,
-                            filter_wise_gateways: None,
-                            priority_logic_tag: updatedPriorityLogicOutput.priorityLogicTag.clone(),
-                            routing_approach: finalDeciderApproach.clone(),
-                            gateway_before_evaluation: topGatewayBeforeSRDowntimeEvaluation.clone(),
-                            priority_logic_output: Some(updatedPriorityLogicOutput),
-                            reset_approach: decider_flow.writer.reset_approach.clone(),
-                            routing_dimension: decider_flow.writer.routing_dimension.clone(),
-                            routing_dimension_level: decider_flow
-                                .writer
-                                .routing_dimension_level
-                                .clone(),
-                            is_scheduled_outage: decider_flow.writer.isScheduledOutage,
-                            is_dynamic_mga_enabled: decider_flow.writer.is_dynamic_mga_enabled,
-                            gateway_mga_id_map: None,
-                            debit_routing_output: None,
-                        }),
+                        Some(decideGatewayOutput) => {
+                            let cpu_time = cpu_start.elapsed().as_millis() as u64;
+                            let fallbacks = cost_fallbacks_override.unwrap_or_else(|| {
+                                fallback_gateways_from_score_map(
+                                    &currentGatewayScoreMap,
+                                    &decideGatewayOutput,
+                                )
+                            });
+                            Ok(T::DecidedGateway {
+                                decided_gateway: decideGatewayOutput,
+                                fallback_gateways: fallbacks,
+                                gateway_priority_map: gatewayPriorityMap,
+                                filter_wise_gateways: None,
+                                priority_logic_tag: updatedPriorityLogicOutput
+                                    .priority_logic_tag
+                                    .clone(),
+                                routing_approach: finalDeciderApproach.clone(),
+                                gateway_before_evaluation: topGatewayBeforeSRDowntimeEvaluation
+                                    .clone(),
+                                priority_logic_output: Some(updatedPriorityLogicOutput),
+                                reset_approach: decider_flow.writer.reset_approach.clone(),
+                                routing_dimension: decider_flow.writer.routing_dimension.clone(),
+                                routing_dimension_level: decider_flow
+                                    .writer
+                                    .routing_dimension_level
+                                    .clone(),
+                                is_scheduled_outage: decider_flow.writer.isScheduledOutage,
+                                is_dynamic_mga_enabled: decider_flow.writer.is_dynamic_mga_enabled,
+                                gateway_mga_id_map: None,
+                                debit_routing_output: None,
+                                is_rust_based_decider: true,
+                                latency: Some(cpu_time),
+                                multi_objective_info: decider_flow
+                                    .writer
+                                    .multi_objective_info
+                                    .clone(),
+                                volume_steer_info: decider_flow.writer.volume_steer_info.clone(),
+                            })
+                        }
                         None => Err((
                             decider_flow.writer.debugFilterList.clone(),
                             decider_flow.writer.debugScoringList.clone(),
-                            updatedPriorityLogicOutput.priorityLogicTag.clone(),
+                            updatedPriorityLogicOutput.priority_logic_tag.clone(),
                             finalDeciderApproach.clone(),
                             Some(updatedPriorityLogicOutput),
                             decider_flow.writer.is_dynamic_mga_enabled,
@@ -507,33 +984,22 @@ pub async fn runDeciderFlow(
             }
         }
     };
-    let key = [
-        C::gatewayScoringData,
-        &deciderParams.dpTxnDetail.txnUuid.clone(),
-    ]
-    .concat();
-    let updated_gateway_scoring_data = T::GatewayScoringData {
-        routingApproach: Some(decider_flow.writer.gwDeciderApproach.clone().to_string()),
-        eliminationEnabled: eliminationEnabled.unwrap_or_default(),
-        ..decider_flow.writer.gateway_scoring_data.clone()
-    };
-    let app_state = get_tenant_app_state().await;
-    app_state
-        .redis_conn
-        .setx(
-            &key,
-            serde_json::to_string(&updated_gateway_scoring_data.clone())
-                .unwrap_or_default()
-                .as_str(),
-            C::gatewayScoreKeysTTL,
-        )
-        .await
-        .unwrap_or_default();
-    updated_gateway_scoring_data;
+
+    write_gateway_scoring_data(
+        &deciderParams.dpTxnDetail.txnUuid,
+        &T::GatewayScoringData {
+            routingApproach: Some(decider_flow.writer.gwDeciderApproach.clone().to_string()),
+            eliminationEnabled: eliminationEnabled.unwrap_or_default(),
+            is_legacy_decider_flow,
+            udfs: Some(deciderParams.dpOrder.udfs.clone()),
+            ..decider_flow.writer.gateway_scoring_data.clone()
+        },
+    )
+    .await;
     match dResult {
-        Ok(result) => Ok((result)),
+        Ok(result) => Ok(result),
         Err((
-            debugFilterList,
+            _debugFilterList,
             _,
             priorityLogicTag,
             finalDeciderApproach,
@@ -558,7 +1024,8 @@ pub async fn runDeciderFlow(
     }
 }
 
-fn getGatewayToMGAIdMapF(allMgas: &Vec<MerchantGatewayAccount>, gateways: &Vec<String>) -> AValue {
+#[allow(dead_code)]
+fn get_gateway_to_mga_id_map_f(allMgas: &[MerchantGatewayAccount], gateways: &[String]) -> AValue {
     json!(gateways
         .iter()
         .map(|x| {
@@ -567,13 +1034,31 @@ fn getGatewayToMGAIdMapF(allMgas: &Vec<MerchantGatewayAccount>, gateways: &Vec<S
                 allMgas
                     .iter()
                     .find(|mga| mga.gateway == *x)
-                    .map(|mga| mga.id.merchantGwAccId.clone()),
+                    .map(|mga| mga.id.merchantGwAccId),
             )
         })
         .collect::<HashMap<_, _>>())
 }
 
-fn addPreferredGatewaysToPriorityList(
+fn fallback_gateways_from_score_map(
+    score_map: &HashMap<String, f64>,
+    decided_gateway: &str,
+) -> Vec<String> {
+    let mut entries: Vec<(&String, &f64)> = score_map.iter().collect();
+    entries.sort_by(|a, b| b.1.partial_cmp(a.1).unwrap_or(std::cmp::Ordering::Equal));
+    entries
+        .into_iter()
+        .filter_map(|(gw, _)| {
+            if gw != decided_gateway {
+                Some(gw.clone())
+            } else {
+                None
+            }
+        })
+        .collect()
+}
+
+fn add_preferred_gateways_to_priority_list(
     gwPriority: Vec<String>,
     preferredGateway: Option<String>,
 ) -> Vec<String> {
@@ -588,7 +1073,7 @@ fn addPreferredGatewaysToPriorityList(
     }
 }
 
-async fn filterFunctionalGatewaysWithEnforcment(
+async fn filter_functional_gateways_with_enforcement(
     decider_flow: &mut T::DeciderFlow<'_>,
     fGws: &[String],
     priorityGws: &[String],
@@ -612,12 +1097,12 @@ async fn filterFunctionalGatewaysWithEnforcment(
             decider_flow.writer.internalMetaData.clone(),
             decider_flow.get().dpOrderMetadata.metadata.clone(),
             plOp.clone(),
-            PriorityLogicFailure::NULL_AFTER_ENFORCE,
+            PriorityLogicFailure::NullAfterEnforce,
         )
         .await;
         let fallBackGwPriority =
-            addPreferredGatewaysToPriorityList(updatedPlOp.gws.clone(), preferredGw);
-        if updatedPlOp.isEnforcement {
+            add_preferred_gateways_to_priority_list(updatedPlOp.gws.clone(), preferredGw);
+        if updatedPlOp.is_enforcement {
             let updatedEnforcedGateways = fGws
                 .iter()
                 .filter(|&gw| fallBackGwPriority.contains(gw))
@@ -633,7 +1118,7 @@ async fn filterFunctionalGatewaysWithEnforcment(
                     decider_flow.writer.internalMetaData.clone(),
                     decider_flow.get().dpOrderMetadata.metadata.clone(),
                     updatedPlOp,
-                    PriorityLogicFailure::NULL_AFTER_ENFORCE,
+                    PriorityLogicFailure::NullAfterEnforce,
                 )
                 .await;
                 (updatedEnforcedGateways, updatedPlOp)
@@ -655,37 +1140,6 @@ async fn filterFunctionalGatewaysWithEnforcment(
 //         Some(f) => f.to_lowercase().collect::<String>() + chars.as_str(),
 //     }
 // }
-
-fn defaultDecidedGateway(
-    gw: String,
-    gpm: Option<AValue>,
-    priorityLogicTag: Option<String>,
-    finalDeciderApproach: T::GatewayDeciderApproach,
-    topGatewayBeforeSRDowntimeEvaluation: Option<String>,
-    priorityLogicOutput: Option<T::GatewayPriorityLogicOutput>,
-    resetApproach: T::ResetApproach,
-    routingDimension: Option<String>,
-    routingDimensionLevel: Option<String>,
-    isScheduledOutage: bool,
-    isDynamicMGAEnabled: bool,
-) -> T::DecidedGateway {
-    T::DecidedGateway {
-        decided_gateway: gw,
-        gateway_priority_map: gpm,
-        filter_wise_gateways: None,
-        priority_logic_tag: priorityLogicTag,
-        routing_approach: finalDeciderApproach,
-        gateway_before_evaluation: topGatewayBeforeSRDowntimeEvaluation,
-        priority_logic_output: priorityLogicOutput,
-        debit_routing_output: None,
-        reset_approach: resetApproach,
-        routing_dimension: routingDimension,
-        routing_dimension_level: routingDimensionLevel,
-        is_scheduled_outage: isScheduledOutage,
-        is_dynamic_mga_enabled: isDynamicMGAEnabled,
-        gateway_mga_id_map: None,
-    }
-}
 
 // async fn addMetricsToStream(
 //     decidedGateway: Option<&Gateway>,

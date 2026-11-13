@@ -1,0 +1,194 @@
+use async_trait::async_trait;
+use clickhouse::{Client, Row};
+use masking::PeekInterface;
+use serde::Deserialize;
+
+use crate::analytics::models::*;
+use crate::analytics::models::{
+    ExperimentResultsQuery, ExperimentResultsResponse, ExperimentTransactionsQuery,
+    ExperimentTransactionsResponse,
+};
+use crate::analytics::store::AnalyticsReadStore;
+use crate::config::ClickHouseAnalyticsConfig;
+use crate::error::ApiError;
+
+pub mod common;
+pub mod endpoints;
+pub mod filters;
+pub mod guard;
+pub mod metrics;
+pub mod query;
+pub mod time;
+
+#[derive(Clone)]
+pub struct ClickHouseAnalyticsStore {
+    client: Client,
+}
+
+#[derive(Debug, Clone, Deserialize, Row)]
+struct StartupProbeRow {
+    value: u8,
+}
+
+impl ClickHouseAnalyticsStore {
+    pub async fn new(config: ClickHouseAnalyticsConfig) -> Result<Self, ApiError> {
+        let mut client = Client::default()
+            .with_url(config.url.clone())
+            .with_database(config.database.clone())
+            .with_user(config.user.clone());
+        if let Some(password) = &config.password {
+            client = client.with_password(password.peek().clone());
+        }
+
+        verify_connectivity(&client).await.map_err(|error| {
+            crate::logger::error!(
+                ?error,
+                clickhouse_url = %config.url,
+                clickhouse_database = %config.database,
+                clickhouse_user = %config.user,
+                "clickhouse analytics startup connectivity check failed"
+            );
+            error
+        })?;
+        guard::detect_settings_support(&client).await;
+
+        Ok(Self {
+            client: guard::bounded(&client),
+        })
+    }
+}
+
+async fn verify_connectivity(client: &Client) -> Result<(), ApiError> {
+    // Fail fast on bad ClickHouse config instead of deferring the error to the first dashboard read.
+    let probe = common::fetch_one::<StartupProbeRow>(client.query("SELECT 1 AS value"))
+        .await
+        .map_err(|error| {
+            crate::logger::error!(?error, "clickhouse startup probe failed");
+            ApiError::DatabaseError
+        })?;
+    let _ = probe.value;
+    Ok(())
+}
+
+#[async_trait]
+impl AnalyticsReadStore for ClickHouseAnalyticsStore {
+    async fn overview(
+        &self,
+        query: &AnalyticsQuery,
+    ) -> Result<AnalyticsOverviewResponse, ApiError> {
+        endpoints::overview::load(&self.client, query).await
+    }
+
+    async fn volume_commitment(
+        &self,
+        query: &CommitmentAnalyticsQuery,
+    ) -> Result<CommitmentAnalytics, ApiError> {
+        Ok(endpoints::volume_commitment::load(&self.client, query).await)
+    }
+
+    async fn volume_commitment_impact(
+        &self,
+        query: &CommitmentAnalyticsQuery,
+    ) -> Result<CommitmentImpactData, ApiError> {
+        Ok(endpoints::volume_commitment::load_impact(&self.client, query).await)
+    }
+
+    async fn gateway_scores(
+        &self,
+        query: &AnalyticsQuery,
+    ) -> Result<AnalyticsGatewayScoresResponse, ApiError> {
+        endpoints::gateway_scores::load(&self.client, query).await
+    }
+
+    async fn decisions(
+        &self,
+        query: &AnalyticsQuery,
+    ) -> Result<AnalyticsDecisionResponse, ApiError> {
+        endpoints::decisions::load(&self.client, query).await
+    }
+
+    async fn routing_stats(
+        &self,
+        query: &AnalyticsQuery,
+    ) -> Result<AnalyticsRoutingStatsResponse, ApiError> {
+        endpoints::routing_stats::load(&self.client, query).await
+    }
+
+    async fn cost_savings(
+        &self,
+        query: &AnalyticsQuery,
+    ) -> Result<AnalyticsCostSavingsResponse, ApiError> {
+        endpoints::cost_savings::load(&self.client, query).await
+    }
+
+    async fn log_summaries(
+        &self,
+        query: &AnalyticsQuery,
+    ) -> Result<AnalyticsLogSummariesResponse, ApiError> {
+        endpoints::log_summaries::load(&self.client, query).await
+    }
+
+    async fn payment_audit(
+        &self,
+        query: &PaymentAuditQuery,
+    ) -> Result<PaymentAuditResponse, ApiError> {
+        endpoints::payment_audit::load(&self.client, query, query.scope).await
+    }
+
+    async fn payment_audit_filter_options(
+        &self,
+        query: &PaymentAuditQuery,
+    ) -> Result<PaymentAuditFilterOptions, ApiError> {
+        metrics::audit_filter_options::load(&self.client, query).await
+    }
+
+    async fn preview_trace(
+        &self,
+        query: &PaymentAuditQuery,
+    ) -> Result<PaymentAuditResponse, ApiError> {
+        endpoints::preview_trace::load(&self.client, query).await
+    }
+
+    async fn experiment_results(
+        &self,
+        query: &ExperimentResultsQuery,
+    ) -> Result<ExperimentResultsResponse, ApiError> {
+        endpoints::experiment_results::load(&self.client, query).await
+    }
+
+    async fn experiment_transactions(
+        &self,
+        query: &ExperimentTransactionsQuery,
+    ) -> Result<ExperimentTransactionsResponse, ApiError> {
+        endpoints::experiment_transactions::load(&self.client, query).await
+    }
+
+    async fn experiment_has_recorded_payments(
+        &self,
+        merchant_id: &str,
+        experiment_id: &str,
+    ) -> Result<bool, ApiError> {
+        endpoints::experiment_results::has_recorded_payments(
+            &self.client,
+            merchant_id,
+            experiment_id,
+        )
+        .await
+    }
+
+    async fn routing_events(
+        &self,
+        query: &RoutingEventsQuery,
+    ) -> Result<RoutingEventsResponse, ApiError> {
+        endpoints::routing_events::load(&self.client, query).await
+    }
+
+    async fn merchant_segment_traffic(
+        &self,
+        merchant_id: &str,
+        since_ms: i64,
+        active_dims: &[&str],
+    ) -> Result<Vec<crate::analytics::store::SegmentTraffic>, ApiError> {
+        endpoints::segment_traffic::load(&self.client, merchant_id, since_ms, active_dims).await
+    }
+}

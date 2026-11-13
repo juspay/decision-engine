@@ -1,9 +1,4 @@
--- DROP DATABASE IF EXISTS decision_engine_db;
--- CREATE DATABASE decision_engine_db;
--- \c decision_engine_db
-
-DROP TABLE IF EXISTS gateway_bank_emi_support_v2;
-CREATE TABLE gateway_bank_emi_support_v2 (
+CREATE TABLE IF NOT EXISTS gateway_bank_emi_support_v2 (
     id BIGSERIAL PRIMARY KEY,
     version BIGINT NOT NULL,
     gateway VARCHAR(255) NOT NULL,
@@ -18,8 +13,7 @@ CREATE TABLE gateway_bank_emi_support_v2 (
     last_updated TIMESTAMP
 );
 
-DROP TABLE IF EXISTS gateway_outage;
-CREATE TABLE gateway_outage (
+CREATE TABLE IF NOT EXISTS gateway_outage (
     id VARCHAR(255) PRIMARY KEY,
     version INTEGER NOT NULL,
     end_time TIMESTAMP NOT NULL,
@@ -36,8 +30,7 @@ CREATE TABLE gateway_outage (
     metadata TEXT
 );
 
-DROP TABLE IF EXISTS merchant_priority_logic;
-CREATE TABLE merchant_priority_logic (
+CREATE TABLE IF NOT EXISTS merchant_priority_logic (
     id VARCHAR(255) PRIMARY KEY,
     version BIGINT NOT NULL,
     date_created TIMESTAMP NOT NULL,
@@ -51,8 +44,7 @@ CREATE TABLE merchant_priority_logic (
     is_active_logic BOOLEAN NOT NULL
 );
 
-DROP TABLE IF EXISTS tenant_config;
-CREATE TABLE tenant_config (
+CREATE TABLE IF NOT EXISTS tenant_config (
     id VARCHAR(255) PRIMARY KEY,
     tenant_type VARCHAR(255) NOT NULL,
     module_key VARCHAR(255) NOT NULL,
@@ -65,8 +57,7 @@ CREATE TABLE tenant_config (
     country_code_alpha3 VARCHAR(3)
 );
 
-DROP TABLE IF EXISTS card_brand_routes;
-CREATE TABLE card_brand_routes (
+CREATE TABLE IF NOT EXISTS card_brand_routes (
     id BIGSERIAL PRIMARY KEY,
     card_brand TEXT NOT NULL,
     date_created TIMESTAMP NOT NULL,
@@ -76,8 +67,7 @@ CREATE TABLE card_brand_routes (
     preferred_gateway TEXT NOT NULL
 );
 
-DROP TABLE IF EXISTS issuer_routes;
-CREATE TABLE issuer_routes (
+CREATE TABLE IF NOT EXISTS issuer_routes (
     id BIGSERIAL PRIMARY KEY,
     issuer TEXT NOT NULL,
     merchant_id TEXT NOT NULL,
@@ -87,8 +77,7 @@ CREATE TABLE issuer_routes (
     last_updated TIMESTAMP NOT NULL
 );
 
-DROP TABLE IF EXISTS merchant_gateway_account_sub_info;
-CREATE TABLE merchant_gateway_account_sub_info (
+CREATE TABLE IF NOT EXISTS merchant_gateway_account_sub_info (
     id BIGSERIAL PRIMARY KEY,
     merchant_gateway_account_id BIGINT NOT NULL,
     sub_info_type TEXT NOT NULL,
@@ -98,8 +87,7 @@ CREATE TABLE merchant_gateway_account_sub_info (
     disabled BOOLEAN NOT NULL
 );
 
-DROP TABLE IF EXISTS gateway_payment_method_flow;
-CREATE TABLE gateway_payment_method_flow (
+CREATE TABLE IF NOT EXISTS gateway_payment_method_flow (
     id TEXT PRIMARY KEY,
     gateway_payment_flow_id TEXT NOT NULL,
     payment_method_id BIGINT,
@@ -117,8 +105,7 @@ CREATE TABLE gateway_payment_method_flow (
     payment_method_type TEXT
 );
 
-DROP TABLE IF EXISTS merchant_iframe_preferences;
-CREATE TABLE merchant_iframe_preferences (
+CREATE TABLE IF NOT EXISTS merchant_iframe_preferences (
     id BIGSERIAL PRIMARY KEY,
     merchant_id TEXT NOT NULL,
     dynamic_switching_enabled BOOLEAN,
@@ -128,8 +115,7 @@ CREATE TABLE merchant_iframe_preferences (
     card_brand_routing_enabled BOOLEAN
 );
 
-DROP TABLE IF EXISTS token_bin_info;
-CREATE TABLE token_bin_info (
+CREATE TABLE IF NOT EXISTS token_bin_info (
     token_bin TEXT PRIMARY KEY,
     card_bin TEXT NOT NULL,
     provider TEXT NOT NULL,
@@ -137,8 +123,7 @@ CREATE TABLE token_bin_info (
     last_updated TIMESTAMP
 );
 
-DROP TABLE IF EXISTS txn_offer_detail;
-CREATE TABLE txn_offer_detail (
+CREATE TABLE IF NOT EXISTS txn_offer_detail (
     id TEXT PRIMARY KEY,
     txn_detail_id TEXT NOT NULL,
     offer_id TEXT NOT NULL,
@@ -150,8 +135,7 @@ CREATE TABLE txn_offer_detail (
     partition_key TIMESTAMP
 );
 
-DROP TABLE IF EXISTS merchant_gateway_card_info;
-CREATE TABLE merchant_gateway_card_info (
+CREATE TABLE IF NOT EXISTS merchant_gateway_card_info (
     id BIGSERIAL PRIMARY KEY,
     disabled BOOLEAN NOT NULL,
     gateway_card_info_id BIGINT NOT NULL,
@@ -160,8 +144,7 @@ CREATE TABLE merchant_gateway_card_info (
     merchant_gateway_account_id BIGINT
 );
 
-DROP TABLE IF EXISTS merchant_account;
-CREATE TABLE merchant_account (
+CREATE TABLE IF NOT EXISTS merchant_account (
     id BIGSERIAL PRIMARY KEY,
     merchant_id TEXT,
     date_created TIMESTAMP NOT NULL,
@@ -186,8 +169,7 @@ CREATE TABLE merchant_account (
     merchant_category_code TEXT
 );
 
-DROP TABLE IF EXISTS merchant_gateway_payment_method_flow;
-CREATE TABLE merchant_gateway_payment_method_flow (
+CREATE TABLE IF NOT EXISTS merchant_gateway_payment_method_flow (
     id BIGSERIAL PRIMARY KEY,
     gateway_payment_method_flow_id TEXT NOT NULL,
     merchant_gateway_account_id BIGINT NOT NULL,
@@ -198,8 +180,7 @@ CREATE TABLE merchant_gateway_payment_method_flow (
     gateway_bank_code TEXT
 );
 
-DROP TABLE IF EXISTS txn_offer;
-CREATE TABLE txn_offer (
+CREATE TABLE IF NOT EXISTS txn_offer (
     id BIGSERIAL PRIMARY KEY,
     version BIGINT NOT NULL,
     discount_amount BIGINT NOT NULL,
@@ -208,8 +189,7 @@ CREATE TABLE txn_offer (
     txn_detail_id BIGINT NOT NULL
 );
 
-DROP TABLE IF EXISTS isin_routes;
-CREATE TABLE isin_routes (
+CREATE TABLE IF NOT EXISTS isin_routes (
     id BIGSERIAL PRIMARY KEY,
     isin TEXT NOT NULL,
     merchant_id TEXT NOT NULL,
@@ -219,16 +199,14 @@ CREATE TABLE isin_routes (
     last_updated TIMESTAMP NOT NULL
 );
 
-DROP TABLE IF EXISTS feature;
-CREATE TABLE feature (
+CREATE TABLE IF NOT EXISTS feature (
     id SERIAL PRIMARY KEY,
     enabled BOOLEAN NOT NULL,
     name TEXT NOT NULL,
     merchant_id TEXT
 );
 
-DROP TABLE IF EXISTS merchant_config;
-CREATE TABLE merchant_config (
+CREATE TABLE IF NOT EXISTS merchant_config (
     id TEXT PRIMARY KEY,
     merchant_account_id BIGINT NOT NULL,
     config_category TEXT NOT NULL,
@@ -239,8 +217,7 @@ CREATE TABLE merchant_config (
     last_updated TIMESTAMP NOT NULL
 );
 
-DROP TABLE IF EXISTS service_configuration;
-CREATE TABLE service_configuration (
+CREATE TABLE IF NOT EXISTS service_configuration (
     id BIGSERIAL PRIMARY KEY,
     name TEXT NOT NULL,
     value TEXT,
@@ -249,8 +226,7 @@ CREATE TABLE service_configuration (
     new_value_status TEXT
 );
 
-DROP TABLE IF EXISTS payment_method;
-CREATE TABLE payment_method (
+CREATE TABLE IF NOT EXISTS payment_method (
     id BIGSERIAL PRIMARY KEY,
     date_created TIMESTAMP NOT NULL,
     last_updated TIMESTAMP NOT NULL,
@@ -264,8 +240,7 @@ CREATE TABLE payment_method (
     payment_dsl TEXT
 );
 
-DROP TABLE IF EXISTS txn_card_info;
-CREATE TABLE txn_card_info (
+CREATE TABLE IF NOT EXISTS txn_card_info (
     id BIGSERIAL PRIMARY KEY,
     txn_id TEXT NOT NULL,
     card_isin TEXT,
@@ -282,8 +257,7 @@ CREATE TABLE txn_card_info (
     partition_key TIMESTAMP
 );
 
-DROP TABLE IF EXISTS txn_detail;
-CREATE TABLE txn_detail (
+CREATE TABLE IF NOT EXISTS txn_detail (
     id BIGSERIAL PRIMARY KEY,
     order_id TEXT NOT NULL,
     status TEXT NOT NULL,
@@ -315,8 +289,7 @@ CREATE TABLE txn_detail (
     txn_amount_breakup TEXT
 );
 
-DROP TABLE IF EXISTS card_info;
-CREATE TABLE card_info (
+CREATE TABLE IF NOT EXISTS card_info (
     card_isin TEXT PRIMARY KEY,
     card_switch_provider TEXT NOT NULL,
     card_type TEXT,
@@ -327,8 +300,7 @@ CREATE TABLE card_info (
     extended_card_type TEXT
 );
 
-DROP TABLE IF EXISTS gateway_card_info;
-CREATE TABLE gateway_card_info (
+CREATE TABLE IF NOT EXISTS gateway_card_info (
     id BIGSERIAL PRIMARY KEY,
     isin TEXT,
     gateway TEXT,
@@ -340,23 +312,20 @@ CREATE TABLE gateway_card_info (
     payment_method_type TEXT
 );
 
-DROP TABLE IF EXISTS juspay_bank_code;
-CREATE TABLE juspay_bank_code (
+CREATE TABLE IF NOT EXISTS juspay_bank_code (
     id BIGSERIAL PRIMARY KEY,
     bank_code TEXT NOT NULL,
     bank_name TEXT NOT NULL
 );
 
-DROP TABLE IF EXISTS emi_bank_code;
-CREATE TABLE emi_bank_code (
+CREATE TABLE IF NOT EXISTS emi_bank_code (
     id BIGSERIAL PRIMARY KEY,
     emi_bank TEXT NOT NULL,
     juspay_bank_code_id BIGINT NOT NULL,
     last_updated TIMESTAMP
 );
 
-DROP TABLE IF EXISTS gateway_bank_emi_support;
-CREATE TABLE gateway_bank_emi_support (
+CREATE TABLE IF NOT EXISTS gateway_bank_emi_support (
     id BIGSERIAL PRIMARY KEY,
     gateway TEXT NOT NULL,
     bank TEXT NOT NULL,
@@ -364,8 +333,7 @@ CREATE TABLE gateway_bank_emi_support (
     scope TEXT
 );
 
-DROP TABLE IF EXISTS user_eligibility_info;
-CREATE TABLE user_eligibility_info (
+CREATE TABLE IF NOT EXISTS user_eligibility_info (
     id TEXT PRIMARY KEY,
     flow_type TEXT NOT NULL,
     identifier_name TEXT NOT NULL,
@@ -374,8 +342,7 @@ CREATE TABLE user_eligibility_info (
     disabled BOOLEAN
 );
 
-DROP TABLE IF EXISTS merchant_gateway_account;
-CREATE TABLE merchant_gateway_account (
+CREATE TABLE IF NOT EXISTS merchant_gateway_account (
     id BIGSERIAL PRIMARY KEY,
     account_details TEXT NOT NULL,
     gateway TEXT NOT NULL,
@@ -390,8 +357,7 @@ CREATE TABLE merchant_gateway_account (
     supported_txn_type TEXT
 );
 
-DROP TABLE IF EXISTS tenant_config_filter;
-CREATE TABLE tenant_config_filter (
+CREATE TABLE IF NOT EXISTS tenant_config_filter (
     id VARCHAR(255) PRIMARY KEY,
     filter_group_id VARCHAR(255) NOT NULL,
     dimension_value VARCHAR(255) NOT NULL,
@@ -399,8 +365,7 @@ CREATE TABLE tenant_config_filter (
     tenant_config_id VARCHAR(255) NOT NULL
 );
 
-DROP TABLE IF EXISTS routing_algorithm;
-CREATE TABLE routing_algorithm (
+CREATE TABLE IF NOT EXISTS routing_algorithm (
     id VARCHAR(255) PRIMARY KEY,
     created_by VARCHAR(255) NOT NULL,
     name VARCHAR(255) NOT NULL,
@@ -412,8 +377,7 @@ CREATE TABLE routing_algorithm (
     modified_at TIMESTAMP NOT NULL
 );
 
-DROP TABLE IF EXISTS co_badged_cards_info_test;
-CREATE TABLE co_badged_cards_info_test (
+CREATE TABLE IF NOT EXISTS co_badged_cards_info_test (
     id VARCHAR(64) PRIMARY KEY,
     card_bin_min BIGINT NOT NULL,
     card_bin_max BIGINT NOT NULL,
@@ -435,8 +399,7 @@ CREATE TABLE co_badged_cards_info_test (
     last_updated_provider VARCHAR(128)
 );
 
-DROP TABLE IF EXISTS routing_algorithm_mapper;
-CREATE TABLE routing_algorithm_mapper (
+CREATE TABLE IF NOT EXISTS routing_algorithm_mapper (
     id SERIAL PRIMARY KEY,
     created_by VARCHAR(255) NOT NULL,
     routing_algorithm_id VARCHAR(255) NOT NULL,
@@ -445,4 +408,4 @@ CREATE TABLE routing_algorithm_mapper (
 );
 
 
-CREATE INDEX co_badged_cards_card_bin_min_card_bin_max_index ON co_badged_cards_info_test (card_bin_min, card_bin_max);
+CREATE INDEX IF NOT EXISTS co_badged_cards_card_bin_min_card_bin_max_index ON co_badged_cards_info_test (card_bin_min, card_bin_max);

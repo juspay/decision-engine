@@ -90,6 +90,20 @@ Create the name for the Routing Config Job
 {{- end }}
 
 {{/*
+Create the name for the analytics ClickHouse bootstrap configmap
+*/}}
+{{- define "decision-engine.analyticsClickhouseConfigName" -}}
+{{- printf "%s-analytics-clickhouse" (include "decision-engine.fullname" .) }}
+{{- end }}
+
+{{/*
+Create the name for the analytics ClickHouse bootstrap job
+*/}}
+{{- define "decision-engine.analyticsClickhouseJobName" -}}
+{{- printf "%s-analytics-clickhouse-init" (include "decision-engine.fullname" .) }}
+{{- end }}
+
+{{/*
 Define the PostgreSQL hostname
 */}}
 {{- define "decision-engine.postgresqlHost" -}}
@@ -169,11 +183,8 @@ max_feed_count = 200
 tti = {{ .Values.decisionEngine.cache.tti }}
 max_capacity = {{ .Values.decisionEngine.cache.maxCapacity }}
 
-[secrets]
-open_router_private_key = {{ .Values.decisionEngine.secrets.openRouterPrivateKey | quote }}
-
 [tenant_secrets]
-public = { master_key = "", public_key = "", schema = "public" }
+public = { schema = "public" }
 
 [secrets_management]
 secrets_manager = {{ .Values.decisionEngine.secrets.secretsManager | quote }}
@@ -197,4 +208,19 @@ Define the MySQL hostname
 {{- else }}
 {{- .Values.mysql.hostname | default (printf "%s-mysql" .Release.Name) }}
 {{- end }}
+{{- end }}
+
+{{/*
+Container securityContext: the chart-wide .Values.securityContext with the
+component's own keys laid over it. Keys are set one by one rather than with
+merge/mergeOverwrite, because those treat an explicit `false` as empty and
+would let a global `true` win over a component's `false`.
+Usage: include "decision-engine.containerSecurityContext" (dict "global" .Values.securityContext "component" .Values.x.securityContext)
+*/}}
+{{- define "decision-engine.containerSecurityContext" -}}
+{{- $sc := deepCopy (.global | default dict) -}}
+{{- range $key, $value := (.component | default dict) }}
+{{- $_ := set $sc $key $value }}
+{{- end }}
+{{- toYaml $sc }}
 {{- end }}

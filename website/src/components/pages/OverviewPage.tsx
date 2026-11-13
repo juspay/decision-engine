@@ -1,0 +1,737 @@
+import { useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import useSWR from 'swr'
+import {
+  BookOpen,
+  CheckCircle2,
+  ChevronRight,
+  GitBranch,
+  Network,
+  TrendingUp,
+} from 'lucide-react'
+import { useMerchantStore } from '../../store/merchantStore'
+import { useAuthStore } from '../../store/authStore'
+import { apiPost, fetcher } from '../../lib/api'
+import {
+  AnalyticsRange,
+  AnalyticsRangeValue,
+  AnalyticsOverviewResponse,
+  RoutingAlgorithm,
+  RuleConfig,
+} from '../../types/api'
+import { Badge } from '../ui/Badge'
+import { Card as GlassCard, SurfaceLabel } from '../ui/Card'
+import { humanizeAuditValue, overviewRouteLabel, routeLabel } from '../../lib/auditLabels'
+import { useDebitRoutingFlag } from '../../hooks/useDebitRoutingFlag'
+import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
+import { TimeRangeFilter } from '../ui/TimeRangeFilter'
+import {
+  customWindowFrom,
+  formatWindowBound,
+  presetWindow,
+  toDateTimeInputValue,
+} from '../../lib/timeRange'
+
+import { PageHeading } from '../ui/PageHeading'
+const PRESET_WINDOW_COPY: Record<AnalyticsRange, { detail: string; badge: string }> = {
+  '15m': { detail: 'Last 15 mins', badge: 'Live 15m' },
+  '1h': { detail: 'Last hour', badge: 'Live 1h' },
+  '12h': { detail: 'Last 12 hours', badge: 'Live 12h' },
+  '1d': { detail: 'Last 1 day', badge: 'Live 1d' },
+  '1w': { detail: 'Last 1 week', badge: 'Live 1w' },
+}
+
+const GATEWAY_ACTIVITY_LIMIT = 6
+
+
+function formatCompactNumber(value: number | undefined) {
+  return new Intl.NumberFormat(undefined, {
+    notation: 'compact',
+    maximumFractionDigits: value && value < 100 ? 1 : 0,
+  }).format(value || 0)
+}
+
+function formatExactNumber(value: number | undefined) {
+  return new Intl.NumberFormat().format(value || 0)
+}
+
+/** Exact digits until the number stops fitting the card — "2K" for 2,063 hides what it's read for. */
+function formatStatNumber(value: number | undefined) {
+  const safe = value || 0
+  return safe < 1_000_000 ? formatExactNumber(safe) : formatCompactNumber(safe)
+}
+
+function formatPercent(value: number | undefined) {
+  if (value === undefined || value === null || Number.isNaN(value)) return '0%'
+  return `${value.toFixed(value >= 100 ? 0 : 1)}%`
+}
+
+/** "0.0% of requests" beside a visibly non-zero error count reads as a contradiction. */
+function formatRate(value: number) {
+  if (value > 0 && value < 0.1) return '<0.1%'
+  return formatPercent(value)
+}
+
+function timeAgo(ms: number) {
+  const diff = Date.now() - ms
+  if (diff < 60_000) return 'just now'
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`
+  return `${Math.floor(diff / 86_400_000)}d ago`
+}
+
+function scoreColor(score: number) {
+  if (score >= 0.85) return { dot: 'bg-emerald-500', text: 'text-emerald-700 dark:text-emerald-400' }
+  if (score >= 0.70) return { dot: 'bg-amber-500', text: 'text-amber-700 dark:text-amber-400' }
+  return { dot: 'bg-red-500', text: 'text-red-600 dark:text-red-400' }
+}
+
+function EmptyWorkspace() {
+  return (
+    <div className="grid gap-5 lg:grid-cols-[1.1fr_0.9fr]">
+      <GlassCard className="p-7">
+        <SurfaceLabel>Merchant session required</SurfaceLabel>
+        <h2 className="mt-4 max-w-xl text-3xl font-semibold tracking-tight text-slate-950 dark:text-white">
+          Sign in with a merchant account to turn this into a live overview.
+        </h2>
+        <p className="mt-4 max-w-xl text-sm leading-7 text-slate-600 dark:text-[#b2bdd1]">
+          Analytics use your signed-in merchant account. After sign-in, the overview shows service
+          health, active routing, request count, and connector activity.
+        </p>
+      </GlassCard>
+
+      <GlassCard className="p-7">
+        <div className="space-y-5">
+          {[
+            {
+              icon: CheckCircle2,
+              title: 'System status',
+              text: 'Check whether the service is reachable.',
+            },
+            {
+              icon: GitBranch,
+              title: 'Routing setup',
+              text: 'See whether a strategy is configured.',
+            },
+            {
+              icon: Network,
+              title: 'Connector activity',
+              text: 'View recent request distribution by connector.',
+            },
+          ].map((item) => (
+            <div key={item.title} className="flex items-start gap-4">
+              <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3 dark:border-[#2a303a] dark:bg-[#161b24]">
+                <item.icon className="h-5 w-5 text-brand-600 dark:text-sky-300" />
+              </div>
+              <div>
+                <p className="text-sm font-semibold text-slate-950 dark:text-white">{item.title}</p>
+                <p className="mt-1 text-sm leading-6 text-slate-600 dark:text-[#b2bdd1]">{item.text}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      </GlassCard>
+    </div>
+  )
+}
+
+
+type RuleConfigResponse = {
+  merchant_id: string
+  config: RuleConfig | null
+}
+
+export function OverviewPage() {
+  const { merchantId } = useMerchantStore()
+  const authMerchantId = useAuthStore((state) => state.user?.merchantId || '')
+  const effectiveMerchantId = merchantId || authMerchantId
+  const [range, setRange] = useState<AnalyticsRangeValue>('1d')
+  const [customStart, setCustomStart] = useState(() =>
+    toDateTimeInputValue(presetWindow('1d').start_ms),
+  )
+  const [customEnd, setCustomEnd] = useState(() => toDateTimeInputValue(Date.now()))
+
+  const customWindow = useMemo(
+    () => (range === 'custom' ? customWindowFrom(customStart, customEnd) : undefined),
+    [customEnd, customStart, range],
+  )
+
+  const { data: activeAlgorithms } = useSWR<RoutingAlgorithm[]>(
+    effectiveMerchantId ? `/routing/list/active/${effectiveMerchantId}` : null,
+    () => fetcher<RoutingAlgorithm[]>(`/routing/list/active/${effectiveMerchantId}`),
+    { shouldRetryOnError: false },
+  )
+
+  const { data: srConfig } = useSWR<RuleConfigResponse>(
+    effectiveMerchantId ? ['/rule/get', 'successRate', effectiveMerchantId] : null,
+    () => apiPost('/rule/get', { merchant_id: effectiveMerchantId, algorithm: 'successRate' }),
+    { shouldRetryOnError: false },
+  )
+  const debitRoutingFlag = useDebitRoutingFlag(effectiveMerchantId)
+  const merchantFeatures = useMerchantFeatures(effectiveMerchantId || undefined)
+
+  // A half-picked custom window has no bounds to query with, so both requests wait for it.
+  const windowQuery =
+    range === 'custom'
+      ? customWindow
+        ? `range=1h&start_ms=${customWindow.start_ms}&end_ms=${customWindow.end_ms}`
+        : null
+      : `range=${range}`
+  const analyticsOverviewUrl = windowQuery ? `/analytics/overview?${windowQuery}` : null
+
+  const analyticsOverview = useSWR<AnalyticsOverviewResponse>(analyticsOverviewUrl, fetcher, {
+    shouldRetryOnError: false,
+    keepPreviousData: true,
+  })
+
+  // A running experiment is listed beside the active rule; the rule is the routing that's set up.
+  const activeRouting =
+    activeAlgorithms?.find((algorithm) => (algorithm.algorithm_data || algorithm.algorithm)?.type !== 'ab_test') ||
+    activeAlgorithms?.[0] ||
+    null
+  const hasRuleBasedRouting = (activeAlgorithms || []).some(
+    (algorithm) => (algorithm.algorithm_data || algorithm.algorithm)?.type === 'advanced',
+  )
+
+  const routeHits = analyticsOverview.data?.route_hits || []
+  const topErrors = analyticsOverview.data?.top_errors || []
+
+  // `totals` are the server's window-wide counts; the fallbacks only cover a response cached from
+  // before that field existed. `top_errors` is capped at five groups, so summing it undercounts.
+  const totalRequests =
+    analyticsOverview.data?.totals?.request_count ??
+    routeHits.reduce((sum, item) => sum + item.count, 0)
+  const totalErrors =
+    analyticsOverview.data?.totals?.error_count ??
+    topErrors.reduce((sum, item) => sum + item.count, 0)
+  const listedErrors = topErrors.reduce((sum, item) => sum + item.count, 0)
+  const errorRate = totalRequests > 0 ? (totalErrors / totalRequests) * 100 : 0
+
+  const requestBreakdown = (analyticsOverview.data?.totals?.requests_by_route ?? routeHits)
+    .filter((item) => item.count > 0)
+    .sort((left, right) => right.count - left.count)
+
+  // A still-pending outcome is in neither count, so the denominator is the resolved ones — fewer
+  // than the calls to /update-gateway-score the Requests card counts.
+  const authRate = analyticsOverview.data?.totals?.auth_rate ?? analyticsOverview.data?.auth_rate
+  const authRateResolved = (authRate?.success_count || 0) + (authRate?.failure_count || 0)
+  const authRatePercent =
+    authRateResolved > 0 ? ((authRate?.success_count || 0) / authRateResolved) * 100 : null
+
+  // Every snapshot field is nullable server-side: rows without a gateway are dropped, and a gateway
+  // with no transaction counts falls back to a plain mean instead of reporting 0%.
+  const gatewayScores = useMemo(() => {
+    const map = new Map<string, { scoreSum: number; txSum: number; plainSum: number; rows: number }>()
+    for (const s of analyticsOverview.data?.top_scores || []) {
+      if (!s.gateway) continue
+      const score = s.score_value || 0
+      const txCount = s.transaction_count || 0
+      const e = map.get(s.gateway) ?? { scoreSum: 0, txSum: 0, plainSum: 0, rows: 0 }
+      e.scoreSum += score * txCount
+      e.txSum += txCount
+      e.plainSum += score
+      e.rows += 1
+      map.set(s.gateway, e)
+    }
+    return Array.from(map.entries())
+      .map(([gateway, e]) => ({
+        gateway,
+        score: e.txSum > 0 ? e.scoreSum / e.txSum : e.rows > 0 ? e.plainSum / e.rows : 0,
+        txCount: e.txSum,
+      }))
+      .sort((a, b) => b.txCount - a.txCount || b.score - a.score)
+  }, [analyticsOverview.data])
+
+  const gatewayUsage = useMemo(() => {
+    const volumes = analyticsOverview.data?.totals?.gateway_volumes || []
+    const totalTraffic = volumes.reduce((sum, item) => sum + item.count, 0)
+
+    return volumes
+      .map((item) => ({
+        gateway: item.gateway,
+        count: item.count,
+        share: totalTraffic ? (item.count / totalTraffic) * 100 : 0,
+      }))
+      .sort((left, right) => right.count - left.count)
+  }, [analyticsOverview.data])
+
+  const gatewayTrafficTotal = gatewayUsage.reduce((sum, item) => sum + item.count, 0)
+  const topGateway = gatewayUsage[0]?.gateway || analyticsOverview.data?.top_scores?.[0]?.gateway
+  const selectedWindow =
+    range === 'custom'
+      ? {
+          detail: customWindow
+            ? `${formatWindowBound(customWindow.start_ms)} — ${formatWindowBound(customWindow.end_ms)}`
+            : 'Custom window',
+          badge: 'Custom',
+        }
+      : PRESET_WINDOW_COPY[range]
+  // Multi-objective is set up when either the merchant saved a manual successRate
+  // config on /routing/sr (a merchant-specific /rule/get response — the same
+  // condition that page uses) or turned on Autopilot mode there (the `autopilot`
+  // merchant feature flag). A global default config alone counts as neither.
+  const hasMultiObjectiveConfig = Boolean(
+    srConfig?.config?.type === 'successRate' &&
+      srConfig.config.data &&
+      srConfig.merchant_id === effectiveMerchantId,
+  )
+  const autopilotEnabled = merchantFeatures.isEnabled('autopilot')
+  const multiObjectiveReady = hasMultiObjectiveConfig || autopilotEnabled
+  const hasDebitRouting = debitRoutingFlag.isEnabled
+  const configuredBasics = [
+    Boolean(activeRouting),
+    multiObjectiveReady,
+    hasRuleBasedRouting,
+    hasDebitRouting,
+  ].filter(Boolean).length
+
+  const setupItems = [
+    {
+      label: 'Routing strategy',
+      description: activeRouting ? activeRouting.name : 'None configured',
+      state: activeRouting ? 'Configured' : 'Not set',
+      icon: GitBranch,
+      required: true,
+      href: '../routing',
+    },
+    {
+      label: 'Multi-objective config',
+      description: autopilotEnabled
+        ? 'Autopilot mode enabled'
+        : hasMultiObjectiveConfig
+          ? 'Configured'
+          : 'Not configured',
+      state: autopilotEnabled ? 'Auto-pilot' : hasMultiObjectiveConfig ? 'Configured' : 'Not set',
+      icon: TrendingUp,
+      required: true,
+      href: '../routing/sr',
+    },
+    {
+      label: 'Rule-based routing',
+      description: hasRuleBasedRouting ? 'Enabled' : 'Not enabled',
+      state: hasRuleBasedRouting ? 'Enabled' : 'Optional',
+      icon: BookOpen,
+      required: false,
+      href: '../routing/rules',
+    },
+    {
+      label: 'Debit routing',
+      description: debitRoutingFlag.isLoading
+        ? 'Checking…'
+        : hasDebitRouting
+          ? 'Enabled'
+          : 'Not enabled',
+      state: debitRoutingFlag.isLoading ? 'Checking' : hasDebitRouting ? 'Enabled' : 'Optional',
+      icon: Network,
+      required: false,
+      href: '../routing/debit',
+    },
+  ]
+
+  const analyticsLoading = !analyticsOverview.data && analyticsOverview.isLoading
+  const analyticsRefreshing = !analyticsLoading && analyticsOverview.isValidating
+
+  // At least GATEWAY_ACTIVITY_LIMIT long, or two rows share a swatch.
+  const gatewayColors = ['#38bdf8', '#60a5fa', '#22c55e', '#f59e0b', '#a78bfa', '#f472b6']
+
+  return (
+    <div className="space-y-6 px-5 sm:px-6 lg:px-8 xl:px-10">
+      <header className="relative flex flex-wrap items-start justify-between gap-4">
+        <PageHeading
+          title="Overview"
+          badge={(analyticsOverview.data?.merchant_id || effectiveMerchantId) ? (
+            <Badge variant="blue">{analyticsOverview.data?.merchant_id || effectiveMerchantId}</Badge>
+          ) : null}
+        />
+
+        <div className="flex flex-wrap items-center gap-2 md:justify-end">
+
+          <TimeRangeFilter
+            range={range}
+            customStart={customStart}
+            customEnd={customEnd}
+            onRangeChange={(nextRange) => {
+              setRange(nextRange)
+              if (nextRange !== 'custom') {
+                const preset = presetWindow(nextRange)
+                setCustomStart(toDateTimeInputValue(preset.start_ms))
+                setCustomEnd(toDateTimeInputValue(preset.end_ms))
+              }
+            }}
+            onCustomChange={(nextStart, nextEnd) => {
+              setCustomStart(nextStart)
+              setCustomEnd(nextEnd)
+            }}
+          />
+        </div>
+
+        {/* loading bar — sits at the bottom edge of the header, no layout shift */}
+        <div className={`absolute bottom-0 left-0 right-0 h-[2px] overflow-hidden transition-opacity duration-500 ${analyticsLoading || analyticsRefreshing ? 'opacity-100' : 'opacity-0'}`}>
+          <div className="h-full origin-left animate-[analytics-progress_1.8s_ease-in-out_infinite] bg-brand-500" />
+        </div>
+      </header>
+
+      {!effectiveMerchantId ? (
+        <EmptyWorkspace />
+      ) : (
+        <>
+
+          {/* ── top stat row ─────────────────────────────────────── */}
+          <div className={`grid gap-6 sm:grid-cols-2 xl:grid-cols-4 transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
+            <GlassCard className="flex flex-col p-5">
+              <SurfaceLabel>Requests</SurfaceLabel>
+              <p
+                className="mt-3 text-[2rem] font-semibold leading-none tracking-tight text-slate-950 dark:text-white"
+                title={formatExactNumber(totalRequests)}
+              >
+                {formatStatNumber(totalRequests)}
+              </p>
+              <p className="mt-2 text-xs text-slate-500 dark:text-[#8d96aa]">
+                All routing endpoints · {selectedWindow.detail.toLowerCase()}
+              </p>
+              {requestBreakdown.length > 0 && (
+                <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 border-t border-slate-100 pt-3 dark:border-[#1e2535]">
+                  {requestBreakdown.map((item) => (
+                    <span
+                      key={item.route}
+                      className="text-[11px] leading-4 text-slate-500 dark:text-[#8d96aa]"
+                    >
+                      {overviewRouteLabel(item.route)}{' '}
+                      <span className="font-semibold tabular-nums text-slate-700 dark:text-[#c6cfdd]">
+                        {formatExactNumber(item.count)}
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              )}
+            </GlassCard>
+
+            <GlassCard className={`flex flex-col p-5 transition-colors ${totalErrors > 0 ? 'border-red-300/60 dark:border-red-500/30' : ''}`}>
+              <SurfaceLabel>Errors</SurfaceLabel>
+              <p
+                className={`mt-3 text-[2rem] font-semibold leading-none tracking-tight ${totalErrors > 0 ? 'text-red-600 dark:text-red-400' : 'text-slate-950 dark:text-white'}`}
+                title={formatExactNumber(totalErrors)}
+              >
+                {formatStatNumber(totalErrors)}
+              </p>
+              <p className="mt-2 text-xs text-slate-500 dark:text-[#8d96aa]">
+                {totalErrors > 0
+                  ? totalRequests > 0
+                    ? `${formatRate(errorRate)} of requests in window`
+                    : 'Issues detected in window'
+                  : 'No issues in window'}
+              </p>
+            </GlassCard>
+
+            <GlassCard className="flex flex-col p-5">
+              <SurfaceLabel>Auth rate</SurfaceLabel>
+              <p className="mt-3 text-[2rem] font-semibold leading-none tracking-tight text-slate-950 dark:text-white">
+                {authRatePercent === null ? '—' : formatPercent(authRatePercent)}
+              </p>
+              <p
+                className="mt-2 text-xs text-slate-500 dark:text-[#8d96aa]"
+                title="Outcomes reported through /update-gateway-score that resolved to a success or failure status. Still-pending ones are in neither count, so this is smaller than the endpoint's call count."
+              >
+                {authRatePercent === null
+                  ? 'No resolved outcomes yet'
+                  : `${formatExactNumber(authRate?.success_count)} of ${formatExactNumber(authRateResolved)} resolved outcomes`}
+              </p>
+            </GlassCard>
+
+            <GlassCard className="flex flex-col p-5">
+              <SurfaceLabel>Top connector</SurfaceLabel>
+              <p className="mt-3 truncate text-[2rem] font-semibold leading-none tracking-tight text-slate-950 dark:text-white">
+                {topGateway ? humanizeAuditValue(topGateway) : '—'}
+              </p>
+              <p className="mt-2 text-xs text-slate-500 dark:text-[#8d96aa] max-w-[57ch]">
+                {gatewayUsage[0]
+                  ? `${formatPercent(gatewayUsage[0].share)} of ${formatExactNumber(gatewayTrafficTotal)} decisions`
+                  : 'No activity yet'}
+              </p>
+            </GlassCard>
+          </div>
+
+          {/* ── main content ─────────────────────────────────────── */}
+          <div className={`grid gap-6 xl:grid-cols-2 transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
+
+            {/* Gateway activity */}
+            <GlassCard className="p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <SurfaceLabel>Connector activity</SurfaceLabel>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8d96aa]">
+                    {gatewayUsage.length
+                      ? `${formatExactNumber(gatewayTrafficTotal)} decisions across ${gatewayUsage.length} ${gatewayUsage.length === 1 ? 'gateway' : 'gateways'}`
+                      : 'Routing decisions by connector'}
+                  </p>
+                </div>
+                <Badge variant="blue">{selectedWindow.badge}</Badge>
+              </div>
+
+              <div className="mt-6 space-y-3">
+                {gatewayUsage.length ? (
+                  gatewayUsage.slice(0, GATEWAY_ACTIVITY_LIMIT).map((item, index) => (
+                    <div
+                      key={item.gateway}
+                      className="rounded-[20px] border border-slate-200 bg-slate-50/80 p-4 dark:border-[#2a303a] dark:bg-[#121720]"
+                    >
+                      <div className="flex items-center justify-between gap-4">
+                        <div className="flex items-center gap-3">
+                          <span
+                            className="h-2.5 w-2.5 flex-shrink-0 rounded-full"
+                            style={{ backgroundColor: gatewayColors[index] || gatewayColors[0] }}
+                          />
+                          <div>
+                            <p className="text-sm font-semibold text-slate-950 dark:text-white">
+                              {humanizeAuditValue(item.gateway)}
+                            </p>
+                            <p className="mt-0.5 text-xs text-slate-500 dark:text-[#98a3b8]">
+                              {formatExactNumber(item.count)} decisions
+                            </p>
+                          </div>
+                        </div>
+                        <p className="text-sm font-semibold tabular-nums text-slate-950 dark:text-white">
+                          {formatPercent(item.share)}
+                        </p>
+                      </div>
+
+                      <div className="mt-3 h-1.5 rounded-full bg-slate-200 dark:bg-[#232933]">
+                        <div
+                          className="h-full rounded-full transition-all duration-500"
+                          style={{
+                            width: `${Math.max(4, item.share)}%`,
+                            backgroundColor: gatewayColors[index] || gatewayColors[0],
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <div className="rounded-[20px] border border-dashed border-slate-200 px-5 py-12 text-center dark:border-[#2a303a]">
+                    <p className="text-sm font-semibold text-slate-950 dark:text-white">
+                      No connector activity yet
+                    </p>
+                    <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-[#a6b0c3]">
+                      Traffic by connector will appear here once requests flow through.
+                    </p>
+                  </div>
+                )}
+
+                {gatewayUsage.length > GATEWAY_ACTIVITY_LIMIT && (
+                  <Link
+                    to="/analytics"
+                    className="flex items-center justify-center gap-1 rounded-[20px] border border-dashed border-slate-200 px-4 py-2.5 text-xs font-medium text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-700 dark:border-[#2a303a] dark:text-[#8d96aa] dark:hover:border-[#3a4252] dark:hover:text-[#c6cfdd]"
+                  >
+                    {gatewayUsage.length - GATEWAY_ACTIVITY_LIMIT} more in Analytics
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Link>
+                )}
+              </div>
+            </GlassCard>
+
+            {/* Setup */}
+            <GlassCard className="p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <SurfaceLabel>Setup</SurfaceLabel>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8d96aa]">
+                    Routing capabilities on this merchant
+                  </p>
+                </div>
+                <Badge variant={configuredBasics >= 2 ? 'green' : 'orange'}>
+                  {configuredBasics}/4 ready
+                </Badge>
+              </div>
+
+              {/* Progress bar */}
+              <div className="mt-4 h-1.5 overflow-hidden rounded-full bg-slate-200 dark:bg-[#232933]">
+                <div
+                  className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+                  style={{ width: `${(configuredBasics / 4) * 100}%` }}
+                />
+              </div>
+
+              {/* Checklist */}
+              <div className="mt-4 divide-y divide-slate-100 dark:divide-[#1e2535]">
+                {setupItems.map((item) => {
+                  const readyState =
+                    item.state === 'Live' ||
+                    item.state === 'Configured' ||
+                    item.state === 'Enabled' ||
+                    item.state === 'Auto-pilot'
+                  const iconColor =
+                    item.state === 'Issue'
+                      ? 'text-red-600'
+                      : readyState
+                        ? 'text-emerald-700'
+                        : 'text-slate-500 dark:text-[#78849a]'
+                  const badgeVariant = readyState
+                    ? 'green'
+                    : item.state === 'Issue'
+                      ? 'red'
+                      : item.state === 'Checking'
+                        ? 'gray'
+                        : item.required
+                          ? 'orange'
+                          : 'gray'
+                  const inner = (
+                    <>
+                      <div className="flex items-center gap-3 min-w-0">
+                        <item.icon className={`h-4 w-4 flex-shrink-0 ${iconColor}`} />
+                        <div className="min-w-0">
+                          <p className="text-sm font-medium text-slate-900 dark:text-white">
+                            {item.label}
+                          </p>
+                          <p className="truncate text-xs text-slate-500 dark:text-[#8d96aa]">
+                            {item.description}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex flex-shrink-0 items-center gap-1.5">
+                        <Badge variant={badgeVariant}>{item.state}</Badge>
+                        {item.href && (
+                          <ChevronRight className="h-3.5 w-3.5 text-slate-500 dark:text-[#78849a]" />
+                        )}
+                      </div>
+                    </>
+                  )
+                  const rowClass = 'flex items-center justify-between gap-3 py-3.5 rounded-lg -mx-2 px-2'
+                  return item.href ? (
+                    <Link
+                      key={item.label}
+                      to={item.href}
+                      relative="path"
+                      className={`${rowClass} transition-colors hover:bg-slate-50 dark:hover:bg-[#13192a]`}
+                    >
+                      {inner}
+                    </Link>
+                  ) : (
+                    <div key={item.label} className={rowClass}>
+                      {inner}
+                    </div>
+                  )
+                })}
+              </div>
+            </GlassCard>
+          </div>
+
+          {/* ── gateway health + errors ───────────────────────────── */}
+          <div className={`grid gap-6 xl:grid-cols-2 transition-opacity duration-200 ${analyticsRefreshing ? 'opacity-60' : 'opacity-100'}`}>
+
+            {/* Gateway health */}
+            <GlassCard className="p-6">
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <SurfaceLabel>Connector health</SurfaceLabel>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8d96aa]">
+                    Success-rate score, weighted by scored transactions
+                  </p>
+                </div>
+                <Badge variant="blue">{selectedWindow.badge}</Badge>
+              </div>
+
+              <div className="mt-5 space-y-2">
+                {gatewayScores.length ? (
+                  gatewayScores.slice(0, 5).map((gw) => {
+                    const color = scoreColor(gw.score)
+                    return (
+                      <div
+                        key={gw.gateway}
+                        className="flex items-center gap-3 rounded-xl border border-slate-200 bg-slate-50/80 px-4 py-3 dark:border-[#2a303a] dark:bg-[#121720]"
+                      >
+                        <span className={`h-2 w-2 flex-shrink-0 rounded-full ${color.dot}`} />
+                        <span className="min-w-0 flex-1 truncate text-sm font-semibold text-slate-950 dark:text-white">
+                          {humanizeAuditValue(gw.gateway)}
+                        </span>
+                        <span className="flex-shrink-0 text-xs tabular-nums text-slate-500 dark:text-[#8d96aa]">
+                          {formatExactNumber(gw.txCount)} txns
+                        </span>
+                        <span className={`w-14 flex-shrink-0 text-right text-sm font-semibold tabular-nums ${color.text}`}>
+                          {(gw.score * 100).toFixed(1)}%
+                        </span>
+                      </div>
+                    )
+                  })
+                ) : (
+                  <div className="rounded-xl border border-dashed border-slate-200 px-5 py-10 text-center dark:border-[#2a303a]">
+                    <p className="text-sm font-semibold text-slate-950 dark:text-white">No score data yet</p>
+                    <p className="mt-1.5 text-xs text-slate-500 dark:text-[#a6b0c3]">
+                      SR scores appear once connectors handle traffic.
+                    </p>
+                  </div>
+                )}
+              </div>
+            </GlassCard>
+
+            {/* Recent errors */}
+            <GlassCard className={`p-6 transition-colors ${totalErrors > 0 ? 'border-red-300/40 dark:border-red-500/20' : ''}`}>
+              <div className="flex items-start justify-between gap-4">
+                <div className="min-w-0">
+                  <SurfaceLabel>Recent errors</SurfaceLabel>
+                  <p className="mt-1 text-xs text-slate-500 dark:text-[#8d96aa]">
+                    Largest failure groups in the window
+                  </p>
+                </div>
+                {totalErrors > 0 ? (
+                  <Badge variant="red">{formatExactNumber(totalErrors)} total</Badge>
+                ) : (
+                  <Badge variant="green">Clean</Badge>
+                )}
+              </div>
+
+              {topErrors.length ? (
+                <>
+                  <div className="mt-4 divide-y divide-slate-100 dark:divide-[#1e2535]">
+                    {topErrors.slice(0, 5).map((err, index) => (
+                      <div key={index} className="flex items-start justify-between gap-3 py-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="rounded bg-red-50 px-1.5 py-0.5 font-mono text-[11px] font-medium text-red-700 dark:bg-red-500/10 dark:text-red-400 leading-4">
+                              {err.error_code || 'unknown'}
+                            </span>
+                            <span className="truncate text-xs text-slate-500 dark:text-[#8d96aa]">
+                              {routeLabel(err.route)}
+                            </span>
+                          </div>
+                          <p className="mt-1 truncate text-xs text-slate-500 dark:text-[#8d96aa]" title={err.error_message}>
+                            {err.error_message}
+                          </p>
+                        </div>
+                        <div className="flex-shrink-0 text-right">
+                          <p className="text-sm font-semibold tabular-nums text-slate-950 dark:text-white">
+                            {formatExactNumber(err.count)}
+                          </p>
+                          <p className="text-[11px] text-slate-500 dark:text-[#78849a] leading-4">
+                            {timeAgo(err.last_seen_ms)}
+                          </p>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  {totalErrors > listedErrors && (
+                    <Link
+                      to="/audit"
+                      className="mt-3 flex items-center justify-center gap-1 rounded-xl border border-dashed border-slate-200 px-4 py-2.5 text-xs font-medium text-slate-500 transition-colors hover:border-slate-300 hover:text-slate-700 dark:border-[#2a303a] dark:text-[#8d96aa] dark:hover:border-[#3a4252] dark:hover:text-[#c6cfdd]"
+                    >
+                      {formatExactNumber(totalErrors - listedErrors)} more in Decision Audit
+                      <ChevronRight className="h-3.5 w-3.5" />
+                    </Link>
+                  )}
+                </>
+              ) : (
+                <div className="mt-5 flex flex-col items-center justify-center rounded-xl border border-dashed border-slate-200 px-5 py-10 text-center dark:border-[#2a303a]">
+                  <CheckCircle2 className="h-8 w-8 text-emerald-700" />
+                  <p className="mt-3 text-sm font-semibold text-slate-950 dark:text-white">No errors in window</p>
+                  <p className="mt-1.5 text-xs text-slate-500 dark:text-[#a6b0c3]">
+                    All requests resolved without errors.
+                  </p>
+                </div>
+              )}
+            </GlassCard>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}

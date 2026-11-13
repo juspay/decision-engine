@@ -1,160 +1,107 @@
-# Dynamo API Reference
-
-## Overview
-
-Dynamo provides both gRPC and HTTP APIs for its dynamic payment routing services. This reference documents the available endpoints, their parameters, and example usage.
-
+---
+title: "API Reference"
+description: "Schema-backed reference for every Decision Engine endpoint, with request/response models and an interactive playground."
 ---
 
-## Authentication and Headers
+# API Reference
 
-All API requests require appropriate authentication:
+This is the schema-backed reference for every Decision Engine endpoint. Each page below shows the full request and response model and includes an interactive playground, generated from the OpenAPI contract.
 
-| Header | Required | Description |
-|:-------|:--------:|:------------|
-| `x-api-key` | ✅ | API key for authentication |
-| `x-tenant-id` | ✅ | Tenant identifier (*required if multi-tenancy is enabled) |
+Looking for copy-paste examples and end-to-end flows instead? Start with the [API Guide](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx).
 
----
+## Two ways to read the API
 
-## Available Services
+| Surface | Best for |
+| --- | --- |
+| [API Guide](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx) | Task-oriented `curl` examples, complete flows, and request variants. |
+| API Reference (this section) | Exact request/response schemas and an interactive playground, one page per endpoint. |
 
-Dynamo offers three main routing services:
+For advanced rule examples — AND, OR, nested AND+OR, `volume_split_priority`, enum arrays, and number-array matching — see the [Advanced Routing Example](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-advanced-example.mdx). For the exact `POST /routing/create` schema, use [Create Routing Rule](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/createRoutingRule.mdx).
 
-### 1. **[Success Rate Calculator](api-reference/success-rate.md)**
+## Access classes
 
-Routes payments to processors with the highest historical success rates.
+| Class | Routes | Authentication |
+| --- | --- | --- |
+| Public | `GET /health`, `GET /health/ready`, `GET /health/diagnostics`, `POST /auth/signup`, `POST /auth/login` | None |
+| Admin bootstrap | `POST /merchant-account/create` | Admin secret |
+| Protected | All routing, decision, score update, rule config, API key, merchant read/delete, analytics, audit, config, and authenticated auth routes | `Authorization: Bearer <jwt_token>` or `x-api-key: <api_key>` |
+| Sandbox | Any Decision Engine route served through `https://sandbox.hyperswitch.io` | Same auth rules plus `x-feature: decision-engine` |
 
-| Endpoint | Description |
-|:---------|:------------|
-| **`FetchSuccessRate`** | Get success rates for processors |
-| **`UpdateSuccessRateWindow`** | Update success/failure data |
-| **`InvalidateWindows`** | Reset success rate data |
-| **`FetchEntityAndGlobalSuccessRate`** | Get both entity and global success rates |
+## Endpoint Families
 
-### 2. **[Elimination Analyser](api-reference/elimination.md)**
+### Health
 
-Prevents routing to processors that meet failure criteria.
+- [Health Check](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/healthCheck.mdx)
+- [Health Ready](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/healthReady.mdx)
+- [Health Diagnostics](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/healthDiagnostics.mdx)
 
-| Endpoint | Description |
-|:---------|:------------|
-| **`GetEliminationStatus`** | Check if processors should be eliminated |
-| **`UpdateEliminationBucket`** | Update failure data |
-| **`InvalidateBucket`** | Reset elimination data |
+### Auth And Onboarding
 
-### 3. **[Contract Score Calculator](api-reference/contract.md)**
+- [Signup](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/signup.mdx)
+- [Login](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/login.mdx)
+- [Logout](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/logout.mdx)
+- [Current User](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/me.mdx)
+- [List User Merchants](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/listUserMerchants.mdx)
+- [Switch Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/switchMerchant.mdx)
+- [Onboard Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/onboardMerchant.mdx)
 
-Routes based on contractual obligations and targets.
+### API Keys
 
-| Endpoint | Description |
-|:---------|:------------|
-| **`FetchContractScore`** | Get contract-based scores |
-| **`UpdateContract`** | Update contract fulfillment data |
-| **`InvalidateContract`** | Reset contract data |
+- [Create API Key](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/createApiKey.mdx)
+- [List API Keys](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/listApiKeys.mdx)
+- [Revoke API Key](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/revokeApiKey.mdx)
 
-### 4. **Health**
+### Merchant Account
 
-System health checks.
+- [Create Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/createMerchant.mdx)
+- [Get Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/getMerchant.mdx)
+- [Delete Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/deleteMerchant.mdx)
+- [Get Merchant Debit Routing](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/getMerchantDebitRouting.mdx)
+- [Update Merchant Debit Routing](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/updateMerchantDebitRouting.mdx)
 
-| Endpoint | Description |
-|:---------|:------------|
-| **`Check`** | Verify system health status |
+### Gateway Decision
 
-**gRPC Method**: `grpc.health.v1.Health/Check`
+- [Decide Gateway](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/decideGateway.mdx)
+- [Legacy Decision Gateway](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/legacyDecisionGateway.mdx)
+- [Update Gateway Score](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/updateGatewayScore.mdx)
+- [Legacy Update Score](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/legacyUpdateScore.mdx)
 
-**HTTP Endpoint**: `POST /grpc.health.v1.Health/Check`
+### Routing Rules
 
-**Request**:
+- [Create Routing Rule](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/createRoutingRule.mdx)
+- [Activate Routing Rule](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/activateRoutingRule.mdx)
+- [Deactivate Routing Rule](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/deactivateRoutingRule.mdx)
+- [List Routing Rules](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/listRoutingRules.mdx)
+- [Get Active Routing Rule](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/getActiveRoutingRule.mdx)
+- [Evaluate Routing Rule](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/evaluateRoutingRule.mdx)
+- [Hybrid Routing](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/hybridRouting.mdx)
 
-```json
-{
-  "service": "dynamo"
-}
-```
+### Rule Configuration
 
-**Response**:
+- [Create Rule Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/createRuleConfig.mdx)
+- [Get Rule Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/getRuleConfig.mdx)
+- [Update Rule Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/updateRuleConfig.mdx)
+- [Delete Rule Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/deleteRuleConfig.mdx)
 
-```json
-{
-  "status": 1  // 1 = SERVING
-}
-```
+### Config
 
----
+- [Get Routing Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/getRoutingConfig.mdx)
+- [Configure SR Dimensions](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/configSrDimension.mdx)
 
-## Protocol Support
+### Analytics
 
-All services are available via both:
+- [Overview](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsOverview.mdx)
+- [Gateway Scores](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsGatewayScores.mdx)
+- [Decisions](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsDecisions.mdx)
+- [Routing Stats](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsRoutingStats.mdx)
+- [Log Summaries](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsLogSummaries.mdx)
+- [Payment Audit](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsPaymentAudit.mdx)
+- [Preview Trace](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsPreviewTrace.mdx)
+- [Cost Savings](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsCostSavings.mdx)
+- [Routing Events](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsRoutingEvents.mdx)
+- [A/B Test Experiment Results](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsExperimentResults.mdx)
+- [A/B Test Experiment Transactions](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsExperimentTransactions.mdx)
 
-<table>
-  <tr>
-    <td width="150px"><strong>gRPC</strong></td>
-    <td>Efficient binary protocol for direct integration</td>
-  </tr>
-  <tr>
-    <td><strong>HTTP/JSON</strong></td>
-    <td>RESTful interface for broader compatibility</td>
-  </tr>
-</table>
+## Curl Examples
 
----
-
-## Quick Start Examples
-
-### 🔹 gRPC Example (using grpcurl)
-
-```bash
-grpcurl -d '{
-  "id": "merchant_123",
-  "params": "{\"payment_method\":\"card\"}",
-  "labels": ["processor_A", "processor_B"],
-  "config": {
-    "min_aggregates_size": 10,
-    "default_success_rate": 0.5
-  }
-}' \
--H 'x-api-key: YOUR_API_KEY' \
--H 'x-tenant-id: tenant_001' \
--plaintext localhost:9000 success_rate.SuccessRateCalculator/FetchSuccessRate
-```
-
-### 🔹 HTTP Example (using curl)
-
-```bash
-curl -X POST \
-  -H "Content-Type: application/json" \
-  -H "x-api-key: YOUR_API_KEY" \
-  -H "x-tenant-id: tenant_001" \
-  -d '{
-    "id": "merchant_123",
-    "params": "{\"payment_method\":\"card\"}",
-    "labels": ["processor_A", "processor_B"],
-    "config": {
-      "min_aggregates_size": 10,
-      "default_success_rate": 0.5
-    }
-  }' \
-  http://localhost:8080/success_rate.SuccessRateCalculator/FetchSuccessRate
-```
-
----
-
-## Error Handling
-
-All services use standard gRPC status codes:
-
-| Status Code | Description | Common Causes |
-|:------------|:------------|:--------------|
-| <code>OK (0)</code> | ✅ Operation completed successfully | Normal successful operation |
-| <code>INVALID_ARGUMENT (3)</code> | ⚠️ Validation failed | Missing required fields, invalid parameters |
-| <code>NOT_FOUND (5)</code> | 🔍 Required resource not found | Entity or configuration not found |
-| <code>UNAUTHENTICATED (16)</code> | 🔒 Authentication failed | Invalid API key |
-| <code>PERMISSION_DENIED (7)</code> | 🚫 Unauthorized access | Insufficient permissions |
-| <code>INTERNAL (13)</code> | ❌ Internal server error | Unexpected server-side errors |
-
----
-
-## Related Documentation
-
-📥 [**Installation**](installation.md)  ⚙️ [**Configuration**](configuration.md)  🔄 [**Dual Protocol**](dual-protocol-layer.md)
-
+For local and sandbox smoke-test examples, use [API Examples](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx).

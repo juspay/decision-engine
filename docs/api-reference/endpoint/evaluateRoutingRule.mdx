@@ -1,0 +1,85 @@
+---
+title: "Evaluate Routing Rule"
+description: "Evaluate the active routing rule for a merchant against a payment context. Returns the ordered list of gateways selected by the rule without consuming SR data."
+openapi: "openapi.json POST /routing/evaluate"
+---
+
+# Evaluate Routing Rule
+
+## Use case
+
+Evaluates the active rule-based or volume-split routing algorithm for a payment context. This is a real evaluation endpoint for rule decisions, kept separate from auth-rate transaction scoring.
+
+## Authentication
+
+Protected. Send either `Authorization: Bearer <jwt_token>` or `x-api-key: <api_key>`. In sandbox, also send `x-feature: decision-engine`.
+
+For local development, start with:
+
+```bash
+export BASE_URL=http://localhost:8080
+export AUTH_HEADER="Authorization: Bearer <jwt_token>"
+# Sandbox only:
+# export BASE_URL=https://sandbox.hyperswitch.io
+# export FEATURE_HEADER="x-feature: decision-engine"
+```
+
+## Request
+
+- Method and path: `POST /routing/evaluate`
+- Parameters: none.
+- Body: JSON body with `created_by`, optional `payment_id`, and `parameters` — a map of rule-builder key → typed value (`{ "type": "enum_variant", "value": "..." }` for enum keys, `{ "type": "number", "value": ... }` for numeric keys). Discover valid keys/values with `GET /config/routing-keys`.
+
+## Example
+
+### Evaluate active rule
+
+```bash
+curl --location "$BASE_URL/routing/evaluate" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+  "created_by": "merchant_demo",
+  "payment_id": "rule_decision_001",
+  "parameters": {
+    "payment_method_type": { "type": "enum_variant", "value": "credit" },
+    "payment_method": { "type": "enum_variant", "value": "card" },
+    "currency": { "type": "enum_variant", "value": "USD" },
+    "amount": { "type": "number", "value": 1000 }
+  }
+}'
+```
+
+## Response
+
+```json
+{
+  "payment_id": "rule_decision_001",
+  "status": "success",
+  "output": {
+    "type": "priority",
+    "connectors": [
+      { "gateway_name": "stripe", "gateway_id": "mca_111" },
+      { "gateway_name": "adyen", "gateway_id": "mca_112" }
+    ]
+  },
+  "evaluated_output": [
+    { "gateway_name": "stripe", "gateway_id": "mca_111" }
+  ],
+  "eligible_connectors": [
+    { "gateway_name": "stripe", "gateway_id": "mca_111" },
+    { "gateway_name": "adyen", "gateway_id": "mca_112" }
+  ]
+}
+```
+
+## Notes
+
+- This endpoint does not call `/update-gateway-score` and does not consume auth-rate score updates.
+- Analytics stores these as rule/volume decisions under the `/analytics/preview-trace` transport endpoint.
+
+## Related
+
+- [Create Routing Rule](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/createRoutingRule.mdx)
+- [Preview Trace](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsPreviewTrace.mdx)
+- [Evaluate Routing Algorithm](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-evaluate.mdx)

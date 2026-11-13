@@ -18,7 +18,7 @@ use crate::logger;
 pub struct StorageSubscription;
 
 /// Storage to store key value pairs of spans.
-/// When new entry is crated it stores it in [HashMap] which is owned by `extensions`.
+/// When new entry is created it stores it in [HashMap] which is owned by `extensions`.
 #[derive(Clone, Debug)]
 pub struct Storage<'a> {
     /// Hash map to store values.
@@ -63,7 +63,6 @@ impl<'a> Storage<'a> {
             "latency",
             serde_json::Value::Number(serde_json::Number::from(123)),
         );
-        self.record_value("is_art_enabled", serde_json::Value::Bool(true));
         self.record_value(
             "error_code",
             serde_json::Value::String("ERR123".to_string()),

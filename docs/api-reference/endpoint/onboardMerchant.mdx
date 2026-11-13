@@ -1,0 +1,70 @@
+---
+title: "Onboard Merchant"
+description: "Create and attach a merchant to the current operator user."
+openapi: "openapi.json POST /onboarding/merchant"
+---
+
+# Onboard Merchant
+
+## Use case
+
+Creates a merchant workspace from the authenticated dashboard flow.
+
+## Authentication
+
+Dashboard protected. Send `Authorization: Bearer <jwt_token>`. In sandbox, also send `x-feature: decision-engine`.
+
+For local development, start with:
+
+```bash
+export BASE_URL=http://localhost:8080
+export AUTH_HEADER="Authorization: Bearer <jwt_token>"
+# Sandbox only:
+# export BASE_URL=https://sandbox.hyperswitch.io
+# export FEATURE_HEADER="x-feature: decision-engine"
+```
+
+## Request
+
+- Method and path: `POST /onboarding/merchant`
+- Parameters: none.
+- Body: JSON body with `merchant_name`, and an optional `parent_merchant_id` to add a [sub-merchant](/sub-merchants) to that merchant instead. Only its admins can add one.
+
+## Example
+
+### Onboard merchant
+
+```bash
+curl --location "$BASE_URL/onboarding/merchant" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+  "merchant_name": "Demo Merchant"
+}'
+```
+
+## Response
+
+```json
+{
+  "token": "eyJ...",
+  "merchant_id": "merchant_9f21a6c0",
+  "merchant_name": "Demo Merchant",
+  "merchants": [
+    { "merchant_id": "merchant_demo", "merchant_name": "Demo Merchant", "role": "admin" },
+    { "merchant_id": "merchant_9f21a6c0", "merchant_name": "Demo Merchant", "role": "admin" }
+  ]
+}
+```
+
+## Notes
+
+- This is the dashboard onboarding route. Service integrations can use `/merchant-account/create` directly.
+- With `parent_merchant_id`, the new account is a sub-merchant with its own `merchant_…` id. It gets no membership of its own: its parent's members and API keys reach it.
+- After onboarding, switch into the merchant before configuring routing.
+
+## Related
+
+- [Switch Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/switchMerchant.mdx)
+- [Create Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/createMerchant.mdx)
+- [Get Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/getMerchant.mdx)

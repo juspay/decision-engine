@@ -1,27 +1,32 @@
 use crate::app::get_tenant_app_state;
 use crate::decider::gatewaydecider::types::{self, DeciderFlow};
+use crate::euclid::types::SrDimensionConfig;
 use crate::feedback::gateway_elimination_scoring::flow::{
     eliminationV2RewardFactor, getPenaltyFactor,
 };
-use crate::redis::feature::isFeatureEnabled;
+use crate::redis::cache::findByNameFromRedis;
+use crate::redis::feature::{is_feature_enabled, RedisCompressionConfigCombined, RedisDataStruct};
 use crate::redis::types::ServiceConfigKey;
 use crate::types::card::card_type::card_type_to_text;
-use crate::types::merchant::id::{merchant_id_to_text, MerchantId};
+use crate::types::country::country_iso::CountryISO2;
+use crate::types::currency::Currency;
+use crate::types::merchant::id::merchant_id_to_text;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 use crate::types::money::internal::Money;
 use crate::types::payment::payment_method_type_const::*;
 use crate::types::payment_flow::{payment_flows_to_text, PaymentFlow};
+use crate::types::payment_instrument::{PaymentInstrument, PaymentMethod};
+use crate::types::service_configuration::MerchantConfig;
 use crate::types::user_eligibility_info::{
     get_eligibility_info, identifier_name_to_text, IdentifierName,
 };
-use crate::utils::{generate_random_number, get_current_date_in_millis};
-use crate::{decider, feedback, logger};
-use diesel::Identifiable;
+use crate::utils::generate_random_number;
+use crate::{feedback, logger};
 use fred::prelude::{KeysInterface, ListInterface};
 use masking::PeekInterface;
+use masking::Secret;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
-use serde_json::from_value;
+use serde::{Deserialize, Serialize, Serializer};
 use serde_json::{from_slice, from_str, Value};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
@@ -54,21 +59,20 @@ use crate::types::feature as ETF;
 // use crate::types::gateway as Gateway;
 // // use types::gateway_payment_method as ETGPM;
 use super::types::{
-    ConfigurableBlock, GatewayList, GatewayRedisKeyMap, GatewayScoreMap, GatewayScoringData,
-    GatewayWiseExtraScore, InternalMetadata, MessageFormat, OptimizationRedisBlockData,
-    ScoreKeyType, SplitSettlementDetails, SrV3InputConfig, SrV3SubLevelInputConfig,
+    GatewayList, GatewayRedisKeyMap, GatewayScoreMap, GatewayScoringData, GatewayWiseExtraScore,
+    InternalMetadata, MessageFormat, ScoreKeyType, SplitSettlementDetails, SrRoutingDimensions,
+    SrV3InputConfig, SrV3SubLevelInputConfig,
 };
 use crate::types::merchant as ETM;
 use crate::types::merchant_gateway_card_info as ETMGCI;
 // // use types::merchant_gateway_card_info as ETMGCI;
 // // use types::merchant_gateway_payment_method as ETMGPM;
 // // use types::money as Money;
-use crate::types::card::txn_card_info::{self as ETTCa, auth_type_to_text};
+use crate::types::card::txn_card_info::{self as ETTCa};
 use crate::types::order as ETO;
 use crate::types::txn_details::types as ETTD;
 use crate::types::txn_offer as ETTO;
 // use juspay::extra::parsing as P;
-use crate::types::gateway as ETG;
 use crate::types::gateway_routing_input::{GatewayScore, GatewaySuccessRateBasedRoutingInput};
 use crate::types::token_bin_info as ETTB;
 // // use utils::config::constants as Config;
@@ -76,8 +80,7 @@ use crate::types::token_bin_info as ETTB;
 // // use safe::Safe;
 // // use control::category::Category;
 // // use juspay::extra::non_empty_text as NET;
-use crate::redis::{self, cache as RService};
-use crate::types::isin_routes as ETIsinR;
+use crate::redis::cache as RService;
 // // use utils::redis as EWRedis;
 // // use db::common::types::payment_flows as PF;
 // // use utils::redis as Redis;
@@ -86,6 +89,7 @@ use crate::types::isin_routes as ETIsinR;
 // // use configs::env_vars as ENV;
 use crate::error::StorageError;
 use crate::types::gateway_card_info::ValidationType;
+use crate::types::order::udfs::{get_udf, UDFs};
 
 pub fn either_decode_t<T: for<'de> Deserialize<'de>>(text: &str) -> Result<T, String> {
     from_slice(text.as_bytes()).map_err(|e| e.to_string())
@@ -127,6 +131,14 @@ pub fn is_otm_enabled(mga: &ETM::merchant_gateway_account::MerchantGatewayAccoun
     check_if_enabled_in_mga(mga, "ONE_TIME_MANDATE", "OTM_ENABLED")
 }
 
+pub fn is_pix_flows_enabled(
+    mga: &ETM::merchant_gateway_account::MerchantGatewayAccount,
+    payment_flow: String,
+    acc_details_flag: String,
+) -> bool {
+    check_if_enabled_in_mga(mga, &payment_flow, &acc_details_flag)
+}
+
 pub fn is_seamless(mga: &ETM::merchant_gateway_account::MerchantGatewayAccount) -> bool {
     let secret_json = Some(mga.account_details.peek());
     secret_json
@@ -144,21 +156,21 @@ pub fn fetch_emi_type(txn_card_info: &ETCa::txn_card_info::TxnCardInfo) -> Optio
     txn_card_info
         .paymentSource
         .as_ref()
-        .and_then(|source| get_value("emi_type", source))
+        .and_then(|source| get_value("emi_type", source.peek()))
 }
 
 pub fn fetch_extended_card_bin(txn_card_info: &ETCa::txn_card_info::TxnCardInfo) -> Option<String> {
     txn_card_info
         .paymentSource
         .as_ref()
-        .and_then(|source| get_value("extended_card_bin", source))
+        .and_then(|source| get_value("extended_card_bin", source.peek()))
 }
 
 pub fn fetch_juspay_bank_code(txn_card_info: &ETCa::txn_card_info::TxnCardInfo) -> Option<String> {
     txn_card_info
         .paymentSource
         .as_ref()
-        .and_then(|source| get_value("juspay_bank_code", source))
+        .and_then(|source| get_value("juspay_bank_code", source.peek()))
 }
 
 pub fn get_pl_gw_ref_id_map(decider_flow: &DeciderFlow<'_>) -> HashMap<String, String> {
@@ -166,13 +178,13 @@ pub fn get_pl_gw_ref_id_map(decider_flow: &DeciderFlow<'_>) -> HashMap<String, S
         .get()
         .dpPriorityLogicOutput
         .as_ref()
-        .map_or_else(HashMap::new, |output| output.gatewayReferenceIds.clone())
+        .map_or_else(HashMap::new, |output| output.gateway_reference_ids.clone())
 }
 
 pub fn get_order_metadata_and_pl_ref_id_map(
     decider_flow: &mut DeciderFlow<'_>,
     enable_gateway_reference_id_based_routing: Option<bool>,
-    order: &ETO::Order,
+    _order: &ETO::Order,
 ) -> (HashMap<String, String>, HashMap<String, String>) {
     if enable_gateway_reference_id_based_routing.unwrap_or(false) {
         let order_metadata = get_metadata(decider_flow);
@@ -187,44 +199,54 @@ pub fn is_emandate_supported_payment_method(
     txn_card_info: &ETCa::txn_card_info::TxnCardInfo,
 ) -> bool {
     matches!(
-        txn_card_info.paymentMethodType.as_str(),
-        CARD | NB | WALLET | UPI | AADHAAR | PAPERNACH | PAN | RTP
+        txn_card_info.instrument.method(),
+        PaymentMethod::Card
+            | PaymentMethod::NetBanking
+            | PaymentMethod::Wallet
+            | PaymentMethod::Upi
+            | PaymentMethod::Aadhaar
+            | PaymentMethod::PaperNach
+            | PaymentMethod::Pan
+            | PaymentMethod::Rtp
     )
 }
 
 pub fn is_emandate_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
     matches!(
         txn_detail.txnObjectType,
-        ETTD::TxnObjectType::EmandateRegister
-            | ETTD::TxnObjectType::TpvEmandateRegister
-            | ETTD::TxnObjectType::EmandatePayment
-            | ETTD::TxnObjectType::TpvEmandatePayment
+        Some(ETTD::TxnObjectType::EmandateRegister)
+            | Some(ETTD::TxnObjectType::TpvEmandateRegister)
+            | Some(ETTD::TxnObjectType::EmandatePayment)
+            | Some(ETTD::TxnObjectType::TpvEmandatePayment)
     )
 }
 
 pub fn is_emandate_payment_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
     matches!(
         txn_detail.txnObjectType,
-        ETTD::TxnObjectType::EmandatePayment | ETTD::TxnObjectType::TpvEmandatePayment
+        Some(ETTD::TxnObjectType::EmandatePayment) | Some(ETTD::TxnObjectType::TpvEmandatePayment)
     )
 }
 
-pub fn is_reccuring_payment_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
+pub fn is_recurring_payment_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
     matches!(
         txn_detail.txnObjectType,
-        ETTD::TxnObjectType::EmandatePayment
-            | ETTD::TxnObjectType::TpvEmandatePayment
-            | ETTD::TxnObjectType::MandatePayment
-            | ETTD::TxnObjectType::TpvMandatePayment
+        Some(ETTD::TxnObjectType::EmandatePayment)
+            | Some(ETTD::TxnObjectType::TpvEmandatePayment)
+            | Some(ETTD::TxnObjectType::MandatePayment)
+            | Some(ETTD::TxnObjectType::TpvMandatePayment)
     )
 }
 
 pub fn is_tpv_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
-    txn_detail.txnObjectType == ETTD::TxnObjectType::TpvPayment
+    matches!(
+        txn_detail.txnObjectType,
+        Some(ETTD::TxnObjectType::TpvPayment)
+    )
 }
 
 pub fn is_tpv_mandate_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
-    txn_detail.txnObjectType == ETTD::TxnObjectType::TpvEmandateRegister
+    txn_detail.txnObjectType == Some(ETTD::TxnObjectType::TpvEmandateRegister)
 }
 
 pub fn get_merchant_wise_si_bin_key(gw: &String) -> String {
@@ -234,18 +256,18 @@ pub fn get_merchant_wise_si_bin_key(gw: &String) -> String {
 fn get_merchant_gateway_card_info_feature_name(
     auth_type: Option<&ETCa::txn_card_info::AuthType>,
     validation_type: Option<&ValidationType>,
-    gateway: &String,
+    gw: &String,
 ) -> Option<String> {
     let flow = validation_type
         .map(|v| format!("{}", v))
         .or_else(|| auth_type.map(|a| format!("{}", a)))?;
-    Some(format!("MERCHANT_GATEWAY_CARD_INFO_{}_{}", flow, gateway))
+    Some(format!("MERCHANT_GATEWAY_CARD_INFO_{}_{}", flow, gw))
 }
 
 pub fn is_mandate_transaction(txn: &ETTD::TxnDetail) -> bool {
     matches!(
         txn.txnObjectType,
-        ETTD::TxnObjectType::MandateRegister | ETTD::TxnObjectType::MandatePayment
+        Some(ETTD::TxnObjectType::MandateRegister) | Some(ETTD::TxnObjectType::MandatePayment)
     )
 }
 
@@ -255,26 +277,26 @@ pub async fn get_merchant_wise_mandate_bin_eligible_gateways(
 ) -> Vec<String> {
     let merchant_wise_mandate_bin_enforced_gateways: Vec<String> =
         RService::findByNameFromRedis::<Vec<String>>(
-            C::MERCHANT_WISE_MANDATE_BIN_ENFORCED_GATEWAYS.get_key(),
+            C::MerchantWiseMandateBinEnforcedGateways.get_key(),
         )
         .await
         .unwrap_or_default();
     let merchant_wise_mandate_supported_gateway: Vec<String> =
         merchant_wise_mandate_bin_enforced_gateways
             .into_iter()
-            .filter(|gateway| mandate_enabled_gateways.contains(gateway))
+            .filter(|gw| mandate_enabled_gateways.contains(gw))
             .collect();
     let mut gws = Vec::new();
-    for gateway in merchant_wise_mandate_supported_gateway {
+    for gw in merchant_wise_mandate_supported_gateway {
         if ETF::get_feature_enabled(
-            &get_merchant_wise_si_bin_key(&gateway),
+            &get_merchant_wise_si_bin_key(&gw),
             &merchant_account.merchantId,
             true,
         )
         .await
         .is_some()
         {
-            gws.push(gateway);
+            gws.push(gw);
         }
     }
     gws
@@ -284,17 +306,17 @@ pub async fn is_merchant_wise_auth_type_check_needed(
     merchant_account: &ETM::merchant_account::MerchantAccount,
     auth_type: Option<&ETCa::txn_card_info::AuthType>,
     validation_type: Option<&ValidationType>,
-    gateway: &String,
+    gw: &String,
 ) -> bool {
     let merchant_wise_auth_type_bin_enforced_gateways: Vec<String> =
         RService::findByNameFromRedis::<Vec<String>>(
-            C::MERCHANT_WISE_AUTH_TYPE_BIN_ENFORCED_GATEWAYS.get_key(),
+            C::MerchantWiseAuthTypeBinEnforcedGateways.get_key(),
         )
         .await
         .unwrap_or_default();
-    if merchant_wise_auth_type_bin_enforced_gateways.contains(gateway) {
+    if merchant_wise_auth_type_bin_enforced_gateways.contains(gw) {
         if let Some(feature_key) =
-            get_merchant_gateway_card_info_feature_name(auth_type, validation_type, gateway)
+            get_merchant_gateway_card_info_feature_name(auth_type, validation_type, gw)
         {
             return ETF::get_feature_enabled(&feature_key, &merchant_account.merchantId, true)
                 .await
@@ -462,24 +484,6 @@ pub fn get_value_from_text(key: &str, t: &Value) -> Option<Value> {
     }
 }
 
-fn get_enabled_gateway_for_brand(brand: &str, enabled_gateways: Option<&Value>) -> Option<Value> {
-    enabled_gateways.and_then(|gateways| match gateways {
-        Value::Object(map) => map.get(brand).cloned(),
-        _ => None,
-    })
-}
-
-fn parse_aeson_string<T: for<'de> Deserialize<'de>>(value: &Value) -> Option<T> {
-    match value {
-        Value::String(s) => from_str(s).ok(),
-        _ => None,
-    }
-}
-
-fn result_to_maybe<T>(result: Result<T, serde_json::Error>) -> Option<T> {
-    result.ok()
-}
-
 fn decode_metadata(text: &str) -> HashMap<String, String> {
     from_str::<HashMap<String, Value>>(text)
         .unwrap_or_default()
@@ -496,7 +500,7 @@ fn decode_metadata(text: &str) -> HashMap<String, String> {
 
 pub fn get_all_possible_ref_ids(
     metadata: HashMap<String, String>,
-    oref: ETO::Order,
+    _oref: ETO::Order,
     pl_ref_id_map: HashMap<String, String>,
 ) -> Vec<ETM::merchant_gateway_account::MgaReferenceId> {
     let gateway_ref_ids = is_suffix_of_gateway_ref_id(metadata.iter().collect());
@@ -540,7 +544,7 @@ pub async fn get_all_ref_ids(
 pub fn get_gateway_reference_id(
     metadata: HashMap<String, String>,
     gw: &String,
-    oref: ETO::Order,
+    _oref: ETO::Order,
     pl_ref_id_map: HashMap<String, String>,
 ) -> Option<ETM::merchant_gateway_account::MgaReferenceId> {
     let meta_res = pl_ref_id_map
@@ -559,7 +563,7 @@ pub fn get_gateway_reference_id(
 
 pub async fn effective_amount_with_txn_amount(txn_detail: ETTD::TxnDetail) -> Money {
     let def_amount = Money::from_double(0.0);
-    let amount_txn = &txn_detail.txnAmount;
+    let amount_txn = txn_detail.txnAmount.as_ref().unwrap_or(&def_amount);
     let offers = ETTO::getOffers(&txn_detail.id).await;
     let discount_sum: Money = Money::from_double(
         offers
@@ -601,13 +605,16 @@ pub fn is_emandate_amount_filter_needed(
 ) -> bool {
     is_emandate_register_transaction(txn_detail)
         && matches!(
-            txn_card_info.paymentMethodType.as_str(),
-            CARD | NB | AADHAAR | PAN
+            txn_card_info.instrument.method(),
+            PaymentMethod::Card
+                | PaymentMethod::NetBanking
+                | PaymentMethod::Aadhaar
+                | PaymentMethod::Pan
         )
 }
 
 pub fn is_emandate_register_transaction(txn_detail: &ETTD::TxnDetail) -> bool {
-    txn_detail.txnObjectType == ETTD::TxnObjectType::EmandateRegister
+    txn_detail.txnObjectType == Some(ETTD::TxnObjectType::EmandateRegister)
 }
 
 pub async fn get_card_brand(decider_flow: &mut DeciderFlow<'_>) -> Option<String> {
@@ -715,11 +722,16 @@ pub async fn get_split_settlement_details(
     }
 }
 
-pub async fn metric_tracker_log(stage: &str, flowtype: &str, log_data: MessageFormat) {
+pub async fn metric_tracker_log(
+    consume_from_router: Option<bool>,
+    _stage: &str,
+    _flowtype: &str,
+    log_data: MessageFormat,
+) {
     let normalized_log_data = match serde_json::to_value(&log_data) {
         Ok(value) => value,
         Err(e) => {
-            crate::logger::error!(
+            crate::logger::info!(
                 action = "metric_tracking_log_error",
                 "Failed to serialize log_data: {}",
                 e
@@ -727,11 +739,27 @@ pub async fn metric_tracker_log(stage: &str, flowtype: &str, log_data: MessageFo
             return;
         }
     };
-    crate::logger::info!(
-        action = "metric_tracking_log",
-        "{}",
-        normalized_log_data.to_string(),
-    );
+
+    if consume_from_router == Some(true) {
+        crate::logger::info!(
+            action = "metric_tracking_log",
+            "{}",
+            normalized_log_data.to_string(),
+        );
+    } else {
+        crate::logger::info!(
+            action = "metric_tracking_log_diff_check_de",
+            "{}",
+            normalized_log_data.to_string(),
+        );
+    }
+}
+
+pub fn mask_secret_option<S>(_: &Option<Secret<String>>, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str("FILTERED")
 }
 
 pub fn get_metric_log_format(decider_flow: &mut DeciderFlow<'_>, stage: &str) -> MessageFormat {
@@ -740,18 +768,20 @@ pub fn get_metric_log_format(decider_flow: &mut DeciderFlow<'_>, stage: &str) ->
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
     let order_reference = decider_flow.get().dpOrder.clone();
-    let x_req_id = decider_flow.logger.get("x-request-id");
-    let payment_source_m = txn_card_info
-        .paymentSource
-        .as_ref()
-        .and_then(|ps| last(split("@", ps)));
+    let x_req_id = decider_flow
+        .logger
+        .get(crate::storage::consts::X_REQUEST_ID);
+    let payment_source_m = txn_card_info.get_payment_source_last();
 
     MessageFormat {
-        model: txn_detail.txnObjectType.to_string(),
+        model: txn_detail
+            .txnObjectType
+            .map(|t| t.to_string())
+            .unwrap_or_default(),
         log_type: "APP_EVENT".to_string(),
-        payment_method: txn_card_info.paymentMethod.clone(),
-        payment_method_type: txn_card_info.paymentMethodType.clone(),
-        payment_source: payment_source_m,
+        payment_method: txn_card_info.instrument.method_code().to_string(),
+        payment_method_type: txn_card_info.instrument.method_type_code().into_owned(),
+        payment_source: payment_source_m.map(Secret::new),
         source_object: txn_detail.sourceObject.clone(),
         txn_detail_id: txn_detail.id.clone(),
         stage: stage.to_string(),
@@ -767,6 +797,12 @@ pub fn get_metric_log_format(decider_flow: &mut DeciderFlow<'_>, stage: &str) ->
         bank_code: fetch_juspay_bank_code(&txn_card_info),
         x_request_id: x_req_id.cloned(),
         log_data: serde_json::to_value(mp).unwrap(),
+        udf_consumed: decider_flow
+            .writer
+            .gateway_scoring_data
+            .udfs_consumed_for_routing
+            .as_ref()
+            .cloned(),
     }
 }
 
@@ -785,9 +821,12 @@ pub async fn log_gateway_decider_approach(
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
     let order_reference = decider_flow.get().dpOrder.clone();
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
-    let x_req_id = decider_flow.logger.get("x-request-id").cloned();
+    let x_req_id = decider_flow
+        .logger
+        .get(crate::storage::consts::X_REQUEST_ID)
+        .cloned();
     let txn_creation_time = txn_detail.dateCreated.to_string(); // Assuming dateCreated is a DateTime field
-
+    let consume_from_router = decider_flow.get().dpShouldConsumeResult;
     let mp = types::DeciderApproachLogData {
         decided_gateway: m_decided_gateway,
         routing_approach: gateway_decider_approach,
@@ -799,23 +838,28 @@ pub async fn log_gateway_decider_approach(
         dateCreated: txn_creation_time,
     };
 
-    let payment_source_m = txn_card_info
-        .paymentSource
-        .as_ref()
-        .and_then(|ps| ps.split('@').next_back().map(String::from));
+    let payment_source_m = txn_card_info.get_payment_source_last();
 
     metric_tracker_log(
+        consume_from_router,
         "GATEWAY_DECIDER_APPROACH",
         "DECIDER",
         MessageFormat {
-            model: txn_detail.txnObjectType.to_string(),
+            model: txn_detail
+                .txnObjectType
+                .map(|t| t.to_string())
+                .unwrap_or_default(),
             log_type: "APP_EVENT".to_string(),
-            payment_method: txn_card_info.clone().paymentMethod,
-            payment_method_type: txn_card_info.clone().paymentMethodType.to_string(),
-            payment_source: payment_source_m,
+            payment_method: txn_card_info.instrument.method_code().to_string(),
+            payment_method_type: txn_card_info.instrument.method_type_code().into_owned(),
+            payment_source: payment_source_m.map(Secret::new),
             source_object: txn_detail.sourceObject,
             txn_detail_id: txn_detail.id,
-            stage: "GATEWAY_DECIDER_APPROACH".to_string(),
+            stage: if consume_from_router == Some(true) {
+                "GATEWAY_DECIDER_APPROACH".to_string()
+            } else {
+                "GATEWAY_DECIDER_APPROACH_DIFF_CHECK_DE".to_string()
+            },
             merchant_id: merchant_id_to_text(order_reference.merchantId),
             txn_uuid: txn_detail.txnUuid,
             order_id: order_reference.orderId.0,
@@ -828,6 +872,7 @@ pub async fn log_gateway_decider_approach(
             bank_code: fetch_juspay_bank_code(&txn_card_info),
             x_request_id: x_req_id,
             log_data: serde_json::to_value(mp).unwrap(),
+            udf_consumed: None,
         },
     )
     .await;
@@ -846,7 +891,11 @@ pub fn get_true_string(val: Option<String>) -> Option<String> {
     }
 }
 
-pub async fn get_card_bin_from_token_bin(length: usize, token_bin: &str) -> String {
+pub async fn get_card_bin_from_token_bin(
+    length: usize,
+    token_bin: &str,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
+) -> String {
     let key = format!("token_bin_{}", token_bin);
     let app_state = get_tenant_app_state().await;
     // let redis = &decider_flow.state().redis_conn;
@@ -854,9 +903,14 @@ pub async fn get_card_bin_from_token_bin(length: usize, token_bin: &str) -> Stri
         Some(bin) => bin.chars().take(length).collect(),
         None => match get_extended_token_bin_info(token_bin).await {
             Some(token_bin_info) => {
-                app_state
+                let _ = app_state
                     .redis_conn
-                    .set_key(&key, &token_bin_info.cardBin)
+                    .set_key(
+                        &key,
+                        &token_bin_info.cardBin,
+                        redis_compression_config.clone(),
+                        RedisDataStruct::STRING,
+                    )
                     .await;
                 token_bin_info.cardBin.chars().take(length).collect()
             }
@@ -932,7 +986,7 @@ pub enum EnabledGatewaysForBrand {
 }
 
 pub async fn get_token_supported_gateways(
-    txn_detail: ETTD::TxnDetail,
+    _txn_detail: ETTD::TxnDetail,
     txn_card_info: ETCa::txn_card_info::TxnCardInfo,
     flow: String,
     m_internal_meta: Option<InternalMetadata>,
@@ -1019,13 +1073,13 @@ async fn get_token_supported_gateways_key(
 ) -> Option<Vec<String>> {
     if brand == token_provider {
         RService::findByNameFromRedis(
-            C::TOKEN_SUPPORTED_GATEWAYS(brand, None, provider_category, flow).get_key(),
+            C::TokenSupportedGateways(brand, None, provider_category, flow).get_key(),
         )
         .await
         .unwrap_or_default()
     } else {
         RService::findByNameFromRedis(
-            C::TOKEN_SUPPORTED_GATEWAYS(brand, Some(token_provider), provider_category, flow)
+            C::TokenSupportedGateways(brand, Some(token_provider), provider_category, flow)
                 .get_key(),
         )
         .await
@@ -1091,25 +1145,19 @@ pub fn get_m_id(mid: ETM::id::MerchantId) -> String {
 }
 
 async fn get_upi_handle_list() -> Vec<String> {
-    RService::findByNameFromRedis(C::V2_ROUTING_HANDLE_LIST.get_key())
-        .await
-        .unwrap_or_default()
-}
-
-async fn get_upi_psp_list() -> Vec<String> {
-    RService::findByNameFromRedis(C::V2_ROUTING_PSP_LIST.get_key())
+    RService::findByNameFromRedis(C::V2RoutingHandleList.get_key())
         .await
         .unwrap_or_default()
 }
 
 async fn get_routing_top_bank_list() -> Vec<String> {
-    RService::findByNameFromRedis(C::V2_ROUTING_TOP_BANK_LIST.get_key())
+    RService::findByNameFromRedis(C::V2RoutingTopBankList.get_key())
         .await
         .unwrap_or_default()
 }
 
 async fn get_upi_package_list() -> Vec<String> {
-    RService::findByNameFromRedis(C::V2_ROUTING_PSP_PACKAGE_LIST.get_key())
+    RService::findByNameFromRedis(C::V2RoutingPspPackageList.get_key())
         .await
         .unwrap_or_default()
 }
@@ -1129,27 +1177,6 @@ pub fn get_bin_list(card_bin: Option<String>) -> Vec<Option<String>> {
     }
 }
 
-async fn get_isin_routes_with_extended_bins(
-    card_bin: Option<String>,
-    merchant_id: MerchantId,
-) -> Option<ETIsinR::IsinRoutes> {
-    match get_true_string(card_bin) {
-        None => None,
-        Some(bin) => {
-            let bin_list = if bin.len() > 6 {
-                (6..=9).map(|len| bin[..len].to_string()).collect()
-            } else {
-                vec![bin]
-            };
-            let mut isin_route_list =
-                ETIsinR::find_all_by_isin_and_merchant_id(bin_list, &merchant_id).await;
-            isin_route_list.sort_by(|x, y| y.isin.cmp(&x.isin));
-            let reverse_list: Vec<_> = isin_route_list.into_iter().collect();
-            reverse_list.first().cloned()
-        }
-    }
-}
-
 pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<ETCa::card_info::CardInfo> {
     logger::debug!("getCardInfoByBin cardBin: {:?}", card_bin);
     match get_true_string(card_bin) {
@@ -1158,7 +1185,7 @@ pub async fn get_card_info_by_bin(card_bin: Option<String>) -> Option<ETCa::card
             let bin_list = if bin.len() > 6 {
                 (6..=9)
                     .filter(|&len| len <= bin.len())
-                    .map(|len| (ETCa::isin::to_isin(bin[..len].to_string())))
+                    .map(|len| ETCa::isin::to_isin(bin[..len].to_string()))
                     .collect()
             } else {
                 vec![(ETCa::isin::to_isin(bin))]
@@ -1193,26 +1220,13 @@ pub fn get_payment_flow_list_from_txn_detail(txn_detail: &ETTD::TxnDetail) -> Ve
         Some(PaymentFlowInfoInInternalTrackingInfo { paymentFlowInfo }) => paymentFlowInfo
             .paymentFlows
             .into_iter()
-            .filter(|flow| C::paymentFlowsRequiredForGwFiltering.contains(&flow.as_str()))
+            .filter(|flow| C::PAYMENT_FLOWS_REQUIRED_FOR_GW_FILTERING.contains(&flow.as_str()))
             .collect(),
         None => vec![],
     }
 }
 
 use crate::decider::gatewaydecider::types::PaymentFlowInfoInInternalTrackingInfo;
-
-fn get_payment_flow_list_from_txn_detail_(txn_detail: &ETTD::TxnDetail) -> Vec<String> {
-    match txn_detail
-        .internalTrackingInfo
-        .as_ref()
-        .and_then(|info| either_decode_t(info).ok())
-    {
-        Some(PaymentFlowInfoInInternalTrackingInfo { paymentFlowInfo }) => {
-            paymentFlowInfo.paymentFlows
-        }
-        None => vec![],
-    }
-}
 
 pub fn set_payment_flow_list(decider_flow: &mut DeciderFlow<'_>, payment_flow_list: Vec<String>) {
     decider_flow.writer.paymentFlowList = payment_flow_list;
@@ -1286,10 +1300,10 @@ pub fn get_gateway_decider_approach(
         if gw_set.len() > 1 {
             gateway_decider_approach
         } else {
-            types::GatewayDeciderApproach::DEFAULT
+            types::GatewayDeciderApproach::Default
         }
     } else {
-        types::GatewayDeciderApproach::NONE
+        types::GatewayDeciderApproach::None
     }
 }
 
@@ -1298,60 +1312,64 @@ pub fn modify_gateway_decider_approach(
     down_time: types::DownTime,
 ) -> types::GatewayDeciderApproach {
     match gw_decider_approach {
-        types::GatewayDeciderApproach::SR_SELECTION_V3_ROUTING => match down_time {
-            types::DownTime::ALL_DOWNTIME => {
-                types::GatewayDeciderApproach::SR_V3_ALL_DOWNTIME_ROUTING
+        types::GatewayDeciderApproach::SrSelectionV3Routing => match down_time {
+            types::DownTime::AllDowntime => types::GatewayDeciderApproach::SrV3AllDowntimeRouting,
+            types::DownTime::GlobalDowntime => {
+                types::GatewayDeciderApproach::SrV3GlobalDowntimeRouting
             }
-            types::DownTime::GLOBAL_DOWNTIME => {
-                types::GatewayDeciderApproach::SR_V3_GLOBAL_DOWNTIME_ROUTING
-            }
-            types::DownTime::DOWNTIME => types::GatewayDeciderApproach::SR_V3_DOWNTIME_ROUTING,
-            types::DownTime::NO_DOWNTIME => types::GatewayDeciderApproach::SR_SELECTION_V3_ROUTING,
+            types::DownTime::Downtime => types::GatewayDeciderApproach::SrV3DowntimeRouting,
+            types::DownTime::NoDowntime => types::GatewayDeciderApproach::SrSelectionV3Routing,
         },
-        types::GatewayDeciderApproach::SR_V3_HEDGING => match down_time {
-            types::DownTime::ALL_DOWNTIME => {
-                types::GatewayDeciderApproach::SR_V3_ALL_DOWNTIME_HEDGING
+        types::GatewayDeciderApproach::SrV3Hedging => match down_time {
+            types::DownTime::AllDowntime => types::GatewayDeciderApproach::SrV3AllDowntimeHedging,
+            types::DownTime::GlobalDowntime => {
+                types::GatewayDeciderApproach::SrV3GlobalDowntimeHedging
             }
-            types::DownTime::GLOBAL_DOWNTIME => {
-                types::GatewayDeciderApproach::SR_V3_GLOBAL_DOWNTIME_HEDGING
-            }
-            types::DownTime::DOWNTIME => types::GatewayDeciderApproach::SR_V3_DOWNTIME_HEDGING,
-            types::DownTime::NO_DOWNTIME => types::GatewayDeciderApproach::SR_V3_HEDGING,
+            types::DownTime::Downtime => types::GatewayDeciderApproach::SrV3DowntimeHedging,
+            types::DownTime::NoDowntime => types::GatewayDeciderApproach::SrV3Hedging,
         },
-        types::GatewayDeciderApproach::SR_SELECTION_V2_ROUTING => match down_time {
-            types::DownTime::ALL_DOWNTIME => {
-                types::GatewayDeciderApproach::SR_V2_ALL_DOWNTIME_ROUTING
+        types::GatewayDeciderApproach::SrSelectionV2Routing => match down_time {
+            types::DownTime::AllDowntime => types::GatewayDeciderApproach::SrV2AllDowntimeRouting,
+            types::DownTime::GlobalDowntime => {
+                types::GatewayDeciderApproach::SrV2GlobalDowntimeRouting
             }
-            types::DownTime::GLOBAL_DOWNTIME => {
-                types::GatewayDeciderApproach::SR_V2_GLOBAL_DOWNTIME_ROUTING
-            }
-            types::DownTime::DOWNTIME => types::GatewayDeciderApproach::SR_V2_DOWNTIME_ROUTING,
-            types::DownTime::NO_DOWNTIME => types::GatewayDeciderApproach::SR_SELECTION_V2_ROUTING,
+            types::DownTime::Downtime => types::GatewayDeciderApproach::SrV2DowntimeRouting,
+            types::DownTime::NoDowntime => types::GatewayDeciderApproach::SrSelectionV2Routing,
         },
-        types::GatewayDeciderApproach::SR_V2_HEDGING => match down_time {
-            types::DownTime::ALL_DOWNTIME => {
-                types::GatewayDeciderApproach::SR_V2_ALL_DOWNTIME_HEDGING
+        types::GatewayDeciderApproach::SrV2Hedging => match down_time {
+            types::DownTime::AllDowntime => types::GatewayDeciderApproach::SrV2AllDowntimeHedging,
+            types::DownTime::GlobalDowntime => {
+                types::GatewayDeciderApproach::SrV2GlobalDowntimeHedging
             }
-            types::DownTime::GLOBAL_DOWNTIME => {
-                types::GatewayDeciderApproach::SR_V2_GLOBAL_DOWNTIME_HEDGING
+            types::DownTime::Downtime => types::GatewayDeciderApproach::SrV2DowntimeHedging,
+            types::DownTime::NoDowntime => types::GatewayDeciderApproach::SrV2Hedging,
+        },
+        types::GatewayDeciderApproach::PreferredConnectorRouting => match down_time {
+            types::DownTime::AllDowntime => {
+                types::GatewayDeciderApproach::PreferredConnectorAllDowntimeRouting
             }
-            types::DownTime::DOWNTIME => types::GatewayDeciderApproach::SR_V2_DOWNTIME_HEDGING,
-            types::DownTime::NO_DOWNTIME => types::GatewayDeciderApproach::SR_V2_HEDGING,
+            types::DownTime::GlobalDowntime => {
+                types::GatewayDeciderApproach::PreferredConnectorGlobalDowntimeRouting
+            }
+            types::DownTime::Downtime => {
+                types::GatewayDeciderApproach::PreferredConnectorDowntimeRouting
+            }
+            types::DownTime::NoDowntime => types::GatewayDeciderApproach::PreferredConnectorRouting,
         },
         _ => match down_time {
-            types::DownTime::ALL_DOWNTIME => types::GatewayDeciderApproach::PL_ALL_DOWNTIME_ROUTING,
-            types::DownTime::GLOBAL_DOWNTIME => {
-                types::GatewayDeciderApproach::PL_GLOBAL_DOWNTIME_ROUTING
+            types::DownTime::AllDowntime => types::GatewayDeciderApproach::PlAllDowntimeRouting,
+            types::DownTime::GlobalDowntime => {
+                types::GatewayDeciderApproach::PlGlobalDowntimeRouting
             }
-            types::DownTime::DOWNTIME => types::GatewayDeciderApproach::PL_DOWNTIME_ROUTING,
-            types::DownTime::NO_DOWNTIME => types::GatewayDeciderApproach::PRIORITY_LOGIC,
+            types::DownTime::Downtime => types::GatewayDeciderApproach::PlDowntimeRouting,
+            types::DownTime::NoDowntime => types::GatewayDeciderApproach::PriorityLogic,
         },
     }
 }
 
 pub fn get_juspay_bank_code_from_internal_metadata(txn_detail: &ETTD::TxnDetail) -> Option<String> {
     txn_detail.internalMetadata.as_ref().and_then(|metadata| {
-        from_str::<Value>(metadata).ok().and_then(|json| {
+        from_str::<Value>(metadata.peek()).ok().and_then(|json| {
             json.get("juspayBankCode")
                 .and_then(|v| v.as_str().map(|s| s.to_string()))
         })
@@ -1364,6 +1382,48 @@ pub fn get_ref_id_value(
     match maybe_ref_id {
         Some(value) => value.mga_reference_id,
         _ => String::new(),
+    }
+}
+
+pub async fn get_common_gateway_ref_id(
+    decider_flow: &mut DeciderFlow<'_>,
+) -> (bool, Option<String>) {
+    let order_ref = decider_flow.get().dpOrder.clone();
+    let merchant = decider_flow.get().dpMerchantAccount.clone();
+
+    let (meta, pl_ref_id_map) = get_order_metadata_and_pl_ref_id_map(
+        decider_flow,
+        merchant.enableGatewayReferenceIdBasedRouting,
+        &order_ref,
+    );
+
+    let gateway_list = decider_flow.writer.functionalGateways.clone();
+
+    let ref_ids: Vec<String> = gateway_list
+        .iter()
+        .map(|gw| {
+            let gw_ref_id = get_gateway_reference_id(
+                meta.clone(),
+                gw,
+                order_ref.clone(),
+                pl_ref_id_map.clone(),
+            );
+            match gw_ref_id {
+                None => "NULL".to_string(),
+                Some(ref_id) => ref_id.mga_reference_id,
+            }
+        })
+        .collect();
+
+    if ref_ids.is_empty() {
+        return (false, None);
+    }
+
+    let first_ref_id = &ref_ids[0];
+    if ref_ids.iter().all(|ref_id| ref_id == first_ref_id) {
+        (true, Some(first_ref_id.clone()))
+    } else {
+        (false, None)
     }
 }
 
@@ -1392,7 +1452,7 @@ pub fn decider_filter_order(filter_name: &str) -> i32 {
         "preferredGateway" => 21,
         "filterEnforcement" => 22,
         "filterFunctionalGatewaysForMerchantRequiredFlow" => 23,
-        "filterGatewaysForEMITenureSpecficGatewayCreds" => 24,
+        "filterGatewaysForEMITenureSpecificGatewayCreds" => 24,
         "filterGatewaysForMGASelectionIntegrity" => 25,
         "FilterFunctionalGatewaysForOTM" => 26,
         _ => 27,
@@ -1429,13 +1489,13 @@ pub fn decider_filter_order(filter_name: &str) -> i32 {
 
 // pub async fn get_block_time_period(merchant_id: &str) -> i64 {
 //     match RService::findByNameFromRedis::<ConfigurableBlock>(
-//         C::OPTIMIZATION_ROUTING_CONFIG(merchant_id.to_string()).get_key(),
+//         C::OptimizationRoutingConfig(merchant_id.to_string()).get_key(),
 //     )
 //     .await
 //     {
 //         Some(config_block) => config_block.block_timeperiod.round() as i64,
 //         None => match RService::findByNameFromRedis::<ConfigurableBlock>(
-//             C::DEFAULT_OPTIMIZATION_ROUTING_CONFIG.get_key(),
+//             C::DefaultOptimizationRoutingConfig.get_key(),
 //         )
 //         .await
 //         {
@@ -1501,15 +1561,15 @@ pub async fn get_experiment_tag(utc_time: OffsetDateTime, dim: &str) -> Option<S
 }
 
 pub async fn create_moving_window_and_score(
-    redis: String,
-    queue_key: String, // Take owned strings
+    _redis: String,
+    queue_key: String,
     score_key: String,
     score: i32,
     score_list: Vec<String>,
 ) {
     // todo!()
     let app_state = get_tenant_app_state().await;
-    let r: Result<Vec<String>, error_stack::Report<redis_interface::errors::RedisError>> =
+    let _r: Result<Vec<String>, error_stack::Report<redis_interface::errors::RedisError>> =
         app_state
             .redis_conn
             .multi(false, |transaction| {
@@ -1517,24 +1577,18 @@ pub async fn create_moving_window_and_score(
                     transaction.del::<(), _>(queue_key.clone()).await?;
                     transaction
                         .lpush::<(), _, _>(
-                            queue_key.as_bytes().clone(),
+                            queue_key.as_bytes(),
                             score_list.iter().map(|s| s.as_bytes()).collect::<Vec<_>>(),
                         )
                         .await?;
                     transaction
-                        .set::<(), _, _>(
-                            score_key.clone(),
-                            score.to_string().clone(),
-                            None,
-                            None,
-                            false,
-                        )
+                        .set::<(), _, _>(score_key.clone(), score.to_string(), None, None, false)
                         .await?;
                     transaction
-                        .expire::<(), _>(queue_key.as_bytes().clone(), 10000000)
+                        .expire::<(), _>(queue_key.as_bytes(), 10000000)
                         .await?;
                     transaction
-                        .expire::<(), _>(score_key.as_bytes().clone(), 10000000)
+                        .expire::<(), _>(score_key.as_bytes(), 10000000)
                         .await?;
                     Ok(())
                 })
@@ -1558,13 +1612,18 @@ pub async fn create_moving_window_and_score(
 
 pub fn get_sr_v3_latency_threshold(
     sr_v3_input_config: Option<SrV3InputConfig>,
-    pmt: &str,
-    pm: &str,
+    payment_method: &str,
+    payment_method_type: &str,
+    sr_routing_dimensions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
-        get_sr_v3_sub_level_input_config(&config.subLevelInputConfig, pmt, pm, |x| {
-            x.latencyThreshold.is_some()
-        })
+        get_sr_v3_sub_level_input_config(
+            &config.subLevelInputConfig,
+            payment_method,
+            payment_method_type,
+            sr_routing_dimensions,
+            |x| x.latencyThreshold.is_some(),
+        )
         .and_then(|sub_config| sub_config.latencyThreshold)
         .or(config.defaultLatencyThreshold)
     })
@@ -1572,13 +1631,22 @@ pub fn get_sr_v3_latency_threshold(
 
 pub fn get_sr_v3_bucket_size(
     sr_v3_input_config: Option<SrV3InputConfig>,
-    pmt: &str,
-    pm: &str,
+    payment_method: &str,
+    payment_method_type: &str,
+    sr_routing_dimensions: &SrRoutingDimensions,
+    // When false, autopilot-calibrated sub-level entries are skipped so the lookup falls back to
+    // the merchant's manual/default bucket size (used by an A/B "manual" arm). Pass true elsewhere
+    // to preserve the standard behavior of honoring autopilot-tuned values.
+    use_autopilot: bool,
 ) -> Option<i32> {
     sr_v3_input_config.and_then(|config| {
-        get_sr_v3_sub_level_input_config(&config.subLevelInputConfig, pmt, pm, |x| {
-            x.bucketSize.is_some()
-        })
+        get_sr_v3_sub_level_input_config(
+            &config.subLevelInputConfig,
+            payment_method,
+            payment_method_type,
+            sr_routing_dimensions,
+            |x| x.bucketSize.is_some() && (use_autopilot || !is_autopilot_sourced(x)),
+        )
         .and_then(|sub_config| sub_config.bucketSize)
         .or(config.defaultBucketSize)
         .filter(|&size| size > 0)
@@ -1587,28 +1655,45 @@ pub fn get_sr_v3_bucket_size(
 
 pub fn get_sr_v3_hedging_percent(
     sr_v3_input_config: Option<SrV3InputConfig>,
-    pmt: &str,
-    pm: &str,
+    payment_method: &str,
+    payment_method_type: &str,
+    sr_routing_dimensions: &SrRoutingDimensions,
+    // See `get_sr_v3_bucket_size`: false skips autopilot-sourced entries (manual arm).
+    use_autopilot: bool,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
-        get_sr_v3_sub_level_input_config(&config.subLevelInputConfig, pmt, pm, |x| {
-            x.hedgingPercent.is_some()
-        })
+        get_sr_v3_sub_level_input_config(
+            &config.subLevelInputConfig,
+            payment_method,
+            payment_method_type,
+            sr_routing_dimensions,
+            |x| x.hedgingPercent.is_some() && (use_autopilot || !is_autopilot_sourced(x)),
+        )
         .and_then(|sub_config| sub_config.hedgingPercent)
         .or(config.defaultHedgingPercent)
         .filter(|&percent| percent >= 0.0)
     })
 }
 
+/// A sub-level SR config entry was written by the auto-calibration (autopilot) job.
+fn is_autopilot_sourced(cfg: &SrV3SubLevelInputConfig) -> bool {
+    cfg.source.as_deref() == Some(crate::sr_auto_calibration::AUTOPILOT_SOURCE)
+}
+
 pub fn get_sr_v3_lower_reset_factor(
     sr_v3_input_config: Option<SrV3InputConfig>,
-    pmt: &str,
-    pm: &str,
+    payment_method: &str,
+    payment_method_type: &str,
+    sr_routing_dimensions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
-        get_sr_v3_sub_level_input_config(&config.subLevelInputConfig, pmt, pm, |x| {
-            x.lowerResetFactor.is_some()
-        })
+        get_sr_v3_sub_level_input_config(
+            &config.subLevelInputConfig,
+            payment_method,
+            payment_method_type,
+            sr_routing_dimensions,
+            |x| x.lowerResetFactor.is_some(),
+        )
         .and_then(|sub_config| sub_config.lowerResetFactor)
         .or(config.defaultLowerResetFactor)
         .filter(|&factor| factor >= 0.0)
@@ -1617,13 +1702,18 @@ pub fn get_sr_v3_lower_reset_factor(
 
 pub fn get_sr_v3_upper_reset_factor(
     sr_v3_input_config: Option<SrV3InputConfig>,
-    pmt: &str,
-    pm: &str,
+    payment_method: &str,
+    payment_method_type: &str,
+    sr_routing_dimensions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
-        get_sr_v3_sub_level_input_config(&config.subLevelInputConfig, pmt, pm, |x| {
-            x.upperResetFactor.is_some()
-        })
+        get_sr_v3_sub_level_input_config(
+            &config.subLevelInputConfig,
+            payment_method,
+            payment_method_type,
+            sr_routing_dimensions,
+            |x| x.upperResetFactor.is_some(),
+        )
         .and_then(|sub_config| sub_config.upperResetFactor)
         .or(config.defaultUpperResetFactor)
         .filter(|&factor| factor >= 0.0)
@@ -1632,16 +1722,23 @@ pub fn get_sr_v3_upper_reset_factor(
 
 pub fn get_sr_v3_gateway_sigma_factor(
     sr_v3_input_config: Option<SrV3InputConfig>,
-    pmt: &str,
-    pm: &str,
+    payment_method: &str,
+    payment_method_type: &str,
     gw: &String,
+    sr_routing_dimensions: &SrRoutingDimensions,
 ) -> Option<f64> {
     sr_v3_input_config.and_then(|config| {
-        get_sr_v3_sub_level_input_config(&config.subLevelInputConfig, pmt, pm, |x| {
-            x.gatewayExtraScore
-                .as_ref()
-                .is_some_and(|scores| scores.iter().any(|score| score.gatewayName == *gw))
-        })
+        get_sr_v3_sub_level_input_config(
+            &config.subLevelInputConfig,
+            payment_method,
+            payment_method_type,
+            sr_routing_dimensions,
+            |x| {
+                x.gatewayExtraScore
+                    .as_ref()
+                    .is_some_and(|scores| scores.iter().any(|score| score.gatewayName == *gw))
+            },
+        )
         .and_then(|sub_config| find_gateway_sigma_factor(&sub_config.gatewayExtraScore, gw))
         .or_else(|| find_gateway_sigma_factor(&config.defaultGatewayExtraScore, gw))
     })
@@ -1661,40 +1758,110 @@ fn find_gateway_sigma_factor(
 
 fn get_sr_v3_sub_level_input_config(
     sub_level_input_config: &Option<Vec<SrV3SubLevelInputConfig>>,
-    pmt: &str,
-    pm: &str,
+    payment_method: &str,
+    payment_method_type: &str,
+    sr_routing_dimensions: &SrRoutingDimensions,
     is_input_non_null: impl Fn(&SrV3SubLevelInputConfig) -> bool,
 ) -> Option<SrV3SubLevelInputConfig> {
-    sub_level_input_config
-        .as_ref()
-        .and_then(|configs| {
-            configs
-                .iter()
-                .find(|config| {
-                    config.paymentMethodType == Some(pmt.to_string())
-                        && config.paymentMethod == Some(pm.to_string())
-                        && is_input_non_null(config)
-                })
-                .or_else(|| {
-                    configs.iter().find(|config| {
-                        config.paymentMethodType == Some(pmt.to_string())
-                            && is_input_non_null(config)
-                    })
-                })
-        })
-        .cloned()
+    sub_level_input_config.as_ref().and_then(|configs| {
+        configs
+            .iter()
+            .filter(|config| {
+                is_sr_v3_config_match(
+                    config,
+                    Some(payment_method.to_string()),
+                    Some(payment_method_type.to_string()),
+                    sr_routing_dimensions,
+                ) && is_input_non_null(config)
+            })
+            // Most-specific match wins: rank matching rows by the number of constrained
+            // (non-`None`) dimensions so a fully-qualified row (e.g. VISA/USD/THREE_DS) is
+            // preferred over a broad all-`Any` row that also matches. This also subsumes the
+            // method-only fallback — a row that constrains `paymentMethodType` outranks one that
+            // leaves it `Any`. Fold with a strict `>` (via `>=` keeping the incumbent) so the
+            // earliest config wins on equal specificity, preserving deterministic config order.
+            .fold(
+                None::<&SrV3SubLevelInputConfig>,
+                |best, config| match best {
+                    Some(b) if config_specificity(b) >= config_specificity(config) => Some(b),
+                    _ => Some(config),
+                },
+            )
+            .cloned()
+    })
 }
 
+/// Number of dimensions a sub-level config constrains (non-`None`). Higher = more specific.
+/// `paymentMethod` is excluded because every candidate has already matched on it, so it does not
+/// discriminate between rows.
+fn config_specificity(config: &SrV3SubLevelInputConfig) -> usize {
+    [
+        config.paymentMethodType.is_some(),
+        config.cardNetwork.is_some(),
+        config.cardIsIn.is_some(),
+        config.currency.is_some(),
+        config.country.is_some(),
+        config.authType.is_some(),
+    ]
+    .into_iter()
+    .filter(|&present| present)
+    .count()
+}
+
+/// Whether a sub-level row applies to a payment. The row's `paymentMethod` (the category) must
+/// equal the payment's; every other dimension it sets, starting with `paymentMethodType` (the
+/// specific method), must match too. Rows are stored as the engine's codes (`CARD`, `CREDIT`).
+fn is_sr_v3_config_match(
+    config: &SrV3SubLevelInputConfig,
+    payment_method: Option<String>,
+    payment_method_type: Option<String>,
+    sr_routing_dimensions: &SrRoutingDimensions,
+) -> bool {
+    let method_matches = config.paymentMethod == payment_method;
+    let type_matches =
+        config.paymentMethodType.is_none() || config.paymentMethodType == payment_method_type;
+    let card_network_matches =
+        config.cardNetwork.is_none() || config.cardNetwork == sr_routing_dimensions.card_network;
+    let card_isin_matches =
+        config.cardIsIn.is_none() || config.cardIsIn == sr_routing_dimensions.card_isin;
+    let currency_matches =
+        config.currency.is_none() || config.currency == sr_routing_dimensions.currency;
+    let country_matches =
+        config.country.is_none() || config.country == sr_routing_dimensions.country;
+    let auth_type_matches =
+        config.authType.is_none() || config.authType == sr_routing_dimensions.auth_type;
+
+    method_matches
+        && type_matches
+        && card_network_matches
+        && card_isin_matches
+        && currency_matches
+        && auth_type_matches
+        && country_matches
+}
+
+/// The row for a whole payment method: its `paymentMethod` and nothing narrower.
 pub fn filter_upto_pmt(
     sub_level_input_config: Vec<SrV3SubLevelInputConfig>,
-    pmt: String,
+    payment_method: String,
     is_input_non_null: impl Fn(&SrV3SubLevelInputConfig) -> bool,
 ) -> Option<SrV3SubLevelInputConfig> {
     sub_level_input_config.into_iter().find(|x| {
-        (x.paymentMethodType.as_ref() == Some(&pmt))
-            && x.paymentMethod.is_none()
+        (x.paymentMethod.as_ref() == Some(&payment_method))
+            && x.paymentMethodType.is_none()
             && is_input_non_null(x)
     })
+}
+
+/// A card's auth type as the auth-level SR dimension groups it: `THREE_DS`, `OTP` or `UNKNOWN`.
+/// The scoring data keeps the auth type as sent, which SR config matching and the payment's score
+/// update read back.
+fn card_auth_level(auth_type: Option<&str>) -> &'static str {
+    auth_type
+        .and_then(|auth_type| {
+            ETCa::txn_card_info::text_to_auth_type(&auth_type.to_uppercase()).ok()
+        })
+        .map_or("UNKNOWN", |auth_type| auth_type.sr_auth_level())
 }
 
 pub fn get_payment_method(
@@ -1729,11 +1896,11 @@ pub async fn delete_score_key_if_bucket_size_changes(
                 match get_tenant_app_state()
                     .await
                     .redis_conn
-                    .conn
-                    .delete_key(&[sr_redis_key, "}score".to_string()].concat())
+                    .commands()
+                    .delete_key(&[sr_redis_key, "}score".to_string()].concat().into())
                     .await
                 {
-                    Ok(res) => (),
+                    Ok(_res) => (),
                     Err(err) => {
                         logger::error!(
                             action = "deleteScoreKeyIfBucketSizeChanges",
@@ -1759,7 +1926,7 @@ pub fn intercalate<S: AsRef<str>>(separator: &str, strings: &[S]) -> String {
 
 // Function to check if the bucket size has changed for a specific gateway
 pub async fn check_if_bucket_size_changed(
-    decider_flow: &mut DeciderFlow<'_>,
+    _decider_flow: &mut DeciderFlow<'_>,
     merchant_bucket_size: i32,
     gateway_redis_key: (String, String),
 ) -> bool {
@@ -1772,8 +1939,8 @@ pub async fn check_if_bucket_size_changed(
     match get_tenant_app_state()
         .await
         .redis_conn
-        .conn
-        .get_list_length(queue_key.as_str())
+        .commands()
+        .get_list_length(&queue_key.into())
         .await
     {
         Ok(redis_bucket_size) => redis_bucket_size != merchant_bucket_size as usize,
@@ -1818,7 +1985,8 @@ pub async fn check_if_bin_is_eligible_for_emi(
         (card_isin, juspay_bank_code, card_type)
     {
         let bin_check_mandated_banks: Option<Vec<String>> =
-            RService::findByNameFromRedis(C::getEmiBinValidationSupportedBanksKey.get_key()).await;
+            RService::findByNameFromRedis(C::GET_EMI_BIN_VALIDATION_SUPPORTED_BANKS_KEY.get_key())
+                .await;
         let should_do_bin_validation = bin_check_mandated_banks
             .is_some_and(|banks| banks.contains(&format!("{}::{}", juspay_bank_code, card_type)));
         if should_do_bin_validation {
@@ -1831,7 +1999,7 @@ pub async fn check_if_bin_is_eligible_for_emi(
                 bin_list,
                 identifier_name_to_text(IdentifierName::BIN),
                 juspay_bank_code,
-                payment_flows_to_text(&PaymentFlow::PG_EMI),
+                payment_flows_to_text(&PaymentFlow::PgEmi),
             )
             .await;
             !emi_eligible_bins.is_empty()
@@ -1859,29 +2027,52 @@ pub fn check_for_reverse_penny_drop_in_mga(mga: &MerchantGatewayAccount) -> bool
 pub fn get_default_gateway_scoring_data(
     merchant_id: String,
     order_type: String,
-    payment_method_type: String,
-    payment_method: String,
+    instrument: PaymentInstrument,
     is_gri_enabled_for_elimination: bool,
     is_gri_enabled_for_sr_routing: bool,
     date_created: OffsetDateTime,
+    card_isin: Option<String>,
+    card_switch_provider: Option<Secret<String>>,
+    currency: Option<Currency>,
+    country: Option<CountryISO2>,
+    auth_type: Option<String>,
+    useServiceConfigForGri: bool,
+    gatewayRefId: Option<String>,
+    udfs: Option<UDFs>,
+    is_legacy_decider_flow: bool,
 ) -> GatewayScoringData {
     GatewayScoringData {
         merchantId: merchant_id,
-        paymentMethodType: payment_method_type,
-        paymentMethod: payment_method,
+        instrument,
         orderType: order_type,
         cardType: None,
         bankCode: None,
-        authType: None,
+        authType: auth_type,
         paymentSource: None,
         isPaymentSourceEnabledForSrRouting: false,
         isAuthLevelEnabledForSrRouting: false,
         isBankLevelEnabledForSrRouting: false,
-        isGriEnabledForElimination: is_gri_enabled_for_elimination,
-        isGriEnabledForSrRouting: is_gri_enabled_for_sr_routing,
+        isGriEnabledForElimination: if useServiceConfigForGri {
+            is_gri_enabled_for_elimination
+        } else {
+            false
+        },
+        isGriEnabledForSrRouting: if useServiceConfigForGri {
+            is_gri_enabled_for_sr_routing
+        } else {
+            false
+        },
         routingApproach: None,
         dateCreated: date_created,
         eliminationEnabled: false,
+        cardIsIn: card_isin,
+        cardSwitchProvider: card_switch_provider,
+        currency,
+        country,
+        is_legacy_decider_flow,
+        udfs,
+        udfs_consumed_for_routing: None,
+        gatewayReferenceId: gatewayRefId,
     }
 }
 
@@ -1890,52 +2081,81 @@ pub async fn get_gateway_scoring_data(
     txn_detail: ETTD::TxnDetail,
     txn_card_info: ETCa::txn_card_info::TxnCardInfo,
     merchant: ETM::merchant_account::MerchantAccount,
+    is_legacy_decider_flow: bool,
 ) -> GatewayScoringData {
-    let merchant_enabled_for_unification = isFeatureEnabled(
-        C::MERCHANTS_ENABLED_FOR_SCORE_KEYS_UNIFICATION.get_key(),
+    let _merchant_enabled_for_unification = is_feature_enabled(
+        C::MerchantsEnabledForScoreKeysUnification.get_key(),
         merchant_id_to_text(merchant.merchantId.clone()),
         "kv_redis".to_string(),
     )
     .await;
     let merchant_id = merchant_id_to_text(merchant.merchantId.clone());
-    let order_type = txn_detail.txnObjectType.to_string();
-    let payment_method_type = txn_card_info.paymentMethodType.to_uppercase();
-    let m_source_object = if txn_card_info.paymentMethod == UPI {
-        txn_detail.sourceObject.clone().unwrap_or_default()
-    } else {
-        txn_card_info.paymentMethod.clone()
+    let order_type = txn_detail
+        .txnObjectType
+        .map(|t| t.to_string())
+        .unwrap_or_default();
+    // Legacy requests name a UPI payment just `UPI` and carry the specific flow on the
+    // source object.
+    let instrument = match (
+        txn_card_info.instrument.method(),
+        txn_card_info.instrument.method_type_code().as_ref(),
+        txn_detail.sourceObject.as_deref(),
+    ) {
+        (PaymentMethod::Upi, "UPI", Some(source_object)) => {
+            PaymentInstrument::from_legacy_txn(UPI, source_object)
+        }
+        _ => txn_card_info.instrument.clone(),
     };
-    let is_performing_experiment = isFeatureEnabled(
-        C::MERCHANT_ENABLED_FOR_ROUTING_EXPERIMENT.get_key(),
+    let is_performing_experiment = is_feature_enabled(
+        C::MerchantEnabledForRoutingExperiment.get_key(),
         merchant_id_to_text(merchant.merchantId.clone()),
         "kv_redis".to_string(),
     )
     .await;
-    let is_gri_enabled_for_elimination = isFeatureEnabled(
-        C::GATEWAY_REFERENCE_ID_ENABLED_MERCHANT.get_key(),
+    let is_gri_enabled_for_elimination = is_feature_enabled(
+        C::GatewayReferenceIdEnabledMerchant.get_key(),
         merchant_id_to_text(merchant.merchantId.clone()),
         "kv_redis".to_string(),
     )
     .await;
-    let is_gri_enabled_for_sr_routing = isFeatureEnabled(
-        C::GW_REF_ID_SELECTION_BASED_ENABLED_MERCHANT.get_key(),
+    let is_gri_enabled_for_sr_routing = is_feature_enabled(
+        C::GwRefIdSelectionBasedEnabledMerchant.get_key(),
         merchant_id_to_text(merchant.merchantId.clone()),
         "kv_redis".to_string(),
     )
     .await;
+    let (useServiceConfigForGri, gatewayRefId) =
+        if is_gri_enabled_for_sr_routing || is_gri_enabled_for_elimination {
+            get_common_gateway_ref_id(decider_flow).await
+        } else {
+            (true, None)
+        };
     let mut default_gateway_scoring_data = get_default_gateway_scoring_data(
         merchant_id.clone(),
         order_type,
-        payment_method_type,
-        m_source_object,
+        instrument,
         is_gri_enabled_for_elimination,
         is_gri_enabled_for_sr_routing,
-        decider_flow.get().dpTxnDetail.dateCreated.clone(),
+        decider_flow.get().dpTxnDetail.dateCreated,
+        decider_flow.get().dpTxnCardInfo.card_isin.clone(),
+        decider_flow.get().dpTxnCardInfo.cardSwitchProvider.clone(),
+        Some(decider_flow.get().dpOrder.currency.clone()),
+        decider_flow.get().dpTxnDetail.country,
+        decider_flow
+            .get()
+            .dpTxnCardInfo
+            .authType
+            .as_ref()
+            .map(|a| a.to_string()),
+        useServiceConfigForGri,
+        gatewayRefId,
+        Some(decider_flow.get().dpOrder.udfs.clone()),
+        is_legacy_decider_flow,
     );
-    let updated_gateway_scoring_data = match txn_card_info.paymentMethodType.as_str() {
-        UPI => {
-            let handle_and_package_based_routing = isFeatureEnabled(
-                C::HANDLE_PACKAGE_BASED_ROUTING_CUTOVER.get_key(),
+    let updated_gateway_scoring_data = match txn_card_info.instrument.method() {
+        PaymentMethod::Upi => {
+            let handle_and_package_based_routing = is_feature_enabled(
+                C::HandlePackageBasedRoutingCutover.get_key(),
                 merchant_id.clone(),
                 "kv_redis".to_string(),
             )
@@ -1945,23 +2165,24 @@ pub async fn get_gateway_scoring_data(
                 set_is_experiment_tag(decider_flow, experiment_tag);
             }
 
-            let payment_source = get_true_string(txn_card_info.paymentSource.clone())
+            let payment_source = get_true_string(txn_card_info.get_payment_source())
                 .map(|source| source.split("@").last().unwrap_or_default().to_uppercase())
-                .unwrap_or_default();
+                .map(Secret::new)
+                .unwrap_or_else(|| Secret::new(String::new()));
             default_gateway_scoring_data.paymentSource = Some(payment_source);
             default_gateway_scoring_data.isPaymentSourceEnabledForSrRouting =
                 handle_and_package_based_routing;
             default_gateway_scoring_data
         }
-        CARD => {
-            let sr_evaluation_at_auth_level = isFeatureEnabled(
-                C::ENABLE_SELECTION_BASED_AUTH_TYPE_EVALUATION.get_key(),
+        PaymentMethod::Card => {
+            let sr_evaluation_at_auth_level = is_feature_enabled(
+                C::EnableSelectionBasedAuthTypeEvaluation.get_key(),
                 merchant_id.clone(),
                 "kv_redis".to_string(),
             )
             .await;
-            let sr_evaluation_at_bank_level = isFeatureEnabled(
-                C::ENABLE_SELECTION_BASED_BANK_LEVEL_EVALUATION.get_key(),
+            let sr_evaluation_at_bank_level = is_feature_enabled(
+                C::EnableSelectionBasedBankLevelEvaluation.get_key(),
                 merchant_id.clone(),
                 "kv_redis".to_string(),
             )
@@ -1982,18 +2203,7 @@ pub async fn get_gateway_scoring_data(
                 .clone()
                 .map(|card| card_type_to_text(&card).to_uppercase())
                 .unwrap_or_default();
-            let auth_type = txn_card_info
-                .authType
-                .clone()
-                .map(|auth| auth_type_to_text(&auth).to_uppercase())
-                .unwrap_or_default();
-            let card_auth_type = match auth_type.as_str() {
-                "THREE_DS" | "THREE_DS_2" => "THREE_DS",
-                "OTP" => "OTP",
-                _ => "UNKNOWN",
-            };
             let bank_code = fetch_juspay_bank_code(&txn_card_info).unwrap_or("UNKNOWN".to_string());
-            default_gateway_scoring_data.authType = Some(card_auth_type.to_owned());
             default_gateway_scoring_data.cardType = Some(card_type.to_owned());
             default_gateway_scoring_data.bankCode = Some(bank_code.to_owned());
             default_gateway_scoring_data.isBankLevelEnabledForSrRouting =
@@ -2018,44 +2228,49 @@ pub async fn get_gateway_scoring_data(
             get_experiment_tag(txn_detail.dateCreated, "GRI_BASED_SR_ROUTING").await;
         set_is_experiment_tag(decider_flow, experiment_tag);
     }
-    let key = [C::gatewayScoringData, &txn_detail.txnUuid.clone()].concat();
+    let _key = [C::GATEWAY_SCORING_DATA, &txn_detail.txnUuid.clone()].concat();
     updated_gateway_scoring_data
 }
 
 pub async fn get_unified_key(
     gateway_scoring_data: GatewayScoringData,
+    decider_flow: Option<&mut DeciderFlow<'_>>,
     score_key_type: ScoreKeyType,
     enforce1d: bool,
     gateway_ref_id_map: types::GatewayReferenceIdMap,
 ) -> GatewayRedisKeyMap {
     let merchant_id = gateway_scoring_data.merchantId.clone();
     let order_type = gateway_scoring_data.orderType.clone();
-    let payment_method_type = gateway_scoring_data.paymentMethodType.clone();
-    let payment_method = gateway_scoring_data.paymentMethod.clone();
+    let payment_method_type = gateway_scoring_data
+        .instrument
+        .method_type_code()
+        .into_owned();
+    let payment_method = gateway_scoring_data.instrument.method_code().to_string();
 
     let gateway_redis_key_map = match score_key_type {
-        ScoreKeyType::ELIMINATION_GLOBAL_KEY => {
-            let key_prefix = C::elimination_based_routing_global_key_prefix;
-            let (prefix_key, suffix_key) = if payment_method_type == CARD {
-                (
-                    vec![key_prefix, &order_type.as_str()],
-                    vec![
-                        payment_method_type,
-                        payment_method,
-                        gateway_scoring_data
-                            .cardType
-                            .clone()
-                            .as_deref()
-                            .unwrap_or("")
-                            .to_string(),
-                    ],
-                )
-            } else {
-                (
-                    vec![key_prefix, &order_type.as_str()],
-                    vec![payment_method_type, payment_method],
-                )
-            };
+        ScoreKeyType::EliminationGlobalKey => {
+            let key_prefix = C::ELIMINATION_BASED_ROUTING_GLOBAL_KEY_PREFIX;
+            let (prefix_key, suffix_key) =
+                if gateway_scoring_data.instrument.is(PaymentMethod::Card) {
+                    (
+                        vec![key_prefix, &order_type.as_str()],
+                        vec![
+                            payment_method_type.to_string(),
+                            payment_method.to_string(),
+                            gateway_scoring_data
+                                .cardType
+                                .clone()
+                                .as_deref()
+                                .unwrap_or("")
+                                .to_string(),
+                        ],
+                    )
+                } else {
+                    (
+                        vec![key_prefix, &order_type.as_str()],
+                        vec![payment_method_type, payment_method],
+                    )
+                };
 
             let result_keys =
                 gateway_ref_id_map
@@ -2081,29 +2296,30 @@ pub async fn get_unified_key(
                     });
             result_keys
         }
-        ScoreKeyType::ELIMINATION_MERCHANT_KEY => {
+        ScoreKeyType::EliminationMerchantKey => {
             let isgri_enabled = gateway_scoring_data.isGriEnabledForElimination;
-            let key_prefix = C::elimination_based_routing_key_prefix;
-            let (prefix_key, suffix_key) = if payment_method_type == CARD {
-                (
-                    vec![key_prefix, &merchant_id, &order_type.as_str()],
-                    vec![
-                        payment_method_type,
-                        payment_method,
-                        gateway_scoring_data
-                            .cardType
-                            .clone()
-                            .as_deref()
-                            .unwrap_or("")
-                            .to_string(),
-                    ],
-                )
-            } else {
-                (
-                    vec![key_prefix, &merchant_id, &order_type.as_str()],
-                    vec![payment_method_type, payment_method],
-                )
-            };
+            let key_prefix = C::ELIMINATION_BASED_ROUTING_KEY_PREFIX;
+            let (prefix_key, suffix_key) =
+                if gateway_scoring_data.instrument.is(PaymentMethod::Card) {
+                    (
+                        vec![key_prefix, &merchant_id, &order_type.as_str()],
+                        vec![
+                            payment_method_type,
+                            payment_method,
+                            gateway_scoring_data
+                                .cardType
+                                .clone()
+                                .as_deref()
+                                .unwrap_or("")
+                                .to_string(),
+                        ],
+                    )
+                } else {
+                    (
+                        vec![key_prefix, &merchant_id, &order_type.as_str()],
+                        vec![payment_method_type, payment_method],
+                    )
+                };
 
             let result_keys = gateway_ref_id_map.iter().fold(
                 GatewayRedisKeyMap::new(),
@@ -2145,16 +2361,17 @@ pub async fn get_unified_key(
             );
             result_keys
         }
-        ScoreKeyType::SR_V2_KEY => {
-            let key = get_unified_sr_key(&gateway_scoring_data, false, enforce1d).await;
+        ScoreKeyType::SrV2Key => {
+            let key =
+                get_unified_sr_key(&gateway_scoring_data, false, enforce1d, decider_flow).await;
             let gri_sr_v2_cutover = gateway_scoring_data.isGriEnabledForSrRouting;
 
             if gri_sr_v2_cutover {
                 gateway_ref_id_map.iter().fold(
                     GatewayRedisKeyMap::new(),
-                    |mut acc, (gateway, ref_id)| {
+                    |mut acc, (gw, ref_id)| {
                         acc.insert(
-                            gateway.clone(),
+                            gw.clone(),
                             intercalate_without_empty_string(
                                 "_",
                                 &vec![key.clone(), ref_id.as_deref().unwrap_or("").to_string()],
@@ -2169,61 +2386,75 @@ pub async fn get_unified_key(
                 map
             }
         }
-        ScoreKeyType::SR_V3_KEY => {
-            let base_key = get_unified_sr_key(&gateway_scoring_data, true, enforce1d).await;
+        ScoreKeyType::SrV3Key => {
+            let base_key =
+                get_unified_sr_key(&gateway_scoring_data, true, enforce1d, decider_flow).await;
             let gri_sr_v2_cutover = gateway_scoring_data.isGriEnabledForSrRouting;
 
             if gri_sr_v2_cutover {
                 gateway_ref_id_map.iter().fold(
                     GatewayRedisKeyMap::new(),
-                    |mut acc, (gateway, ref_id)| {
+                    |mut acc, (gw, ref_id)| {
                         let key = intercalate_without_empty_string(
                             "_",
                             &vec![
                                 base_key.clone(),
                                 ref_id.as_deref().unwrap_or("").to_string(),
-                                gateway.to_string(),
+                                gw.to_string(),
                             ],
                         );
-                        acc.insert(gateway.clone(), key);
+                        acc.insert(gw.clone(), key);
                         acc
                     },
                 )
             } else {
-                gateway_ref_id_map.iter().fold(
-                    GatewayRedisKeyMap::new(),
-                    |mut acc, (gateway, _)| {
+                gateway_ref_id_map
+                    .iter()
+                    .fold(GatewayRedisKeyMap::new(), |mut acc, (gw, _)| {
                         acc.insert(
-                            gateway.clone(),
+                            gw.clone(),
                             intercalate_without_empty_string(
                                 "_",
-                                &vec![base_key.clone(), gateway.to_string()],
+                                &vec![base_key.clone(), gw.to_string()],
                             ),
                         );
                         acc
-                    },
-                )
+                    })
             }
         }
-        ScoreKeyType::OUTAGE_GLOBAL_KEY => {
-            let key_prefix = C::globalLevelOutageKeyPrefix;
-            let base_key = if payment_method_type == CARD {
+        ScoreKeyType::OutageGlobalKey => {
+            let key_prefix = C::GLOBAL_LEVEL_OUTAGE_KEY_PREFIX;
+            let base_key = if gateway_scoring_data.instrument.is(PaymentMethod::Card) {
                 vec![
-                    key_prefix,
-                    &payment_method_type,
-                    &payment_method,
-                    gateway_scoring_data.bankCode.as_deref().unwrap_or(""),
-                    gateway_scoring_data.cardType.as_deref().unwrap_or(""),
+                    key_prefix.to_string(),
+                    payment_method_type.to_string(),
+                    payment_method.to_string(),
+                    gateway_scoring_data
+                        .bankCode
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_string(),
+                    gateway_scoring_data
+                        .cardType
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_string(),
                 ]
-            } else if payment_method_type == UPI {
+            } else if gateway_scoring_data.instrument.is(PaymentMethod::Upi) {
+                let peek = gateway_scoring_data.get_payment_source();
+
                 vec![
-                    key_prefix,
-                    &payment_method_type,
-                    &payment_method,
-                    gateway_scoring_data.paymentSource.as_deref().unwrap_or(""),
+                    key_prefix.to_string(),
+                    payment_method_type.to_string(),
+                    payment_method.to_string(),
+                    peek,
                 ]
             } else {
-                vec![key_prefix, &payment_method_type, &payment_method]
+                vec![
+                    key_prefix.to_string(),
+                    payment_method_type.to_string(),
+                    payment_method.to_string(),
+                ]
             };
 
             let mut map = GatewayRedisKeyMap::new();
@@ -2239,31 +2470,41 @@ pub async fn get_unified_key(
             );
             map
         }
-        ScoreKeyType::OUTAGE_MERCHANT_KEY => {
-            let key_prefix = C::merchantLevelOutageKeyPrefix;
-            let base_key = if payment_method_type == CARD {
+        ScoreKeyType::OutageMerchantKey => {
+            let key_prefix = C::MERCHANT_LEVEL_OUTAGE_KEY_PREFIX;
+            let base_key: Vec<String> = if gateway_scoring_data.instrument.is(PaymentMethod::Card) {
                 vec![
-                    key_prefix,
-                    &merchant_id,
-                    &payment_method_type,
-                    &payment_method,
-                    gateway_scoring_data.bankCode.as_deref().unwrap_or(""),
-                    gateway_scoring_data.cardType.as_deref().unwrap_or(""),
+                    key_prefix.to_string(),
+                    merchant_id.clone(),
+                    payment_method_type.to_string(),
+                    payment_method.to_string(),
+                    gateway_scoring_data
+                        .bankCode
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_string(),
+                    gateway_scoring_data
+                        .cardType
+                        .as_deref()
+                        .unwrap_or("")
+                        .to_string(),
                 ]
-            } else if payment_method_type == UPI {
+            } else if gateway_scoring_data.instrument.is(PaymentMethod::Upi) {
+                let peek = gateway_scoring_data.get_payment_source();
+
                 vec![
-                    key_prefix,
-                    &merchant_id,
-                    &payment_method_type,
-                    &payment_method,
-                    gateway_scoring_data.paymentSource.as_deref().unwrap_or(""),
+                    key_prefix.to_string(),
+                    merchant_id.clone(),
+                    payment_method_type.to_string(),
+                    payment_method.to_string(),
+                    peek,
                 ]
             } else {
                 vec![
-                    key_prefix,
-                    &merchant_id,
-                    &payment_method_type,
-                    &payment_method,
+                    key_prefix.to_string(),
+                    merchant_id.clone(),
+                    payment_method_type.to_string(),
+                    payment_method.to_string(),
                 ]
             };
 
@@ -2296,25 +2537,159 @@ pub async fn get_unified_sr_key(
     gateway_scoring_data: &GatewayScoringData,
     is_sr_v3_metric_enabled: bool,
     enforce1d: bool,
+    decider_flow: Option<&mut DeciderFlow<'_>>,
+) -> String {
+    let merchant_id = gateway_scoring_data.merchantId.clone();
+
+    let name = crate::types::service_configuration::SrDimensions::name(&merchant_id);
+
+    let service_config: Option<SrDimensionConfig> = findByNameFromRedis(name.clone()).await;
+
+    let udfs = service_config
+        .as_ref()
+        .map(|config| config.paymentInfo.udfs.clone())
+        .unwrap_or_default();
+
+    let udf_values =
+        gateway_scoring_data
+            .udfs
+            .as_ref()
+            .zip(Some(udfs))
+            .and_then(|(udf_map, udf_keys)| {
+                let mut values = Vec::with_capacity(udf_keys.len());
+
+                for udf in udf_keys {
+                    match get_udf(udf_map, udf) {
+                        Some(value) => values.push(value.to_string()),
+                        None => {
+                            return None;
+                        }
+                    }
+                }
+
+                Some(values)
+            });
+
+    if let Some(df) = decider_flow {
+        if let Some(udf_values) = udf_values.as_ref() {
+            if udf_values.len() == 1 {
+                df.writer.gateway_scoring_data.udfs_consumed_for_routing =
+                    Some(udf_values[0].clone());
+            }
+        }
+    }
+
+    let is_legacy_decider_flow = gateway_scoring_data.is_legacy_decider_flow;
+
+    if is_legacy_decider_flow {
+        let sr_keys =
+            get_legacy_unified_sr_key(gateway_scoring_data, is_sr_v3_metric_enabled, enforce1d)
+                .await;
+
+        let sr_key_with_udfs = if let Some(udf_values) = udf_values.clone() {
+            let mut key_components = vec![sr_keys];
+            key_components.extend(udf_values);
+            intercalate_without_empty_string("_", &key_components)
+        } else {
+            sr_keys
+        };
+        return sr_key_with_udfs;
+    }
+
+    let fields: Vec<String> = service_config
+        .as_ref()
+        .map(|config| config.paymentInfo.fields.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .flatten()
+        .collect();
+    sr_key(
+        gateway_scoring_data,
+        is_sr_v3_metric_enabled,
+        &fields,
+        udf_values,
+    )
+}
+
+/// A payment's SR score key, without the gateway suffix:
+/// `{prefix}_{merchant}_{order type}_{payment method type}_{payment method}`, then the merchant's
+/// configured dimensions (`card_network`, `card_is_in`, `currency`, `country`, `auth_type`) and
+/// UDF values, skipping any the payment lacks. The type and method are the instrument's codes
+/// (`CREDIT`, `CARD`). Scores live under this key, so its format is pinned by tests: changing it
+/// strands every merchant's learned scores.
+pub fn sr_key(
+    gateway_scoring_data: &GatewayScoringData,
+    is_sr_v3_metric_enabled: bool,
+    fields: &[String],
+    udf_values: Option<Vec<String>>,
+) -> String {
+    let key_prefix = if is_sr_v3_metric_enabled {
+        C::GATEWAY_SELECTION_V3_ORDER_TYPE_KEY_PREFIX
+    } else {
+        C::GATEWAY_SELECTION_ORDER_TYPE_KEY_PREFIX
+    };
+    let mut key_components = vec![
+        key_prefix.to_string(),
+        gateway_scoring_data.merchantId.clone(),
+        gateway_scoring_data.orderType.clone(),
+        gateway_scoring_data
+            .instrument
+            .method_type_code()
+            .into_owned(),
+        gateway_scoring_data.instrument.method_code().to_string(),
+    ];
+    for field in fields {
+        let value = match field.as_str() {
+            "card_network" => gateway_scoring_data
+                .cardSwitchProvider
+                .as_ref()
+                .map(|network| network.peek().to_string()),
+            "card_is_in" => gateway_scoring_data.cardIsIn.clone(),
+            "currency" => gateway_scoring_data
+                .currency
+                .as_ref()
+                .map(ToString::to_string),
+            "country" => gateway_scoring_data
+                .country
+                .as_ref()
+                .map(ToString::to_string),
+            "auth_type" => gateway_scoring_data.authType.clone(),
+            _ => None,
+        };
+        key_components.extend(value);
+    }
+    key_components.extend(udf_values.into_iter().flatten());
+    intercalate_without_empty_string("_", &key_components)
+}
+
+async fn get_legacy_unified_sr_key(
+    gateway_scoring_data: &GatewayScoringData,
+    is_sr_v3_metric_enabled: bool,
+    enforce1d: bool,
 ) -> String {
     let merchant_id = gateway_scoring_data.merchantId.clone();
     let order_type = gateway_scoring_data.orderType.clone();
-    let payment_method_type = gateway_scoring_data.paymentMethodType.clone();
-    let payment_method = gateway_scoring_data.paymentMethod.clone();
+    let payment_method_type = gateway_scoring_data
+        .instrument
+        .method_type_code()
+        .into_owned();
+    let payment_method = gateway_scoring_data.instrument.method_code().to_string();
     let key_prefix = if is_sr_v3_metric_enabled {
-        C::gateway_selection_v3_order_type_key_prefix.to_string()
+        C::GATEWAY_SELECTION_V3_ORDER_TYPE_KEY_PREFIX.to_string()
     } else {
-        C::gateway_selection_order_type_key_prefix.to_string()
+        C::GATEWAY_SELECTION_ORDER_TYPE_KEY_PREFIX.to_string()
     };
+    // The legacy key order: the category, then the specific method (`CARD_VISA`), so legacy scores
+    // keep their keys.
     let base_key = vec![
         key_prefix.clone(),
         merchant_id.clone(),
         order_type.clone(),
-        payment_method_type.clone(),
         payment_method.clone(),
+        payment_method_type.clone(),
     ];
 
-    if enforce1d && payment_method_type == CARD {
+    if enforce1d && gateway_scoring_data.instrument.is(PaymentMethod::Card) {
         let res = &[
             base_key.clone(),
             vec![gateway_scoring_data.cardType.clone().unwrap_or_default()],
@@ -2323,14 +2698,14 @@ pub async fn get_unified_sr_key(
         intercalate_without_empty_string("_", res)
     } else if enforce1d {
         intercalate_without_empty_string("_", &base_key)
-    } else if payment_method_type == UPI {
+    } else if gateway_scoring_data.instrument.is(PaymentMethod::Upi) {
         if gateway_scoring_data.isPaymentSourceEnabledForSrRouting {
-            match payment_method.as_str() {
+            match payment_method_type.as_str() {
                 "UPI_COLLECT" | "COLLECT" => {
                     let handle_list = get_upi_handle_list().await;
-                    let upi_handle = gateway_scoring_data.paymentSource.as_deref().unwrap_or("");
-                    let append_handle = if handle_list.contains(&upi_handle.to_string()) {
-                        upi_handle
+                    let upi_handle = gateway_scoring_data.get_payment_source();
+                    let append_handle = if handle_list.contains(&upi_handle) {
+                        &upi_handle
                     } else {
                         ""
                     };
@@ -2341,9 +2716,9 @@ pub async fn get_unified_sr_key(
                 }
                 "UPI_PAY" | "PAY" => {
                     let package_list = get_upi_package_list().await;
-                    let upi_package = gateway_scoring_data.paymentSource.as_deref().unwrap_or("");
-                    let append_package = if package_list.contains(&upi_package.to_string()) {
-                        upi_package
+                    let upi_package = gateway_scoring_data.get_payment_source();
+                    let append_package = if package_list.contains(&upi_package) {
+                        upi_package.as_str()
                     } else {
                         ""
                     };
@@ -2357,12 +2732,12 @@ pub async fn get_unified_sr_key(
         } else {
             intercalate_without_empty_string("_", &base_key)
         }
-    } else if payment_method_type == CARD {
+    } else if gateway_scoring_data.instrument.is(PaymentMethod::Card) {
         let v = &[
             base_key.clone(),
             vec![
                 gateway_scoring_data.cardType.clone().unwrap_or_default(),
-                gateway_scoring_data.authType.clone().unwrap_or_default(),
+                card_auth_level(gateway_scoring_data.authType.as_deref()).to_string(),
             ],
         ]
         .concat();
@@ -2409,7 +2784,7 @@ pub async fn get_consumer_key(
     gateway_list: GatewayList,
 ) -> GatewayRedisKeyMap {
     let merchant = decider_flow.get().dpMerchantAccount.clone();
-    let txn_detail = decider_flow.get().dpTxnDetail.clone();
+    let _txn_detail = decider_flow.get().dpTxnDetail.clone();
     let gw_ref_id_map = if gateway_scoring_data.isGriEnabledForElimination
         || gateway_scoring_data.isGriEnabledForSrRouting
     {
@@ -2419,11 +2794,11 @@ pub async fn get_consumer_key(
             merchant.enableGatewayReferenceIdBasedRouting,
             &order_ref,
         );
-        let gw_ref_ids = gateway_list.iter().fold(HashMap::new(), |acc, gateway| {
+        let gw_ref_ids = gateway_list.iter().fold(HashMap::new(), |acc, gw| {
             let mut map = acc;
             let gwref_id = get_gateway_reference_id(
                 meta.clone(),
-                gateway,
+                gw,
                 order_ref.clone(),
                 pl_ref_id_map.clone(),
             );
@@ -2431,22 +2806,21 @@ pub async fn get_consumer_key(
                 None => "NULL".to_string(),
                 Some(ref_id) => ref_id.mga_reference_id,
             };
-            map.insert(gateway.clone(), Some(val));
+            map.insert(gw.clone(), Some(val));
             map
         });
         set_gw_ref_id(decider_flow, gw_ref_ids.values().next().cloned().flatten());
         logger::debug!("gwRefId {:?}", gw_ref_ids);
         gw_ref_ids
     } else {
-        gateway_list
-            .iter()
-            .fold(HashMap::new(), |mut acc, gateway| {
-                acc.insert(gateway.clone(), None);
-                acc
-            })
+        gateway_list.iter().fold(HashMap::new(), |mut acc, gw| {
+            acc.insert(gw.clone(), None);
+            acc
+        })
     };
     let gateway_redis_key_map = get_unified_key(
         gateway_scoring_data,
+        Some(decider_flow),
         score_key_type,
         enforce1d,
         gw_ref_id_map,
@@ -2465,18 +2839,22 @@ async fn set_routing_dimension_and_reference(
 ) {
     let base_dimension = vec![
         gateway_scoring_data.orderType,
-        gateway_scoring_data.paymentMethodType.clone(),
-        gateway_scoring_data.paymentMethod.clone(),
+        gateway_scoring_data
+            .instrument
+            .method_type_code()
+            .into_owned(),
+        gateway_scoring_data.instrument.method_code().to_string(),
     ];
     let (final_dimension, routing_dimension_level) =
-        if gateway_scoring_data.paymentMethodType == UPI {
+        if gateway_scoring_data.instrument.is(PaymentMethod::Upi) {
             if gateway_scoring_data.isPaymentSourceEnabledForSrRouting {
-                match gateway_scoring_data.paymentMethod.as_str() {
+                match gateway_scoring_data.instrument.method_type_code().as_ref() {
                     "UPI_COLLECT" | "COLLECT" => {
                         let handle_list = get_upi_handle_list().await;
                         let upi_handle = gateway_scoring_data.paymentSource.unwrap_or_default();
-                        let append_handle = if handle_list.contains(&upi_handle) {
-                            upi_handle
+                        let upi_handle_peek = upi_handle.peek().to_string();
+                        let append_handle = if handle_list.contains(&upi_handle_peek) {
+                            upi_handle_peek
                         } else {
                             "".to_string()
                         };
@@ -2491,8 +2869,8 @@ async fn set_routing_dimension_and_reference(
                     "UPI_PAY" | "PAY" => {
                         let package_list = get_upi_package_list().await;
                         let upi_package = gateway_scoring_data.paymentSource.unwrap_or_default();
-                        let append_package = if package_list.contains(&upi_package) {
-                            upi_package
+                        let append_package = if package_list.contains(upi_package.peek()) {
+                            upi_package.peek().to_string()
                         } else {
                             "".to_string()
                         };
@@ -2515,7 +2893,7 @@ async fn set_routing_dimension_and_reference(
                     "PM_LEVEL".to_string(),
                 )
             }
-        } else if gateway_scoring_data.paymentMethodType == CARD {
+        } else if gateway_scoring_data.instrument.is(PaymentMethod::Card) {
             if gateway_scoring_data.isAuthLevelEnabledForSrRouting {
                 (
                     intercalate_without_empty_string(
@@ -2524,7 +2902,8 @@ async fn set_routing_dimension_and_reference(
                             base_dimension,
                             vec![
                                 gateway_scoring_data.cardType.unwrap_or_default(),
-                                gateway_scoring_data.authType.unwrap_or_default(),
+                                card_auth_level(gateway_scoring_data.authType.as_deref())
+                                    .to_string(),
                             ],
                         ]
                         .concat(),
@@ -2536,7 +2915,7 @@ async fn set_routing_dimension_and_reference(
                 let bank_code = gateway_scoring_data
                     .bankCode
                     .unwrap_or("UNKNOWN".to_string());
-                let append_bank_code = if top_bank_list.contains(&bank_code) {
+                let _append_bank_code = if top_bank_list.contains(&bank_code) {
                     bank_code.clone()
                 } else {
                     "".to_string()
@@ -2587,10 +2966,13 @@ fn set_elimination_dimension(
 ) {
     let base_dimension = vec![
         gateway_scoring_data.orderType,
-        gateway_scoring_data.paymentMethodType.clone(),
-        gateway_scoring_data.paymentMethod,
+        gateway_scoring_data
+            .instrument
+            .method_type_code()
+            .into_owned(),
+        gateway_scoring_data.instrument.method_code().to_string(),
     ];
-    let dimension = if gateway_scoring_data.paymentMethodType == CARD {
+    let dimension = if gateway_scoring_data.instrument.is(PaymentMethod::Card) {
         intercalate_without_empty_string(
             "/",
             &[
@@ -2610,10 +2992,13 @@ pub fn set_outage_dimension(
     gateway_scoring_data: GatewayScoringData,
 ) {
     let base_dimension = vec![
-        gateway_scoring_data.paymentMethodType.clone(),
-        gateway_scoring_data.paymentMethod,
+        gateway_scoring_data
+            .instrument
+            .method_type_code()
+            .into_owned(),
+        gateway_scoring_data.instrument.method_code().to_string(),
     ];
-    let dimension = if gateway_scoring_data.paymentMethodType == CARD {
+    let dimension = if gateway_scoring_data.instrument.is(PaymentMethod::Card) {
         intercalate_without_empty_string(
             "/",
             &[
@@ -2625,12 +3010,16 @@ pub fn set_outage_dimension(
             ]
             .concat(),
         )
-    } else if gateway_scoring_data.paymentMethodType == UPI {
+    } else if gateway_scoring_data.instrument.is(PaymentMethod::Upi) {
         intercalate_without_empty_string(
             "/",
             &[
                 base_dimension,
-                vec![gateway_scoring_data.paymentSource.unwrap_or_default()],
+                vec![gateway_scoring_data
+                    .paymentSource
+                    .unwrap_or_default()
+                    .peek()
+                    .to_string()],
             ]
             .concat(),
         )
@@ -2640,30 +3029,24 @@ pub fn set_outage_dimension(
     set_outage_dimension_level(decider_flow, dimension)
 }
 
-pub fn route_random_traffic_to_explore(
-    hedging_percent: f64,
-    functional_gateways: Vec<String>,
-    tag: String,
-) -> bool {
+pub fn route_random_traffic_to_explore(hedging_percent: f64, tag: String) -> bool {
     let num = generate_random_number(
         format!("GatewayDecider::routeRandomTrafficToExplore::{}", tag),
         (0.0, 100.0),
     );
-    let explore_hedging_percent = hedging_percent * (functional_gateways.len() as f64);
-    num < explore_hedging_percent
+    num < hedging_percent
 }
 
-pub fn is_reset_eligibile(
+pub fn is_reset_eligible(
     soft_ttl: Option<f64>,
     current_time_in_millis: u128,
     threshold: f64,
     cached_gateway_score: GatewayScore,
 ) -> bool {
+    // Saturating, so a soft TTL longer than the clock reads as "not yet" rather than underflowing.
+    let reset_before = current_time_in_millis.saturating_sub(soft_ttl.unwrap_or(0.0) as u128);
     cached_gateway_score.score < threshold
-        && cached_gateway_score.lastResetTimestamp
-            < (current_time_in_millis - soft_ttl.unwrap_or(0.0) as u128)
-                .try_into()
-                .unwrap()
+        && cached_gateway_score.lastResetTimestamp < i64::try_from(reset_before).unwrap_or(i64::MAX)
 }
 pub fn get_reset_score(min_threshold: f64, penalty_factor: f64, max_allowed_failures: i32) -> f64 {
     let reduction_factor = 1.0 - (penalty_factor / 100.0);
@@ -2677,13 +3060,20 @@ pub async fn writeToCacheWithTTL(
     key: String,
     cached_gateway_score: GatewayScore,
     ttl: i64,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Result<i32, StorageError> {
-    //from CachedGatewayScore comvert encoded_score to a encoded jasson that can be used as a value for redis sextx
+    //from CachedGatewayScore convert encoded_score to a encoded json that can be used as a value for redis sextx
     let encoded_score =
         serde_json::to_string(&cached_gateway_score).unwrap_or_else(|_| "".to_string());
 
-    let primary_write =
-        addToCacheWithExpiry("kv_redis".to_string(), key.clone(), encoded_score, ttl).await;
+    let primary_write = addToCacheWithExpiry(
+        "kv_redis".to_string(),
+        key.clone(),
+        encoded_score,
+        ttl,
+        redis_compression_config,
+    )
+    .await;
 
     match primary_write {
         Ok(_) => Ok(0),
@@ -2693,41 +3083,59 @@ pub async fn writeToCacheWithTTL(
 
 // Original Haskell function: addToCacheWithExpiry
 pub async fn addToCacheWithExpiry(
-    redis_name: String,
+    _redis_name: String,
     key: String,
     value: String,
     ttl: i64,
+    redis_compression_config: Option<RedisCompressionConfigCombined>,
 ) -> Result<(), StorageError> {
     let app_state = get_tenant_app_state().await;
-    let cached_resp = app_state.redis_conn.setx(&key, &value, ttl).await;
+    let cached_resp = app_state
+        .redis_conn
+        .setx(
+            &key,
+            &value,
+            ttl,
+            redis_compression_config,
+            RedisDataStruct::STRING,
+        )
+        .await;
     match cached_resp {
         Ok(_) => Ok(()),
-        Err(error) => Err(StorageError::InsertError),
+        Err(_error) => Err(StorageError::InsertError),
     }
 }
 
-pub async fn get_penality_factor_(decider_flow: &mut DeciderFlow<'_>) -> f64 {
+pub async fn get_penality_factor_(
+    decider_flow: &mut DeciderFlow<'_>,
+    gateway_scoring_data: &GatewayScoringData,
+) -> f64 {
     let merchant = decider_flow.get().dpMerchantAccount.clone();
     let txn_detail = decider_flow.get().dpTxnDetail.clone();
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
     let merchant_id = get_m_id(merchant.merchantId);
-    let is_elimination_v2_enabled = isFeatureEnabled(
-        C::ENABLE_ELIMINATION_V2.get_key(),
+    let is_elimination_v2_enabled = is_feature_enabled(
+        C::EnableEliminationV2.get_key(),
         merchant_id.clone(),
         feedback::constants::kvRedis(),
     )
     .await;
     if is_elimination_v2_enabled {
-        let m_reward_factor =
-            eliminationV2RewardFactor(&merchant_id, &txn_card_info, &txn_detail).await;
+        let griEnabled = gateway_scoring_data.gatewayReferenceId.is_some();
+        let m_reward_factor = eliminationV2RewardFactor(
+            &merchant_id,
+            &txn_card_info,
+            &txn_detail,
+            griEnabled,
+            gateway_scoring_data.gatewayReferenceId.clone(),
+        )
+        .await;
         match m_reward_factor {
-            Some(reward_factor) => return (1.0 - reward_factor),
-            None => {
-                return getPenaltyFactor(ScoreKeyType::ELIMINATION_MERCHANT_KEY).await;
-            }
+            Some(reward_factor) => 1.0 - reward_factor,
+            None => getPenaltyFactor(ScoreKeyType::EliminationMerchantKey).await,
         }
     } else {
-        return getPenaltyFactor(ScoreKeyType::ELIMINATION_MERCHANT_KEY).await;
+        getPenaltyFactor(ScoreKeyType::EliminationMerchantKey).await
     }
 }
 
@@ -2803,3 +3211,235 @@ pub async fn get_penality_factor_(decider_flow: &mut DeciderFlow<'_>) -> f64 {
 //     Ok(None)
 //     }
 // }
+
+#[cfg(test)]
+mod sr_v3_sub_level_match_tests {
+    use super::*;
+    use crate::decider::gatewaydecider::types::{SrRoutingDimensions, SrV3SubLevelInputConfig};
+
+    fn sub_config(
+        method_type: Option<&str>,
+        network: Option<&str>,
+        currency: Option<&str>,
+        auth: Option<&str>,
+        hedging: f64,
+    ) -> SrV3SubLevelInputConfig {
+        SrV3SubLevelInputConfig {
+            paymentMethodType: method_type.map(String::from),
+            paymentMethod: Some("CARD".to_string()),
+            cardNetwork: network.map(String::from),
+            cardIsIn: None,
+            currency: currency.map(String::from),
+            country: None,
+            authType: auth.map(String::from),
+            latencyThreshold: None,
+            bucketSize: None,
+            hedgingPercent: Some(hedging),
+            lowerResetFactor: None,
+            upperResetFactor: None,
+            gatewayExtraScore: None,
+            source: None,
+        }
+    }
+
+    fn visa_usd_3ds_debit() -> SrRoutingDimensions {
+        SrRoutingDimensions {
+            card_network: Some("VISA".to_string()),
+            card_isin: None,
+            currency: Some("USD".to_string()),
+            country: Some("US".to_string()),
+            auth_type: Some("THREE_DS".to_string()),
+        }
+    }
+
+    // The broad `CARD/DEBIT` all-`Any` row is listed BEFORE the fully-qualified autopilot row,
+    // yet the specific row must win — regression guard for the first-match shadowing bug.
+    #[test]
+    fn specific_row_wins_over_broad_row_listed_first() {
+        let configs = Some(vec![
+            sub_config(Some("DEBIT"), None, None, None, 8.81),
+            sub_config(
+                Some("DEBIT"),
+                Some("VISA"),
+                Some("USD"),
+                Some("THREE_DS"),
+                20.0,
+            ),
+        ]);
+        let picked = get_sr_v3_sub_level_input_config(
+            &configs,
+            "CARD",
+            "DEBIT",
+            &visa_usd_3ds_debit(),
+            |x| x.hedgingPercent.is_some(),
+        );
+        assert_eq!(picked.and_then(|c| c.hedgingPercent), Some(20.0));
+    }
+
+    // With no fully-qualified row, the broad row still matches.
+    #[test]
+    fn broad_row_used_when_no_specific_row() {
+        let configs = Some(vec![sub_config(Some("DEBIT"), None, None, None, 8.81)]);
+        let picked = get_sr_v3_sub_level_input_config(
+            &configs,
+            "CARD",
+            "DEBIT",
+            &visa_usd_3ds_debit(),
+            |x| x.hedgingPercent.is_some(),
+        );
+        assert_eq!(picked.and_then(|c| c.hedgingPercent), Some(8.81));
+    }
+
+    // Equal specificity ⇒ earliest config wins (deterministic config order preserved).
+    #[test]
+    fn ties_keep_earliest_config() {
+        let configs = Some(vec![
+            sub_config(Some("DEBIT"), Some("VISA"), None, None, 11.0),
+            sub_config(Some("DEBIT"), Some("VISA"), None, None, 22.0),
+        ]);
+        let picked = get_sr_v3_sub_level_input_config(
+            &configs,
+            "CARD",
+            "DEBIT",
+            &visa_usd_3ds_debit(),
+            |x| x.hedgingPercent.is_some(),
+        );
+        assert_eq!(picked.and_then(|c| c.hedgingPercent), Some(11.0));
+    }
+}
+
+#[cfg(test)]
+mod card_auth_level_tests {
+    use super::card_auth_level;
+
+    #[test]
+    fn groups_auth_types_as_the_auth_level_dimension_does() {
+        assert_eq!(card_auth_level(Some("THREE_DS")), "THREE_DS");
+        assert_eq!(card_auth_level(Some("three_ds_2")), "THREE_DS");
+        assert_eq!(card_auth_level(Some("OTP")), "OTP");
+        assert_eq!(card_auth_level(Some("NO_THREE_DS")), "UNKNOWN");
+        assert_eq!(card_auth_level(None), "UNKNOWN");
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::panic_in_result_fn)]
+mod sr_key_tests {
+    use super::sr_key;
+    use crate::decider::gatewaydecider::types::GatewayScoringData;
+    use crate::types::payment_instrument::PaymentInstrument;
+
+    fn scoring_data(
+        instrument: PaymentInstrument,
+    ) -> Result<GatewayScoringData, serde_json::Error> {
+        let mut data: GatewayScoringData = serde_json::from_value(serde_json::json!({
+            "merchantId": "merchant_1",
+            "paymentMethod": "",
+            "paymentMethodType": "",
+            "orderType": "UNKNOWN",
+            "cardType": null, "bankCode": null, "authType": "NO_THREE_DS", "paymentSource": null,
+            "isPaymentSourceEnabledForSrRouting": false, "isAuthLevelEnabledForSrRouting": false,
+            "isBankLevelEnabledForSrRouting": false, "isGriEnabledForElimination": false,
+            "isGriEnabledForSrRouting": false, "routingApproach": null,
+            "dateCreated": [2026, 287, 0, 0, 0, 0, 0, 0, 0],
+            "eliminationEnabled": false, "cardIsIn": "453091", "cardSwitchProvider": "VISA",
+            "currency": "CAD", "country": null, "is_legacy_decider_flow": false,
+            "gatewayReferenceId": null, "udfs": null, "udfs_consumed_for_routing": null,
+        }))?;
+        data.instrument = instrument;
+        Ok(data)
+    }
+
+    /// The key a card payment's SR scores live under. Production scores are stored
+    /// under exactly this; a change here needs a key migration.
+    #[test]
+    fn a_card_keys_as_before() -> Result<(), serde_json::Error> {
+        let data = scoring_data(PaymentInstrument::parse_lenient(
+            Some("card"),
+            Some("credit"),
+        ))?;
+        assert_eq!(
+            sr_key(&data, true, &[], None),
+            "{gw_sr_v3_score_merchant_1_UNKNOWN_CREDIT_CARD"
+        );
+        assert_eq!(
+            sr_key(
+                &data,
+                true,
+                &[
+                    "card_network".to_string(),
+                    "currency".to_string(),
+                    "country".to_string()
+                ],
+                Some(vec!["udf_1".to_string()]),
+            ),
+            "{gw_sr_v3_score_merchant_1_UNKNOWN_CREDIT_CARD_VISA_CAD_udf_1"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_payment_without_a_type_keys_on_its_method() -> Result<(), serde_json::Error> {
+        let data = scoring_data(PaymentInstrument::parse_lenient(Some("wallet"), None))?;
+        // A missing type keys as UNKNOWN, as every empty key part does (the order type here is
+        // UNKNOWN too). Before the instrument, a hybrid payment without a type keyed as `NULL`.
+        assert_eq!(
+            sr_key(&data, true, &[], None),
+            "{gw_sr_v3_score_merchant_1_UNKNOWN_UNKNOWN_WALLET"
+        );
+        Ok(())
+    }
+
+    /// A legacy card payment keeps the legacy key order: category, brand, then card type.
+    #[tokio::test]
+    async fn a_legacy_card_keys_as_before() -> Result<(), serde_json::Error> {
+        let data = scoring_data(PaymentInstrument::from_legacy_txn("CARD", "VISA"))?;
+        assert_eq!(
+            super::get_legacy_unified_sr_key(&data, true, true).await,
+            "{gw_sr_v3_score_merchant_1_UNKNOWN_CARD_VISA_UNKNOWN"
+        );
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod reset_eligibility_tests {
+    use super::is_reset_eligible;
+    use crate::types::gateway_routing_input::GatewayScore;
+
+    fn low_score_reset_at(last_reset: i64) -> GatewayScore {
+        GatewayScore {
+            timestamp: 0,
+            score: 0.1,
+            transactionCount: 0,
+            lastResetTimestamp: last_reset,
+        }
+    }
+
+    #[test]
+    fn a_soft_ttl_longer_than_the_clock_is_not_yet_eligible() {
+        // `now - ttl` underflowed here, then failed the conversion back to i64.
+        assert!(!is_reset_eligible(
+            Some(1e15),
+            1_000,
+            0.5,
+            low_score_reset_at(0)
+        ));
+    }
+
+    #[test]
+    fn a_low_score_reset_before_the_soft_ttl_is_eligible() {
+        assert!(is_reset_eligible(
+            Some(1_000.0),
+            10_000,
+            0.5,
+            low_score_reset_at(5_000)
+        ));
+        assert!(!is_reset_eligible(
+            Some(1_000.0),
+            10_000,
+            0.5,
+            low_score_reset_at(9_500)
+        ));
+    }
+}

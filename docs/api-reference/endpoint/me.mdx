@@ -1,0 +1,70 @@
+---
+title: "Current User"
+description: "Return current authenticated user and merchant context."
+openapi: "openapi.json GET /auth/me"
+---
+
+# Current User
+
+## Use case
+
+Returns the current authenticated dashboard operator and selected merchant context.
+
+## Authentication
+
+Dashboard protected. Send `Authorization: Bearer <jwt_token>`. In sandbox, also send `x-feature: decision-engine`.
+
+For local development, start with:
+
+```bash
+export BASE_URL=http://localhost:8080
+export AUTH_HEADER="Authorization: Bearer <jwt_token>"
+# Sandbox only:
+# export BASE_URL=https://sandbox.hyperswitch.io
+# export FEATURE_HEADER="x-feature: decision-engine"
+```
+
+## Request
+
+- Method and path: `GET /auth/me`
+- Parameters: none.
+- Body: No parameters or request body.
+
+## Example
+
+### Current user
+
+```bash
+curl "$BASE_URL/auth/me" \
+  --header "$AUTH_HEADER"
+```
+
+## Response
+
+```json
+{
+  "user_id": "user_123",
+  "email": "operator@example.com",
+  "merchant_id": "merchant_demo",
+  "role": "admin",
+  "email_verified": true,
+  "merchants": [
+    {
+      "merchant_id": "merchant_demo",
+      "merchant_name": "Demo Merchant",
+      "role": "admin"
+    }
+  ]
+}
+```
+
+## Notes
+
+- Use this after refresh to restore the authenticated dashboard state.
+- A 401 means the dashboard should return to login.
+
+## Related
+
+- [Login](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/login.mdx)
+- [List User Merchants](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/listUserMerchants.mdx)
+- [Switch Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/switchMerchant.mdx)

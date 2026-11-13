@@ -1,0 +1,71 @@
+//! The scheduler's own axum listener: `/health`, `/schedule`, and the loop.
+
+use std::sync::Arc;
+
+use axum::extract::State;
+use axum::routing::get;
+use axum::{Json, Router};
+use tokio::signal::unix::{signal, SignalKind};
+
+use super::scheduler::{ScheduleEntry, Scheduler};
+use super::Deps;
+use crate::error::ConfigurationError;
+use crate::logger;
+
+/// Serve the scheduler's port, and run its loop, until SIGTERM or SIGINT. A no-op unless
+/// `volume_commitment.enabled` — two schedulers would double every run.
+pub async fn volume_commitment_server_builder(
+    deps: Arc<Deps>,
+    admin_secret: String,
+) -> Result<(), ConfigurationError> {
+    if !deps.config.enabled {
+        logger::info!(
+            tag = "volume_commitment",
+            "volume commitment scheduler disabled; not binding its port"
+        );
+        return Ok(());
+    }
+
+    let bind_address = format!("{}:{}", deps.config.server.host, deps.config.server.port);
+    let listener = tokio::net::TcpListener::bind(&bind_address).await?;
+    logger::info!(
+        tag = "volume_commitment",
+        "volume commitment scheduler listening on {}",
+        bind_address
+    );
+
+    let scheduler = Arc::new(Scheduler::new(deps, admin_secret));
+    Arc::clone(&scheduler).spawn();
+
+    let router = Router::new()
+        .route("/health", get(|| async { "ok" }))
+        .route("/schedule", get(schedule))
+        .layer(axum::middleware::from_fn(
+            crate::middleware::default_response_headers,
+        ))
+        .with_state(scheduler);
+
+    // Same signals as the main server; it handles SIGINT, so Ctrl-C no longer kills the process by default.
+    let mut sigterm = signal(SignalKind::terminate())?;
+    let mut sigint = signal(SignalKind::interrupt())?;
+
+    axum::serve(listener, router.into_make_service())
+        .with_graceful_shutdown(async move {
+            tokio::select! {
+                _ = sigterm.recv() => {}
+                _ = sigint.recv() => {}
+            }
+            logger::info!(
+                tag = "volume_commitment",
+                "volume commitment scheduler shutting down gracefully"
+            );
+        })
+        .await?;
+
+    Ok(())
+}
+
+/// `GET /schedule` — every merchant's cadence, last run, and time until the next one fires.
+async fn schedule(State(scheduler): State<Arc<Scheduler>>) -> Json<Vec<ScheduleEntry>> {
+    Json(scheduler.schedule().await)
+}

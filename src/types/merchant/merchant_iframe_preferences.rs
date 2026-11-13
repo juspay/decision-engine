@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 // use db::mesh::internal::find_one_row;
 // use eulerhs::types::MeshError;
 use crate::app::get_tenant_app_state;
+use crate::generics::Repository;
 use crate::logger;
 use crate::storage::types::MerchantIframePreferences as DBMerchantIframePreferences;
 // use types::utils::dbconfig::get_euler_db_conf;
@@ -10,17 +11,12 @@ use crate::types::merchant::id::{to_merchant_id, MerchantId};
 // use juspay::extra::parsing::{Parsed, Step, defaulting, lift_pure, mandated, non_negative, parse_field, project};
 // use eulerhs::extra::combinators::to_domain_all;
 // use eulerhs::language::MonadFlow;
-use std::i64;
 use std::option::Option;
 use std::string::String;
 // use named::Named;
 // use optics_core::review;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::merchant_iframe_preferences::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::merchant_iframe_preferences::dsl;
+use crate::storage::backend::schema::merchant_iframe_preferences::dsl;
 use crate::storage::types::BitBool;
-use diesel::associations::HasTable;
 use diesel::*;
 use std::fmt::Debug;
 
@@ -48,7 +44,7 @@ pub struct MerchantIframePreferences {
 
 impl From<DBMerchantIframePreferences> for MerchantIframePreferences {
     fn from(value: DBMerchantIframePreferences) -> Self {
-        MerchantIframePreferences {
+        Self {
             id: to_merchant_iframe_prefs_pid(value.id),
             merchantId: to_merchant_id(value.merchant_id),
             dynamicSwitchingEnabled: value.dynamic_switching_enabled.unwrap_or(BitBool(false)).0,
@@ -89,15 +85,10 @@ impl From<DBMerchantIframePreferences> for MerchantIframePreferences {
 // }
 
 pub async fn getMerchantIPrefsByMId(m_id: String) -> Option<MerchantIframePreferences> {
-    // Query the database using generic_find_one_optional with Diesel
+    // Query the database using find_optional with Diesel
     let app_state = get_tenant_app_state().await;
     logger::debug!("merchant id: {:?}", m_id);
-    match crate::generics::generic_find_one_optional::<
-        <DBMerchantIframePreferences as HasTable>::Table,
-        _,
-        DBMerchantIframePreferences,
-    >(&app_state.db, dsl::merchant_id.eq(m_id))
-    .await
+    match DBMerchantIframePreferences::find_optional(&app_state.db, dsl::merchant_id.eq(m_id)).await
     {
         Ok(Some(db_prefs)) => Some(MerchantIframePreferences::from(db_prefs)),
         Ok(None) => {

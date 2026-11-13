@@ -1,8 +1,6 @@
 use serde::{Deserialize, Serialize};
 use time::PrimitiveDateTime;
 
-use crate::decider::gatewaydecider::types::Gateway;
-
 use super::money::internal::Money;
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Serialize, Deserialize)]
@@ -20,11 +18,13 @@ pub enum OfferStatus {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum OfferType {
-    CASHBACK,
-    VOUCHER,
-    DISCOUNT,
-    REWARD_POINT,
+    Cashback,
+    VCoucher,
+    Discount,
+    #[serde(rename = "REWARD_POINT")]
+    RewardPoint,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

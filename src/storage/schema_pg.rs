@@ -53,6 +53,41 @@ diesel::table! {
 }
 
 diesel::table! {
+    cost_ingestion (id) {
+        #[max_length = 36]
+        id -> Varchar,
+        #[max_length = 255]
+        merchant_id -> Varchar,
+        #[max_length = 64]
+        connector -> Varchar,
+        #[max_length = 255]
+        account -> Varchar,
+        #[max_length = 16]
+        source -> Varchar,
+        #[max_length = 255]
+        notification_id -> Nullable<Varchar>,
+        report_ref -> Text,
+        #[max_length = 32]
+        status -> Varchar,
+        attempts -> Int4,
+        last_error -> Nullable<Text>,
+        staged_rows -> Int8,
+        report_date -> Nullable<Date>,
+        period_start -> Nullable<Date>,
+        period_end -> Nullable<Date>,
+        currency_count -> Int4,
+        currencies -> Nullable<Text>,
+        country_count -> Int4,
+        countries -> Nullable<Text>,
+        total_gross -> Float8,
+        total_clusters -> Int8,
+        good_clusters -> Int8,
+        created_at -> Timestamp,
+        updated_at -> Timestamp,
+    }
+}
+
+diesel::table! {
     emi_bank_code (id) {
         id -> Int8,
         emi_bank -> Text,
@@ -217,6 +252,28 @@ diesel::table! {
         tenant_account_id -> Nullable<Text>,
         priority_logic_config -> Nullable<Text>,
         merchant_category_code -> Nullable<Text>,
+        #[max_length = 255]
+        merchant_name -> Nullable<Varchar>,
+        #[max_length = 255]
+        parent_merchant_id -> Nullable<Varchar>,
+    }
+}
+
+diesel::table! {
+    merchant_api_keys (id) {
+        id -> Int8,
+        #[max_length = 64]
+        key_id -> Varchar,
+        #[max_length = 255]
+        merchant_id -> Varchar,
+        #[max_length = 64]
+        key_hash -> Varchar,
+        #[max_length = 16]
+        key_prefix -> Varchar,
+        #[max_length = 255]
+        description -> Nullable<Varchar>,
+        is_active -> Bool,
+        created_at -> Timestamp,
     }
 }
 
@@ -513,10 +570,43 @@ diesel::table! {
     }
 }
 
+diesel::table! {
+    user_merchants (id) {
+        id -> Int8,
+        #[max_length = 64]
+        user_id -> Varchar,
+        #[max_length = 255]
+        merchant_id -> Varchar,
+        #[max_length = 50]
+        role -> Varchar,
+        created_at -> Timestamp,
+    }
+}
+
+diesel::table! {
+    users (id) {
+        id -> Int8,
+        #[max_length = 64]
+        user_id -> Varchar,
+        #[max_length = 255]
+        email -> Varchar,
+        #[max_length = 255]
+        password_hash -> Varchar,
+        #[max_length = 255]
+        merchant_id -> Nullable<Varchar>,
+        #[max_length = 50]
+        role -> Varchar,
+        is_active -> Bool,
+        email_verified -> Bool,
+        created_at -> Timestamp,
+    }
+}
+
 diesel::allow_tables_to_appear_in_same_query!(
     card_brand_routes,
     card_info,
     co_badged_cards_info_test,
+    cost_ingestion,
     emi_bank_code,
     feature,
     gateway_bank_emi_support,
@@ -528,6 +618,7 @@ diesel::allow_tables_to_appear_in_same_query!(
     issuer_routes,
     juspay_bank_code,
     merchant_account,
+    merchant_api_keys,
     merchant_config,
     merchant_gateway_account,
     merchant_gateway_account_sub_info,
@@ -547,4 +638,6 @@ diesel::allow_tables_to_appear_in_same_query!(
     txn_offer,
     txn_offer_detail,
     user_eligibility_info,
+    user_merchants,
+    users,
 );

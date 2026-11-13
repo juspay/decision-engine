@@ -1,0 +1,806 @@
+#!/usr/bin/env bash
+
+set -e
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$SCRIPT_DIR"
+
+OPENAPI_PATH="$SCRIPT_DIR/docs/openapi.json"
+DOCS_PORT="${DOCS_PORT:-3000}"
+DOCS_URL="http://localhost:${DOCS_PORT}"
+DOCS_HOME_URL="${DOCS_URL}/introduction"
+API_REF_URL="${DOCS_URL}/api-reference"
+API_EXAMPLES_URL="${DOCS_URL}/api-refs/api-ref"
+DOCS_LOG_PATH="$SCRIPT_DIR/.mintlify-dev.log"
+ONECLICK_AUTO_CONFIRM="${ONECLICK_AUTO_CONFIRM:-0}"
+
+# Build profile for the backend. Debug (default) compiles fast but runs slower — notably CSV report
+# parsing is ~10x slower, so large settlement uploads crawl. Pass `--release` (or ONECLICK_RELEASE=1)
+# to compile optimized: slower first build, dramatically faster ingestion/decide at runtime.
+ONECLICK_RELEASE="${ONECLICK_RELEASE:-0}"
+# Database engine for the postgres build. Both use the `postgres` feature and migrations_pg —
+# `cockroach` just swaps the dockerized DB (via the docker-compose.cockroach.yml overlay) for a
+# CockroachDB node, since CockroachDB is PostgreSQL wire-protocol compatible.
+ONECLICK_DB="${ONECLICK_DB:-postgres}"
+for arg in "$@"; do
+    case "$arg" in
+        --release) ONECLICK_RELEASE=1 ;;
+        --debug) ONECLICK_RELEASE=0 ;;
+        --cockroach|--crdb) ONECLICK_DB=cockroach ;;
+        --postgres|--pg) ONECLICK_DB=postgres ;;
+        -h|--help)
+            echo "Usage: ./oneclick.sh [--release|--debug] [--cockroach|--postgres]"
+            echo "  --release     build the backend optimized (fast runtime; e.g. ~10x faster report parsing)"
+            echo "  --debug       build the backend unoptimized (default; faster compile)"
+            echo "  --cockroach   use CockroachDB instead of PostgreSQL (same postgres build + migrations)"
+            echo "  --postgres    use PostgreSQL (default)"
+            exit 0
+            ;;
+    esac
+done
+
+# CockroachDB reuses everything (same postgres build, migrations_pg, db_user/db_pass/decision_engine_db);
+# COMPOSE_FILE makes every `docker compose` call below swap the `postgresql` service for CockroachDB.
+# Keep docker-compose.override.yml in the list so its (unrelated) tweaks still apply. The DB is
+# published on host 26257 (its native port) to coexist with a local PostgreSQL on 5432, so the
+# host-side tooling — migrate (DB_PORT), seed (POSTGRES_PORT), backend (pg_database.pg_port) — is
+# pointed there; inside the container CockroachDB still listens on 5432.
+if [ "${ONECLICK_DB}" = "cockroach" ]; then
+    export COMPOSE_FILE="${SCRIPT_DIR}/docker-compose.yaml:${SCRIPT_DIR}/docker-compose.override.yml:${SCRIPT_DIR}/docker-compose.cockroach.yml"
+    POSTGRES_PORT="${POSTGRES_PORT:-26257}"
+    export DB_PORT="${DB_PORT:-26257}"
+    export DECISION_ENGINE__PG_DATABASE__PG_PORT="${DECISION_ENGINE__PG_DATABASE__PG_PORT:-26257}"
+fi
+
+if [ "${ONECLICK_RELEASE}" -eq 1 ]; then
+    CARGO_PROFILE_FLAG="--release"
+    CARGO_BUILD_MODE="release"
+else
+    CARGO_PROFILE_FLAG=""
+    CARGO_BUILD_MODE="debug"
+fi
+
+POSTGRES_HOST="${POSTGRES_HOST:-localhost}"
+POSTGRES_PORT="${POSTGRES_PORT:-5432}"
+POSTGRES_USER="${POSTGRES_USER:-db_user}"
+POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-db_pass}"
+POSTGRES_DB="${POSTGRES_DB:-decision_engine_db}"
+REDIS_HOST="${REDIS_HOST:-localhost}"
+REDIS_PORT="${REDIS_PORT:-6379}"
+CLICKHOUSE_HTTP_URL="${CLICKHOUSE_HTTP_URL:-http://localhost:8123}"
+CLICKHOUSE_DATABASE="${CLICKHOUSE_DATABASE:-default}"
+CLICKHOUSE_USER="${CLICKHOUSE_USER:-decision_engine}"
+CLICKHOUSE_PASSWORD="${CLICKHOUSE_PASSWORD:-decision_engine}"
+KAFKA_HOST="${KAFKA_HOST:-localhost}"
+KAFKA_PORT="${KAFKA_PORT:-9092}"
+MAILPIT_HOST="${MAILPIT_HOST:-localhost}"
+MAILPIT_UI_PORT="${MAILPIT_UI_PORT:-8025}"
+# Metrics: the API pushes OTLP to the collector, which re-exposes them for Prometheus to scrape.
+OTEL_COLLECTOR_HOST="${OTEL_COLLECTOR_HOST:-localhost}"
+OTEL_COLLECTOR_GRPC_PORT="${OTEL_COLLECTOR_GRPC_PORT:-4317}"
+OTEL_COLLECTOR_PROM_PORT="${OTEL_COLLECTOR_PROM_PORT:-9898}"
+OTEL_COLLECTOR_ENDPOINT="http://${OTEL_COLLECTOR_HOST}:${OTEL_COLLECTOR_GRPC_PORT}"
+OTEL_COLLECTOR_METRICS_URL="http://${OTEL_COLLECTOR_HOST}:${OTEL_COLLECTOR_PROM_PORT}/metrics"
+
+PORTS=(8080 5173 "$DOCS_PORT")
+# Ports of Compose-managed infra oneclick starts itself; our own containers on them are reused, anything else is a conflict.
+INFRA_PORTS=("$OTEL_COLLECTOR_GRPC_PORT" "$OTEL_COLLECTOR_PROM_PORT" 9090)
+EXPECTED_CLICKHOUSE_TABLES=(
+    analytics_api_events_queue
+    analytics_domain_events_queue
+    analytics_api_events
+    analytics_domain_events
+    cost_daily_stats
+    cost_fee_model
+    cost_fee_model_segment
+    cost_bin_product
+)
+
+# True when the container publishing $1 belongs to this Compose project (so it is ours to reuse).
+is_own_compose_container() {
+    local port="$1"
+    local container_id
+    container_id=$(docker ps --filter "publish=$port" -q 2>/dev/null | head -1 || true)
+    [ -n "$container_id" ] && docker compose ps -q 2>/dev/null | grep -q "^${container_id}"
+}
+
+check_and_kill_ports() {
+    local pids_to_kill=()
+    local ports_in_use=()
+    # Infra ports are freed only so Compose can bind them. Without Docker nothing would take them
+    # over, so whatever serves them (e.g. `nix run .#infra`) is left running and reused.
+    local kill_ports=("${PORTS[@]}")
+    if check_docker_daemon; then
+        kill_ports+=("${INFRA_PORTS[@]}")
+    else
+        echo "Docker is not available — leaving infra ports ${INFRA_PORTS[*]} to the services already on them."
+    fi
+
+    echo "Checking for processes on ports ${kill_ports[*]}..."
+    echo ""
+
+    for port in "${kill_ports[@]}"; do
+        local pids
+        pids=$(lsof -t -iTCP:$port -sTCP:LISTEN 2>/dev/null || true)
+        if [ -n "$pids" ]; then
+            while IFS= read -r pid; do
+                [ -z "$pid" ] && continue
+                local cmd
+                cmd=$(ps -p "$pid" -o command= 2>/dev/null || echo "unknown process")
+
+                # OrbStack and Docker Desktop forward container ports via their own helper
+                # processes. Killing them would take down the entire container runtime.
+                # Stop the container instead.
+                if echo "$cmd" | grep -qiE "OrbStack|com\.docker\.backend|dockerd"; then
+                    if is_own_compose_container "$port"; then
+                        echo "  [ok] Port $port is forwarded by this project's own container — reusing it."
+                        continue
+                    fi
+                    local container_id
+                    container_id=$(docker ps --filter "publish=$port" -q 2>/dev/null | head -1 || true)
+                    if [ -n "$container_id" ]; then
+                        local container_name
+                        container_name=$(docker ps --filter "publish=$port" --format "{{.Names}}" 2>/dev/null | head -1)
+                        echo "  [docker] Port $port is forwarded by container '$container_name' — stopping it..."
+                        docker stop "$container_id" >/dev/null 2>&1 || true
+                    else
+                        echo "  [skip] Port $port is held by the container runtime (OrbStack/Docker)."
+                        echo "         No matching container found. Free the port manually before retrying."
+                    fi
+                    continue
+                fi
+
+                ports_in_use+=("$port")
+                pids_to_kill+=("$pid")
+                echo "  [!] Port $port is in use by PID $pid"
+                echo "      Command: $cmd"
+            done <<< "$pids"
+        fi
+    done
+
+    if [ ${#pids_to_kill[@]} -gt 0 ]; then
+        echo ""
+        echo "=========================================="
+        echo "  WARNING: Found processes on ports ${ports_in_use[*]}"
+        echo "  These processes will be killed to proceed."
+        echo "=========================================="
+        echo ""
+
+        if [ "$ONECLICK_AUTO_CONFIRM" = "1" ]; then
+            echo "Auto-confirm enabled. Continuing without prompt..."
+        else
+            echo "Press Enter to continue and kill these processes, or Ctrl+C to abort..."
+            read -r
+        fi
+
+        echo ""
+        echo "Killing processes..."
+        for pid in "${pids_to_kill[@]}"; do
+            kill "$pid" 2>/dev/null || true
+            echo "  Killed PID $pid"
+        done
+
+        sleep 1
+
+        for port in "${kill_ports[@]}"; do
+            local pid
+            pid=$(lsof -t -iTCP:$port -sTCP:LISTEN 2>/dev/null || true)
+            if [ -n "$pid" ]; then
+                # Never force-kill the container runtime's port forwarder: that takes down every container.
+                if ps -p "$pid" -o command= 2>/dev/null | grep -qiE "OrbStack|com\.docker\.backend|dockerd"; then
+                    continue
+                fi
+                kill -9 "$pid" 2>/dev/null || true
+                echo "  Force killed PID $pid on port $port"
+            fi
+        done
+
+        echo "Done. All ports cleared."
+        echo ""
+    else
+        echo "No conflicting processes found on ports ${kill_ports[*]}."
+        echo ""
+    fi
+}
+
+cleanup() {
+    local exit_code="${1:-0}"
+    echo ""
+    echo "Stopping services..."
+    if [ -n "$SERVER_PID" ]; then
+        kill "$SERVER_PID" 2>/dev/null || true
+    fi
+    if [ -n "$DASHBOARD_PID" ]; then
+        kill "$DASHBOARD_PID" 2>/dev/null || true
+    fi
+    if [ -n "$DOCS_PID" ]; then
+        kill "$DOCS_PID" 2>/dev/null || true
+    fi
+    exit "$exit_code"
+}
+
+trap cleanup SIGINT SIGTERM
+
+command_exists() {
+    command -v "$1" >/dev/null 2>&1
+}
+
+check_docker_daemon() {
+    if ! command_exists docker; then
+        return 1
+    fi
+
+    docker info >/dev/null 2>&1
+}
+
+check_postgres() {
+    if command_exists pg_isready; then
+        pg_isready -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB" >/dev/null 2>&1
+    elif command_exists nc; then
+        nc -z "$POSTGRES_HOST" "$POSTGRES_PORT" >/dev/null 2>&1
+    else
+        lsof -t -iTCP:"$POSTGRES_PORT" -sTCP:LISTEN >/dev/null 2>&1
+    fi
+}
+
+check_redis() {
+    if command_exists redis-cli; then
+        [ "$(redis-cli -h "$REDIS_HOST" -p "$REDIS_PORT" ping 2>/dev/null)" = "PONG" ]
+    elif command_exists nc; then
+        nc -z "$REDIS_HOST" "$REDIS_PORT" >/dev/null 2>&1
+    else
+        lsof -t -iTCP:"$REDIS_PORT" -sTCP:LISTEN >/dev/null 2>&1
+    fi
+}
+
+check_clickhouse() {
+    curl -fsS \
+        --user "${CLICKHOUSE_USER}:${CLICKHOUSE_PASSWORD}" \
+        "${CLICKHOUSE_HTTP_URL}/?query=SELECT%201" >/dev/null 2>&1
+}
+
+check_kafka() {
+    if command_exists nc; then
+        nc -z "$KAFKA_HOST" "$KAFKA_PORT" >/dev/null 2>&1
+    else
+        lsof -t -iTCP:"$KAFKA_PORT" -sTCP:LISTEN >/dev/null 2>&1
+    fi
+}
+
+check_mailpit() {
+    # `/api/v1/messages` is the message-listing endpoint — it confirms the API is serving, not
+    # just that the web UI's index renders.
+    curl -fsS "http://${MAILPIT_HOST}:${MAILPIT_UI_PORT}/api/v1/messages" >/dev/null 2>&1
+}
+
+check_otel_collector() {
+    # The collector's Prometheus-format endpoint is up once OTLP ingest is up.
+    curl -fsS "${OTEL_COLLECTOR_METRICS_URL}" >/dev/null 2>&1
+}
+
+check_clickhouse_schema() {
+    local missing=0
+
+    for table_name in "${EXPECTED_CLICKHOUSE_TABLES[@]}"; do
+        local query
+        query="SELECT%20count()%20FROM%20system.tables%20WHERE%20database%20%3D%20'${CLICKHOUSE_DATABASE}'%20AND%20name%20%3D%20'${table_name}'"
+        local result
+        result=$(curl -fsS \
+            --user "${CLICKHOUSE_USER}:${CLICKHOUSE_PASSWORD}" \
+            "${CLICKHOUSE_HTTP_URL}/?query=${query}" 2>/dev/null || echo "0")
+        if [ "$result" != "1" ]; then
+            echo "  [missing] ClickHouse table ${table_name}"
+            missing=1
+        fi
+    done
+
+    # Column-level drift, not just table existence: the card_product dimension is ADDED to
+    # already-created cost tables by the 038 migration. A DB that has every table but pre-dates
+    # card_product (ran 035-037 before it existed) passes the existence loop yet still needs 038 —
+    # without this check the heal never fires and ingestion 500s on the missing column. Probing
+    # cost_daily_stats (the ingest target) is representative: the four cost tables migrate together.
+    # A transient curl failure defaults to "0" → re-runs the idempotent 038, which is harmless.
+    local col_query col_result
+    col_query="SELECT%20count()%20FROM%20system.columns%20WHERE%20database%20%3D%20'${CLICKHOUSE_DATABASE}'%20AND%20table%20%3D%20'cost_daily_stats'%20AND%20name%20%3D%20'card_product'"
+    col_result=$(curl -fsS \
+        --user "${CLICKHOUSE_USER}:${CLICKHOUSE_PASSWORD}" \
+        "${CLICKHOUSE_HTTP_URL}/?query=${col_query}" 2>/dev/null || echo "0")
+    if [ "$col_result" != "1" ]; then
+        echo "  [missing] ClickHouse column cost_daily_stats.card_product (needs 038 migration)"
+        missing=1
+    fi
+
+    return "$missing"
+}
+
+# Seed the global SR V3 service configs the decider relies on. These were
+# previously created only by routing-config/setup.py (which targets MySQL); the
+# Postgres bring-up creates an empty service_configuration table, so without this
+# the decider can't hedge (e.g. ENABLE_MERCHANT_ON_VOLUME_DISTRIBUTION_FEATURE_SR_V3
+# is absent and route_random_traffic never runs). Idempotent via WHERE NOT EXISTS, so
+# re-running leaves existing values (service_configuration.name is unique).
+seed_global_configs() {
+    echo "Seeding global SR V3 service configs..."
+    local sql
+    sql=$(cat <<'SQL'
+INSERT INTO service_configuration (name, value)
+SELECT v.name, v.value
+FROM (VALUES
+    ('ENABLE_MERCHANT_ON_VOLUME_DISTRIBUTION_FEATURE_SR_V3', '{"enableAll":true,"enableAllRollout":100}'),
+    ('merchants_enabled_for_score_keys_unification',         '{"enableAll":true,"enableAllRollout":100}'),
+    ('SR_V3_INPUT_CONFIG_DEFAULT',                           '{"defaultLatencyThreshold":90,"defaultBucketSize":125,"defaultHedgingPercent":5}')
+) AS v(name, value)
+WHERE NOT EXISTS (
+    SELECT 1 FROM service_configuration sc WHERE sc.name = v.name
+);
+SQL
+)
+
+    if command_exists psql; then
+        if PGPASSWORD="$POSTGRES_PASSWORD" psql -h "$POSTGRES_HOST" -p "$POSTGRES_PORT" \
+            -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1 -c "$sql" >/dev/null 2>&1; then
+            echo "Global SR V3 configs seeded."
+            echo ""
+            return 0
+        fi
+    fi
+
+    if docker compose ps -q postgresql >/dev/null 2>&1; then
+        # The CockroachDB container ships `cockroach sql`, not `psql`.
+        local db_cli
+        if [ "$ONECLICK_DB" = "cockroach" ]; then
+            db_cli=(cockroach sql --insecure --database="$POSTGRES_DB")
+        else
+            db_cli=(psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -v ON_ERROR_STOP=1)
+        fi
+        if echo "$sql" | docker compose exec -T postgresql \
+            "${db_cli[@]}" >/dev/null 2>&1; then
+            echo "Global SR V3 configs seeded."
+            echo ""
+            return 0
+        fi
+    fi
+
+    echo "  [warn] Could not seed global SR V3 configs (no psql and postgresql container unreachable)."
+    echo "         Hedging will not work until these service_configuration rows exist."
+    echo ""
+    return 1
+}
+
+# Create the role + database the migrator/backend connect as. CockroachDB in insecure mode accepts
+# any password but the role must exist, and `public` schema privileges are no longer implicit.
+# Idempotent (IF NOT EXISTS), so it is safe to run on every bring-up.
+ensure_cockroach_db() {
+    echo "Ensuring CockroachDB database and role exist..."
+    if ! docker compose ps -q postgresql >/dev/null 2>&1; then
+        echo "  [warn] postgresql (CockroachDB) container not found — skipping. If a plain Postgres"
+        echo "         is already running on ${POSTGRES_PORT}, stop it and rerun with --cockroach."
+        echo ""
+        return 1
+    fi
+    # default_int_size=4 + serial_normalization='sql_sequence' make CockroachDB's integer typing match
+    # PostgreSQL/schema_pg.rs (INTEGER->INT4, SERIAL->INT4 sequence), so the backend decodes columns
+    # correctly. Set before migrations so tables get the right widths.
+    if docker compose exec -T postgresql cockroach sql --insecure -e "
+        CREATE DATABASE IF NOT EXISTS ${POSTGRES_DB};
+        CREATE USER IF NOT EXISTS ${POSTGRES_USER};
+        GRANT ALL ON DATABASE ${POSTGRES_DB} TO ${POSTGRES_USER};
+        ALTER ROLE ${POSTGRES_USER} SET default_int_size = 4;
+        ALTER ROLE ${POSTGRES_USER} SET serial_normalization = 'sql_sequence';
+    " >/dev/null 2>&1 &&
+       docker compose exec -T postgresql cockroach sql --insecure --database="${POSTGRES_DB}" -e "
+        GRANT ALL ON SCHEMA public TO ${POSTGRES_USER};
+    " >/dev/null 2>&1; then
+        echo "CockroachDB database and role ready."
+        echo ""
+        return 0
+    fi
+    echo "  [warn] Could not initialize CockroachDB (is the container CockroachDB, not Postgres?)."
+    echo ""
+    return 1
+}
+
+print_service_status() {
+    local service_name="$1"
+    local status="$2"
+
+    if [ "$status" -eq 1 ]; then
+        echo "  [ok] $service_name"
+    else
+        echo "  [missing] $service_name"
+    fi
+}
+
+run_infra_checklist() {
+    echo "Running infrastructure checklist..."
+
+    if check_docker_daemon; then
+        DOCKER_READY=1
+    else
+        DOCKER_READY=0
+    fi
+
+    if check_postgres; then
+        POSTGRES_READY=1
+    else
+        POSTGRES_READY=0
+    fi
+
+    if check_redis; then
+        REDIS_READY=1
+    else
+        REDIS_READY=0
+    fi
+
+    if check_kafka; then
+        KAFKA_READY=1
+    else
+        KAFKA_READY=0
+    fi
+
+    if check_clickhouse; then
+        CLICKHOUSE_READY=1
+    else
+        CLICKHOUSE_READY=0
+    fi
+
+    if check_mailpit; then
+        MAILPIT_READY=1
+    else
+        MAILPIT_READY=0
+    fi
+
+    if check_otel_collector; then
+        OTEL_READY=1
+    else
+        OTEL_READY=0
+    fi
+
+    print_service_status "Docker daemon" "$DOCKER_READY"
+    print_service_status "Postgres (${POSTGRES_HOST}:${POSTGRES_PORT})" "$POSTGRES_READY"
+    print_service_status "Redis (${REDIS_HOST}:${REDIS_PORT})" "$REDIS_READY"
+    print_service_status "Kafka (${KAFKA_HOST}:${KAFKA_PORT})" "$KAFKA_READY"
+    print_service_status "ClickHouse (${CLICKHOUSE_HTTP_URL})" "$CLICKHOUSE_READY"
+    print_service_status "Mailpit UI (${MAILPIT_HOST}:${MAILPIT_UI_PORT}) / SMTP :1025" "$MAILPIT_READY"
+    print_service_status "OpenTelemetry collector (${OTEL_COLLECTOR_HOST}:${OTEL_COLLECTOR_PROM_PORT}) / OTLP :${OTEL_COLLECTOR_GRPC_PORT}" "$OTEL_READY"
+    echo ""
+}
+
+wait_for_postgres() {
+    local attempts=0
+    local max_attempts=60
+
+    echo "Waiting for Postgres on ${POSTGRES_HOST}:${POSTGRES_PORT}..."
+
+    while [ $attempts -lt $max_attempts ]; do
+        if check_postgres; then
+            echo "Postgres is healthy."
+            echo ""
+            return 0
+        fi
+
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    echo "Postgres did not become healthy within ${max_attempts}s."
+    return 1
+}
+
+wait_for_redis() {
+    local attempts=0
+    local max_attempts=120
+
+    echo "Waiting for Redis on ${REDIS_HOST}:${REDIS_PORT}..."
+
+    while [ $attempts -lt $max_attempts ]; do
+        if check_redis; then
+            echo "Redis is healthy."
+            echo ""
+            return 0
+        fi
+
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    echo "Redis did not become healthy within ${max_attempts}s."
+    return 1
+}
+
+wait_for_kafka() {
+    local attempts=0
+    local max_attempts=60
+
+    echo "Waiting for Kafka on ${KAFKA_HOST}:${KAFKA_PORT}..."
+
+    while [ $attempts -lt $max_attempts ]; do
+        if check_kafka; then
+            echo "Kafka is healthy."
+            echo ""
+            return 0
+        fi
+
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    echo "Kafka did not become healthy within ${max_attempts}s."
+    return 1
+}
+
+wait_for_clickhouse() {
+    local attempts=0
+    local max_attempts=60
+
+    echo "Waiting for ClickHouse on ${CLICKHOUSE_HTTP_URL}..."
+
+    while [ $attempts -lt $max_attempts ]; do
+        if check_clickhouse; then
+            echo "ClickHouse is healthy."
+            echo ""
+            return 0
+        fi
+
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    echo "ClickHouse did not become healthy within ${max_attempts}s."
+    return 1
+}
+
+wait_for_mailpit() {
+    local attempts=0
+    local max_attempts=30
+
+    echo "Waiting for Mailpit on http://${MAILPIT_HOST}:${MAILPIT_UI_PORT}..."
+
+    while [ $attempts -lt $max_attempts ]; do
+        if check_mailpit; then
+            echo "Mailpit is healthy."
+            echo ""
+            return 0
+        fi
+
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    echo "Mailpit did not become healthy within ${max_attempts}s."
+    return 1
+}
+
+wait_for_otel_collector() {
+    local attempts=0
+    local max_attempts=30
+
+    echo "Waiting for the OpenTelemetry collector on ${OTEL_COLLECTOR_METRICS_URL}..."
+
+    while [ $attempts -lt $max_attempts ]; do
+        if check_otel_collector; then
+            echo "OpenTelemetry collector is healthy."
+            echo ""
+            return 0
+        fi
+
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    echo "OpenTelemetry collector did not become healthy within ${max_attempts}s."
+    return 1
+}
+
+wait_for_backend() {
+    local attempts=0
+    local max_attempts=480
+
+    echo "Waiting for Decision Engine API on http://localhost:8080/health..."
+
+    while [ $attempts -lt $max_attempts ]; do
+        if curl -fsS http://localhost:8080/health >/dev/null 2>&1; then
+            echo "Decision Engine API is healthy."
+            echo ""
+            return 0
+        fi
+
+        if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+            echo "Decision Engine server exited before becoming healthy."
+            return 1
+        fi
+
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    echo "Decision Engine API did not become healthy within ${max_attempts}s."
+    return 1
+}
+
+wait_for_docs() {
+    local attempts=0
+    local max_attempts=480
+
+    echo "Waiting for docs preview on ${DOCS_HOME_URL}..."
+
+    while [ $attempts -lt $max_attempts ]; do
+        if curl -fsS "${DOCS_HOME_URL}" >/dev/null 2>&1; then
+            echo "Docs preview is healthy."
+            echo ""
+            return 0
+        fi
+
+        if ! kill -0 "$DOCS_PID" 2>/dev/null; then
+            echo "Docs preview exited before becoming healthy."
+            echo "Check ${DOCS_LOG_PATH} for details."
+            return 1
+        fi
+
+        attempts=$((attempts + 1))
+        sleep 1
+    done
+
+    echo "Docs preview did not become healthy within ${max_attempts}s."
+    echo "Check ${DOCS_LOG_PATH} for details."
+    return 1
+}
+
+check_and_kill_ports
+run_infra_checklist
+
+if [ "${DOCKER_READY}" -eq 0 ] && ([ "${POSTGRES_READY}" -eq 0 ] || [ "${REDIS_READY}" -eq 0 ] || [ "${KAFKA_READY}" -eq 0 ] || [ "${CLICKHOUSE_READY}" -eq 0 ] || [ "${MAILPIT_READY}" -eq 0 ] || [ "${OTEL_READY}" -eq 0 ]); then
+    echo "Cannot start missing infrastructure services because Docker is not available."
+    echo "Start Docker/OrbStack first, then rerun ./oneclick.sh."
+    cleanup 1
+fi
+
+if [ "${POSTGRES_READY}" -eq 0 ] || [ "${REDIS_READY}" -eq 0 ] || [ "${KAFKA_READY}" -eq 0 ] || [ "${CLICKHOUSE_READY}" -eq 0 ] || [ "${MAILPIT_READY}" -eq 0 ] || [ "${OTEL_READY}" -eq 0 ]; then
+    echo "Starting infrastructure services..."
+    # otel-collector and prometheus are named explicitly so the monitoring profile's Grafana (port 3000, the docs preview here) stays off.
+    COMPOSE_PROFILES= docker compose --profile postgres-ghcr --profile analytics-clickhouse up -d postgresql redis kafka kafka-init clickhouse mailpit otel-collector prometheus
+    echo ""
+fi
+
+if [ "${POSTGRES_READY}" -eq 0 ] && ! wait_for_postgres; then
+    cleanup 1
+fi
+
+if [ "${REDIS_READY}" -eq 0 ] && ! wait_for_redis; then
+    cleanup 1
+fi
+
+if [ "${KAFKA_READY}" -eq 0 ] && ! wait_for_kafka; then
+    cleanup 1
+fi
+
+if [ "${CLICKHOUSE_READY}" -eq 0 ] && ! wait_for_clickhouse; then
+    cleanup 1
+fi
+
+if [ "${MAILPIT_READY}" -eq 0 ] && ! wait_for_mailpit; then
+    cleanup 1
+fi
+
+if [ "${OTEL_READY}" -eq 0 ] && ! wait_for_otel_collector; then
+    cleanup 1
+fi
+
+echo "Infrastructure checklist after bring-up:"
+run_infra_checklist
+
+if ! check_clickhouse_schema; then
+    echo ""
+    echo "ClickHouse schema is incomplete — attempting to (re)create cost-ingestion tables..."
+    # The cost tables (cost_daily_stats / cost_fee_model from 035_cost_model.sh,
+    # cost_bin_product from 036, the piecewise cost_fee_model_segment from 037,
+    # and the card_product ALTER migration in 038) are only auto-run by the container on a fresh
+    # clickhouse-data volume. Every one is idempotent and non-destructive — the CREATEs are
+    # IF NOT EXISTS, and 038 is ADD COLUMN IF NOT EXISTS + a same-key MODIFY ORDER BY (a metadata-only
+    # append) — so re-running against an existing DB heals it without wiping analytics data. 038 is
+    # what upgrades a database that already ran 035/036 before card_product existed. Add new cost DDL
+    # scripts here.
+    for cost_script in 035_cost_model.sh 036_cost_bin_product.sh 037_cost_fee_model_segment.sh 038_cost_card_product.sh; do
+        if docker compose exec -T clickhouse sh "/docker-entrypoint-initdb.d/${cost_script}" >/dev/null 2>&1; then
+            echo "  Ran ${cost_script}."
+        else
+            echo "  Could not run ${cost_script} in the clickhouse container."
+        fi
+    done
+
+    if ! check_clickhouse_schema; then
+        echo ""
+        echo "ClickHouse schema is still incomplete after re-running the cost-model DDL."
+        echo "Run 'make reset-analytics-clickhouse' to recreate the ClickHouse analytics volume."
+        cleanup 1
+    fi
+    echo "ClickHouse schema is now complete."
+fi
+
+echo "Running Postgres migrations..."
+if [ "${ONECLICK_DB}" = "cockroach" ]; then
+    ensure_cockroach_db
+    # Use the CockroachDB diesel config (no [print_schema]); diesel_cli's schema regeneration reads
+    # information_schema in a way CockroachDB returns as INT8-not-i32 and would fail post-migration.
+    diesel migration run \
+        --database-url "postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@${POSTGRES_HOST}:${POSTGRES_PORT}/${POSTGRES_DB}" \
+        --migration-dir "${SCRIPT_DIR}/migrations_pg" \
+        --config-file "${SCRIPT_DIR}/diesel_pg_cockroach.toml"
+else
+    just migrate-pg
+fi
+
+seed_global_configs
+
+# Start backend, npm install, and docs in parallel — none of them depend on each other.
+echo "Starting Decision Engine server (${CARGO_BUILD_MODE} build), installing dashboard dependencies, and starting docs preview..."
+if [ "${CARGO_BUILD_MODE}" = "release" ]; then
+    echo "  (release build: the first compile takes longer, but runtime — including large report ingestion — is far faster)"
+fi
+
+DECISION_ENGINE__LOG__TELEMETRY__METRICS_ENABLED=true \
+DECISION_ENGINE__LOG__TELEMETRY__OTEL_EXPORTER_OTLP_ENDPOINT="${OTEL_COLLECTOR_ENDPOINT}" \
+cargo run ${CARGO_PROFILE_FLAG} --no-default-features --features postgres &
+SERVER_PID=$!
+
+cd "$SCRIPT_DIR/website"
+npm install --silent &
+NPM_PID=$!
+
+cd "$SCRIPT_DIR/docs"
+rm -f "$DOCS_LOG_PATH"
+if [ "${DOCS_PORT}" != "3000" ]; then
+    echo "Mint preview uses port 3000 in this environment; overriding DOCS_PORT=${DOCS_PORT} to 3000."
+    DOCS_PORT="3000"
+    DOCS_URL="http://localhost:${DOCS_PORT}"
+    DOCS_HOME_URL="${DOCS_URL}/introduction"
+    API_REF_URL="${DOCS_URL}/api-reference"
+    API_EXAMPLES_URL="${DOCS_URL}/api-refs/api-ref"
+fi
+PORT="$DOCS_PORT" mint dev --no-open >"$DOCS_LOG_PATH" 2>&1 &
+DOCS_PID=$!
+
+# Dashboard needs npm install to finish first.
+if ! wait $NPM_PID; then
+    echo "npm install failed."
+    cleanup 1
+fi
+
+cd "$SCRIPT_DIR/website"
+echo "Starting dashboard..."
+npm run dev &
+DASHBOARD_PID=$!
+
+cd "$SCRIPT_DIR"
+
+# Wait for backend and docs — they were compiling/starting in parallel this whole time.
+if ! wait_for_backend; then
+    cleanup 1
+fi
+
+if ! wait_for_docs; then
+    cleanup 1
+fi
+
+echo ""
+echo "=========================================="
+echo "  Decision Engine is starting up!"
+echo "=========================================="
+echo ""
+if [ "${ONECLICK_DB}" = "cockroach" ]; then
+    echo "  Database:     CockroachDB (localhost:${POSTGRES_PORT})  Console: http://localhost:8090"
+else
+    echo "  Database:     PostgreSQL (localhost:${POSTGRES_PORT})"
+fi
+echo "  Server:       http://localhost:8080"
+echo "  Dashboard:    http://localhost:5173/"
+echo "  Docs:         $DOCS_HOME_URL"
+echo "  API Ref:      $API_REF_URL"
+echo "  API Examples: $API_EXAMPLES_URL"
+echo "  OpenAPI:      $OPENAPI_PATH"
+echo "  Mailpit:      http://${MAILPIT_HOST}:${MAILPIT_UI_PORT}  (catches all outgoing email)"
+echo ""
+echo "=========================================="
+echo ""
+
+wait $SERVER_PID $DASHBOARD_PID

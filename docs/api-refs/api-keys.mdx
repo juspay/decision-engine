@@ -1,0 +1,51 @@
+---
+title: "API Keys"
+description: "Curl examples for creating, listing, and revoking Decision Engine API keys."
+---
+
+# API Keys
+
+API keys are intended for service-to-service traffic. Use the returned `api_key` value as `x-api-key` for protected endpoints.
+
+A key belongs to a merchant and works for that merchant and every one of its [sub-merchants](/sub-merchants), including ones added later: send the `merchant_id` of whichever one a request is for. A sub-merchant has no keys of its own: listing, creating or revoking keys from a sub-merchant acts on its parent's keys.
+
+Only merchant admins can create or revoke keys from the dashboard (`403` for members). Sessions handed over from Hyperswitch can't create or revoke keys, because Hyperswitch calls Decision Engine with the admin secret. An existing API key and the admin secret can still create and revoke keys.
+
+## Create API Key
+
+```bash
+curl --location "$BASE_URL/api-key/create" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "merchant_id": "merchant_demo",
+    "description": "backend integration key"
+  }'
+```
+
+```json
+{
+  "key_id": "018f...",
+  "api_key": "DE_...",
+  "key_prefix": "DE_abcd",
+  "merchant_id": "merchant_demo",
+  "description": "backend integration key",
+  "created_at": "2026-04-25 10:00:00"
+}
+```
+
+Naming a sub-merchant as `merchant_id` creates the key on its parent. The response's `merchant_id` names the parent.
+
+## List API Keys
+
+```bash
+curl "$BASE_URL/api-key/list/merchant_demo" \
+  --header "$AUTH_HEADER"
+```
+
+## Revoke API Key
+
+```bash
+curl --request DELETE "$BASE_URL/api-key/018f-key-id" \
+  --header "$AUTH_HEADER"
+```

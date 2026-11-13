@@ -40,6 +40,10 @@ pub enum ValueType {
 }
 
 impl ValueType {
+    pub fn is_metadata(&self) -> bool {
+        matches!(self, Self::MetadataVariant(_))
+    }
+
     pub fn get_type(&self) -> DataType {
         match self {
             Self::Number(_) => DataType::Number,
@@ -75,7 +79,7 @@ pub enum ComparisonType {
 }
 
 /// Represents a single comparison condition.
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct Comparison {
     /// The left hand side which will always be a domain input identifier like "payment.method.cardtype"
@@ -113,7 +117,7 @@ pub type IfCondition = Vec<Comparison>;
 pub struct IfStatement {
     // #[schema(value_type=Vec<Comparison>)]
     pub condition: IfCondition,
-    pub nested: Option<Vec<IfStatement>>,
+    pub nested: Option<Vec<Self>>,
 }
 
 /// Represents a rule
@@ -150,14 +154,14 @@ pub enum RoutingType {
     VolumeSplitPriority,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct VolumeSplit<T> {
     pub split: u8,
     pub output: T,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum Output {
     Single(ConnectorInfo),
@@ -166,11 +170,36 @@ pub enum Output {
     VolumeSplitPriority(Vec<VolumeSplit<Vec<ConnectorInfo>>>),
 }
 
-#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub struct ConnectorInfo {
     pub gateway_name: String,
     pub gateway_id: Option<String>,
+}
+
+impl ConnectorInfo {
+    /// The identifier the success-rate decider scores this connector by: `"name:id"`, or the
+    /// bare name for a connector without an account.
+    pub fn identifier(&self) -> String {
+        match &self.gateway_id {
+            Some(id) => format!("{}:{}", self.gateway_name, id),
+            None => self.gateway_name.clone(),
+        }
+    }
+
+    /// Reads an identifier written by [`Self::identifier`].
+    pub fn from_identifier(identifier: &str) -> Self {
+        match identifier.split_once(':') {
+            Some((gateway_name, id)) => Self {
+                gateway_name: gateway_name.to_string(),
+                gateway_id: Some(id.to_string()),
+            },
+            None => Self {
+                gateway_name: identifier.to_string(),
+                gateway_id: None,
+            },
+        }
+    }
 }
 
 impl fmt::Display for ConnectorInfo {

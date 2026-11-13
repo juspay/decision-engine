@@ -3,6 +3,7 @@
 // use control::category::compose as compose; // Equivalent to Haskell's >>> operator
 use crate::app::get_tenant_app_state;
 use crate::error::ApiError;
+use crate::generics::Repository;
 use crate::storage::types::GatewayBankEmiSupport as DBGatewayBankEmiSupport;
 use serde::{Deserialize, Serialize};
 use std::option::Option;
@@ -19,11 +20,7 @@ use std::vec::Vec;
 // use sequelize::{Clause::{And, Is}, Term::{Eq, In, Null}};
 // use test::quickcheck::Arbitrary;
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::gateway_bank_emi_support::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::gateway_bank_emi_support::dsl;
-use diesel::associations::HasTable;
+use crate::storage::backend::schema::gateway_bank_emi_support::dsl;
 use diesel::*;
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
@@ -63,7 +60,7 @@ impl TryFrom<DBGatewayBankEmiSupport> for GatewayBankEmiSupport {
     }
 }
 
-pub async fn getGatewayBankEmiSupportDB(
+pub async fn get_gateway_bank_emi_support_db(
     emi_bank: String,
     t_gws: Vec<String>,
     scp: String,
@@ -72,11 +69,7 @@ pub async fn getGatewayBankEmiSupportDB(
 
     // Build the query based on scp value
     let query = if scp == "NULL" {
-        crate::generics::generic_find_all::<
-            <DBGatewayBankEmiSupport as HasTable>::Table,
-            _,
-            DBGatewayBankEmiSupport,
-        >(
+        DBGatewayBankEmiSupport::find_all(
             &app_state.db,
             dsl::bank
                 .eq(emi_bank)
@@ -85,11 +78,7 @@ pub async fn getGatewayBankEmiSupportDB(
         )
         .await
     } else {
-        crate::generics::generic_find_all::<
-            <DBGatewayBankEmiSupport as HasTable>::Table,
-            _,
-            DBGatewayBankEmiSupport,
-        >(
+        DBGatewayBankEmiSupport::find_all(
             &app_state.db,
             dsl::bank
                 .eq(emi_bank)
@@ -103,13 +92,13 @@ pub async fn getGatewayBankEmiSupportDB(
     query
 }
 
-pub async fn getGatewayBankEmiSupport(
+pub async fn get_gateway_bank_emi_support(
     emi_bank: String,
     gws: Vec<String>,
     scp: String,
 ) -> Vec<GatewayBankEmiSupport> {
     // Call the DB function and handle results
-    match getGatewayBankEmiSupportDB(emi_bank, gws, scp).await {
+    match get_gateway_bank_emi_support_db(emi_bank, gws, scp).await {
         Ok(db_results) => db_results
             .into_iter()
             .filter_map(|db_record| GatewayBankEmiSupport::try_from(db_record).ok())
@@ -120,7 +109,7 @@ pub async fn getGatewayBankEmiSupport(
 
 // #TOD implement db calls
 
-// pub async fn getGatewayBankEmiSupportDB(
+// pub async fn get_gateway_bank_emi_support_db(
 //     emi_bank: String,
 //     gws: Vec<Gateway>,
 //     scp: String,

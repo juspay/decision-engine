@@ -1,4 +1,5 @@
 use crate::error::ApiError;
+use crate::generics::Repository;
 use masking::Secret;
 use serde::{Deserialize, Serialize};
 // use eulerhs::types::{MeshError};
@@ -12,17 +13,12 @@ use crate::types::merchant::id::{to_merchant_id, MerchantId};
 // use juspay::extra::secret::{Secret, SecretContext};
 // use eulerhs::extra::combinators::to_domain_all;
 // use eulerhs::language::MonadFlow;
-use std::i64;
 use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
 // use std::text::Text;
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::merchant_gateway_account::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::merchant_gateway_account::dsl;
-use diesel::associations::HasTable;
+use crate::storage::backend::schema::merchant_gateway_account::dsl;
 use diesel::*;
 use std::fmt::Debug;
 
@@ -54,7 +50,7 @@ pub fn to_supported_payment_flows(
 ) -> Result<SupportedPaymentFlows, ApiError> {
     match serde_json::from_str::<SupportedPaymentFlows>(&supported_payment_flows) {
         Ok(res) => Ok(res),
-        Err(_) => Err(ApiError::ParsingError("Inavlid Supported Payment Flowws")),
+        Err(_) => Err(ApiError::ParsingError("Invalid Supported Payment Flows")),
     }
 }
 
@@ -127,10 +123,10 @@ impl TryFrom<DBMerchantGatewayAccount> for MerchantGatewayAccount {
             paymentMethods: value.payment_methods,
             supported_payment_flows: value
                 .supported_payment_flows
-                .map(|flows| to_supported_payment_flows(flows))
+                .map(to_supported_payment_flows)
                 .transpose()?,
             disabled: value.disabled.map(|f| f.0),
-            referenceId: value.reference_id.map(|id| to_mga_reference_id(id)),
+            referenceId: value.reference_id.map(to_mga_reference_id),
             supportedCurrencies: value.supported_currencies,
             gatewayIdentifier: value.gateway_identifier,
             gatewayType: value.gateway_type,
@@ -207,13 +203,7 @@ impl TryFrom<DBMerchantGatewayAccount> for MerchantGatewayAccount {
 pub async fn getEnabledMgasByMerchantId(mid: String) -> Vec<MerchantGatewayAccount> {
     // Call the DB function and handle results using Diesel
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_all::<
-        <DBMerchantGatewayAccount as HasTable>::Table,
-        _,
-        DBMerchantGatewayAccount,
-    >(&app_state.db, dsl::merchant_id.eq(mid))
-    .await
-    {
+    match DBMerchantGatewayAccount::find_all(&app_state.db, dsl::merchant_id.eq(mid)).await {
         Ok(db_results) => db_results
             .into_iter()
             .filter_map(|db_record| MerchantGatewayAccount::try_from(db_record).ok())
@@ -228,11 +218,7 @@ pub async fn getEnabledMgasByMerchantIdAndRefId(
 ) -> Vec<MerchantGatewayAccount> {
     // Use Diesel's query builder with multiple conditions
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_all::<
-        <DBMerchantGatewayAccount as HasTable>::Table,
-        _,
-        DBMerchantGatewayAccount,
-    >(
+    match DBMerchantGatewayAccount::find_all(
         &app_state.db,
         dsl::merchant_id
             .eq(mid)
@@ -250,7 +236,7 @@ pub async fn getEnabledMgasByMerchantIdAndRefId(
             .filter_map(|db_record| MerchantGatewayAccount::try_from(db_record).ok())
             .collect(),
         Err(err) => {
-            crate::logger::info!("Error in getEnabledMgasByMerchantIdAndRefId: {:?}", err);
+            crate::logger::debug!("Error in getEnabledMgasByMerchantIdAndRefId: {:?}", err);
             Vec::new() // Silently handle any errors by returning empty vec
         }
     }

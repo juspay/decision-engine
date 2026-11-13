@@ -1,4 +1,5 @@
 use crate::app::get_tenant_app_state;
+use crate::generics::Repository;
 use serde::{Deserialize, Serialize};
 // use db::euler_mesh_impl::mesh_config;
 // use db::mesh::internal::*;
@@ -12,11 +13,7 @@ use crate::error::ApiError;
 use crate::storage::types::PaymentMethod as DBPaymentMethod;
 use crate::types::bank_code::{to_bank_code_id, BankCodeId};
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::payment_method::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::payment_method::dsl;
-use diesel::associations::HasTable;
+use crate::storage::backend::schema::payment_method::dsl;
 use diesel::*;
 use std::convert::TryFrom;
 use std::option::Option;
@@ -46,69 +43,57 @@ pub struct PaymentMethod {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum PaymentMethodSubType {
-    #[serde(rename = "WALLET")]
-    WALLET,
-    #[serde(rename = "CF_BNPL")]
-    CF_BNPL,
-    #[serde(rename = "GIFT_CARD")]
-    GIFT_CARD,
-    #[serde(rename = "CF_EMI")]
-    CF_EMI,
-    #[serde(rename = "REAL_TIME")]
-    REAL_TIME,
-    #[serde(rename = "CF_POD")]
-    CF_POD,
-    #[serde(rename = "REWARD")]
-    REWARD,
-    #[serde(rename = "VAN")]
-    VAN,
-    #[serde(rename = "STORE")]
-    STORE,
-    #[serde(rename = "POS")]
-    POS,
-    #[serde(rename = "CF_LSP")]
-    CF_LSP,
-    #[serde(rename = "FPX")]
-    FPX,
-    #[serde(rename = "UNKNOWN")]
-    UNKNOWN,
+    Wallet,
+    CfBnpl,
+    GiftCard,
+    CfEmi,
+    RealTime,
+    CfPod,
+    Reward,
+    Van,
+    Store,
+    Pos,
+    CfLsp,
+    Fpx,
+    Unknown,
 }
 
 impl PaymentMethodSubType {
     pub fn to_text(&self) -> &'static str {
         match self {
-            Self::WALLET => "WALLET",
-            Self::CF_BNPL => "CF_BNPL",
-            Self::GIFT_CARD => "GIFT_CARD",
-            Self::CF_EMI => "CF_EMI",
-            Self::REAL_TIME => "REAL_TIME",
-            Self::CF_POD => "CF_POD",
-            Self::REWARD => "REWARD",
-            Self::VAN => "VAN",
-            Self::STORE => "STORE",
-            Self::POS => "POS",
-            Self::CF_LSP => "CF_LSP",
-            Self::FPX => "FPX",
-            Self::UNKNOWN => "UNKNOWN",
+            Self::Wallet => "WALLET",
+            Self::CfBnpl => "CF_BNPL",
+            Self::GiftCard => "GIFT_CARD",
+            Self::CfEmi => "CF_EMI",
+            Self::RealTime => "REAL_TIME",
+            Self::CfPod => "CF_POD",
+            Self::Reward => "REWARD",
+            Self::Van => "VAN",
+            Self::Store => "STORE",
+            Self::Pos => "POS",
+            Self::CfLsp => "CF_LSP",
+            Self::Fpx => "FPX",
+            Self::Unknown => "UNKNOWN",
         }
     }
 
     pub fn from_text(ctx: &str) -> Result<Self, ApiError> {
         match ctx {
-            "WALLET" => Ok(Self::WALLET),
-            "CF_BNPL" => Ok(Self::CF_BNPL),
-            "GIFT_CARD" => Ok(Self::GIFT_CARD),
-            "CF_EMI" => Ok(Self::CF_EMI),
-            "REAL_TIME" => Ok(Self::REAL_TIME),
-            "CF_POD" => Ok(Self::CF_POD),
-            "REWARD" => Ok(Self::REWARD),
-            "VAN" => Ok(Self::VAN),
-            "STORE" => Ok(Self::STORE),
-            "POS" => Ok(Self::POS),
-            "CF_LSP" => Ok(Self::CF_LSP),
-            "FPX" => Ok(Self::FPX),
-            "UNKNOWN" => Ok(Self::UNKNOWN),
+            "WALLET" => Ok(Self::Wallet),
+            "CF_BNPL" => Ok(Self::CfBnpl),
+            "GIFT_CARD" => Ok(Self::GiftCard),
+            "CF_EMI" => Ok(Self::CfEmi),
+            "REAL_TIME" => Ok(Self::RealTime),
+            "CF_POD" => Ok(Self::CfPod),
+            "REWARD" => Ok(Self::Reward),
+            "VAN" => Ok(Self::Van),
+            "STORE" => Ok(Self::Store),
+            "POS" => Ok(Self::Pos),
+            "CF_LSP" => Ok(Self::CfLsp),
+            "FPX" => Ok(Self::Fpx),
+            "UNKNOWN" => Ok(Self::Unknown),
             _ => Err(ApiError::ParsingError("Invalid Payment Method Sub Type")),
         }
     }
@@ -156,13 +141,7 @@ impl TryFrom<DBPaymentMethod> for PaymentMethod {
 
 pub async fn get_by_name(name: String) -> Option<PaymentMethod> {
     let app_state = get_tenant_app_state().await;
-    match crate::generics::generic_find_one_optional::<
-        <DBPaymentMethod as HasTable>::Table,
-        _,
-        DBPaymentMethod,
-    >(&app_state.db, dsl::name.eq(name))
-    .await
-    {
+    match DBPaymentMethod::find_optional(&app_state.db, dsl::name.eq(name)).await {
         Ok(Some(db_payment_method)) => PaymentMethod::try_from(db_payment_method).ok(),
         _ => None,
     }

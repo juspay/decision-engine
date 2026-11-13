@@ -1,0 +1,498 @@
+name: Nightly Build and Release
+
+on:
+  schedule:
+    # Runs at 5:00 AM IST (11:30 PM UTC previous day) every day
+    - cron: '30 23 * * *'
+  workflow_dispatch:
+    inputs:
+      tag_suffix:
+        description: 'Build name. On main: optional suffix (e.g. "rc1" → nightly-2026.07.21-rc1). On any other branch: required; the tag becomes <branch>-<name> (e.g. feat/x + rc1 → feat-x-rc1).'
+        required: false
+        type: string
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  create-tag:
+    runs-on: ubuntu-latest
+    outputs:
+      tag_name: ${{ steps.create_tag.outputs.tag_name }}
+      short_sha: ${{ steps.create_tag.outputs.short_sha }}
+      # Only main builds move `nightly-latest` and get a GitHub release.
+      is_main: ${{ steps.create_tag.outputs.is_main }}
+      built_at: ${{ steps.create_tag.outputs.built_at }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Create nightly tag
+        id: create_tag
+        env:
+          TAG_SUFFIX: ${{ github.event.inputs.tag_suffix }}
+        run: |
+          # Validate tag suffix against allowed charset (alphanumeric, dash, dot, underscore only)
+          if [[ -n "$TAG_SUFFIX" && ! "$TAG_SUFFIX" =~ ^[a-zA-Z0-9._-]+$ ]]; then
+            echo "Error: tag_suffix contains invalid characters. Only alphanumeric, dash, dot, and underscore are allowed."
+            echo "Provided: $TAG_SUFFIX"
+            exit 1
+          fi
+
+          SHORT_SHA="${GITHUB_SHA::7}"
+          BUILT_AT=$(TZ=Asia/Kolkata date '+%Y-%m-%d %H:%M:%S IST')
+
+          # Exact lookup of refs/tags/<name> on origin (no regex: tag names contain dots).
+          remote_tag_exists() {
+            git ls-remote --exit-code --tags origin "refs/tags/$1" >/dev/null 2>&1
+          }
+
+          if [[ "$GITHUB_REF_NAME" == "main" ]]; then
+            IS_MAIN=true
+            # Date-based tag (YYYY.MM.DD format)
+            DATE_TAG=$(TZ=Asia/Kolkata date +%Y.%m.%d)
+            if [[ -n "$TAG_SUFFIX" ]]; then
+              BASE_TAG="nightly-${DATE_TAG}-${TAG_SUFFIX}"
+            else
+              BASE_TAG="nightly-${DATE_TAG}"
+            fi
+
+            # If the date tag already points at another commit, append the run number
+            TAG_NAME="${BASE_TAG}"
+            if remote_tag_exists "${BASE_TAG}"; then
+              git fetch origin "refs/tags/${BASE_TAG}:refs/tags/${BASE_TAG}" 2>/dev/null || true
+              EXISTING_SHA=$(git rev-parse "refs/tags/${BASE_TAG}^{commit}" 2>/dev/null || echo "")
+              if [[ "$EXISTING_SHA" == "$GITHUB_SHA" ]]; then
+                echo "✓ Tag ${BASE_TAG} already exists and points to current commit ${SHORT_SHA}"
+                echo "  Reusing existing tag. Builds will update images."
+              else
+                TAG_NAME="${BASE_TAG}-run${GITHUB_RUN_NUMBER}"
+                echo "⚠ Tag ${BASE_TAG} exists but points to different commit"
+                echo "  Creating unique tag: ${TAG_NAME}"
+              fi
+            else
+              echo "✓ Tag ${BASE_TAG} does not exist remotely. Will create new tag."
+            fi
+          else
+            IS_MAIN=false
+            # Branch builds (e.g. hotfix bases) are named after the branch plus
+            # the provided name, so the image says what it was built from.
+            if [[ -z "$TAG_SUFFIX" ]]; then
+              echo "Error: tag_suffix is required when building from a branch other than main (got branch: ${GITHUB_REF_NAME})."
+              exit 1
+            fi
+            # Image tags allow only [A-Za-z0-9_.-] and cannot start with '.' or '-'.
+            BRANCH_SLUG=$(printf '%s' "$GITHUB_REF_NAME" | sed -e 's#[^A-Za-z0-9._-]#-#g' -e 's#^[.-]*##')
+            # A branch made only of unsafe characters (e.g. "+") sanitizes to nothing.
+            BRANCH_SLUG="${BRANCH_SLUG:-branch}"
+            TAG_NAME="${BRANCH_SLUG}-${TAG_SUFFIX}"
+            # nightly-* (nightly-latest and the dated tags) belongs to main. Image
+            # pushes for TAG_NAME are not gated on is_main, so a branch "nightly"
+            # with suffix "latest" would otherwise overwrite nightly-latest.
+            if [[ "$TAG_NAME" == nightly-* ]]; then
+              echo "Error: tag '${TAG_NAME}' is in the nightly-* namespace reserved for main builds. Rename the branch or build from main."
+              exit 1
+            fi
+            # Longest derived image tag is "groovy-runner-<tag>" (14 chars + tag), registry limit 128.
+            if (( ${#TAG_NAME} > 114 )); then
+              echo "Error: tag '${TAG_NAME}' is ${#TAG_NAME} characters; branch name + suffix must be at most 114."
+              exit 1
+            fi
+            # Never silently rename or move a branch build: fail if the name is taken by another commit.
+            if remote_tag_exists "${TAG_NAME}"; then
+              git fetch origin "refs/tags/${TAG_NAME}:refs/tags/${TAG_NAME}" 2>/dev/null || true
+              EXISTING_SHA=$(git rev-parse "refs/tags/${TAG_NAME}^{commit}" 2>/dev/null || echo "")
+              if [[ "$EXISTING_SHA" == "$GITHUB_SHA" ]]; then
+                echo "✓ Tag ${TAG_NAME} already exists and points to current commit ${SHORT_SHA}. Rebuilding images."
+              else
+                echo "Error: tag ${TAG_NAME} already exists at ${EXISTING_SHA::7}, not ${SHORT_SHA}. Use a different tag_suffix."
+                exit 1
+              fi
+            else
+              echo "✓ Branch build tag: ${TAG_NAME}"
+            fi
+          fi
+
+          # Output the final tag name
+          echo "tag_name=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "short_sha=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "built_at=${BUILT_AT}" >> "$GITHUB_OUTPUT"
+          echo "final_tag=${TAG_NAME}" >> "$GITHUB_OUTPUT"
+          echo "is_main=${IS_MAIN}" >> "$GITHUB_OUTPUT"
+          
+          # Create tag locally (will be pushed after successful builds)
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Remove local tag if it exists
+          git tag -d "${TAG_NAME}" 2>/dev/null || true
+          
+          # Create the tag pointing to current commit
+          echo "Creating tag: ${TAG_NAME} → ${GITHUB_SHA}"
+          git tag -a "${TAG_NAME}" "${GITHUB_SHA}" -m "Nightly build ${TAG_NAME} (${SHORT_SHA})"
+
+  build-postgres-image:
+    needs: create-tag
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            tag: linux-amd64
+            os: ubuntu-latest
+          - platform: linux/arm64
+            tag: linux-arm64
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/postgres
+          tags: |
+            type=raw,value=${{ needs.create-tag.outputs.tag_name }}
+            type=raw,value=nightly-latest,enable=${{ needs.create-tag.outputs.is_main == 'true' }}
+
+      - name: Build and push Postgres Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile.postgres
+          build-args: |
+            VERGEN_GIT_DESCRIBE=${{ needs.create-tag.outputs.tag_name }}
+          platforms: ${{ matrix.platform }}
+          tags: ghcr.io/${{ github.repository }}/postgres:${{ needs.create-tag.outputs.tag_name }}-${{ matrix.tag }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=nightly-postgres-${{ matrix.tag }}
+          cache-to: type=gha,scope=nightly-postgres-${{ matrix.tag }},mode=max
+          push: true
+        env:
+          CARGO_INCREMENTAL: '0'
+          RUSTFLAGS: "-A warnings"
+          SCCACHE_ENABLE: "true"
+
+  build-mysql-image:
+    needs: create-tag
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        include:
+          - platform: linux/amd64
+            tag: linux-amd64
+            os: ubuntu-latest
+          - platform: linux/arm64
+            tag: linux-arm64
+            os: ubuntu-24.04-arm
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          tags: |
+            type=raw,value=${{ needs.create-tag.outputs.tag_name }}
+            type=raw,value=nightly-latest,enable=${{ needs.create-tag.outputs.is_main == 'true' }}
+
+      - name: Build and push MySQL Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: Dockerfile
+          build-args: |
+            VERGEN_GIT_DESCRIBE=${{ needs.create-tag.outputs.tag_name }}
+          platforms: ${{ matrix.platform }}
+          tags: ghcr.io/${{ github.repository }}:${{ needs.create-tag.outputs.tag_name }}-${{ matrix.tag }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=nightly-mysql-${{ matrix.tag }}
+          cache-to: type=gha,scope=nightly-mysql-${{ matrix.tag }},mode=max
+          push: true
+        env:
+          CARGO_INCREMENTAL: '0'
+          RUSTFLAGS: "-A warnings"
+          SCCACHE_ENABLE: "true"
+
+  create-postgres-manifest:
+    needs: [create-tag, build-postgres-image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifest
+        run: |
+          TAG_NAME="${{ needs.create-tag.outputs.tag_name }}"
+
+          # Create manifest for nightly tag
+          docker buildx imagetools create --tag ghcr.io/${{ github.repository }}/postgres:${TAG_NAME} \
+            ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-amd64 \
+            ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-arm64
+
+          # Create manifest for nightly-latest (main builds only)
+          if [[ "${{ needs.create-tag.outputs.is_main }}" == "true" ]]; then
+            docker buildx imagetools create --tag ghcr.io/${{ github.repository }}/postgres:nightly-latest \
+              ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-amd64 \
+              ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-arm64
+          fi
+
+          # Flat alias on the root image for single-repository registries
+          # (e.g. a central ECR repo), where the sub-image name has to be
+          # folded into the tag: decision-engine:postgres-<tag>
+          docker buildx imagetools create --tag ghcr.io/${{ github.repository }}:postgres-${TAG_NAME} \
+            ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-amd64 \
+            ghcr.io/${{ github.repository }}/postgres:${TAG_NAME}-linux-arm64
+
+  create-mysql-manifest:
+    needs: [create-tag, build-mysql-image]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create multi-arch manifest
+        run: |
+          TAG_NAME="${{ needs.create-tag.outputs.tag_name }}"
+          
+          # Create manifest for nightly tag
+          docker buildx imagetools create --tag ghcr.io/${{ github.repository }}:${TAG_NAME} \
+            ghcr.io/${{ github.repository }}:${TAG_NAME}-linux-amd64 \
+            ghcr.io/${{ github.repository }}:${TAG_NAME}-linux-arm64
+          
+          # Create manifest for nightly-latest (main builds only)
+          if [[ "${{ needs.create-tag.outputs.is_main }}" == "true" ]]; then
+            docker buildx imagetools create --tag ghcr.io/${{ github.repository }}:nightly-latest \
+              ghcr.io/${{ github.repository }}:${TAG_NAME}-linux-amd64 \
+              ghcr.io/${{ github.repository }}:${TAG_NAME}-linux-arm64
+          fi
+
+  build-groovy-image:
+    needs: create-tag
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}/groovy-runner
+          tags: |
+            type=raw,value=${{ needs.create-tag.outputs.tag_name }}
+            type=raw,value=nightly-latest,enable=${{ needs.create-tag.outputs.is_main == 'true' }}
+
+      - name: Build and push Groovy Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: groovy.Dockerfile
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ github.repository }}/groovy-runner:${{ needs.create-tag.outputs.tag_name }}
+            ${{ needs.create-tag.outputs.is_main == 'true' && format('ghcr.io/{0}/groovy-runner:nightly-latest', github.repository) || '' }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha,scope=nightly-groovy
+          cache-to: type=gha,scope=nightly-groovy,mode=max
+
+      - name: Create flat alias tag
+        run: |
+          TAG_NAME="${{ needs.create-tag.outputs.tag_name }}"
+
+          # Flat alias on the root image for single-repository registries
+          # (e.g. a central ECR repo), where the sub-image name has to be
+          # folded into the tag: decision-engine:groovy-runner-<tag>
+          docker buildx imagetools create --tag ghcr.io/${{ github.repository }}:groovy-runner-${TAG_NAME} \
+            ghcr.io/${{ github.repository }}/groovy-runner:${TAG_NAME}
+
+  create-release:
+    needs: [create-tag, create-postgres-manifest, create-mysql-manifest, build-groovy-image]
+    # Branch (hotfix) builds get a tag and images but no GitHub release.
+    if: needs.create-tag.outputs.is_main == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.create-tag.outputs.tag_name }}
+          name: Nightly Build ${{ needs.create-tag.outputs.tag_name }}
+          body: |
+            ## Nightly Build - ${{ needs.create-tag.outputs.tag_name }}
+            
+            **Commit:** ${{ needs.create-tag.outputs.short_sha }}
+            **Built:** ${{ needs.create-tag.outputs.built_at }}
+            
+            ### Docker Images
+            This release includes the following Docker images:
+            - `ghcr.io/${{ github.repository }}/postgres:${{ needs.create-tag.outputs.tag_name }}`
+            - `ghcr.io/${{ github.repository }}:${{ needs.create-tag.outputs.tag_name }}`
+            - `ghcr.io/${{ github.repository }}/groovy-runner:${{ needs.create-tag.outputs.tag_name }}`
+
+            All images are also available with the `nightly-latest` tag.
+
+            Flat aliases on the root image (for copying into single-repository registries such as ECR, where source and destination `repo:tag` can then be identical):
+            - `ghcr.io/${{ github.repository }}:postgres-${{ needs.create-tag.outputs.tag_name }}`
+            - `ghcr.io/${{ github.repository }}:groovy-runner-${{ needs.create-tag.outputs.tag_name }}`
+            
+            ### Usage
+            ```bash
+            # Pull specific nightly version
+            docker pull ghcr.io/${{ github.repository }}:${{ needs.create-tag.outputs.tag_name }}
+            
+            # Pull latest nightly
+            docker pull ghcr.io/${{ github.repository }}:nightly-latest
+            ```
+            
+            ---
+            *This is an automated nightly build. Use at your own risk.*
+          draft: false
+          prerelease: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  push-tag:
+    needs: [create-tag, create-postgres-manifest, create-mysql-manifest, build-groovy-image, create-release]
+    # create-release is skipped for branch builds, so check the image jobs directly.
+    if: >-
+      !cancelled() &&
+      needs.create-postgres-manifest.result == 'success' &&
+      needs.create-mysql-manifest.result == 'success' &&
+      needs.build-groovy-image.result == 'success' &&
+      (needs.create-release.result == 'success' || needs.create-release.result == 'skipped')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Re-create and push tag to remote
+        run: |
+          TAG_NAME="${{ needs.create-tag.outputs.tag_name }}"
+          SHORT_SHA="${{ needs.create-tag.outputs.short_sha }}"
+          
+          # Configure git
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # Re-create the tag (it was created locally in create-tag job but not pushed)
+          echo "Creating tag ${TAG_NAME} at commit ${GITHUB_SHA}..."
+          
+          # Remove local tag if it exists
+          git tag -d "${TAG_NAME}" 2>/dev/null || true
+          
+          # Create annotated tag pointing to current commit
+          git tag -a "${TAG_NAME}" "${GITHUB_SHA}" -m "Nightly build ${TAG_NAME} (${SHORT_SHA})"
+          
+          # Push tag to remote (force push to handle updates)
+          echo "Pushing tag ${TAG_NAME} to remote..."
+          if git ls-remote --tags origin | grep -q "refs/tags/${TAG_NAME}$"; then
+            echo "⚠ Tag exists remotely. Force-pushing to update..."
+            git push --force origin "${TAG_NAME}"
+          else
+            echo "✓ Pushing new tag..."
+            git push origin "${TAG_NAME}"
+          fi
+          echo "✓ Tag pushed successfully!"
+
+  notify-completion:
+    needs: [create-tag, push-tag]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    if: success()
+    steps:
+      - name: Check build status
+        run: |
+          echo "Nightly build completed successfully!"
+          echo "Tag: ${{ needs.create-tag.outputs.tag_name }}"
+          if [[ "${{ needs.create-tag.outputs.is_main }}" == "true" ]]; then
+            echo "Release: https://github.com/${{ github.repository }}/releases/tag/${{ needs.create-tag.outputs.tag_name }}"
+          fi
+          echo "Images are available at:"
+          echo "  - ghcr.io/${{ github.repository }}/postgres:${{ needs.create-tag.outputs.tag_name }}"
+          echo "  - ghcr.io/${{ github.repository }}:${{ needs.create-tag.outputs.tag_name }}"
+          echo "  - ghcr.io/${{ github.repository }}/groovy-runner:${{ needs.create-tag.outputs.tag_name }}"

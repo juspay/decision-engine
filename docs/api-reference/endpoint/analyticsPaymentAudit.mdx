@@ -1,0 +1,188 @@
+---
+title: "Payment Audit"
+description: "ClickHouse-backed payment audit read endpoint."
+openapi: "openapi.json GET /analytics/payment-audit"
+---
+
+# Payment Audit
+
+## Use case
+
+Searches payment decision trails and returns matching payments plus event timelines for audit inspection.
+
+## Authentication
+
+Protected. Send either `Authorization: Bearer <jwt_token>` or `x-api-key: <api_key>`. In sandbox, also send `x-feature: decision-engine`.
+
+For local development, start with:
+
+```bash
+export BASE_URL=http://localhost:8080
+export AUTH_HEADER="Authorization: Bearer <jwt_token>"
+export TENANT_HEADER="x-tenant-id: public"
+# Sandbox only:
+# export BASE_URL=https://sandbox.hyperswitch.io
+# export FEATURE_HEADER="x-feature: decision-engine"
+```
+
+## Request
+
+- Method and path: `GET /analytics/payment-audit`
+- Parameters:
+  - `x-tenant-id` (header, required, string) — see [Environment setup](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx#environment-setup).
+  - `range` (query, optional, string)
+  - `start_ms` (query, optional, integer)
+  - `end_ms` (query, optional, integer)
+  - `page` (query, optional, integer)
+  - `page_size` (query, optional, integer)
+  - `payment_method_type` (query, optional, string)
+  - `payment_method` (query, optional, string)
+  - `card_network` (query, optional, string)
+  - `card_is_in` (query, optional, string)
+  - `currency` (query, optional, string)
+  - `country` (query, optional, string)
+  - `auth_type` (query, optional, string)
+  - `gateway` (query, optional, string)
+  - `payment_id` (query, optional, string)
+  - `request_id` (query, optional, string)
+  - `route` (query, optional, string)
+  - `status` (query, optional, string)
+  - `flow_type` (query, optional, string)
+  - `routing_approach` (query, optional, string)
+  - `exclude_routing_approach` (query, optional, string)
+  - `error_code` (query, optional, string)
+  - `routing_kind` (query, optional, string) — `multi_objective` (`/decide` and `/routing/hybrid`),
+    `auth_rate` (`/decide-gateway`), `rule_based` or `debit_routing`.
+  - `connector_mismatch` (query, optional, boolean, default `false`) — only payments whose latest
+    Multi Objective or Auth Rate decision differs from a reported update connector.
+  - `payment_fields` (query, optional, string) — a JSON object of routing keys or `metadata.<key>`
+    names to values, e.g. `{"card_bin":"424242","metadata.segment":"premium"}`; a payment must
+    carry every value. See [Decision Audit](/payment-audit#payment-fields).
+- Body: Optional query parameters include `range`, `page`, `page_size`, `payment_id`, `gateway`, `status`, `route`, `flow_type`, `routing_approach`, `exclude_routing_approach`, and `error_code`. Use `payment_id` for exact lookup; request IDs are event-level identifiers and may not map to payment summary search in every flow.
+
+## Example
+
+### Audit list
+
+```bash
+curl "$BASE_URL/analytics/payment-audit?range=1d&page=1&page_size=10" \
+  --header "$AUTH_HEADER" \
+  --header "$TENANT_HEADER"
+```
+
+### Exact payment lookup
+
+```bash
+curl "$BASE_URL/analytics/payment-audit?range=1d&payment_id=pay_sr_001" \
+  --header "$AUTH_HEADER" \
+  --header "$TENANT_HEADER"
+```
+
+### Connector mismatches
+
+```bash
+curl "$BASE_URL/analytics/payment-audit?range=1d&connector_mismatch=true" \
+  --header "$AUTH_HEADER" \
+  --header "$TENANT_HEADER"
+```
+
+The Decision Audit page's **Connector mismatches only** toggle applies this filter to its existing
+results, connector badges, counts, and pagination. Clicking a result opens the full payment timeline,
+including every connector reported to `/update-gateway-score`.
+
+The comparison uses the latest known `/decide-gateway` or `/routing/hybrid` decision in the selected
+window. At least one reported update connector must differ. Matching updates remain in the payment's
+summary and timeline. Updates whose scoring was skipped or failed count as reported updates; score
+snapshots and legacy `/update-score` events do not. Payments without both a known decision and an
+update are excluded. Connector names compare without case or account suffixes (`adyen:mca_id` and
+`ADYEN` match); original identifiers remain visible in the audit. The filter combines with the
+existing routing and payment filters. Like other list filters, it does not restrict an exact ID
+lookup, which returns the complete retained trace.
+
+### Debit routing audit
+
+```bash
+curl "$BASE_URL/analytics/payment-audit?range=1d&routing_approach=NTW_BASED_ROUTING" \
+  --header "$AUTH_HEADER" \
+  --header "$TENANT_HEADER"
+```
+
+## Response
+
+```json
+{
+  "merchant_id": "merchant_demo",
+  "range": "1d",
+  "payment_id": "pay_sr_001",
+  "request_id": null,
+  "gateway": null,
+  "route": null,
+  "status": null,
+  "flow_type": null,
+  "routing_approach": null,
+  "error_code": null,
+  "page": 1,
+  "page_size": 12,
+  "total_results": 1,
+  "total_success": 1,
+  "total_failure": 0,
+  "results": [
+    {
+      "lookup_key": "pay_sr_001",
+      "payment_id": "pay_sr_001",
+      "request_id": null,
+      "merchant_id": "merchant_demo",
+      "first_seen_ms": 1808624000000,
+      "last_seen_ms": 1808624000000,
+      "event_count": 2,
+      "latest_status": "success",
+      "latest_gateway": "stripe",
+      "latest_stage": "gateway_decided",
+      "gateways": ["stripe"],
+      "routes": ["decide_gateway"]
+    }
+  ],
+  "timeline": [
+    {
+      "id": "evt_...",
+      "flow_type": "decision",
+      "event_stage": "gateway_decided",
+      "route": "decide_gateway",
+      "merchant_id": "merchant_demo",
+      "payment_id": "pay_sr_001",
+      "request_id": null,
+      "global_request_id": null,
+      "trace_id": null,
+      "payment_method_type": "CARD",
+      "payment_method": "CREDIT",
+      "gateway": "stripe",
+      "routing_approach": "SR_SELECTION_V3_ROUTING",
+      "rule_name": null,
+      "status": "success",
+      "error_code": null,
+      "error_message": null,
+      "score_value": 0.94,
+      "sigma_factor": null,
+      "average_latency": null,
+      "tp99_latency": null,
+      "transaction_count": null,
+      "details": null,
+      "details_json": null,
+      "created_at_ms": 1808624000000
+    }
+  ]
+}
+```
+
+## Notes
+
+- Analytics reads are ClickHouse-backed and merchant-scoped by the authenticated context.
+- Use `range=15m|1h|12h|1d|1w` or `start_ms` plus `end_ms` for a custom window.
+- Use `payment_id` as the primary search key in the dashboard.
+- Use `exclude_routing_approach=NTW_BASED_ROUTING` to hide debit routing from auth-rate based audit mode.
+
+## Related
+
+- [Preview Trace](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsPreviewTrace.mdx)
+- [Analytics Log Summaries](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/analyticsLogSummaries.mdx)
+- [Analytics Endpoints](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/analytics-endpoints.mdx)

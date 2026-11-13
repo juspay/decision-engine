@@ -1,0 +1,691 @@
+//! Adyen `SettlementReportSource` — the first connector.
+//!
+//! The report parser is a faithful port of `scratch/par_extract.py`: keep settled rows, project
+//! the fee columns, pull the interchange category out of the `ICSF details` JSON, and derive
+//! `gross`/`total_fee`. Everything Adyen-specific (report column names, the notification shape,
+//! the HMAC scheme, the download auth) is contained in this file.
+
+use super::common::{http_client_without_redirects, to_float};
+
+use async_trait::async_trait;
+use axum::http::HeaderMap;
+use bytes::Bytes;
+use masking::{PeekInterface, Secret};
+use ring::hmac;
+use serde_json::Value;
+
+use crate::cost_ingestion::connectors::csv_reader;
+use crate::cost_ingestion::source::SettlementReportSource;
+use crate::cost_ingestion::types::{
+    ConnectorCreds, IngestError, ReportNotification, SettledFeeRow,
+};
+
+/// Adyen record types that actually carry settlement fees; everything else (Authorised,
+/// Received, Refused, …) has empty fee columns and would pollute the fit.
+///
+/// **`Settled` ONLY — deliberately not `SentForSettle` too.** The Payments Accounting Report is an
+/// accounting *journal*, not a transaction list: one payment writes a line per lifecycle stage, and
+/// the `SentForSettle` and `Settled` lines carry byte-identical money columns (measured over a real
+/// 924k-row export: 172,908 paired references, **0** with any difference in gross, total fee,
+/// interchange, scheme fee or markup). Accepting both folded every transaction into the rollup twice.
+///
+/// Duplication leaves the OLS slope and intercept untouched (the normal equations scale on both
+/// sides) and `bps_rmse` is an RMS, so this was never a *mispricing* — it inflated `n` and
+/// `gross_sum` 2× in the dashboard, and shrank the slope CI by ~√2, which let the `MIN_N` / `SEG_FLOOR`
+/// gates and the L2 `ci_bps` promotion pass on samples that did not exist.
+///
+/// Trade-off accepted: a transaction captured but not yet settled at the report cutoff (~3.9% of
+/// references in that export) contributes nothing until it settles. It returns in a later report's
+/// `Settled` rows, and `cost_daily_stats` is a `ReplacingMergeTree` keyed on the transaction day, so
+/// the newer report supersedes that day cleanly.
+const FEE_RECORD_TYPES: [&str; 1] = ["Settled"];
+
+/// The only notification that names a report to download.
+const REPORT_AVAILABLE: &str = "REPORT_AVAILABLE";
+
+/// Adyen serves report downloads from its own hosts (`ca-test.adyen.com`, `ca-live.adyen.com`).
+const ADYEN_DOMAIN: &str = "adyen.com";
+
+pub struct AdyenReportSource;
+
+impl AdyenReportSource {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
+impl Default for AdyenReportSource {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+#[async_trait]
+impl SettlementReportSource for AdyenReportSource {
+    fn connector(&self) -> &'static str {
+        "adyen"
+    }
+
+    fn peek_account(&self, raw_body: &[u8]) -> Result<String, IngestError> {
+        let item = notification_item(raw_body)?;
+        item.get("merchantAccountCode")
+            .and_then(Value::as_str)
+            .map(str::to_string)
+            .ok_or_else(|| {
+                IngestError::MalformedNotification("missing merchantAccountCode".to_string())
+            })
+    }
+
+    fn verify_and_parse_notification(
+        &self,
+        _headers: &HeaderMap,
+        raw_body: &[u8],
+        secret: &Secret<String>,
+    ) -> Result<ReportNotification, IngestError> {
+        let item = notification_item(raw_body)?;
+
+        // Adyen carries the HMAC in the body (additionalData.hmacSignature), not a header.
+        let provided_sig = item
+            .get("additionalData")
+            .and_then(|a| a.get("hmacSignature"))
+            .and_then(Value::as_str)
+            .ok_or_else(|| {
+                IngestError::MalformedNotification("missing hmacSignature".to_string())
+            })?;
+
+        // NOTE: field set/ordering below follows Adyen's *standard* notification signing scheme.
+        // The exact payload for REPORT_AVAILABLE must be confirmed against Adyen docs before
+        // production (see architecture doc §7.7) — the HMAC *mechanism* here is correct.
+        let payload = hmac_payload(&item);
+        if !verify_hmac(&payload, provided_sig, secret.peek()) {
+            return Err(IngestError::SignatureMismatch);
+        }
+
+        if item.get("eventCode").and_then(Value::as_str) != Some(REPORT_AVAILABLE) {
+            return Err(IngestError::MalformedNotification(
+                "not a REPORT_AVAILABLE notification".to_string(),
+            ));
+        }
+
+        let account = item
+            .get("merchantAccountCode")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        // For REPORT_AVAILABLE the download URL is carried in `reason`; `pspReference` is unique.
+        let report_ref = item
+            .get("reason")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string();
+        let notification_id = item
+            .get("pspReference")
+            .and_then(Value::as_str)
+            .filter(|s| !s.is_empty())
+            .unwrap_or(&report_ref)
+            .to_string();
+        let report_date = item
+            .get("eventDate")
+            .and_then(Value::as_str)
+            .and_then(|d| d.get(0..10))
+            .and_then(|d| chrono::NaiveDate::parse_from_str(d, "%Y-%m-%d").ok());
+
+        if report_ref.is_empty() {
+            return Err(IngestError::MalformedNotification(
+                "no report reference in notification".to_string(),
+            ));
+        }
+        // `reason` is outside the HMAC payload, so a signed notification proves nothing about it.
+        if !is_adyen_report_url(&report_ref) {
+            return Err(IngestError::MalformedNotification(
+                "report URL is not an https Adyen URL".to_string(),
+            ));
+        }
+
+        Ok(ReportNotification {
+            notification_id,
+            report_ref,
+            report_date,
+            account,
+        })
+    }
+
+    async fn download_report(
+        &self,
+        creds: &ConnectorCreds,
+        note: &ReportNotification,
+    ) -> Result<Bytes, IngestError> {
+        // Adyen accepts two ways to authenticate a report download (see
+        // https://docs.adyen.com/reporting/automatically-get-reports): report-user Basic auth, or a
+        // Report Service API key sent as `X-API-Key`. We store one string in `download_auth` and
+        // disambiguate by the ':' — Basic auth is always "user:password"; an Adyen API key never
+        // contains a colon, so a colon-less value is treated as the API key.
+        // The URL is held to Adyen's hosts here too, not only when the notification arrives, so a
+        // queued job can never send the merchant's report credentials anywhere else. Redirects are
+        // not followed for the same reason: `X-API-Key` would travel with them.
+        if !is_adyen_report_url(&note.report_ref) {
+            return Err(IngestError::Download(
+                "report URL is not an https Adyen URL".to_string(),
+            ));
+        }
+        let auth = creds.download_auth.peek();
+        let request = http_client_without_redirects().get(&note.report_ref);
+        let request = match auth.split_once(':') {
+            Some((user, pass)) => request.basic_auth(user, Some(pass)),
+            None => request.header("X-API-Key", auth),
+        };
+
+        let resp = request
+            .send()
+            .await
+            .map_err(|e| IngestError::Download(e.to_string()))?;
+
+        if !resp.status().is_success() {
+            return Err(IngestError::Download(format!("status {}", resp.status())));
+        }
+        resp.bytes()
+            .await
+            .map_err(|e| IngestError::Download(e.to_string()))
+    }
+
+    fn parse_rows(
+        &self,
+        reader: Box<dyn std::io::Read + Send>,
+        mapping: &crate::cost_ingestion::mapping::ColumnMapping,
+        on_row: &mut dyn FnMut(SettledFeeRow) -> Result<(), IngestError>,
+    ) -> Result<(), IngestError> {
+        // Resolved column indices for one report (order can drift between report versions).
+        struct Cols {
+            record: usize,
+            psp: usize,
+            variant: usize,
+            brand: usize,
+            issuer: usize,
+            ccy: usize,
+            payable: usize,
+            commission: usize,
+            markup: usize,
+            scheme: usize,
+            interchange: usize,
+            icsf: usize,
+            booking: Option<usize>,
+            terminal: Option<usize>,
+            card_number: Option<usize>,
+        }
+
+        csv_reader::parse(
+            reader,
+            mapping,
+            |h| {
+                Ok(Cols {
+                    record: h.require("Record Type")?,
+                    psp: h.require("Psp Reference")?,
+                    variant: h.require("Payment Method Variant")?,
+                    brand: h.require("Global Card Brand")?,
+                    issuer: h.require("Issuer Country")?,
+                    ccy: h.require("Settlement Currency")?,
+                    payable: h.require("Payable (SC)")?,
+                    commission: h.require("Commission (SC)")?,
+                    markup: h.require("Markup (SC)")?,
+                    scheme: h.require("Scheme Fees (SC)")?,
+                    interchange: h.require("Interchange (SC)")?,
+                    icsf: h.require("ICSF details")?,
+                    // Optional: used only for the ingested report's period; absent in older/test reports.
+                    booking: h.index("Booking Date"),
+                    // Optional: a terminal id marks in-person (POS) acceptance; absence ⇒ online (ecom).
+                    // Drives the channel feature of the category predictor.
+                    terminal: h.index("Unique Terminal ID"),
+                    // Optional: the (masked) PAN — its leading digits are the issuer BIN that seeds
+                    // the global card-product map. Absent in trimmed/tokenized exports ⇒ no BIN.
+                    card_number: h.index("Card Number"),
+                })
+            },
+            |c, row| {
+                // Skip non-fee rows before any field extraction — this is the ~90% majority.
+                if !FEE_RECORD_TYPES.contains(&row.get(c.record)) {
+                    return Ok(None);
+                }
+
+                let commission = to_float(row.get(c.commission));
+                let markup = to_float(row.get(c.markup));
+                let scheme_fee = to_float(row.get(c.scheme));
+                let interchange = to_float(row.get(c.interchange));
+                let total_fee = commission + markup + scheme_fee + interchange;
+                let gross = to_float(row.get(c.payable)) + total_fee;
+
+                let variant = row.get(c.variant).to_lowercase();
+                // Resolve funding from the variant, falling back to the interchange rate for
+                // co-badge cards whose variant is silent (separates the 20/30/90 fan).
+                let interchange_bps = ic_bps(row.get(c.icsf));
+                let funding = SettledFeeRow::resolve_funding(&variant, interchange_bps);
+                let txn_date = c.booking.and_then(|i| parse_booking_date(row.get(i)));
+                // POS when a terminal id is present, else online. Absent column ⇒ unknown ⇒ ecom.
+                let channel = match c.terminal {
+                    Some(i) if !row.get(i).trim().is_empty() => "pos",
+                    _ => "ecom",
+                }
+                .to_string();
+
+                let icsf = row.get(c.icsf);
+                let bin = c
+                    .card_number
+                    .map(|i| SettledFeeRow::bin_from_pan(row.get(i)))
+                    .unwrap_or_default();
+
+                Ok(Some(SettledFeeRow {
+                    txn_ref: row.get(c.psp).to_string(),
+                    card_network: row.get(c.brand).to_lowercase(),
+                    variant,
+                    funding,
+                    issuer_country: row.get(c.issuer).to_string(),
+                    currency: row.get(c.ccy).to_string(),
+                    ic_category: ic_category(icsf),
+                    ic_bps: SettledFeeRow::ic_bps_key(interchange_bps),
+                    txn_date,
+                    channel,
+                    gross,
+                    total_fee,
+                    interchange,
+                    scheme_fee,
+                    markup,
+                    commission,
+                    bin,
+                }))
+            },
+            on_row,
+        )
+    }
+}
+
+/// Normalize an Adyen webhook body into a single `NotificationRequestItem`-shaped object,
+/// accepting both formats Adyen can post: the JSON envelope
+/// (`{"notificationItems":[{"NotificationRequestItem":{…}}]}`) and the legacy / "Test
+/// configuration" `application/x-www-form-urlencoded` post (flat `key=value` pairs, with the
+/// signature under `additionalData.hmacSignature` and amount split across `value`/`currency`).
+/// Everything downstream (`hmac_payload`, field extraction) reads this one shape.
+fn notification_item(raw_body: &[u8]) -> Result<Value, IngestError> {
+    // JSON envelope first: a form-urlencoded body isn't valid JSON, so this falls through.
+    if let Ok(v) = serde_json::from_slice::<Value>(raw_body) {
+        if let Some(item) = first_item(&v) {
+            return Ok(item.clone());
+        }
+        // Tolerate a bare NotificationRequestItem posted without the envelope.
+        if v.get("merchantAccountCode").is_some() {
+            return Ok(v);
+        }
+        return Err(IngestError::MalformedNotification(
+            "no NotificationRequestItem".to_string(),
+        ));
+    }
+    Ok(form_to_item(raw_body))
+}
+
+/// First `NotificationRequestItem` in an Adyen JSON webhook envelope.
+fn first_item(v: &Value) -> Option<&Value> {
+    v.get("notificationItems")?
+        .as_array()?
+        .first()?
+        .get("NotificationRequestItem")
+}
+
+/// Rebuild the `NotificationRequestItem` shape from Adyen's flat form-urlencoded post: `value` and
+/// `currency` fold into a nested `amount`, and dotted keys (`additionalData.hmacSignature`) become
+/// nested objects. All values stay strings — `hmac_payload`/`value_to_string` handle that.
+fn form_to_item(raw_body: &[u8]) -> Value {
+    let mut item = serde_json::Map::new();
+    let mut amount = serde_json::Map::new();
+    let mut additional = serde_json::Map::new();
+    for (k, v) in form_urlencoded::parse(raw_body) {
+        let value = Value::String(v.into_owned());
+        match k.as_ref() {
+            "value" => {
+                amount.insert("value".to_string(), value);
+            }
+            "currency" => {
+                amount.insert("currency".to_string(), value);
+            }
+            key => match key.strip_prefix("additionalData.") {
+                Some(sub) => {
+                    additional.insert(sub.to_string(), value);
+                }
+                None => {
+                    item.insert(key.to_string(), value);
+                }
+            },
+        }
+    }
+    if !amount.is_empty() {
+        item.insert("amount".to_string(), Value::Object(amount));
+    }
+    if !additional.is_empty() {
+        item.insert("additionalData".to_string(), Value::Object(additional));
+    }
+    Value::Object(item)
+}
+
+/// Adyen's colon-joined, backslash-escaped signing payload (standard-notification field order).
+fn hmac_payload(item: &Value) -> String {
+    let f = |key: &str| -> String {
+        item.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .replace('\\', "\\\\")
+            .replace(':', "\\:")
+    };
+    [
+        f("pspReference"),
+        f("originalReference"),
+        f("merchantAccountCode"),
+        f("merchantReference"),
+        item.pointer("/amount/value")
+            .map(value_to_string)
+            .unwrap_or_default(),
+        item.pointer("/amount/currency")
+            .and_then(Value::as_str)
+            .unwrap_or_default()
+            .to_string(),
+        f("eventCode"),
+        f("success"),
+    ]
+    .join(":")
+}
+
+fn value_to_string(v: &Value) -> String {
+    match v {
+        Value::String(s) => s.clone(),
+        other => other.to_string(),
+    }
+}
+
+/// HMAC-SHA256 over `payload` with a hex-encoded Adyen key, base64-compared in constant time.
+fn verify_hmac(payload: &str, provided_b64: &str, hex_key: &str) -> bool {
+    let Some(key_bytes) = hex_decode(hex_key) else {
+        return false;
+    };
+    let key = hmac::Key::new(hmac::HMAC_SHA256, &key_bytes);
+    let tag = hmac::sign(&key, payload.as_bytes());
+    let expected_b64 = base64_encode(tag.as_ref());
+    // Constant-time comparison to avoid a signature-timing side channel.
+    ring::constant_time::verify_slices_are_equal(expected_b64.as_bytes(), provided_b64.as_bytes())
+        .is_ok()
+}
+
+/// Whether `raw` is an `https` URL on an Adyen host, with no userinfo or explicit port — the only
+/// place report credentials are sent.
+fn is_adyen_report_url(raw: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(raw) else {
+        return false;
+    };
+    url.scheme() == "https"
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && url.host_str().is_some_and(|host| {
+            host == ADYEN_DOMAIN
+                || host
+                    .strip_suffix(ADYEN_DOMAIN)
+                    .is_some_and(|sub| sub.ends_with('.'))
+        })
+}
+
+fn hex_decode(s: &str) -> Option<Vec<u8>> {
+    if !s.len().is_multiple_of(2) {
+        return None;
+    }
+    (0..s.len())
+        .step_by(2)
+        .map(|i| u8::from_str_radix(&s[i..i + 2], 16).ok())
+        .collect()
+}
+
+fn base64_encode(bytes: &[u8]) -> String {
+    use base64::Engine;
+    base64::engine::general_purpose::STANDARD.encode(bytes)
+}
+
+/// Pull the interchange category from the `ICSF details` JSON array: the element with `t=="ic"`
+/// carries the product category in `n`. `""` when absent (flat-fee methods) or unparsable.
+fn ic_category(raw: &str) -> String {
+    if raw.is_empty() {
+        return String::new();
+    }
+    let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(raw) else {
+        return String::new();
+    };
+    arr.iter()
+        .find(|e| e.get("t").and_then(Value::as_str) == Some("ic"))
+        .and_then(|e| e.get("n").and_then(Value::as_str))
+        .unwrap_or("")
+        .trim()
+        .to_string()
+}
+
+/// Pull the stated interchange rate (bps) out of the `ICSF details` JSON — the `bps` field on the
+/// `"t":"ic"` line item. `None` when the report omits it (trimmed exports carry the `ic` name but
+/// no `bps`). This is recorded per-BIN only; it never enters the cluster key.
+fn ic_bps(raw: &str) -> Option<f64> {
+    if raw.is_empty() {
+        return None;
+    }
+    let Ok(Value::Array(arr)) = serde_json::from_str::<Value>(raw) else {
+        return None;
+    };
+    arr.iter()
+        .find(|e| e.get("t").and_then(Value::as_str) == Some("ic"))
+        .and_then(|e| e.get("bps").and_then(Value::as_f64))
+}
+
+/// Parse Adyen's `Booking Date` (`"2026-01-16 00:00:53"`, optional timezone column) to a date.
+/// Only the date part matters for the report period; a blank/odd value yields `None`.
+fn parse_booking_date(s: &str) -> Option<chrono::NaiveDate> {
+    let date_part = s.trim().get(0..10)?;
+    chrono::NaiveDate::parse_from_str(date_part, "%Y-%m-%d").ok()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// One payment writes a journal line per lifecycle stage, and its `SentForSettle` and `Settled`
+    /// lines carry identical money columns. Only the `Settled` leg may reach the rollup — counting
+    /// both folded every transaction in twice, inflating `n`/`gross_sum` 2× and shrinking the slope
+    /// CI by ~√2 (see [`FEE_RECORD_TYPES`]).
+    #[test]
+    fn duplicate_sent_for_settle_leg_is_dropped() {
+        let csv = "\
+Psp Reference,Record Type,Payment Method Variant,Global Card Brand,Issuer Country,Settlement Currency,Payable (SC),Commission (SC),Markup (SC),Scheme Fees (SC),Interchange (SC),ICSF details\n\
+ref1,SentForSettle,visastandarddebit,visa,FR,EUR,40.01,0.00,0.04,0.06,0.08,\n\
+ref1,Settled,visastandarddebit,visa,FR,EUR,40.01,0.00,0.04,0.06,0.08,\n";
+        let rows = AdyenReportSource::new()
+            .parse_report(csv.as_bytes())
+            .unwrap();
+        assert_eq!(
+            rows.len(),
+            1,
+            "the same payment must be counted once, not once per leg"
+        );
+        assert!(
+            (rows[0].gross - 40.19).abs() < 1e-9,
+            "40.01 payable + 0.18 fee"
+        );
+    }
+
+    #[test]
+    fn parses_settled_rows_and_skips_non_fee_records() {
+        // Header order intentionally not the code's order — indices resolve by label.
+        let csv = "\
+Psp Reference,Record Type,Payment Method Variant,Global Card Brand,Issuer Country,Settlement Currency,Payable (SC),Commission (SC),Markup (SC),Scheme Fees (SC),Interchange (SC),ICSF details\n\
+ref1,Authorised,visastandarddebit,visa,FR,EUR,,,,,,\n\
+ref2,Settled,visastandarddebit,visa,FR,EUR,100.00,0.05,0.00,0.02,0.20,\"[{\"\"t\"\":\"\"ic\"\",\"\"n\"\":\"\"Intra EEA Consumer EMV Debit\"\"}]\"\n";
+        let rows = AdyenReportSource::new()
+            .parse_report(csv.as_bytes())
+            .unwrap();
+        assert_eq!(rows.len(), 1, "only the Settled row is kept");
+        let r = &rows[0];
+        assert_eq!(r.txn_ref, "ref2");
+        assert_eq!(r.funding, "debit");
+        assert_eq!(r.ic_category, "Intra EEA Consumer EMV Debit");
+        assert!((r.total_fee - 0.27).abs() < 1e-9, "0.05+0.00+0.02+0.20");
+        assert!((r.gross - 100.27).abs() < 1e-9, "payable + total_fee");
+        assert!(r.txn_date.is_none(), "no Booking Date column -> None");
+    }
+
+    #[test]
+    fn booking_date_parses_date_part() {
+        assert_eq!(
+            parse_booking_date("2026-01-16 00:00:53"),
+            chrono::NaiveDate::from_ymd_opt(2026, 1, 16),
+        );
+        assert_eq!(parse_booking_date(""), None);
+        assert_eq!(parse_booking_date("garbage"), None);
+    }
+
+    #[test]
+    fn ic_category_absent_yields_empty() {
+        assert_eq!(ic_category(""), "");
+        assert_eq!(ic_category("[{\"t\":\"scheme\",\"n\":\"x\"}]"), "");
+        assert_eq!(ic_category("not json"), "");
+    }
+
+    #[test]
+    fn bin_and_rate_extraction() {
+        // Masked PAN → leading run of digits, capped at 8; empty/tokenized ⇒ "".
+        assert_eq!(SettledFeeRow::bin_from_pan("489678****4354"), "489678");
+        assert_eq!(SettledFeeRow::bin_from_pan("48967812****4354"), "48967812");
+        assert_eq!(SettledFeeRow::bin_from_pan(""), "");
+        assert_eq!(SettledFeeRow::bin_from_pan("****1234"), "");
+        // Stated interchange rate from the ICSF `ic` line; absent (trimmed export) ⇒ None.
+        assert_eq!(
+            ic_bps("[{\"t\":\"ic\",\"n\":\"X\",\"bps\":20.0}]"),
+            Some(20.0)
+        );
+        assert_eq!(ic_bps("[{\"t\":\"ic\",\"n\":\"X\"}]"), None);
+        assert_eq!(ic_bps(""), None);
+    }
+
+    #[test]
+    fn funding_derivation() {
+        assert_eq!(
+            SettledFeeRow::funding_from_variant("visastandarddebit"),
+            "debit"
+        );
+        assert_eq!(
+            SettledFeeRow::funding_from_variant("mcsuperpremiumcredit"),
+            "credit"
+        );
+        assert_eq!(SettledFeeRow::funding_from_variant("ideal"), "");
+    }
+
+    #[test]
+    fn cobadge_funding_resolves_from_rate() {
+        // mc/visa: the variant wins; the rate is ignored even if present.
+        assert_eq!(
+            SettledFeeRow::resolve_funding("visastandarddebit", Some(90.0)),
+            "debit"
+        );
+        // co-badge (blank variant): fall back to the interchange rate → separates the fan on the
+        // EU IFR caps: 20 bps debit, 30 bps credit, ~90 bps (cap-exempt) commercial.
+        assert_eq!(
+            SettledFeeRow::resolve_funding("cartebancaire", Some(20.0)),
+            "debit"
+        );
+        assert_eq!(
+            SettledFeeRow::resolve_funding("cartebancaire", Some(30.0)),
+            "credit"
+        );
+        assert_eq!(
+            SettledFeeRow::resolve_funding("cartebancaire", Some(90.0)),
+            "commercial"
+        );
+        // 0 (rate present but zero) is unknown, not debit ⇒ abstains.
+        assert_eq!(
+            SettledFeeRow::resolve_funding("cartebancaire", Some(0.0)),
+            ""
+        );
+        // no rate (trimmed export): unresolved ⇒ abstains, exactly as today.
+        assert_eq!(SettledFeeRow::resolve_funding("cartebancaire", None), "");
+    }
+
+    /// A notification signed with hex key `74657374` ("test"), as Adyen would sign it.
+    fn signed_notification(event_code: &str, reason: &str) -> Vec<u8> {
+        let mut item = serde_json::json!({
+            "pspReference": "PSP1",
+            "merchantAccountCode": "Acct",
+            "eventCode": event_code,
+            "success": "true",
+            "reason": reason,
+            "amount": { "value": 0, "currency": "EUR" },
+        });
+        let key = hmac::Key::new(hmac::HMAC_SHA256, b"test");
+        let sig = base64_encode(hmac::sign(&key, hmac_payload(&item).as_bytes()).as_ref());
+        item["additionalData"] = serde_json::json!({ "hmacSignature": sig });
+        serde_json::to_vec(&serde_json::json!({
+            "notificationItems": [{ "NotificationRequestItem": item }]
+        }))
+        .expect("notification")
+    }
+
+    fn parse(body: &[u8]) -> Result<ReportNotification, IngestError> {
+        AdyenReportSource::new().verify_and_parse_notification(
+            &HeaderMap::new(),
+            body,
+            &Secret::new("74657374".to_string()),
+        )
+    }
+
+    #[test]
+    fn a_report_notification_on_an_adyen_host_is_accepted() {
+        let url = "https://ca-test.adyen.com/reports/download/MerchantAccount/Acct/report.csv";
+        let note = parse(&signed_notification(REPORT_AVAILABLE, url)).expect("accepted");
+        assert_eq!(note.report_ref, url);
+        assert_eq!(note.notification_id, "PSP1");
+    }
+
+    #[test]
+    fn a_report_url_off_adyen_is_refused_though_signed() {
+        for url in [
+            "https://attacker.example/report.csv",
+            "https://adyen.com.attacker.example/report.csv",
+            "https://evil-adyen.com/report.csv",
+            "http://ca-test.adyen.com/report.csv",
+            "https://ca-test.adyen.com:8443/report.csv",
+            "https://user@ca-test.adyen.com/report.csv",
+            "not a url",
+        ] {
+            assert!(
+                matches!(
+                    parse(&signed_notification(REPORT_AVAILABLE, url)),
+                    Err(IngestError::MalformedNotification(_))
+                ),
+                "{url}"
+            );
+        }
+    }
+
+    #[test]
+    fn only_report_notifications_are_accepted() {
+        let url = "https://ca-test.adyen.com/reports/download/MerchantAccount/Acct/report.csv";
+        assert!(matches!(
+            parse(&signed_notification("AUTHORISATION", url)),
+            Err(IngestError::MalformedNotification(_))
+        ));
+    }
+
+    #[test]
+    fn adyen_hosts() {
+        assert!(is_adyen_report_url("https://adyen.com/x"));
+        assert!(is_adyen_report_url("https://ca-live.adyen.com/x"));
+        assert!(!is_adyen_report_url("https://notadyen.com/x"));
+    }
+
+    #[test]
+    fn hmac_verifies_known_vector() {
+        // key = hex("test") bytes; verify a self-computed signature round-trips and a wrong one fails.
+        let hex_key = "74657374"; // "test"
+        let payload = "a:b:c";
+        let key = hmac::Key::new(hmac::HMAC_SHA256, b"test");
+        let good = base64_encode(hmac::sign(&key, payload.as_bytes()).as_ref());
+        assert!(verify_hmac(payload, &good, hex_key));
+        assert!(!verify_hmac(payload, "AAAA", hex_key));
+    }
+}

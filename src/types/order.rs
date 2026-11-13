@@ -139,6 +139,8 @@ pub enum OrderType {
     VanPayment,
     #[serde(rename = "MOTO_PAYMENT")]
     MotoPayment,
+    #[serde(rename = "UNKNOWN")]
+    Unknown,
 }
 
 impl OrderType {
@@ -153,6 +155,7 @@ impl OrderType {
             Self::TpvMandatePayment => "TPV_MANDATE_PAYMENT".to_string(),
             Self::VanPayment => "VAN_PAYMENT".to_string(),
             Self::MotoPayment => "MOTO_PAYMENT".to_string(),
+            Self::Unknown => "UNKNOWN".to_string(),
         }
     }
 
@@ -186,6 +189,7 @@ impl OrderType {
             TxnObjectType::PartialVoid => Self::OrderPayment,
             TxnObjectType::VanPayment => Self::VanPayment,
             TxnObjectType::MotoPayment => Self::MotoPayment,
+            _ => Self::Unknown,
         }
     }
 }
@@ -208,13 +212,14 @@ where
     Ok(UDFs(hashmap))
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize, crate::auth::MerchantScoped)]
 pub struct Order {
     pub id: OrderPrimId,
     pub amount: Money,
     pub currency: Currency,
     #[serde(with = "time::serde::iso8601")]
     pub dateCreated: OffsetDateTime,
+    #[merchant]
     pub merchantId: MerchantId,
     pub orderId: OrderId,
     pub status: OrderStatus,

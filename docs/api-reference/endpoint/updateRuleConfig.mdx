@@ -1,0 +1,100 @@
+---
+title: "Update Rule Config"
+description: "Update an existing rule configuration."
+openapi: "openapi.json POST /rule/update"
+---
+
+# Update Rule Config
+
+## Use case
+
+Updates a merchant scoring configuration for success-rate or elimination.
+
+## Authentication
+
+Protected. Send either `Authorization: Bearer <jwt_token>` or `x-api-key: <api_key>`. In sandbox, also send `x-feature: decision-engine`.
+
+For local development, start with:
+
+```bash
+export BASE_URL=http://localhost:8080
+export AUTH_HEADER="Authorization: Bearer <jwt_token>"
+# Sandbox only:
+# export BASE_URL=https://sandbox.hyperswitch.io
+# export FEATURE_HEADER="x-feature: decision-engine"
+```
+
+## Request
+
+- Method and path: `POST /rule/update`
+- Parameters: none.
+- Body: JSON body with `merchant_id` and full replacement `config` payload.
+
+## Example
+
+### Update success-rate config
+
+```bash
+curl --location "$BASE_URL/rule/update" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+  "merchant_id": "merchant_demo",
+  "config": {
+    "type": "successRate",
+    "data": {
+      "defaultBucketSize": 30,
+      "defaultLatencyThreshold": 2500,
+      "defaultHedgingPercent": 0.1
+    }
+  }
+}'
+```
+
+### Update elimination config
+
+```bash
+curl --location "$BASE_URL/rule/update" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+  "merchant_id": "merchant_demo",
+  "config": {
+    "type": "elimination",
+    "data": {
+      "threshold": 0.30
+    }
+  }
+}'
+```
+
+## Response
+
+```json
+{
+  "message": "Success Rate Configuration updated successfully",
+  "merchant_id": "merchant_demo",
+  "config": {
+    "type": "successRate",
+    "data": {
+      "defaultBucketSize": 30,
+      "defaultLatencyThreshold": 2500.0,
+      "defaultHedgingPercent": 0.1,
+      "subLevelInputConfig": null,
+      "margin": null
+    }
+  }
+}
+```
+
+## Notes
+
+- Send the full desired config, not only changed fields.
+- Changes affect future routing decisions.
+
+## Related
+
+- [Get Rule Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/getRuleConfig.mdx)
+- [Delete Rule Config](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/deleteRuleConfig.mdx)
+- [Update Success-Rate Config](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/success-rate-config-update.mdx)
+- [Update Elimination Config](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/elimination-config-update.mdx)

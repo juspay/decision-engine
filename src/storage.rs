@@ -1,13 +1,18 @@
-use crate::{
-    config::Database,
-    config::PgDatabase,
-    error::{self, ContainerError},
-    logger,
-};
+use crate::error::{self, ContainerError};
+
+#[cfg(feature = "mysql")]
+use crate::config::Database;
+#[cfg(feature = "postgres")]
+use crate::config::PgDatabase;
+
+#[cfg(feature = "mysql")]
+use crate::logger;
 
 use crate::generics::StorageResult;
 use bb8::PooledConnection;
+#[cfg(feature = "mysql")]
 use std::time::Duration;
+#[cfg(feature = "mysql")]
 use tokio::time;
 
 #[cfg(feature = "mysql")]
@@ -16,24 +21,20 @@ use diesel::MysqlConnection;
 use diesel::PgConnection;
 #[cfg(feature = "mysql")]
 use diesel_async::{
-    pooled_connection::{
-        self,
-        deadpool::{Object, Pool},
-    },
+    pooled_connection::{self, deadpool::Pool},
     AsyncMysqlConnection,
 };
 #[cfg(feature = "postgres")]
 use diesel_async::{
-    pooled_connection::{
-        self,
-        deadpool::{Object, Pool},
-    },
+    pooled_connection::{self, deadpool::Pool},
     AsyncPgConnection,
 };
 
 use error_stack::ResultExt;
 use masking::PeekInterface;
 
+pub mod api_keys;
+pub mod backend;
 pub mod consts;
 pub mod db;
 #[cfg(feature = "mysql")]
@@ -69,40 +70,25 @@ pub type MysqlPoolConn = async_bb8_diesel::Connection<diesel::MysqlConnection>;
 pub type MysqlPool = bb8::Pool<MysqlPooledConn>;
 
 #[cfg(feature = "postgres")]
-type DeadPoolConnType = Object<AsyncPgConnection>;
-
-#[cfg(feature = "mysql")]
-type DeadPoolConnType = Object<AsyncMysqlConnection>;
-
-#[cfg(feature = "postgres")]
 impl Storage {
     /// Create a new storage interface from configuration
     pub async fn new(
         database: &PgDatabase,
         schema: &str,
     ) -> error_stack::Result<Self, error::StorageError> {
-        let database_url = format!(
-            "postgres://{}:{}@{}:{}/{}?application_name={}&options=-c search_path%3D{}",
-            database.pg_username,
-            database.pg_password.peek(),
-            database.pg_host,
-            database.pg_port,
-            database.pg_dbname,
-            schema,
-            schema
-        );
+        let database_url = pg_database_url(database, schema);
 
         let config =
             pooled_connection::AsyncDieselConnectionManager::<AsyncPgConnection>::new(database_url);
         let pool = Pool::builder(config);
 
-        let pool = match database.pg_pool_size {
+        let _pool = match database.pg_pool_size {
             Some(value) => pool.max_size(value),
             None => pool,
         };
 
         let pool = diesel_make_pg_pool(database, schema, false).await?;
-        return Ok(Self { pg_pool: pool });
+        Ok(Self { pg_pool: pool })
     }
     pub async fn get_conn(
         &self,
@@ -110,7 +96,7 @@ impl Storage {
     {
         match self.pg_pool.get().await {
             Ok(conn) => Ok(conn),
-            Err(err) => Err(crate::generics::MeshError::DatabaseConnectionError),
+            Err(_err) => Err(crate::generics::MeshError::DatabaseConnectionError),
         }
     }
 }
@@ -123,7 +109,7 @@ impl Storage {
         schema: &str,
     ) -> error_stack::Result<Self, error::StorageError> {
         let database_url = format!(
-            "mysql://{}:{}@{}:{}/{}?application_name={}&options=-c search_path%3D{}",
+            "mysql://{}:{}@{}:{}/{}?application_name={}&options=-c%20search_path%3D{}",
             database.username,
             database.password.peek(),
             database.host,
@@ -138,13 +124,13 @@ impl Storage {
         );
         let pool = Pool::builder(config);
 
-        let pool = match database.pool_size {
+        let _pool = match database.pool_size {
             Some(value) => pool.max_size(value),
             None => pool,
         };
 
         let pool = diesel_make_mysql_pool(database, schema, false).await?;
-        return Ok(Self { pg_pool: pool });
+        Ok(Self { pg_pool: pool })
     }
 
     /// Get connection from database pool for accessing data
@@ -155,7 +141,7 @@ impl Storage {
         let timeout_duration = Duration::from_secs(10);
         match time::timeout(timeout_duration, self.pg_pool.get()).await {
             Ok(Ok(conn)) => {
-                logger::info!(
+                logger::debug!(
                     action = "DB_CONNECTION_SUCCESS",
                     "connection to db successful"
                 );
@@ -187,14 +173,18 @@ pub(crate) trait TestInterface {
     async fn test(&self) -> Result<(), ContainerError<Self::Error>>;
 }
 
+/// Build the `postgres://` connection URL shared by every PostgreSQL pool.
+///
+/// CockroachDB speaks the PostgreSQL wire protocol, so the same URL, `search_path` option, and
+/// Diesel `postgres` backend drive it unchanged. `sslmode`/`sslrootcert` are appended only when
+/// configured — a secure CockroachDB cluster (e.g. CockroachDB Cloud) needs `sslmode=verify-full`,
+/// while a plain PostgreSQL or insecure local CockroachDB node connects with libpq's default.
 #[cfg(feature = "postgres")]
-pub async fn diesel_make_pg_pool(
-    database: &PgDatabase,
-    schema: &str,
-    test_transaction: bool,
-) -> error_stack::Result<PgPool, error::StorageError> {
-    let database_url = format!(
-        "postgres://{}:{}@{}:{}/{}?application_name={}&options=-c search_path%3D{}",
+fn pg_database_url(database: &PgDatabase, schema: &str) -> String {
+    // Keep the space percent-encoded: libpq 16 rejects a raw one ("unexpected spaces found in ...")
+    // and no connection can be opened at all. libpq 14 tolerated it, which is why it went unnoticed.
+    let mut url = format!(
+        "postgres://{}:{}@{}:{}/{}?application_name={}&options=-c%20search_path%3D{}",
         database.pg_username,
         database.pg_password.peek(),
         database.pg_host,
@@ -203,6 +193,45 @@ pub async fn diesel_make_pg_pool(
         schema,
         schema
     );
+    if let Some(sslmode) = database.pg_sslmode.as_deref().filter(|s| !s.is_empty()) {
+        url.push_str("&sslmode=");
+        url.push_str(&encode_query_value(sslmode));
+    }
+    if let Some(cert) = database
+        .pg_ssl_root_cert
+        .as_deref()
+        .filter(|s| !s.is_empty())
+    {
+        url.push_str("&sslrootcert=");
+        url.push_str(&encode_query_value(cert));
+    }
+    url
+}
+
+/// Percent-encode a connection-URL query value (RFC 3986 unreserved set kept, everything else
+/// escaped). An sslrootcert path can contain spaces or reserved characters (`&`, `?`, …) that would
+/// otherwise break the query string — libpq rejects a raw space outright.
+#[cfg(feature = "postgres")]
+fn encode_query_value(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    for &byte in value.as_bytes() {
+        match byte {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(byte as char)
+            }
+            _ => out.push_str(&format!("%{byte:02X}")),
+        }
+    }
+    out
+}
+
+#[cfg(feature = "postgres")]
+pub async fn diesel_make_pg_pool(
+    database: &PgDatabase,
+    schema: &str,
+    _test_transaction: bool,
+) -> error_stack::Result<PgPool, error::StorageError> {
+    let database_url = pg_database_url(database, schema);
     let manager = async_bb8_diesel::ConnectionManager::<PgConnection>::new(database_url);
     let pool = bb8::Pool::builder()
         .max_size(50)
@@ -218,10 +247,10 @@ pub async fn diesel_make_pg_pool(
 pub async fn diesel_make_mysql_pool(
     database: &Database,
     schema: &str,
-    test_transaction: bool,
+    _test_transaction: bool,
 ) -> error_stack::Result<MysqlPool, error::StorageError> {
     let database_url = format!(
-        "mysql://{}:{}@{}:{}/{}?application_name={}&options=-c search_path%3D{}",
+        "mysql://{}:{}@{}:{}/{}?application_name={}&options=-c%20search_path%3D{}",
         database.username,
         database.password.peek(),
         database.host,

@@ -7,26 +7,249 @@ use fred::prelude::RedisKey;
 use fred::types::SetOptions;
 use fred::{
     clients::Transaction,
-    interfaces::{KeysInterface, ListInterface, TransactionInterface},
-    types::{Expiration, FromRedis, MultipleValues, Scanner},
+    interfaces::{HashesInterface, KeysInterface, ListInterface, TransactionInterface},
+    types::{Expiration, FromRedis, MultipleValues},
 };
-use redis_interface::{errors, types::DelReply, RedisConnectionPool};
+use redis_interface::{errors, types::DelReply, RedisConnectionPool, RedisConnectionWithContext};
 use std::fmt::Debug;
+use std::str;
+use std::sync::Arc;
+
+use crate::config::CompressionFilepath;
+#[cfg(feature = "redis_compression")]
+use crate::logger;
+#[cfg(feature = "redis_compression")]
+use crate::redis::feature::{
+    RedisCompressionConfig, RedisCompressionConfigCombined, RedisDataStruct,
+};
+#[cfg(not(feature = "redis_compression"))]
+use crate::redis::feature::{RedisCompressionConfigCombined, RedisDataStruct};
+#[cfg(feature = "redis_compression")]
+use fred::types::RedisValue;
+#[cfg(feature = "redis_compression")]
+use serde::de::DeserializeOwned;
+#[cfg(feature = "redis_compression")]
+use std::env;
+#[cfg(feature = "redis_compression")]
+use std::fs::File;
+#[cfg(feature = "redis_compression")]
+use std::io::{Cursor, Read};
+#[cfg(feature = "redis_compression")]
+use zstd::bulk::Compressor;
+#[cfg(feature = "redis_compression")]
+use zstd::stream::read::Decoder;
 
 pub struct RedisConnectionWrapper {
-    pub conn: RedisConnectionPool,
+    pub conn: Arc<RedisConnectionPool>,
+    pub compression_file_path: Option<CompressionFilepath>,
 }
 
+#[allow(dead_code)]
+const ZSTD_MAGIC_BYTES: &[u8] = &[0x28, 0xB5, 0x2F, 0xFD];
+
 impl RedisConnectionWrapper {
-    pub fn new(redis_conn: RedisConnectionPool) -> Self {
-        Self { conn: redis_conn }
+    pub fn new(
+        redis_conn: RedisConnectionPool,
+        compression_file_path: Option<CompressionFilepath>,
+    ) -> Self {
+        Self {
+            conn: Arc::new(redis_conn),
+            compression_file_path,
+        }
     }
 
-    pub async fn set_key<V>(&self, key: &str, value: V) -> Result<(), errors::RedisError>
+    /// Handle for the `redis_interface` command helpers, which take the connection
+    /// through a request-scoped wrapper.
+    pub fn commands(&self) -> RedisConnectionWithContext {
+        RedisConnectionWithContext::new_without_context(Arc::clone(&self.conn))
+    }
+
+    #[cfg(feature = "redis_compression")]
+    fn compress_string_with_config(
+        &self,
+        value: &str,
+        key: &str,
+        redis_compression_config: Option<&RedisCompressionConfigCombined>,
+        redis_type: RedisDataStruct,
+    ) -> Vec<u8> {
+        logger::debug!(
+            "REDIS_ZSTD_COMPRESS - compress_string_with_config called with key: {}, value length: {}",
+            key,
+            value.len()
+        );
+
+        let json = value.as_bytes().to_vec();
+
+        let redis_compression_eligible_length = env::var("REDIS_COMPRESSION_ELIGIBLE_LENGTH")
+            .ok()
+            .and_then(|v| v.parse::<usize>().ok())
+            .unwrap_or(200);
+
+        let redis_type_key = redis_type.as_str();
+
+        logger::debug!(
+            "REDIS_ZSTD_COMPRESS - Redis Type Key: {}, JSON Length: {}, redis_compression_config: {:?}, key: {} , eligible_length: {}",
+            redis_type_key,
+            json.len(),
+            redis_compression_config,
+            key,
+            redis_compression_eligible_length
+        );
+
+        let final_value = match redis_compression_config {
+            Some(config_combined) if config_combined.isRedisCompEnabled => {
+                match config_combined
+                    .redisCompressionConfig
+                    .as_ref()
+                    .and_then(|config| config.get(redis_type_key))
+                {
+                    Some(comp_conf)
+                        if json.len() > redis_compression_eligible_length
+                            && comp_conf.compEnabled =>
+                    {
+                        logger::debug!(
+                            "REDIS_ZSTD_COMPRESS - Compressing data for key: {}, dictId: {}",
+                            key,
+                            comp_conf.dictId
+                        );
+                        self.compress_with_dict(&json, comp_conf, key)
+                    }
+                    _ => {
+                        logger::debug!(
+                            "REDIS_ZSTD_COMPRESS - Skipping compression for key: {} (length or compEnabled check failed)",
+                            key
+                        );
+                        json
+                    }
+                }
+            }
+            _ => {
+                logger::debug!(
+                    "REDIS_ZSTD_COMPRESS - Skipping compression for key: {} (redis compression not enabled or config not present)",
+                    key
+                );
+                json
+            }
+        };
+
+        logger::debug!(
+            "REDIS_ZSTD_COMPRESS - Compressed/processed key: {}, final value length: {}, is_compressed: {}",
+            key,
+            final_value.len(),
+            Self::is_zstd_compressed(&final_value)
+        );
+
+        final_value
+    }
+
+    #[cfg(feature = "redis_compression")]
+    fn compress_with_dict(
+        &self,
+        json: &[u8],
+        comp_conf: &RedisCompressionConfig,
+        key: &str,
+    ) -> Vec<u8> {
+        let dict_file_path = match &self.compression_file_path {
+            Some(compression_config) => format!(
+                "{}/{}.dict",
+                compression_config.zstd_compression_filepath, comp_conf.dictId
+            ),
+            None => {
+                logger::debug!(
+                    "REDIS_ZSTD_COMPRESS - Compression filepath not configured for key: {}",
+                    key
+                );
+                return json.to_vec();
+            }
+        };
+
+        match std::fs::read(&dict_file_path) {
+            Ok(dict_bytes) => {
+                let compression_level = comp_conf
+                    .compLevel
+                    .as_ref()
+                    .and_then(|s| s.parse::<i32>().ok())
+                    .unwrap_or(3);
+
+                match Compressor::with_dictionary(compression_level, &dict_bytes) {
+                    Ok(mut compressor) => match compressor.compress(json) {
+                        Ok(compressed) => {
+                            logger::debug!(
+                                    "REDIS_ZSTD_COMPRESS - Successfully compressed data for key: {}, original length: {}, compressed length: {}",
+                                    key,
+                                    json.len(),
+                                    compressed.len()
+                                );
+                            return compressed;
+                        }
+                        Err(e) => {
+                            logger::error!("Compression failed for key {}: {:?}", key, e);
+                        }
+                    },
+                    Err(e) => {
+                        logger::error!("Failed to create compressor for key {}: {:?}", key, e);
+                    }
+                }
+            }
+            Err(e) => {
+                logger::error!(
+                    "Failed to read dictionary file {} for key {}: {:?}",
+                    dict_file_path,
+                    key,
+                    e
+                );
+            }
+        }
+
+        json.to_vec()
+    }
+
+    #[cfg(not(feature = "redis_compression"))]
+    pub async fn set_key<V>(
+        &self,
+        key: &str,
+        value: V,
+        _redis_compression_config: Option<RedisCompressionConfigCombined>,
+        _redis_type: RedisDataStruct,
+    ) -> Result<(), errors::RedisError>
     where
         V: serde::Serialize + Debug,
     {
-        self.conn.serialize_and_set_key(key, value).await
+        self.commands()
+            .serialize_and_set_key(&key.into(), value)
+            .await
+    }
+
+    #[cfg(feature = "redis_compression")]
+    pub async fn set_key(
+        &self,
+        key: &str,
+        value: &str,
+        redis_compression_config: Option<RedisCompressionConfigCombined>,
+        redis_type: RedisDataStruct,
+    ) -> Result<(), errors::RedisError> {
+        let final_value = self.compress_string_with_config(
+            value,
+            key,
+            redis_compression_config.as_ref(),
+            redis_type,
+        );
+
+        // Convert Vec<u8> to RedisValue::Bytes for proper serialization
+        let redis_value = RedisValue::Bytes(final_value.into());
+
+        self.conn
+            .pool
+            .set::<(), _, _>(key, redis_value, None, None, false)
+            .await
+            .change_context(errors::RedisError::SetHashFailed)?;
+
+        logger::debug!(
+            "REDIS_ZSTD_COMPRESS - REDIS_COMPRESSION - Successfully set key: {} (string type)",
+            key
+        );
+
+        Ok(())
     }
 
     pub async fn set_key_with_ttl<V>(
@@ -38,11 +261,156 @@ impl RedisConnectionWrapper {
     where
         V: serde::Serialize + Debug,
     {
-        self.conn
-            .serialize_and_set_key_with_expiry(key, value, ttl)
+        self.commands()
+            .serialize_and_set_key_with_expiry(&key.into(), value, ttl)
             .await
     }
 
+    #[cfg(feature = "redis_compression")]
+    fn is_zstd_compressed(data: &[u8]) -> bool {
+        data.len() >= 4 && data[..4] == [0x28, 0xB5, 0x2F, 0xFD]
+    }
+    #[cfg(feature = "redis_compression")]
+    fn extract_dict_id_from_cdata(cdata: &[u8]) -> Option<String> {
+        // Haskell magic: "(\181/\253"
+        let magic_number: [u8; 4] = [0x28, 0xB5, 0x2F, 0xFD];
+
+        if cdata.len() > 9 && cdata[0..4] == magic_number {
+            let cdata_wo_magic = &cdata[4..];
+
+            let frame_header_w = cdata_wo_magic[0];
+
+            // getDictionaryLengthFromDictID (bit1, bit0)
+            let bit1 = ((frame_header_w >> 1) & 1) == 1;
+            let bit0 = (frame_header_w & 1) == 1;
+
+            let dict_id_size = match (bit1, bit0) {
+                (false, false) => 1,
+                (false, true) => 1,
+                (true, false) => 2,
+                (true, true) => 4,
+            };
+
+            // singleSegmentFlag = bit 5
+            let single_segment_flag = ((frame_header_w >> 5) & 1) == 1;
+
+            let start_offset = if single_segment_flag { 1 } else { 2 };
+
+            if cdata_wo_magic.len() < start_offset + dict_id_size {
+                return None;
+            }
+
+            let dict_id_bytes = &cdata_wo_magic[start_offset..start_offset + dict_id_size];
+
+            // decodeDictId → convert bytes to hex string
+            let decoded = Self::decode_dict_id(dict_id_bytes);
+
+            Some(decoded)
+        } else {
+            None
+        }
+    }
+
+    #[cfg(feature = "redis_compression")]
+    fn decode_dict_id(bytes: &[u8]) -> String {
+        let val = match bytes.len() {
+            1 => bytes[0] as u32,
+            2 => {
+                let s8 = bytes[0] as u32;
+                let f8 = bytes[1] as u32;
+                (f8 << 8) | s8
+            }
+            3 => {
+                let a8 = bytes[0] as u32;
+                let b8 = bytes[1] as u32;
+                let c8 = bytes[2] as u32;
+                (c8 << 16) | (b8 << 8) | a8
+            }
+            4 => {
+                let a8 = bytes[0] as u32;
+                let b8 = bytes[1] as u32;
+                let c8 = bytes[2] as u32;
+                let d8 = bytes[3] as u32;
+                ((d8 << 8) | c8) << 16 | (b8 << 8) | a8
+            }
+            _ => {
+                logger::error!("Unexpected dict_id size: {}", bytes.len());
+                return "0".to_string();
+            }
+        };
+
+        val.to_string()
+    }
+
+    #[cfg(feature = "redis_compression")]
+    pub async fn get_key<T>(
+        &self,
+        key: &str,
+        _type_name: &'static str,
+    ) -> Result<T, errors::RedisError>
+    where
+        T: DeserializeOwned,
+    {
+        let raw_bytes: Vec<u8> = self.commands().get_key(&key.into()).await?;
+
+        if raw_bytes.is_empty() {
+            return Err(errors::RedisError::GetFailed.into());
+        }
+
+        match Self::extract_dict_id_from_cdata(&raw_bytes) {
+            Some(dict_id) => {
+                let dict_file_path = match &self.compression_file_path {
+                    Some(compression_config) => format!(
+                        "{}/{}.dict",
+                        compression_config.zstd_compression_filepath, dict_id
+                    ),
+                    None => {
+                        logger::debug!(
+                            "REDIS_ZSTD_COMPRESS - Compression filepath not configured for key: {}",
+                            key
+                        );
+                        return serde_json::from_slice(&raw_bytes)
+                            .change_context(errors::RedisError::GetFailed);
+                    }
+                };
+
+                let mut dict_file = File::open(&dict_file_path).map_err(|e| {
+                    logger::error!(
+                        "Failed to open dictionary file {} for key {}: {:?}",
+                        dict_file_path,
+                        key,
+                        e
+                    );
+                    errors::RedisError::UnknownResult
+                })?;
+
+                let mut dict_bytes = Vec::new();
+                dict_file.read_to_end(&mut dict_bytes).map_err(|e| {
+                    logger::error!("Failed to read dictionary file for key {}: {:?}", key, e);
+                    errors::RedisError::GetFailed
+                })?;
+
+                let mut decoder = Decoder::with_dictionary(Cursor::new(&raw_bytes), &dict_bytes)
+                    .map_err(|e| {
+                        logger::error!("Failed to create ZSTD decoder for key {}: {:?}", key, e);
+                        errors::RedisError::GetFailed
+                    })?;
+
+                let mut decompressed = Vec::new();
+                decoder.read_to_end(&mut decompressed).map_err(|e| {
+                    logger::error!("Failed to decompress data for key {}: {:?}", key, e);
+                    errors::RedisError::GetFailed
+                })?;
+
+                serde_json::from_slice(&decompressed).change_context(errors::RedisError::GetFailed)
+            }
+            None => {
+                serde_json::from_slice(&raw_bytes).change_context(errors::RedisError::GetFailed)
+            }
+        }
+    }
+
+    #[cfg(not(feature = "redis_compression"))]
     pub async fn get_key<T>(
         &self,
         key: &str,
@@ -51,20 +419,61 @@ impl RedisConnectionWrapper {
     where
         T: serde::de::DeserializeOwned,
     {
-        self.conn.get_and_deserialize_key(key, type_name).await
+        self.commands()
+            .get_and_deserialize_key(&key.into(), type_name)
+            .await
     }
 
+    #[cfg(feature = "redis_compression")]
     pub async fn get_key_string(&self, key: &str) -> Result<String, errors::RedisError> {
-        self.conn
-            .get_key(key)
+        self.get_key::<String>(key, "").await
+    }
+
+    #[cfg(not(feature = "redis_compression"))]
+    pub async fn get_key_string(&self, key: &str) -> Result<String, errors::RedisError> {
+        self.get_key::<String>(key, "").await
+    }
+
+    /// Atomically read and delete a string key (`GETDEL`), returning `None` when the key
+    /// did not exist. Use this for single-use tokens: a plain `get` followed by a later
+    /// `delete` lets two concurrent requests read the same token before either removes it.
+    pub async fn get_and_delete_key_string(
+        &self,
+        key: &str,
+    ) -> Result<Option<String>, errors::RedisError> {
+        let value: Vec<u8> = self
+            .conn
+            .pool
+            .getdel(self.conn.add_prefix(key))
             .await
-            .change_context(errors::RedisError::GetFailed)
+            .change_context(errors::RedisError::GetFailed)?;
+
+        if value.is_empty() {
+            return Ok(None);
+        }
+
+        serde_json::from_slice(&value)
+            .change_context(errors::RedisError::JsonDeserializationFailed)
+            .map(Some)
     }
 
     pub async fn get_list_length(&self, key: &str) -> Result<usize, errors::RedisError> {
         self.conn
             .pool
             .llen(key)
+            .await
+            .change_context(errors::RedisError::GetListLengthFailed)
+    }
+
+    pub async fn get_list_range(
+        &self,
+        key: &str,
+        start: i64,
+        stop: i64,
+    ) -> Result<Vec<String>, errors::RedisError> {
+        self.conn
+            .pool
+            .lrange(key, start, stop)
             .await
             .change_context(errors::RedisError::GetListLengthFailed)
     }
@@ -105,10 +514,61 @@ impl RedisConnectionWrapper {
             .change_context(errors::RedisError::DeleteFailed)
     }
 
+    /// Delete every key matching `pattern` (glob, e.g. `prefix_*`) and return how many
+    /// were removed. Uses a cursor-based `SCAN` (never `KEYS`, which blocks the server)
+    /// and deletes each key individually: in cluster mode each SR key carries its own hash
+    /// tag, so a single multi-key `DEL` could span slots and fail — one at a time stays
+    /// slot-safe. Intended for scoped admin flushes (e.g. clearing one merchant's gateway
+    /// scores), not hot-path use.
+    pub async fn delete_keys_by_pattern(&self, pattern: &str) -> Result<usize, errors::RedisError> {
+        use fred::types::Scanner;
+        use futures::stream::StreamExt;
+
+        let client = self.conn.pool.next();
+        let mut scan_stream = client.scan(pattern.to_string(), Some(100), None);
+        let mut deleted = 0usize;
+
+        while let Some(page) = scan_stream.next().await {
+            let mut page = page.change_context(errors::RedisError::GetFailed)?;
+            if let Some(keys) = page.take_results() {
+                for key in keys {
+                    let _: i64 = self
+                        .conn
+                        .pool
+                        .del(key)
+                        .await
+                        .change_context(errors::RedisError::DeleteFailed)?;
+                    deleted += 1;
+                }
+            }
+            // Advance the cursor; without this the scan stops after the first page.
+            let _ = page.next();
+        }
+
+        Ok(deleted)
+    }
+
     pub async fn increment_key(&self, key: &str) -> Result<i64, errors::RedisError> {
         self.conn
             .pool
             .incr(key)
+            .await
+            .change_context(errors::RedisError::IncrementHashFieldFailed)
+    }
+
+    /// `INCRBYFLOAT` — atomically add `delta` and return the resulting total.
+    ///
+    /// The returned total is what makes this usable as a shared cap: subtracting `delta` from it
+    /// gives the value the caller would have observed had it held a lock, so concurrent callers
+    /// each see a distinct "before" and only one can be the one that crossed the line.
+    pub async fn increment_key_by_float(
+        &self,
+        key: &str,
+        delta: f64,
+    ) -> Result<f64, errors::RedisError> {
+        self.conn
+            .pool
+            .incr_by_float(key, delta)
             .await
             .change_context(errors::RedisError::IncrementHashFieldFailed)
     }
@@ -129,20 +589,68 @@ impl RedisConnectionWrapper {
             .change_context(errors::RedisError::IncrementHashFieldFailed)
     }
 
+    #[cfg(not(feature = "redis_compression"))]
     pub async fn setXWithOption(
         &self,
         key: &str,
         value: &str,
         ttl: i64,
         option: SetOptions,
+        _redis_compression_config: Option<RedisCompressionConfigCombined>,
+        _redis_type: RedisDataStruct,
     ) -> Result<bool, errors::RedisError> {
-        // implement the redis query to set if it doesn't exist
         self.conn
             .pool
             .set(key, value, Some(Expiration::EX(ttl)), Some(option), false)
             .await
             .change_context(errors::RedisError::SetHashFailed)
     }
+    #[cfg(feature = "redis_compression")]
+    pub async fn setXWithOption(
+        &self,
+        key: &str,
+        value: &str,
+        ttl: i64,
+        option: SetOptions,
+        redis_compression_config: Option<RedisCompressionConfigCombined>,
+        redis_type: RedisDataStruct,
+    ) -> Result<bool, errors::RedisError> {
+        let final_value = self.compress_string_with_config(
+            value,
+            key,
+            redis_compression_config.as_ref(),
+            redis_type,
+        );
+
+        // Convert Vec<u8> to RedisValue::Bytes for proper serialization
+        let redis_value = RedisValue::Bytes(final_value.into());
+
+        let result = self
+            .conn
+            .pool
+            .set(
+                key,
+                redis_value,
+                Some(Expiration::EX(ttl)),
+                Some(option),
+                false,
+            )
+            .await
+            .change_context(errors::RedisError::SetHashFailed)?;
+
+        logger::debug!(
+            "REDIS_ZSTD_COMPRESS - REDIS_COMPRESSION - Successfully set key: {}, result: {}",
+            key,
+            result
+        );
+
+        Ok(result)
+    }
+    /// `EXISTS` on a key read through `get_key`, which applies the connection's key prefix.
+    pub async fn key_exists(&self, key: &str) -> Result<bool, errors::RedisError> {
+        self.commands().exists::<String>(&key.into()).await
+    }
+
     pub async fn exists(&self, key: &str) -> Result<bool, errors::RedisError> {
         self.conn
             .pool
@@ -150,12 +658,77 @@ impl RedisConnectionWrapper {
             .await
             .change_context(errors::RedisError::GetFailed)
     }
-    pub async fn setx(&self, key: &str, value: &str, ttl: i64) -> Result<(), errors::RedisError> {
+
+    /// SET key value EX ttl NX — returns true if the key was set, false if it already existed.
+    ///
+    /// Uses Option<bool> internally because fred maps a Redis nil response (key already exists)
+    /// to Ok(None) for Option types, while bool would produce a parse error on nil.
+    pub async fn set_key_if_not_exists(
+        &self,
+        key: &str,
+        value: &str,
+        ttl: i64,
+    ) -> Result<bool, errors::RedisError> {
+        let result: Option<bool> = self
+            .conn
+            .pool
+            .set(
+                key,
+                value,
+                Some(Expiration::EX(ttl)),
+                Some(SetOptions::NX),
+                false,
+            )
+            .await
+            .change_context(errors::RedisError::SetHashFailed)?;
+        Ok(result.unwrap_or(false))
+    }
+    #[cfg(not(feature = "redis_compression"))]
+    pub async fn setx(
+        &self,
+        key: &str,
+        value: &str,
+        ttl: i64,
+        _redis_compression_config: Option<RedisCompressionConfigCombined>,
+        _redis_type: RedisDataStruct,
+    ) -> Result<(), errors::RedisError> {
         self.conn
             .pool
             .set(key, value, Some(Expiration::EX(ttl)), None, false)
             .await
             .change_context(errors::RedisError::SetHashFailed)
+    }
+    #[cfg(feature = "redis_compression")]
+    pub async fn setx(
+        &self,
+        key: &str,
+        value: &str,
+        ttl: i64,
+        redis_compression_config: Option<RedisCompressionConfigCombined>,
+        redis_type: RedisDataStruct,
+    ) -> Result<(), errors::RedisError> {
+        let final_value = self.compress_string_with_config(
+            value,
+            key,
+            redis_compression_config.as_ref(),
+            redis_type,
+        );
+
+        // Convert Vec<u8> to RedisValue::Bytes for proper serialization
+        let redis_value = RedisValue::Bytes(final_value.into());
+
+        self.conn
+            .pool
+            .set::<(), _, _>(key, redis_value, Some(Expiration::EX(ttl)), None, false)
+            .await
+            .change_context(errors::RedisError::SetHashFailed)?;
+
+        logger::debug!(
+            "REDIS_ZSTD_COMPRESS - REDIS_COMPRESSION - Successfully set key: {}",
+            key
+        );
+
+        Ok(())
     }
     pub async fn multi<R, F>(&self, abort_on_error: bool, f: F) -> Result<R, errors::RedisError>
     where
@@ -173,5 +746,68 @@ impl RedisConnectionWrapper {
         trx.exec::<R>(abort_on_error)
             .await
             .change_context(errors::RedisError::UnknownResult)
+    }
+
+    // Redis Hash Operations
+    /// `HSET key field value`, then refresh the key's TTL. The TTL covers the whole hash, so every
+    /// write extends the lifetime of all its fields.
+    pub async fn hset_with_ttl(
+        &self,
+        key: &str,
+        field: &str,
+        value: String,
+        ttl: i64,
+    ) -> Result<(), errors::RedisError> {
+        let _: i64 = self
+            .conn
+            .pool
+            .hset(key, (field, value))
+            .await
+            .change_context(errors::RedisError::SetHashFailed)?;
+        if let Err(e) = self.expire_key(key, ttl).await {
+            // A hash left without a TTL would never expire, so it is removed instead.
+            let _ = self.delete_key(key).await;
+            return Err(e);
+        }
+        Ok(())
+    }
+
+    /// `HGETALL` as raw field → string value pairs; empty when the key does not exist.
+    pub async fn hgetall_strings(
+        &self,
+        key: &str,
+    ) -> Result<std::collections::HashMap<String, String>, errors::RedisError> {
+        self.conn
+            .pool
+            .hgetall(key)
+            .await
+            .change_context(errors::RedisError::GetFailed)
+    }
+
+    pub async fn hget<T>(
+        &self,
+        key: &str,
+        field: &str,
+        _type_name: &'static str,
+    ) -> Result<Option<T>, errors::RedisError>
+    where
+        T: serde::de::DeserializeOwned,
+    {
+        let result: Option<String> = self
+            .conn
+            .pool
+            .hget(key, field)
+            .await
+            .change_context(errors::RedisError::GetFailed)?;
+
+        match result {
+            Some(value_str) => {
+                let value: T = serde_json::from_str(&value_str)
+                    .map_err(|_| errors::RedisError::UnknownResult)
+                    .change_context(errors::RedisError::GetFailed)?;
+                Ok(Some(value))
+            }
+            None => Ok(None),
+        }
     }
 }

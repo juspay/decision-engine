@@ -1,13 +1,24 @@
+use std::{borrow::Cow, time::Instant};
+
+use crate::custom_extractors::{RequestIds, ScopedJson, ScopedJsonRejection};
+use crate::euclid::types::ExperimentEndpoint;
 use crate::{
-    decider::gatewaydecider::{
-        flow_new::deciderFullPayloadHSFunction,
-        types::{DecidedGateway, DomainDeciderRequestForApiCallV2, ErrorResponse, UnifiedError},
+    analytics::{
+        serialize_details, AnalyticsFlowContext, AnalyticsRoute, ApiFlow, DomainAnalyticsEvent,
+        FlowType,
     },
-    logger, metrics,
+    decider::gatewaydecider::{
+        flow_new::decider_full_payload_hs_function,
+        types::{
+            DecidedGateway, DomainDeciderRequestForApiCallV2, ErrorResponse,
+            GatewayDeciderApproach, RankingAlgorithm, ResetApproach, UnifiedError,
+        },
+    },
+    logger,
 };
-use axum::body::to_bytes;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
+use serde::Serialize;
 
 // impl IntoResponse for ErrorResponse {
 //     fn into_response(self) -> axum::http::Response<axum::body::Body> {
@@ -20,6 +31,91 @@ use axum::response::IntoResponse;
 //     }
 // }
 
+#[derive(Debug, Serialize)]
+struct DecideGatewayReadFailureDetail<'a> {
+    request_id: &'a str,
+    response: &'a ErrorResponse,
+}
+
+#[derive(Debug, Serialize)]
+struct DecideGatewaySelectionReason<'a> {
+    decided_gateway: &'a str,
+    routing_approach: &'a GatewayDeciderApproach,
+    gateway_before_evaluation: Option<&'a str>,
+    priority_logic_tag: Option<&'a str>,
+    reset_approach: &'a ResetApproach,
+}
+
+#[derive(Debug, Serialize)]
+struct DecideGatewaySuccessDetail<'a> {
+    request: &'a DomainDeciderRequestForApiCallV2,
+    response: &'a DecidedGateway,
+    score_context: Option<&'a serde_json::Value>,
+    selection_reason: DecideGatewaySelectionReason<'a>,
+}
+
+#[derive(Debug, Serialize)]
+struct DecideGatewayFailureDetail<'a> {
+    request_id: &'a str,
+    request: &'a DomainDeciderRequestForApiCallV2,
+    routing_approach: Option<&'a GatewayDeciderApproach>,
+    response: &'a ErrorResponse,
+}
+
+#[derive(Debug, Serialize)]
+struct DecideGatewayParseFailureDetail<'a> {
+    request_id: &'a str,
+    raw_request: Cow<'a, str>,
+    response: &'a ErrorResponse,
+}
+
+pub(crate) fn requested_routing_approach(
+    ranking_algorithm: Option<&RankingAlgorithm>,
+    response_routing_approach: Option<&GatewayDeciderApproach>,
+) -> Option<String> {
+    response_routing_approach
+        .map(ToString::to_string)
+        .or_else(|| ranking_algorithm.map(ToString::to_string))
+}
+
+fn request_parse_error_response(error: impl ToString) -> ErrorResponse {
+    ErrorResponse {
+        status: "400".to_string(),
+        error_code: "400".to_string(),
+        error_message: "Error parsing request".to_string(),
+        priority_logic_tag: None,
+        routing_approach: None,
+        filter_wise_gateways: None,
+        error_info: UnifiedError {
+            code: "INVALID_INPUT".to_string(),
+            user_message: "Invalid request params. Please verify your input.".to_string(),
+            developer_message: error.to_string(),
+        },
+        priority_logic_output: None,
+        is_dynamic_mga_enabled: false,
+    }
+}
+
+fn invalid_payment_method_response(developer_message: String) -> ErrorResponse {
+    ErrorResponse {
+        status: "400".to_string(),
+        error_code: "400".to_string(),
+        error_message: "Invalid payment method".to_string(),
+        priority_logic_tag: None,
+        routing_approach: None,
+        filter_wise_gateways: None,
+        error_info: UnifiedError {
+            code: "INVALID_PAYMENT_METHOD".to_string(),
+            user_message:
+                "paymentMethod and paymentMethodType are missing, swapped or do not fit together."
+                    .to_string(),
+            developer_message,
+        },
+        priority_logic_output: None,
+        is_dynamic_mga_enabled: false,
+    }
+}
+
 impl IntoResponse for DecidedGateway {
     fn into_response(self) -> axum::http::Response<axum::body::Body> {
         let body = serde_json::to_string(&self).unwrap();
@@ -31,90 +127,216 @@ impl IntoResponse for DecidedGateway {
     }
 }
 
+/// Runs the decider and records the request hit, the decision and any failure. Callers that
+/// already hold a parsed request use this directly; `decide_gateway` wraps it with the raw-body
+/// read and parse-failure reporting that only an HTTP entry point can do.
+pub(crate) async fn run_decider_with_analytics(
+    payload: DomainDeciderRequestForApiCallV2,
+    x_request_id: &str,
+    global_request_id: Option<String>,
+    trace_id: Option<String>,
+    cpu_start: Instant,
+) -> Result<DecidedGateway, ErrorResponse> {
+    let auth_type = payload.auth_type();
+    DomainAnalyticsEvent::record_request_hit(
+        AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayRequestHit),
+        AnalyticsRoute::DecideGateway,
+        Some(payload.merchant_id.clone()),
+        Some(payload.payment_id().to_string()),
+        Some(x_request_id.to_string()),
+        global_request_id.clone(),
+        trace_id.clone(),
+        auth_type.clone(),
+    );
+
+    match decider_full_payload_hs_function(
+        payload.clone(),
+        cpu_start,
+        ExperimentEndpoint::DecideGateway,
+    )
+    .await
+    {
+        Ok(decided_gateway) => {
+            let routing_approach = decided_gateway.routing_approach.to_string();
+            let (payment_method, payment_method_type) = payload.instrument().analytics_columns();
+
+            DomainAnalyticsEvent::record_decision(
+                AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayDecision),
+                Some(payload.merchant_id.clone()),
+                Some(routing_approach),
+                Some(decided_gateway.decided_gateway.clone()),
+                Some("success".to_string()),
+                AnalyticsRoute::DecideGateway,
+                decided_gateway.priority_logic_tag.clone(),
+                serialize_details(&DecideGatewaySuccessDetail {
+                    request: &payload,
+                    response: &decided_gateway,
+                    score_context: decided_gateway.gateway_priority_map.as_ref(),
+                    selection_reason: DecideGatewaySelectionReason {
+                        decided_gateway: &decided_gateway.decided_gateway,
+                        routing_approach: &decided_gateway.routing_approach,
+                        gateway_before_evaluation: decided_gateway
+                            .gateway_before_evaluation
+                            .as_deref(),
+                        priority_logic_tag: decided_gateway.priority_logic_tag.as_deref(),
+                        reset_approach: &decided_gateway.reset_approach,
+                    },
+                }),
+                Some(payload.payment_id().to_string()),
+                Some(x_request_id.to_string()),
+                global_request_id,
+                trace_id,
+                Some("gateway_decided".to_string()),
+                payment_method_type,
+                payment_method,
+                auth_type,
+                payload.card_network(),
+                Some(payload.currency()),
+                payload.country(),
+            );
+            Ok(decided_gateway)
+        }
+        Err(e) => {
+            logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
+            let routing_approach = requested_routing_approach(
+                payload.ranking_algorithm.as_ref(),
+                e.routing_approach.as_ref(),
+            );
+            DomainAnalyticsEvent::record_error(
+                AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayError),
+                AnalyticsRoute::DecideGateway,
+                Some(payload.merchant_id.clone()),
+                Some(payload.payment_id().to_string()),
+                Some(x_request_id.to_string()),
+                global_request_id,
+                trace_id,
+                None,
+                routing_approach,
+                e.error_code.clone(),
+                e.error_message.clone(),
+                serialize_details(&DecideGatewayFailureDetail {
+                    request_id: x_request_id,
+                    request: &payload,
+                    routing_approach: e.routing_approach.as_ref(),
+                    response: &e,
+                }),
+                Some("request_failed".to_string()),
+                auth_type,
+            );
+            Err(e)
+        }
+    }
+}
+
 #[axum::debug_handler]
 pub async fn decide_gateway(
-    req: axum::http::Request<axum::body::Body>,
+    headers: axum::http::HeaderMap,
+    request: Result<ScopedJson<DomainDeciderRequestForApiCallV2>, ScopedJsonRejection>,
 ) -> Result<DecidedGateway, ErrorResponse> {
-    let timer = metrics::API_LATENCY_HISTOGRAM
-        .with_label_values(&["decide_gateway"])
-        .start_timer();
-    metrics::API_REQUEST_TOTAL_COUNTER
-        .with_label_values(&["decide_gateway"])
-        .inc();
+    let cpu_start = Instant::now();
 
-    let headers = req.headers();
-    for (name, value) in headers.iter() {
-        logger::debug!(tag = "DecideGateway", "Header: {}: {:?}", name, value);
-    }
-    let body = match to_bytes(req.into_body(), usize::MAX).await {
-        Ok(body) => {
+    let RequestIds {
+        request_id,
+        global_request_id,
+        trace_id,
+    } = RequestIds::from_headers(&headers);
+    let x_request_id = request_id.unwrap_or_else(|| "unknown".to_string());
+    // Mask values by default and consolidate header diagnostics into one event.
+    logger::debug!(
+        tag = "DecideGateway",
+        headers = ?headers
+            .keys()
+            .map(|name| (name.as_str(), "**MASKED**"))
+            .collect::<std::collections::BTreeMap<_, _>>(),
+        "Incoming request headers"
+    );
+    let (body, parsed) = match request {
+        Ok(ScopedJson { payload, body, .. }) => {
             logger::debug!("Body: {:?}", body);
-            body
+            (body, Ok(payload))
         }
-        Err(e) => {
-            logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["decide_gateway", "failure"])
-                .inc();
-            timer.observe_duration();
-            return Err(ErrorResponse {
-                status: "400".to_string(),
-                error_code: "400".to_string(),
-                error_message: "Error parsing request".to_string(),
-                priority_logic_tag: None,
-                routing_approach: None,
-                filter_wise_gateways: None,
-                error_info: UnifiedError {
-                    code: "INVALID_INPUT".to_string(),
-                    user_message: "Invalid request params. Please verify your input.".to_string(),
-                    developer_message: e.to_string(),
-                },
-                priority_logic_output: None,
-                is_dynamic_mga_enabled: false,
-            });
+        Err(ScopedJsonRejection::Parse { body, error }) => {
+            logger::debug!("Body: {:?}", body);
+            (body, Err(error))
+        }
+        Err(ScopedJsonRejection::Scope(violation)) => {
+            return Err(violation.into());
+        }
+        Err(ScopedJsonRejection::Read(e)) => {
+            let (error_code, error_message) = e.analytics_code_and_message();
+            let analytics_stage = e.analytics_stage().to_string();
+            let error_response = e.into_error_response();
+            DomainAnalyticsEvent::record_error(
+                AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayError),
+                AnalyticsRoute::DecideGateway,
+                None,
+                None,
+                Some(x_request_id.clone()),
+                global_request_id.clone(),
+                trace_id.clone(),
+                None,
+                None,
+                error_code,
+                error_message.to_string(),
+                serialize_details(&DecideGatewayReadFailureDetail {
+                    request_id: &x_request_id,
+                    response: &error_response,
+                }),
+                Some(analytics_stage),
+                None,
+            );
+            return Err(error_response);
         }
     };
-    let api_decider_request: Result<DomainDeciderRequestForApiCallV2, _> =
-        serde_json::from_slice(&body);
-    let result = match api_decider_request {
-        Ok(payload) => match deciderFullPayloadHSFunction(payload).await {
-            Ok(decided_gateway) => {
-                metrics::API_REQUEST_COUNTER
-                    .with_label_values(&["decide_gateway", "success"])
-                    .inc();
-                Ok(decided_gateway)
-            }
-            Err(e) => {
-                logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
-                metrics::API_REQUEST_COUNTER
-                    .with_label_values(&["decide_gateway", "failure"])
-                    .inc();
-                Err(e)
-            }
+    let api_decider_request = match parsed {
+        Ok(payload) => match payload.check_payment_method() {
+            Ok(_) => Ok(payload),
+            Err(error) => Err(invalid_payment_method_response(error.to_string())),
         },
-        Err(e) => {
-            logger::debug!(tag = "DecideGateway", "Error: {:?}", e);
-            metrics::API_REQUEST_COUNTER
-                .with_label_values(&["decide_gateway", "failure"])
-                .inc();
-            Err(ErrorResponse {
-                status: "400".to_string(),
-                error_code: "400".to_string(),
-                error_message: "Error parsing request".to_string(),
-                priority_logic_tag: None,
-                routing_approach: None,
-                filter_wise_gateways: None,
-                error_info: UnifiedError {
-                    code: "INVALID_INPUT".to_string(),
-                    user_message: "Invalid request params. Please verify your input.".to_string(),
-                    developer_message: e.to_string(),
-                },
-                priority_logic_output: None,
-                is_dynamic_mga_enabled: false,
-            })
+        Err(e) => Err(request_parse_error_response(&e)),
+    };
+    let result = match api_decider_request {
+        Ok(payload) => {
+            let span = tracing::Span::current();
+            if !payload.merchant_id.is_empty() {
+                span.record("merchant_id", payload.merchant_id.as_str());
+            }
+            if !payload.payment_id().is_empty() {
+                span.record("payment_id", payload.payment_id());
+            }
+            run_decider_with_analytics(
+                payload,
+                &x_request_id,
+                global_request_id,
+                trace_id,
+                cpu_start,
+            )
+            .await
+        }
+        Err(error_response) => {
+            DomainAnalyticsEvent::record_error(
+                AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayError),
+                AnalyticsRoute::DecideGateway,
+                None,
+                None,
+                Some(x_request_id.clone()),
+                global_request_id,
+                trace_id,
+                None,
+                None,
+                error_response.error_code.clone(),
+                error_response.error_message.clone(),
+                serialize_details(&DecideGatewayParseFailureDetail {
+                    request_id: &x_request_id,
+                    raw_request: String::from_utf8_lossy(&body),
+                    response: &error_response,
+                }),
+                Some("request_parse_failed".to_string()),
+                None,
+            );
+            Err(error_response)
         }
     };
-    timer.observe_duration();
 
     // let connection = state.db.get_conn().await.unwrap();
     // println!("Starting Decision Gateway");

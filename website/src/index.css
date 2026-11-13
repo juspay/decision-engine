@@ -1,0 +1,385 @@
+@import url('https://fonts.googleapis.com/css2?family=Google+Sans:ital,opsz,wght@0,17..18,400..700;1,17..18,400..700&family=Inter:ital,opsz,wght@0,14..32,400..700;1,14..32,400..700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+
+  html {
+    /* Google Sans, with Inter behind it as a webfont fallback and the platform's own UI face
+       behind that. Both webfonts are OFL-1.1 and cover the 400..700 the app uses; a browser
+       fetches a webfont only when it has text to render in it, so the Inter files stay unfetched
+       while Google Sans resolves.
+
+       The system faces sit ahead of Roboto and Arial on purpose. Arial ships with both macOS and
+       Windows, so listing it earlier would win on every desktop the moment the webfonts fail to
+       load — an air-gapped install, or a blocked CDN — and Arial is a poorer match for this UI
+       than San Francisco or Segoe UI in both proportion and weight. This order also decides what
+       shows during the `display=swap` flash on a normal load. */
+    --font-sans: 'Google Sans', 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Noto Sans', Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji';
+    --font-mono: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace;
+    color-scheme: light;
+    --chart-tooltip-bg: rgba(248, 250, 252, 0.98);
+    --chart-tooltip-border: #cbd5e1;
+    --chart-tooltip-label: #0f172a;
+    --chart-tooltip-text: #334155;
+    --chart-tooltip-shadow: 0 18px 44px -24px rgba(15, 23, 42, 0.42);
+  }
+
+  html.dark {
+    color-scheme: dark;
+    --chart-tooltip-bg: #0d0d12;
+    --chart-tooltip-border: #1c1c24;
+    --chart-tooltip-label: #f8fafc;
+    --chart-tooltip-text: #e2e8f0;
+    --chart-tooltip-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+  }
+
+  html,
+  body {
+    font-family: var(--font-sans);
+    /* Google Sans carries a 17..18 optical-size axis — the split Google ships as two families,
+       Google Sans Text for body and Google Sans for headings — and Inter behind it carries 14..32.
+       `auto` feeds the rendered size into whichever resolves, so body copy lands on the text cut
+       and headings on the display cut either way. */
+    font-optical-sizing: auto;
+    /* A slashed zero, so 0 and O stay apart in merchant IDs, payment IDs and gateway names.
+       Google Sans has no equivalent of Inter's l/I disambiguation set — its `ss02` is
+       "Colon Time" — so `zero` is the whole of what is available here. It is not a figure-width
+       feature, so the `tabular-nums` utilities still control that. */
+    font-feature-settings: 'zero' 1;
+    /* Every role in the scale pairs a size with its own line-height. This is the floor for anything
+       that sets neither: 1.5 matches the 16px/24px pairing Tailwind's `text-base` already uses, so
+       untouched text lands on a designed leading rather than the font's `normal` (~1.25 here). */
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    @apply bg-[#ffffff] text-slate-800 dark:bg-[#000000] dark:text-[#f4f4f5] transition-colors duration-300;
+  }
+
+  #root {
+    min-width: 0;
+    overflow-wrap: break-word;
+  }
+
+  /* Fallback text colors for robust contrast when not overridden */
+  p,
+  span,
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    @apply text-slate-800 dark:text-slate-200 transition-colors duration-300;
+  }
+
+  .dark p.text-slate-500,
+  .dark span.text-slate-500,
+  .dark div.text-slate-500 {
+    color: #94a3b8;
+  }
+
+  .dark p.text-slate-600,
+  .dark span.text-slate-600,
+  .dark div.text-slate-600 {
+    color: #cbd5e1;
+  }
+
+  /* Automatic inversion for tailwind colors in dark mode */
+  .dark .text-slate-900,
+  .dark .text-slate-800 {
+    color: #f1f5f9 !important;
+  }
+
+  .dark .text-slate-700 {
+    color: #e2e8f0 !important;
+  }
+
+  .dark .text-slate-600 {
+    color: #cbd5e1 !important;
+  }
+
+  .dark .text-slate-500 {
+    color: #94a3b8 !important;
+  }
+
+  .dark .text-slate-400 {
+    color: #78849a !important;
+  }
+
+  .dark .text-blue-800,
+  .dark .text-blue-700 {
+    color: #93c5fd !important;
+  }
+
+  .dark .text-blue-600 {
+    color: #60a5fa !important;
+  }
+
+  .dark .text-brand-500 {
+    color: #818cf8 !important;
+  }
+
+  .dark .bg-slate-50 {
+    @apply bg-[#1a1a1d] !important;
+  }
+
+  .dark .bg-slate-100 {
+    @apply bg-[#222226] !important;
+  }
+
+  /* Scrollbar */
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-300 dark:bg-[#222222] rounded-full hover:bg-slate-400 dark:hover:bg-[#333333] transition-colors;
+  }
+
+  /* Form elements — Dynamic override.
+     Every declaration here has to stay overridable by a component's own utility classes, so the
+     radius is a conservative default rather than a pill, only colours transition (animating
+     `all` made focus decoration fade in and out), and nothing is `!important`.
+     Focus is marked by the border colour alone: fields carry no ring or glow, so a focused input
+     keeps exactly the footprint it had at rest. */
+  :where(input:not([type='checkbox']):not([type='radio']):not([type='range'])),
+  :where(select),
+  :where(textarea) {
+    @apply bg-white dark:bg-[#0f0f11] border-slate-200 dark:border-transparent text-slate-800 dark:text-white rounded-lg px-4 placeholder-slate-500 dark:placeholder-[#8a8a93] transition-colors duration-150 focus:outline-none focus:border-brand-500 dark:focus:bg-[#151518] dark:focus:border-[#333338];
+    font-family: var(--font-sans);
+  }
+
+  :where(select) {
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
+    padding-right: 3rem;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6.5L8 10.5L12 6.5' stroke='%236b7280' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 1rem center;
+    background-size: 16px 16px;
+  }
+
+  .dark select {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6.5L8 10.5L12 6.5' stroke='%2394a3b8' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  }
+
+  select option {
+    @apply bg-white dark:bg-[#0f0f11] text-slate-800 dark:text-white;
+  }
+
+  /* Range input */
+  input[type='range'] {
+    @apply accent-brand-500 dark:accent-white;
+  }
+
+  /* Radio/checkbox */
+  input[type='radio'],
+  input[type='checkbox'] {
+    @apply w-4 h-4 bg-white dark:bg-[#0f0f11] border-slate-300 dark:border-[#222226] accent-brand-500 dark:accent-white transition-all duration-200;
+  }
+
+  input[type='radio'] {
+    border-radius: 50%;
+  }
+
+  input[type='checkbox'] {
+    border-radius: 4px;
+  }
+
+  input[type='radio']:checked,
+  input[type='checkbox']:checked {
+    @apply bg-brand-500 dark:bg-white border-brand-500 dark:border-white;
+  }
+}
+
+/* Inline condition-row selects — small, auto-width, single custom arrow */
+.cond-select {
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  appearance: none;
+  display: inline-block;
+  border-radius: 0.5rem;
+  padding: 0.5rem 2rem 0.5rem 0.75rem;
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6.5L8 10.5L12 6.5' stroke='%236b7280' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.6rem center;
+  background-color: transparent;
+  background-size: 14px 14px;
+  border: 1px solid #e2e8f0;
+  outline: none;
+  box-shadow: none !important;
+  min-width: 0;
+}
+
+.dark .cond-select {
+  border-color: #222226;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 16 16' fill='none'%3E%3Cpath d='M4 6.5L8 10.5L12 6.5' stroke='%2394a3b8' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E");
+  background-color: transparent;
+}
+
+.cond-select:focus {
+  outline: none;
+  box-shadow: none !important;
+}
+
+/* Floating panel utility class */
+.glass-panel {
+  @apply bg-white dark:bg-[#0c0c0e] border border-slate-200 dark:border-[#1a1a1d] shadow-[0_18px_50px_-30px_rgba(15,23,42,0.12)] dark:shadow-2xl rounded-2xl relative overflow-hidden transition-all duration-300;
+}
+
+.glass-panel-hover:hover {
+  @apply bg-white dark:bg-[#111114] border-slate-300 dark:border-[#222226];
+}
+
+/* Brand Gradient Text Utility */
+.text-gradient {
+  @apply bg-clip-text text-transparent bg-gradient-to-r from-brand-600 to-purple-500 dark:from-[#9b51e0] dark:via-[#4f46e5] dark:to-[#0ea5e9];
+}
+
+/* Aurora top edge */
+.aurora-top {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(90deg, #3b82f6, #0ea5e9, #6366f1);
+  opacity: 0.35;
+  z-index: 100;
+}
+
+@keyframes analytics-progress {
+  0% {
+    transform: scaleX(0.18);
+  }
+
+  55% {
+    transform: scaleX(0.82);
+  }
+
+  100% {
+    transform: scaleX(0.96);
+  }
+}
+
+@layer components {
+  /* An input used as an inline title rather than a form field — an editable heading. Opts out of
+     the form-element defaults above (padding, border, radius, focus ring) so it sits flush with
+     the text around it, and marks focus with a soft tint instead of an outline. */
+  .input-bare {
+    @apply border-0 bg-transparent px-0 focus:ring-0;
+  }
+
+  .input-bare:focus {
+    @apply rounded-md bg-slate-100/80 dark:bg-white/[0.06];
+  }
+}
+
+/* Ambient flow along the Decision Flow ribbons: a short dash cycle drifting downstream. The
+   cycle length (18px) matches the dasharray below; duration is set inline per lane so volume
+   shares read as flow speed. */
+.de-lane-flow {
+  stroke-dasharray: 2.2 15.8;
+  animation: de-lane-flow 3s linear infinite;
+}
+
+@keyframes de-lane-flow {
+  to {
+    stroke-dashoffset: -18;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .de-lane-flow {
+    display: none;
+  }
+}
+
+/* Decision Flow "payment" particles and focal dots. Particles are SMIL circles traveling the
+   ribbon paths; the breathe pulse marks the payment origin and the decided winner. */
+@keyframes de-dot-breathe {
+  0%, 100% { transform: scale(1); opacity: 0.85; }
+  50% { transform: scale(1.35); opacity: 1; }
+}
+
+.de-dot-breathe {
+  animation: de-dot-breathe 3.4s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .de-dot-breathe { animation: none; }
+  .de-lane-particle { display: none; }
+}
+
+/* Transient "demoted" marker at the health-penalties gap: pops in, drifts down, fades. */
+@keyframes de-demote-flash {
+  0% { opacity: 0; transform: translateY(-6px) scale(0.85); }
+  18% { opacity: 1; transform: translateY(0) scale(1.05); }
+  70% { opacity: 1; transform: translateY(6px) scale(1); }
+  100% { opacity: 0; transform: translateY(14px) scale(0.95); }
+}
+
+.de-demote-flash {
+  animation: de-demote-flash 2.4s ease-out forwards;
+}
+
+/* Persistent cut markers (a filtered/penalized connector while it is out) and the wave guard
+   that hides payment particles while lanes are re-shaping, so dots never float off-ribbon. */
+@keyframes de-pop-in {
+  from { opacity: 0; transform: translateY(-4px) scale(0.85); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.de-cut-marker {
+  animation: de-pop-in 0.35s ease-out both;
+}
+
+svg.de-wave .de-lane-particle {
+  opacity: 0 !important;
+  transition: opacity 0.25s;
+}
+
+/* Smooth lane cut/restore: the ribbon retracts to the break point and regrows via an animated
+   dash mask (pathLength=100 normalizes the budget). Flow and particles fade with their lane. */
+.de-lane-flow {
+  transition: opacity 0.7s ease;
+}
+
+g.de-lane-cut .de-lane-particle {
+  opacity: 0 !important;
+  transition: opacity 0.3s;
+}
+
+/* Per-stage connector columns: each chip names a gateway still in the running after that stage.
+   The one a stage knocks out turns red and strikes through before its lane retracts. The colours
+   are also written inline by the canvas; these carry `!important` so the base-layer text rules
+   this file sets on every span can't tint an eliminated chip back to normal. */
+.de-state-chip.de-state-out {
+  color: #b91c1c !important;
+  border-color: rgba(239, 68, 68, 0.55) !important;
+  background: rgba(254, 226, 226, 0.95) !important;
+  text-decoration: line-through;
+}
+
+.dark .de-state-chip.de-state-out {
+  color: #fca5a5 !important;
+  border-color: rgba(248, 113, 113, 0.5) !important;
+  background: rgba(127, 29, 29, 0.35) !important;
+}
+
+.de-state-chip {
+  transition: opacity 0.35s ease, background-color 0.4s ease, border-color 0.4s ease, color 0.4s ease;
+}
+
+/* The gateway the payment is handed to: the arriving chip turns into a verdict. */

@@ -1,0 +1,104 @@
+use axum::http::StatusCode;
+
+use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
+
+#[derive(Debug, Clone, Copy)]
+enum RequestBodyFailureKind {
+    ReadFailed,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RequestBodyFailureSpec {
+    analytics_stage: &'static str,
+    status: StatusCode,
+    error_message: &'static str,
+    developer_error_code: &'static str,
+    user_message: &'static str,
+}
+
+impl RequestBodyFailureKind {
+    fn spec(self) -> RequestBodyFailureSpec {
+        match self {
+            Self::ReadFailed => RequestBodyFailureSpec {
+                analytics_stage: "request_read_failed",
+                status: StatusCode::BAD_REQUEST,
+                error_message: "Error reading request body",
+                developer_error_code: "INVALID_INPUT",
+                user_message: "Invalid request params. Please verify your input.",
+            },
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum RequestBodyError {
+    Read(axum::Error),
+}
+
+impl std::fmt::Display for RequestBodyError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Read(error) => error.fmt(f),
+        }
+    }
+}
+
+impl RequestBodyError {
+    fn kind(&self) -> RequestBodyFailureKind {
+        match self {
+            Self::Read(_) => RequestBodyFailureKind::ReadFailed,
+        }
+    }
+
+    pub fn analytics_stage(&self) -> &'static str {
+        self.kind().spec().analytics_stage
+    }
+
+    pub fn into_error_response(self) -> ErrorResponse {
+        let spec = self.kind().spec();
+        match self {
+            Self::Read(error) => ErrorResponse {
+                status: spec.status.as_u16().to_string(),
+                error_code: spec.status.as_u16().to_string(),
+                error_message: spec.error_message.to_string(),
+                priority_logic_tag: None,
+                routing_approach: None,
+                filter_wise_gateways: None,
+                error_info: UnifiedError {
+                    code: spec.developer_error_code.to_string(),
+                    user_message: spec.user_message.to_string(),
+                    developer_message: error.to_string(),
+                },
+                priority_logic_output: None,
+                is_dynamic_mga_enabled: false,
+            },
+        }
+    }
+
+    pub fn analytics_code_and_message(&self) -> (String, &'static str) {
+        let spec = self.kind().spec();
+        (spec.status.as_u16().to_string(), spec.error_message)
+    }
+}
+
+impl From<crate::auth::MerchantScopeViolation> for ErrorResponse {
+    fn from(violation: crate::auth::MerchantScopeViolation) -> Self {
+        let status = violation.status().as_u16().to_string();
+        let message = violation.message().to_string();
+        Self {
+            status: status.clone(),
+            error_code: status,
+            error_message: message.clone(),
+            priority_logic_tag: None,
+            routing_approach: None,
+            filter_wise_gateways: None,
+            error_info: UnifiedError {
+                code: "MERCHANT_SCOPE_VIOLATION".to_string(),
+                user_message: message.clone(),
+                developer_message: message,
+            },
+            priority_logic_output: None,
+            is_dynamic_mga_enabled: false,
+        }
+    }
+}

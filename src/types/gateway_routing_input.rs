@@ -1,29 +1,28 @@
-use crate::types::merchant::id::MerchantId;
+use crate::error;
+use crate::types::{merchant::id::MerchantId, routing_configuration};
+use error_stack::ResultExt;
 use serde::{Deserialize, Serialize};
 use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum EliminationLevel {
-    #[serde(rename = "GATEWAY")]
-    GATEWAY,
-    #[serde(rename = "PAYMENT_METHOD_TYPE")]
-    PAYMENT_METHOD_TYPE,
-    #[serde(rename = "PAYMENT_METHOD")]
-    PAYMENT_METHOD,
-    #[serde(rename = "NONE")]
-    NONE,
-    #[serde(rename = "FORCED_PAYMENT_METHOD")]
-    FORCED_PAYMENT_METHOD,
+    Gateway,
+    PaymentMethodType,
+    PaymentMethod,
+    None,
+    ForcedPaymentMethod,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SelectionLevel {
     #[serde(rename = "PAYMENT_MODE")]
-    SL_PAYMENT_MODE,
+    SlPaymentMode,
     #[serde(rename = "PAYMENT_METHOD")]
-    SL_PAYMENT_METHOD,
+    SlPaymentMethod,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,14 +117,16 @@ pub struct GatewaySuccessRateBasedRoutingInput {
     pub defaultGatewayLevelEliminationThreshold: Option<f64>,
     #[serde(rename = "defaultEliminationV2SuccessRate")]
     pub defaultEliminationV2SuccessRate: Option<f64>,
+    #[serde(rename = "txnLatency")]
+    pub txnLatency: Option<routing_configuration::TransactionLatencyThreshold>,
 }
 
 impl GatewaySuccessRateBasedRoutingInput {
-    pub fn from_elimination_threshold(elimination_threshold: f64) -> Self {
+    pub fn from_elimination_threshold(config: routing_configuration::EliminationData) -> Self {
         Self {
             gatewayWiseInputs: None,
-            defaultEliminationThreshold: elimination_threshold,
-            defaultEliminationLevel: EliminationLevel::PAYMENT_METHOD,
+            defaultEliminationThreshold: config.threshold,
+            defaultEliminationLevel: EliminationLevel::PaymentMethod,
             defaultSelectionLevel: None,
             enabledPaymentMethodTypes: vec![],
             eliminationV2SuccessRateInputs: None,
@@ -138,7 +139,13 @@ impl GatewaySuccessRateBasedRoutingInput {
             defaultGlobalSoftTxnResetCount: None,
             defaultGatewayLevelEliminationThreshold: None,
             defaultEliminationV2SuccessRate: None,
+            txnLatency: config.txnLatency,
         }
+    }
+    pub fn from_str(input: &str) -> error_stack::Result<Self, error::RuleConfigurationError> {
+        serde_json::from_str(input)
+            .change_context(error::RuleConfigurationError::DeserializationError)
+            .attach_printable_lazy(|| format!("Unable to parse Input from string: {:?}", input))
     }
 }
 
@@ -147,7 +154,7 @@ impl Default for GatewaySuccessRateBasedRoutingInput {
         Self {
             gatewayWiseInputs: None,
             defaultEliminationThreshold: 0.0,
-            defaultEliminationLevel: EliminationLevel::PAYMENT_METHOD,
+            defaultEliminationLevel: EliminationLevel::PaymentMethod,
             defaultSelectionLevel: None,
             enabledPaymentMethodTypes: vec![],
             eliminationV2SuccessRateInputs: None,
@@ -160,6 +167,7 @@ impl Default for GatewaySuccessRateBasedRoutingInput {
             defaultGlobalSoftTxnResetCount: None,
             defaultGatewayLevelEliminationThreshold: None,
             defaultEliminationV2SuccessRate: None,
+            txnLatency: None,
         }
     }
 }

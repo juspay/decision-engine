@@ -10,46 +10,648 @@ use crate::{
     logger::config::Log,
 };
 use error_stack::ResultExt;
+#[cfg(all(feature = "kms-hashicorp-vault", test))]
 use masking::ExposeInterface;
+use masking::PeekInterface;
 use redis_interface::RedisSettings;
+use serde::Deserialize;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     ops::{Deref, DerefMut},
     path::PathBuf,
+    sync::Arc,
 };
 
 #[derive(Clone, serde::Deserialize, Debug)]
 pub struct GlobalConfig {
     pub server: Server,
-    pub metrics: Server,
     #[cfg(feature = "mysql")]
     pub database: Database,
     #[cfg(feature = "postgres")]
     pub pg_database: PgDatabase,
-    pub secrets: Secrets,
     #[serde(default)]
     pub secrets_management: SecretsManagementConfig,
     pub log: Log,
     #[cfg(feature = "limit")]
     pub limit: Limit,
     pub redis: RedisSettings,
+    pub cache_config: CacheConfig,
     pub tenant_secrets: TenantsSecrets,
     pub tls: Option<ServerTls>,
     #[serde(default)]
     pub api_client: ApiClientConfig,
     #[serde(default)]
+    pub analytics: AnalyticsConfig,
+    #[serde(default)]
     pub routing_config: Option<TomlConfig>,
     #[serde(default)]
+    pub pm_filters: ConnectorFilters,
+    #[serde(default)]
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
+    pub compression_filepath: Option<CompressionFilepath>,
+    #[serde(default = "default_true")]
+    pub api_key_auth_enabled: bool,
+    pub user_auth: UserAuthConfig,
+    pub admin_secret: AdminSecretConfig,
+    #[serde(default)]
+    pub email: EmailConfig,
+    #[serde(default)]
+    pub gsm: GsmConfig,
+    #[serde(default)]
+    pub mem_cache: MemCacheConfig,
+    #[serde(default)]
+    pub hypersense: HypersenseConfig,
+    #[serde(default)]
+    pub cost_ingestion: CostIngestionConfig,
+    #[serde(default)]
+    pub volume_commitment: VolumeCommitmentConfig,
+    #[serde(default)]
+    pub sr_auto_calibration: SrAutoCalibrationConfig,
+    #[serde(default)]
+    pub card_info_service: CardInfoServiceConfig,
+}
+
+/// Configuration for the external Hyperswitch cards-info API used to enrich a payment's
+/// card attributes from its BIN (see the BIN-enrichment step in `flow_new`).
+#[derive(Clone, serde::Deserialize, Debug)]
+#[serde(default)]
+pub struct CardInfoServiceConfig {
+    pub base_url: String,
+    pub api_key: masking::Secret<String>,
+    pub timeout_ms: u64,
+    pub tenant_id: String,
+}
+
+impl Default for CardInfoServiceConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "https://integ.hyperswitch.io/api/cards".to_string(),
+            api_key: masking::Secret::new(String::new()),
+            timeout_ms: 2_000,
+            tenant_id: "public".to_string(),
+        }
+    }
+}
+
+/// Runtime auto-calibration of the SRv3 bucket size + hedging %.
+#[derive(Clone, serde::Deserialize, Debug, Default)]
+pub struct SrAutoCalibrationConfig {
+    /// Recalc cadence in seconds. When unset (or 0), the job uses a built-in default (900s).
+    #[serde(default)]
+    pub interval_secs: Option<u64>,
+    /// Smallest bucket size the calibrator will write. Default 100.
+    #[serde(default)]
+    pub min_bucket_size: Option<i32>,
+    /// Largest bucket size the calibrator will write. Lower it (e.g. 25) for snappy demos —
+    /// a smaller window flips scores faster. Default 2000.
+    #[serde(default)]
+    pub max_bucket_size: Option<i32>,
+    /// Total hedging cap (%). Default 30.
+    #[serde(default)]
+    pub max_hedging_percent: Option<f64>,
+    /// Horizon (seconds) hedging sizes window-refresh against. Default 3600 (production). Set it
+    /// short (e.g. 60) for demos so laggards get enough exploration traffic to recover quickly.
+    #[serde(default)]
+    pub reaction_horizon_secs: Option<u64>,
+    /// Trailing window (seconds) over which volume/dimensions are counted in ClickHouse. Default
+    /// 3600. Keep it well above `interval_secs` so windows overlap and smooth; shorten (e.g. 300)
+    /// for demos to react faster and shed stale events.
+    #[serde(default)]
+    pub lookback_secs: Option<u64>,
+    /// Minimum per-cluster volume in the lookback window before a cluster is calibrated. Default
+    /// 100. Lower it (e.g. 20) for demos, especially when splitting by dimension.
+    #[serde(default)]
+    pub min_volume: Option<i64>,
+}
+
+#[derive(Clone, serde::Deserialize, Debug)]
+pub struct UserAuthConfig {
+    /// Secret used to sign JWTs — set a strong random value in production
+    pub jwt_secret: masking::Secret<String>,
+    /// JWT expiry in seconds (default 24 hours)
+    #[serde(default = "default_jwt_expiry")]
+    pub jwt_expiry_seconds: u64,
+    /// Expiry (seconds) for HS-redirect SSO sessions. Short-lived by design — HS can re-mint on
+    /// demand — so a leaked session caps its own blast radius. Default 20 minutes. When it
+    /// expires the SPA sends the user back to Hyperswitch (not the DE login page — the synthetic
+    /// user has no password), so keep this comfortably above a typical routing edit.
+    #[serde(default = "default_hs_redirect_jwt_expiry")]
+    pub hs_redirect_jwt_expiry_seconds: u64,
+    /// Send verification email on signup; block login until verified
+    #[serde(default)]
+    pub email_verification_enabled: bool,
+    #[serde(default = "default_true")]
+    pub signup_requires_admin_secret: bool,
+    /// Emails granted platform super-admin: they may enter any merchant's dashboard by pasting its
+    /// ID. Compared case-insensitively against the JWT's `email` claim at the moment of the action,
+    /// so config is the single source of truth — a grant/revoke takes effect on redeploy. Kept in
+    /// config (not the DB) on purpose: the roster is small, rarely changes, and every change goes
+    /// through code review + the deploy pipeline. Relies on `users.email` being immutable — there is
+    /// no change-email flow today; revisit this key if one is ever added.
+    ///
+    /// Accepts either a TOML array or a comma-separated string, so it can be set from a config file
+    /// (`["a@x.com", "b@x.com"]`) or the environment
+    /// (`DECISION_ENGINE__USER_AUTH__SUPER_ADMIN_EMAILS=a@x.com,b@x.com`) — env values arrive as a
+    /// single string, which the config crate won't split into a sequence on its own.
+    #[serde(default, deserialize_with = "deserialize_comma_separated_or_seq")]
+    pub super_admin_emails: Vec<String>,
+    /// Treat a session that names no permissions as holding none.
+    ///
+    /// Phase two of the permissions rollout. While false, such a session keeps full access, so a
+    /// Decision Engine deployed ahead of a Hyperswitch that does not send permissions yet behaves
+    /// exactly as before. Turn it on once every Hyperswitch in front of this deployment sends them,
+    /// and a caller that omits them is a bug rather than an old build.
+    #[serde(default)]
+    pub require_explicit_permissions: bool,
+    /// How long (ms) a token found *not* revoked is trusted without re-reading `jwt_revoked:<jti>`
+    /// from Redis, saving one round-trip per authenticated request. The cost is revocation latency:
+    /// a token revoked by `/auth/logout` stays usable for up to this long. Only the "not revoked"
+    /// answer is cached; a revoked token is refused and never re-admitted. `0` disables the cache.
+    #[serde(default)]
+    pub jwt_revocation_cache_ttl_ms: u64,
+}
+
+/// Deserialize a `Vec<String>` from either a sequence (TOML array) or a single comma-separated
+/// string (how an environment override arrives). Blank entries are dropped and whitespace trimmed.
+fn deserialize_comma_separated_or_seq<'de, D>(deserializer: D) -> Result<Vec<String>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    struct StringOrSeq;
+
+    impl<'de> serde::de::Visitor<'de> for StringOrSeq {
+        type Value = Vec<String>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a list of strings or a comma-separated string")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+        where
+            E: serde::de::Error,
+        {
+            Ok(value
+                .split(',')
+                .map(|entry| entry.trim().to_string())
+                .filter(|entry| !entry.is_empty())
+                .collect())
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
+        where
+            A: serde::de::SeqAccess<'de>,
+        {
+            let mut out = Vec::new();
+            while let Some(entry) = seq.next_element::<String>()? {
+                let entry = entry.trim().to_string();
+                if !entry.is_empty() {
+                    out.push(entry);
+                }
+            }
+            Ok(out)
+        }
+    }
+
+    deserializer.deserialize_any(StringOrSeq)
+}
+
+fn default_true() -> bool {
+    true
+}
+
+fn default_jwt_expiry() -> u64 {
+    86400
+}
+
+fn default_hs_redirect_jwt_expiry() -> u64 {
+    1200 // 20 minutes
+}
+
+const DEFAULT_ADMIN_SECRET: &str = "test_admin";
+
+#[derive(Clone, serde::Deserialize, Debug)]
+pub struct AdminSecretConfig {
+    /// Secret required in `x-admin-secret` header to call privileged endpoints (e.g. merchant create)
+    pub secret: masking::Secret<String>,
+}
+
+impl Default for AdminSecretConfig {
+    fn default() -> Self {
+        Self {
+            secret: DEFAULT_ADMIN_SECRET.to_string().into(),
+        }
+    }
+}
+
+impl AdminSecretConfig {
+    pub fn is_default(&self) -> bool {
+        self.secret.peek() == DEFAULT_ADMIN_SECRET
+    }
+}
+
+impl Default for UserAuthConfig {
+    fn default() -> Self {
+        Self {
+            jwt_secret: "change_me_in_production_use_32chars!!".to_string().into(),
+            jwt_expiry_seconds: default_jwt_expiry(),
+            hs_redirect_jwt_expiry_seconds: default_hs_redirect_jwt_expiry(),
+            email_verification_enabled: false,
+            signup_requires_admin_secret: true,
+            super_admin_emails: Vec::new(),
+            require_explicit_permissions: false,
+            jwt_revocation_cache_ttl_ms: 0,
+        }
+    }
+}
+
+/// Top-level email configuration block
+#[derive(Clone, serde::Deserialize, Debug)]
+#[serde(default)]
+pub struct EmailConfig {
+    /// From-address used in all outgoing emails
+    pub sender_email: String,
+    /// Public base URL of the application (used for verification links)
+    pub base_url: String,
+    /// Which email backend to use
+    pub active_email_client: EmailClientChoice,
+    /// SMTP settings — required when active_email_client = "smtp"
+    pub smtp: Option<SmtpConfig>,
+    /// AWS SES settings — required when active_email_client = "aws_ses"
+    pub aws_ses: Option<AwsSesEmailConfig>,
+}
+
+impl Default for EmailConfig {
+    fn default() -> Self {
+        Self {
+            sender_email: String::new(),
+            base_url: "http://localhost:8080".to_string(),
+            active_email_client: EmailClientChoice::default(),
+            smtp: None,
+            aws_ses: None,
+        }
+    }
+}
+
+impl EmailConfig {
+    /// Returns true if a real email backend is configured
+    pub fn is_active(&self) -> bool {
+        !matches!(self.active_email_client, EmailClientChoice::NoEmailClient)
+    }
+
+    /// Construct the email client from this config
+    pub async fn build_client(
+        &self,
+    ) -> error_stack::Result<crate::email::DynEmailClient, crate::email::EmailError> {
+        use crate::email::EmailError;
+        use error_stack::report;
+
+        let client: Arc<dyn crate::email::EmailClient> = match &self.active_email_client {
+            EmailClientChoice::NoEmailClient => Arc::new(crate::email::no_email::NoEmailClient),
+            EmailClientChoice::Smtp => {
+                let smtp_config = self
+                    .smtp
+                    .as_ref()
+                    .ok_or_else(|| report!(EmailError::MissingConfig))?;
+                Arc::new(crate::email::smtp::SmtpEmailClient::new(
+                    smtp_config,
+                    self.sender_email.clone(),
+                )?)
+            }
+            EmailClientChoice::AwsSes => {
+                let ses_config = self
+                    .aws_ses
+                    .as_ref()
+                    .ok_or_else(|| report!(EmailError::MissingConfig))?;
+                Arc::new(
+                    crate::email::aws_ses::AwsSesEmailClient::new(
+                        ses_config,
+                        self.sender_email.clone(),
+                    )
+                    .await?,
+                )
+            }
+        };
+
+        Ok(client)
+    }
+}
+
+/// Selects which email backend is active
+#[derive(Clone, serde::Deserialize, Debug, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum EmailClientChoice {
+    /// Emails are silently discarded — useful for development
+    #[default]
+    NoEmailClient,
+    /// Send via SMTP (works with any SMTP-compatible service)
+    Smtp,
+    /// Send via AWS Simple Email Service v2
+    AwsSes,
+}
+
+/// SMTP client configuration
+#[derive(Clone, serde::Deserialize, Debug)]
+pub struct SmtpConfig {
+    /// SMTP server hostname
+    pub host: String,
+    /// SMTP server port — defaults to 587 (STARTTLS) or 465 (TLS), 1025 (None)
+    pub port: Option<u16>,
+    /// SMTP auth username
+    pub username: String,
+    /// SMTP auth password
+    pub password: String,
+    /// TLS mode — use "none" for local dev (Mailpit), "starttls" for most production SMTP servers
+    #[serde(default)]
+    pub tls: SmtpTls,
+}
+
+#[derive(Clone, serde::Deserialize, Debug, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum SmtpTls {
+    /// No TLS — plain SMTP. Use for local testing with Mailpit.
+    None,
+    /// Upgrade to TLS via STARTTLS after connecting. Standard for port 587.
+    #[default]
+    StartTls,
+    /// Implicit TLS from the first byte. Standard for port 465.
+    Tls,
+}
+
+/// AWS SES v2 client configuration
+#[derive(Clone, serde::Deserialize, Debug)]
+pub struct AwsSesEmailConfig {
+    /// AWS region where SES is configured (e.g. "us-east-1")
+    pub region: String,
+    /// IAM role ARN to assume via STS before sending emails (cross-account use)
+    pub email_role_arn: Option<String>,
+    /// STS session name used when assuming the role
+    pub sts_role_session_name: Option<String>,
+    /// HTTP proxy URL for SES API calls (e.g. "http://squid-proxy:3128"). Use an `http://` scheme
+    /// even when proxying HTTPS destinations — the proxy uses CONNECT tunneling. Required in private
+    /// subnets without a SES VPC endpoint.
+    pub proxy_url: Option<String>,
 }
 
 #[derive(Clone, Debug)]
 pub struct TenantConfig {
     pub tenant_id: String,
-    pub open_router_secrets: Secrets,
     pub tenant_secrets: TenantSecrets,
     pub routing_config: Option<TomlConfig>,
+    pub pm_filters: ConnectorFilters,
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
+    pub cache_config: CacheConfig,
+    pub hypersense: HypersenseConfig,
+    pub cost_ingestion: CostIngestionConfig,
+    pub volume_commitment: VolumeCommitmentConfig,
+    pub card_info_service: CardInfoServiceConfig,
+}
+
+/// Deployment-level mechanics for volume commitment routing; everything per-merchant arrives
+/// from the contract source instead. Nothing here is a contract term.
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct VolumeCommitmentConfig {
+    /// Expose the scheduler in this process, on its own port.
+    pub enabled: bool,
+    /// Where that port binds — its own listener, exactly as `[metrics]` is.
+    pub server: Server,
+    /// Where the scheduler sends run calls; normally this same process's `[server]`.
+    pub main_server_url: String,
+    /// How often the scheduler wakes. Bounds how late a due job fires; keep well under the
+    /// shortest cadence.
+    pub tick_secs: u64,
+    /// How often a merchant's plan is rebuilt — the only scheduled job. Per-merchant overridable.
+    pub default_forecast_interval_secs: u64,
+    /// Whether `test_minutes` billing cycles may be written. A contract whose "day" lasts
+    /// seconds is a demo device, meaningless against real billing, so it is off unless a
+    /// deployment's own config turns it on.
+    #[serde(default)]
+    pub allow_test_cycles: bool,
+    /// How long one contract "day" lasts on a `test_minutes` cycle. It sets the speed of a demo:
+    /// the whole cycle is `anchor` of these, so halving it halves the wait and doubles the rate
+    /// the promise line paces at. Read through `test_day_secs()`, which holds it to a range a
+    /// demo can be watched at.
+    #[serde(default)]
+    pub test_day_secs: u64,
+    /// The demo contract library — whole documents, not a recipe for building them, so a
+    /// deployment tunes a scenario without a build. A config that lists none (the default, and
+    /// what production ships) serves none: that empty list *is* the production gate.
+    #[serde(default)]
+    pub samples: Vec<SampleScenario>,
+}
+
+impl VolumeCommitmentConfig {
+    /// The configured test contract-day length, held to something a demo can be watched at: at
+    /// least a second, and under an hour, so a "day" stays shorter than the calendar day every
+    /// reader of `day_secs` distinguishes it from.
+    pub fn test_day_secs(&self) -> u64 {
+        self.test_day_secs.clamp(1, 3_600)
+    }
+}
+
+/// One demo contract a merchant can activate to watch a single engine behaviour happen on
+/// purpose: the document verbatim, plus what a reader should watch for.
+///
+/// The document is the same shape the contract builder writes, so a sample is a template and
+/// nothing more — once activated it is an ordinary contract, paced by the ordinary engine.
+#[derive(Debug, Clone, serde::Deserialize, serde::Serialize)]
+// Read from TOML in snake_case like every other config key; served to the dashboard in
+// camelCase like every other API field.
+#[serde(deny_unknown_fields, rename_all(serialize = "camelCase"))]
+pub struct SampleScenario {
+    /// Stable identifier, used as a key and a deep link.
+    pub id: String,
+    pub title: String,
+    /// One line: the situation the contract puts the engine in.
+    pub summary: String,
+    /// What the dashboard should show if the engine is working.
+    pub expected_outcome: String,
+    /// The contract itself, exactly as it would be stored.
+    pub contract: crate::euclid::volume_contract::VolumeContractConfig,
+}
+
+impl Default for VolumeCommitmentConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            server: Server {
+                host: "127.0.0.1".to_string(),
+                port: 9095,
+                shutdown_timeout: Server::default_shutdown_timeout(),
+                shutdown_drain_delay: Server::default_shutdown_drain_delay(),
+                routing_request_timeout_ms: Server::default_routing_request_timeout_ms(),
+            },
+            main_server_url: "http://127.0.0.1:8080".to_string(),
+            tick_secs: 30,
+            default_forecast_interval_secs: 3600,
+            // `config/` ships only `development.toml`, so a deployment whose config omits this
+            // key must land on production behaviour, not on demo behaviour.
+            allow_test_cycles: false,
+            test_day_secs:
+                crate::decider::gatewaydecider::volume_commitment::math::DEFAULT_TEST_DAY_SECS,
+            samples: Vec::new(),
+        }
+    }
+}
+
+/// Server-owned report API endpoints for a connector, grouped by environment.
+/// Missing settings retain the connector production endpoints for existing deployments.
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct ConnectorReportApiConfig {
+    pub checkout_production_api_base_url: String,
+    pub checkout_sandbox_api_base_url: String,
+    pub chase_token_url: String,
+    pub chase_reports_url: String,
+}
+
+impl Default for ConnectorReportApiConfig {
+    fn default() -> Self {
+        Self {
+            checkout_production_api_base_url: "https://api.checkout.com".to_string(),
+            checkout_sandbox_api_base_url: "https://api.sandbox.checkout.com".to_string(),
+            chase_token_url: "https://idag2.jpmorganchase.com/adfs/oauth2/token".to_string(),
+            chase_reports_url: "https://api.reports.jpmorgan.com/api/v1/reports".to_string(),
+        }
+    }
+}
+
+/// Configuration for the in-house cost-estimation settlement ingestion pipeline
+/// (see `scratch/inhouse-cost-architecture.md` §7).
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct CostIngestionConfig {
+    /// Connector settlement report API endpoints.
+    pub connector: ConnectorReportApiConfig,
+    /// Key id used to encrypt *new* connector credentials. Must name a key present in
+    /// `creds_encryption_keys`. Rotate by adding a new key there and pointing this at it —
+    /// old keys stay in the ring so existing credentials still decrypt. Empty ⇒ storage disabled.
+    pub creds_encryption_current: String,
+    /// Keyring: key-id → hex-encoded 32-byte AES-256 key. Retaining old ids is what makes
+    /// rotation non-destructive: a credential is stored tagged with the id that encrypted it,
+    /// and decryption looks the id up here. Generate keys with `openssl rand -hex 32`.
+    pub creds_encryption_keys: std::collections::HashMap<String, masking::Secret<String>>,
+    /// Enable the background ingest worker that drains `report_ingest_queue`. Off by default so
+    /// only the deployment(s) meant to run ingestion do.
+    pub worker_enabled: bool,
+    /// How often the ingest worker polls the queue, in seconds.
+    pub worker_interval_secs: u64,
+    /// Max jobs claimed per poll cycle.
+    pub worker_batch_size: usize,
+    /// Enable the report poller for pull-based connectors: it lists each connector's ready reports
+    /// and enqueues them. Connector-agnostic. Off by default; enable on the deployment that owns
+    /// ingestion.
+    pub report_poll_enabled: bool,
+    /// How often the report poller lists reports, in seconds. Reports are daily, so hourly is ample.
+    pub report_poll_interval_secs: u64,
+    /// S3 bucket for curated sample reports used by the "Use a sample file" flow. Each connector's
+    /// sample is expected at `<connector>_report.csv` inside this bucket, and is filed under the
+    /// account `acc_<connector>`. If empty, the sample endpoint returns 404.
+    pub aws_bucket: String,
+    /// AWS region for S3 sample downloads. If omitted, the SDK uses the default region provider
+    /// chain (env vars, profile, IMDS, etc.).
+    pub aws_region: Option<String>,
+}
+
+impl Default for CostIngestionConfig {
+    fn default() -> Self {
+        Self {
+            connector: ConnectorReportApiConfig::default(),
+            creds_encryption_current: String::new(),
+            creds_encryption_keys: std::collections::HashMap::new(),
+            worker_enabled: false,
+            worker_interval_secs: 60,
+            worker_batch_size: 20,
+            report_poll_enabled: false,
+            report_poll_interval_secs: 3600,
+            aws_bucket: String::new(),
+            aws_region: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, serde::Deserialize)]
+#[serde(default)]
+pub struct AnalyticsConfig {
+    pub capture: AnalyticsCaptureConfig,
+    pub kafka: KafkaAnalyticsConfig,
+    pub clickhouse: ClickHouseAnalyticsConfig,
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct AnalyticsCaptureConfig {
+    pub details_max_bytes: usize,
+}
+
+impl Default for AnalyticsCaptureConfig {
+    fn default() -> Self {
+        Self {
+            details_max_bytes: 65_536,
+        }
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct KafkaAnalyticsConfig {
+    pub enabled: bool,
+    pub brokers: String,
+    pub client_id: String,
+    pub api_topic: String,
+    pub domain_topic: String,
+    pub acks: String,
+    pub compression: String,
+    pub message_timeout_ms: u64,
+    pub queue_capacity: usize,
+    pub security_protocol: Option<String>,
+    pub sasl_mechanism: Option<String>,
+    pub sasl_username: Option<String>,
+    pub sasl_password: Option<masking::Secret<String>>,
+}
+
+impl Default for KafkaAnalyticsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            brokers: "localhost:9092".to_string(),
+            client_id: "decision-engine".to_string(),
+            api_topic: "api".to_string(),
+            domain_topic: "domain".to_string(),
+            acks: "all".to_string(),
+            compression: "lz4".to_string(),
+            message_timeout_ms: 5_000,
+            // Sized for bursts (simulator runs emit hundreds of events/sec); events over
+            // capacity are silently dropped, which surfaces as "no outcome" A/B payments.
+            queue_capacity: 5_000,
+            security_protocol: None,
+            sasl_mechanism: None,
+            sasl_username: None,
+            sasl_password: None,
+        }
+    }
+}
+
+#[derive(Clone, Debug, serde::Deserialize)]
+#[serde(default)]
+pub struct ClickHouseAnalyticsConfig {
+    pub enabled: bool,
+    pub url: String,
+    pub database: String,
+    pub user: String,
+    pub password: Option<masking::Secret<String>>,
+}
+
+impl Default for ClickHouseAnalyticsConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            url: String::new(),
+            database: "default".to_string(),
+            user: "default".to_string(),
+            password: None,
+        }
+    }
 }
 
 impl TenantConfig {
@@ -61,8 +663,8 @@ impl TenantConfig {
     pub fn from_global_config(global_config: &GlobalConfig, tenant_id: String) -> Self {
         Self {
             tenant_id: tenant_id.clone(),
-            open_router_secrets: global_config.secrets.clone(),
             routing_config: global_config.routing_config.clone(),
+            pm_filters: global_config.pm_filters.clone(),
             #[allow(clippy::unwrap_used)]
             tenant_secrets: global_config
                 .tenant_secrets
@@ -70,8 +672,53 @@ impl TenantConfig {
                 .cloned()
                 .unwrap(),
             debit_routing_config: global_config.debit_routing_config.clone(),
+            cache_config: global_config.cache_config.clone(),
+            hypersense: global_config.hypersense.clone(),
+            cost_ingestion: global_config.cost_ingestion.clone(),
+            volume_commitment: global_config.volume_commitment.clone(),
+            card_info_service: global_config.card_info_service.clone(),
         }
     }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(transparent)]
+pub struct ConnectorFilters(pub HashMap<String, PaymentMethodFilters>);
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(transparent)]
+pub struct PaymentMethodFilters(pub HashMap<String, CurrencyCountryFlowFilter>);
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct CurrencyCountryFlowFilter {
+    #[serde(default, deserialize_with = "deserialize_optional_hashset")]
+    pub country: Option<HashSet<String>>,
+    #[serde(default, deserialize_with = "deserialize_optional_hashset")]
+    pub currency: Option<HashSet<String>>,
+    pub not_available_flows: Option<NotAvailableFlows>,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(default)]
+pub struct NotAvailableFlows {
+    pub capture_method: Option<String>,
+}
+
+fn deserialize_optional_hashset<'a, D>(deserializer: D) -> Result<Option<HashSet<String>>, D::Error>
+where
+    D: serde::Deserializer<'a>,
+{
+    let raw = Option::<String>::deserialize(deserializer)?;
+    Ok(raw.map(|value| {
+        value
+            .trim()
+            .split(',')
+            .map(str::trim)
+            .filter(|part| !part.is_empty())
+            .map(ToOwned::to_owned)
+            .collect()
+    }))
 }
 
 #[cfg(feature = "limit")]
@@ -86,6 +733,27 @@ pub struct Limit {
 pub struct Server {
     pub host: String,
     pub port: u16,
+    #[serde(default = "Server::default_shutdown_timeout")]
+    pub shutdown_timeout: u64,
+    #[serde(default = "Server::default_shutdown_drain_delay")]
+    pub shutdown_drain_delay: u64,
+    /// Longest a routing hot-path request (decide, evaluate, hybrid, score update) may run before
+    /// it is answered with `504`. Bounds how long a slow Redis or database holds a connection.
+    #[serde(default = "Server::default_routing_request_timeout_ms")]
+    pub routing_request_timeout_ms: u64,
+}
+
+impl Server {
+    // drain_delay + shutdown_timeout + 5s feedback drain must stay under terminationGracePeriodSeconds (chart default 35).
+    fn default_shutdown_timeout() -> u64 {
+        20
+    }
+    fn default_shutdown_drain_delay() -> u64 {
+        5
+    }
+    fn default_routing_request_timeout_ms() -> u64 {
+        2000
+    }
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]
@@ -106,35 +774,251 @@ pub struct PgDatabase {
     pub pg_port: u16,
     pub pg_dbname: String,
     pub pg_pool_size: Option<usize>,
+    /// libpq `sslmode` (e.g. `verify-full`). Leave unset for a plain PostgreSQL / insecure
+    /// CockroachDB node; a secure CockroachDB cluster (CockroachDB Cloud) requires `verify-full`.
+    #[serde(default)]
+    pub pg_sslmode: Option<String>,
+    /// Path to the CA certificate used to verify the server when `pg_sslmode` demands it.
+    #[serde(default)]
+    pub pg_ssl_root_cert: Option<String>,
 }
 
 #[derive(Clone, serde::Deserialize, Debug)]
-pub struct Secrets {
-    // KMS encrypted
-    #[cfg(feature = "middleware")]
-    pub open_router_private_key: masking::Secret<String>,
+pub struct CacheConfig {
+    pub service_config_redis_prefix: String,
+    pub service_config_ttl: i64,
+    #[serde(default = "CacheConfig::default_invalidation_channel")]
+    pub invalidation_channel: String,
+}
+
+impl CacheConfig {
+    fn default_invalidation_channel() -> String {
+        "decision_engine_invalidate".to_string()
+    }
+
+    pub fn add_prefix(&self, key: &str) -> String {
+        format!("{}{}", self.service_config_redis_prefix, key)
+    }
+}
+
+#[derive(Clone, serde::Deserialize, Debug)]
+#[serde(default)]
+pub struct HypersenseConfig {
+    pub base_url: String,
+    pub username: String,
+    pub password: masking::Secret<String>,
+    /// TTL (seconds) for the cached access token. Must stay below the token's own
+    /// lifetime (the sign-in API issues 86400s tokens); defaults to 23h.
+    pub token_ttl_secs: i64,
+    /// TTL (seconds) for the in-process fee-rate-estimate cache that fronts the
+    /// cost-observability endpoint. Identical lookup scenarios within this window
+    /// are served from memory instead of re-hitting the API. `0` disables the
+    /// cache. Defaults to 300s (5 min) — short, since this is a temporary cache
+    /// and cost data should not go stale for long.
+    pub cost_cache_ttl_secs: u64,
+    /// When true, candidate PSP costs are served from the local, deterministic
+    /// `seed_costs` table (realistic US IC++ for Adyen vs blended for Stripe) instead
+    /// of the live Hypersense API. Intended for the Decision Simulator so the auth-vs-cost
+    /// tradeoff is offline and repeatable. Defaults to `false` (production uses the API).
+    pub use_seed_costs: bool,
+    /// Per-PSP seed cost models consulted when `use_seed_costs` is true. Each entry has a
+    /// `default` fee plus optional `tiers` overriding it by card network/program. Empty by
+    /// default; populate it (see `config/development.toml`) to drive the simulator.
+    pub seed_costs: Vec<SeedCostEntry>,
+}
+
+impl Default for HypersenseConfig {
+    fn default() -> Self {
+        Self {
+            base_url: "https://eu.hyperswitch.io/cost-observability/router".to_string(),
+            username: String::new(),
+            password: masking::Secret::new(String::new()),
+            token_ttl_secs: 82_800,
+            cost_cache_ttl_secs: 300,
+            use_seed_costs: false,
+            seed_costs: Vec::new(),
+        }
+    }
+}
+
+/// Split a percentage fee into its `(interchange, scheme, markup)` bps components: the explicit
+/// contract components when *any* is set, otherwise the whole blended `pct_bps` attributed to
+/// interchange. Effective percentage rate is always the sum of the returned triple, so a legacy
+/// blended entry (`pct_bps` only) and a component entry both collapse to the same effective bps.
+pub fn fee_components(
+    pct_bps: f64,
+    interchange_bps: Option<f64>,
+    scheme_bps: Option<f64>,
+    markup_bps: Option<f64>,
+) -> (f64, f64, f64) {
+    match (interchange_bps, scheme_bps, markup_bps) {
+        (None, None, None) => (pct_bps, 0.0, 0.0),
+        _ => (
+            interchange_bps.unwrap_or(0.0),
+            scheme_bps.unwrap_or(0.0),
+            markup_bps.unwrap_or(0.0),
+        ),
+    }
+}
+
+/// An amount-independent fee split — `effective_cost_bps = pct_bps + fixed/amount·10_000`.
+/// `fixed` is in the cluster's major currency unit (e.g. dollars).
+///
+/// The percentage rate can be expressed two ways: the blended `pct_bps` (legacy), or the explicit
+/// contract components `interchange_bps` + `scheme_bps` + `markup_bps` (what a merchant negotiates).
+/// When any component is set, the effective rate is their sum and `pct_bps` is ignored — see
+/// [`fee_components`] and [`SeedFeeModel::effective_pct_bps`].
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct SeedFeeModel {
+    #[serde(default)]
+    pub pct_bps: f64,
+    pub fixed: f64,
+    #[serde(default)]
+    pub interchange_bps: Option<f64>,
+    #[serde(default)]
+    pub scheme_bps: Option<f64>,
+    #[serde(default)]
+    pub markup_bps: Option<f64>,
+}
+
+impl SeedFeeModel {
+    /// Effective percentage rate (bps): the sum of the contract components when any is present,
+    /// else the blended `pct_bps`.
+    pub fn effective_pct_bps(&self) -> f64 {
+        let (i, s, m) = fee_components(
+            self.pct_bps,
+            self.interchange_bps,
+            self.scheme_bps,
+            self.markup_bps,
+        );
+        i + s + m
+    }
+}
+
+/// A fee override scoped to a card scenario. Each field is matched against the same-named
+/// `ClusterKey` field; a `None` field is a wildcard (matches any value). The most specific
+/// matching tier wins (see `seed_costs`). Adding a network, currency, funding type, or
+/// program is just appending another tier — no code change.
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct SeedCostTier {
+    /// Card network, e.g. "visa", "mastercard" (case-insensitive equality).
+    /// Matches `ClusterKey::card_network`. `None` matches any.
+    #[serde(default)]
+    pub card_network: Option<String>,
+    /// Funding type, "credit" or "debit" (case-insensitive equality).
+    /// Matches `ClusterKey::payment_method_type`. `None` matches any.
+    #[serde(default)]
+    pub payment_method_type: Option<String>,
+    /// Card program / tier, e.g. "standard", "premium", "ultra_premium", "commercial"
+    /// (case-insensitive equality — exact, so "premium" and "ultra_premium" stay distinct).
+    /// Matches `ClusterKey::card_type`. `None` matches any.
+    #[serde(default)]
+    pub card_type: Option<String>,
+    /// Transaction currency, e.g. "USD", "EUR" (case-insensitive equality).
+    /// Matches `ClusterKey::transaction_currency`. `None` matches any.
+    #[serde(default)]
+    pub transaction_currency: Option<String>,
+    /// Issuer region bucket — "us", "eu", or "intl" (case-insensitive equality).
+    /// Matches `ClusterKey::card_issuing_country` (which `derive_cluster_key` normalizes
+    /// from the card's issuer country). This is the dimension that separates the otherwise
+    /// indistinguishable USD scenarios at a US merchant — regulated US debit vs EU consumer
+    /// vs international — since they share a currency but differ by who issued the card.
+    /// `None` matches any.
+    #[serde(default)]
+    pub card_issuing_country: Option<String>,
+    /// Blended percentage rate in bps. Optional when the component fields below are set
+    /// (effective rate = interchange + scheme + markup); kept for the legacy blended form.
+    #[serde(default)]
+    pub pct_bps: f64,
+    pub fixed: f64,
+    /// Contract fee components (bps). When any is set, the effective percentage is their sum and
+    /// `pct_bps` is ignored — lets a merchant express interchange / scheme / markup line items.
+    #[serde(default)]
+    pub interchange_bps: Option<f64>,
+    #[serde(default)]
+    pub scheme_bps: Option<f64>,
+    #[serde(default)]
+    pub markup_bps: Option<f64>,
+    /// Human-readable scenario name for the dashboard (e.g. "High-value flight, UAE debit").
+    #[serde(default)]
+    pub label: Option<String>,
+    /// Representative ticket amount for this scenario, used to pre-fill the simulation preview.
+    #[serde(default)]
+    pub example_amount: Option<f64>,
+}
+
+impl SeedCostTier {
+    /// Effective percentage rate (bps): the sum of the contract components when any is present,
+    /// else the blended `pct_bps`.
+    pub fn effective_pct_bps(&self) -> f64 {
+        let (i, s, m) = fee_components(
+            self.pct_bps,
+            self.interchange_bps,
+            self.scheme_bps,
+            self.markup_bps,
+        );
+        i + s + m
+    }
+}
+
+/// The seed pricing for one PSP: a `default` fee used when no tier matches, plus optional
+/// per-(network, program) `tiers`. A blended PSP needs only `default`; an IC++ PSP lists a
+/// tier per card type it prices differently.
+#[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
+pub struct SeedCostEntry {
+    /// PSP / gateway name (case-insensitive), e.g. "adyen", "stripe".
+    pub psp: String,
+    pub default: SeedFeeModel,
+    #[serde(default)]
+    pub tiers: Vec<SeedCostTier>,
+}
+
+/// TTL configuration for the in-process memory caches that sit in front of
+/// Redis / DB on the routing hot-path.
+#[derive(Clone, serde::Deserialize, Debug)]
+pub struct MemCacheConfig {
+    /// SR score in-process cache TTL in milliseconds (default: 75).
+    #[serde(default = "MemCacheConfig::default_sr_score_ttl_ms")]
+    pub sr_score_ttl_ms: u64,
+    /// Gateway outage list cache TTL in milliseconds (default: 30 000 = 30s).
+    #[serde(default = "MemCacheConfig::default_gw_outage_ttl_ms")]
+    pub gw_outage_ttl_ms: u64,
+    /// Per-merchant payment-flow config cache TTL in milliseconds (default: 60 000 = 60s).
+    #[serde(default = "MemCacheConfig::default_payment_flow_ttl_ms")]
+    pub payment_flow_ttl_ms: u64,
+}
+
+impl MemCacheConfig {
+    fn default_sr_score_ttl_ms() -> u64 {
+        75
+    }
+    fn default_gw_outage_ttl_ms() -> u64 {
+        30_000
+    }
+    fn default_payment_flow_ttl_ms() -> u64 {
+        60_000
+    }
+}
+
+impl Default for MemCacheConfig {
+    fn default() -> Self {
+        Self {
+            sr_score_ttl_ms: Self::default_sr_score_ttl_ms(),
+            gw_outage_ttl_ms: Self::default_gw_outage_ttl_ms(),
+            payment_flow_ttl_ms: Self::default_payment_flow_ttl_ms(),
+        }
+    }
+}
+
+#[derive(Clone, serde::Deserialize, Debug)]
+pub struct CompressionFilepath {
+    pub zstd_compression_filepath: String,
 }
 
 #[derive(serde::Deserialize, Debug, Clone)]
 pub struct TenantSecrets {
-    #[serde(deserialize_with = "deserialize_hex")]
-    pub master_key: Vec<u8>,
-    #[cfg(feature = "middleware")]
-    pub public_key: masking::Secret<String>,
-
     /// schema name for the tenant (defaults to tenant_id)
     pub schema: String,
-}
-
-fn deserialize_hex<'de, D>(deserializer: D) -> Result<Vec<u8>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let deserialized_str: String = serde::Deserialize::deserialize(deserializer)?;
-
-    let deserialized_str = deserialized_str.into_bytes();
-
-    Ok(deserialized_str)
 }
 
 #[derive(serde::Deserialize, Debug, Clone)]
@@ -195,13 +1079,27 @@ impl GlobalConfig {
 
         let config = Self::builder(&env)?
             .add_source(config::File::from(config_path).required(false))
-            .add_source(config::Environment::with_prefix("LOCKER").separator("__"))
+            .add_source(
+                config::Environment::with_prefix("DECISION_ENGINE")
+                    .separator("__")
+                    .list_separator(",")
+                    .with_list_parse_key("redis.cluster_urls"),
+            )
             .build()?;
 
-        serde_path_to_error::deserialize(config).map_err(|error| {
-            logger::error!("Unable to deserialize application configuration: {error}");
-            error.into_inner()
-        })
+        let mut global_config: Self =
+            serde_path_to_error::deserialize(config).map_err(|error| {
+                logger::error!("Unable to deserialize application configuration: {error}");
+                error.into_inner()
+            })?;
+        // Payment method keys come from the code, not the file.
+        global_config.routing_config =
+            global_config
+                .routing_config
+                .map(|routing_config| TomlConfig {
+                    keys: routing_config.keys.with_payment_method_keys(),
+                });
+        Ok(global_config)
     }
 
     pub fn builder(
@@ -269,55 +1167,77 @@ impl GlobalConfig {
                 ))?;
         }
 
-        for tenant_secrets in self.tenant_secrets.values_mut() {
-            if tenant_secrets.master_key.is_empty() {
-                logger::debug!("Skipping decryption of master key for tenant as it is empty");
-                // Skip decryption if master_key is empty
-                continue;
+        if self.analytics.clickhouse.enabled {
+            if let Some(password) = self.analytics.clickhouse.password.clone() {
+                self.analytics.clickhouse.password = Some(
+                    secret_management_client
+                        .get_secret(password)
+                        .await
+                        .change_context(error::ConfigurationError::KmsDecryptError(
+                            "analytics_clickhouse_password",
+                        ))?,
+                );
             }
-            tenant_secrets.master_key = hex::decode(
-                secret_management_client
-                    .get_secret(
-                        String::from_utf8(tenant_secrets.master_key.clone())
-                            .expect("Failed while converting master key to `String`")
-                            .into(),
-                    )
-                    .await
-                    .change_context(error::ConfigurationError::KmsDecryptError("master_key"))?
-                    .expose(),
-            )
-            .expect("Failed to hex decode master key")
+        } else if self.analytics.clickhouse.password.is_some() {
+            crate::logger::warn!(
+                "Skipping ClickHouse password decryption: analytics.clickhouse.enabled is false. \
+                 A password is configured but will not be used."
+            );
         }
 
-        #[cfg(feature = "middleware")]
-        {
-            for tenant_secrets in self.tenant_secrets.values_mut() {
-                if tenant_secrets.public_key.clone().expose().is_empty() {
-                    logger::debug!("Skipping decryption of public key for tenant as it is empty");
-                    continue; // Skip decryption if public_key is empty
-                }
-                tenant_secrets.public_key = secret_management_client
-                    .get_secret(tenant_secrets.public_key.clone())
-                    .await
-                    .change_context(error::ConfigurationError::KmsDecryptError("public_key"))?;
+        if self.analytics.kafka.enabled {
+            if let Some(password) = self.analytics.kafka.sasl_password.clone() {
+                self.analytics.kafka.sasl_password = Some(
+                    secret_management_client
+                        .get_secret(password)
+                        .await
+                        .change_context(error::ConfigurationError::KmsDecryptError(
+                            "analytics_kafka_sasl_password",
+                        ))?,
+                );
             }
+        } else if self.analytics.kafka.sasl_password.is_some() {
+            crate::logger::warn!(
+                "Skipping Kafka SASL password decryption: analytics.kafka.enabled is false. \
+                 A password is configured but will not be used."
+            );
+        }
 
-            if self
-                .secrets
-                .open_router_private_key
-                .clone()
-                .expose()
-                .is_empty()
-            {
-                logger::debug!("Skipping decryption of open_router_private_key as it is empty");
-            } else {
-                self.secrets.open_router_private_key = secret_management_client
-                    .get_secret(self.secrets.open_router_private_key.clone())
-                    .await
-                    .change_context(error::ConfigurationError::KmsDecryptError(
-                        "open_router_private_key",
-                    ))?;
-            }
+        self.card_info_service.api_key = secret_management_client
+            .get_secret(self.card_info_service.api_key.clone())
+            .await
+            .change_context(error::ConfigurationError::KmsDecryptError(
+                "card_info_service_api_key",
+            ))?;
+
+        self.hypersense.password = secret_management_client
+            .get_secret(self.hypersense.password.clone())
+            .await
+            .change_context(error::ConfigurationError::KmsDecryptError(
+                "hypersense_password",
+            ))?;
+
+        self.user_auth.jwt_secret = secret_management_client
+            .get_secret(self.user_auth.jwt_secret.clone())
+            .await
+            .change_context(error::ConfigurationError::KmsDecryptError(
+                "user_auth_jwt_secret",
+            ))?;
+
+        self.admin_secret.secret = secret_management_client
+            .get_secret(self.admin_secret.secret.clone())
+            .await
+            .change_context(error::ConfigurationError::KmsDecryptError(
+                "admin_secret_secret",
+            ))?;
+
+        for secret in self.cost_ingestion.creds_encryption_keys.values_mut() {
+            *secret = secret_management_client
+                .get_secret(secret.clone())
+                .await
+                .change_context(error::ConfigurationError::KmsDecryptError(
+                    "cost_ingestion_creds_encryption_keys",
+                ))?;
         }
 
         Ok(())
@@ -325,6 +1245,27 @@ impl GlobalConfig {
 
     pub fn validate(&self) -> error_stack::Result<(), error::ConfigurationError> {
         self.secrets_management.validate()?;
+        if self.analytics.capture.details_max_bytes == 0 {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "analytics.capture.details_max_bytes".to_string(),
+                )
+            ));
+        }
+        if self.analytics.clickhouse.enabled && self.analytics.clickhouse.url.trim().is_empty() {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "analytics.clickhouse.url".to_string(),
+                )
+            ));
+        }
+        if self.analytics.kafka.enabled && self.analytics.kafka.queue_capacity == 0 {
+            return Err(error_stack::report!(
+                error::ConfigurationError::InvalidConfigurationValueError(
+                    "analytics.kafka.queue_capacity".to_string(),
+                )
+            ));
+        }
         Ok(())
     }
 }
@@ -417,6 +1358,8 @@ mod tests {
     }
 }
 
+pub use gsm::{GsmConfig, GsmSourceKind};
+
 /// Represents a key configuration in the TOML file
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
 pub struct KeyConfig {
@@ -431,10 +1374,4 @@ pub struct KeyConfig {
 pub struct KeysConfig {
     #[serde(flatten)]
     pub keys: HashMap<String, KeyConfig>,
-}
-
-/// Structure for the [default] section in the TOML
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct DefaultConfig {
-    pub output: Vec<String>,
 }

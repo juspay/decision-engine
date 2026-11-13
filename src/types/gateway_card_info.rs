@@ -1,12 +1,11 @@
 use crate::app::get_tenant_app_state;
+use crate::generics::Repository;
 use crate::logger;
-use diesel::sql_types::Bool;
 use serde::{Deserialize, Serialize};
 // use db::euler_mesh_impl::mesh_config;
 // use db::mesh::internal;
 use crate::storage::types::{BitBool, GatewayCardInfo as DBGatewayCardInfo};
 use crate::types::bank_code::{to_bank_code_id, BankCodeId};
-use crate::types::gateway::GatewayAny;
 // use juspay::extra::parsing::{
 //     Parsed, Step, ParsingErrorType, ParsingErrorType::UnexpectedTextValue, around, lift_either,
 //     lift_pure, mandated, non_negative, parse_field, project,
@@ -15,7 +14,6 @@ use crate::types::gateway::GatewayAny;
 // use types::utils::dbconfig::get_euler_db_conf;
 // use eulerhs::language::MonadFlow;
 use crate::error::ApiError;
-use std::clone;
 use std::cmp::PartialEq;
 use std::fmt::Debug;
 use std::fmt::Display;
@@ -23,12 +21,7 @@ use std::option::Option;
 use std::string::String;
 use std::vec::Vec;
 
-#[cfg(feature = "mysql")]
-use crate::storage::schema::gateway_card_info::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::gateway_card_info::dsl;
-use diesel::associations::HasTable;
-use diesel::dsl::sql;
+use crate::storage::backend::schema::gateway_card_info::dsl;
 use diesel::*;
 
 // use super::payment::payment_method::text_to_payment_method_type;
@@ -119,15 +112,13 @@ impl TryFrom<DBGatewayCardInfo> for GatewayCardInfo {
             gateway: db_gci.gateway,
             cardIssuerBankName: db_gci.card_issuer_bank_name,
             authType: db_gci.auth_type,
-            juspayBankCodeId: db_gci.juspay_bank_code_id.map(|id| to_bank_code_id(id)),
+            juspayBankCodeId: db_gci.juspay_bank_code_id.map(to_bank_code_id),
             disabled: db_gci.disabled.map(|f| f.0),
             validationType: db_gci
                 .validation_type
-                .map(|validation_type| text_to_validation_type(validation_type))
+                .map(text_to_validation_type)
                 .transpose()?,
-            paymentMethodType: db_gci
-                .payment_method_type
-                .map(|payment_method_type| payment_method_type),
+            paymentMethodType: db_gci.payment_method_type,
         })
     }
 }
@@ -137,13 +128,7 @@ pub async fn get_all_by_mgci_ids(ids: Vec<GciPId>) -> Vec<GatewayCardInfo> {
     let id_values: Vec<i64> = ids.into_iter().map(|id| id.gciPId).collect();
     let app_state = get_tenant_app_state().await;
     // Execute the database query using Diesel
-    match crate::generics::generic_find_all::<
-        <DBGatewayCardInfo as HasTable>::Table,
-        _,
-        DBGatewayCardInfo,
-    >(&app_state.db, dsl::id.eq_any(id_values))
-    .await
-    {
+    match DBGatewayCardInfo::find_all(&app_state.db, dsl::id.eq_any(id_values)).await {
         Ok(db_results) => db_results
             .into_iter()
             .filter_map(|db_record: DBGatewayCardInfo| GatewayCardInfo::try_from(db_record).ok())
@@ -158,7 +143,7 @@ pub async fn get_enabled_gateway_card_info_for_gateways(
 ) -> Vec<GatewayCardInfo> {
     // Early return if both input lists are empty
     if card_bins.is_empty() && gateways.is_empty() {
-        logger::info!(
+        logger::debug!(
             tag = "get_enabled_gateway_card_info_for_gateways",
             action = "get_enabled_gateway_card_info_for_gateways",
             "card_bins and gateways are empty"
@@ -168,10 +153,9 @@ pub async fn get_enabled_gateway_card_info_for_gateways(
     let app_state = get_tenant_app_state().await;
 
     // Convert gateways to strings
-    let gateway_strings: Vec<Option<String>> =
-        gateways.clone().into_iter().map(|g| Some(g)).collect();
+    let gateway_strings: Vec<Option<String>> = gateways.clone().into_iter().map(Some).collect();
 
-    logger::info!(
+    logger::debug!(
         tag = "get_enabled_gateway_card_info_for_gateways",
         action = "get_enabled_gateway_card_info_for_gateways",
         "gateway_strings: {:?}, gateways: {:?}, card_bins: {:?}",
@@ -180,11 +164,7 @@ pub async fn get_enabled_gateway_card_info_for_gateways(
         card_bins.clone()
     );
     // Execute database query with three conditions
-    match crate::generics::generic_find_all::<
-        <DBGatewayCardInfo as HasTable>::Table,
-        _,
-        DBGatewayCardInfo,
-    >(
+    match DBGatewayCardInfo::find_all(
         &app_state.db,
         dsl::isin
             .eq_any(card_bins)
@@ -194,7 +174,7 @@ pub async fn get_enabled_gateway_card_info_for_gateways(
     .await
     {
         Ok(db_results) => {
-            logger::info!(
+            logger::debug!(
                 tag = "get_enabled_gateway_card_info_for_gateways",
                 action = "get_enabled_gateway_card_info_for_gateways",
                 "db_results: {:?}",
@@ -206,7 +186,7 @@ pub async fn get_enabled_gateway_card_info_for_gateways(
                 .collect()
         }
         Err(e) => {
-            logger::info!(
+            logger::debug!(
                 tag = "get_enabled_gateway_card_info_for_gateways",
                 action = "get_enabled_gateway_card_info_for_gateways",
                 "Error fetching data from DB: {:?}",

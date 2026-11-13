@@ -3,6 +3,13 @@ name: ci-pr
 on:
   pull_request:
     types: [opened, synchronize, reopened]
+  # The merge queue runs the same jobs on the PR combined with the latest main, so a PR doesn't
+  # need updating with main itself, and `CI Gate` reports for the queue as it does for the PR.
+  merge_group:
+    types: [checks_requested]
+
+permissions:
+  contents: read
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -13,8 +20,57 @@ env:
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
   RUST_BACKTRACE: short
+  # The stable Rust toolchain for clippy, tests and builds. Keep this identical in ci-pr.yml and
+  # ci-push.yml: when the two drift, code that one clippy version accepts passes the PR checks and
+  # then fails on main. Bump it in both files together.
+  STABLE_RUST_TOOLCHAIN: "1.99.1"
 
 jobs:
+  # Which of this PR's files decide whether the expensive jobs below have anything to say. The
+  # Rust and spell checks run on everything and are not gated; the end-to-end suite boots the API,
+  # the dashboard and four datastores, so it is asked for by path rather than run by default.
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      e2e: ${{ steps.filter.outputs.e2e }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # In the merge queue there is no PR to list files from: compare the queued commit with
+          # the main it was built on. Both are empty, so unset, on a pull request.
+          base: ${{ github.event.merge_group.base_sha }}
+          ref: ${{ github.event.merge_group.head_sha }}
+          filters: |
+            # Everything the E2E job builds, boots or runs. Listed wide on purpose: an extra run
+            # costs a runner, a missed one costs a regression that reaches main.
+            e2e:
+              # The API binary under test, and what it is built and configured from
+              - 'src/**'
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'config/**'
+              # The schema it is migrated onto
+              - 'migrations_pg/**'
+              - 'diesel_pg.toml'
+              - 'justfile'
+              # The dashboard the UI project drives
+              - 'website/**'
+              # The suite itself, and the toolchain that type-checks and runs it
+              - 'tests/**'
+              - 'playwright.config.ts'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'tsconfig.json'
+              # The datastores it starts, and this workflow
+              - 'docker-compose*.y*ml'
+              - '.github/workflows/ci-pr.yml'
+
   fmt:
     name: Rustfmt
     runs-on: ubuntu-latest
@@ -29,12 +85,23 @@ jobs:
   clippy:
     name: Clippy
     runs-on: ubuntu-latest
+    # ci-push denies warnings, so a lint that only warns here would pass the PR and fail on main.
+    env:
+      RUSTFLAGS: "-D warnings"
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable
+          toolchain: ${{ env.STABLE_RUST_TOOLCHAIN }}
           components: clippy
+      - name: Install native deps for rdkafka
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libcurl4-openssl-dev \
+            libsasl2-dev \
+            zlib1g-dev
       - uses: taiki-e/install-action@v2
         with:
           tool: just
@@ -46,17 +113,28 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: crate-ci/typos@master
+      - uses: crate-ci/typos@v1
 
   ci-hack:
     name: Cargo Hack
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: stable
+          toolchain: ${{ env.STABLE_RUST_TOOLCHAIN }}
+      - name: Install native deps for rdkafka
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libcurl4-openssl-dev \
+            libsasl2-dev \
+            zlib1g-dev
       - uses: taiki-e/install-action@v2
         with:
           tool: just
@@ -67,3 +145,191 @@ jobs:
       - run: just ci_hack
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.STABLE_RUST_TOOLCHAIN }}
+      - name: Install native deps for rdkafka
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libcurl4-openssl-dev \
+            libsasl2-dev \
+            zlib1g-dev
+      - uses: Swatinem/rust-cache@v2.7.7
+      - name: Run unit tests
+        run: cargo test
+
+  frontend-typecheck:
+    name: Frontend Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: website/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+        working-directory: website
+      - name: TypeScript type check
+        run: npx tsc --noEmit
+        working-directory: website
+
+  helm:
+    name: Helm Chart Validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for helm-charts changes
+        id: helm-changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            helm:
+              - 'helm-charts/**'
+
+      - name: Install Helm
+        if: steps.helm-changes.outputs.helm == 'true'
+        uses: azure/setup-helm@v4
+
+      - name: Lint and validate chart
+        if: steps.helm-changes.outputs.helm == 'true'
+        run: |
+          helm repo add bitnami https://charts.bitnami.com/bitnami
+          helm repo update
+          helm dependency update helm-charts/
+          helm lint helm-charts/
+          helm template test helm-charts/ > /dev/null
+
+  e2e-playwright:
+    name: E2E (Playwright)
+    needs: changes
+    if: needs.changes.outputs.e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ env.STABLE_RUST_TOOLCHAIN }}
+
+      - name: Install native deps for rdkafka
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            pkg-config \
+            libcurl4-openssl-dev \
+            libsasl2-dev \
+            zlib1g-dev \
+            libpq-dev
+
+      - uses: Swatinem/rust-cache@v2.7.7
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+          checksum: true
+
+      - name: Install diesel CLI
+        run: cargo install diesel_cli --no-default-features --features postgres --locked
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install e2e dependencies
+        run: npm ci
+
+      - name: Type check e2e suite
+        run: npm run typecheck
+
+      - name: Install dashboard dependencies
+        run: npm ci
+        working-directory: website
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium
+
+      - name: Build decision-engine
+        run: cargo build --no-default-features --features postgres
+
+      - name: Start datastores
+        run: |
+          COMPOSE_PROFILES= docker compose --profile postgres-ghcr --profile analytics-clickhouse \
+            up -d postgresql redis kafka kafka-init clickhouse mailpit
+          COMPOSE_PROFILES= docker compose --profile postgres-ghcr --profile analytics-clickhouse \
+            up -d --wait postgresql redis kafka clickhouse mailpit
+
+      - name: Apply database schema
+        run: just migrate-pg
+
+      - name: Seed global service configs
+        run: |
+          COMPOSE_PROFILES= docker compose --profile postgres-ghcr exec -T postgresql \
+            psql -v ON_ERROR_STOP=1 -U db_user -d decision_engine_db -c "
+              INSERT INTO service_configuration (name, value)
+              SELECT v.name, v.value
+              FROM (VALUES
+                  ('ENABLE_MERCHANT_ON_VOLUME_DISTRIBUTION_FEATURE_SR_V3', '{\"enableAll\":true,\"enableAllRollout\":100}'),
+                  ('merchants_enabled_for_score_keys_unification',         '{\"enableAll\":true,\"enableAllRollout\":100}'),
+                  ('SR_V3_INPUT_CONFIG_DEFAULT',                           '{\"defaultLatencyThreshold\":90,\"defaultBucketSize\":125,\"defaultHedgingPercent\":5}')
+              ) AS v(name, value)
+              WHERE NOT EXISTS (
+                  SELECT 1 FROM service_configuration sc WHERE sc.name = v.name
+              );"
+
+      - name: Run Playwright e2e
+        run: npx playwright test
+        env:
+          CI: 'true'
+          DECISION_ENGINE__LOG__CONSOLE__LEVEL: WARN
+
+      - name: Upload Playwright report
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  # The single check the branch ruleset requires. Jobs above are gated by path filters, and a job
+  # GitHub skips reports no status at all — required directly, each one would leave unrelated PRs
+  # waiting forever on a check that is never going to arrive. This job always runs, so it always
+  # reports, and it fails unless every job it depends on succeeded or was deliberately skipped.
+  # Adding a job to `needs` here is what makes it blocking; the ruleset does not need touching.
+  ci-gate:
+    name: CI Gate
+    needs:
+      - changes
+      - fmt
+      - clippy
+      - typos
+      - ci-hack
+      - unit-tests
+      - frontend-typecheck
+      - helm
+      - e2e-playwright
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every upstream job to have succeeded or been skipped
+        run: |
+          echo '${{ toJSON(needs) }}' | jq .
+          echo '${{ toJSON(needs) }}' \
+            | jq -e 'all(.[]; .result == "success" or .result == "skipped")'

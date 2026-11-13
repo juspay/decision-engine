@@ -1,3 +1,7 @@
+#![allow(clippy::unwrap_in_result)]
+
+use masking::PeekInterface;
+use open_router::decider::gatewaydecider::volume_commitment;
 use open_router::{logger, tenant::GlobalAppState};
 
 #[allow(clippy::expect_used)]
@@ -9,8 +13,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let _guard = logger::setup(
         &global_config.log,
         open_router::service_name!(),
-        [open_router::service_name!(), "tower_http"],
+        ["tower_http"],
     );
+
+    // Instruments bind to the global meter provider at first use, so this must run before anything records a metric.
+    let _metrics_guard = open_router::metrics::init(&global_config.log.telemetry)
+        .expect("Failed to set up the metrics pipeline");
 
     #[allow(clippy::expect_used)]
     global_config
@@ -21,23 +29,87 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .await
         .expect("Failed to fetch raw application secrets");
 
-    let global_app_state = GlobalAppState::new(global_config.clone()).await;
+    open_router::redis::mem_cache::init(global_config.mem_cache.clone());
 
-    // Run both servers concurrently using tokio::spawn
+    log_startup_configuration(&global_config);
+
+    let global_app_state = GlobalAppState::new(global_config.clone())
+        .await
+        .expect("Failed while configuring global application state");
+
+    // Volume commitment routing: install the shared dependencies before anything binds, so the
+    // routing path and the controller's own port see the same plan and the same counters.
+    let volume_commitment_admin_secret = global_config.admin_secret.secret.peek().clone();
+    let volume_commitment_deps = std::sync::Arc::new(
+        volume_commitment::build_deps(
+            &global_config.volume_commitment,
+            &global_config.analytics.clickhouse,
+        )
+        .await,
+    );
+    volume_commitment::init_deps(volume_commitment_deps.clone());
+
+    // Run the servers concurrently using tokio::spawn
     let main_server_handle = tokio::spawn(async move {
         open_router::app::server_builder(global_app_state)
             .await
             .expect("Failed while building the main server")
     });
 
-    let metrics_server_handle = tokio::spawn(async move {
-        open_router::metrics::metrics_server_builder(global_config.clone())
-            .await
-            .expect("Failed while building the metrics server")
+    // The pacing scheduler, on a port of its own. It owns the clock: when a merchant's forecast
+    // comes due it calls the main server, which does the work.
+    let volume_commitment_server_handle = tokio::spawn(async move {
+        volume_commitment::server::volume_commitment_server_builder(
+            volume_commitment_deps,
+            volume_commitment_admin_secret,
+        )
+        .await
+        .expect("Failed while building the volume commitment scheduler server")
     });
 
-    // Wait for both servers to complete (they should run indefinitely)
-    tokio::try_join!(main_server_handle, metrics_server_handle)?;
+    // Wait for the servers to complete (they should run indefinitely)
+    tokio::try_join!(main_server_handle, volume_commitment_server_handle)?;
 
     Ok(())
+}
+
+fn log_startup_configuration(global_config: &open_router::config::GlobalConfig) {
+    logger::info!("Decision engine started [{:?}]", global_config);
+
+    if global_config.admin_secret.is_default() {
+        logger::warn!(
+            "SECURITY WARNING: admin_secret is set to the default value. \
+             Set `admin_secret.secret` in your config to a strong secret before exposing this server."
+        );
+    }
+    if global_config.user_auth.jwt_secret.peek() == "change_me_in_production_use_32chars!!" {
+        logger::warn!(
+            "SECURITY WARNING: user_auth.jwt_secret is set to the default value. \
+             Set it to a strong random secret in production."
+        );
+    }
+
+    if global_config.user_auth.email_verification_enabled {
+        if global_config.email.is_active() {
+            logger::info!(
+                "Email verification is ENABLED — users must verify their email before logging in. \
+                 Active email backend: {:?}",
+                global_config.email.active_email_client
+            );
+        } else {
+            logger::warn!(
+                "Email verification is ENABLED but active_email_client = \"no_email_client\" — \
+                 verification emails will not be delivered. The verification URL is logged at INFO \
+                 level by the no-email client so you can complete verification manually. \
+                 Set active_email_client = \"smtp\" (or \"aws_ses\") for real delivery."
+            );
+        }
+    } else {
+        logger::info!(
+            "Email verification is DISABLED — users can log in without verifying their email. \
+             To enable: set `email_verification_enabled = true` under [user_auth] and configure \
+             an email backend under [email] (active_email_client = \"smtp\" or \"aws_ses\"). \
+             For local testing, Mailpit captures all mail at http://localhost:8025."
+        );
+    }
 }

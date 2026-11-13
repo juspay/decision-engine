@@ -1,176 +1,300 @@
+---
+title: "Configuration"
+description: "Configure Decision Engine via config files and environment variable overrides."
+---
+
 # Configuration Guide
 
-Dynamo uses TOML configuration files to customize its behavior. This guide explains the available configuration options and how to use them effectively.
+This document explains how to configure Decision Engine for local and on-prem deployments.
 
-## Configuration File Location
+## Primary Config Files
 
-By default, Dynamo looks for configuration files in the following locations:
+- `config/development.toml`: used for host/source runs
+- `config/docker-configuration.toml`: used for Docker and Compose runs
+- `helm-charts/config/development.toml`: Kubernetes chart template config
 
-- Development mode: `config/development.toml`
-- Production mode: `config/production.toml`
+These files already exist with all required sections. Edit the one that matches your runtime rather than copying from `config.example.toml`, which is incomplete.
 
-You can also specify a custom configuration file using environment variables.
+## Config Sections
 
-## Configuration Format
-
-Below is an explanation of the main configuration sections:
-
-### Server Configuration
+### Server
 
 ```toml
 [server]
-host = "127.0.0.1"      # The address to bind the server to
-port = 8000             # The port to listen on
-type = "grpc"           # Server type: "grpc" or "http"
+host = "0.0.0.0"
+port = 8080
+routing_request_timeout_ms = 2000  # optional, default 2000
 ```
 
-### Metrics Server Configuration
+`host` is the bind address. Use `0.0.0.0` for Docker/deployed, `127.0.0.1` for local-only.
+
+`routing_request_timeout_ms` caps how long a routing hot-path request may run before it is answered with `504`: `/decide-gateway`, `/decision_gateway`, `/routing/evaluate`, `/routing/evaluate/batch`, `/routing/hybrid` and `/update-gateway-score`. Other routes, such as report uploads and analytics, have no deadline. A score update the handler has already queued still completes after the timeout.
+
+A handler that panics on any route is answered with `500` and logged, rather than having its connection dropped.
+
+#### Graceful shutdown
 
 ```toml
-[metrics]
-host = "127.0.0.1"      # The address to bind the metrics server to
-port = 9000             # The port for the metrics server
+[server]
+shutdown_drain_delay = 5  # seconds
+shutdown_timeout = 20     # seconds
 ```
 
-### Logging Configuration
+Both keys are optional; the values above are the defaults. On SIGTERM or SIGINT the server:
 
-```toml
-[log.console]
-enabled = true          # Whether to enable console logging
-level = "DEBUG"         # Log level: DEBUG, INFO, WARN, ERROR
-log_format = "default"  # Log format: "default" or "json"
-```
+1. Marks itself not ready, so `GET /health/ready` returns `400`, and keeps serving for `shutdown_drain_delay` seconds. This gives Kubernetes and the service mesh time to stop routing new requests to the pod.
+2. Stops accepting connections and gives in-flight requests up to `shutdown_timeout` seconds to finish. This is the same setting as Hyperswitch's `[server] shutdown_timeout`.
+3. Waits up to 5 seconds for background gateway-score feedback tasks, then exits.
 
-### Redis Configuration
+The pod's `terminationGracePeriodSeconds` must be longer than `shutdown_drain_delay + shutdown_timeout + 5`, or Kubernetes kills the process mid-drain. The Helm chart defaults it to `35`. The chart's readiness probe uses `/health/ready`, and its liveness probe stays on `/health`, which returns `200` for as long as the process runs. This keeps a draining pod from being restarted.
 
-```toml
-[redis]
-host = "127.0.0.1"
-port = 6379
-pool_size = 5                      # Number of connections to keep open
-reconnect_max_attempts = 5         # Maximum reconnection attempts
-reconnect_delay = 5                # Delay between attempts in milliseconds
-use_legacy_version = false         # Use RESP2 protocol for Redis < 6
-```
+For local runs, set `shutdown_drain_delay = 0` so Ctrl-C exits right away. Environment overrides: `DECISION_ENGINE__SERVER__SHUTDOWN_DRAIN_DELAY`, `DECISION_ENGINE__SERVER__SHUTDOWN_TIMEOUT`.
 
-### TTL for Keys
+### Response version header
 
-```toml
-[ttl_for_keys]
-aggregates = 300                   # Time to live for aggregates keys (seconds)
-current_block = 900                # Time to live for current_block keys (seconds)
-elimination_bucket = 900           # Time to live for elimination buckets (seconds)
-contract_ttl = 900                 # Time to live for contracts (seconds)
-```
+The main API and volume commitment scheduler add `x-de-version` to their responses,
+including health checks and application errors. An existing response value is preserved.
+The value is embedded at compile time using `vergen` and Git describe metadata, following
+Hyperswitch's version header pattern. It can contain a tag, a commit-distance/hash suffix,
+and a `-dirty` suffix for builds with uncommitted changes.
 
-### Global Routing Configurations
+Nightly image builds embed their generated release tag. Other builds derive the value
+from the source checkout; fetch Git history and tags to retain the tag information.
+For source archives or custom image builds, supply `VERGEN_GIT_DESCRIBE` at build time
+(a Docker build argument with the same name is supported by both Dockerfiles).
+Without Git metadata or an override, `vergen` emits `VERGEN_IDEMPOTENT_OUTPUT` and a build
+warning. Changing a runtime environment variable does not change an already-built binary.
 
-```toml
-[global_routing_configs.success_rate]
-min_aggregates_size = 5            # Minimum number of buckets for SR calculation
-default_success_rate = 100         # Default SR when insufficient data
-max_aggregates_size = 10           # Maximum number of aggregates to store
+Inspect the header with `curl -sS -D - -o /dev/null http://localhost:8080/health`.
+Responses generated by a proxy or ingress before reaching DE do not pass through this middleware.
 
-[global_routing_configs.success_rate.current_block_threshold]
-duration_in_mins = 10              # Current block duration in minutes
-max_total_count = 5                # Maximum transaction count for current block
-
-[global_routing_configs.elimination_rate]
-bucket_size = 5                    # Capacity of buckets
-bucket_leak_interval_in_secs = 300 # Leak rate of buckets in seconds
-```
-
-### Multi-Tenancy
-
-```toml
-[multi_tenancy]
-enabled = true                     # Enable multi-tenant mode
-```
-
-## Environment Variables
-
-You can override configuration values using environment variables with the prefix `DYNAMO__`:
-
-```bash
-# Override Redis host and port
-export DYNAMO__REDIS__HOST=redis-server
-export DYNAMO__REDIS__PORT=6380
-
-# Override server port
-export DYNAMO__SERVER__PORT=9000
-```
-
-## Configuration Examples
-
-### Development Configuration
+### Logging
 
 ```toml
 [log.console]
 enabled = true
 level = "DEBUG"
 log_format = "default"
+```
 
-[server]
-host = "127.0.0.1"
-port = 8000
-type = "grpc"
+`log_format` accepts `"default"` (human-readable) or `"json"` (structured, recommended for prod).
 
+### Metrics (OpenTelemetry push)
+
+```toml
+[log.telemetry]
+metrics_enabled = true
+ignore_errors = true
+otel_exporter_otlp_endpoint = "http://localhost:4317"
+otel_exporter_otlp_timeout = 10000 # milliseconds per export request
+```
+
+There is no metrics port to scrape. When `metrics_enabled` is on, metrics are pushed over OTLP/gRPC to an OpenTelemetry collector every 3 seconds, the same cadence as Hyperswitch. In the Hyperswitch clusters the collector re-exposes them to vmagent, so they land in VictoriaMetrics and the Grafana `VictoriaMetrics` datasource. The collector adds `source_namespace`, `source_pod` and `source_app` labels; filter by `source_namespace="decision-engine"` in Grafana. With `metrics_enabled = false` the instruments are no-ops.
+
+`metrics_enabled` defaults to `false` and the endpoint defaults to the local collector (`http://localhost:4317` for a native binary, `http://otel-collector:4317` inside Compose), so enabling is a single flag. `oneclick.sh` starts the collector and Prometheus and runs the API with metrics enabled; the `monitoring` Compose profile adds Grafana. Metrics are then at `http://localhost:9898/metrics` on the collector and in Prometheus at `http://localhost:9090`.
+
+Environment variables follow the usual prefix, e.g. `DECISION_ENGINE__LOG__TELEMETRY__METRICS_ENABLED=true` and `DECISION_ENGINE__LOG__TELEMETRY__OTEL_EXPORTER_OTLP_ENDPOINT=...`.
+
+### Rate Limiting
+
+```toml
+[limit]
+request_count = 1
+duration = 60
+```
+
+Controls rate limiting on the delete APIs. `request_count` requests allowed per `duration` seconds.
+
+### Redis cache config
+
+```toml
+[cache_config]
+service_config_redis_prefix = "DE_service_config_"
+service_config_ttl = 300    # Redis TTL for service config entries, in seconds
+invalidation_channel = "decision_engine_invalidate"  # optional, this is the default
+```
+
+#### Cross-pod cache invalidation
+
+Each pod keeps merchant accounts and cost models in memory. When one pod changes them, it updates its own copy and publishes a message on the Redis pub/sub channel `invalidation_channel`. Every other pod listens on that channel and drops or rebuilds its copy:
+
+| Change | What the other pods do |
+|---|---|
+| Merchant account created, updated or deleted | Evict their cached account |
+| Cost models refitted (report upload or delete, ingest worker, invoice, connector-fee override) | Rebuild that merchant's models from ClickHouse |
+| Service config written (for example `/rule/*` SR config, `/config-sr-dimension`, merchant feature toggles, `/gateway-score/reset`, SR auto-calibration) | Drop their in-memory copy, so the next read takes the new value from Redis |
+
+Publishing is best effort. If Redis is unavailable, the write still succeeds and the other pods fall back to the existing TTLs (`service_config_ttl` for accounts and service configs, the 5-minute cost-model refresh). Deployments that share a Redis but must stay separate (for example, two environments) should each set their own `invalidation_channel`. The metric `cache_invalidations_total{kind, outcome}` counts published, failed and applied invalidations.
+
+### Database
+
+MySQL and PostgreSQL use separate config sections.
+
+**MySQL:**
+
+```toml
+[database]
+username = "db_user"
+password = "db_pass"
+host = "localhost"
+port = 3306
+dbname = "decision_engine_db"
+```
+
+**PostgreSQL:**
+
+```toml
+[pg_database]
+pg_username = "db_user"
+pg_password = "db_pass"
+pg_host = "localhost"
+pg_port = 5432
+pg_dbname = "decision_engine_db"
+```
+
+For Docker Compose runs both are pre-wired via service names in `config/docker-configuration.toml`.
+
+### Multi-Tenant Schema
+
+```toml
+[tenant_secrets]
+public = { schema = "public" }
+```
+
+Maps tenant identifiers to database schemas. The shipped config files (`config/development.toml`, `config/docker-configuration.toml`) define only the `public` tenant — add entries for any additional tenant you want to support.
+
+Some routes resolve the tenant from an `x-tenant-id` request header rather than the authenticated merchant, and reject the request outright if it's missing (`TE_03`). Send `x-tenant-id: public` on `GET /health/diagnostics`, every `GET /analytics/*` route, and `POST /gateway-score/reset` — see [API Guide](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx#environment-setup).
+
+### Redis
+
+```toml
 [redis]
 host = "127.0.0.1"
 port = 6379
 ```
 
-### Production Configuration
+Redis is required — it's used for caching routing config and service config. For Docker, use the service name as host.
+
+### Auth
 
 ```toml
-[log.console]
+[user_auth]
+jwt_secret = "change_me_in_production_use_32chars!!"
+jwt_expiry_seconds = 86400
+email_verification_enabled = false
+jwt_revocation_cache_ttl_ms = 0
+```
+
+Use a strong, random `jwt_secret` — 32+ characters recommended. Set `email_verification_enabled = true` if you've wired an email provider.
+
+`jwt_revocation_cache_ttl_ms` caches "this token is not revoked" in memory, so authenticated
+requests skip the JWT denylist read in Redis for that many milliseconds. The cost is that
+**a logged-out session keeps working until the window expires**. Only the confirmed
+"not revoked" answer is cached — a denylisted token is refused, and a failed Redis read isn't
+stored — so an outage can't extend a revoked session. Token expiry (`exp`) is unaffected.
+`0` (the default) reads Redis on every request; `1000` bounds revocation to a second.
+
+### Admin Secret
+
+```toml
+[admin_secret]
+secret = "test_admin"
+```
+
+Used to authenticate the `POST /merchant-account/create` endpoint (admin bootstrap). Change this in production.
+
+### API Key Auth
+
+```toml
+api_key_auth_enabled = true
+```
+
+Top-level flag. When `true`, protected routes accept `x-api-key` in addition to JWT bearer tokens. When `false`, the auth middleware allows **all requests through without authentication** — this effectively disables auth for every protected route. Do not set this to `false` in any environment that should enforce auth.
+
+### Analytics
+
+Both Kafka and ClickHouse require `enabled = true` — without it, analytics is disabled even if the connection details are configured.
+
+```toml
+[analytics.kafka]
 enabled = true
-level = "INFO"
-log_format = "json"
+brokers = "localhost:9092"
+api_topic = "api"
+domain_topic = "domain"
 
-[server]
-host = "0.0.0.0"  # Listen on all interfaces
-port = 8000
-type = "grpc"
-
-[redis]
-host = "redis-server"  # Use service name in production
-port = 6379
-pool_size = 20
-reconnect_max_attempts = 10
+[analytics.clickhouse]
+enabled = true
+url = "http://localhost:8123"
+user = "decision_engine"
+password = "decision_engine"
 ```
 
-### High-Availability Configuration
+Decision outcomes are published to Kafka and consumed into ClickHouse. Both are required for analytics and audit dashboard views. For Docker runs, these are pre-configured and enabled via the Compose profiles.
+
+Completed `/routing/evaluate/batch` audit events include the full `request` and `response` alongside the entry count, failed count, and per-entry summaries. Each nonempty batch still produces one outcome event, with one additional error event if any entries fail.
+
+Batch payloads use the same JSON serialization and bounded background publisher as other routing flows. Audit details remain subject to `analytics.capture.details_max_bytes` (64 KiB by default). Oversized domain details are omitted in full, preserving the event metadata without cutting JSON or UTF-8. Publishing failures and unavailable or full queues do not change the routing response.
+
+### TLS
 
 ```toml
-[server]
-host = "0.0.0.0"
-port = 8000
-type = "grpc"
-
-[redis]
-host = "redis-master"
-port = 6379
-pool_size = 30
-reconnect_max_attempts = 15
-reconnect_delay = 2
+[tls]
+certificate = "cert.pem"
+private_key = "key.pem"
 ```
 
-## Advanced Configuration
+Paths to PEM-format certificate and key files. Only needed if you're terminating TLS at the app layer rather than a reverse proxy.
 
-### Using Multiple Redis Instances
+### API Client
 
-While not directly supported in the configuration file, you can set up Redis Sentinel or Redis Cluster for high availability and implement a custom client.
+```toml
+[api_client]
+client_idle_timeout = 90
+pool_max_idle_per_host = 10
+identity = ""
+```
 
-### Configuring Routing Strategies
+Controls the outbound HTTP client used for upstream calls. Set `identity` to a PEM path if you need mTLS.
 
-Each routing strategy has specific configuration parameters:
+## Secrets Management
 
-1. **Success Rate Routing**: Configure weight factors, time windows, and default values
-2. **Elimination Routing**: Configure bucket sizes, leak rates, and thresholds
-3. **Contract Routing**: Configure contract scores, targets, and time scales
+By default, secrets in config are stored in plaintext. For production, use one of the two supported backends.
 
-## Next Steps
+### AWS KMS
 
-- [Installation Guide](setup-guide.md)
-- [API Reference](api-reference.md)
+Requires the `kms-aws` feature (included in the `release` feature set).
+
+```toml
+[secrets_management]
+secrets_manager = "aws_kms"
+
+[secrets_management.aws_kms]
+key_id = "your-kms-key-id"
+region = "us-east-1"
+```
+
+### HashiCorp Vault
+
+Requires the `kms-hashicorp-vault` feature.
+
+```toml
+[secrets_management]
+secrets_manager = "hashi_corp_vault"
+
+[secrets_management.hashi_corp_vault]
+url = "http://127.0.0.1:8200"
+token = "hvs.your_token"
+```
+
+When a secrets manager is configured, sensitive fields like `database.password` and `user_auth.jwt_secret` are resolved from the vault rather than the config file.
+
+## Environment Overrides
+
+Selected values can be overridden at runtime via environment variables. This is useful in Helm deployments via `extraEnvVars`. Consult `src/config.rs` for the full mapping.
+
+## Related Docs
+
+- [Installation](https://github.com/juspay/decision-engine/blob/main/docs/installation.md)
+- [Local Setup Guide](https://github.com/juspay/decision-engine/blob/main/docs/local-setup.md)
+- [API Guide](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/api-ref.mdx)
+- [API Reference](https://github.com/juspay/decision-engine/blob/main/docs/api-reference.md)

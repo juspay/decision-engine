@@ -1,0 +1,95 @@
+# CockroachDB overlay for the Decision Engine.
+#
+# CockroachDB speaks the PostgreSQL wire protocol, so it reuses the existing `postgres` build,
+# `migrations_pg`, and the app's `pg_database` config — only the port differs. This CockroachDB build
+# refuses to listen on anything but its native port 26257 (it errors on other ports and on a literal
+# `0.0.0.0` host), so the DB runs on 26257 end to end. That also lets it coexist with a local
+# PostgreSQL on 5432. The in-docker app + migrator are repointed to 26257 here; the `oneclick.sh
+# --cockroach` flow does the same for the host-side tooling via env vars.
+#
+# Usage (mirrors the postgres profiles, e.g. postgres-local / postgres-ghcr / dashboard-*):
+#   docker compose -f docker-compose.yaml -f docker-compose.cockroach.yml --profile postgres-local up -d
+#
+# CockroachDB DB Console: http://localhost:8090
+
+services:
+  # Replace the PostgreSQL server with a single-node CockroachDB. Empty host (`:26257`) binds all
+  # interfaces; the port must be 26257 for this build.
+  postgresql:
+    image: cockroachdb/cockroach:v24.1.5
+    command: >-
+      start-single-node --insecure
+      --listen-addr=:26257
+      --http-addr=:8080
+    # 26257 coexists with a local PostgreSQL on 5432; DB Console on host 8090 stays clear of the app
+    # (8080) and dashboard nginx (8081). `!override` replaces the base service's `5432:5432` mapping
+    # instead of appending to it (which would keep publishing host 5432 and clash with PostgreSQL).
+    ports: !override
+      - "26257:26257"
+      - "8090:8080"
+    # `!override` so we don't also inherit the base service's postgres-data mount.
+    volumes: !override
+      - cockroach-data:/cockroach/cockroach-data
+    healthcheck:
+      test: ["CMD", "cockroach", "sql", "--insecure", "--host=127.0.0.1:26257", "-e", "SELECT 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Create the database + role the app/migrator connect as. In insecure mode CockroachDB accepts any
+  # password but the role must exist; `public` schema privileges are no longer implicit, so grant them.
+  # The two role settings make CockroachDB match PostgreSQL's integer typing, which schema_pg.rs (and
+  # so the compiled backend) assumes: default_int_size=4 makes INTEGER/INT columns INT4 (CockroachDB
+  # defaults them to INT8), and serial_normalization='sql_sequence' makes SERIAL an INT4 sequence
+  # (CockroachDB's default `rowid` SERIAL is INT8). Set before migrations so tables are created with
+  # the right column widths; they also apply to the backend, which connects as the same role.
+  cockroach-init:
+    image: cockroachdb/cockroach:v24.1.5
+    profiles:
+      - postgres-ghcr
+      - dashboard-postgres-ghcr
+      - postgres-local
+      - dashboard-postgres-local
+    depends_on:
+      postgresql:
+        condition: service_healthy
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -e
+        cockroach sql --insecure --host=postgresql:26257 -e "
+          CREATE DATABASE IF NOT EXISTS decision_engine_db;
+          CREATE USER IF NOT EXISTS db_user;
+          GRANT ALL ON DATABASE decision_engine_db TO db_user;
+          ALTER ROLE db_user SET default_int_size = 4;
+          ALTER ROLE db_user SET serial_normalization = 'sql_sequence';
+        "
+        cockroach sql --insecure --host=postgresql:26257 --database=decision_engine_db -e "
+          GRANT ALL ON SCHEMA public TO db_user;
+        "
+    networks:
+      - open-router-network
+
+  # Wait for the database + role to exist, point the migrations at 26257, and use the CockroachDB
+  # diesel config (no [print_schema] — see diesel_pg_cockroach.toml).
+  db-migrator-postgres:
+    depends_on:
+      cockroach-init:
+        condition: service_completed_successfully
+    environment:
+      - DATABASE_URL=postgresql://db_user:db_pass@postgresql:26257/decision_engine_db
+    command: "bash -c 'cargo install diesel_cli --no-default-features --features postgres && diesel migration run --database-url \"$$DATABASE_URL\" --migration-dir /app/migrations_pg --config-file /app/diesel_pg_cockroach.toml'"
+
+  # In-container app connects to CockroachDB on 26257 (config default is 5432). Only used by the
+  # docker-only run; oneclick runs the backend on the host and sets this via env instead.
+  open-router-pg-ghcr:
+    environment:
+      - DECISION_ENGINE__PG_DATABASE__PG_PORT=26257
+  open-router-pg-local:
+    environment:
+      - DECISION_ENGINE__PG_DATABASE__PG_PORT=26257
+
+volumes:
+  cockroach-data:

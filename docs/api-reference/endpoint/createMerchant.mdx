@@ -1,0 +1,64 @@
+---
+title: "Create Merchant"
+description: "Register a new merchant account. The merchant ID is the primary identifier used in all subsequent routing and scoring calls."
+openapi: "openapi.json POST /merchant-account/create"
+---
+
+# Create Merchant
+
+## Use case
+
+Creates a merchant account record used by routing, analytics, and account-level flags.
+
+## Authentication
+
+Admin-bootstrap route. Send the deployment's admin secret as `x-admin-secret: <admin_secret>` — **not** a JWT or API key. (The dashboard onboarding route `/onboarding/merchant` is the JWT-authenticated alternative.)
+
+For local development, start with:
+
+```bash
+export BASE_URL=http://localhost:8080
+export ADMIN_SECRET="x-admin-secret: <admin_secret>"
+```
+
+## Request
+
+- Method and path: `POST /merchant-account/create`
+- Parameters: none.
+- Body: JSON body with `merchant_id` (keep it stable — it scopes analytics and routing config), optional `gateway_success_rate_based_decider_input`, and optional `parent_merchant_id` to create the account as a [sub-merchant](/sub-merchants) of that merchant. A sub-merchant gets no `api_key` in the response, because its parent's keys reach it.
+
+## Example
+
+### Create merchant
+
+```bash
+curl --location "$BASE_URL/merchant-account/create" \
+  --header "$ADMIN_SECRET" \
+  --header "Content-Type: application/json" \
+  --data '{
+  "merchant_id": "merchant_demo",
+  "gateway_success_rate_based_decider_input": null
+}'
+```
+
+## Response
+
+```json
+{
+  "message": "Merchant account created successfully",
+  "merchant_id": "merchant_demo",
+  "gateway_success_rate_based_decider_input": null,
+  "api_key": "DE_..."
+}
+```
+
+## Notes
+
+- Dashboard onboarding usually wraps this flow.
+- Create the merchant before attaching routing algorithms or API keys.
+
+## Related
+
+- [Get Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/getMerchant.mdx)
+- [Delete Merchant](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/deleteMerchant.mdx)
+- [Update Merchant Debit Routing](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/updateMerchantDebitRouting.mdx)

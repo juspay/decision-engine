@@ -1,14 +1,24 @@
 # Default values for decision-engine
 replicaCount: 1
 
+# Must exceed server.shutdown_drain_delay (5s) + server.shutdown_timeout (20s) + 5s feedback drain.
+terminationGracePeriodSeconds: 35
+
+# When enabled, the HPA owns the replica count and replicaCount is ignored.
+autoscaling:
+  enabled: false
+  minReplicas: 2
+  maxReplicas: 4
+  targetCPUUtilizationPercentage: 80
+
 image:
   # Updated to include the registry URL
   repository: ghcr.io/juspay/decision-engine/postgres
   pullPolicy: Always
-  version: "v1.2.0"
+  version: "v1.4"
 
 # Configure these if your images are in a private registry
-imagePullSecrets: 
+imagePullSecrets:
   # - name: regcred
 nameOverride: ""
 fullnameOverride: ""
@@ -27,17 +37,49 @@ podAnnotations: {}
 podSecurityContext: {}
   # fsGroup: 2000
 
-securityContext: {}
-  # capabilities:
-  #   drop:
-  #   - ALL
-  # readOnlyRootFilesystem: true
-  # runAsNonRoot: true
-  # runAsUser: 1000
+initContainers:
+  # Set to false to disable all init containers
+  enabled: true
+  busybox:
+    repository: public.ecr.aws/docker/library/busybox
+    tag: "1.37"
+    pullPolicy: IfNotPresent
+  # The busybox wait containers only open TCP connections, so they run as nobody.
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 65534
+    runAsGroup: 65534
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+    seccompProfile:
+      type: RuntimeDefault
+
+# Applied to the decision-engine and groovy-runner containers, merged with each
+# component's own `securityContext` (which pins its UID). The kubelet refuses to
+# start either container as root. readOnlyRootFilesystem additionally needs an
+# emptyDir at /tmp (report uploads stream there).
+securityContext:
+  runAsNonRoot: true
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+  seccompProfile:
+    type: RuntimeDefault
 
 service:
   type: ClusterIP
-  port: 8080
+  ports:
+    - name: http
+      port: 80
+      targetPort: 8080
+      protocol: TCP
+    - name: metrics
+      port: 9090
+      targetPort: 9090
+      protocol: TCP
 
 ingress:
   enabled: false
@@ -55,13 +97,11 @@ ingress:
   #    hosts:
   #      - chart-example.local
 
-resources: {}
-  # limits:
-  #   cpu: 100m
-  #   memory: 128Mi
-  # requests:
-  #   cpu: 100m
-  #   memory: 128Mi
+# Requests are needed by the HPA to compute CPU/memory utilization. Limits are left to each environment.
+resources:
+  requests:
+    cpu: 400m
+    memory: 400Mi
 
 nodeSelector: {}
 
@@ -71,6 +111,10 @@ affinity: {}
 
 # Decision Engine configurations
 decisionEngine:
+  # Matches the image's USER; pinned here so older images that predate it also run unprivileged.
+  securityContext:
+    runAsUser: 10001
+    runAsGroup: 10001
   # Set to false to use PostgreSQL instead of MySQL
   useMySQL: false
   # Set to true to enable PostgreSQL support
@@ -113,6 +157,29 @@ decisionEngine:
     labels:
       component: decision-engine
 
+analytics:
+  enabled: false
+  kafka:
+    brokers: "kafka:19092"
+    apiTopic: "decision-engine.analytics.api.v1"
+    domainTopic: "decision-engine.analytics.domain.v1"
+  clickhouse:
+    host: "clickhouse"
+    httpPort: 8123
+    nativePort: 9000
+    database: "decision_engine_analytics"
+    user: "decision_engine"
+    password: "decision_engine"
+    kafkaBrokerList: "kafka:19092"
+    apiConsumerGroup: "decision-engine-analytics-api-v1"
+    domainConsumerGroup: "decision-engine-analytics-domain-v1"
+    bootstrap:
+      enabled: false
+      image:
+        repository: "clickhouse/clickhouse-server"
+        tag: "26.1"
+        pullPolicy: "IfNotPresent"
+
 # MySQL configuration (used when decisionEngine.useMySQL is true)
 mysql:
   enabled: false
@@ -154,9 +221,22 @@ redis:
 # Groovy Runner configuration
 groovyRunner:
   enabled: true
+  # The image's `groovy` user, which owns /home/groovy. The root filesystem is
+  # read-only; /tmp is an emptyDir.
+  securityContext:
+    runAsUser: 1000
+    runAsGroup: 1000
+    readOnlyRootFilesystem: true
+  # Restricts the runner to traffic from the decision-engine pods and closes
+  # egress. Needs a CNI that enforces NetworkPolicy. If a service-mesh sidecar
+  # is injected into the runner, open its control-plane traffic in extraEgress.
+  networkPolicy:
+    enabled: true
+    extraIngress: []
+    extraEgress: []
   image:
     repository: "ghcr.io/juspay/decision-engine/groovy-runner"
-    version: "v1.0.0"
+    version: "v1.4"
     pullPolicy: "Always"
   service:
     port: 8085
@@ -178,6 +258,11 @@ dbMigration:
   # PostgreSQL migrations
   postgresql:
     enabled: true
+    # rust:latest has no unprivileged user; any non-root UID works because
+    # HOME, CARGO_HOME, TMPDIR and the working directory all live on an emptyDir.
+    securityContext:
+      runAsUser: 10001
+      runAsGroup: 10001
     image:
       repository: "postgres"
       tag: "latest"
@@ -187,8 +272,15 @@ dbMigration:
   # MySQL migrations (not used with PostgreSQL)
   mysql:
     enabled: false
+    # Ships the mysql client and curl, so nothing is installed at runtime.
     image:
+      repository: mysql
+      tag: "8.4"
       pullPolicy: IfNotPresent
+    # The image's `mysql` user.
+    securityContext:
+      runAsUser: 999
+      runAsGroup: 999
     scriptUrls:
       - https://raw.githubusercontent.com/juspay/decision-engine/431b1b2/migrations/00000000000000_diesel_initial_setup/up.sql
       - https://raw.githubusercontent.com/juspay/decision-engine/431b1b2/migrations/2025-04-23-103603_add_routing_algorithm_mapper_table/up.sql
@@ -206,3 +298,55 @@ routingConfig:
     enabled: true
     # Path to mount routing config files
     mountPath: "/app"
+
+# Additional environment variables to inject into the main container (map format for proper merging)
+# Supports both simple values and valueFrom references for secrets/configmaps
+extraEnvVars: {}
+  # Simple value example:
+  # MY_VAR: "my-value"
+  # Secret reference example:
+  # DB_PASSWORD:
+  #   valueFrom:
+  #     secretKeyRef:
+  #       name: decision-engine-secrets
+  #       key: LOCKER__PG_DATABASE__PG_PASSWORD
+  # ConfigMap reference example:
+  # APP_CONFIG:
+  #   valueFrom:
+  #     configMapKeyRef:
+  #       name: app-config
+  #       key: config.json
+
+# Istio configuration (optional)
+istio:
+  enabled: false
+  virtualService:
+    enabled: false
+    hosts: []
+    gateways: []
+    # HTTP routing rules - route destination will be automatically set to control center service
+    http: []
+    # Example configuration:
+    # http:
+    #   - name: "control-center-routes"
+    #     match:
+    #       - uri:
+    #           prefix: /
+    #     rewrite:
+    #       uri: "/dashboard"
+    #     weight: 100
+    #     timeout: 30s
+    #     retries:
+    #       attempts: 3
+    #       perTryTimeout: 10s
+  destinationRule:
+    enabled: false
+    trafficPolicy: {}
+    # Example traffic policy:
+    # trafficPolicy:
+    #   loadBalancer:
+    #     simple: ROUND_ROBIN
+    #   connectionPool:
+    #     tcp:
+    #       maxConnections: 50
+    #       connectTimeout: 30s

@@ -1,3 +1,7 @@
+use super::mem_cache::GLOBAL_CACHE;
+use crate::app::get_tenant_app_state;
+use crate::logger;
+use crate::redis::feature::RedisDataStruct;
 use crate::types::service_configuration;
 use crate::utils::StringExt;
 use serde::Deserialize;
@@ -5,6 +9,62 @@ use serde::Deserialize;
 // Converted type synonyms
 // Original Haskell type: KVDBName
 pub type KVDBName = String;
+
+async fn get_from_memory_cache(prefixed_key: &str) -> Result<String, String> {
+    match GLOBAL_CACHE.get::<String>(prefixed_key) {
+        Ok(value) => Ok(value),
+        Err(e) => Err(format!("Memory cache get failed: {}", e)),
+    }
+}
+
+async fn set_to_memory_cache(prefixed_key: &str, value: &str, ttl_seconds: Option<u64>) {
+    match GLOBAL_CACHE.store(prefixed_key.to_string(), value.to_string(), ttl_seconds) {
+        Ok(_) => {}
+        Err(e) => {
+            crate::logger::warn!(
+                tag = "memory_cache_write_failed",
+                action = "memory_cache_write_failed",
+                "Failed to write cache for key: {}, error: {:?}",
+                prefixed_key,
+                e
+            );
+        }
+    }
+}
+
+async fn get_from_redis_cache(prefixed_key: &str) -> Result<String, String> {
+    let app_state = get_tenant_app_state().await;
+    match app_state.redis_conn.get_key_string(prefixed_key).await {
+        Ok(value) => Ok(value),
+        Err(e) => Err(format!("Redis cache get failed: {:?}", e)),
+    }
+}
+
+async fn set_to_redis_cache(prefixed_key: &str, value: &str, ttl_seconds: i64) {
+    let app_state = get_tenant_app_state().await;
+    match app_state
+        .redis_conn
+        .setx(
+            prefixed_key,
+            value,
+            ttl_seconds,
+            None,
+            RedisDataStruct::STRING,
+        )
+        .await
+    {
+        Ok(_) => {}
+        Err(e) => {
+            crate::logger::warn!(
+                tag = "redis_cache_write_failed",
+                action = "redis_cache_write_failed",
+                "Failed to write Redis cache for key: {}, error: {:?}",
+                prefixed_key,
+                e
+            );
+        }
+    }
+}
 
 // // Converted data types
 // // Original Haskell data type: Multi
@@ -54,7 +114,6 @@ where
     findByNameFromRedisHelper(key, Some(decode_fn)).await
 }
 
-// Original Haskell function: findByNameFromRedisHelper
 pub async fn findByNameFromRedisHelper<A>(
     key: String,
     decode_fn: Option<impl Fn(String) -> Option<A>>,
@@ -62,21 +121,176 @@ pub async fn findByNameFromRedisHelper<A>(
 where
     A: for<'de> Deserialize<'de>,
 {
-    let res = service_configuration::find_config_by_name(key).await;
+    let app_state = get_tenant_app_state().await;
+    let prefixed_key = app_state.config.cache_config.add_prefix(&key);
+    let ttl_seconds = app_state.config.cache_config.service_config_ttl;
+    let ttl_seconds_u64 = Some(ttl_seconds as u64);
+
+    match get_from_memory_cache(&prefixed_key).await {
+        Ok(cache_value) => {
+            logger::debug!(
+                tag = "memory_cache",
+                action = "hit",
+                "Memory cache hit for key: {}",
+                key
+            );
+            if cache_value.is_empty() {
+                return None;
+            }
+            return match &decode_fn {
+                Some(func) => func(cache_value),
+                None => extractValue(cache_value),
+            };
+        }
+        Err(_) => {
+            logger::debug!(
+                tag = "memory_cache",
+                action = "miss",
+                "Memory cache miss for key: {}, checking Redis",
+                key
+            );
+        }
+    }
+
+    match get_from_redis_cache(&prefixed_key).await {
+        Ok(redis_value) if !redis_value.is_empty() => {
+            logger::debug!(
+                tag = "redis_cache",
+                action = "hit",
+                "Redis cache hit for key: {}",
+                key
+            );
+            set_to_memory_cache(&prefixed_key, &redis_value, ttl_seconds_u64).await;
+            return match &decode_fn {
+                Some(func) => func(redis_value),
+                None => extractValue(redis_value),
+            };
+        }
+        Ok(_) => {
+            // Empty string is a negative-cache sentinel written by evict_service_config.
+            // Propagate it to the memory cache so subsequent lookups in this process
+            // short-circuit here instead of falling through to the DB again.
+            logger::debug!(
+                tag = "redis_cache",
+                action = "negative_hit",
+                "Redis negative cache hit for key: {}",
+                key
+            );
+            set_to_memory_cache(&prefixed_key, "", ttl_seconds_u64).await;
+            return None;
+        }
+        _ => {
+            logger::debug!(
+                tag = "redis_cache",
+                action = "miss",
+                "Redis cache miss for key: {}, falling back to database",
+                key
+            );
+        }
+    }
+
+    let res = service_configuration::find_config_by_name(key.clone()).await;
 
     match res {
-        Ok(m_service_config) => match m_service_config {
-            Some(service_config) => match service_config.value {
-                Some(value) => match decode_fn {
+        Ok(Some(service_config)) => match service_config.value {
+            Some(value) => {
+                set_to_redis_cache(&prefixed_key, &value, ttl_seconds).await;
+                set_to_memory_cache(&prefixed_key, &value, ttl_seconds_u64).await;
+
+                match decode_fn {
                     Some(func) => func(value),
-                    None => None,
-                },
-                None => None,
-            },
-            None => None,
+                    None => extractValue(value),
+                }
+            }
+            None => {
+                // Only cache the negative result in memory, not Redis, so a subsequent
+                // SET in Redis can be picked up after the memory TTL expires.
+                set_to_memory_cache(&prefixed_key, "", ttl_seconds_u64).await;
+                None
+            }
         },
+        Ok(None) => {
+            set_to_memory_cache(&prefixed_key, "", ttl_seconds_u64).await;
+            None
+        }
         Err(_) => None,
     }
+}
+
+// Function to find value from memory cache/DB and return default if not present
+pub async fn findByNameFromRedisWithDefault<A>(key: String, default_value: A) -> A
+where
+    A: for<'de> Deserialize<'de> + serde::Serialize + Clone,
+{
+    // First try to get the value using the helper function
+    let result = findByNameFromRedisHelper(key.clone(), Some(extractValue::<A>)).await;
+
+    match result {
+        Some(value) => value,
+        None => {
+            // Serialize the default value to JSON string
+            match serde_json::to_string(&default_value) {
+                Ok(default_json) => {
+                    // Cache the default value for future use
+                    let app_state = get_tenant_app_state().await;
+                    let prefixed_key = app_state.config.cache_config.add_prefix(&key);
+                    let ttl_seconds = app_state.config.cache_config.service_config_ttl;
+                    let ttl_seconds_u64 = Some(ttl_seconds as u64);
+
+                    set_to_redis_cache(&prefixed_key, &default_json, ttl_seconds).await;
+                    set_to_memory_cache(&prefixed_key, &default_json, ttl_seconds_u64).await;
+
+                    logger::debug!(
+                        tag = "cache",
+                        action = "default_cached",
+                        "Cached default value for key: {}",
+                        key
+                    );
+                }
+                Err(e) => {
+                    logger::warn!(
+                        tag = "cache",
+                        action = "serialize_failed",
+                        "Failed to serialize default value for key: {}, error: {:?}",
+                        key,
+                        e
+                    );
+                }
+            }
+
+            default_value
+        }
+    }
+}
+
+/// Write-through: update both Redis and memory cache after a successful DB write.
+/// Call this after `update_config` or `insert_config` succeeds.
+pub async fn write_through_service_config(key: String, value: &str) {
+    let app_state = get_tenant_app_state().await;
+    let prefixed_key = app_state.config.cache_config.add_prefix(&key);
+    let ttl = app_state.config.cache_config.service_config_ttl;
+    set_to_redis_cache(&prefixed_key, value, ttl).await;
+    set_to_memory_cache(&prefixed_key, value, Some(ttl as u64)).await;
+    super::invalidation::publish(super::invalidation::CacheKind::ServiceConfig(key)).await;
+}
+
+/// Evict a service_config key from both Redis and memory cache after a DB delete.
+/// Caches an empty string (consistent with how `findByNameFromRedisHelper` signals "not found").
+pub async fn evict_service_config(key: String) {
+    let app_state = get_tenant_app_state().await;
+    let prefixed_key = app_state.config.cache_config.add_prefix(&key);
+    let ttl = app_state.config.cache_config.service_config_ttl;
+    set_to_redis_cache(&prefixed_key, "", ttl).await;
+    set_to_memory_cache(&prefixed_key, "", Some(ttl as u64)).await;
+    super::invalidation::publish(super::invalidation::CacheKind::ServiceConfig(key)).await;
+}
+
+/// Drop this process's in-memory copy of a service_config key; the next read falls through to Redis.
+pub(crate) fn evict_service_config_from_memory(
+    cache_config: &crate::config::CacheConfig,
+    key: &str,
+) {
+    let _ = GLOBAL_CACHE.remove(&cache_config.add_prefix(key));
 }
 
 pub fn extractValue<A>(value: String) -> Option<A>

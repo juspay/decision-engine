@@ -1,0 +1,40 @@
+---
+title: "Update Success Rate Config"
+description: "Curl example for updating success-rate scoring config."
+---
+
+# Update Success Rate Config
+
+```bash
+curl --location "$BASE_URL/rule/update" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "merchant_id": "merchant_demo",
+    "config": {
+      "type": "successRate",
+      "data": {
+        "defaultBucketSize": 30,
+        "defaultLatencyThreshold": 2500,
+        "defaultHedgingPercent": 0.1
+      }
+    }
+  }'
+```
+
+```json
+{
+  "message": "Success Rate Configuration updated successfully",
+  "merchant_id": "merchant_demo",
+  "config": {
+    "type": "successRate",
+    "data": {
+      "defaultBucketSize": 30,
+      "defaultLatencyThreshold": 2500.0,
+      "defaultHedgingPercent": 0.1,
+      "subLevelInputConfig": null,
+      "margin": null
+    }
+  }
+}
+```

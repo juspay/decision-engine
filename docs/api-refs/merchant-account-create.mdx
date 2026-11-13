@@ -1,0 +1,47 @@
+---
+title: "Create Merchant Account"
+description: "Curl example for creating a merchant account."
+---
+
+# Create Merchant Account
+
+This public bootstrap route requires the configured admin secret.
+
+## Request
+
+```bash
+curl --location "$BASE_URL/merchant-account/create" \
+  --header "x-admin-secret: <admin_secret>" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "merchant_id": "merchant_demo",
+    "gateway_success_rate_based_decider_input": null
+  }'
+```
+
+## Response
+
+```json
+{
+  "message": "Merchant account created successfully",
+  "merchant_id": "merchant_demo",
+  "gateway_success_rate_based_decider_input": null,
+  "api_key": "DE_..."
+}
+```
+
+## Create a Sub-merchant
+
+Pass `parent_merchant_id` to create the account as a [sub-merchant](/sub-merchants) of an existing merchant. The parent's API keys and members reach the sub-merchant, so the response has no `api_key`.
+
+```bash
+curl --location "$BASE_URL/merchant-account/create" \
+  --header "x-admin-secret: <admin_secret>" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "merchant_id": "merchant_demo_india",
+    "parent_merchant_id": "merchant_demo"
+  }'
+```
+
+The parent must already exist and be a Decision Engine merchant: not a sub-merchant, and not an account synced from Hyperswitch (`400`).

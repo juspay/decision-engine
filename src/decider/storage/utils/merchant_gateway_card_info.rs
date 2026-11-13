@@ -1,17 +1,7 @@
-#[cfg(feature = "mysql")]
-use crate::storage::schema::gateway_card_info as g_dsl;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::juspay_bank_code as j_dsl;
-
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::gateway_card_info as g_dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::juspay_bank_code as j_dsl;
-
-#[cfg(feature = "mysql")]
-use crate::storage::schema::merchant_gateway_card_info as m_dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::merchant_gateway_card_info as m_dsl;
+use crate::generics::Repository;
+use crate::storage::backend::schema::gateway_card_info as g_dsl;
+use crate::storage::backend::schema::juspay_bank_code as j_dsl;
+use crate::storage::backend::schema::merchant_gateway_card_info as m_dsl;
 use crate::storage::types::BitBool;
 use crate::storage::types::{
     GatewayCardInfo as DBGatewayCardInfo, JuspayBankCode as DBJuspayBankCode,
@@ -26,7 +16,6 @@ use crate::types::merchant::merchant_account::MerchantAccount;
 use crate::types::merchant::merchant_gateway_account::merchant_gw_acc_id_to_id;
 use crate::types::merchant::merchant_gateway_account::MerchantGatewayAccount;
 use crate::types::merchant_gateway_card_info::MerchantGatewayCardInfo;
-use diesel::associations::HasTable;
 use diesel::BoolExpressionMethods;
 use diesel::ExpressionMethods;
 
@@ -47,15 +36,11 @@ pub async fn filter_gateways_for_payment_method_and_validation_type(
         .map(|acc| merchant_gw_acc_id_to_id(acc.id.clone()))
         .collect();
 
-    let given_payment_method = txn_card_info.paymentMethod.clone();
-    let given_payment_method_type = txn_card_info.paymentMethodType;
+    let given_payment_method = txn_card_info.instrument.method_type_code().into_owned();
+    let given_payment_method_type = txn_card_info.instrument.method_code().to_string();
 
     // Step 1: Fetch Juspay Bank Codes
-    let jpbc_records: Vec<DBJuspayBankCode> = match crate::generics::generic_find_all::<
-        <DBJuspayBankCode as HasTable>::Table,
-        _,
-        DBJuspayBankCode,
-    >(
+    let jpbc_records: Vec<DBJuspayBankCode> = match DBJuspayBankCode::find_all(
         &app_state.db,
         j_dsl::bank_code.eq(given_payment_method.clone()),
     )
@@ -71,11 +56,7 @@ pub async fn filter_gateways_for_payment_method_and_validation_type(
     }
 
     // Step 2: Fetch Gateway Card Info
-    let gci_records: Vec<DBGatewayCardInfo> = match crate::generics::generic_find_all::<
-        <DBGatewayCardInfo as HasTable>::Table,
-        _,
-        DBGatewayCardInfo,
-    >(
+    let gci_records: Vec<DBGatewayCardInfo> = match DBGatewayCardInfo::find_all(
         &app_state.db,
         g_dsl::juspay_bank_code_id
             .eq_any(valid_jpbc_ids)
@@ -95,15 +76,11 @@ pub async fn filter_gateways_for_payment_method_and_validation_type(
     }
 
     // Step 3: Fetch Merchant Gateway Card Info
-    let mgci_records: Vec<DBMerchantGatewayCardInfo> = match crate::generics::generic_find_all::<
-        <DBMerchantGatewayCardInfo as HasTable>::Table,
-        _,
-        DBMerchantGatewayCardInfo,
-    >(
+    let mgci_records: Vec<DBMerchantGatewayCardInfo> = match DBMerchantGatewayCardInfo::find_all(
         &app_state.db,
         m_dsl::gateway_card_info_id
             .eq_any(gci_ids)
-            .and(m_dsl::merchant_account_id.eq(merchant_pid_to_text(merchant_account.id.clone())))
+            .and(m_dsl::merchant_account_id.eq(merchant_pid_to_text(merchant_account.id)))
             .and(m_dsl::disabled.eq(BitBool(false)))
             .and(m_dsl::merchant_gateway_account_id.eq_any(enabled_gateway_accounts_ids)),
     )
@@ -114,8 +91,5 @@ pub async fn filter_gateways_for_payment_method_and_validation_type(
     };
 
     // Step 4: Convert to Domain Types
-    mgci_records
-        .into_iter()
-        .filter_map(|db_record| MerchantGatewayCardInfo::try_from(db_record).ok())
-        .collect()
+    mgci_records.into_iter().map(From::from).collect()
 }

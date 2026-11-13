@@ -3,6 +3,12 @@ enabled = true         # To enable logging in console
 level = "DEBUG"        # level to be set for the logging framework
 log_format = "default" # format to be used for logging default | json
 
+[log.telemetry]
+metrics_enabled = false # push metrics to the OpenTelemetry collector over OTLP/gRPC; oneclick.sh and the compose monitoring profile turn this on
+ignore_errors = true    # log and continue if the OTLP exporter cannot be built
+otel_exporter_otlp_endpoint = "http://localhost:4317" # OTLP/gRPC address of the OpenTelemetry collector
+otel_exporter_otlp_timeout = 10000 # milliseconds per export request (exporter default)
+
 [server]
 host = "127.0.0.1" # The host that the server should be exposed to
 port = 3001        # The port where the server should be hosted on
@@ -11,10 +17,13 @@ port = 3001        # The port where the server should be hosted on
 request_count = 1 # The requests per duration
 duration = 60     # duration to rate limit the delete api (in sec)
 
-
 [cache]
 tti = 7200          # Idle time after a get/insert of a cache entry to free the cache (in secs)
 max_capacity = 5000 # Max capacity of a single table cache
+
+[cache_config]
+service_config_redis_prefix = "DE_service_config_"
+service_config_ttl = 300    # 5 minutes
 
 [database]
 username = "sam"   # username for the database
@@ -23,14 +32,9 @@ host = "localhost" # the host where the database is hosted on
 port = 5432        # the port of the database
 dbname = "open_router"  # the name of the database where the cards are stored
 
-[secrets]
-open_router_private_key = "" # the open_router private key to used used and the private key present with the tenant
-
 [tenant_secrets]
-# configure master_key and public_key for each tenant
-# master_key - used for database encryption this could be aes encrypted by key custodian
-# public_key - used for signature verification and encryption of response payload which is sent back to tenant
-hyperswitch = { master_key = "", public_key = "", schema = "public" }
+# schema - database schema to be used for the tenant
+hyperswitch = { schema = "public" }
 
 # To protect secret/sensitive values like:
 # - database.passwod
@@ -69,3 +73,54 @@ client_idle_timeout = 90    # timeout for idle sockets being kept-alive
 pool_max_idle_per_host = 10 # maximum idle connection per host allowed in the pool.
 identity = ""               # identity to be used for client certificate authentication in mtls.
 
+[analytics.kafka]
+brokers = "localhost:9092"
+api_topic = "api"
+domain_topic = "domain"
+
+[analytics.clickhouse]
+url = "http://localhost:8123"
+database = "default"
+user = "default"
+
+api_key_auth_enabled = true
+
+[user_auth]
+jwt_secret = "change_me_in_production_use_32chars!!"
+jwt_expiry_seconds = 86400
+email_verification_enabled = false
+super_admin_emails = []
+# Trust a token found not revoked for this long instead of re-reading the Redis denylist on
+# every request. Above 0, a logged-out session keeps working until the window expires.
+jwt_revocation_cache_ttl_ms = 0
+# Treat a session that names no permissions as holding none. Leave false until every Hyperswitch
+# in front of this deployment sends them.
+require_explicit_permissions = false
+
+[admin_secret]
+secret = "test_admin"
+
+# Email configuration
+# active_email_client options: "no_email_client" | "smtp" | "aws_ses"
+[email]
+sender_email = "noreply@example.com"
+base_url = "https://your-domain.example.com"
+active_email_client = "no_email_client"
+
+# SMTP backend — used when active_email_client = "smtp"
+# Works with any SMTP relay: Gmail, SendGrid, Mailgun, Postfix, etc.
+# [email.smtp]
+# host = "smtp.example.com"
+# port = 587          # optional — defaults to 1025 (none), 587 (starttls), 465 (tls)
+# username = "smtp-user"
+# password = "smtp-password"
+# tls = "starttls"   # "none" | "starttls" | "tls" — use "none" for Mailpit, "starttls" for production
+
+# AWS SES v2 backend — used when active_email_client = "aws_ses"
+# Credentials are resolved from the standard AWS credential chain
+# (env vars, IAM role, ~/.aws/credentials)
+# [email.aws_ses]
+# region = "us-east-1"
+# For cross-account setups, provide a role to assume via STS:
+# email_role_arn = "arn:aws:iam::<account-id>:role/<role-name>"
+# sts_role_session_name = "decision_engine_ses_session"

@@ -1,12 +1,9 @@
-#[cfg(feature = "mysql")]
-use crate::storage::schema::tenant_config_filter::{dimension_value, dsl, filter_group_id};
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::tenant_config_filter::{dimension_value, dsl, filter_group_id};
+use crate::generics::Repository;
+use crate::storage::backend::schema::tenant_config_filter::dsl;
 use crate::{
     app::get_tenant_app_state, error::ApiError,
     storage::types::TenantConfigFilter as DBTenantConfigFilter,
 };
-use diesel::associations::HasTable;
 use diesel::*;
 use serde::{Deserialize, Serialize};
 use std::string::String;
@@ -44,7 +41,7 @@ impl TryFrom<DBTenantConfigFilter> for TenantConfigFilter {
     type Error = ApiError;
 
     fn try_from(db_tenant_config_filter: DBTenantConfigFilter) -> Result<Self, ApiError> {
-        Ok(TenantConfigFilter {
+        Ok(Self {
             id: text_to_tenant_config_filter_id(db_tenant_config_filter.id),
             filterGroupId: db_tenant_config_filter.filter_group_id,
             dimensionValue: db_tenant_config_filter.dimension_value,
@@ -56,20 +53,16 @@ impl TryFrom<DBTenantConfigFilter> for TenantConfigFilter {
 
 pub async fn get_tenant_config_filter_by_group_id_and_dimension_value(
     group_id: String,
-    dimension_valu: String,
+    dimension_value: String,
 ) -> Option<TenantConfigFilter> {
     let app_state = get_tenant_app_state().await;
 
     // Use Diesel's query builder for querying the database
-    match crate::generics::generic_find_one_optional::<
-        <DBTenantConfigFilter as HasTable>::Table,
-        _,
-        DBTenantConfigFilter,
-    >(
+    match DBTenantConfigFilter::find_optional(
         &app_state.db,
         dsl::filter_group_id
             .eq(group_id)
-            .and(dsl::dimension_value.eq(dimension_valu)),
+            .and(dsl::dimension_value.eq(dimension_value)),
     )
     .await
     {

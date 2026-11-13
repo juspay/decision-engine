@@ -35,146 +35,109 @@ pub enum EuclidErrors {
     #[error("routing_algorithm not found for: {0}")]
     RoutingAlgorithmNotFound(String),
 
+    #[error("Routing algorithm not active for merchant: {0}")]
+    RoutingAlgorithmNotActive(String),
+
+    #[error("default fallback not found in evaluate request for: {0}")]
+    DefaultFallbackNotFound(String),
+
     #[error("Storage error")]
     StorageError,
+
+    #[error("Invalid Sr Dimension Configuration")]
+    InvalidSrDimensionConfig(String),
+
+    #[error("Field validation failed: {0}")]
+    FieldValidationFailed(String),
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct ValidationErrorDetails {
+    pub field: String,
+    pub error_type: String,
+    pub message: String,
+}
+
+impl ValidationErrorDetails {
+    pub fn new(
+        field: impl Into<String>,
+        error_type: impl Into<String>,
+        message: impl Into<String>,
+    ) -> Self {
+        Self {
+            field: field.into(),
+            error_type: error_type.into(),
+            message: message.into(),
+        }
+    }
+}
+
+impl EuclidErrors {
+    pub fn status_code(&self) -> hyper::StatusCode {
+        match self {
+            Self::GlobalRoutingConfigsUnavailable
+            | Self::StorageError
+            | Self::FailedToSerializeJsonToString
+            | Self::RoutingInterpretationFailed => hyper::StatusCode::INTERNAL_SERVER_ERROR,
+            Self::RoutingAlgorithmNotActive(_) => hyper::StatusCode::NOT_FOUND,
+            Self::InvalidRuleConfiguration
+            | Self::InvalidRequestParameter(_)
+            | Self::FailedToValidateRoutingRule
+            | Self::InvalidRequest(_)
+            | Self::FailedToParseJsonInput
+            | Self::ActiveRoutingAlgorithmNotFound(_)
+            | Self::RoutingAlgorithmNotFound(_)
+            | Self::DefaultFallbackNotFound(_)
+            | Self::FailedToEvaluateOutput(_)
+            | Self::InvalidSrDimensionConfig(_)
+            | Self::FieldValidationFailed(_) => hyper::StatusCode::BAD_REQUEST,
+        }
+    }
+
+    /// The message the caller sees.
+    pub fn message(&self) -> String {
+        match self {
+            Self::InvalidRuleConfiguration => "Invalid routing rule configuration".to_string(),
+            Self::InvalidRequestParameter(param) => format!("Invalid parameter: {param}"),
+            Self::FailedToValidateRoutingRule => {
+                "Failed to validate the provided routing rule".to_string()
+            }
+            Self::InvalidRequest(msg) => format!("Invalid request received : {msg}"),
+            Self::GlobalRoutingConfigsUnavailable => "Routing configurations not found".to_string(),
+            Self::StorageError => "Something went wrong".to_string(),
+            Self::FailedToParseJsonInput => "Failed to parse Json received in request".to_string(),
+            Self::FailedToSerializeJsonToString => "Failed to serialize Json ".to_string(),
+            Self::ActiveRoutingAlgorithmNotFound(msg) => {
+                format!("No active routing algorithm found for the created_by entity : {msg}")
+            }
+            Self::RoutingAlgorithmNotFound(msg) => {
+                format!("Routing algorithm not found for the provided id : {msg}")
+            }
+            Self::RoutingAlgorithmNotActive(msg) => {
+                format!("Routing algorithm not active for merchant: {msg}")
+            }
+            Self::DefaultFallbackNotFound(created_by) => {
+                format!("Default fallback not found for the provided created_by id: {created_by}")
+            }
+            Self::FailedToEvaluateOutput(msg) => {
+                format!("Failed to evaluate output for algorithm kind : {msg}")
+            }
+            Self::RoutingInterpretationFailed => {
+                "unable to evaluate output for routing algorithm against the provided parameters"
+                    .to_string()
+            }
+            Self::InvalidSrDimensionConfig(msg) => msg.clone(),
+            Self::FieldValidationFailed(msg) => format!("Field validation failed: {msg}"),
+        }
+    }
 }
 
 impl axum::response::IntoResponse for EuclidErrors {
     fn into_response(self) -> axum::response::Response {
-        match self {
-            EuclidErrors::InvalidRuleConfiguration => (
-                hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_04,
-                    "Invalid routing rule configuration".to_string(),
-                    None,
-                )),
-            )
-                .into_response(),
-
-            EuclidErrors::InvalidRequestParameter(param) => (
-                hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_04,
-                    format!(
-                    "Invalid parameter: {}",
-                    param
-                ),
-                    None,
-                )),
-            )
-                .into_response(),
-
-            EuclidErrors::FailedToValidateRoutingRule => (
-                hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_04,
-                    "Failed to validate the provided routing rule".to_string(),
-                    None,
-                )),
-            )
-                .into_response(),
-
-            EuclidErrors::InvalidRequest(msg) => (
-                hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_04,
-                    format!(
-                    "Invalid request received : {}",
-                    msg
-                ),
-                    None,
-                )),
-            )
-                .into_response(),
-
-            EuclidErrors::GlobalRoutingConfigsUnavailable => (
-                hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_04,
-                    "Routing configurations not found".to_string(),
-                    None,
-                )),
-            )
-                .into_response(),
-
-            EuclidErrors::StorageError => (
-                hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_04,
-                    "Something went wrong".to_string(),
-                    None,
-                )),
-            )
-                .into_response(),
-
-            EuclidErrors::FailedToParseJsonInput => (
-                hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_04,
-                    "Failed to parse Json received in request".to_string(),
-                    None,
-                )),
-            )
-                .into_response(),
-
-            EuclidErrors::FailedToSerializeJsonToString => (
-                hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_04,
-                    "Failed to serialize Json ".to_string(),
-                    None,
-                )),
-            )
-                .into_response(),
-
-            EuclidErrors::ActiveRoutingAlgorithmNotFound(msg) => (
-                hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_04,
-                    format!(
-                    "No active routing algorithm found for the created_by entity : {}",
-                    msg
-                ),
-                    None,
-                )),
-            )
-                .into_response(),
-
-            EuclidErrors::RoutingAlgorithmNotFound(msg) => (
-                hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_04,
-                    format!(
-                    "Routing algorithm not found for the provided id : {}",
-                    msg
-                ),
-                    None,
-                )),
-            )
-                .into_response(),
-
-            EuclidErrors::FailedToEvaluateOutput(msg) => (
-                hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_04,
-                    format!(
-                    "Failed to evaluate output for algorithm kind : {}",
-                    msg
-                ),
-                    None,
-                )),
-            ).into_response(),
-
-            EuclidErrors::RoutingInterpretationFailed => (
-                hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_04,
-                    "unable to evaluate output for routing algorithm against the provided parameters".to_string(),
-                    None,
-                )),
-            )
-                .into_response(),
-        }
+        (
+            self.status_code(),
+            ApiErrorResponse::new(error_codes::TE_04, self.message(), None),
+        )
+            .into_response()
     }
 }

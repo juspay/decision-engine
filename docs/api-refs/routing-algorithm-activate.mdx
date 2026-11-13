@@ -1,0 +1,29 @@
+---
+title: "Activate Routing Algorithm"
+description: "Curl example for activating a routing algorithm."
+---
+
+# Activate Routing Algorithm
+
+At a given time, one algorithm for each `algorithm_for` value can be active for one merchant, plus one A/B experiment per `algorithm_for`. An experiment is active beside the rule rather than replacing it; see [A/B Testing: Create An Experiment](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-create.mdx#activate-the-experiment).
+
+## Request
+
+```bash
+curl --location "$BASE_URL/routing/activate" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+    "created_by": "merchant_demo",
+    "routing_algorithm_id": "routing_e641380c-6f24-4405-8454-5ae6cbceb7a0"
+  }'
+```
+
+## Response
+
+Success returns HTTP `200` with an empty response body.
+
+## Related
+
+- [Deactivate Routing Algorithm](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-deactivate.mdx)
+- [List Active Routing Algorithms](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-list-active.mdx)

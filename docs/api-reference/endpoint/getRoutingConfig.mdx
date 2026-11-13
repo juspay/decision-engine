@@ -1,0 +1,82 @@
+---
+title: "Get Routing Config"
+description: "Return rule-builder routing keys and supported values."
+openapi: "openapi.json GET /config/routing-keys"
+---
+
+# Get Routing Config
+
+## Use case
+
+Returns routing keys/dimensions used by the dashboard to build routing configuration forms.
+
+## Authentication
+
+Protected. Send either `Authorization: Bearer <jwt_token>` or `x-api-key: <api_key>`. In sandbox, also send `x-feature: decision-engine`.
+
+For local development, start with:
+
+```bash
+export BASE_URL=http://localhost:8080
+export AUTH_HEADER="Authorization: Bearer <jwt_token>"
+# Sandbox only:
+# export BASE_URL=https://sandbox.hyperswitch.io
+# export FEATURE_HEADER="x-feature: decision-engine"
+```
+
+## Request
+
+- Method and path: `GET /config/routing-keys`
+- Parameters: none.
+- Body: No parameters or request body.
+
+## Example
+
+### Get routing keys
+
+```bash
+curl "$BASE_URL/config/routing-keys" \
+  --header "$AUTH_HEADER"
+```
+
+## Response
+
+Returns a `keys` map of routing-key name → metadata (its type, and for enums the allowed `values` as a comma-separated string).
+
+```json
+{
+  "keys": {
+    "payment_method_type": {
+      "type": "enum",
+      "values": "credit, debit, card, upi_collect, ...",
+      "min_value": null,
+      "max_value": null,
+      "min_length": null,
+      "max_length": null,
+      "exact_length": null,
+      "regex": null
+    },
+    "amount": {
+      "type": "integer",
+      "values": null,
+      "min_value": null,
+      "max_value": null,
+      "min_length": null,
+      "max_length": null,
+      "exact_length": null,
+      "regex": null
+    }
+  }
+}
+```
+
+## Notes
+
+- Use this to keep UI selectors aligned with backend-supported routing dimensions.
+- The exact set can vary as backend routing attributes evolve.
+
+## Related
+
+- [Configure SR Dimensions](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/configSrDimension.mdx)
+- [Create Routing Rule](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/createRoutingRule.mdx)
+- [Config Endpoints](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/config-endpoints.mdx)

@@ -1,0 +1,23 @@
+{
+  "skill_name": "decision-engine-integration",
+  "evals": [
+    {
+      "id": 1,
+      "prompt": "We self-host Juspay Decision Engine. In our Node/Express payment orchestrator, before we call the PSP's authorize API we currently pick the acquirer from a hard-coded priority array in services/routing.js. I want to replace that with a call to Decision Engine's decide-gateway, and then report the auth result back with update-gateway-score. Our checkout uses a Vault that tokenizes the card and sends us the token plus metadata including the card BIN. Wire this up.",
+      "expected_output": "Agent discovers the selection point and authorize call, inserts a decide-gateway client call mapping amount/currency/paymentMethod/cardIsin(BIN), uses decided_gateway, then calls update-gateway-score after the terminal outcome with the same paymentId. Fail-open on DE error/timeout, no PAN sent, bounded timeout, kill-switch/config externalized. Adds tests.",
+      "files": []
+    },
+    {
+      "id": 2,
+      "prompt": "I don't have Decision Engine running yet. Can you set it up locally and then connect our Python orchestrator's charge flow to it so it decides which gateway to use and learns from the outcome?",
+      "expected_output": "Agent stands up Decision Engine via docker compose, bootstraps a merchant + API key + SR config, verifies with a smoke test, then integrates decide-gateway before the charge and update-gateway-score after it in the orchestrator, with fail-open and BIN mapping.",
+      "files": []
+    },
+    {
+      "id": 3,
+      "prompt": "We already added the decide-gateway call to our routing layer last week. Before we ship, can you certify the integration is correct and safe? I especially want to be sure a Decision Engine outage can't take down checkout.",
+      "expected_output": "Agent runs/writes the behavioral test matrix (esp. fail-open, BIN-not-PAN, paymentId attribution), runs the smoke/certify scripts against the engine, and applies the AI eval rubric, reporting a PASS/FAIL verdict with evidence rather than a vague thumbs-up.",
+      "files": []
+    }
+  ]
+}

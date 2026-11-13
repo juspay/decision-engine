@@ -5,6 +5,7 @@ use crate::error::ApiError;
 // use data::int::Int64;
 // use data::text::Text;
 use crate::app::get_tenant_app_state;
+use crate::generics::Repository;
 use crate::storage::types::MerchantGatewayAccountSubInfo as DBMerchantGatewayAccountSubInfo;
 // use types::utils::dbconfig::get_euler_db_conf;
 use crate::types::merchant::merchant_gateway_account::{to_merchant_gw_acc_id, MerchantGwAccId};
@@ -17,12 +18,9 @@ use crate::types::merchant::merchant_gateway_account::{to_merchant_gw_acc_id, Me
 // use prelude::hiding::id;
 // use sequelize::{Clause, Term};
 // use test::quickcheck::Arbitrary;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::merchant_gateway_account_sub_info::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::merchant_gateway_account_sub_info::dsl;
-use diesel::associations::HasTable;
+use crate::storage::backend::schema::merchant_gateway_account_sub_info::dsl;
 use diesel::*;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct MerchantGatewayAccountSubInfo {
@@ -44,9 +42,10 @@ pub fn to_mgasi_pid(id: i64) -> MgasiPId {
     MgasiPId { mgasiPId: id }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum SubInfoType {
-    SPLIT_SETTLEMENT,
+    SplitSettlement,
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
@@ -57,7 +56,7 @@ pub enum SubIdType {
 
 pub fn text_to_sub_info_type(ctx: String) -> Result<SubInfoType, ApiError> {
     match ctx.as_str() {
-        "SPLIT_SETTLEMENT" => Ok(SubInfoType::SPLIT_SETTLEMENT),
+        "SPLIT_SETTLEMENT" => Ok(SubInfoType::SplitSettlement),
         _ => Err(ApiError::ParsingError("Invalid Sub Info Type")),
     }
 }
@@ -93,11 +92,7 @@ pub async fn find_all_mgasi_by_maga_ids_db(
     let mga_id_values: Vec<i64> = mga_ids.iter().map(|id| id.merchantGwAccId).collect();
     let app_state = get_tenant_app_state().await;
     // Use Diesel's query builder to find all matching records
-    crate::generics::generic_find_all::<
-        <DBMerchantGatewayAccountSubInfo as HasTable>::Table,
-        _,
-        DBMerchantGatewayAccountSubInfo,
-    >(
+    DBMerchantGatewayAccountSubInfo::find_all(
         &app_state.db,
         dsl::merchant_gateway_account_id.eq_any(mga_id_values),
     )

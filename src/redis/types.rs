@@ -2,7 +2,7 @@ use serde::Deserialize;
 use serde::Serialize;
 
 // Original Haskell data type: FeatureConf
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FeatureConf {
     #[serde(rename = "enableAll")]
     pub enableAll: bool,
@@ -18,7 +18,7 @@ pub struct FeatureConf {
 }
 
 // Original Haskell data type: MerchantFeature
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct MerchantFeature {
     #[serde(rename = "merchantId")]
     pub merchantId: String,
@@ -57,21 +57,13 @@ pub struct FeatureDimension {
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum DimensionType {
-    #[serde(rename = "JUSPAY_BANK_CODE")]
-    JUSPAY_BANK_CODE,
-
-    #[serde(rename = "GATEWAY")]
-    GATEWAY,
-
-    #[serde(rename = "CARD_BRAND")]
-    CARD_BRAND,
-
-    #[serde(rename = "SCOF")]
-    SCOF,
-
-    #[serde(rename = "FIDO")]
-    FIDO,
+    JuspayBankCode,
+    Gateway,
+    CardBrand,
+    Scof,
+    Fido,
 }
 
 pub trait ServiceConfigKey {

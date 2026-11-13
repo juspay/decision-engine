@@ -1,6 +1,5 @@
-use crate::logger::storage::Storage;
 use crate::{
-    decider::gatewaydecider::runner::ResponseBody, error::ApiClientError, logger, storage::consts,
+    decider::gatewaydecider::runner::ResponseBody, error::ApiClientError, storage::consts,
 };
 use axum::{body::Body, extract::Request};
 use error_stack::ResultExt;
@@ -11,7 +10,6 @@ use reqwest::{
     Client,
 };
 use serde::Deserialize;
-use serde_json::Value;
 
 use std::time::{SystemTime, UNIX_EPOCH};
 /// Date-time utilities.
@@ -26,28 +24,17 @@ pub mod date_time {
 }
 
 pub fn record_fields_from_header(request: &Request<Body>) -> tracing::Span {
-    let span = tracing::debug_span!(
+    let span = tracing::info_span!(
         "request",
         method = %request.method(),
         uri = %request.uri(),
         version = ?request.version(),
-        tenant_id = tracing::field::Empty,
-        udf_order_id = tracing::field::Empty,
-        udf_customer_id = tracing::field::Empty,
-        udf_txn_uuid = tracing::field::Empty,
         "x-request-id" = tracing::field::Empty,
         "x-global-request-id" = tracing::field::Empty,
         merchant_id = tracing::field::Empty,
-        is_art_enabled = tracing::field::Empty,
-        is_audit_trail_log = tracing::field::Empty,
-        "euler-request-id" = tracing::field::Empty,
+        payment_id = tracing::field::Empty,
         tenant_id = tracing::field::Empty,
-        tenant_name = tracing::field::Empty,
         schema_version = tracing::field::Empty,
-        tag = tracing::field::Empty,
-        config_version = tracing::field::Empty,
-        sdk_session_span = tracing::field::Empty,
-        cell_selector = tracing::field::Empty,
     );
 
     let headers = request.headers();
@@ -59,21 +46,10 @@ pub fn record_fields_from_header(request: &Request<Body>) -> tracing::Span {
     };
 
     record_field(consts::X_TENANT_ID, "tenant_id");
-    record_field(consts::UDF_ORDER_ID, "udf_order_id");
-    record_field(consts::UDF_CUSTOMER_ID, "udf_customer_id");
-    record_field(consts::UDF_TXN_UUID, "udf_txn_uuid");
+    record_field("x-merchant-id", "merchant_id");
     record_field(consts::X_REQUEST_ID, "x-request-id");
     record_field(consts::X_GLOBAL_REQUEST_ID, "x-global-request-id");
-    record_field(consts::EULER_REQUEST_ID, "euler-request-id");
-    record_field(consts::X_SESSION_ID, "sdk_session_span");
-    record_field(consts::X_CELL_SELECTOR, "cell_selector");
-    record_field(consts::X_ART_RECORDING, "is_art_enabled");
-    span.record("is_audit_trail_log", "true");
     span.record("schema_version", "V2");
-    span.record("tenant_name", "JUSPAY");
-    span.record("tenant_id", "JUSPAY");
-    span.record("tag", "euler_logs");
-    span.record("config_version", 4872);
 
     span
 }
@@ -158,9 +134,7 @@ impl<T> StringExt<T> for String {
     {
         serde_json::from_str::<T>(self)
             .change_context(ParsingError::StructParseFailure(type_name))
-            .attach_printable_lazy(|| {
-                format!("Unable to parse {type_name} from string {:?}", &self)
-            })
+            .attach_printable_lazy(|| format!("Unable to parse {type_name} from string {:?}", self))
     }
 }
 
@@ -226,7 +200,7 @@ pub async fn call_api(url: &str, body: &serde_json::Value) -> Result<ResponseBod
     }
 }
 
-pub fn generate_random_number(tag: String, range: (f64, f64)) -> f64 {
+pub fn generate_random_number(_tag: String, range: (f64, f64)) -> f64 {
     let (min, max) = range;
 
     // Create a random number generator

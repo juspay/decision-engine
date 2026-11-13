@@ -323,6 +323,9 @@ pub mod error_codes {
 
     /// Validation error: Represents an error occurring in euclid codebase.
     pub const TE_04: &str = "TE_04";
+
+    /// Validation error: Represents an error occurring in debit routing codebase.
+    pub const TE_05: &str = "TE_05";
 }
 
 impl axum::response::IntoResponse for ApiError {
@@ -330,40 +333,32 @@ impl axum::response::IntoResponse for ApiError {
         match self {
             Self::CustodianLocked => (
                 hyper::StatusCode::UNAUTHORIZED,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_00,
-                    "Custodian is locked".into(),
-                    None,
-                )),
+                ApiErrorResponse::new(error_codes::TE_00, "Custodian is locked".into(), None),
             )
                 .into_response(),
 
             Self::MissingRequiredField(field_name) => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_00,
                     format!("Missing required param: {field_name}"),
                     None,
-                )),
+                ),
             )
                 .into_response(),
 
             Self::DecryptingKeysFailed(err) => (
                 hyper::StatusCode::UNAUTHORIZED,
-                axum::Json(ApiErrorResponse::new(
+                ApiErrorResponse::new(
                     error_codes::TE_00,
                     format!("Failed while decrypting two custodian keys: {err}"),
                     None,
-                )),
+                ),
             )
                 .into_response(),
             data @ Self::EncodingError => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_00,
-                    format!("{}", data),
-                    None,
-                )),
+                ApiErrorResponse::new(error_codes::TE_00, format!("{}", data), None),
             )
                 .into_response(),
             data @ Self::ResponseMiddlewareError(_)
@@ -371,11 +366,7 @@ impl axum::response::IntoResponse for ApiError {
             | data @ Self::MerchantKeyError
             | data @ Self::KeyManagerError(_) => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_00,
-                    format!("{}", data),
-                    None,
-                )),
+                ApiErrorResponse::new(error_codes::TE_00, format!("{}", data), None),
             )
                 .into_response(),
 
@@ -384,11 +375,7 @@ impl axum::response::IntoResponse for ApiError {
             | data @ Self::DatabaseDeleteFailed(_)
             | data @ Self::RetrieveDataFailed(_) => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_01,
-                    format!("{}", data),
-                    None,
-                )),
+                ApiErrorResponse::new(error_codes::TE_01, format!("{}", data), None),
             )
                 .into_response(),
             data @ Self::RequestMiddlewareError(_)
@@ -398,38 +385,22 @@ impl axum::response::IntoResponse for ApiError {
             | data @ Self::CustodianUnlocked
             | data @ Self::TenantError(_) => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_03,
-                    format!("{}", data),
-                    None,
-                )),
+                ApiErrorResponse::new(error_codes::TE_03, format!("{}", data), None),
             )
                 .into_response(),
             data @ Self::NotFoundError => (
                 hyper::StatusCode::NOT_FOUND,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_02,
-                    format!("{}", data),
-                    None,
-                )),
+                ApiErrorResponse::new(error_codes::TE_02, format!("{}", data), None),
             )
                 .into_response(),
             data @ Self::MerchantError => (
                 hyper::StatusCode::INTERNAL_SERVER_ERROR,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_02,
-                    format!("{}", data),
-                    None,
-                )),
+                ApiErrorResponse::new(error_codes::TE_02, format!("{}", data), None),
             )
                 .into_response(),
             data @ Self::ParsingError(..) => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(ApiErrorResponse::new(
-                    error_codes::TE_03,
-                    format!("{}", data),
-                    None,
-                )),
+                ApiErrorResponse::new(error_codes::TE_03, format!("{}", data), None),
             )
                 .into_response(),
         }
@@ -440,7 +411,7 @@ impl<T: axum::response::IntoResponse + error_stack::Context + Clone> axum::respo
     for ContainerError<T>
 {
     fn into_response(self) -> axum::response::Response {
-        crate::logger::error!(error=?self.error);
+        crate::logger::error!(error = ?self.error, error_message = %self.error.current_context());
         self.error.current_context().clone().into_response()
     }
 }
@@ -486,3 +457,176 @@ impl ApiErrorResponse {
 //         output.map_err(|err| (*err.current_context()))
 //     }
 // }
+
+impl axum::response::IntoResponse for ApiErrorResponse {
+    fn into_response(self) -> axum::response::Response {
+        axum::Json(self).into_response()
+    }
+}
+
+/// Log authentication/plain-text errors once while preserving their HTTP response.
+pub(crate) fn text_error_response(
+    status: StatusCode,
+    message: impl Into<String>,
+) -> axum::response::Response {
+    use axum::response::IntoResponse;
+    let message = message.into();
+    crate::logger::error!(error_message = %message, error_code = status.as_str(), "Request failed");
+    (status, message).into_response()
+}
+
+/// A route's error, answered with the standard `{code, message, data}` body and logged once when it
+/// becomes the response.
+///
+/// `message` is what the caller sees. An unexpected failure is built with [`RouteError::internal`],
+/// which keeps its cause for the log and tells the caller only that the request failed.
+#[derive(Debug)]
+pub struct RouteError {
+    status: StatusCode,
+    message: String,
+    /// The underlying failure, logged and never sent.
+    cause: Option<String>,
+}
+
+impl RouteError {
+    pub fn new(status: StatusCode, message: impl Into<String>) -> Self {
+        Self {
+            status,
+            message: message.into(),
+            cause: None,
+        }
+    }
+
+    pub fn bad_request(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::BAD_REQUEST, message)
+    }
+
+    pub fn not_found(message: impl Into<String>) -> Self {
+        Self::new(StatusCode::NOT_FOUND, message)
+    }
+
+    /// A failure the caller cannot act on — storage, ClickHouse, the filesystem. Its detail goes to
+    /// the log; the response says only that the request failed.
+    pub fn internal(cause: impl std::fmt::Debug) -> Self {
+        Self {
+            status: StatusCode::INTERNAL_SERVER_ERROR,
+            message: "The request could not be completed".to_string(),
+            cause: Some(format!("{cause:?}")),
+        }
+    }
+
+    /// Keeps `cause` for the log alongside the caller's message.
+    pub fn with_cause(mut self, cause: impl std::fmt::Debug) -> Self {
+        self.cause = Some(format!("{cause:?}"));
+        self
+    }
+
+    pub fn status(&self) -> StatusCode {
+        self.status
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    fn code(&self) -> &'static str {
+        match self.status {
+            StatusCode::NOT_FOUND => error_codes::TE_02,
+            status if status.is_client_error() => error_codes::TE_03,
+            _ => error_codes::TE_00,
+        }
+    }
+}
+
+/// A caller error keeps its status and message; a server error answers as [`RouteError::internal`].
+/// Either way the full report is logged.
+impl From<ContainerError<crate::euclid::errors::EuclidErrors>> for RouteError {
+    fn from(error: ContainerError<crate::euclid::errors::EuclidErrors>) -> Self {
+        let status = error.get_inner().status_code();
+        if status.is_server_error() {
+            Self::internal(error)
+        } else {
+            Self::new(status, error.get_inner().message()).with_cause(error)
+        }
+    }
+}
+
+impl axum::response::IntoResponse for RouteError {
+    fn into_response(self) -> axum::response::Response {
+        crate::logger::error!(
+            error_message = %self.message,
+            error_code = self.status.as_str(),
+            cause = self.cause.as_deref().unwrap_or_default(),
+            "Request failed"
+        );
+        let code = self.code();
+        (self.status, ApiErrorResponse::new(code, self.message, None)).into_response()
+    }
+}
+
+#[cfg(test)]
+mod route_error_tests {
+    use super::RouteError;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+
+    async fn body(error: RouteError) -> (StatusCode, serde_json::Value) {
+        let response = error.into_response();
+        let status = response.status();
+        let bytes = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("body");
+        (status, serde_json::from_slice(&bytes).expect("json"))
+    }
+
+    #[tokio::test]
+    async fn answers_with_the_standard_json_error() {
+        assert_eq!(
+            body(RouteError::not_found("ingestion not found")).await,
+            (
+                StatusCode::NOT_FOUND,
+                serde_json::json!({"code": "TE_02", "message": "ingestion not found", "data": null})
+            )
+        );
+        assert_eq!(
+            body(RouteError::bad_request("empty report body")).await.1["code"],
+            "TE_03"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_euclid_error_keeps_its_status_and_hides_server_detail() {
+        use crate::error::ContainerError;
+        use crate::euclid::errors::EuclidErrors;
+
+        let caller: ContainerError<EuclidErrors> =
+            EuclidErrors::InvalidRequest("fallback connector `x` is unknown".into()).into();
+        assert_eq!(
+            body(caller.into()).await,
+            (
+                StatusCode::BAD_REQUEST,
+                serde_json::json!({
+                    "code": "TE_03",
+                    "message": "Invalid request received : fallback connector `x` is unknown",
+                    "data": null
+                })
+            )
+        );
+
+        let server: ContainerError<EuclidErrors> = EuclidErrors::StorageError.into();
+        let (status, json) = body(server.into()).await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(json["message"], "The request could not be completed");
+    }
+
+    #[tokio::test]
+    async fn an_internal_error_keeps_its_cause_out_of_the_response() {
+        let (status, json) = body(RouteError::internal(
+            "connection refused: postgres://user:pw@db",
+        ))
+        .await;
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(json["code"], "TE_00");
+        assert!(!json.to_string().contains("postgres"), "{json}");
+    }
+}

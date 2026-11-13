@@ -1,0 +1,113 @@
+---
+title: "Hybrid Routing"
+description: "Evaluate hybrid routing using the active routing rule plus runtime payment context."
+openapi: "openapi.json POST /routing/hybrid"
+---
+
+# Hybrid Routing
+
+## Use case
+
+Evaluates a routing configuration that combines rule output with runtime gateway scoring.
+
+## Authentication
+
+Protected. Send either `Authorization: Bearer <jwt_token>` or `x-api-key: <api_key>`. In sandbox, also send `x-feature: decision-engine`.
+
+For local development, start with:
+
+```bash
+export BASE_URL=http://localhost:8080
+export AUTH_HEADER="Authorization: Bearer <jwt_token>"
+# Sandbox only:
+# export BASE_URL=https://sandbox.hyperswitch.io
+# export FEATURE_HEADER="x-feature: decision-engine"
+```
+
+## Request
+
+- Method and path: `POST /routing/hybrid`
+- Parameters: none.
+- Body: JSON body with `static_routing_request` and/or `dynamic_routing_request` (at least one required). `static_routing_request` uses the `/routing/evaluate` shape (`created_by` + `parameters`); `dynamic_routing_request` uses the `/decide-gateway` shape (`merchantId`, `eligibleGatewayList`, `rankingAlgorithm`, `paymentInfo`).
+
+## Example
+
+### Hybrid routing
+
+```bash
+curl --location "$BASE_URL/routing/hybrid" \
+  --header "$AUTH_HEADER" \
+  --header "Content-Type: application/json" \
+  --data '{
+  "static_routing_request": {
+    "created_by": "merchant_demo",
+    "payment_id": "hybrid_rule_001",
+    "parameters": {
+      "payment_method_type": { "type": "enum_variant", "value": "credit" },
+      "payment_method": { "type": "enum_variant", "value": "card" }
+    }
+  },
+  "dynamic_routing_request": {
+    "merchantId": "merchant_demo",
+    "eligibleGatewayList": ["stripe", "adyen"],
+    "rankingAlgorithm": "SR_BASED_ROUTING",
+    "eliminationEnabled": false,
+    "paymentInfo": {
+      "paymentId": "hybrid_rule_001",
+      "amount": 1000,
+      "currency": "USD",
+      "paymentType": "ORDER_PAYMENT",
+      "paymentMethod": "CARD",
+      "paymentMethodType": "CREDIT",
+      "authType": "THREE_DS"
+    }
+  }
+}'
+```
+
+## Response
+
+```json
+{
+  "static_routing": {
+    "payment_id": "hybrid_rule_001",
+    "status": "success",
+    "output": {
+      "type": "priority",
+      "connectors": [
+        { "gateway_name": "stripe", "gateway_id": "mca_111" },
+        { "gateway_name": "adyen", "gateway_id": "mca_112" }
+      ]
+    },
+    "evaluated_output": [ { "gateway_name": "stripe", "gateway_id": "mca_111" } ],
+    "eligible_connectors": [
+      { "gateway_name": "stripe", "gateway_id": "mca_111" },
+      { "gateway_name": "adyen", "gateway_id": "mca_112" }
+    ]
+  },
+  "dynamic_routing": {
+    "status": "success",
+    "decision": {
+      "decided_gateway": "stripe",
+      "fallback_gateways": ["adyen"],
+      "gateway_priority_map": { "stripe": 0.94, "adyen": 0.91 },
+      "routing_approach": "SR_SELECTION_V3_ROUTING"
+    },
+    "fallback_connectors": null
+  },
+  "evaluated_connectors": [
+    { "gateway_name": "stripe", "gateway_id": null }
+  ]
+}
+```
+
+## Notes
+
+- Use `/decide-gateway` with `NTW_SR_HYBRID_ROUTING` for debit network + SR hybrid decisions.
+- Use this route only when the hybrid rule evaluation contract is needed.
+
+## Related
+
+- [Evaluate Routing Rule](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/evaluateRoutingRule.mdx)
+- [Decide Gateway](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/decideGateway.mdx)
+- [Hybrid Routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-hybrid.mdx)

@@ -7,10 +7,10 @@ use serde::{Deserialize, Serialize};
 use time::PrimitiveDateTime;
 // use database::beam as B;
 // use chrono::{Local, Utc};
-use crate::types::gateway as ETG;
-use crate::types::txn_details::types::{Offset, TxnStatus};
+use crate::decider::gatewaydecider::utils::mask_secret_option;
+use crate::types::txn_details::types::{TransactionLatency, TxnStatus};
+use masking::Secret;
 use std::string::String;
-use time::OffsetDateTime;
 // use eulerhs::types::MeshError;
 
 // // Converted type synonyms
@@ -42,10 +42,11 @@ pub struct TxnInfo {
 
 // Original Haskell data type: MandateTxnType
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum MandateTxnType {
-    REGISTER,
-    REGISTER_AND_DEBIT,
-    DEFAULT,
+    Register,
+    RegisterAndDebit,
+    Default,
 }
 
 // Original Haskell data type: MerchantScoringDetails
@@ -107,7 +108,8 @@ pub struct GatewayScoringKeyType {
     pub sourceObject: Option<String>,
 
     #[serde(rename = "paymentSource")]
-    pub paymentSource: Option<String>,
+    #[serde(serialize_with = "mask_secret_option")]
+    pub paymentSource: Option<Secret<String>>,
 
     #[serde(rename = "cardType")]
     pub cardType: Option<String>,
@@ -120,6 +122,9 @@ pub struct GatewayScoringKeyType {
 
     #[serde(rename = "softTTL")]
     pub softTTL: Option<i32>,
+
+    #[serde(rename = "gatewayReferenceId")]
+    pub gatewayReferenceId: Option<String>,
 }
 
 // Original Haskell data type: TxnDetailT
@@ -217,35 +222,56 @@ pub struct GatewayScoringKeyType {
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum TxnObjectType {
-    MANDATE_REGISTER,
-    MANDATE_PAYMENT,
-    ORDER_PAYMENT,
-    EMANDATE_REGISTER,
-    EMANDATE_PAYMENT,
-    TPV_PAYMENT,
-    PARTIAL_CAPTURE,
-    PARTIAL_VOID,
-    TPV_EMANDATE_REGISTER,
-    TPV_MANDATE_REGISTER,
-    TPV_EMANDATE_PAYMENT,
-    TPV_MANDATE_PAYMENT,
-    VAN_PAYMENT,
-    MOTO_PAYMENT,
+    MandateRegister,
+    MandatePayment,
+    OrderPayment,
+    EmandateRegister,
+    EmandatePayment,
+    TpvPayment,
+    PartialCapture,
+    PartialVoid,
+    TpvEmandateRegister,
+    TpvMandateRegister,
+    TpvEmandatePayment,
+    TpvMandatePayment,
+    VanPayment,
+    MotoPayment,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone)]
+pub use gsm::{GsmErrorInfo, GsmInfo};
+
+#[derive(Debug, Serialize, Deserialize, Clone, crate::auth::MerchantScoped)]
+#[serde(rename_all = "camelCase")]
 pub struct UpdateScorePayload {
-    pub merchantId: String,
+    #[merchant]
+    pub merchant_id: String,
     pub gateway: String,
-    pub gatewayReferenceId: Option<String>,
+    pub gateway_reference_id: Option<String>,
     pub status: TxnStatus,
-    pub paymentId: String,
-    pub enforceDynamicRoutingFailure: Option<bool>,
+    pub payment_id: String,
+    pub enforce_dynamic_routing_failure: Option<bool>,
+    pub txn_latency: Option<TransactionLatency>,
+    /// Optional gateway error details used for GSM-based scoring filter.
+    /// When present and the per-merchant flag is enabled, user/issuer-originated
+    /// failures are skipped so the gateway is not penalized for non-gateway errors.
+    pub error_info: Option<crate::gsm::GsmErrorInfo>,
+    /// Set to true by the orchestrator when this call is a smart-retry attempt
+    /// (i.e. a fallback gateway chosen after a GSM-guided retry decision).
+    /// When present, the engine emits a SmartRetryDecision analytics event capturing
+    /// which gateway was retried and whether it recovered the payment.
+    pub is_smart_retry: Option<bool>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct UpdateScoreResponse {
     pub message: String,
+    pub merchant_id: String,
+    pub gateway: String,
+    pub payment_id: String,
+    /// GSM lookup result. Present only when `errorInfo` was supplied in the request
+    /// and a matching rule was found in the GSM store.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub gsm_info: Option<GsmInfo>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -258,6 +284,12 @@ pub struct InternalMetadata {
 pub struct InternalTrackingInfo {
     #[serde(rename = "routing_approach")]
     pub routing_approach: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TransactionLatencyThreshold {
+    #[serde(rename = "gatewayLatency")]
+    pub gatewayLatency: Option<f64>,
 }
 
 // Original Haskell data type: Error
@@ -433,7 +465,7 @@ pub struct SrV3DebugBlock {
 //     AADHAAR,
 //     PAPERNACH,
 //     PAN,
-//     MERCHANT_CONTAINER,
+//     MerchantContainer,
 //     Virtual_Account,
 //     OTC,
 //     RTP,
@@ -509,7 +541,7 @@ pub struct SrV3DebugBlock {
 
 // Converted newtypes
 // Original Haskell newtype: Milliseconds
-#[derive(Debug, Serialize, Deserialize, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, PartialOrd)]
 pub struct Milliseconds {
     #[serde(rename = "milliseconds")]
     pub milliseconds: f64,
@@ -537,7 +569,7 @@ pub struct Date {
 //         PaymentMethodType::AADHAAR => "AADHAAR".into(),
 //         PaymentMethodType::PAPERNACH => "PAPERNACH".into(),
 //         PaymentMethodType::PAN => "PAN".into(),
-//         PaymentMethodType::MERCHANT_CONTAINER => "MERCHANT_CONTAINER".into(),
+//         PaymentMethodType::MerchantContainer => "MERCHANT_CONTAINER".into(),
 //         PaymentMethodType::Virtual_Account => "VIRTUAL_ACCOUNT".into(),
 //         PaymentMethodType::OTC => "OTC".into(),
 //         PaymentMethodType::RTP => "RTP".into(),
@@ -561,7 +593,7 @@ pub struct Date {
 //         "AADHAAR" => PaymentMethodType::AADHAAR,
 //         "PAPERNACH" => PaymentMethodType::PAPERNACH,
 //         "PAN" => PaymentMethodType::PAN,
-//         "MERCHANT_CONTAINER" => PaymentMethodType::MERCHANT_CONTAINER,
+//         "MERCHANT_CONTAINER" => PaymentMethodType::MerchantContainer,
 //         "VIRTUAL_ACCOUNT" => PaymentMethodType::Virtual_Account,
 //         "OTC" => PaymentMethodType::OTC,
 //         "RTP" => PaymentMethodType::RTP,

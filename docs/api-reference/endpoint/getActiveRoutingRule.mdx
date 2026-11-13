@@ -1,0 +1,77 @@
+---
+title: "Get Active Routing Rule"
+description: "Retrieve the currently active routing rule for a merchant."
+openapi: "openapi.json GET /routing/list/active/{merchant_id}"
+---
+
+# Get Active Routing Rule
+
+## Use case
+
+Fetches the currently active routing algorithm for a creator/merchant scope.
+
+## Authentication
+
+Protected. Send either `Authorization: Bearer <jwt_token>` or `x-api-key: <api_key>`. In sandbox, also send `x-feature: decision-engine`.
+
+For local development, start with:
+
+```bash
+export BASE_URL=http://localhost:8080
+export AUTH_HEADER="Authorization: Bearer <jwt_token>"
+# Sandbox only:
+# export BASE_URL=https://sandbox.hyperswitch.io
+# export FEATURE_HEADER="x-feature: decision-engine"
+```
+
+## Request
+
+- Method and path: `GET /routing/list/active/{merchant_id}`
+- Parameters:
+  - `merchant_id` (path, required, string)
+- Body: none.
+
+## Example
+
+### Get active rule
+
+```bash
+curl --location "$BASE_URL/routing/list/active/merchant_demo" \
+  --header "$AUTH_HEADER"
+```
+
+## Response
+
+Returns an array of the currently-active routing algorithms (each the full rule object). Empty array `[]` when none is active.
+
+```json
+[
+  {
+    "id": "routing_e641380c-6f24-4405-8454-5ae6cbceb7a0",
+    "created_by": "merchant_demo",
+    "name": "priority rule",
+    "description": "try stripe before adyen",
+    "algorithm_data": {
+      "type": "priority",
+      "data": [
+        { "gateway_name": "stripe", "gateway_id": "mca_111" },
+        { "gateway_name": "adyen", "gateway_id": "mca_112" }
+      ]
+    },
+    "algorithm_for": "payment",
+    "created_at": "2026-04-26 10:00:00.000000",
+    "modified_at": "2026-04-26 10:00:00.000000"
+  }
+]
+```
+
+## Notes
+
+- The dashboard uses this before volume/rule evaluations.
+- A missing active rule means the explorer should ask the operator to configure routing first.
+
+## Related
+
+- [List Routing Rules](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/listRoutingRules.mdx)
+- [Activate Routing Rule](https://github.com/juspay/decision-engine/blob/main/docs/api-reference/endpoint/activateRoutingRule.mdx)
+- [List Active Routing Algorithms](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/routing-algorithm-list-active.mdx)

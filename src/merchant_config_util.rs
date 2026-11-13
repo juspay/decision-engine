@@ -25,12 +25,17 @@
 use josekit::Value;
 
 use crate::{
+    app::get_tenant_app_state,
     decider::{
         configs::env_vars::enable_merchant_config_entity_lookup,
-        gatewaydecider::constants::MERCHANT_CONFIG_ENTITY_LEVEL_LOOKUP_CUTOVER,
+        gatewaydecider::constants::MerchantConfigEntityLevelLookupCutover,
     },
     logger,
-    redis::{cache::findByNameFromRedis, types::ServiceConfigKey},
+    redis::{
+        cache::findByNameFromRedis,
+        mem_cache::{mem_cache_config, TypedCache, GLOBAL_CACHE},
+        types::ServiceConfigKey,
+    },
     types::{
         country::country_iso::CountryISO,
         merchant::id::MerchantPId,
@@ -40,12 +45,14 @@ use crate::{
                 load_merchant_config_by_mpid_category_name_and_status, MerchantConfig,
             },
             types::{
-                config_category_to_text, config_status_to_text, to_config_status, ConfigCategory,
-                ConfigStatus, PfMcConfig,
+                config_category_to_text, config_status_to_text, ConfigCategory, ConfigStatus,
+                PfMcConfig,
             },
         },
         payment_flow::{payment_flows_to_text, PaymentFlow},
-        tenant::tenant_config::{ConfigType, ModuleName},
+        tenant::tenant_config::{
+            ConfigType, ModuleName, TenantConfigStatus, TenantConfigValueType,
+        },
         tenant_config::{
             get_arr_active_tenant_config_by_tenant_id_module_name_module_key_and_arr_type,
             get_arr_active_tenant_config_by_tenant_id_module_name_module_key_and_arr_type_and_country,
@@ -53,6 +60,20 @@ use crate::{
         },
     },
 };
+
+use once_cell::sync::Lazy;
+
+// ── Payment-flow config cache ─────────────────────────────────────────────────
+//
+// 60-second TTL per (merchant, module, payment_flow, country) combination.
+// Payment flow config changes only via the admin dashboard, so a 60-second
+// stale window eliminates a per-request DB round-trip on the routing hot-path
+// without meaningful operational impact.
+//
+// TTL is read from [mem_cache] payment_flow_ttl_ms in the TOML config (default 60 000ms = 60s).
+// Uses TypedCache (Mutex + try_lock) — non-blocking, safe on single-core.
+static PAYMENT_FLOW_CACHE: Lazy<TypedCache<bool>> =
+    Lazy::new(|| TypedCache::new(mem_cache_config().payment_flow_ttl_ms, 10_000));
 
 // Converted data types
 // Original Haskell data type: CONFIG_VALUE_STATUS
@@ -75,7 +96,7 @@ use crate::{
 // // Original Haskell function: getMerchantConfigEntityLevelLookupConfig
 pub async fn getMerchantConfigEntityLevelLookupConfig() -> Option<PfMcConfig> {
     if enable_merchant_config_entity_lookup() {
-        findByNameFromRedis(MERCHANT_CONFIG_ENTITY_LEVEL_LOOKUP_CUTOVER.get_key()).await
+        findByNameFromRedis(MerchantConfigEntityLevelLookupCutover.get_key()).await
     } else {
         None
     }
@@ -144,28 +165,34 @@ pub async fn isMerchantEnabledForPaymentFlows(
     merchant_id: MerchantPId,
     payment_flows: Vec<PaymentFlow>,
 ) -> bool {
+    let flow_texts: Vec<String> = payment_flows.iter().map(payment_flows_to_text).collect();
+    let cache_key = format!("mc_pf_arr_{}_{}", merchant_id.0, flow_texts.join("_"));
+
+    if let Ok(cached) = GLOBAL_CACHE.get::<bool>(&cache_key) {
+        return cached;
+    }
+
     let mc_arr = load_merchant_config_by_mpid_category_and_name(
         merchant_id,
-        config_category_to_text(ConfigCategory::PAYMENT_FLOW),
-        payment_flows
-            .iter()
-            .map(|pf: &PaymentFlow| payment_flows_to_text(pf))
-            .collect::<Vec<_>>()
-            .join(","),
+        config_category_to_text(ConfigCategory::PaymentFlow),
+        flow_texts.join(","),
     )
     .await;
     let is_valid_length = mc_arr.iter().count() == payment_flows.len();
     let are_all_pfs_enabled = mc_arr.iter().all(|mc| mc.status == ConfigStatus::ENABLED);
     if !is_valid_length {
-        logMerConfigLengthMisMatchError(
-            payment_flows.iter().map(payment_flows_to_text).collect(),
-            mc_arr
-                .into_iter()
-                .filter_map(|mc| Some(mc.clone()))
-                .collect(),
-        );
+        logMerConfigLengthMisMatchError(flow_texts, mc_arr.into_iter().collect());
     }
-    is_valid_length && are_all_pfs_enabled
+    let result = is_valid_length && are_all_pfs_enabled;
+
+    let ttl = get_tenant_app_state()
+        .await
+        .config
+        .cache_config
+        .service_config_ttl as u64;
+    let _ = GLOBAL_CACHE.store(cache_key, result, Some(ttl));
+
+    result
 }
 
 // // Original Haskell function: isMerchantEnabledForPaymentFlow
@@ -238,7 +265,7 @@ pub async fn isMerchantEnabledForPaymentFlows(
 //     }
 //     let mc_arr = MerchantConfig::loadArrMerchantConfigByMPidCategoryAndName(
 //         mer_acc_id,
-//         MCTypes::PAYMENT_FLOW,
+//         MCTypes::PaymentFlow,
 //         &enabled_pfs.iter().map(|pf| MCTypes::ConfigName(pf.clone())).collect::<Vec<_>>(),
 //     );
 //     let result: Vec<(String, RedisMerchantConfigStatus)> = enabled_pfs
@@ -281,17 +308,32 @@ pub async fn isPaymentFlowEnabledForMerchant(
     payment_flow: PaymentFlow,
 ) -> bool {
     let config_name = payment_flows_to_text(&payment_flow);
-    let config_category = config_category_to_text(ConfigCategory::PAYMENT_FLOW);
+    let cache_key = format!("mc_pf_{}_{}", merchant_p_id.0, config_name);
+
+    if let Ok(cached) = GLOBAL_CACHE.get::<bool>(&cache_key) {
+        return cached;
+    }
+
+    let config_category = config_category_to_text(ConfigCategory::PaymentFlow);
     let config_status = config_status_to_text(ConfigStatus::ENABLED);
 
-    load_merchant_config_by_mpid_category_name_and_status(
+    let result = load_merchant_config_by_mpid_category_name_and_status(
         merchant_p_id,
         config_category,
         config_name,
         config_status,
     )
     .await
-    .is_some()
+    .is_some();
+
+    let ttl = get_tenant_app_state()
+        .await
+        .config
+        .cache_config
+        .service_config_ttl as u64;
+    let _ = GLOBAL_CACHE.store(cache_key, result, Some(ttl));
+
+    result
 }
 
 // // Original Haskell function: isMerchantEnabledForFeature
@@ -326,7 +368,7 @@ pub async fn isPaymentFlowEnabledForMerchant(
 
 // // Original Haskell function: logMerConfigLengthMisMatchError
 pub fn logMerConfigLengthMisMatchError(pfs: Vec<String>, mc_arr: Vec<MerchantConfig>) {
-    logger::error!(
+    logger::warn!(
         "Merchant config length mismatch for payment flows: {:?} and merchant config: {:?}",
         pfs,
         mc_arr
@@ -340,7 +382,7 @@ pub async fn getMerchantConfigValueForPaymentFlow(
 ) -> Option<Value> {
     let m_mer_config = load_merchant_config_by_mpid_category_name_and_status(
         merchant_p_id_val,
-        config_category_to_text(ConfigCategory::PAYMENT_FLOW),
+        config_category_to_text(ConfigCategory::PaymentFlow),
         payment_flows_to_text(&pf),
         config_status_to_text(ConfigStatus::ENABLED),
     )
@@ -363,7 +405,7 @@ pub async fn getMerchantConfigValueForPaymentFlow(
 // ) -> Option<Val> {
 //     let m_mer_config = load_merchant_config_by_mpid_category_name_and_status(
 //         merchant_p_id_val,
-//         ConfigCategory::PAYMENT_FLOW,
+//         ConfigCategory::PaymentFlow,
 //         payment_flows_to_text(&pf),
 //         ConfigStatus::ENABLED,
 //     );
@@ -401,13 +443,13 @@ pub async fn getMerchantConfigValueForPaymentFlow(
 // // Original Haskell function: getMerchantConfigStatusAndvalueForPaymentFlow
 pub async fn getMerchantConfigStatusAndvalueForPaymentFlow(
     merchant_p_id: MerchantPId,
-    merchant_id: MerchantPId,
+    _merchant_id: MerchantPId,
     pf: PaymentFlow,
-    m_pf_mc_config: Option<MerchantConfig>,
+    _m_pf_mc_config: Option<MerchantConfig>,
 ) -> (ConfigStatus, Option<Value>) {
     let m_mer_config: Option<MerchantConfig> = load_merchant_config_by_mpid_category_and_name(
         merchant_p_id,
-        config_category_to_text(ConfigCategory::PAYMENT_FLOW),
+        config_category_to_text(ConfigCategory::PaymentFlow),
         payment_flows_to_text(&pf),
     )
     .await;
@@ -435,7 +477,7 @@ pub async fn getMerchantConfigStatusAndvalueForPaymentFlow(
 // ) -> (Option<MerchantConfig>) {
 //     let m_mer_config = load_merchant_config_by_mpid_category_and_name(
 //         merchant_p_id,
-//         config_category_to_text(ConfigCategory::PAYMENT_FLOW),
+//         config_category_to_text(ConfigCategory::PaymentFlow),
 //         payment_flows_to_text(&pf),
 //     ).await;
 //     match m_mer_config {
@@ -517,7 +559,7 @@ pub async fn isPaymentFlowEnabledWithHierarchyCheck(
         );
     }
 
-    let category = config_category_to_text(ConfigCategory::PAYMENT_FLOW);
+    let category = config_category_to_text(ConfigCategory::PaymentFlow);
 
     let m_mer_config = load_merchant_config_by_mpid_category_and_name(
         merchant_p_id,
@@ -543,11 +585,45 @@ pub async fn isPaymentFlowEnabledWithHierarchyCheck(
     }
 }
 
+/// Cached variant of [`isPaymentFlowEnabledWithHierarchyCheck`] for the routing hot-path.
+///
+/// TTL: 60 seconds keyed on all five parameters.  Callers that require
+/// guaranteed-fresh data (e.g. validation endpoints) should call the uncached
+/// version directly.
+pub async fn isPaymentFlowEnabledWithHierarchyCheckCached(
+    merchant_p_id: MerchantPId,
+    m_tenant_account_id: Option<String>,
+    module_name: ModuleName,
+    payment_flow: PaymentFlow,
+    m_iso_country_code: Option<CountryISO>,
+) -> bool {
+    let cache_key = format!(
+        "pf:{}:{}:{:?}:{}:{:?}",
+        merchant_p_id.0,
+        m_tenant_account_id.as_deref().unwrap_or(""),
+        module_name,
+        payment_flows_to_text(&payment_flow),
+        m_iso_country_code,
+    );
+    if let Some(cached) = PAYMENT_FLOW_CACHE.get(&cache_key) {
+        return cached;
+    }
+    let result = isPaymentFlowEnabledWithHierarchyCheck(
+        merchant_p_id,
+        m_tenant_account_id,
+        module_name,
+        payment_flow,
+        m_iso_country_code,
+    )
+    .await;
+    PAYMENT_FLOW_CACHE.store(cache_key, result);
+    result
+}
+
 fn checkIfEnabledByTenant(config_value: &str, error_tag: &str) -> bool {
-    let config_status = to_config_status(config_value);
-    match config_status {
-        Ok(ConfigStatus::ENABLED) => true,
-        Ok(ConfigStatus::DISABLED) => false,
+    let result: Result<TenantConfigValueType<Value>, _> = serde_json::from_str(config_value);
+    match result {
+        Ok(config) => config.status == TenantConfigStatus::ENABLED,
         Err(e) => {
             logger::error!(action = error_tag, tag = error_tag, "Error: {}", e);
             false
@@ -606,7 +682,7 @@ pub async fn getPaymentFlowInfoFromTenantConfig(
 // ) -> (Redis::MerchantConfigStatus, MAConfigs) {
 //     let m_mer_config = MerchantConfig::loadMerchantConfigByMPidCategoryAndName(
 //         &merchant_p_id,
-//         MCTypes::PAYMENT_FLOW,
+//         MCTypes::PaymentFlow,
 //         MCTypes::ConfigName(pf.to_string()),
 //     );
 
@@ -677,7 +753,7 @@ pub async fn getPaymentFlowInfoFromTenantConfig(
 //                 ma_configs.clone()
 //             }
 //         },
-//         PaymentFlow::AUTO_REFUND => match mer_config.config_value.as_ref().and_then(|v| {
+//         PaymentFlow::AutoRefund => match mer_config.config_value.as_ref().and_then(|v| {
 //             A::eitherDecodeStrict::<AutoRefundConfig>(&encodeUtf8(v)).ok()
 //         }) {
 //             Some(v) => MAConfigs::ARC(v),
@@ -701,8 +777,8 @@ pub async fn getPaymentFlowInfoFromTenantConfig(
 //     }
 // }
 
-// // Original Haskell function: getConfigValueWithGCCatagory
-// pub fn getConfigValueWithGCCatagory<T>(
+// // Original Haskell function: getConfigValueWithGCCategory
+// pub fn getConfigValueWithGCCategory<T>(
 //     arg1: i64,
 //     arg2: String,
 //     arg3: String,
@@ -711,17 +787,17 @@ pub async fn getPaymentFlowInfoFromTenantConfig(
 // where
 //     T: serde::de::DeserializeOwned,
 // {
-//     getConfigValueFromMerchantConfig(MCTypes::GENERAL_CONFIG, arg1, arg2, arg3, arg4)
+//     getConfigValueFromMerchantConfig(MCTypes::GeneralConfig, arg1, arg2, arg3, arg4)
 // }
 
-// // Original Haskell function: getConfigValueWithPFCatagory
-// pub fn getConfigValueWithPFCatagory(
+// // Original Haskell function: getConfigValueWithPFCategory
+// pub fn getConfigValueWithPFCategory(
 //     arg1: i64,
 //     arg2: String,
 //     arg3: String,
 //     arg4: Option<ETCC.CountryISO>,
 // ) -> Option<A> {
-//     getConfigValueFromMerchantConfig(MCTypes::PAYMENT_FLOW, arg1, arg2, arg3, arg4)
+//     getConfigValueFromMerchantConfig(MCTypes::PaymentFlow, arg1, arg2, arg3, arg4)
 // }
 
 // // Original Haskell function: getConfigValueFromMerchantConfig
@@ -734,7 +810,7 @@ pub async fn getPaymentFlowInfoFromTenantConfig(
 // ) -> Option<T> {
 //     let tenant_config = getPaymentFlowInfoFromTenantConfig(
 //         Some(&tenant_acc_id),
-//         TC::MERCHANT_CONFIG,
+//         TC::MerchantConfig,
 //         &merchant_config_key,
 //         m_iso_country_code,
 //     );

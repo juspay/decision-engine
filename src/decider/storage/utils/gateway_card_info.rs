@@ -1,5 +1,6 @@
 // use db::eulermeshimpl::mesh_config;
 // use db::mesh::internal::*;
+use crate::generics::Repository;
 use crate::storage::types::{
     BitBool, GatewayCardInfo as DBGatewayCardInfo,
     MerchantGatewayCardInfo as DBMerchantGatewayCardInfo,
@@ -10,16 +11,9 @@ use crate::types::merchant::id::merchant_pid_to_text;
 // use juspay::extra::parsing::{Parsed, Step, around, lift_pure, mandated, parse_field, project};
 // use eulerhs::extra::combinators::to_domain_all;
 // use eulerhs::language::MonadFlow;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::gateway_card_info::dsl;
-#[cfg(feature = "mysql")]
-use crate::storage::schema::merchant_gateway_card_info::dsl as m_dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::gateway_card_info::dsl;
-#[cfg(feature = "postgres")]
-use crate::storage::schema_pg::merchant_gateway_card_info::dsl as m_dsl;
+use crate::storage::backend::schema::gateway_card_info::dsl;
+use crate::storage::backend::schema::merchant_gateway_card_info::dsl as m_dsl;
 use crate::types::merchant::merchant_account::MerchantAccount;
-use diesel::associations::HasTable;
 use diesel::*;
 use std::clone::Clone;
 use std::option::Option;
@@ -33,27 +27,20 @@ use crate::{
     logger,
 };
 
-pub async fn getSupportedGatewayCardInfoForBins(
+pub async fn get_supported_gateway_card_info_for_bins(
     app_state: &crate::app::TenantAppState,
     input_merchant_account: MerchantAccount,
     card_bins: Vec<Option<String>>,
 ) -> Result<Vec<GatewayCardInfo>, ErrorResponse> {
     // Step 1: Query GatewayCardInfo with diesel
-    let gci_records: Vec<DBGatewayCardInfo> = match crate::generics::generic_find_all::<
-        <DBGatewayCardInfo as HasTable>::Table,
-        _,
-        DBGatewayCardInfo,
-    >(
+    let gci_records: Vec<DBGatewayCardInfo> = DBGatewayCardInfo::find_all(
         &app_state.db,
         dsl::isin
             .eq_any(card_bins.clone())
             .and(dsl::disabled.eq(Some(BitBool(false)))),
     )
     .await
-    {
-        Ok(records) => records,
-        Err(_) => Vec::new(),
-    };
+    .unwrap_or_default();
 
     let gcis: Vec<i64> = gci_records.iter().map(|r| r.id).collect();
     if gcis.is_empty() {
@@ -61,11 +48,7 @@ pub async fn getSupportedGatewayCardInfoForBins(
     }
 
     // Step 2: Query MerchantGatewayCardInfo using diesel
-    let mgci_records: Vec<DBMerchantGatewayCardInfo> = match crate::generics::generic_find_all::<
-        <DBMerchantGatewayCardInfo as HasTable>::Table,
-        _,
-        DBMerchantGatewayCardInfo,
-    >(
+    let mgci_records: Vec<DBMerchantGatewayCardInfo> = DBMerchantGatewayCardInfo::find_all(
         &app_state.db,
         m_dsl::merchant_account_id
             .eq(merchant_pid_to_text(input_merchant_account.id))
@@ -73,10 +56,7 @@ pub async fn getSupportedGatewayCardInfoForBins(
             .and(m_dsl::gateway_card_info_id.eq_any(gcis)),
     )
     .await
-    {
-        Ok(records) => records,
-        Err(_) => Vec::new(),
-    };
+    .unwrap_or_default();
 
     // Step 3: Filter GatewayCardInfo records
     let gcis_filtered: Vec<i64> = mgci_records

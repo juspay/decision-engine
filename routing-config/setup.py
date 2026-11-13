@@ -94,13 +94,14 @@ INSERT INTO merchant_iframe_preferences (
 sql_statements.append(iframe_sql)
 
 # === Insert SR Config if present ===
+# service_configuration.name is unique, so re-running for a merchant updates its SR config.
 if sr_config:
     sr_config_sql = f"""
     INSERT INTO service_configuration (
         name, value, new_value, previous_value, new_value_status
     ) VALUES (
         'SR_V3_INPUT_CONFIG_{merchant_id}', '{json.dumps(sr_config)}', {null}, {null}, {null}
-    );
+    ) ON DUPLICATE KEY UPDATE value = VALUES(value);
     """.strip()
     sql_statements.append(sr_config_sql)
 

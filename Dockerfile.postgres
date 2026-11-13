@@ -1,37 +1,73 @@
-FROM rust:bookworm AS builder
-
-ARG EXTRA_FEATURES=""
-
+FROM rust:bookworm AS chef
+RUN cargo install cargo-chef --locked
+RUN apt-get update \
+    && apt-get install -y cmake libmariadb-dev libssl-dev clang \
+    && rm -rf /var/lib/apt/lists/*
 WORKDIR /open_router
 
 ENV CARGO_NET_RETRY=10
 ENV RUSTUP_MAX_RETRIES=10
-ENV CARGO_INCREMENTAL=0
 
-RUN apt-get update && apt-get install -y libmariadb-dev libssl-dev clang && rm -rf /var/lib/apt/lists/*
-
-
+# ── Stage 1: compute the dependency recipe ───────────────────────────────────
+# Only Cargo.toml / Cargo.lock files are needed here. Source files are not
+# copied, so this layer is invalidated only when dependencies change.
+FROM chef AS planner
 COPY . .
+RUN cargo chef prepare --recipe-path recipe.json
 
-RUN RUSTFLAGS="-A warnings" cargo build --release --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES}
+# ── Stage 2: build dependencies only ─────────────────────────────────────────
+# This is the slow step (~15-30 min). It is cached as a Docker layer and
+# only re-runs when recipe.json changes (i.e. Cargo.toml / Cargo.lock changed).
+# A source-only change never reaches this stage.
+#
+# BUILD_MODE=release       → production binary with LTO + codegen-units=1 (default)
+# BUILD_MODE=release-fast  → fast-compile variant (~2 min); same opt-level, no LTO.
+#                            Use for local iteration and ablation tests.
+# BUILD_MODE=debug         → unoptimised binary; skips LLVM passes, ~30s compile.
+#                            Adequate for E2E / Cypress test runs where throughput
+#                            doesn't matter.
+FROM chef AS builder
+ARG BUILD_MODE=release
+ARG EXTRA_FEATURES=""
+COPY --from=planner /open_router/recipe.json recipe.json
+# debug has no --profile flag (it is the implicit default); all others use --profile <name>.
+RUN PROFILE_FLAG=$([ "$BUILD_MODE" = "debug" ] && echo "" || echo "--profile ${BUILD_MODE}") && \
+    RUSTFLAGS="-A warnings" cargo chef cook $PROFILE_FLAG --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES} --recipe-path recipe.json
+
+# ── Stage 3: build the binary ─────────────────────────────────────────────────
+# Dependencies are already compiled above. Only changed crates are recompiled.
+COPY . .
+ARG VERGEN_GIT_DESCRIBE
+RUN PROFILE_FLAG=$([ "$BUILD_MODE" = "debug" ] && echo "" || echo "--profile ${BUILD_MODE}") && \
+    RUSTFLAGS="-A warnings" cargo build $PROFILE_FLAG --no-default-features --features middleware,kms-aws,postgres ${EXTRA_FEATURES}
 
 
+# ── Runtime image ─────────────────────────────────────────────────────────────
 FROM debian:bookworm
 
+ARG BUILD_MODE=release
 ARG CONFIG_DIR=/local/config
 ARG BIN_DIR=/local
 ARG BINARY=open_router
-
+ENV BINARY=${BINARY}
 
 RUN apt-get update \
     && apt-get install -y ca-certificates tzdata libpq-dev curl procps libmariadb3
 
 EXPOSE 8080
 
-RUN mkdir -p ${CONFIG_DIR}
+# Unprivileged runtime user. The UID is numeric so Kubernetes can verify
+# `runAsNonRoot` without resolving names inside the image.
+ARG APP_UID=10001
+RUN groupadd --system --gid ${APP_UID} app \
+    && useradd --system --uid ${APP_UID} --gid app --no-create-home --shell /usr/sbin/nologin app \
+    && mkdir -p ${CONFIG_DIR}
 
-COPY --from=builder /open_router/target/release/${BINARY} ${BIN_DIR}/${BINARY}
+COPY --from=builder /open_router/target/${BUILD_MODE}/${BINARY} ${BIN_DIR}/${BINARY}
+
+USER ${APP_UID}:${APP_UID}
 
 WORKDIR ${BIN_DIR}
 
-CMD ["./open_router"]
+# `exec` makes the binary PID 1 so it receives SIGTERM (plain `sh -c` keeps dash as PID 1 and swallows it).
+CMD ["sh", "-c", "exec ./${BINARY}"]
