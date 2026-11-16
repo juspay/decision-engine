@@ -172,13 +172,18 @@ export function apiErrorMessage(err: unknown, fallback = 'Something went wrong')
  */
 let sessionEnded = false
 
+/** Forget the token and stop sending it, leaving the screen change to the caller. */
+export function discardLocalSession(): void {
+  sessionEnded = true
+  tokenRef.set(null)
+}
+
 /**
  * Drop a session whose token the backend would refuse, and hand the user to where a new one comes
  * from. Throws, so the request that found out goes no further.
  */
 function endExpiredSession(): never {
-  sessionEnded = true
-  tokenRef.set(null)
+  discardLocalSession()
   import('../store/authStore').then(({ useAuthStore }) => {
     useAuthStore.getState().clearAuth()
   })
