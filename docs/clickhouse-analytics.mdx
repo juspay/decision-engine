@@ -7,7 +7,8 @@ description: "ClickHouse setup notes for analytics"
 
 Decision Engine uses a Kafka to ClickHouse analytics pipeline:
 
-- API server captures full request and response bodies for API analytics events
+- API server captures request and response bodies for API analytics events
+- Before queueing API events for Kafka, API-key fields (`api_key`, `apiKey`, and `api-key`, case-insensitive) are replaced with `[REDACTED]` throughout JSON request, response, and error payloads, including nested objects and arrays. Null values stay null. Nonempty bodies that cannot be parsed as JSON are omitted from analytics and replaced with a fixed marker.
 - API server publishes analytics events to Kafka
 - ClickHouse Kafka engine queue tables consume Kafka and materialized views fan into the raw tables
 
@@ -39,6 +40,8 @@ The correlation key for those reads is the write-time `lookup_key`:
 
 - `payment_id` when present
 - otherwise `request_id`
+
+Redaction affects only analytics copies; callers still receive the original HTTP response, including a newly issued key from `/merchant-account/create`. It does not remove previously captured credentials from Kafka or ClickHouse. Existing exposures require a separate key-rotation and retained-data cleanup process. This field-based protection covers API keys; it is not a general sanitizer for every kind of secret or payment data.
 
 ## Local Bring-Up
 
