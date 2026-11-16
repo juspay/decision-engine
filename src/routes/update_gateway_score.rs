@@ -1,4 +1,4 @@
-use crate::custom_extractors::{RequestIds, ScopedJson, ScopedJsonRejection};
+use crate::custom_extractors::{Json, RequestIds, ScopedJson, ScopedJsonRejection};
 // use std::sync::Arc;
 //
 // use axum::{routing::post, Json};
@@ -24,7 +24,6 @@ use crate::feedback::gateway_scoring_service::{
     check_and_update_gateway_score_, SCORE_UPDATE_SKIPPED,
 };
 use crate::feedback::types::{UpdateScorePayload, UpdateScoreResponse};
-use axum::extract::Json;
 use once_cell::sync::Lazy;
 use serde::Serialize;
 use tokio_util::task::TaskTracker;

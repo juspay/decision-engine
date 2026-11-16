@@ -15,7 +15,7 @@ use axum::http::HeaderMap;
 use diesel::associations::HasTable;
 use diesel::{BoolExpressionMethods, ExpressionMethods};
 use error_stack::ResultExt;
-use masking::PeekInterface;
+use masking::{PeekInterface, Secret};
 use serde::{Deserialize, Serialize};
 
 use crate::storage::backend::schema::users::dsl;
@@ -46,22 +46,22 @@ where
     String::deserialize(deserializer).map(|email| normalize_email(&email))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SignupRequest {
     #[serde(deserialize_with = "deserialize_email")]
     pub email: String,
-    pub password: String,
+    pub password: Secret<String>,
     pub merchant_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LoginRequest {
     #[serde(deserialize_with = "deserialize_email")]
     pub email: String,
-    pub password: String,
+    pub password: Secret<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct CreateMerchantRequest {
     pub merchant_name: String,
     /// Creates a sub-merchant of this merchant instead of a standalone one. Only its admins may.
@@ -69,7 +69,7 @@ pub struct CreateMerchantRequest {
     pub parent_merchant_id: Option<String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SwitchMerchantRequest {
     pub merchant_id: String,
 }
@@ -104,7 +104,7 @@ pub struct MerchantInfo {
 
 #[derive(Debug, Serialize)]
 pub struct AuthResponse {
-    pub token: String,
+    pub token: Secret<String>,
     pub user_id: String,
     pub email: String,
     pub merchant_id: String,
@@ -137,7 +137,7 @@ pub struct MeResponse {
 
 #[derive(Debug, Serialize)]
 pub struct CreateMerchantResponse {
-    pub token: String,
+    pub token: Secret<String>,
     pub merchant_id: String,
     pub merchant_name: String,
     pub merchants: Vec<MerchantInfo>,
@@ -178,10 +178,10 @@ pub async fn signup(
         ));
     }
 
-    auth::validate_password_strength(&payload.password)
+    auth::validate_password_strength(payload.password.peek())
         .change_context(UserAuthError::WeakPassword)?;
 
-    let password_hash = auth::hash_password(&payload.password)
+    let password_hash = auth::hash_password(payload.password.peek())
         .change_context(UserAuthError::PasswordHashingFailed)?;
 
     let user_id = uuid::Uuid::new_v4().to_string();
@@ -375,7 +375,7 @@ pub async fn signup(
     let merchants = fetch_user_merchants(&app_state, &user_id).await?;
 
     Ok(Json(SignupResponse::Authenticated(AuthResponse {
-        token,
+        token: Secret::new(token),
         user_id,
         email: payload.email,
         merchant_id: requested_merchant_id.unwrap_or_default(),
@@ -428,7 +428,7 @@ pub async fn login(
         return Err(error::ContainerError::from(UserAuthError::EmailNotVerified));
     }
 
-    if !auth::verify_password(&payload.password, &user.password_hash)
+    if !auth::verify_password(payload.password.peek(), &user.password_hash)
         .change_context(UserAuthError::StorageError)?
     {
         return Err(error::ContainerError::from(UserAuthError::InvalidPassword));
@@ -455,7 +455,7 @@ pub async fn login(
     .change_context(UserAuthError::TokenGenerationFailed)?;
 
     Ok(Json(AuthResponse {
-        token,
+        token: Secret::new(token),
         user_id: user.user_id,
         email: user.email,
         merchant_id: active_merchant_id,
@@ -530,7 +530,7 @@ pub async fn create_merchant(
         )
         .change_context(UserAuthError::TokenGenerationFailed)?;
         return Ok(Json(CreateMerchantResponse {
-            token: new_token,
+            token: Secret::new(new_token),
             merchant_id,
             merchant_name: payload.merchant_name,
             merchants,
@@ -588,7 +588,7 @@ pub async fn create_merchant(
     .change_context(UserAuthError::TokenGenerationFailed)?;
 
     Ok(Json(CreateMerchantResponse {
-        token: new_token,
+        token: Secret::new(new_token),
         merchant_id,
         merchant_name: payload.merchant_name,
         merchants,
@@ -664,7 +664,7 @@ async fn switch_within_memberships(
     .change_context(UserAuthError::TokenGenerationFailed)?;
 
     Ok(Json(AuthResponse {
-        token: new_token,
+        token: Secret::new(new_token),
         user_id: claims.user_id,
         email: claims.email,
         merchant_id: target.merchant_id.clone(),
@@ -711,7 +711,7 @@ async fn switch_within_grant(
     let merchants = granted_merchants(&grant, &claims.role).await;
 
     Ok(Json(AuthResponse {
-        token: new_token,
+        token: Secret::new(new_token),
         user_id: claims.user_id,
         email: claims.email,
         merchant_id: payload.merchant_id,
@@ -729,10 +729,10 @@ fn unix_now() -> u64 {
         .unwrap_or(0)
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ChangePasswordRequest {
-    pub current_password: String,
-    pub new_password: String,
+    pub current_password: Secret<String>,
+    pub new_password: Secret<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -769,16 +769,16 @@ pub async fn change_password(
 
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
 
-    if !auth::verify_password(&payload.current_password, &user.password_hash)
+    if !auth::verify_password(payload.current_password.peek(), &user.password_hash)
         .change_context(UserAuthError::StorageError)?
     {
         return Err(error::ContainerError::from(UserAuthError::InvalidPassword));
     }
 
-    auth::validate_password_strength(&payload.new_password)
+    auth::validate_password_strength(payload.new_password.peek())
         .change_context(UserAuthError::WeakPassword)?;
 
-    let new_hash = auth::hash_password(&payload.new_password)
+    let new_hash = auth::hash_password(payload.new_password.peek())
         .change_context(UserAuthError::PasswordHashingFailed)?;
 
     let conn = app_state
@@ -806,7 +806,7 @@ pub async fn change_password(
     }))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct InviteMemberRequest {
     #[serde(deserialize_with = "deserialize_email")]
     pub email: String,
@@ -818,7 +818,7 @@ pub struct InviteMemberResponse {
     pub email: String,
     pub is_new_user: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
-    pub password: Option<String>,
+    pub password: Option<Secret<String>>,
     pub role: String,
 }
 
@@ -1037,7 +1037,7 @@ pub async fn invite_member(
         Ok(Json(InviteMemberResponse {
             email: payload.email,
             is_new_user: true,
-            password: Some(generated_password),
+            password: Some(Secret::new(generated_password)),
             role,
         }))
     }
@@ -1422,16 +1422,16 @@ async fn ensure_can_add_sub_merchant(
     Ok(())
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ForgotPasswordRequest {
     #[serde(deserialize_with = "deserialize_email")]
     pub email: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ResetPasswordRequest {
-    pub token: String,
-    pub new_password: String,
+    pub token: Secret<String>,
+    pub new_password: Secret<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1537,13 +1537,13 @@ pub async fn reset_password(
 ) -> Result<Json<MessageResponse>, error::ContainerError<UserAuthError>> {
     let app_state = get_tenant_app_state().await;
 
-    let redis_key = format!("{}{}", PASSWORD_RESET_PREFIX, payload.token);
+    let redis_key = format!("{}{}", PASSWORD_RESET_PREFIX, payload.token.peek());
 
     // Validate and hash before touching the token so a weak password doesn't consume it.
-    auth::validate_password_strength(&payload.new_password)
+    auth::validate_password_strength(payload.new_password.peek())
         .change_context(UserAuthError::WeakPassword)?;
 
-    let new_hash = auth::hash_password(&payload.new_password)
+    let new_hash = auth::hash_password(payload.new_password.peek())
         .change_context(UserAuthError::PasswordHashingFailed)?;
 
     // Single-use token: GETDEL consumes it atomically, so concurrent requests carrying the
@@ -1597,9 +1597,9 @@ pub async fn reset_password(
     }))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct VerifyEmailQuery {
-    pub token: String,
+    pub token: Secret<String>,
 }
 
 #[axum::debug_handler]
@@ -1608,7 +1608,7 @@ pub async fn verify_email(
 ) -> Result<Json<VerifyEmailResponse>, error::ContainerError<UserAuthError>> {
     let app_state = get_tenant_app_state().await;
 
-    let redis_key = format!("{}{}", EMAIL_VERIFICATION_PREFIX, query.token);
+    let redis_key = format!("{}{}", EMAIL_VERIFICATION_PREFIX, query.token.peek());
 
     let user_id = app_state
         .redis_conn
@@ -1716,7 +1716,7 @@ fn jwt_live_cache(ttl_ms: u64) -> &'static crate::redis::mem_cache::TypedCache<b
     CACHE.get_or_init(|| crate::redis::mem_cache::TypedCache::new(ttl_ms, 50_000))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct AdminMerchantTokenRequest {
     pub merchant_id: String,
     /// How far the handed-over session may move, in Hyperswitch's terms — set from the entity type
@@ -1829,7 +1829,7 @@ fn switcher_label(scope: &hierarchy::GrantedScope) -> String {
 
 #[derive(Debug, Serialize)]
 pub struct AdminMerchantCodeResponse {
-    pub code: String,
+    pub code: Secret<String>,
     pub expires_in: i64,
 }
 
@@ -1884,14 +1884,14 @@ pub async fn admin_merchant_token(
         .change_context(UserAuthError::StorageError)?;
 
     Ok(Json(AdminMerchantCodeResponse {
-        code,
+        code: Secret::new(code),
         expires_in: HS_SSO_CODE_TTL_SECONDS,
     }))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct ExchangeMerchantTokenRequest {
-    pub code: String,
+    pub code: Secret<String>,
 }
 
 /// Called by the DE SPA with the one-time code carried in the redirect URL. Atomically consumes
@@ -1906,7 +1906,7 @@ pub async fn exchange_merchant_token(
         .ok_or(UserAuthError::StorageError)?;
 
     let app_state = get_tenant_app_state().await;
-    let code_key = format!("{}{}", HS_SSO_CODE_PREFIX, payload.code);
+    let code_key = format!("{}{}", HS_SSO_CODE_PREFIX, payload.code.peek());
 
     // Read the scope and grant behind the code. A missing/expired/unknown code reads as NotFound —
     // treat any failure to read it as an invalid code (401), not a server error (500).
@@ -1952,7 +1952,7 @@ pub async fn exchange_merchant_token(
     let merchants = granted_merchants(&grant, "admin").await;
 
     Ok(Json(AuthResponse {
-        token,
+        token: Secret::new(token),
         user_id: synthetic_user_id,
         email,
         merchant_id,
@@ -1961,7 +1961,7 @@ pub async fn exchange_merchant_token(
     }))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct EnterMerchantRequest {
     pub merchant_id: String,
 }
@@ -2022,7 +2022,7 @@ pub async fn enter_merchant(
     .change_context(UserAuthError::TokenGenerationFailed)?;
 
     Ok(Json(AuthResponse {
-        token: new_token,
+        token: Secret::new(new_token),
         user_id: claims.user_id,
         email: claims.email,
         merchant_id: payload.merchant_id,
@@ -2084,7 +2084,7 @@ pub async fn exit_merchant(
     .change_context(UserAuthError::TokenGenerationFailed)?;
 
     Ok(Json(AuthResponse {
-        token: new_token,
+        token: Secret::new(new_token),
         user_id: user.user_id,
         email: user.email,
         merchant_id: home_merchant_id,
@@ -2093,7 +2093,7 @@ pub async fn exit_merchant(
     }))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct LookupRequest {
     pub query: String,
 }

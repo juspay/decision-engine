@@ -117,12 +117,10 @@ impl AnalyticsRuntime {
         update_depth("domain", &self.domain_depth, 1);
     }
 
-    pub fn enqueue_api_event(&self, mut event: ApiEvent) {
+    pub fn enqueue_api_event(&self, event: ApiEvent) {
         if !self.write_enabled() {
             return;
         }
-
-        super::redaction::redact_api_event(&mut event);
 
         if self.api_tx.try_send(event).is_err() {
             ANALYTICS_EVENTS_DROPPED_TOTAL

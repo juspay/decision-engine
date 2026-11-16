@@ -1,6 +1,6 @@
-use std::{borrow::Cow, time::Instant};
+use std::time::Instant;
 
-use crate::custom_extractors::{RequestIds, ScopedJson, ScopedJsonRejection};
+use crate::custom_extractors::{Json, RequestIds, ScopedJson, ScopedJsonRejection};
 use crate::euclid::types::ExperimentEndpoint;
 use crate::{
     analytics::{
@@ -16,7 +16,6 @@ use crate::{
     },
     logger,
 };
-use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::Serialize;
 
@@ -65,7 +64,7 @@ struct DecideGatewayFailureDetail<'a> {
 #[derive(Debug, Serialize)]
 struct DecideGatewayParseFailureDetail<'a> {
     request_id: &'a str,
-    raw_request: Cow<'a, str>,
+    raw_request: masking::Secret<String>,
     response: &'a ErrorResponse,
 }
 
@@ -118,12 +117,7 @@ fn invalid_payment_method_response(developer_message: String) -> ErrorResponse {
 
 impl IntoResponse for DecidedGateway {
     fn into_response(self) -> axum::http::Response<axum::body::Body> {
-        let body = serde_json::to_string(&self).unwrap();
-        axum::http::Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
-            .body(axum::body::Body::from(body))
-            .unwrap()
+        Json(self).into_response()
     }
 }
 
@@ -252,11 +246,11 @@ pub async fn decide_gateway(
     );
     let (body, parsed) = match request {
         Ok(ScopedJson { payload, body, .. }) => {
-            logger::debug!("Body: {:?}", body);
+            logger::debug!("Body: {:?}", masking::Secret::<_>::new(&body));
             (body, Ok(payload))
         }
         Err(ScopedJsonRejection::Parse { body, error }) => {
-            logger::debug!("Body: {:?}", body);
+            logger::debug!("Body: {:?}", masking::Secret::<_>::new(&body));
             (body, Err(error))
         }
         Err(ScopedJsonRejection::Scope(violation)) => {
@@ -328,7 +322,7 @@ pub async fn decide_gateway(
                 error_response.error_message.clone(),
                 serialize_details(&DecideGatewayParseFailureDetail {
                     request_id: &x_request_id,
-                    raw_request: String::from_utf8_lossy(&body),
+                    raw_request: masking::Secret::new(String::from_utf8_lossy(&body).into_owned()),
                     response: &error_response,
                 }),
                 Some("request_parse_failed".to_string()),

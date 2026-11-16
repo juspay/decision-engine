@@ -93,7 +93,7 @@ impl axum::response::IntoResponse for RuleConfigurationError {
                 .into_response(),
             Self::InvalidPaymentMethod(detail) => (
                 hyper::StatusCode::BAD_REQUEST,
-                axum::Json(crate::error::ApiErrorResponse::new(
+                crate::custom_extractors::Json(crate::error::ApiErrorResponse::new(
                     crate::error::error_codes::TE_04,
                     format!("Invalid payment method: {detail}"),
                     None,

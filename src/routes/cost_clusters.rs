@@ -494,7 +494,7 @@ pub async fn list_cost_clusters(
     Ok(Json(out))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct SetClusterOverrideRequest {
     pub pct_bps: f64,
     pub fixed: f64,

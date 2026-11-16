@@ -123,7 +123,7 @@ pub async fn list_connector_fees(
     Ok(Json(fees))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct SetFeeOverrideRequest {
     pub pct_bps: f64,
     pub fixed: f64,

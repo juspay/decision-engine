@@ -360,7 +360,7 @@ pub struct PreflightParams {
 /// Body of a mapping preview/save: the candidate mapping plus the file sample it was written
 /// against. The sample travels with the request because a mapping is only meaningful relative to a
 /// specific file's headers, and the server holds no copy of the merchant's file at this stage.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct MappingRequest {
     /// `expected label -> merchant's label`.
     pub columns: std::collections::HashMap<String, String>,

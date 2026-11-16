@@ -24,7 +24,7 @@ pub struct Json<T>(pub T);
 impl<S, T> axum::extract::FromRequest<S> for Json<T>
 where
     S: Send + Sync,
-    T: serde::de::DeserializeOwned,
+    T: serde::de::DeserializeOwned + serde::Serialize,
 {
     type Rejection = Response;
 
@@ -32,8 +32,17 @@ where
         request: axum::extract::Request,
         state: &S,
     ) -> Result<Self, Self::Rejection> {
+        let analytics = request
+            .extensions()
+            .get::<crate::analytics::payload::RequestAnalyticsPayload>()
+            .cloned();
         match axum::Json::<T>::from_request(request, state).await {
-            Ok(axum::Json(payload)) => Ok(Self(payload)),
+            Ok(axum::Json(payload)) => {
+                if let Some(analytics) = analytics {
+                    analytics.record(&payload);
+                }
+                Ok(Self(payload))
+            }
             Err(rejection) => Err(invalid_json_response(
                 json_rejection_message(&rejection),
                 rejection.body_text(),
@@ -99,13 +108,13 @@ fn json_rejection_message(rejection: &axum::extract::rejection::JsonRejection) -
     }
 }
 
-/// The standard answer to a body that could not be read or parsed, logged once with serde's text.
+/// The standard answer to an unreadable body. Raw serde diagnostics can echo submitted secrets.
 fn invalid_json_response(message: String, detail: String) -> Response {
     crate::logger::error!(
         status_code = StatusCode::BAD_REQUEST.as_u16(),
         error_code = crate::error::error_codes::TE_03,
         error_message = %message,
-        error_detail = %detail,
+        error_detail = ?masking::Secret::<String>::new(detail),
         "Request JSON extraction failed"
     );
 
@@ -118,7 +127,12 @@ fn invalid_json_response(message: String, detail: String) -> Response {
 
 impl<T: serde::Serialize> IntoResponse for Json<T> {
     fn into_response(self) -> Response {
-        axum::Json(self.0).into_response()
+        let analytics = crate::analytics::payload::ResponseAnalyticsPayload(
+            crate::analytics::payload::masked_payload(&self.0),
+        );
+        let mut response = axum::Json(self.0).into_response();
+        response.extensions_mut().insert(analytics);
+        response
     }
 }
 
@@ -134,7 +148,7 @@ impl<T: serde::Serialize> IntoResponse for Json<T> {
 pub struct ScopedJson<T> {
     pub merchant: crate::auth::AuthorizedMerchant,
     pub payload: T,
-    /// The body exactly as received, for request logs and analytics.
+    /// The body exactly as received. Analytics uses the separate typed, masked snapshot.
     pub body: axum::body::Bytes,
 }
 
@@ -168,7 +182,7 @@ impl IntoResponse for ScopedJsonRejection {
 impl<S, T> axum::extract::FromRequest<S> for ScopedJson<T>
 where
     S: Send + Sync,
-    T: serde::de::DeserializeOwned + crate::auth::MerchantScoped + Send,
+    T: serde::de::DeserializeOwned + serde::Serialize + crate::auth::MerchantScoped + Send,
 {
     type Rejection = ScopedJsonRejection;
 
@@ -177,6 +191,10 @@ where
         state: &S,
     ) -> Result<Self, Self::Rejection> {
         let session = request.extensions().get::<AuthContext>().cloned();
+        let analytics = request
+            .extensions()
+            .get::<crate::analytics::payload::RequestAnalyticsPayload>()
+            .cloned();
         // Read through `Bytes` so the route's `DefaultBodyLimit` applies.
         let body = axum::body::Bytes::from_request(request, state)
             .await
@@ -190,6 +208,9 @@ where
             Ok(axum::Json(payload)) => payload,
             Err(error) => return Err(ScopedJsonRejection::Parse { body, error }),
         };
+        if let Some(analytics) = analytics {
+            analytics.record(&payload);
+        }
         let merchant = crate::auth::authorize(session.as_ref(), &payload)
             .await
             .map_err(ScopedJsonRejection::Scope)?;
@@ -365,7 +386,7 @@ mod tests {
         count: u32,
     }
 
-    #[derive(Debug, serde::Deserialize, crate::auth::MerchantScoped)]
+    #[derive(Debug, serde::Deserialize, serde::Serialize, crate::auth::MerchantScoped)]
     struct ScopedTestPayload {
         #[merchant]
         #[serde(default)]
@@ -620,7 +641,7 @@ mod tests {
 
     async fn scoped_status<T>(session: Option<&str>, body: &str) -> axum::http::StatusCode
     where
-        T: serde::de::DeserializeOwned + crate::auth::MerchantScoped + Send,
+        T: serde::de::DeserializeOwned + serde::Serialize + crate::auth::MerchantScoped + Send,
     {
         use axum::{body::Body, extract::FromRequest};
 

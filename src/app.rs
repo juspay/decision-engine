@@ -170,16 +170,6 @@ fn parse_request_metadata(
     (merchant_id, payment_id, auth_type)
 }
 
-fn parse_response_error(
-    status_code: u16,
-    captured: &crate::analytics::CapturedBody,
-) -> Option<serde_json::Value> {
-    if status_code < 400 {
-        return None;
-    }
-    serde_json::from_slice::<serde_json::Value>(&captured.bytes).ok()
-}
-
 async fn capture_api_event(
     State(global_state): State<Arc<GlobalAppState>>,
     request: Request<Body>,
@@ -195,7 +185,9 @@ async fn capture_api_event(
     };
 
     let started_at = Instant::now();
-    let (parts, body) = request.into_parts();
+    let (mut parts, body) = request.into_parts();
+    let request_analytics = crate::analytics::payload::RequestAnalyticsPayload::default();
+    parts.extensions.insert(request_analytics.clone());
     let (request_body, request_handle) = crate::analytics::CaptureBody::new(body);
 
     let request_id = parts
@@ -229,15 +221,22 @@ async fn capture_api_event(
         .run(Request::from_parts(parts, Body::new(request_body)))
         .await;
     let status_code = response.status().as_u16();
-    let (response_parts, response_body) = response.into_parts();
-    let (response_body, response_handle) = crate::analytics::CaptureBody::new(response_body);
+    let response_analytics = response
+        .extensions()
+        .get::<crate::analytics::payload::ResponseAnalyticsPayload>()
+        .map(|payload| payload.0.clone())
+        .unwrap_or_else(crate::analytics::payload::omitted_payload);
 
     let runtime = global_state.analytics_runtime.clone();
     tokio::spawn(async move {
         let request_capture = request_handle.wait().await;
-        let response_capture = response_handle.wait().await;
         let (merchant_id, payment_id, auth_type) = parse_request_metadata(&request_capture);
-        let error = parse_response_error(status_code, &response_capture);
+        let error = (status_code >= 400).then(|| response_analytics.clone());
+        let request = if request_capture.bytes.is_empty() {
+            String::new()
+        } else {
+            request_analytics.snapshot().to_string()
+        };
 
         runtime.enqueue_api_event(crate::analytics::ApiEvent {
             event_id: crate::analytics::next_event_id(),
@@ -252,17 +251,17 @@ async fn capture_api_event(
             latency: started_at.elapsed().as_millis() as u64,
             status_code,
             auth_type,
-            request: String::from_utf8_lossy(&request_capture.bytes).to_string(),
+            request,
             user_agent,
             ip_addr,
             url_path: path,
-            response: Some(String::from_utf8_lossy(&response_capture.bytes).to_string()),
+            response: Some(response_analytics.to_string()),
             error,
             http_method: method,
         });
     });
 
-    Response::from_parts(response_parts, Body::new(response_body))
+    response
 }
 
 ///

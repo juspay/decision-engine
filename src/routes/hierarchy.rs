@@ -28,7 +28,7 @@ use crate::utils::date_time;
 // Request — mirrors the HS tree, so it uses HS's own field names
 // ---------------------------------------------------------------------------------------
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct HierarchyRequest {
     pub orgs: Vec<OrgNode>,
 
@@ -50,7 +50,7 @@ fn default_report_stranded() -> bool {
     true
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct OrgNode {
     pub org_id: String,
     pub org_name: Option<String>,
@@ -58,7 +58,7 @@ pub struct OrgNode {
     pub merchants: Vec<MerchantNode>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct MerchantNode {
     /// The HS **merchant account** ID — ancestry, never a routing scope.
     pub merchant_id: String,
@@ -67,7 +67,7 @@ pub struct MerchantNode {
     pub profiles: Vec<ProfileNode>,
 }
 
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct ProfileNode {
     /// The HS profile ID — this *is* the DE routing scope.
     pub profile_id: String,

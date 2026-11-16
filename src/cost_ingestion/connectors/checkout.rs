@@ -1017,7 +1017,7 @@ ic_orphan,Capture,Interchange Fixed Fee,VISA,Credit,Consumer,SA,USD,-102.29,2026
             }
             let request: SetCredentialsRequest = serde_json::from_value(payload)?;
             let transformed = ConnectorCreds {
-                webhook_secret: Secret::new(request.webhook_secret),
+                webhook_secret: request.webhook_secret,
                 download_auth: request
                     .environment
                     .unwrap_or_default()

@@ -4,7 +4,7 @@ pub mod events;
 pub mod flow;
 pub mod kafka;
 pub mod models;
-mod redaction;
+pub(crate) mod payload;
 pub mod runtime;
 pub mod service;
 pub mod store;

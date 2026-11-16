@@ -3,6 +3,7 @@
 //! [`RoutingEvaluation`] to the endpoint to write as its response.
 
 use crate::analytics::clickhouse::common::STATIC_ROUTING_APPROACH;
+use crate::analytics::payload::{masked_payload, omitted_payload, ResponseAnalyticsPayload};
 use crate::analytics::{
     serialize_details, AnalyticsFlowContext, AnalyticsRoute, ApiFlow, DomainAnalyticsEvent,
     FlowType,
@@ -32,8 +33,14 @@ use std::time::Instant;
 fn to_json_value_or_invalid<T: Serialize>(
     value: &T,
     context: &str,
+    mask_secrets: bool,
 ) -> Result<serde_json::Value, ContainerError<EuclidErrors>> {
-    serde_json::to_value(value).map_err(|err| {
+    let serialized = if mask_secrets {
+        masking::masked_serialize(value)
+    } else {
+        serde_json::to_value(value)
+    };
+    serialized.map_err(|err| {
         crate::logger::error!(
             serialization_context = context,
             "Failed to serialize hybrid routing response field: {}",
@@ -48,14 +55,15 @@ fn insert_serialized<T: Serialize>(
     key: &str,
     value: &T,
     context: &str,
+    mask_secrets: bool,
 ) -> Result<(), ContainerError<EuclidErrors>> {
-    to_json_value_or_invalid(value, context).map(|json_value| {
+    to_json_value_or_invalid(value, context, mask_secrets).map(|json_value| {
         map.insert(key.to_string(), json_value);
     })
 }
 
 fn log_serializable_response<T: Serialize>(label: &str, value: &T) {
-    match serde_json::to_value(value) {
+    match masking::masked_serialize(value) {
         Ok(response_value) => {
             crate::logger::debug!(decision_engine_response_label = label, decision_engine_response = ?response_value)
         }
@@ -97,8 +105,10 @@ struct DynamicRoutingEnvelope<'a> {
 /// The audit record of an evaluation: `static_routing`, `dynamic_routing` and
 /// `evaluated_connectors`, each present only when that part produced something. The analytics
 /// queries read it at these paths, and `/routing/hybrid` answers with it.
+/// The analytics copy uses masked serialization before field types are erased into JSON values.
 fn record_body(
     evaluation: &RoutingEvaluation,
+    mask_secrets: bool,
 ) -> Result<serde_json::Map<String, serde_json::Value>, ContainerError<EuclidErrors>> {
     let mut res = serde_json::Map::new();
     if let Some(static_response) = evaluation.static_routing.as_ref() {
@@ -107,6 +117,7 @@ fn record_body(
             "static_routing",
             static_response,
             "static_routing",
+            mask_secrets,
         )?;
     }
     let dynamic_payload = match &evaluation.success_rate {
@@ -131,10 +142,11 @@ fn record_body(
             "dynamic_routing",
             &dynamic_payload,
             "dynamic_routing",
+            mask_secrets,
         )?;
     }
     if let Some(connectors) = evaluation.evaluated_connectors.as_ref() {
-        insert_evaluated_connectors(&mut res, connectors)?;
+        insert_evaluated_connectors(&mut res, connectors, mask_secrets)?;
     }
     Ok(res)
 }
@@ -146,12 +158,14 @@ fn record_body(
 fn insert_evaluated_connectors(
     map: &mut serde_json::Map<String, serde_json::Value>,
     connectors: &[ConnectorInfo],
+    mask_secrets: bool,
 ) -> Result<(), ContainerError<EuclidErrors>> {
     insert_serialized(
         map,
         "evaluated_connectors",
         &connectors.to_vec(),
         "evaluated_connectors",
+        mask_secrets,
     )
 }
 
@@ -271,7 +285,7 @@ pub(crate) async fn evaluate(
     render: impl FnOnce(
             RoutingEvaluation,
             String,
-        ) -> Result<Option<serde_json::Value>, ContainerError<EuclidErrors>>
+        ) -> Result<Option<axum::response::Response>, ContainerError<EuclidErrors>>
         + Send,
 ) -> Result<axum::response::Response, EvaluationError> {
     // Both endpoints record the same flow types, which the decision analytics select on; the
@@ -529,6 +543,7 @@ pub(crate) async fn evaluate(
             (
                 RoutingEvaluation,
                 serde_json::Map<String, serde_json::Value>,
+                serde_json::Value,
                 HybridDecisionSummary,
             ),
             HybridFailure,
@@ -584,7 +599,7 @@ pub(crate) async fn evaluate(
             }
             (false, Some(Err(dynamic_err)), None, _, _) => {
                 log_serializable_response("dynamic_error_response", &dynamic_err);
-                let error = serde_json::to_value(&dynamic_err).unwrap_or(serde_json::Value::Null);
+                let error = masked_payload(&dynamic_err);
                 return Ok(Err(HybridFailure {
                     error_code: dynamic_err.error_code.clone(),
                     error_message: dynamic_err.error_message.clone(),
@@ -610,8 +625,8 @@ pub(crate) async fn evaluate(
                 let error_message = static_err.get_inner().to_string();
                 let error = static_err
                     .downcast_ref::<crate::error::ApiErrorResponse>()
-                    .and_then(|payload| serde_json::to_value(payload).ok())
-                    .unwrap_or_else(|| serde_json::Value::String(error_message.clone()));
+                    .map(masked_payload)
+                    .unwrap_or_else(omitted_payload);
                 return Ok(Err(HybridFailure {
                     error_code: "HYBRID_STATIC_ROUTING_FAILED".to_string(),
                     error_message,
@@ -631,8 +646,11 @@ pub(crate) async fn evaluate(
             success_rate: dynamic,
             evaluated_connectors,
         };
-        let record = record_body(&evaluation)?;
-        Ok(Ok((evaluation, record, summary)))
+        let record = record_body(&evaluation, false)?;
+        let analytics_record = record_body(&evaluation, true)
+            .map(serde_json::Value::Object)
+            .unwrap_or_else(|_| omitted_payload());
+        Ok(Ok((evaluation, record, analytics_record, summary)))
     };
 
     let dynamic_request = recorded_request.dynamic_routing_request.as_ref();
@@ -663,10 +681,17 @@ pub(crate) async fn evaluate(
     };
 
     let api_result = match resolve() {
-        Ok(Ok((evaluation, record, summary))) => {
+        Ok(Ok((evaluation, record, analytics_record, summary))) => {
             let response_value = serde_json::Value::Object(record);
             let api_response = render(evaluation, request_id.clone())?;
-            crate::logger::debug!(decision_engine_success_response = ?response_value);
+            let analytics_api_response = api_response.as_ref().map(|response| {
+                response
+                    .extensions()
+                    .get::<ResponseAnalyticsPayload>()
+                    .map(|payload| payload.0.clone())
+                    .unwrap_or_else(omitted_payload)
+            });
+            crate::logger::debug!(decision_engine_success_response = ?analytics_record);
             DomainAnalyticsEvent::record_decision(
                 AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::RoutingHybridDecision),
                 merchant_id.clone(),
@@ -677,9 +702,9 @@ pub(crate) async fn evaluate(
                 summary.priority_logic_tag.clone(),
                 serialize_details(&HybridRoutingSuccessDetail {
                     request: &recorded_request,
-                    response: &response_value,
+                    response: &analytics_record,
                     api_request: decide_request.as_ref(),
-                    api_response: api_response.as_ref(),
+                    api_response: analytics_api_response.as_ref(),
                     score_context: summary.score_context.as_ref(),
                     selection_reason: &summary,
                 }),
@@ -695,7 +720,15 @@ pub(crate) async fn evaluate(
                 dynamic_request.map(|request| request.currency()),
                 dynamic_request.and_then(|request| request.country()),
             );
-            Ok(Json(api_response.unwrap_or(response_value)).into_response())
+            Ok(api_response.unwrap_or_else(|| {
+                let mut response = Json(response_value).into_response();
+                // The wire map has already erased Secret types; attach the copy serialized
+                // from the original typed evaluation instead of masking that map again.
+                response
+                    .extensions_mut()
+                    .insert(ResponseAnalyticsPayload(analytics_record));
+                response
+            }))
         }
         Ok(Err(failure)) => {
             record_failure(

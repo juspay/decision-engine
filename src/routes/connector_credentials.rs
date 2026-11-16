@@ -23,12 +23,12 @@ use crate::error::RouteError;
 /// credential's name, which must fit [`crate::types::service_configuration::MAX_NAME_LEN`].
 const MAX_ACCOUNT_LEN: usize = 255;
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct SetCredentialsRequest {
     /// Connector-side account (e.g. Adyen `merchantAccountCode`).
     pub account: String,
     /// Secret used to verify inbound webhook signatures.
-    pub webhook_secret: String,
+    pub webhook_secret: Secret<String>,
     /// Checkout: plain secret key (sk_…). Adyen: report-user Basic auth as
     /// "user:password", or a Report Service API key on its own (sent as `X-API-Key`).
     pub download_auth: Secret<String>,
@@ -80,7 +80,7 @@ pub async fn set_connector_credentials(
     ))?;
 
     let new = ConnectorCreds {
-        webhook_secret: Secret::new(body.webhook_secret),
+        webhook_secret: body.webhook_secret,
         download_auth,
     };
     store

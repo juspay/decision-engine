@@ -178,7 +178,7 @@ pub async fn get_seed_costs(
     Ok(Json(entries_to_rows(&entries)))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct SaveSeedCostsRequest {
     pub rows: Vec<SeedCostRow>,
 }
@@ -220,7 +220,7 @@ pub async fn delete_seed_costs(
     Ok(Json(entries_to_rows(&entries)))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct SimulateRequest {
     pub amount: f64,
     #[serde(default)]

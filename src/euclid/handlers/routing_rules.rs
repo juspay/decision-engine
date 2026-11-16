@@ -340,6 +340,18 @@ struct RoutingEvaluateAnalyticsDetails<'a> {
     preview_kind: &'static str,
 }
 
+#[derive(Serialize)]
+struct RoutingBatchAnalyticsDetails<'a> {
+    request: &'a RoutingBatchRequest,
+    response: &'a RoutingBatchResponse,
+    created_by: &'a str,
+    algorithm_for: &'a Option<String>,
+    fallback_output: &'a Option<Vec<ConnectorInfo>>,
+    entry_count: usize,
+    failed_count: usize,
+    entries: &'a [Value],
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RoutingEvaluateAnalyticsFlows {
     pub emit_events: bool,
@@ -545,7 +557,7 @@ pub async fn routing_create(
     ScopedJson {
         merchant,
         payload: mut config,
-        body,
+        ..
     }: ScopedJson<RoutingRule>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
     let state = get_tenant_app_state().await;
@@ -555,8 +567,8 @@ pub async fn routing_create(
         trace_id,
     } = ids;
 
-    // The request as received, for the analytics event.
-    let payload: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    // Preserve the typed request's secret annotations before normalization or mutation.
+    let payload = masking::masked_serialize(&config).unwrap_or(Value::Null);
 
     // Volume contracts are stored canonicalized (integer minor-unit amounts, tolerance in bps)
     // so every future consumer reads one representation.
@@ -1689,16 +1701,16 @@ fn serialize_batch_analytics_details(
     entries: &[Value],
     failed_count: usize,
 ) -> Option<String> {
-    crate::analytics::serialize_details(&json!({
-        "request": request,
-        "response": response,
-        "created_by": request.created_by,
-        "algorithm_for": request.algorithm_for,
-        "fallback_output": request.fallback_output,
-        "entry_count": entries.len(),
-        "failed_count": failed_count,
-        "entries": entries,
-    }))
+    crate::analytics::serialize_details(&RoutingBatchAnalyticsDetails {
+        request,
+        response,
+        created_by: &request.created_by,
+        algorithm_for: &request.algorithm_for,
+        fallback_output: &request.fallback_output,
+        entry_count: entries.len(),
+        failed_count,
+        entries,
+    })
 }
 
 fn record_routing_evaluate_preview_error(
