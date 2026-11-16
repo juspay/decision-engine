@@ -9,6 +9,7 @@ import { refreshSessionScopedSWRCache } from '../../lib/swrCache'
 import { isEmbedded } from '../../lib/embedMode'
 import { postToDashboard } from '../../lib/embedBridge'
 import { tokenRef } from '../../lib/tokenRef'
+import { watchForSignOutInAnotherTab } from '../../lib/sessionSync'
 
 interface MeResponse {
   user_id: string
@@ -156,6 +157,9 @@ export function AuthGuard() {
   useEffect(() => {
     if (tokenExpired) endSession()
   }, [tokenExpired, endSession])
+
+  // A sign-out in another tab revoked this token too
+  useEffect(() => watchForSignOutInAnotherTab(endSession), [endSession])
 
   useEffect(() => {
     // Don't clear auth while SWR is revalidating — the stale error may be from a previous
