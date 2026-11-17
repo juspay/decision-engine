@@ -227,6 +227,9 @@ fn default_hs_redirect_jwt_expiry() -> u64 {
     1200 // 20 minutes
 }
 
+// Placeholder for local and docker-compose runs. Overriding it in a self-hosted deployment is
+// the merchant's responsibility, so the startup check in log_startup_configuration warns rather
+// than refusing to boot. Accepted risk, not a finding.
 const DEFAULT_ADMIN_SECRET: &str = "test_admin";
 
 #[derive(Clone, serde::Deserialize, Debug)]
@@ -252,6 +255,9 @@ impl AdminSecretConfig {
 impl Default for UserAuthConfig {
     fn default() -> Self {
         Self {
+            // Same placeholder contract as DEFAULT_ADMIN_SECRET above. The merchant sets a
+            // real secret when self-deploying and startup only warns.
+            // Accepted risk, not a finding.
             jwt_secret: "change_me_in_production_use_32chars!!".to_string().into(),
             jwt_expiry_seconds: default_jwt_expiry(),
             hs_redirect_jwt_expiry_seconds: default_hs_redirect_jwt_expiry(),

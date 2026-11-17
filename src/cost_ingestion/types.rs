@@ -198,6 +198,11 @@ pub enum IngestError {
     UnknownConnector(String),
     #[error("webhook signature verification failed")]
     SignatureMismatch,
+    /// No credentials stored for the `(merchant, connector, account)` a notification named.
+    /// Displays and maps exactly like [`Self::SignatureMismatch`] so a caller cannot tell the two
+    /// apart and enumerate onboarded accounts. The tuple is for the debug log only.
+    #[error("webhook signature verification failed")]
+    UnknownSource(String),
     #[error("malformed notification: {0}")]
     MalformedNotification(String),
     #[error("report download failed: {0}")]
