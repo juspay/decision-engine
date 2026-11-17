@@ -1612,15 +1612,11 @@ pub async fn verify_email(
 
     let user_id = app_state
         .redis_conn
-        .get_key_string(&redis_key)
+        .get_and_delete_key_string(&redis_key)
         .await
-        .change_context(UserAuthError::StorageError)?;
-
-    if user_id.is_empty() {
-        return Err(error::ContainerError::from(
-            UserAuthError::InvalidVerificationToken,
-        ));
-    }
+        .change_context(UserAuthError::StorageError)?
+        .filter(|user_id| !user_id.is_empty())
+        .ok_or(UserAuthError::InvalidVerificationToken)?;
 
     let conn = app_state
         .db
@@ -1651,8 +1647,6 @@ pub async fn verify_email(
             UserAuthError::InvalidVerificationToken,
         ));
     }
-
-    let _ = app_state.redis_conn.delete_key(&redis_key).await;
 
     Ok(Json(VerifyEmailResponse {
         message: "Email verified successfully. You can now log in.".to_string(),
