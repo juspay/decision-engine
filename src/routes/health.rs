@@ -3,7 +3,8 @@ use std::sync::Arc;
 use crate::app::APP_STATE;
 use crate::tenant::GlobalAppState;
 
-use axum::{routing::get, Json};
+use crate::custom_extractors::Json;
+use axum::routing::get;
 use hyper::StatusCode;
 
 use crate::storage::TestInterface;
@@ -114,7 +115,7 @@ pub async fn diagnostics(TenantStateResolver(state): TenantStateResolver) -> Jso
         },
     };
 
-    axum::Json(Diagnostics {
+    Json(Diagnostics {
         key_custodian_locked: false,
         database: db_health,
     })
