@@ -41,14 +41,29 @@ pub async fn settlement_webhook(
             (StatusCode::OK, "[accepted]")
         }
         Err(e) => {
-            logger::warn!(
-                tag = "settlement_webhook",
-                "rejected {} settlement webhook for {}: {:?}",
-                connector,
-                merchant_id,
-                e
-            );
-            (status_for(&e), "rejected")
+            let status = status_for(&e);
+            // Rejections stay at debug so an unauthenticated caller cannot flood the logs.
+            let connector = sanitize_for_log(&connector);
+            let merchant_id = sanitize_for_log(&merchant_id);
+            let detail = sanitize_for_log(&format!("{e:?}"));
+            if status == StatusCode::INTERNAL_SERVER_ERROR {
+                logger::warn!(
+                    tag = "settlement_webhook",
+                    "failed {} settlement webhook for {}: {}",
+                    connector,
+                    merchant_id,
+                    detail
+                );
+            } else {
+                logger::debug!(
+                    tag = "settlement_webhook",
+                    "rejected {} settlement webhook for {}: {}",
+                    connector,
+                    merchant_id,
+                    detail
+                );
+            }
+            (status, "rejected")
         }
     }
 }
@@ -84,9 +99,7 @@ async fn handle(
         .get(&merchant, connector, &account)
         .await?
         .ok_or_else(|| {
-            IngestError::MalformedNotification(format!(
-                "no credentials stored for {merchant_id}/{connector}/{account}"
-            ))
+            IngestError::UnknownSource(format!("{merchant_id}/{connector}/{account}"))
         })?;
 
     // 3. Verify the signature against that merchant's secret and extract the report handle. An
@@ -107,14 +120,33 @@ async fn handle(
     .await
 }
 
-/// A bad signature is the caller's fault (401); everything else is our side (500). Either way the
-/// response is fast and carries no internal detail.
+/// A bad signature is the caller's fault (401), a bad payload too (400), everything else is our
+/// side (500). Either way the response is fast and carries no internal detail.
+///
+/// An unknown source shares the 401 so an unauthenticated caller cannot enumerate which
+/// merchant+connector+account tuples are onboarded. `MalformedNotification` stays a 400 because it
+/// is also raised *after* the HMAC verifies, where the caller has earned an accurate status.
 fn status_for(e: &IngestError) -> StatusCode {
     match e {
-        IngestError::SignatureMismatch => StatusCode::UNAUTHORIZED,
+        IngestError::SignatureMismatch | IngestError::UnknownSource(_) => StatusCode::UNAUTHORIZED,
         IngestError::UnknownConnector(_) | IngestError::MalformedNotification(_) => {
             StatusCode::BAD_REQUEST
         }
         _ => StatusCode::INTERNAL_SERVER_ERROR,
     }
+}
+
+/// Clean a string an unauthenticated caller controls before it reaches a log line. Control
+/// characters would otherwise let it forge whole log records.
+fn sanitize_for_log(s: &str) -> String {
+    const MAX: usize = 256;
+    let mut out: String = s
+        .chars()
+        .take(MAX)
+        .map(|c| if c.is_control() { '.' } else { c })
+        .collect();
+    if s.chars().nth(MAX).is_some() {
+        out.push_str("..");
+    }
+    out
 }
