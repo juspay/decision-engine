@@ -665,8 +665,7 @@ pub async fn filterFunctionalGateways(this: &mut DeciderFlow<'_>) -> GatewayList
             } else if Utils::is_token_repeat_txn(mInternalMeta.clone()) {
                 let brand = txnCardInfo
                     .cardSwitchProvider
-                    .as_ref()
-                    .map(|provider| provider.peek().to_string())
+                    .clone()
                     .unwrap_or_else(|| "DEFAULT".to_string());
                 let isMerchantEnabledForCvvLessV2Flow = is_feature_enabled(
                     C::CVV_LESS_V2_FLOW.get_key(),
@@ -926,8 +925,13 @@ async fn check_cvv_less_support_rupay(txnCardInfo: &TxnCardInfo) -> bool {
     let bankCode = Utils::fetch_juspay_bank_code(txnCardInfo);
     let mCardType = txnCardInfo.card_type.as_ref().map(ETCA::card_type_to_text);
     if let Some(bCode) = bankCode {
-        let feature_key =
-            C::getTokenRepeatCvvLessBankCodeKey(txnCardInfo.cardSwitchProvider.clone()).get_key();
+        let feature_key = C::getTokenRepeatCvvLessBankCodeKey(
+            txnCardInfo
+                .cardSwitchProvider
+                .clone()
+                .map(masking::Secret::new),
+        )
+        .get_key();
         let dimension = format!(
             "{}::{}",
             bCode,
@@ -1708,7 +1712,10 @@ pub async fn filterGatewaysForValidationType(
         {
             let m_mandate_guest_checkout_supported_gateways: Option<Vec<String>> =
                 findByNameFromRedis(
-                    C::getmandateGuestCheckoutKey(txn_card_info.cardSwitchProvider).get_key(),
+                    C::getmandateGuestCheckoutKey(
+                        txn_card_info.cardSwitchProvider.map(masking::Secret::new),
+                    )
+                    .get_key(),
                 )
                 .await;
 

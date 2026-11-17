@@ -291,10 +291,7 @@ pub async fn scoring_flow(
                 );
 
                 let sr_routing_dimensions = SrRoutingDimensions {
-                    card_network: txn_card_info
-                        .cardSwitchProvider
-                        .as_ref()
-                        .map(|s| s.peek().to_string()),
+                    card_network: txn_card_info.cardSwitchProvider.clone(),
                     card_isin: txn_card_info.card_isin.clone(),
                     currency: Some(decider_flow.get().dpOrder.currency.to_string()),
                     country: txn_detail.country.as_ref().map(|a| a.to_string()),
@@ -565,10 +562,7 @@ pub async fn get_cached_scores_based_on_srv3(
     let txn_card_info = decider_flow.get().dpTxnCardInfo.clone();
 
     let sr_routing_dimensions = SrRoutingDimensions {
-        card_network: txn_card_info
-            .cardSwitchProvider
-            .as_ref()
-            .map(|s| s.peek().to_string()),
+        card_network: txn_card_info.cardSwitchProvider.clone(),
         card_isin: txn_card_info.card_isin,
         currency: Some(decider_flow.get().dpOrder.currency.to_string()),
         country: decider_flow

@@ -120,8 +120,7 @@ async fn prepare_decider_params(
                 if update_txn_card_info.cardSwitchProvider.is_none()
                     && !card_info.card_switch_provider.is_empty()
                 {
-                    update_txn_card_info.cardSwitchProvider =
-                        Some(masking::Secret::new(card_info.card_switch_provider));
+                    update_txn_card_info.cardSwitchProvider = Some(card_info.card_switch_provider);
                 }
                 if update_txn_card_info.card_type.is_none() {
                     update_txn_card_info.card_type = card_info.card_type;

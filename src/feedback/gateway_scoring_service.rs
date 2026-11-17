@@ -335,10 +335,7 @@ pub async fn get_gateway_scoring_type(
     // Extract the new parameters from txn_card_info
 
     let sr_routing_dimensions = SrRoutingDimensions {
-        card_network: txn_card_info
-            .cardSwitchProvider
-            .as_ref()
-            .map(|s| s.peek().to_string()),
+        card_network: txn_card_info.cardSwitchProvider.clone(),
         card_isin: txn_card_info.card_isin.clone(),
         currency: Some(txn_detail.currency.to_string()),
         country: txn_detail.country.as_ref().map(|c| c.to_string()),
@@ -907,10 +904,7 @@ pub async fn update_gateway_score(
                 Some(MID::merchant_id_to_text(txn_detail.clone().merchantId)),
                 Some(txn_card_info.instrument.method_type_code().into_owned()),
                 Some(txn_card_info.instrument.method_code().to_string()),
-                txn_card_info
-                    .cardSwitchProvider
-                    .as_ref()
-                    .map(|provider| provider.peek().to_string()),
+                txn_card_info.cardSwitchProvider.clone(),
                 txn_card_info.card_isin.clone(),
                 Some(txn_detail.currency.to_string()),
                 txn_detail
@@ -973,10 +967,7 @@ pub async fn update_gateway_score(
                 let pmt_str = txn_card_info.instrument.method_code().to_string();
                 let pm_str = m_source_object.clone().unwrap_or_default();
                 let sr_routing_dimensions = SrRoutingDimensions {
-                    card_network: txn_card_info
-                        .cardSwitchProvider
-                        .as_ref()
-                        .map(|s| s.peek().to_string()),
+                    card_network: txn_card_info.cardSwitchProvider.clone(),
                     card_isin: txn_card_info.card_isin.clone(),
                     currency: Some(txn_detail.currency.to_string()),
                     country: txn_detail.country.as_ref().map(|c| c.to_string()),

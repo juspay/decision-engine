@@ -156,7 +156,7 @@ pub struct TxnCardInfo {
     pub id: TxnCardInfoPId,
     pub card_isin: Option<String>,
     pub cardIssuerBankName: Option<String>,
-    pub cardSwitchProvider: Option<Secret<String>>,
+    pub cardSwitchProvider: Option<String>,
     pub card_type: Option<CardType>,
     pub card_program: Option<String>,
     /// Issuer country of the card (ISO code or region bucket). Used by the multi-objective
@@ -184,7 +184,7 @@ struct TxnCardInfoWire {
     #[serde(rename = "cardIssuerBankName")]
     cardIssuerBankName: Option<String>,
     #[serde(rename = "cardSwitchProvider")]
-    cardSwitchProvider: Option<Secret<String>>,
+    cardSwitchProvider: Option<String>,
     #[serde(rename = "cardType")]
     card_type: Option<CardType>,
     #[serde(rename = "cardProgram", default)]
@@ -283,7 +283,7 @@ pub struct SafeTxnCardInfo {
     #[serde(rename = "cardIssuerBankName")]
     pub cardIssuerBankName: Option<String>,
     #[serde(rename = "cardSwitchProvider")]
-    pub cardSwitchProvider: Option<Secret<String>>,
+    pub cardSwitchProvider: Option<String>,
     #[serde(rename = "cardType")]
     pub card_type: Option<CardType>,
     #[serde(rename = "cardProgram", default)]

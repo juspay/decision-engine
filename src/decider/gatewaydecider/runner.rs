@@ -320,7 +320,7 @@ fn go_card_isin(
         paymentMethod: txnCardInfo
             .cardSwitchProvider
             .clone()
-            .map(|csp| csp.peek().to_uppercase()),
+            .map(|csp| csp.to_uppercase()),
         paymentSource: None,
         cardIssuer: txnCardInfo
             .cardIssuerBankName
@@ -335,7 +335,7 @@ fn go_card_isin(
         cardBrand: cloned_txn_card_info
             .cardSwitchProvider
             .clone()
-            .map(|csp| csp.peek().to_uppercase()),
+            .map(|csp| csp.to_uppercase()),
         cardIssuerCountry: mCardInfo
             .as_ref()
             .and_then(|ci| ci.card_issuer_country.clone().map(|c| c.to_uppercase()))

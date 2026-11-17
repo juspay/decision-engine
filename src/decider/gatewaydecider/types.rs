@@ -577,7 +577,7 @@ pub struct GatewayScoringData {
     pub dateCreated: OffsetDateTime,
     pub eliminationEnabled: bool,
     pub cardIsIn: Option<String>,
-    pub cardSwitchProvider: Option<Secret<String>>,
+    pub cardSwitchProvider: Option<String>,
     pub currency: Option<Currency>,
     pub country: Option<CountryISO2>,
     pub is_legacy_decider_flow: bool,
@@ -1043,7 +1043,7 @@ pub struct PaymentInfo {
     card_issuer_bank_name: Option<String>,
     pub card_isin: Option<String>,
     card_type: Option<ETCa::card_type::CardType>,
-    card_switch_provider: Option<Secret<String>>,
+    card_switch_provider: Option<String>,
     #[serde(default)]
     card_program: Option<String>,
     #[serde(default)]
@@ -1118,7 +1118,7 @@ impl From<(&RoutingRequest, Option<Self>)> for DomainDeciderRequestForApiCallV2 
                 card_type: routing_param_text(request, "card_type").and_then(|value| {
                     ETCa::card_type::CardType::try_from(normalize_static_enum(value)).ok()
                 }),
-                card_switch_provider: routing_param_text(request, "card_network").map(Secret::new),
+                card_switch_provider: routing_param_text(request, "card_network"),
                 card_program: None,
                 card_issuer_country: routing_param_text(request, "issuer_country"),
                 channel: None,
@@ -1186,8 +1186,7 @@ impl DomainDeciderRequestForApiCallV2 {
             info.card_switch_provider = card
                 .card_switch_provider
                 .clone()
-                .or(card.card_network.clone())
-                .map(Secret::new);
+                .or(card.card_network.clone());
         }
         info.preferred_connectors =
             request
@@ -1242,10 +1241,7 @@ impl DomainDeciderRequestForApiCallV2 {
     /// Card scheme (card_network SR dimension) — the card switch provider, matching how the
     /// decider keys SR clusters.
     pub fn card_network(&self) -> Option<String> {
-        self.payment_info
-            .card_switch_provider
-            .as_ref()
-            .map(|s| s.peek().to_string())
+        self.payment_info.card_switch_provider.clone()
     }
 
     pub fn currency(&self) -> String {
