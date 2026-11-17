@@ -52,7 +52,9 @@ struct Credentials {
 }
 ```
 
-Normal API serialization still sends the original values to the caller. Analytics serialization masks them automatically; handlers do not maintain field-name lists. API keys, passwords, session tokens, one-time codes, and connector credentials use these secret types.
+Normal API serialization still sends the original values to the caller. Analytics serialization masks them automatically; handlers do not maintain field-name lists. API keys, passwords, session tokens, one-time codes, connector credentials, merchant hash and encoding keys, card tokens, and payment sources use these secret types at the request and response boundaries.
+
+Payment Audit matches card-network filters against the dedicated `card_network` dimension as well as legacy request fields. This keeps filtering available when `cardSwitchProvider` is masked in request snapshots.
 
 Domain event details also use masked serialization through `serialize_details`. Pass the original typed value into that helper. Converting a secret into a plain string or ordinary `serde_json::Value` first erases its secret annotation; if a response must be assembled as JSON, carry its separately masked snapshot alongside its wire representation.
 
