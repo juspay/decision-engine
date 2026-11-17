@@ -185,9 +185,8 @@ async fn capture_api_event(
     };
 
     let started_at = Instant::now();
-    let (mut parts, body) = request.into_parts();
-    let request_analytics = crate::analytics::payload::RequestAnalyticsPayload::default();
-    parts.extensions.insert(request_analytics.clone());
+    let (parts, body) = request.into_parts();
+    let payload_capture = crate::analytics::payload::ApiPayloadCapture::default();
     let (request_body, request_handle) = crate::analytics::CaptureBody::new(body);
 
     let request_id = parts
@@ -217,15 +216,11 @@ async fn capture_api_event(
         });
     let method = parts.method.to_string();
 
-    let response = next
-        .run(Request::from_parts(parts, Body::new(request_body)))
+    let response = payload_capture
+        .scope(next.run(Request::from_parts(parts, Body::new(request_body))))
         .await;
     let status_code = response.status().as_u16();
-    let response_analytics = response
-        .extensions()
-        .get::<crate::analytics::payload::ResponseAnalyticsPayload>()
-        .map(|payload| payload.0.clone())
-        .unwrap_or_else(crate::analytics::payload::omitted_payload);
+    let response_analytics = payload_capture.response_snapshot();
 
     let runtime = global_state.analytics_runtime.clone();
     tokio::spawn(async move {
@@ -235,7 +230,7 @@ async fn capture_api_event(
         let request = if request_capture.bytes.is_empty() {
             String::new()
         } else {
-            request_analytics.snapshot().to_string()
+            payload_capture.request_snapshot().to_string()
         };
 
         runtime.enqueue_api_event(crate::analytics::ApiEvent {

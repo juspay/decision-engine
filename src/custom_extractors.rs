@@ -32,15 +32,9 @@ where
         request: axum::extract::Request,
         state: &S,
     ) -> Result<Self, Self::Rejection> {
-        let analytics = request
-            .extensions()
-            .get::<crate::analytics::payload::RequestAnalyticsPayload>()
-            .cloned();
         match axum::Json::<T>::from_request(request, state).await {
             Ok(axum::Json(payload)) => {
-                if let Some(analytics) = analytics {
-                    analytics.record(&payload);
-                }
+                crate::analytics::payload::record_request(&payload);
                 Ok(Self(payload))
             }
             Err(rejection) => Err(invalid_json_response(
@@ -127,13 +121,16 @@ fn invalid_json_response(message: String, detail: String) -> Response {
 
 impl<T: serde::Serialize> IntoResponse for Json<T> {
     fn into_response(self) -> Response {
-        let analytics = crate::analytics::payload::ResponseAnalyticsPayload(
-            crate::analytics::payload::masked_payload(&self.0),
-        );
-        let mut response = axum::Json(self.0).into_response();
-        response.extensions_mut().insert(analytics);
-        response
+        crate::analytics::payload::record_response(&self.0);
+        axum::Json(self.0).into_response()
     }
+}
+
+/// A JSON response assembled from already-serialized parts. Serializing to a `Value` erases
+/// `Secret` annotations, so the caller passes the masked copy it serialized from the typed value.
+pub fn json_response_with_masked(wire: serde_json::Value, masked: serde_json::Value) -> Response {
+    crate::analytics::payload::record_masked_response(masked);
+    axum::Json(wire).into_response()
 }
 
 /// The request body of a route that names its merchant in the body, parsed as `T` and authorized
@@ -191,10 +188,6 @@ where
         state: &S,
     ) -> Result<Self, Self::Rejection> {
         let session = request.extensions().get::<AuthContext>().cloned();
-        let analytics = request
-            .extensions()
-            .get::<crate::analytics::payload::RequestAnalyticsPayload>()
-            .cloned();
         // Read through `Bytes` so the route's `DefaultBodyLimit` applies.
         let body = axum::body::Bytes::from_request(request, state)
             .await
@@ -208,9 +201,7 @@ where
             Ok(axum::Json(payload)) => payload,
             Err(error) => return Err(ScopedJsonRejection::Parse { body, error }),
         };
-        if let Some(analytics) = analytics {
-            analytics.record(&payload);
-        }
+        crate::analytics::payload::record_request(&payload);
         let merchant = crate::auth::authorize(session.as_ref(), &payload)
             .await
             .map_err(ScopedJsonRejection::Scope)?;

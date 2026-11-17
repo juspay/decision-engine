@@ -3,7 +3,7 @@
 //! [`RoutingEvaluation`] to the endpoint to write as its response.
 
 use crate::analytics::clickhouse::common::STATIC_ROUTING_APPROACH;
-use crate::analytics::payload::{masked_payload, omitted_payload, ResponseAnalyticsPayload};
+use crate::analytics::payload::{current_response_snapshot, masked_payload, omitted_payload};
 use crate::analytics::{
     serialize_details, AnalyticsFlowContext, AnalyticsRoute, ApiFlow, DomainAnalyticsEvent,
     FlowType,
@@ -684,13 +684,11 @@ pub(crate) async fn evaluate(
         Ok(Ok((evaluation, record, analytics_record, summary))) => {
             let response_value = serde_json::Value::Object(record);
             let api_response = render(evaluation, request_id.clone())?;
-            let analytics_api_response = api_response.as_ref().map(|response| {
-                response
-                    .extensions()
-                    .get::<ResponseAnalyticsPayload>()
-                    .map(|payload| payload.0.clone())
-                    .unwrap_or_else(omitted_payload)
-            });
+            // `render` wrote its typed response through `Json`, which recorded the masked copy in
+            // the request's analytics capture. Both evaluation endpoints are captured routes.
+            let analytics_api_response = api_response
+                .as_ref()
+                .map(|_| current_response_snapshot().unwrap_or_else(omitted_payload));
             crate::logger::debug!(decision_engine_success_response = ?analytics_record);
             DomainAnalyticsEvent::record_decision(
                 AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::RoutingHybridDecision),
@@ -721,13 +719,10 @@ pub(crate) async fn evaluate(
                 dynamic_request.and_then(|request| request.country()),
             );
             Ok(api_response.unwrap_or_else(|| {
-                let mut response = Json(response_value).into_response();
-                // The wire map has already erased Secret types; attach the copy serialized
-                // from the original typed evaluation instead of masking that map again.
-                response
-                    .extensions_mut()
-                    .insert(ResponseAnalyticsPayload(analytics_record));
-                response
+                crate::custom_extractors::json_response_with_masked(
+                    response_value,
+                    analytics_record,
+                )
             }))
         }
         Ok(Err(failure)) => {
