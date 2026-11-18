@@ -477,11 +477,10 @@ fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
         )
         .route(
             "/merchant-account/:merchant_id/connectors/:connector/report",
-            // Monthly settlement reports run to several GB. The handler streams the body to disk
-            // and parses in batches (O(batch) RAM), so lift the body cap to the same hard limit it
-            // enforces itself. DefaultBodyLimit otherwise errors the stream at its default.
+            // Match the body cap to the limit the handler enforces itself, or DefaultBodyLimit
+            // errors the stream at its own default.
             metered!(post, routes::report_upload::upload_report).layer(
-                axum::extract::DefaultBodyLimit::max(routes::report_upload::MAX_UPLOAD_BYTES),
+                axum::extract::DefaultBodyLimit::max(routes::report_upload::max_upload_bytes()),
             ),
         )
         .route(

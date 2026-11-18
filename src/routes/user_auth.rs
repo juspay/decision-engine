@@ -398,6 +398,9 @@ pub async fn login(
         .await
         .change_error(UserAuthError::StorageError)?;
 
+    // UserNotFound and InvalidPassword render as the same 401 in into_response, so there is no
+    // enumeration oracle. AccountInactive and EmailNotVerified stay distinct so the user knows
+    // which step to take.
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
 
     let is_active = {
@@ -1034,6 +1037,8 @@ pub async fn invite_member(
             }
         }
 
+        // The inviting admin needs the credential to pass on and the email invite is
+        // best-effort, so it is returned here by design. Analytics masks the field.
         Ok(Json(InviteMemberResponse {
             email: payload.email,
             is_new_user: true,
