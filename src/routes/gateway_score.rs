@@ -42,6 +42,10 @@ pub async fn reset_gateway_scores(
 
     // Both SR v2 and SR v3 (the multi-objective path) share the
     // `<prefix>_<merchant_id>_...` layout, with `_}score` / `_}queue` suffixes.
+    //
+    // Not a client string, `ScopedJson` resolves the id against the caller's session. Widening the
+    // glob would need a provisioned id holding a metacharacter, which no creation path produces.
+    // Validate the charset at merchant creation.
     let patterns = [
         format!(
             "{}_{}_*",

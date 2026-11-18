@@ -337,6 +337,8 @@ pub async fn authenticate(
         ));
     }
 
+    // Backward-compat lane for deployments predating API keys. Off in every shipped config, and
+    // `default_true` means a missing or misspelled key leaves auth on, so a typo cannot open it.
     if !app_state.global_config.api_key_auth_enabled {
         return Ok(next.run(req).await);
     }
