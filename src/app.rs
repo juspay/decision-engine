@@ -167,17 +167,12 @@ async fn capture_api_event(
 
     let runtime = global_state.analytics_runtime.clone();
     tokio::spawn(async move {
-        let crate::analytics::payload::RequestFields {
-            merchant_id,
-            payment_id,
-            auth_type,
-        } = payload_capture.request_fields();
         let response_body = payload_capture.response_snapshot().to_string();
 
         runtime.enqueue_api_event(crate::analytics::ApiEvent {
             event_id: crate::analytics::next_event_id(),
-            merchant_id,
-            payment_id,
+            merchant_id: payload_capture.merchant_id(),
+            payment_id: payload_capture.payment_id(),
             api_flow: flow_context.api_flow,
             flow_type: flow_context.flow_type,
             created_at_timestamp: crate::analytics::now_ms(),
@@ -186,7 +181,6 @@ async fn capture_api_event(
             trace_id,
             latency,
             status_code,
-            auth_type,
             request: payload_capture.request_body(),
             user_agent,
             ip_addr,

@@ -146,3 +146,6 @@ pub async fn list_connector_credentials(
         }
     }
 }
+
+// These requests name no payment.
+crate::impl_api_event_payload!(SetCredentialsRequest);

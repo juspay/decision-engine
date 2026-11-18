@@ -182,7 +182,6 @@ pub struct ApiEvent {
     pub trace_id: Option<String>,
     pub latency: u64,
     pub status_code: u16,
-    pub auth_type: Option<String>,
     pub request: String,
     pub user_agent: Option<String>,
     pub ip_addr: Option<String>,

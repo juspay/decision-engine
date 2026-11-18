@@ -326,3 +326,6 @@ pub async fn update_score(
         }
     }
 }
+
+// These requests name no payment.
+crate::impl_api_event_payload!(UpdateScoreRequest);

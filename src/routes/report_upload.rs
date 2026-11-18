@@ -824,3 +824,6 @@ async fn run_ingest(
     )
     .await
 }
+
+// These requests name no payment.
+crate::impl_api_event_payload!(MappingRequest);

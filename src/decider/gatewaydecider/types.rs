@@ -2314,3 +2314,12 @@ mod preferred_connectors_contract_tests {
         Ok(())
     }
 }
+
+// These requests name no payment.
+crate::impl_api_event_payload!(DomainDeciderRequest);
+
+impl crate::analytics::payload::ApiEventPayload for DomainDeciderRequestForApiCallV2 {
+    fn payment_id(&self) -> Option<&str> {
+        Some(Self::payment_id(self))
+    }
+}

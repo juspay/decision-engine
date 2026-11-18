@@ -662,3 +662,20 @@ impl KeysConfig {
 pub struct TomlConfig {
     pub keys: KeysConfig,
 }
+
+// These requests name no payment.
+crate::impl_api_event_payload!(
+    ActivateRoutingConfigRequest,
+    DeactivateRoutingConfigRequest,
+    RoutingBatchRequest,
+    RoutingRule,
+    SrDimensionConfig,
+    DeleteRoutingConfigRequest,
+    UpdateRoutingConfigRequest
+);
+
+impl crate::analytics::payload::ApiEventPayload for RoutingRequest {
+    fn payment_id(&self) -> Option<&str> {
+        self.payment_id.as_deref()
+    }
+}

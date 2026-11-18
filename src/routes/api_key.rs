@@ -198,6 +198,9 @@ pub async fn mint_api_key(
     })
 }
 
+// These requests name no payment.
+crate::impl_api_event_payload!(CreateApiKeyRequest);
+
 #[cfg(test)]
 mod tests {
     use super::*;

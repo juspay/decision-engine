@@ -210,3 +210,6 @@ pub(crate) async fn refresh_serving(merchant_id: &str) {
         );
     }
 }
+
+// These requests name no payment.
+crate::impl_api_event_payload!(SetFeeOverrideRequest);

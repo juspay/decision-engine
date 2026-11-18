@@ -26,74 +26,46 @@ pub(crate) fn masked_payload<T: Serialize>(payload: &T) -> Value {
     masking::masked_serialize(payload).unwrap_or_else(|_| omitted_payload())
 }
 
-/// The identifiers an API event is indexed by, read from the request body.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct RequestFields {
-    pub merchant_id: Option<String>,
-    pub payment_id: Option<String>,
-    pub auth_type: Option<String>,
-}
-
-impl RequestFields {
-    const MERCHANT_ID: &'static [&'static [&'static str]] = &[
-        &["merchant_id"],
-        &["merchantId"],
-        &["created_by"],
-        &["createdBy"],
-    ];
-    const PAYMENT_ID: &'static [&'static [&'static str]] = &[
-        &["payment_id"],
-        &["paymentId"],
-        &["payment_info", "payment_id"],
-        &["paymentInfo", "paymentId"],
-    ];
-    const AUTH_TYPE: &'static [&'static [&'static str]] = &[
-        &["authentication_type"],
-        &["authenticationType"],
-        &["auth_type"],
-        &["authType"],
-        &["payment_info", "authentication_type"],
-        &["payment_info", "auth_type"],
-        &["paymentInfo", "authenticationType"],
-        &["paymentInfo", "authType"],
-    ];
-
-    /// Reads each field from the first of its known paths that holds a string, in snake_case or
-    /// camelCase.
-    pub(crate) fn from_json(body: &Value) -> Self {
-        let first = |paths: &[&[&str]]| {
-            paths.iter().find_map(|path| {
-                path.iter()
-                    .try_fold(body, |value, key| value.get(*key))
-                    .and_then(Value::as_str)
-                    .map(str::to_string)
-            })
-        };
-        Self {
-            merchant_id: first(Self::MERCHANT_ID),
-            payment_id: first(Self::PAYMENT_ID),
-            auth_type: first(Self::AUTH_TYPE),
-        }
+/// What an API event records about a request type, besides its masked body. Implemented by every
+/// type the `Json` and `ScopedJson` extractors take; most use the defaults through
+/// [`crate::impl_api_event_payload`].
+pub trait ApiEventPayload {
+    /// The payment the request is about, if it names one.
+    fn payment_id(&self) -> Option<&str> {
+        None
     }
 }
+
+/// Implements [`ApiEventPayload`] with its defaults, for request types that name no payment.
+#[macro_export]
+macro_rules! impl_api_event_payload {
+    ($($type:ty),+ $(,)?) => {
+        $(impl $crate::analytics::payload::ApiEventPayload for $type {})+
+    };
+}
+
+impl_api_event_payload!(Value);
+
+impl<T: ApiEventPayload> ApiEventPayload for Vec<T> {}
 
 /// The request body as analytics recorded it.
 #[derive(Debug, Clone)]
 enum RecordedRequest {
-    /// Extracted as its type: the masked copy, and the fields read from it.
+    /// Extracted as its type: the masked copy, and the payment it names.
     Typed {
         masked: Value,
-        fields: RequestFields,
+        payment_id: Option<String>,
     },
-    /// Read but not extracted (too large, or not a valid instance of the type). Only the fields
-    /// are kept, read from the body when it is JSON.
-    Unparsed { fields: RequestFields },
+    /// Read but not extracted: too large, or not a valid instance of the type.
+    Unparsed,
 }
 
-/// The masked request and response copies of one captured API call.
+/// The masked request and response copies of one captured API call, and the merchant it was
+/// authorized for.
 #[derive(Clone, Default)]
 pub(crate) struct ApiPayloadCapture {
     request: Arc<OnceLock<RecordedRequest>>,
+    merchant_id: Arc<OnceLock<String>>,
     response: Arc<Mutex<Option<Value>>>,
 }
 
@@ -108,19 +80,22 @@ impl ApiPayloadCapture {
     pub(crate) fn request_body(&self) -> String {
         match self.request.get() {
             Some(RecordedRequest::Typed { masked, .. }) => masked.to_string(),
-            Some(RecordedRequest::Unparsed { .. }) => omitted_payload().to_string(),
+            Some(RecordedRequest::Unparsed) => omitted_payload().to_string(),
             None => String::new(),
         }
     }
 
-    /// The identifiers read from the request body, if one was read.
-    pub(crate) fn request_fields(&self) -> RequestFields {
+    /// The payment the extracted request names.
+    pub(crate) fn payment_id(&self) -> Option<String> {
         match self.request.get() {
-            Some(RecordedRequest::Typed { fields, .. } | RecordedRequest::Unparsed { fields }) => {
-                fields.clone()
-            }
-            None => RequestFields::default(),
+            Some(RecordedRequest::Typed { payment_id, .. }) => payment_id.clone(),
+            Some(RecordedRequest::Unparsed) | None => None,
         }
+    }
+
+    /// The merchant the request was authorized to act on.
+    pub(crate) fn merchant_id(&self) -> Option<String> {
+        self.merchant_id.get().cloned()
     }
 
     /// The masked response, or the omission marker when no typed response was written.
@@ -149,31 +124,30 @@ fn record(request: impl FnOnce() -> RecordedRequest) {
 }
 
 /// Records the typed request body. The first recorded body is kept.
-pub(crate) fn record_request<T: Serialize>(payload: &T) {
-    record(|| {
-        let masked = masked_payload(payload);
-        let fields = RequestFields::from_json(&masked);
-        RecordedRequest::Typed { masked, fields }
+pub(crate) fn record_request<T: Serialize + ApiEventPayload>(payload: &T) {
+    record(|| RecordedRequest::Typed {
+        masked: masked_payload(payload),
+        payment_id: payload.payment_id().map(str::to_string),
     });
 }
 
-/// Records a body that was read but did not extract as its type. Only its identifiers are kept.
-/// An empty body records nothing, as if none was sent.
+/// Records a body that was read but did not extract as its type. An empty body records nothing,
+/// as if none was sent.
 pub(crate) fn record_unparsed_request(body: &[u8]) {
-    if body.is_empty() {
-        return;
+    if !body.is_empty() {
+        record(|| RecordedRequest::Unparsed);
     }
-    record(|| RecordedRequest::Unparsed {
-        fields: serde_json::from_slice(body)
-            .map(|value| RequestFields::from_json(&value))
-            .unwrap_or_default(),
-    });
 }
 
 /// Records a body that could not be read (over the route's limit, or the stream failed).
 pub(crate) fn record_unread_request() {
-    record(|| RecordedRequest::Unparsed {
-        fields: RequestFields::default(),
+    record(|| RecordedRequest::Unparsed);
+}
+
+/// Records the merchant the request was authorized to act on. The first one is kept.
+pub(crate) fn record_merchant(merchant_id: &str) {
+    let _ = CAPTURE.try_with(|capture| {
+        capture.merchant_id.get_or_init(|| merchant_id.to_string());
     });
 }
 
@@ -198,10 +172,7 @@ pub(crate) fn current_response_snapshot() -> Option<Value> {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        current_response_snapshot, masked_payload, omitted_payload, ApiPayloadCapture,
-        RequestFields,
-    };
+    use super::{current_response_snapshot, masked_payload, omitted_payload, ApiPayloadCapture};
     use crate::custom_extractors::Json;
     use axum::{body::Body, http::Request, response::IntoResponse, routing::post, Router};
     use masking::Secret;
@@ -222,6 +193,8 @@ mod tests {
         backup_codes: Vec<Secret<String>>,
         otp: Option<Secret<String>>,
     }
+
+    crate::impl_api_event_payload!(LoginRequest);
 
     #[derive(Serialize)]
     struct LoginResponse {
@@ -324,46 +297,83 @@ mod tests {
 
         assert!(response.status().is_client_error());
         assert_eq!(capture.request_body(), omitted_payload().to_string());
-        assert_eq!(capture.request_fields(), RequestFields::default());
+        assert_eq!(capture.payment_id(), None);
         // The rejection is an `ApiErrorResponse`, captured from its own typed value.
         assert_masked(&capture.response_snapshot());
     }
 
-    #[tokio::test]
-    async fn a_scoped_body_is_recorded_masked() {
-        use axum::extract::FromRequest;
+    #[derive(Serialize, Deserialize, crate::auth::MerchantScoped)]
+    struct ScopedCredentials {
+        #[merchant]
+        merchant_id: String,
+        payment_id: String,
+        webhook_secret: Secret<String>,
+    }
 
-        #[derive(Serialize, Deserialize, crate::auth::MerchantScoped)]
-        struct ScopedCredentials {
-            #[merchant]
-            merchant_id: String,
-            webhook_secret: Secret<String>,
+    impl super::ApiEventPayload for ScopedCredentials {
+        fn payment_id(&self) -> Option<&str> {
+            Some(&self.payment_id)
         }
+    }
 
-        let capture = ApiPayloadCapture::default();
+    /// Extracts `body` as [`ScopedCredentials`] for a session of `session_merchant`.
+    async fn extract_scoped(
+        capture: &ApiPayloadCapture,
+        session_merchant: &str,
+        body: String,
+    ) -> bool {
+        use axum::extract::FromRequest;
         let mut request = Request::builder()
             .header("content-type", "application/json")
-            .body(Body::from(format!(
-                r#"{{"merchant_id": "m1", "webhook_secret": "{SECRET}"}}"#
-            )))
+            .body(Body::from(body))
             .unwrap();
         request
             .extensions_mut()
-            .insert(crate::auth::AuthContext::from_api_key("m1"));
-        let extracted = capture
+            .insert(crate::auth::AuthContext::from_api_key(session_merchant));
+        capture
             .scope(
                 crate::custom_extractors::ScopedJson::<ScopedCredentials>::from_request(
                     request,
                     &(),
                 ),
             )
-            .await;
+            .await
+            .is_ok()
+    }
 
-        assert!(extracted.is_ok());
+    #[tokio::test]
+    async fn a_scoped_body_records_its_authorized_merchant_and_payment() {
+        let capture = ApiPayloadCapture::default();
+        let body = format!(
+            r#"{{"merchant_id": "m1", "payment_id": "pay_1", "webhook_secret": "{SECRET}"}}"#
+        );
+        assert!(extract_scoped(&capture, "m1", body).await);
+
         let snapshot: serde_json::Value = serde_json::from_str(&capture.request_body()).unwrap();
         assert_masked(&snapshot);
         assert_eq!(snapshot["merchant_id"], "m1");
-        assert_eq!(capture.request_fields().merchant_id.as_deref(), Some("m1"));
+        assert_eq!(capture.merchant_id().as_deref(), Some("m1"));
+        assert_eq!(capture.payment_id().as_deref(), Some("pay_1"));
+    }
+
+    #[tokio::test]
+    async fn a_merchant_the_caller_may_not_act_on_is_not_recorded() {
+        let capture = ApiPayloadCapture::default();
+        let body = format!(
+            r#"{{"merchant_id": "m2", "payment_id": "pay_1", "webhook_secret": "{SECRET}"}}"#
+        );
+        assert!(!extract_scoped(&capture, "m1", body).await);
+        assert_eq!(capture.merchant_id(), None);
+    }
+
+    #[tokio::test]
+    async fn a_session_merchant_is_recorded() {
+        let capture = ApiPayloadCapture::default();
+        let context = crate::auth::AuthContext::from_api_key("m1");
+        capture
+            .scope(async { crate::auth::scope::session_merchant(Some(&context)) })
+            .await;
+        assert_eq!(capture.merchant_id().as_deref(), Some("m1"));
     }
 
     #[tokio::test]
@@ -431,26 +441,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_body_that_fails_extraction_keeps_its_identifiers() {
+    async fn a_scoped_body_that_fails_extraction_records_no_identifiers() {
         let capture = ApiPayloadCapture::default();
-        let request = Request::builder()
-            .method("POST")
-            .uri("/login")
-            .header("content-type", "application/json")
-            .body(Body::from(
-                r#"{"merchant_id": "m1", "payment_id": "pay_1", "credentials": 7}"#,
-            ))
-            .unwrap();
-        let response = capture
-            .scope(login_router().oneshot(request))
-            .await
-            .unwrap();
-
-        assert!(response.status().is_client_error());
+        let body = r#"{"merchant_id": "m1", "payment_id": "pay_1", "webhook_secret": 7}"#;
+        assert!(!extract_scoped(&capture, "m1", body.to_string()).await);
         assert_eq!(capture.request_body(), omitted_payload().to_string());
-        let fields = capture.request_fields();
-        assert_eq!(fields.merchant_id.as_deref(), Some("m1"));
-        assert_eq!(fields.payment_id.as_deref(), Some("pay_1"));
+        assert_eq!(capture.merchant_id(), None);
+        assert_eq!(capture.payment_id(), None);
     }
 
     #[tokio::test]
@@ -480,31 +477,6 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
         assert_eq!(capture.request_body(), "");
-    }
-
-    #[test]
-    fn identifiers_are_read_in_either_case() {
-        let fields = |body: &str| RequestFields::from_json(&serde_json::from_str(body).unwrap());
-        assert_eq!(
-            fields(
-                r#"{"payment_id":"pay_decide","merchant_id":"pro_decide","routing_config":{"algorithm_for":"payment"},"authentication_type":"three_ds"}"#
-            ),
-            RequestFields {
-                merchant_id: Some("pro_decide".to_string()),
-                payment_id: Some("pay_decide".to_string()),
-                auth_type: Some("three_ds".to_string()),
-            }
-        );
-        assert_eq!(
-            fields(
-                r#"{"merchantId":"demo_merchant","paymentInfo":{"paymentId":"pay_001","authType":"THREE_DS"}}"#
-            ),
-            RequestFields {
-                merchant_id: Some("demo_merchant".to_string()),
-                payment_id: Some("pay_001".to_string()),
-                auth_type: Some("THREE_DS".to_string()),
-            }
-        );
     }
 
     /// `cargo test --lib response_capture_cost -- --ignored --nocapture`, ideally with `--release`.

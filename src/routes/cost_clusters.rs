@@ -548,3 +548,6 @@ pub async fn delete_cluster_override(
     refresh_serving(merchant.as_str()).await;
     Ok(StatusCode::NO_CONTENT)
 }
+
+// These requests name no payment.
+crate::impl_api_event_payload!(SetClusterOverrideRequest);

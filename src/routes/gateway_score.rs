@@ -123,3 +123,6 @@ async fn clear_autopilot_sublevel_overrides(merchant_id: &str) -> usize {
     }
     removed
 }
+
+// These requests name no payment.
+crate::impl_api_event_payload!(ResetGatewayScoresRequest);

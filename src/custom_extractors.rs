@@ -24,7 +24,7 @@ pub struct Json<T>(pub T);
 impl<S, T> axum::extract::FromRequest<S> for Json<T>
 where
     S: Send + Sync,
-    T: serde::de::DeserializeOwned + serde::Serialize,
+    T: serde::de::DeserializeOwned + serde::Serialize + crate::analytics::payload::ApiEventPayload,
 {
     type Rejection = Response;
 
@@ -218,7 +218,11 @@ impl IntoResponse for ScopedJsonRejection {
 impl<S, T> axum::extract::FromRequest<S> for ScopedJson<T>
 where
     S: Send + Sync,
-    T: serde::de::DeserializeOwned + serde::Serialize + crate::auth::MerchantScoped + Send,
+    T: serde::de::DeserializeOwned
+        + serde::Serialize
+        + crate::auth::MerchantScoped
+        + crate::analytics::payload::ApiEventPayload
+        + Send,
 {
     type Rejection = ScopedJsonRejection;
 
@@ -388,6 +392,7 @@ where
             .extensions
             .get::<AuthContext>()
             .cloned()
+            .inspect(|context| crate::analytics::payload::record_merchant(&context.merchant_id))
             .ok_or_else(|| {
                 crate::logger::error!(
                     error_message = "Analytics access requires JWT or API key authentication",
@@ -450,6 +455,8 @@ mod tests {
         #[allow(dead_code)]
         count: u32,
     }
+
+    crate::impl_api_event_payload!(TestPayload, ScopedTestPayload);
 
     thread_local! {
         static ERRORS_LOGGED: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
@@ -697,7 +704,11 @@ mod tests {
 
     async fn scoped_status<T>(session: Option<&str>, body: &str) -> axum::http::StatusCode
     where
-        T: serde::de::DeserializeOwned + serde::Serialize + crate::auth::MerchantScoped + Send,
+        T: serde::de::DeserializeOwned
+            + serde::Serialize
+            + crate::auth::MerchantScoped
+            + crate::analytics::payload::ApiEventPayload
+            + Send,
     {
         use axum::{body::Body, extract::FromRequest};
 
