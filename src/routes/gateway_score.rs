@@ -8,7 +8,7 @@ use crate::decider::gatewaydecider::constants as C;
 use crate::error;
 use crate::logger;
 
-#[derive(Debug, Deserialize, crate::auth::MerchantScoped)]
+#[derive(Debug, Deserialize, Serialize, crate::auth::MerchantScoped)]
 pub struct ResetGatewayScoresRequest {
     /// Merchant whose gateway (SR) scores should be flushed. Accepts both the
     /// snake_case and the camelCase the dashboard sends.

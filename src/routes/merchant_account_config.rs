@@ -7,6 +7,7 @@ use crate::types::service_configuration;
 use crate::{error, logger};
 use axum::extract::Path;
 use error_stack::ResultExt;
+use masking::Secret;
 use serde::{Deserialize, Serialize};
 use strum::IntoEnumIterator;
 
@@ -15,7 +16,7 @@ pub struct MerchantAccountCreateResponse {
     pub message: String,
     pub merchant_id: String,
     pub gateway_success_rate_based_decider_input: Option<String>,
-    pub api_key: Option<String>,
+    pub api_key: Option<Secret<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]

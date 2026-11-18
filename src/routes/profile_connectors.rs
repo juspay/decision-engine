@@ -15,7 +15,7 @@ use fred::interfaces::KeysInterface;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct ConnectorInput {
     connector_name: String,
     merchant_connector_id: String,
@@ -27,13 +27,13 @@ pub struct ConnectorInput {
     payment_methods_enabled: Option<Vec<PaymentMethodInput>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PaymentMethodInput {
     payment_method: String,
     payment_method_types: Option<Vec<PaymentMethodTypeInput>>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct PaymentMethodTypeInput {
     payment_method_type: String,
 }

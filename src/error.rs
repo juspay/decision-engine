@@ -460,7 +460,7 @@ impl ApiErrorResponse {
 
 impl axum::response::IntoResponse for ApiErrorResponse {
     fn into_response(self) -> axum::response::Response {
-        axum::Json(self).into_response()
+        crate::custom_extractors::Json(self).into_response()
     }
 }
 

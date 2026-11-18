@@ -354,6 +354,10 @@ pub fn payment_field_match(filter: &PaymentFieldFilter) -> FilterClause {
             (PaymentField::RoutingKey(_), None) => {}
         }
     }
+    if matches!(&filter.field, PaymentField::RoutingKey(key) if key == "card_network") {
+        // Request copies may mask cardSwitchProvider; the network dimension stays queryable.
+        candidates.push("ifNull(card_network, '')".to_string());
+    }
     let placeholders = vec!["lowerUTF8(?)"; filter.values.len()].join(", ");
     binds.extend(filter.values.iter().cloned().map(BindArg::from));
     FilterClause::new(

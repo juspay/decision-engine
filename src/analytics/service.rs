@@ -14,7 +14,9 @@ pub fn now_ms() -> i64 {
 }
 
 pub fn serialize_details<T: Serialize>(details: &T) -> Option<String> {
-    serde_json::to_string(details).ok()
+    masking::masked_serialize(details)
+        .ok()
+        .and_then(|masked| serde_json::to_string(&masked).ok())
 }
 
 fn header_string(headers: &HeaderMap, name: &'static str) -> Option<String> {

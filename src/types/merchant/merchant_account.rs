@@ -21,6 +21,7 @@ use crate::types::merchant::id::{to_merchant_id, to_merchant_pid, MerchantId, Me
 use crate::storage::backend::schema::merchant_account::dsl;
 use diesel::associations::HasTable;
 use diesel::*;
+use masking::Secret;
 use std::cmp::PartialEq;
 use std::fmt::Debug;
 use std::option::Option;
@@ -52,7 +53,7 @@ pub struct MerchantAccount {
     // #[serde(rename = "useCodeForGatewayPriority")]
     pub useCodeForGatewayPriority: bool,
     // #[serde(rename = "internalHashKey")]
-    pub internalHashKey: Option<String>,
+    pub internalHashKey: Option<Secret<String>>,
     // #[serde(rename = "lockerId")]
     // pub lockerId: Option<LockerId>,
     // #[serde(rename = "tokenLockerId")]
@@ -183,7 +184,7 @@ impl TryFrom<DBMerchantAccount> for MerchantAccount {
             gatewayPriority: value.gateway_priority,
             gatewayPriorityLogic: value.gateway_priority_logic.unwrap_or("".to_string()),
             useCodeForGatewayPriority: value.use_code_for_gateway_priority.0,
-            internalHashKey: value.internal_hash_key,
+            internalHashKey: value.internal_hash_key.map(Secret::new),
             userId: value.user_id,
             secondaryMerchantAccountId: value.secondary_merchant_account_id.map(to_merchant_pid),
             enableGatewayReferenceIdBasedRouting: value

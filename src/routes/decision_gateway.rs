@@ -1,4 +1,4 @@
-use crate::custom_extractors::{RequestIds, ScopedJson, ScopedJsonRejection};
+use crate::custom_extractors::{Json, RequestIds, ScopedJson, ScopedJsonRejection};
 use std::time::Instant;
 
 use crate::decider::gatewaydecider::{
@@ -17,12 +17,7 @@ use std::collections::HashMap;
 
 impl IntoResponse for DecidedGatewayResponse {
     fn into_response(self) -> axum::http::Response<axum::body::Body> {
-        let body = serde_json::to_string(&self).unwrap();
-        axum::http::Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
-            .body(axum::body::Body::from(body))
-            .unwrap()
+        Json(self).into_response()
     }
 }
 
@@ -44,12 +39,7 @@ impl IntoResponse for ErrorResponse {
             .ok()
             .filter(StatusCode::is_client_error)
             .unwrap_or(StatusCode::BAD_REQUEST);
-        let body = serde_json::to_string(&self).unwrap();
-        axum::http::Response::builder()
-            .status(status)
-            .header("Content-Type", "application/json")
-            .body(axum::body::Body::from(body))
-            .unwrap()
+        (status, Json(self)).into_response()
     }
 }
 
@@ -168,7 +158,9 @@ where
                         latency: Some(cpu_time),
                     };
                     // Serialize response body and headers for logging
-                    let res_body = serde_json::to_string(&response).unwrap_or("{}".to_string());
+                    let res_body = masking::masked_serialize(&response)
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|_| "[REDACTED]".to_string());
                     // let res_headers = r#"{"Content-Type": "application/json"}"#;
 
                     // Log the successful response
@@ -217,7 +209,7 @@ where
                         error_message = e.error_message,
                         developer_message = e.error_info.developer_message,
                         user_message = e.error_info.user_message,
-                        req_body = String::from_utf8_lossy(&body).to_string(),
+                        req_body = format!("{:?}", masking::Secret::<_>::new(&body)),
                         req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                         category = "INCOMING_API",
                         "Error occurred while processing decider function"
@@ -265,7 +257,7 @@ where
                 error_message = error_response.error_message,
                 developer_message = error_response.error_info.developer_message,
                 user_message = error_response.error_info.user_message,
-                req_body = String::from_utf8_lossy(&body).to_string(),
+                req_body = format!("{:?}", masking::Secret::<_>::new(&body)),
                 // req_headers = req_headers,
                 category = "INCOMING_API",
                 req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),

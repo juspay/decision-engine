@@ -7,7 +7,9 @@ description: "ClickHouse setup notes for analytics"
 
 Decision Engine uses a Kafka to ClickHouse analytics pipeline:
 
-- API server captures full request and response bodies for API analytics events
+- The shared `Json<T>` and `ScopedJson<T>` extractors capture typed request snapshots. The shared `Json<T>` response wrapper captures a separate typed response snapshot.
+- Snapshots use `masking::masked_serialize` before Rust types are converted into ordinary JSON or bytes. Fields declared as `masking::Secret<T>` are automatically masked, including fields nested in objects, arrays, and options. This applies regardless of the field name; null values stay null.
+- Requests that fail typed extraction and responses without a typed snapshot use a fixed omission marker. Raw wire bodies are never used as a fallback for API analytics. Error payloads reuse the masked response snapshot.
 - API server publishes analytics events to Kafka
 - ClickHouse Kafka engine queue tables consume Kafka and materialized views fan into the raw tables
 
@@ -39,6 +41,24 @@ The correlation key for those reads is the write-time `lookup_key`:
 
 - `payment_id` when present
 - otherwise `request_id`
+
+Declare sensitive DTO fields as `Secret<T>`, for example:
+
+```rust
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Credentials {
+    password: masking::Secret<String>,
+    token: Option<masking::Secret<String>>,
+}
+```
+
+Normal API serialization still sends the original values to the caller. Analytics serialization masks them automatically; handlers do not maintain field-name lists. API keys, passwords, session tokens, one-time codes, connector credentials, merchant hash and encoding keys, card tokens, and payment sources use these secret types at the request and response boundaries.
+
+Payment Audit matches card-network filters against the dedicated `card_network` dimension as well as legacy request fields. This keeps filtering available when `cardSwitchProvider` is masked in request snapshots.
+
+Domain event details also use masked serialization through `serialize_details`. Pass the original typed value into that helper. Converting a secret into a plain string or ordinary `serde_json::Value` first erases its secret annotation; if a response must be assembled as JSON, carry its separately masked snapshot alongside its wire representation.
+
+This change does not remove credentials already captured in Kafka or ClickHouse. Existing exposures require separate key rotation and cleanup of retained data.
 
 ## Local Bring-Up
 

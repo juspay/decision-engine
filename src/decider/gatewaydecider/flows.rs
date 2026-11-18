@@ -2,6 +2,7 @@ use super::runner::get_gateway_priority;
 use super::types::UnifiedError;
 use crate::redis::feature::{RedisCompressionConfigCombined, RedisDataStruct};
 use axum::response::IntoResponse;
+use masking::PeekInterface;
 use serde_json::json;
 use serde_json::Value as AValue;
 use std::collections::HashMap;
@@ -217,7 +218,8 @@ pub async fn decider_full_payload_hs_function(
         "{:?}",
         resolve_bin.clone()
     );
-    let m_vault_provider = Utils::get_vault_provider(dreq.cardToken.as_deref());
+    let m_vault_provider =
+        Utils::get_vault_provider(dreq.cardToken.as_ref().map(|token| token.peek().as_str()));
     let update_txn_card_info = TxnCardInfo {
         card_isin: resolve_bin,
         ..dreq.txnCardInfo

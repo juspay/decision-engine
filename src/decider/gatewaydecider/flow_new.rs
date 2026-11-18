@@ -4,6 +4,7 @@ use super::types::UnifiedError;
 use crate::app::get_tenant_app_state;
 use crate::decider::network_decider;
 use crate::types::service_configuration::MerchantConfig;
+use masking::PeekInterface;
 use serde_json::json;
 use serde_json::Value as AValue;
 use std::collections::HashMap;
@@ -92,7 +93,8 @@ async fn prepare_decider_params(
         "{:?}",
         resolve_bin.clone()
     );
-    let m_vault_provider = Utils::get_vault_provider(dreq.cardToken.as_deref());
+    let m_vault_provider =
+        Utils::get_vault_provider(dreq.cardToken.as_ref().map(|token| token.peek().as_str()));
     let mut update_txn_card_info = TxnCardInfo {
         card_isin: resolve_bin,
         ..dreq.txnCardInfo
