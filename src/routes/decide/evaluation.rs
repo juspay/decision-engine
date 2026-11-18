@@ -363,16 +363,19 @@ pub(crate) async fn evaluate(
         .as_ref()
         .and_then(|request| request.auth_type());
 
-    DomainAnalyticsEvent::record_request_hit(
-        AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::RoutingHybridRequestHit),
-        route,
-        merchant_id.clone(),
-        payment_id.clone(),
-        Some(request_id.clone()),
-        global_request_id.clone(),
-        trace_id.clone(),
-        auth_type.clone(),
-    );
+    DomainAnalyticsEvent {
+        merchant_id: merchant_id.clone(),
+        payment_id: payment_id.clone(),
+        request_id: Some(request_id.clone()),
+        global_request_id: global_request_id.clone(),
+        trace_id: trace_id.clone(),
+        auth_type: auth_type.clone(),
+        ..DomainAnalyticsEvent::request_hit(
+            AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::RoutingHybridRequestHit),
+            route,
+        )
+    }
+    .emit();
 
     let is_empty_request = static_routing_request.is_none() && dynamic_routing_request.is_none();
 
@@ -658,26 +661,27 @@ pub(crate) async fn evaluate(
         .map(|request| request.instrument().analytics_columns())
         .unwrap_or_default();
     let record_failure = |error_code: String, error_message: String, error: serde_json::Value| {
-        DomainAnalyticsEvent::record_error(
-            AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::RoutingHybridError),
-            route,
-            merchant_id.clone(),
-            payment_id.clone(),
-            Some(request_id.clone()),
-            global_request_id.clone(),
-            trace_id.clone(),
-            None,
-            None,
-            error_code,
-            error_message,
-            serialize_details(&HybridRoutingFailureDetail {
+        DomainAnalyticsEvent {
+            merchant_id: merchant_id.clone(),
+            payment_id: payment_id.clone(),
+            request_id: Some(request_id.clone()),
+            global_request_id: global_request_id.clone(),
+            trace_id: trace_id.clone(),
+            details: serialize_details(&HybridRoutingFailureDetail {
                 request: &recorded_request,
                 api_request: decide_request.as_ref(),
                 error,
             }),
-            Some(failed_stage.to_string()),
-            auth_type.clone(),
-        );
+            event_stage: Some(failed_stage.to_string()),
+            auth_type: auth_type.clone(),
+            ..DomainAnalyticsEvent::error(
+                AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::RoutingHybridError),
+                route,
+                error_code,
+                error_message,
+            )
+        }
+        .emit();
     };
 
     let api_result = match resolve() {
@@ -690,15 +694,13 @@ pub(crate) async fn evaluate(
                 .as_ref()
                 .map(|_| current_response_snapshot().unwrap_or_else(omitted_payload));
             crate::logger::debug!(decision_engine_success_response = ?analytics_record);
-            DomainAnalyticsEvent::record_decision(
-                AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::RoutingHybridDecision),
-                merchant_id.clone(),
-                Some(summary.routing_approach.clone()),
-                summary.decided_gateway.clone(),
-                Some("success".to_string()),
-                route,
-                summary.priority_logic_tag.clone(),
-                serialize_details(&HybridRoutingSuccessDetail {
+            DomainAnalyticsEvent {
+                merchant_id: merchant_id.clone(),
+                routing_approach: Some(summary.routing_approach.clone()),
+                gateway: summary.decided_gateway.clone(),
+                status: Some("success".to_string()),
+                rule_name: summary.priority_logic_tag.clone(),
+                details: serialize_details(&HybridRoutingSuccessDetail {
                     request: &recorded_request,
                     response: &analytics_record,
                     api_request: decide_request.as_ref(),
@@ -706,18 +708,26 @@ pub(crate) async fn evaluate(
                     score_context: summary.score_context.as_ref(),
                     selection_reason: &summary,
                 }),
-                payment_id.clone(),
-                Some(request_id.clone()),
-                global_request_id.clone(),
-                trace_id.clone(),
-                Some(routed_stage.to_string()),
-                payment_method_type.clone(),
-                payment_method.clone(),
-                auth_type.clone(),
-                dynamic_request.and_then(|request| request.card_network()),
-                dynamic_request.map(|request| request.currency()),
-                dynamic_request.and_then(|request| request.country()),
-            );
+                payment_id: payment_id.clone(),
+                request_id: Some(request_id.clone()),
+                global_request_id: global_request_id.clone(),
+                trace_id: trace_id.clone(),
+                event_stage: Some(routed_stage.to_string()),
+                payment_method_type: payment_method_type.clone(),
+                payment_method: payment_method.clone(),
+                auth_type: auth_type.clone(),
+                card_network: dynamic_request.and_then(|request| request.card_network()),
+                currency: dynamic_request.map(|request| request.currency()),
+                country: dynamic_request.and_then(|request| request.country()),
+                ..DomainAnalyticsEvent::new(
+                    AnalyticsFlowContext::new(
+                        ApiFlow::DynamicRouting,
+                        FlowType::RoutingHybridDecision,
+                    ),
+                    route,
+                )
+            }
+            .emit_decision();
             Ok(api_response.unwrap_or_else(|| {
                 crate::custom_extractors::json_response_with_masked(
                     response_value,

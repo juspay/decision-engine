@@ -78,28 +78,25 @@ pub async fn update_score(
             let latency = start_time.elapsed().as_millis() as u64;
             let cpu_time = cpu_start.elapsed().as_millis() as u64;
 
-            crate::analytics::DomainAnalyticsEvent::record_error(
-                crate::analytics::AnalyticsFlowContext::new(
-                    crate::analytics::ApiFlow::DynamicRouting,
-                    crate::analytics::FlowType::UpdateScoreLegacyError,
-                ),
-                crate::analytics::AnalyticsRoute::UpdateScore,
-                None,
-                None,
-                None,
-                global_request_id.clone(),
-                trace_id.clone(),
-                None,
-                None,
-                error_response.error_code.clone(),
-                error_response.error_message.clone(),
-                crate::analytics::serialize_details(&UpdateScoreReadFailureDetail {
+            crate::analytics::DomainAnalyticsEvent {
+                global_request_id: global_request_id.clone(),
+                trace_id: trace_id.clone(),
+                details: crate::analytics::serialize_details(&UpdateScoreReadFailureDetail {
                     request_id: x_request_id,
                     query_params: &query_params,
                 }),
-                Some(analytics_stage),
-                None,
-            );
+                event_stage: Some(analytics_stage),
+                ..crate::analytics::DomainAnalyticsEvent::error(
+                    crate::analytics::AnalyticsFlowContext::new(
+                        crate::analytics::ApiFlow::DynamicRouting,
+                        crate::analytics::FlowType::UpdateScoreLegacyError,
+                    ),
+                    crate::analytics::AnalyticsRoute::UpdateScore,
+                    error_response.error_code.clone(),
+                    error_response.error_message.clone(),
+                )
+            }
+            .emit();
 
             logger::error!(
                 url = original_url,
@@ -156,28 +153,28 @@ pub async fn update_score(
                 let latency = start_time.elapsed().as_millis() as u64;
                 let cpu_time = cpu_start.elapsed().as_millis() as u64;
 
-                crate::analytics::DomainAnalyticsEvent::record_error(
-                    crate::analytics::AnalyticsFlowContext::new(
-                        crate::analytics::ApiFlow::DynamicRouting,
-                        crate::analytics::FlowType::UpdateScoreLegacyError,
+                crate::analytics::DomainAnalyticsEvent {
+                    merchant_id: Some(merchant_id_txt.clone()),
+                    global_request_id: global_request_id.clone(),
+                    trace_id: trace_id.clone(),
+                    details: crate::analytics::serialize_details(
+                        &UpdateScoreValidationFailureDetail {
+                            request_id: x_request_id,
+                            reason: "gateway_missing",
+                        },
                     ),
-                    crate::analytics::AnalyticsRoute::UpdateScore,
-                    Some(merchant_id_txt.clone()),
-                    None,
-                    None,
-                    global_request_id.clone(),
-                    trace_id.clone(),
-                    None,
-                    None,
-                    error_response.error_code.clone(),
-                    error_response.error_message.clone(),
-                    crate::analytics::serialize_details(&UpdateScoreValidationFailureDetail {
-                        request_id: x_request_id,
-                        reason: "gateway_missing",
-                    }),
-                    Some("validation_failed".to_string()),
-                    None,
-                );
+                    event_stage: Some("validation_failed".to_string()),
+                    ..crate::analytics::DomainAnalyticsEvent::error(
+                        crate::analytics::AnalyticsFlowContext::new(
+                            crate::analytics::ApiFlow::DynamicRouting,
+                            crate::analytics::FlowType::UpdateScoreLegacyError,
+                        ),
+                        crate::analytics::AnalyticsRoute::UpdateScore,
+                        error_response.error_code.clone(),
+                        error_response.error_message.clone(),
+                    )
+                }
+                .emit();
 
                 logger::error!(
                     url = original_url,

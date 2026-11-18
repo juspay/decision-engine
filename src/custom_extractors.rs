@@ -32,7 +32,26 @@ where
         request: axum::extract::Request,
         state: &S,
     ) -> Result<Self, Self::Rejection> {
-        match axum::Json::<T>::from_request(request, state).await {
+        // As `axum::Json`, which leaves the body unread without a JSON content type. Reading the
+        // bytes here lets analytics keep a rejected body's identifiers.
+        let parsed = if json_content_type(request.headers()) {
+            match axum::body::Bytes::from_request(request, state).await {
+                Ok(body) => {
+                    let parsed = axum::Json::<T>::from_bytes(&body);
+                    if parsed.is_err() {
+                        crate::analytics::payload::record_unparsed_request(&body);
+                    }
+                    parsed
+                }
+                Err(rejection) => {
+                    crate::analytics::payload::record_unread_request();
+                    Err(rejection.into())
+                }
+            }
+        } else {
+            Err(axum::extract::rejection::MissingJsonContentType::default().into())
+        };
+        match parsed {
             Ok(axum::Json(payload)) => {
                 crate::analytics::payload::record_request(&payload);
                 Ok(Self(payload))
@@ -42,6 +61,26 @@ where
                 rejection.body_text(),
             )),
         }
+    }
+}
+
+/// `application/json`, or an `application/*+json` subtype, as `axum::Json` accepts.
+fn json_content_type(headers: &axum::http::HeaderMap) -> bool {
+    let Some(content_type) = headers
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+    else {
+        return false;
+    };
+    let essence = content_type
+        .split(';')
+        .next()
+        .unwrap_or_default()
+        .trim()
+        .to_ascii_lowercase();
+    match essence.split_once('/') {
+        Some(("application", subtype)) => subtype == "json" || subtype.ends_with("+json"),
+        _ => false,
     }
 }
 
@@ -192,6 +231,7 @@ where
         let body = axum::body::Bytes::from_request(request, state)
             .await
             .map_err(|rejection| {
+                crate::analytics::payload::record_unread_request();
                 // `body_text` keeps the cause ("length limit exceeded"), as `Json` reports it.
                 ScopedJsonRejection::Read(crate::routes::body::RequestBodyError::Read(
                     axum::Error::new(rejection.body_text()),
@@ -199,7 +239,10 @@ where
             })?;
         let payload = match axum::Json::<T>::from_bytes(&body) {
             Ok(axum::Json(payload)) => payload,
-            Err(error) => return Err(ScopedJsonRejection::Parse { body, error }),
+            Err(error) => {
+                crate::analytics::payload::record_unparsed_request(&body);
+                return Err(ScopedJsonRejection::Parse { body, error });
+            }
         };
         crate::analytics::payload::record_request(&payload);
         let merchant = crate::auth::authorize(session.as_ref(), &payload)
@@ -369,6 +412,28 @@ where
 #[cfg(test)]
 mod tests {
     use super::AuthenticatedAnalyticsContext;
+
+    /// The content types `axum::Json` accepts and rejects.
+    #[test]
+    fn json_content_type_matches_axum() {
+        let accepts = |value: &str| {
+            let mut headers = axum::http::HeaderMap::new();
+            headers.insert(
+                axum::http::header::CONTENT_TYPE,
+                axum::http::HeaderValue::from_str(value).unwrap(),
+            );
+            super::json_content_type(&headers)
+        };
+        assert!(accepts("application/json"));
+        assert!(accepts("application/json; charset=utf-8"));
+        assert!(accepts("application/json;charset=utf-8"));
+        assert!(accepts("application/cloudevents+json"));
+        assert!(accepts("Application/JSON"));
+        assert!(!accepts("text/json"));
+        assert!(!accepts("application/jsonx"));
+        assert!(!accepts("text/plain"));
+        assert!(!super::json_content_type(&axum::http::HeaderMap::new()));
+    }
     use crate::auth::{AuthContext, AuthKind};
     use axum::{extract::FromRequestParts, http::Request};
 

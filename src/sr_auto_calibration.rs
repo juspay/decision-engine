@@ -450,21 +450,24 @@ fn emit_calibration_event(
     prev_hedge: Option<f64>,
     new_hedge: f64,
 ) {
-    DomainAnalyticsEvent::record_autopilot_calibration(
-        AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::AutopilotCalibration),
-        AnalyticsRoute::UpdateGatewayScore,
-        Some(merchant_id.to_string()),
-        Some(seg.payment_method_type.clone()),
-        Some(seg.payment_method.clone()),
-        seg.card_network.clone(),
-        seg.currency.clone(),
-        seg.country.clone(),
-        seg.auth_type.clone(),
-        new_bucket,
-        prev_bucket,
-        new_hedge,
-        prev_hedge,
-    );
+    DomainAnalyticsEvent {
+        merchant_id: Some(merchant_id.to_string()),
+        payment_method_type: Some(seg.payment_method_type.clone()),
+        payment_method: Some(seg.payment_method.clone()),
+        card_network: seg.card_network.clone(),
+        currency: seg.currency.clone(),
+        country: seg.country.clone(),
+        auth_type: seg.auth_type.clone(),
+        ..DomainAnalyticsEvent::autopilot_calibration(
+            AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::AutopilotCalibration),
+            AnalyticsRoute::UpdateGatewayScore,
+            new_bucket,
+            prev_bucket,
+            new_hedge,
+            prev_hedge,
+        )
+    }
+    .emit();
 }
 
 fn log_segment(
