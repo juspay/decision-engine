@@ -1,11 +1,15 @@
 FROM ubuntu:focal
 
-RUN apt-get update \
-        && apt-get -y install tar cron zip software-properties-common curl \
-        qemu-user-static binfmt-support
-
-# Install OpenJDK 8 (works on both arm64 and amd64)
-RUN apt-get update && apt-get install -y openjdk-8-jdk
+# Retry transient mirror failures, and stop if an index still could not be fetched:
+# apt-get update only warns about it, and installing from a partial index fails later
+# with misleading unmet-dependency errors.
+RUN printf 'Acquire::Retries "5";\n' > /etc/apt/apt.conf.d/80-retries \
+    && apt-get update 2>&1 | tee /tmp/apt-update.log \
+    && ! grep -q '^[WE]: Failed to fetch' /tmp/apt-update.log \
+    && rm /tmp/apt-update.log \
+    && apt-get install -y --no-install-recommends ca-certificates curl \
+    # OpenJDK 8 (works on both arm64 and amd64)
+    && apt-get install -y openjdk-8-jdk
 
 # Set up Java environment
 RUN mkdir -p /usr/java/ \
@@ -16,7 +20,7 @@ RUN mkdir -p /usr/java/ \
 
 ENV JAVA_HOME=/usr/java/latest
 
-ENV GROOVY_HOME /opt/groovy
+ENV GROOVY_HOME=/opt/groovy
 
 RUN set -o errexit -o nounset \
     && echo "Downloading groovy-sandbox-1.6.jar" \
@@ -49,7 +53,7 @@ RUN apt-get update \
         wget \
     && rm --recursive --force /var/lib/apt/lists/*
 
-ENV GROOVY_VERSION 2.5.13
+ENV GROOVY_VERSION=2.5.13
 RUN set -o errexit -o nounset \
     && echo "Downloading Groovy" \
     && wget --no-verbose --output-document=groovy.zip "https://archive.apache.org/dist/groovy/${GROOVY_VERSION}/distribution/apache-groovy-binary-${GROOVY_VERSION}.zip" \
