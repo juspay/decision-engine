@@ -625,12 +625,15 @@ mod tests {
             mapped["static_routing_request"]["parameters"]["payment_type"],
             json!({"type": "enum_variant", "value": "ppt_mandate"})
         );
-        // The decider's transaction type is a different field; a rule payment type leaves it
-        // unknown, as hybrid does.
-        let without = serde_json::to_value(self::request()?.to_hybrid_request(&config()?)?)?;
+        // The decider's transaction type carries it too, so the SR score buckets by it.
         assert_eq!(
             mapped["dynamic_routing_request"]["paymentInfo"]["paymentType"],
-            without["dynamic_routing_request"]["paymentInfo"]["paymentType"]
+            "PPT_MANDATE"
+        );
+        let without = serde_json::to_value(self::request()?.to_hybrid_request(&config()?)?)?;
+        assert_eq!(
+            without["dynamic_routing_request"]["paymentInfo"]["paymentType"],
+            "UNKNOWN"
         );
         Ok(())
     }
