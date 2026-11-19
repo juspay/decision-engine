@@ -474,6 +474,9 @@ fn merge_ids<'a>(existing: &mut Vec<String>, incoming: impl Iterator<Item = &'a 
     }
 }
 
+// These requests name no payment.
+crate::impl_api_event_payload!(HierarchyRequest);
+
 #[cfg(test)]
 mod tests {
     use super::*;

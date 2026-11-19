@@ -212,6 +212,9 @@ pub async fn transform_fallback(
     }
 }
 
+// These requests name no payment.
+crate::impl_api_event_payload!(ConnectorInput);
+
 #[cfg(test)]
 mod tests {
     use super::*;

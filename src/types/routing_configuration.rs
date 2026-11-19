@@ -196,3 +196,6 @@ mod success_rate_normalisation_tests {
         Ok(())
     }
 }
+
+// These requests name no payment.
+crate::impl_api_event_payload!(FetchRoutingRule, RoutingRule);

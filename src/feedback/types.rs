@@ -602,3 +602,9 @@ pub struct Date {
 //         x => PaymentMethodType::UNKNOWN(x.to_string()),
 //     }
 // }
+
+impl crate::analytics::payload::ApiEventPayload for UpdateScorePayload {
+    fn payment_id(&self) -> Option<&str> {
+        Some(&self.payment_id)
+    }
+}

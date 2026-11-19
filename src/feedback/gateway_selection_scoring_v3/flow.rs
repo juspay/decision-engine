@@ -52,7 +52,6 @@ use crate::{
         merchant::merchant_account::MerchantAccount, txn_details::types::TxnDetail,
     },
 };
-use masking::PeekInterface;
 
 // Converted functions
 // Original Haskell function: updateSrV3Score
@@ -276,10 +275,7 @@ pub async fn getSrV3MerchantBucketSize(txn_detail: TxnDetail, txn_card_info: Txn
     // Extract the new parameters from txn_card_info
 
     let sr_routing_dimensions = SrRoutingDimensions {
-        card_network: txn_card_info
-            .cardSwitchProvider
-            .as_ref()
-            .map(|s| s.peek().to_string()),
+        card_network: txn_card_info.cardSwitchProvider.clone(),
         card_isin: txn_card_info.card_isin,
         currency: Some(txn_detail.currency.to_string()),
         country: txn_detail.country.as_ref().map(|c| c.to_string()),

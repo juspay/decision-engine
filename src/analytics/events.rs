@@ -45,8 +45,20 @@ pub struct DomainAnalyticsEvent {
     pub created_at_ms: i64,
 }
 
+/// Built with struct update syntax: a constructor fills the fields its kind always carries and the
+/// caller names the rest, then sends it with `emit`.
+///
+/// ```ignore
+/// DomainAnalyticsEvent {
+///     merchant_id: Some(merchant_id),
+///     payment_id: Some(payment_id),
+///     ..DomainAnalyticsEvent::request_hit(flow, route)
+/// }
+/// .emit();
+/// ```
 impl DomainAnalyticsEvent {
-    fn base(flow: AnalyticsFlowContext, route: AnalyticsRoute, created_at_ms: i64) -> Self {
+    /// An event of `flow` on `route`, stamped now, with every other field empty.
+    pub fn new(flow: AnalyticsFlowContext, route: AnalyticsRoute) -> Self {
         Self {
             event_id: next_event_id(),
             api_flow: flow.api_flow,
@@ -79,267 +91,57 @@ impl DomainAnalyticsEvent {
             transaction_count: None,
             route: Some(route.as_str().to_string()),
             details: None,
-            created_at_ms,
+            created_at_ms: crate::analytics::now_ms(),
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn decision(
-        flow: AnalyticsFlowContext,
-        route: AnalyticsRoute,
-        merchant_id: Option<String>,
-        routing_approach: Option<String>,
-        gateway: Option<String>,
-        status: Option<String>,
-        rule_name: Option<String>,
-        details: Option<String>,
-        payment_id: Option<String>,
-        request_id: Option<String>,
-        global_request_id: Option<String>,
-        trace_id: Option<String>,
-        event_stage: Option<String>,
-        payment_method_type: Option<String>,
-        payment_method: Option<String>,
-        auth_type: Option<String>,
-        card_network: Option<String>,
-        currency: Option<String>,
-        country: Option<String>,
-        created_at_ms: i64,
-    ) -> Self {
-        let lookup_key = derive_lookup_key(payment_id.as_deref(), request_id.as_deref());
+    /// A request that reached its handler.
+    pub fn request_hit(flow: AnalyticsFlowContext, route: AnalyticsRoute) -> Self {
         Self {
-            merchant_id,
-            payment_id,
-            request_id,
-            lookup_key,
-            global_request_id,
-            trace_id,
-            payment_method_type,
-            payment_method,
-            auth_type,
-            card_network,
-            currency,
-            country,
-            gateway,
-            event_stage,
-            routing_approach,
-            rule_name,
-            status,
-            details,
-            ..Self::base(flow, route, created_at_ms)
+            event_stage: Some("request_received".to_string()),
+            status: Some("received".to_string()),
+            ..Self::new(flow, route)
         }
     }
 
-    #[allow(clippy::too_many_arguments)]
-    pub fn score_snapshot(
-        flow: AnalyticsFlowContext,
-        route: AnalyticsRoute,
-        merchant_id: Option<String>,
-        payment_method_type: Option<String>,
-        payment_method: Option<String>,
-        card_network: Option<String>,
-        card_is_in: Option<String>,
-        currency: Option<String>,
-        country: Option<String>,
-        auth_type: Option<String>,
-        gateway: Option<String>,
-        score_value: Option<f64>,
-        sigma_factor: Option<f64>,
-        average_latency: Option<f64>,
-        tp99_latency: Option<f64>,
-        transaction_count: Option<i64>,
-        details: Option<String>,
-        payment_id: Option<String>,
-        request_id: Option<String>,
-        global_request_id: Option<String>,
-        trace_id: Option<String>,
-        event_stage: Option<String>,
-        created_at_ms: i64,
-    ) -> Self {
-        let lookup_key = derive_lookup_key(payment_id.as_deref(), request_id.as_deref());
-        Self {
-            merchant_id,
-            payment_id,
-            request_id,
-            lookup_key,
-            global_request_id,
-            trace_id,
-            payment_method_type,
-            payment_method,
-            card_network,
-            card_is_in,
-            currency,
-            country,
-            auth_type,
-            gateway,
-            event_stage,
-            status: Some("snapshot".to_string()),
-            score_value,
-            sigma_factor,
-            average_latency,
-            tp99_latency,
-            transaction_count,
-            details,
-            ..Self::base(flow, route, created_at_ms)
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn gateway_update(
-        flow: AnalyticsFlowContext,
-        route: AnalyticsRoute,
-        merchant_id: Option<String>,
-        gateway: Option<String>,
-        status: Option<String>,
-        details: Option<String>,
-        payment_id: Option<String>,
-        request_id: Option<String>,
-        global_request_id: Option<String>,
-        trace_id: Option<String>,
-        event_stage: Option<String>,
-        created_at_ms: i64,
-    ) -> Self {
-        let lookup_key = derive_lookup_key(payment_id.as_deref(), request_id.as_deref());
-        Self {
-            merchant_id,
-            payment_id,
-            request_id,
-            lookup_key,
-            global_request_id,
-            trace_id,
-            gateway,
-            event_stage,
-            status,
-            details,
-            ..Self::base(flow, route, created_at_ms)
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn rule_hit(
-        flow: AnalyticsFlowContext,
-        route: AnalyticsRoute,
-        merchant_id: Option<String>,
-        rule_name: String,
-        gateway: Option<String>,
-        routing_approach: Option<String>,
-        details: Option<String>,
-        payment_id: Option<String>,
-        request_id: Option<String>,
-        global_request_id: Option<String>,
-        trace_id: Option<String>,
-        event_stage: Option<String>,
-        created_at_ms: i64,
-    ) -> Self {
-        let lookup_key = derive_lookup_key(payment_id.as_deref(), request_id.as_deref());
-        Self {
-            merchant_id,
-            payment_id,
-            request_id,
-            lookup_key,
-            global_request_id,
-            trace_id,
-            gateway,
-            event_stage,
-            routing_approach,
-            rule_name: Some(rule_name),
-            status: Some("hit".to_string()),
-            details,
-            ..Self::base(flow, route, created_at_ms)
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn rule_evaluation_preview(
-        flow: AnalyticsFlowContext,
-        merchant_id: Option<String>,
-        payment_id: Option<String>,
-        gateway: Option<String>,
-        rule_name: Option<String>,
-        status: Option<String>,
-        details: Option<String>,
-        request_id: Option<String>,
-        global_request_id: Option<String>,
-        trace_id: Option<String>,
-        created_at_ms: i64,
-    ) -> Self {
-        let lookup_key = derive_lookup_key(payment_id.as_deref(), request_id.as_deref());
-        Self {
-            merchant_id,
-            payment_id,
-            request_id,
-            lookup_key,
-            global_request_id,
-            trace_id,
-            gateway,
-            event_stage: Some("preview_evaluated".to_string()),
-            routing_approach: Some("RULE_EVALUATE_PREVIEW".to_string()),
-            rule_name,
-            status,
-            details,
-            ..Self::base(flow, AnalyticsRoute::RoutingEvaluate, created_at_ms)
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
+    /// A request that failed with `error_code`.
     pub fn error(
         flow: AnalyticsFlowContext,
         route: AnalyticsRoute,
-        merchant_id: Option<String>,
-        payment_id: Option<String>,
-        request_id: Option<String>,
-        global_request_id: Option<String>,
-        trace_id: Option<String>,
-        gateway: Option<String>,
-        routing_approach: Option<String>,
         error_code: String,
         error_message: String,
-        details: Option<String>,
-        event_stage: Option<String>,
-        auth_type: Option<String>,
-        created_at_ms: i64,
     ) -> Self {
-        let lookup_key = derive_lookup_key(payment_id.as_deref(), request_id.as_deref());
         Self {
-            merchant_id,
-            payment_id,
-            request_id,
-            lookup_key,
-            global_request_id,
-            trace_id,
-            auth_type,
-            gateway,
-            event_stage,
-            routing_approach,
             status: Some("failure".to_string()),
             error_code: Some(error_code),
             error_message: Some(error_message),
-            details,
-            ..Self::base(flow, route, created_at_ms)
+            ..Self::new(flow, route)
         }
     }
 
-    pub fn request_hit(
-        flow: AnalyticsFlowContext,
-        route: AnalyticsRoute,
-        merchant_id: Option<String>,
-        payment_id: Option<String>,
-        request_id: Option<String>,
-        global_request_id: Option<String>,
-        trace_id: Option<String>,
-        auth_type: Option<String>,
-        created_at_ms: i64,
-    ) -> Self {
+    /// A priority-logic rule that matched. Send it with `emit_rule_hit`, which counts it.
+    pub fn rule_hit(flow: AnalyticsFlowContext, route: AnalyticsRoute, rule_name: String) -> Self {
         Self {
-            merchant_id,
-            payment_id,
-            request_id,
-            global_request_id,
-            trace_id,
-            auth_type,
-            event_stage: Some("request_received".to_string()),
-            status: Some("received".to_string()),
-            ..Self::base(flow, route, created_at_ms)
+            rule_name: Some(rule_name),
+            status: Some("hit".to_string()),
+            ..Self::new(flow, route)
+        }
+    }
+
+    /// A gateway's score after feedback.
+    pub fn score_snapshot(flow: AnalyticsFlowContext, route: AnalyticsRoute) -> Self {
+        Self {
+            status: Some("snapshot".to_string()),
+            ..Self::new(flow, route)
+        }
+    }
+
+    /// A rule evaluated without routing a payment.
+    pub fn rule_evaluation_preview(flow: AnalyticsFlowContext) -> Self {
+        Self {
+            event_stage: Some("preview_evaluated".to_string()),
+            routing_approach: Some("RULE_EVALUATE_PREVIEW".to_string()),
+            ..Self::new(flow, AnalyticsRoute::RoutingEvaluate)
         }
     }
 
@@ -347,67 +149,22 @@ impl DomainAnalyticsEvent {
     /// columns (`score_value`/`sigma_factor` = new/prev hedging %, `transaction_count` =
     /// new bucket, `average_latency` = prev bucket) so the routing-events detector can read
     /// them back without JSON parsing. `event_stage` tags the row for that query.
-    #[allow(clippy::too_many_arguments)]
     pub fn autopilot_calibration(
         flow: AnalyticsFlowContext,
         route: AnalyticsRoute,
-        merchant_id: Option<String>,
-        payment_method_type: Option<String>,
-        payment_method: Option<String>,
-        card_network: Option<String>,
-        currency: Option<String>,
-        country: Option<String>,
-        auth_type: Option<String>,
         new_bucket: i32,
         previous_bucket: Option<i32>,
         new_hedge: f64,
         previous_hedge: Option<f64>,
-        created_at_ms: i64,
     ) -> Self {
         Self {
-            merchant_id,
-            payment_method_type,
-            payment_method,
-            card_network,
-            currency,
-            country,
-            auth_type,
             event_stage: Some(crate::analytics::models::AUTOPILOT_CALIBRATION_STAGE.to_string()),
             status: Some("applied".to_string()),
             score_value: Some(new_hedge),
             sigma_factor: previous_hedge,
-            transaction_count: Some(new_bucket as i64),
-            average_latency: previous_bucket.map(|b| b as f64),
-            ..Self::base(flow, route, created_at_ms)
-        }
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn operation(
-        flow: AnalyticsFlowContext,
-        route: AnalyticsRoute,
-        merchant_id: Option<String>,
-        payment_id: Option<String>,
-        request_id: Option<String>,
-        global_request_id: Option<String>,
-        trace_id: Option<String>,
-        status: Option<String>,
-        details: Option<String>,
-        event_stage: Option<String>,
-        created_at_ms: i64,
-    ) -> Self {
-        let lookup_key = derive_lookup_key(payment_id.as_deref(), request_id.as_deref());
-        Self {
-            merchant_id,
-            payment_id,
-            request_id,
-            lookup_key,
-            global_request_id,
-            trace_id,
-            event_stage,
-            status,
-            details,
-            ..Self::base(flow, route, created_at_ms)
+            transaction_count: Some(i64::from(new_bucket)),
+            average_latency: previous_bucket.map(f64::from),
+            ..Self::new(flow, route)
         }
     }
 }
@@ -425,13 +182,12 @@ pub struct ApiEvent {
     pub trace_id: Option<String>,
     pub latency: u64,
     pub status_code: u16,
-    pub auth_type: Option<String>,
     pub request: String,
     pub user_agent: Option<String>,
     pub ip_addr: Option<String>,
     pub url_path: String,
     pub response: Option<String>,
-    pub error: Option<serde_json::Value>,
+    pub error: Option<String>,
     pub http_method: String,
 }
 

@@ -350,6 +350,12 @@ impl DecideRequest {
     }
 }
 
+impl crate::analytics::payload::ApiEventPayload for DecideRequest {
+    fn payment_id(&self) -> Option<&str> {
+        Some(&self.payment_id)
+    }
+}
+
 #[cfg(test)]
 #[allow(clippy::panic_in_result_fn)]
 mod tests {

@@ -37,21 +37,26 @@ fn record_rule_config_event<Request: Serialize, Response: Serialize>(
     (request, response): (&Request, &Response),
     event_stage: &str,
 ) {
-    crate::analytics::DomainAnalyticsEvent::record_operation(
-        crate::analytics::AnalyticsFlowContext::new(
-            crate::analytics::ApiFlow::RuleBasedRouting,
-            flow_type,
-        ),
-        route,
-        Some(merchant.as_str().to_string()),
-        None,
-        ids.request_id,
-        ids.global_request_id,
-        ids.trace_id,
-        Some("success".to_string()),
-        crate::analytics::serialize_details(&RuleConfigAnalyticsDetails { request, response }),
-        Some(event_stage.to_string()),
-    );
+    crate::analytics::DomainAnalyticsEvent {
+        merchant_id: Some(merchant.as_str().to_string()),
+        request_id: ids.request_id,
+        global_request_id: ids.global_request_id,
+        trace_id: ids.trace_id,
+        status: Some("success".to_string()),
+        details: crate::analytics::serialize_details(&RuleConfigAnalyticsDetails {
+            request,
+            response,
+        }),
+        event_stage: Some(event_stage.to_string()),
+        ..crate::analytics::DomainAnalyticsEvent::new(
+            crate::analytics::AnalyticsFlowContext::new(
+                crate::analytics::ApiFlow::RuleBasedRouting,
+                flow_type,
+            ),
+            route,
+        )
+    }
+    .emit();
 }
 
 /// The dashboard's name for each configuration, as the response messages spell it.

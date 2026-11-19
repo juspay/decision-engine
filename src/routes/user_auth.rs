@@ -2328,6 +2328,22 @@ pub async fn lookup_merchants(
     Ok(Json(results))
 }
 
+// These requests name no payment.
+crate::impl_api_event_payload!(
+    AdminMerchantTokenRequest,
+    LoginRequest,
+    ChangePasswordRequest,
+    CreateMerchantRequest,
+    EnterMerchantRequest,
+    ExchangeMerchantTokenRequest,
+    ForgotPasswordRequest,
+    InviteMemberRequest,
+    LookupRequest,
+    ResetPasswordRequest,
+    SignupRequest,
+    SwitchMerchantRequest
+);
+
 #[cfg(test)]
 mod tests {
     use super::*;

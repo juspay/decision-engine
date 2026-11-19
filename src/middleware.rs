@@ -593,13 +593,14 @@ mod tests {
 #[cfg(test)]
 mod response_header_tests {
     use super::default_response_headers;
+    use crate::custom_extractors::Json;
     use axum::{
         body::Body,
         http::{Request, StatusCode},
         middleware::{self, Next},
         response::Response,
         routing::get,
-        Json, Router,
+        Router,
     };
     use tower::ServiceExt;
 

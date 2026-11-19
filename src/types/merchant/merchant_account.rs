@@ -395,3 +395,6 @@ pub async fn update_merchant_account(
     invalidate_cached(&merchant_id).await;
     Ok(())
 }
+
+// These requests name no payment.
+crate::impl_api_event_payload!(MerchantAccountCreateRequest);

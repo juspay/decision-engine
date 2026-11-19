@@ -103,6 +103,12 @@ impl AuthorizedMerchant {
         Self(merchant_id.into())
     }
 
+    /// The merchant a request was authorized for. Its API event records this merchant.
+    fn for_request(merchant_id: &str) -> Self {
+        crate::analytics::payload::record_merchant(merchant_id);
+        Self(merchant_id.to_string())
+    }
+
     pub fn as_str(&self) -> &str {
         &self.0
     }
@@ -210,7 +216,7 @@ fn resolve(
             None => MerchantScopeViolation::ConflictingMerchants,
         });
     }
-    Ok(AuthorizedMerchant(target.to_string()))
+    Ok(AuthorizedMerchant::for_request(target))
 }
 
 /// The merchant `merchant_id` is a sub-merchant of. Served from the cached account that routing
@@ -237,7 +243,7 @@ pub async fn key_holder(merchant: &AuthorizedMerchant) -> AuthorizedMerchant {
 /// The merchant a session is authorized for, for a route that names no merchant of its own (such as
 /// revoking an api key by id). `None` for a service credential, which has no merchant of its own.
 pub fn session_merchant(session: Option<&AuthContext>) -> Option<AuthorizedMerchant> {
-    session.map(|session| AuthorizedMerchant(session.merchant_id.clone()))
+    session.map(|session| AuthorizedMerchant::for_request(&session.merchant_id))
 }
 
 /// Resolve a request that names its merchant once, as a path parameter does.

@@ -1,4 +1,3 @@
-pub mod capture;
 pub mod clickhouse;
 pub mod events;
 pub mod flow;
@@ -9,7 +8,6 @@ pub mod runtime;
 pub mod service;
 pub mod store;
 
-pub use capture::*;
 pub use events::*;
 pub use flow::*;
 pub use kafka::*;

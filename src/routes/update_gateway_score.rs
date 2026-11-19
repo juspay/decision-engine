@@ -125,25 +125,22 @@ pub async fn update_gateway_score(
         }
         Err(ScopedJsonRejection::Read(e)) => {
             let (error_code, error_message) = e.analytics_code_and_message();
-            crate::analytics::DomainAnalyticsEvent::record_error(
-                crate::analytics::AnalyticsFlowContext::new(
-                    crate::analytics::ApiFlow::DynamicRouting,
-                    crate::analytics::FlowType::UpdateGatewayScoreError,
-                ),
-                crate::analytics::AnalyticsRoute::UpdateGatewayScore,
-                None,
-                None,
-                None,
-                global_request_id.clone(),
-                trace_id.clone(),
-                None,
-                None,
-                error_code,
-                error_message.to_string(),
-                Some("request body parse failure".to_string()),
-                Some(e.analytics_stage().to_string()),
-                None,
-            );
+            crate::analytics::DomainAnalyticsEvent {
+                global_request_id: global_request_id.clone(),
+                trace_id: trace_id.clone(),
+                details: Some("request body parse failure".to_string()),
+                event_stage: Some(e.analytics_stage().to_string()),
+                ..crate::analytics::DomainAnalyticsEvent::error(
+                    crate::analytics::AnalyticsFlowContext::new(
+                        crate::analytics::ApiFlow::DynamicRouting,
+                        crate::analytics::FlowType::UpdateGatewayScoreError,
+                    ),
+                    crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+                    error_code,
+                    error_message.to_string(),
+                )
+            }
+            .emit();
             return Err(e.into_error_response());
         }
     };
@@ -160,19 +157,21 @@ pub async fn update_gateway_score(
             if !payment_id.is_empty() {
                 span.record("payment_id", payment_id.as_str());
             }
-            crate::analytics::DomainAnalyticsEvent::record_request_hit(
-                crate::analytics::AnalyticsFlowContext::new(
-                    crate::analytics::ApiFlow::DynamicRouting,
-                    crate::analytics::FlowType::UpdateGatewayScoreRequestHit,
-                ),
-                crate::analytics::AnalyticsRoute::UpdateGatewayScore,
-                Some(merchant_id.clone()),
-                Some(payment_id.clone()),
-                x_request_id.clone(),
-                global_request_id.clone(),
-                trace_id.clone(),
-                None,
-            );
+            crate::analytics::DomainAnalyticsEvent {
+                merchant_id: Some(merchant_id.clone()),
+                payment_id: Some(payment_id.clone()),
+                request_id: x_request_id.clone(),
+                global_request_id: global_request_id.clone(),
+                trace_id: trace_id.clone(),
+                ..crate::analytics::DomainAnalyticsEvent::request_hit(
+                    crate::analytics::AnalyticsFlowContext::new(
+                        crate::analytics::ApiFlow::DynamicRouting,
+                        crate::analytics::FlowType::UpdateGatewayScoreRequestHit,
+                    ),
+                    crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+                )
+            }
+            .emit();
             // GSM lookup is a fast in-memory lookup — compute it synchronously so the
             // caller gets the result immediately without waiting for the score update.
             let gsm_info = payload.error_info.as_ref().and_then(|ei| {
@@ -205,16 +204,11 @@ pub async fn update_gateway_score(
                     Ok(outcome) => {
                         // A payment without a scoring context had no score to update.
                         if outcome != SCORE_UPDATE_SKIPPED {
-                            crate::analytics::DomainAnalyticsEvent::record_gateway_update(
-                                crate::analytics::AnalyticsFlowContext::new(
-                                    crate::analytics::ApiFlow::DynamicRouting,
-                                    crate::analytics::FlowType::UpdateGatewayScoreUpdate,
-                                ),
-                                Some(merchant_id.clone()),
-                                Some(gateway.clone()),
-                                Some(transaction_status.clone()),
-                                crate::analytics::AnalyticsRoute::UpdateGatewayScore,
-                                crate::analytics::serialize_details(
+                            crate::analytics::DomainAnalyticsEvent {
+                                merchant_id: Some(merchant_id.clone()),
+                                gateway: Some(gateway.clone()),
+                                status: Some(transaction_status.clone()),
+                                details: crate::analytics::serialize_details(
                                     &UpdateGatewayScoreSuccessDetail {
                                         request: UpdateGatewayScoreRequestDetail {
                                             merchant_id: &merchant_id,
@@ -244,23 +238,26 @@ pub async fn update_gateway_score(
                                         },
                                     },
                                 ),
-                                Some(payment_id.clone()),
-                                x_request_id.clone(),
-                                global_request_id.clone(),
-                                trace_id.clone(),
-                                Some("score_updated".to_string()),
-                            );
+                                payment_id: Some(payment_id.clone()),
+                                request_id: x_request_id.clone(),
+                                global_request_id: global_request_id.clone(),
+                                trace_id: trace_id.clone(),
+                                event_stage: Some("score_updated".to_string()),
+                                ..crate::analytics::DomainAnalyticsEvent::new(
+                                    crate::analytics::AnalyticsFlowContext::new(
+                                        crate::analytics::ApiFlow::DynamicRouting,
+                                        crate::analytics::FlowType::UpdateGatewayScoreUpdate,
+                                    ),
+                                    crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+                                )
+                            }
+                            .emit();
                         } else {
-                            crate::analytics::DomainAnalyticsEvent::record_gateway_update(
-                                crate::analytics::AnalyticsFlowContext::new(
-                                    crate::analytics::ApiFlow::DynamicRouting,
-                                    crate::analytics::FlowType::UpdateGatewayScoreSkipped,
-                                ),
-                                Some(merchant_id.clone()),
-                                Some(gateway.clone()),
-                                Some(transaction_status.clone()),
-                                crate::analytics::AnalyticsRoute::UpdateGatewayScore,
-                                crate::analytics::serialize_details(
+                            crate::analytics::DomainAnalyticsEvent {
+                                merchant_id: Some(merchant_id.clone()),
+                                gateway: Some(gateway.clone()),
+                                status: Some(transaction_status.clone()),
+                                details: crate::analytics::serialize_details(
                                     &UpdateGatewayScoreSkippedDetail {
                                         request: UpdateGatewayScoreRequestDetail {
                                             merchant_id: &merchant_id,
@@ -282,38 +279,49 @@ pub async fn update_gateway_score(
                                         },
                                     },
                                 ),
-                                Some(payment_id.clone()),
-                                x_request_id.clone(),
-                                global_request_id.clone(),
-                                trace_id.clone(),
-                                Some("score_skipped".to_string()),
-                            );
+                                payment_id: Some(payment_id.clone()),
+                                request_id: x_request_id.clone(),
+                                global_request_id: global_request_id.clone(),
+                                trace_id: trace_id.clone(),
+                                event_stage: Some("score_skipped".to_string()),
+                                ..crate::analytics::DomainAnalyticsEvent::new(
+                                    crate::analytics::AnalyticsFlowContext::new(
+                                        crate::analytics::ApiFlow::DynamicRouting,
+                                        crate::analytics::FlowType::UpdateGatewayScoreSkipped,
+                                    ),
+                                    crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+                                )
+                            }
+                            .emit();
                         }
                     }
                     Err(e) => {
-                        crate::analytics::DomainAnalyticsEvent::record_error(
-                            crate::analytics::AnalyticsFlowContext::new(
-                                crate::analytics::ApiFlow::DynamicRouting,
-                                crate::analytics::FlowType::UpdateGatewayScoreError,
-                            ),
-                            crate::analytics::AnalyticsRoute::UpdateGatewayScore,
-                            Some(merchant_id.clone()),
-                            Some(payment_id.clone()),
-                            x_request_id,
+                        crate::analytics::DomainAnalyticsEvent {
+                            merchant_id: Some(merchant_id.clone()),
+                            payment_id: Some(payment_id.clone()),
+                            request_id: x_request_id,
                             global_request_id,
                             trace_id,
-                            Some(gateway.clone()),
-                            None,
-                            e.error_code.clone(),
-                            e.error_message.clone(),
-                            crate::analytics::serialize_details(&UpdateGatewayScoreFailureDetail {
-                                payment_id: &payment_id,
-                                request_id: None,
-                                status: &transaction_status,
-                            }),
-                            Some("score_update_failed".to_string()),
-                            None,
-                        );
+                            gateway: Some(gateway.clone()),
+                            details: crate::analytics::serialize_details(
+                                &UpdateGatewayScoreFailureDetail {
+                                    payment_id: &payment_id,
+                                    request_id: None,
+                                    status: &transaction_status,
+                                },
+                            ),
+                            event_stage: Some("score_update_failed".to_string()),
+                            ..crate::analytics::DomainAnalyticsEvent::error(
+                                crate::analytics::AnalyticsFlowContext::new(
+                                    crate::analytics::ApiFlow::DynamicRouting,
+                                    crate::analytics::FlowType::UpdateGatewayScoreError,
+                                ),
+                                crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+                                e.error_code.clone(),
+                                e.error_message.clone(),
+                            )
+                        }
+                        .emit();
                         crate::logger::error!(
                             merchant_id = %merchant_id,
                             gateway = %gateway,
@@ -342,25 +350,22 @@ pub async fn update_gateway_score(
         }
         Err(e) => {
             let error_response = request_parse_error_response(&e);
-            crate::analytics::DomainAnalyticsEvent::record_error(
-                crate::analytics::AnalyticsFlowContext::new(
-                    crate::analytics::ApiFlow::DynamicRouting,
-                    crate::analytics::FlowType::UpdateGatewayScoreError,
-                ),
-                crate::analytics::AnalyticsRoute::UpdateGatewayScore,
-                None,
-                None,
-                None,
+            crate::analytics::DomainAnalyticsEvent {
                 global_request_id,
                 trace_id,
-                None,
-                None,
-                "400".to_string(),
-                "Error parsing request".to_string(),
-                Some("request body parse failure".to_string()),
-                Some("request_parse_failed".to_string()),
-                None,
-            );
+                details: Some("request body parse failure".to_string()),
+                event_stage: Some("request_parse_failed".to_string()),
+                ..crate::analytics::DomainAnalyticsEvent::error(
+                    crate::analytics::AnalyticsFlowContext::new(
+                        crate::analytics::ApiFlow::DynamicRouting,
+                        crate::analytics::FlowType::UpdateGatewayScoreError,
+                    ),
+                    crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+                    "400".to_string(),
+                    "Error parsing request".to_string(),
+                )
+            }
+            .emit();
             Err(error_response)
         }
     }

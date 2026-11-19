@@ -54,7 +54,11 @@ struct Credentials {
 
 Normal API serialization still sends the original values to the caller. Analytics serialization masks them automatically; handlers do not maintain field-name lists. API keys, passwords, session tokens, one-time codes, connector credentials, merchant hash and encoding keys, card tokens, and payment sources use these secret types at the request and response boundaries.
 
-Payment Audit matches card-network filters against the dedicated `card_network` dimension as well as legacy request fields. This keeps filtering available when `cardSwitchProvider` is masked in request snapshots.
+Mark only credentials as `Secret`. Values that analytics filters or groups by, such as the card network (`cardSwitchProvider`), stay plain so request snapshots keep them.
+
+Snapshots are taken only for requests the analytics middleware captures: analytics writes must be enabled and the route must be one of the classified analytics flows. Other requests skip masked serialization entirely. Use `custom_extractors::Json` for request and response bodies; Clippy rejects `axum::Json` outside that module.
+
+An API event's `merchant_id` is the merchant the request was authorized to act on, whether named in the body, the path, the `x-connected-merchant-id` header or the session. Its `payment_id` comes from the request type's `ApiEventPayload` implementation, which every type the `Json` and `ScopedJson` extractors take provides. A type that names a payment returns it from `payment_id`; any other uses the default through `impl_api_event_payload!`. A request whose body fails extraction, or whose merchant is refused, records neither.
 
 Domain event details also use masked serialization through `serialize_details`. Pass the original typed value into that helper. Converting a secret into a plain string or ordinary `serde_json::Value` first erases its secret annotation; if a response must be assembled as JSON, carry its separately masked snapshot alongside its wire representation.
 

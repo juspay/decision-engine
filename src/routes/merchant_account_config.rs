@@ -479,6 +479,9 @@ pub async fn delete_merchant_config(
         .map_err(Into::into)
 }
 
+// These requests name no payment.
+crate::impl_api_event_payload!(DebitRoutingRequest, UpdateFeatureRequest);
+
 #[cfg(test)]
 mod tests {
     use super::with_merchant;
