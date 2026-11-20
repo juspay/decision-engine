@@ -596,6 +596,13 @@ pub async fn check_and_update_gateway_score_(
 
     match m_gateway_scoring_data {
         Ok(gateway_scoring_data) => {
+            // The key is by payment id alone, so another merchant's payment is rejected untouched.
+            if gateway_scoring_data.merchantId != api_payload.merchant_id {
+                return Err(invalid_request_error(
+                    "payment_id",
+                    &"Payment does not belong to the requested merchant",
+                ));
+            }
             // Extract transaction details and card info from the API payload
             let txn_detail: TxnDetail = match Fbu::get_txn_detail_from_api_payload(
                 api_payload.clone(),
