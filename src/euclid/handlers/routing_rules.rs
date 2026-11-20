@@ -340,6 +340,18 @@ struct RoutingEvaluateAnalyticsDetails<'a> {
     preview_kind: &'static str,
 }
 
+#[derive(Serialize)]
+struct RoutingBatchAnalyticsDetails<'a> {
+    request: &'a RoutingBatchRequest,
+    response: &'a RoutingBatchResponse,
+    created_by: &'a str,
+    algorithm_for: &'a Option<String>,
+    fallback_output: &'a Option<Vec<ConnectorInfo>>,
+    entry_count: usize,
+    failed_count: usize,
+    entries: &'a [Value],
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct RoutingEvaluateAnalyticsFlows {
     pub emit_events: bool,
@@ -545,7 +557,7 @@ pub async fn routing_create(
     ScopedJson {
         merchant,
         payload: mut config,
-        body,
+        ..
     }: ScopedJson<RoutingRule>,
 ) -> Result<Json<RoutingDictionaryRecord>, ContainerError<EuclidErrors>> {
     let state = get_tenant_app_state().await;
@@ -555,8 +567,8 @@ pub async fn routing_create(
         trace_id,
     } = ids;
 
-    // The request as received, for the analytics event.
-    let payload: Value = serde_json::from_slice(&body).unwrap_or(Value::Null);
+    // Preserve the typed request's secret annotations before normalization or mutation.
+    let payload = masking::masked_serialize(&config).unwrap_or(Value::Null);
 
     // Volume contracts are stored canonicalized (integer minor-unit amounts, tolerance in bps)
     // so every future consumer reads one representation.
@@ -652,21 +664,27 @@ pub async fn routing_create(
         timestamp,
     );
     logger::debug!("Response: {response:?}");
-    crate::analytics::DomainAnalyticsEvent::record_operation(
-        crate::analytics::AnalyticsFlowContext::new(
-            crate::analytics::ApiFlow::RuleBasedRouting,
-            create_flow_type,
-        ),
-        crate::analytics::AnalyticsRoute::RoutingCreate,
-        Some(analytics_created_by),
-        None,
+    crate::analytics::DomainAnalyticsEvent {
+        merchant_id: Some(analytics_created_by),
         request_id,
         global_request_id,
         trace_id,
-        Some("success".to_string()),
-        serialize_routing_create_analytics_details(&payload, &response, &analytics_config_name),
-        Some("routing_created".to_string()),
-    );
+        status: Some("success".to_string()),
+        details: serialize_routing_create_analytics_details(
+            &payload,
+            &response,
+            &analytics_config_name,
+        ),
+        event_stage: Some("routing_created".to_string()),
+        ..crate::analytics::DomainAnalyticsEvent::new(
+            crate::analytics::AnalyticsFlowContext::new(
+                crate::analytics::ApiFlow::RuleBasedRouting,
+                create_flow_type,
+            ),
+            crate::analytics::AnalyticsRoute::RoutingCreate,
+        )
+    }
+    .emit();
 
     Ok(Json(response))
 }
@@ -786,21 +804,23 @@ async fn no_active_algorithm_response(
 ) -> RoutingEvaluateResponse {
     let response = build_no_active_algorithm_response(state, payload).await;
     if flows.emit_events {
-        crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
-            crate::analytics::AnalyticsFlowContext::new(
-                crate::analytics::ApiFlow::RuleBasedRouting,
-                crate::analytics::FlowType::RoutingEvaluatePreview,
-            ),
-            Some(payload.created_by.clone()),
-            payload.payment_id.clone(),
-            preview_gateway(&response),
-            None,
-            Some(response.status.clone()),
-            serialize_routing_evaluate_analytics_details(payload, &response, None),
+        crate::analytics::DomainAnalyticsEvent {
+            merchant_id: Some(payload.created_by.clone()),
+            payment_id: payload.payment_id.clone(),
+            gateway: preview_gateway(&response),
+            status: Some(response.status.clone()),
+            details: serialize_routing_evaluate_analytics_details(payload, &response, None),
             request_id,
             global_request_id,
             trace_id,
-        );
+            ..crate::analytics::DomainAnalyticsEvent::rule_evaluation_preview(
+                crate::analytics::AnalyticsFlowContext::new(
+                    crate::analytics::ApiFlow::RuleBasedRouting,
+                    crate::analytics::FlowType::RoutingEvaluatePreview,
+                ),
+            )
+        }
+        .emit();
     }
 
     response
@@ -1195,19 +1215,21 @@ pub(crate) async fn routing_evaluate_with_analytics(
         "Received routing evaluation request"
     );
     if flows.emit_events {
-        crate::analytics::DomainAnalyticsEvent::record_request_hit(
-            crate::analytics::AnalyticsFlowContext::new(
-                crate::analytics::ApiFlow::RuleBasedRouting,
-                crate::analytics::FlowType::RoutingEvaluateRequestHit,
-            ),
-            crate::analytics::AnalyticsRoute::RoutingEvaluate,
-            Some(payload.created_by.clone()),
-            payload.payment_id.clone(),
-            request_id.clone(),
-            global_request_id.clone(),
-            trace_id.clone(),
-            None,
-        );
+        crate::analytics::DomainAnalyticsEvent {
+            merchant_id: Some(payload.created_by.clone()),
+            payment_id: payload.payment_id.clone(),
+            request_id: request_id.clone(),
+            global_request_id: global_request_id.clone(),
+            trace_id: trace_id.clone(),
+            ..crate::analytics::DomainAnalyticsEvent::request_hit(
+                crate::analytics::AnalyticsFlowContext::new(
+                    crate::analytics::ApiFlow::RuleBasedRouting,
+                    crate::analytics::FlowType::RoutingEvaluateRequestHit,
+                ),
+                crate::analytics::AnalyticsRoute::RoutingEvaluate,
+            )
+        }
+        .emit();
     }
 
     let fail_preview = |err: ContainerError<EuclidErrors>, stage: &'static str| {
@@ -1336,21 +1358,24 @@ pub(crate) async fn routing_evaluate_with_analytics(
                 rule_name.as_deref(),
             ),
         };
-        crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
-            crate::analytics::AnalyticsFlowContext::new(
-                crate::analytics::ApiFlow::RuleBasedRouting,
-                preview_flow_type,
-            ),
-            Some(payload.created_by.clone()),
-            payload.payment_id.clone(),
-            preview_gateway(&response),
-            rule_name.clone(),
-            Some(response.status.clone()),
-            analytics_details,
+        crate::analytics::DomainAnalyticsEvent {
+            merchant_id: Some(payload.created_by.clone()),
+            payment_id: payload.payment_id.clone(),
+            gateway: preview_gateway(&response),
+            rule_name: rule_name.clone(),
+            status: Some(response.status.clone()),
+            details: analytics_details,
             request_id,
             global_request_id,
             trace_id,
-        );
+            ..crate::analytics::DomainAnalyticsEvent::rule_evaluation_preview(
+                crate::analytics::AnalyticsFlowContext::new(
+                    crate::analytics::ApiFlow::RuleBasedRouting,
+                    preview_flow_type,
+                ),
+            )
+        }
+        .emit();
     }
 
     Ok(Json(response))
@@ -1386,19 +1411,21 @@ pub async fn routing_evaluate_batch(
         entry_count = payload.requests.len(),
         "Received batch routing evaluation request"
     );
-    crate::analytics::DomainAnalyticsEvent::record_request_hit(
-        crate::analytics::AnalyticsFlowContext::new(
-            crate::analytics::ApiFlow::RuleBasedRouting,
-            crate::analytics::FlowType::RoutingEvaluateRequestHit,
-        ),
-        crate::analytics::AnalyticsRoute::RoutingEvaluate,
-        Some(payload.created_by.clone()),
-        batch_payment_id.clone(),
-        request_id.clone(),
-        global_request_id.clone(),
-        trace_id.clone(),
-        None,
-    );
+    crate::analytics::DomainAnalyticsEvent {
+        merchant_id: Some(payload.created_by.clone()),
+        payment_id: batch_payment_id.clone(),
+        request_id: request_id.clone(),
+        global_request_id: global_request_id.clone(),
+        trace_id: trace_id.clone(),
+        ..crate::analytics::DomainAnalyticsEvent::request_hit(
+            crate::analytics::AnalyticsFlowContext::new(
+                crate::analytics::ApiFlow::RuleBasedRouting,
+                crate::analytics::FlowType::RoutingEvaluateRequestHit,
+            ),
+            crate::analytics::AnalyticsRoute::RoutingEvaluate,
+        )
+    }
+    .emit();
 
     // One representative request for the batch: a whole-batch failure has no single entry to
     // attribute, but without it the audit records a request hit and never an outcome.
@@ -1503,21 +1530,23 @@ pub async fn routing_evaluate_batch(
             let response = RoutingBatchResponse { results };
             // One preview event for the whole call: the batch is one evaluation moment,
             // and its per-entry answers live in the event's details.
-            crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
-                crate::analytics::AnalyticsFlowContext::new(
-                    crate::analytics::ApiFlow::RuleBasedRouting,
-                    crate::analytics::FlowType::RoutingEvaluatePreview,
-                ),
-                Some(payload.created_by.clone()),
-                call_payment_id,
-                response.results.first().and_then(preview_gateway),
-                None,
-                Some("no_active_algorithm".to_string()),
-                serialize_batch_analytics_details(&payload, &response, &entry_outcomes, 0),
-                request_id.clone(),
-                global_request_id.clone(),
-                trace_id.clone(),
-            );
+            crate::analytics::DomainAnalyticsEvent {
+                merchant_id: Some(payload.created_by.clone()),
+                payment_id: call_payment_id,
+                gateway: response.results.first().and_then(preview_gateway),
+                status: Some("no_active_algorithm".to_string()),
+                details: serialize_batch_analytics_details(&payload, &response, &entry_outcomes, 0),
+                request_id: request_id.clone(),
+                global_request_id: global_request_id.clone(),
+                trace_id: trace_id.clone(),
+                ..crate::analytics::DomainAnalyticsEvent::rule_evaluation_preview(
+                    crate::analytics::AnalyticsFlowContext::new(
+                        crate::analytics::ApiFlow::RuleBasedRouting,
+                        crate::analytics::FlowType::RoutingEvaluatePreview,
+                    ),
+                )
+            }
+            .emit();
             return Ok(Json(response));
         }
         Err(e) => return fail_batch(e, "batch_active_routing_lookup_failed"),
@@ -1641,21 +1670,29 @@ pub async fn routing_evaluate_batch(
         ok_status
     };
     let response = RoutingBatchResponse { results };
-    crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
-        crate::analytics::AnalyticsFlowContext::new(
-            crate::analytics::ApiFlow::RuleBasedRouting,
-            call_flow_type,
+    crate::analytics::DomainAnalyticsEvent {
+        merchant_id: Some(payload.created_by.clone()),
+        payment_id: call_payment_id,
+        gateway: call_gateway,
+        rule_name: call_rule_name,
+        status: Some(call_status),
+        details: serialize_batch_analytics_details(
+            &payload,
+            &response,
+            &entry_outcomes,
+            failed_entries,
         ),
-        Some(payload.created_by.clone()),
-        call_payment_id,
-        call_gateway,
-        call_rule_name,
-        Some(call_status),
-        serialize_batch_analytics_details(&payload, &response, &entry_outcomes, failed_entries),
-        request_id.clone(),
-        global_request_id.clone(),
-        trace_id.clone(),
-    );
+        request_id: request_id.clone(),
+        global_request_id: global_request_id.clone(),
+        trace_id: trace_id.clone(),
+        ..crate::analytics::DomainAnalyticsEvent::rule_evaluation_preview(
+            crate::analytics::AnalyticsFlowContext::new(
+                crate::analytics::ApiFlow::RuleBasedRouting,
+                call_flow_type,
+            ),
+        )
+    }
+    .emit();
     // Failed entries also surface once in error analytics, carrying the first
     // failure's error and stage; the details above name every failed entry.
     if let Some((error, stage)) = first_entry_error {
@@ -1689,16 +1726,16 @@ fn serialize_batch_analytics_details(
     entries: &[Value],
     failed_count: usize,
 ) -> Option<String> {
-    crate::analytics::serialize_details(&json!({
-        "request": request,
-        "response": response,
-        "created_by": request.created_by,
-        "algorithm_for": request.algorithm_for,
-        "fallback_output": request.fallback_output,
-        "entry_count": entries.len(),
-        "failed_count": failed_count,
-        "entries": entries,
-    }))
+    crate::analytics::serialize_details(&RoutingBatchAnalyticsDetails {
+        request,
+        response,
+        created_by: &request.created_by,
+        algorithm_for: &request.algorithm_for,
+        fallback_output: &request.fallback_output,
+        entry_count: entries.len(),
+        failed_count,
+        entries,
+    })
 }
 
 fn record_routing_evaluate_preview_error(
@@ -1736,30 +1773,31 @@ fn record_routing_evaluate_preview_error(
         .map(str::to_string)
         .unwrap_or_else(|| error.get_inner().to_string());
 
-    crate::analytics::DomainAnalyticsEvent::record_error(
-        crate::analytics::AnalyticsFlowContext::new(
-            crate::analytics::ApiFlow::RuleBasedRouting,
-            crate::analytics::FlowType::RoutingEvaluateError,
-        ),
-        crate::analytics::AnalyticsRoute::RoutingEvaluate,
-        Some(payload.created_by.clone()),
-        payload.payment_id.clone(),
+    crate::analytics::DomainAnalyticsEvent {
+        merchant_id: Some(payload.created_by.clone()),
+        payment_id: payload.payment_id.clone(),
         request_id,
         global_request_id,
         trace_id,
-        None,
-        Some("RULE_EVALUATE_PREVIEW".to_string()),
-        error_code,
-        error_message.clone(),
-        serialize_routing_evaluate_error_analytics_details(
+        routing_approach: Some("RULE_EVALUATE_PREVIEW".to_string()),
+        details: serialize_routing_evaluate_error_analytics_details(
             payload,
             &status,
             &error_message,
             &response_payload,
         ),
-        Some(event_stage.to_string()),
-        None,
-    );
+        event_stage: Some(event_stage.to_string()),
+        ..crate::analytics::DomainAnalyticsEvent::error(
+            crate::analytics::AnalyticsFlowContext::new(
+                crate::analytics::ApiFlow::RuleBasedRouting,
+                crate::analytics::FlowType::RoutingEvaluateError,
+            ),
+            crate::analytics::AnalyticsRoute::RoutingEvaluate,
+            error_code,
+            error_message.clone(),
+        )
+    }
+    .emit();
 }
 
 use crate::storage::backend::schema::routing_algorithm_mapper::dsl as mapper_dsl;

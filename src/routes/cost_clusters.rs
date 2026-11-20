@@ -494,7 +494,7 @@ pub async fn list_cost_clusters(
     Ok(Json(out))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct SetClusterOverrideRequest {
     pub pct_bps: f64,
     pub fixed: f64,
@@ -548,3 +548,6 @@ pub async fn delete_cluster_override(
     refresh_serving(merchant.as_str()).await;
     Ok(StatusCode::NO_CONTENT)
 }
+
+// These requests name no payment.
+crate::impl_api_event_payload!(SetClusterOverrideRequest);

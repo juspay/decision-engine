@@ -1037,7 +1037,7 @@ pub const MAX_ROUTING_EVENTS_LIMIT: usize = 200;
 
 /// `event_stage` marker written on the domain-event rows the SR auto-calibrator emits,
 /// and the filter the routing-events detector reads them back by. Single source of truth
-/// shared by the emit path (`record_autopilot_calibration`) and the query path.
+/// shared by the emit path (`DomainAnalyticsEvent::autopilot_calibration`) and the query path.
 pub const AUTOPILOT_CALIBRATION_STAGE: &str = "autopilot_calibration";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]

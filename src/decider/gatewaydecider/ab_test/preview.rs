@@ -135,19 +135,30 @@ pub async fn evaluate_rule_arm(
 
 /// Analytics detail serialization for AB test routing evaluate (Decision Explorer preview).
 /// Includes full request/response so the rule-based audit shows proper input/response content.
+#[derive(serde::Serialize)]
+struct AbTestAnalyticsDetails<'a, Request, Response> {
+    request: &'a Request,
+    response: &'a Response,
+    rule_name: Option<&'a str>,
+    preview_kind: &'static str,
+    experiment_id: &'a str,
+    variant_arm: &'a str,
+    endpoint: &'a str,
+}
+
 pub fn serialize_analytics_details(
     request: &impl serde::Serialize,
     response: &impl serde::Serialize,
     rule_name: Option<&str>,
     assignment: &super::outcome::ExperimentAssignment,
 ) -> Option<String> {
-    crate::analytics::serialize_details(&serde_json::json!({
-        "request": request,
-        "response": response,
-        "rule_name": rule_name,
-        "preview_kind": "routing_evaluate_ab_test",
-        "experiment_id": assignment.experiment_id,
-        "variant_arm": assignment.side.as_str(),
-        "endpoint": assignment.endpoint.as_str(),
-    }))
+    crate::analytics::serialize_details(&AbTestAnalyticsDetails {
+        request,
+        response,
+        rule_name,
+        preview_kind: "routing_evaluate_ab_test",
+        experiment_id: &assignment.experiment_id,
+        variant_arm: assignment.side.as_str(),
+        endpoint: assignment.endpoint.as_str(),
+    })
 }

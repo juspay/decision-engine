@@ -577,7 +577,7 @@ pub struct GatewayScoringData {
     pub dateCreated: OffsetDateTime,
     pub eliminationEnabled: bool,
     pub cardIsIn: Option<String>,
-    pub cardSwitchProvider: Option<Secret<String>>,
+    pub cardSwitchProvider: Option<String>,
     pub currency: Option<Currency>,
     pub country: Option<CountryISO2>,
     pub is_legacy_decider_flow: bool,
@@ -668,7 +668,7 @@ pub struct GatewayScoringDataV2 {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cardIsIn: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cardSwitchProvider: Option<Secret<String>>,
+    pub cardSwitchProvider: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub currency: Option<Currency>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -896,7 +896,7 @@ pub struct ApiDeciderRequest {
     pub orderMetadata: ApiOrderMetadataV2,
     pub txnDetail: ApiTxnDetail,
     pub txnCardInfo: ApiTxnCardInfo,
-    pub card_token: Option<String>,
+    pub card_token: Option<Secret<String>>,
     pub txn_type: Option<String>,
     pub should_create_mandate: Option<bool>,
     pub enforce_gateway_list: Option<Vec<AValue>>,
@@ -934,14 +934,14 @@ pub struct ApiMerchantAccount {
     pub useCodeForGatewayPriority: bool,
     pub enableTransactionFilter: Option<bool>,
     pub enabledInstantRefund: bool,
-    pub cardEncodingKey: Option<String>,
+    pub cardEncodingKey: Option<Secret<String>>,
     pub shouldAddSurcharge: Option<bool>,
     pub enableGatewayReferenceIdBasedRouting: Option<bool>,
     pub enableSuccessRateBasedGatewayElimination: bool,
     pub gatewaySuccessRateBasedDeciderInput: String,
     pub gatewaySuccessRateBasedOutageInput: String,
     pub secondaryMerchantAccountId: Option<i64>,
-    pub internalHashKey: Option<String>,
+    pub internalHashKey: Option<Secret<String>>,
     pub tokenLockerId: Option<String>,
     pub executeMandateAutoRetryEnabled: Option<bool>,
     pub autoRevokeMandate: Option<bool>,
@@ -1133,7 +1133,7 @@ pub struct DomainDeciderRequest {
     pub txnCardInfo: ETCa::txn_card_info::TxnCardInfo,
     #[merchant]
     pub merchantAccount: ETM::merchant_account::MerchantAccount,
-    pub cardToken: Option<String>,
+    pub cardToken: Option<Secret<String>>,
     pub txnType: Option<String>,
     pub shouldCreateMandate: Option<bool>,
     pub enforceGatewayList: Option<Vec<String>>,
@@ -1201,12 +1201,12 @@ pub struct PaymentInfo {
     emi_tenure: Option<i32>,
     payment_method_type: String,
     payment_method: String,
-    payment_source: Option<String>,
+    payment_source: Option<Secret<String>>,
     auth_type: Option<ETCa::txn_card_info::AuthType>,
     card_issuer_bank_name: Option<String>,
     pub card_isin: Option<String>,
     card_type: Option<ETCa::card_type::CardType>,
-    card_switch_provider: Option<Secret<String>>,
+    card_switch_provider: Option<String>,
     #[serde(default)]
     card_program: Option<String>,
     #[serde(default)]
@@ -1281,7 +1281,7 @@ impl From<(&RoutingRequest, Option<Self>)> for DomainDeciderRequestForApiCallV2 
                 card_type: routing_param_text(request, "card_type").and_then(|value| {
                     ETCa::card_type::CardType::try_from(normalize_static_enum(value)).ok()
                 }),
-                card_switch_provider: routing_param_text(request, "card_network").map(Secret::new),
+                card_switch_provider: routing_param_text(request, "card_network"),
                 card_program: None,
                 card_issuer_country: routing_param_text(request, "issuer_country"),
                 channel: None,
@@ -1349,8 +1349,7 @@ impl DomainDeciderRequestForApiCallV2 {
             info.card_switch_provider = card
                 .card_switch_provider
                 .clone()
-                .or(card.card_network.clone())
-                .map(Secret::new);
+                .or(card.card_network.clone());
         }
         info.preferred_connectors =
             request
@@ -1405,10 +1404,7 @@ impl DomainDeciderRequestForApiCallV2 {
     /// Card scheme (card_network SR dimension) — the card switch provider, matching how the
     /// decider keys SR clusters.
     pub fn card_network(&self) -> Option<String> {
-        self.payment_info
-            .card_switch_provider
-            .as_ref()
-            .map(|s| s.peek().to_string())
+        self.payment_info.card_switch_provider.clone()
     }
 
     pub fn currency(&self) -> String {
@@ -1514,7 +1510,7 @@ impl DomainDeciderRequestForApiCallV2 {
                 nameOnCard: None,
                 dateCreated: OffsetDateTime::now_utc(),
                 instrument: self.instrument(),
-                paymentSource: self.payment_info.payment_source.clone().map(Secret::new),
+                paymentSource: self.payment_info.payment_source.clone(),
                 authType: self.payment_info.auth_type.clone(),
                 partitionKey: None,
             },
@@ -1536,7 +1532,7 @@ pub struct DomainDeciderRequestForApiCall {
     pub orderMetadata: ETOMV2::OrderMetadataV2,
     pub txnDetail: ETTD::TxnDetail,
     pub txnCardInfo: ETCa::txn_card_info::TxnCardInfo,
-    pub card_token: Option<String>,
+    pub card_token: Option<Secret<String>>,
     pub txn_type: Option<String>,
     pub should_create_mandate: Option<bool>,
     pub enforce_gateway_list: Option<Vec<AValue>>,
@@ -2571,5 +2567,14 @@ mod stored_gateway_scoring_data_tests {
         assert_eq!(key(&old), key(&new));
         assert_eq!((new.dateCreated - old.dateCreated).whole_milliseconds(), 0);
         Ok(())
+    }
+}
+
+// These requests name no payment.
+crate::impl_api_event_payload!(DomainDeciderRequest);
+
+impl crate::analytics::payload::ApiEventPayload for DomainDeciderRequestForApiCallV2 {
+    fn payment_id(&self) -> Option<&str> {
+        Some(Self::payment_id(self))
     }
 }

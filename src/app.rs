@@ -121,65 +121,6 @@ fn generate_request_id_header_value() -> HeaderValue {
     }
 }
 
-fn extract_json_path(value: &serde_json::Value, path: &[&str]) -> Option<String> {
-    let nested_value = path
-        .iter()
-        .try_fold(value, |current, key| current.get(*key))?;
-
-    nested_value.as_str().map(str::to_string)
-}
-
-fn parse_request_metadata(
-    captured: &crate::analytics::CapturedBody,
-) -> (Option<String>, Option<String>, Option<String>) {
-    let request_json = serde_json::from_slice::<serde_json::Value>(&captured.bytes).ok();
-    let merchant_id = request_json.as_ref().and_then(|value| {
-        [
-            &["merchant_id"][..],
-            &["merchantId"][..],
-            &["created_by"][..],
-            &["createdBy"][..],
-        ]
-        .into_iter()
-        .find_map(|path| extract_json_path(value, path))
-    });
-    let payment_id = request_json.as_ref().and_then(|value| {
-        [
-            &["payment_id"][..],
-            &["paymentId"][..],
-            &["payment_info", "payment_id"][..],
-            &["paymentInfo", "paymentId"][..],
-        ]
-        .into_iter()
-        .find_map(|path| extract_json_path(value, path))
-    });
-    let auth_type = request_json.as_ref().and_then(|value| {
-        [
-            &["authentication_type"][..],
-            &["authenticationType"][..],
-            &["auth_type"][..],
-            &["authType"][..],
-            &["payment_info", "authentication_type"][..],
-            &["payment_info", "auth_type"][..],
-            &["paymentInfo", "authenticationType"][..],
-            &["paymentInfo", "authType"][..],
-        ]
-        .into_iter()
-        .find_map(|path| extract_json_path(value, path))
-    });
-    (merchant_id, payment_id, auth_type)
-}
-
-fn parse_response_error(
-    status_code: u16,
-    captured: &crate::analytics::CapturedBody,
-) -> Option<serde_json::Value> {
-    if status_code < 400 {
-        return None;
-    }
-    serde_json::from_slice::<serde_json::Value>(&captured.bytes).ok()
-}
-
 async fn capture_api_event(
     State(global_state): State<Arc<GlobalAppState>>,
     request: Request<Body>,
@@ -195,74 +136,62 @@ async fn capture_api_event(
     };
 
     let started_at = Instant::now();
-    let (parts, body) = request.into_parts();
-    let (request_body, request_handle) = crate::analytics::CaptureBody::new(body);
-
-    let request_id = parts
-        .headers
+    let payload_capture = crate::analytics::payload::ApiPayloadCapture::default();
+    let headers = request.headers();
+    let request_id = headers
         .get(crate::storage::consts::X_REQUEST_ID)
         .and_then(|value| value.to_str().ok())
         .unwrap_or("unknown")
         .to_string();
-    let global_request_id = crate::analytics::global_request_id_from_headers(&parts.headers);
-    let trace_id = crate::analytics::trace_id_from_headers(&parts.headers);
-    let user_agent = parts
-        .headers
+    let global_request_id = crate::analytics::global_request_id_from_headers(headers);
+    let trace_id = crate::analytics::trace_id_from_headers(headers);
+    let user_agent = headers
         .get(axum::http::header::USER_AGENT)
         .and_then(|value| value.to_str().ok())
         .map(str::to_string);
-    let ip_addr = parts
-        .headers
+    let ip_addr = headers
         .get("x-forwarded-for")
         .and_then(|value| value.to_str().ok())
         .map(|value| value.split(',').next().unwrap_or(value).trim().to_string())
         .or_else(|| {
-            parts
-                .headers
+            headers
                 .get("x-real-ip")
                 .and_then(|value| value.to_str().ok())
                 .map(str::to_string)
         });
-    let method = parts.method.to_string();
+    let method = request.method().to_string();
 
-    let response = next
-        .run(Request::from_parts(parts, Body::new(request_body)))
-        .await;
+    let response = payload_capture.scope(next.run(request)).await;
     let status_code = response.status().as_u16();
-    let (response_parts, response_body) = response.into_parts();
-    let (response_body, response_handle) = crate::analytics::CaptureBody::new(response_body);
+    let latency = started_at.elapsed().as_millis() as u64;
 
     let runtime = global_state.analytics_runtime.clone();
     tokio::spawn(async move {
-        let request_capture = request_handle.wait().await;
-        let response_capture = response_handle.wait().await;
-        let (merchant_id, payment_id, auth_type) = parse_request_metadata(&request_capture);
-        let error = parse_response_error(status_code, &response_capture);
+        let response_body = payload_capture.response_snapshot().to_string();
 
         runtime.enqueue_api_event(crate::analytics::ApiEvent {
             event_id: crate::analytics::next_event_id(),
-            merchant_id,
-            payment_id,
+            merchant_id: payload_capture.merchant_id(),
+            payment_id: payload_capture.payment_id(),
             api_flow: flow_context.api_flow,
             flow_type: flow_context.flow_type,
             created_at_timestamp: crate::analytics::now_ms(),
             request_id,
             global_request_id,
             trace_id,
-            latency: started_at.elapsed().as_millis() as u64,
+            latency,
             status_code,
-            auth_type,
-            request: String::from_utf8_lossy(&request_capture.bytes).to_string(),
+            request: payload_capture.request_body(),
             user_agent,
             ip_addr,
             url_path: path,
-            response: Some(String::from_utf8_lossy(&response_capture.bytes).to_string()),
-            error,
+            error: (status_code >= 400).then(|| response_body.clone()),
+            response: Some(response_body),
             http_method: method,
         });
     });
 
-    Response::from_parts(response_parts, Body::new(response_body))
+    response
 }
 
 ///
@@ -477,11 +406,10 @@ fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
         )
         .route(
             "/merchant-account/:merchant_id/connectors/:connector/report",
-            // Monthly settlement reports run to several GB. The handler streams the body to disk
-            // and parses in batches (O(batch) RAM), so lift the body cap to the same hard limit it
-            // enforces itself. DefaultBodyLimit otherwise errors the stream at its default.
+            // Match the body cap to the limit the handler enforces itself, or DefaultBodyLimit
+            // errors the stream at its own default.
             metered!(post, routes::report_upload::upload_report).layer(
-                axum::extract::DefaultBodyLimit::max(routes::report_upload::MAX_UPLOAD_BYTES),
+                axum::extract::DefaultBodyLimit::max(routes::report_upload::max_upload_bytes()),
             ),
         )
         .route(
@@ -963,64 +891,4 @@ where
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    #![allow(clippy::unwrap_used)]
-
-    use axum::body::Bytes;
-
-    use super::parse_request_metadata;
-
-    #[test]
-    fn parse_request_metadata_supports_decide_scope() {
-        let captured = crate::analytics::CapturedBody {
-            bytes: Bytes::from_static(br#"{"payment_id":"pay_decide","merchant_id":"pro_decide","routing_config":{"algorithm_for":"payment"},"authentication_type":"three_ds"}"#),
-        };
-        let (merchant_id, payment_id, auth_type) = parse_request_metadata(&captured);
-        assert_eq!(merchant_id.as_deref(), Some("pro_decide"));
-        assert_eq!(payment_id.as_deref(), Some("pay_decide"));
-        assert_eq!(auth_type.as_deref(), Some("three_ds"));
-    }
-
-    #[test]
-    fn parse_request_metadata_supports_decide_gateway_shape() {
-        let captured = crate::analytics::CapturedBody {
-            bytes: Bytes::from_static(
-                br#"{
-                    "merchantId":"demo_merchant",
-                    "paymentInfo":{
-                        "paymentId":"pay_001",
-                        "authType":"THREE_DS"
-                    }
-                }"#,
-            ),
-        };
-
-        let (merchant_id, payment_id, auth_type) = parse_request_metadata(&captured);
-
-        assert_eq!(merchant_id.as_deref(), Some("demo_merchant"));
-        assert_eq!(payment_id.as_deref(), Some("pay_001"));
-        assert_eq!(auth_type.as_deref(), Some("THREE_DS"));
-    }
-
-    #[test]
-    fn parse_request_metadata_keeps_snake_case_support() {
-        let captured = crate::analytics::CapturedBody {
-            bytes: Bytes::from_static(
-                br#"{
-                    "merchant_id":"demo_merchant",
-                    "payment_id":"pay_002",
-                    "authentication_type":"NO_THREE_DS"
-                }"#,
-            ),
-        };
-
-        let (merchant_id, payment_id, auth_type) = parse_request_metadata(&captured);
-
-        assert_eq!(merchant_id.as_deref(), Some("demo_merchant"));
-        assert_eq!(payment_id.as_deref(), Some("pay_002"));
-        assert_eq!(auth_type.as_deref(), Some("NO_THREE_DS"));
-    }
 }

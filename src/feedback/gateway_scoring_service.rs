@@ -343,10 +343,7 @@ pub async fn get_gateway_scoring_type(
     // Extract the new parameters from txn_card_info
 
     let sr_routing_dimensions = SrRoutingDimensions {
-        card_network: txn_card_info
-            .cardSwitchProvider
-            .as_ref()
-            .map(|s| s.peek().to_string()),
+        card_network: txn_card_info.cardSwitchProvider.clone(),
         card_isin: txn_card_info.card_isin.clone(),
         currency: Some(txn_detail.currency.to_string()),
         country: txn_detail.country.as_ref().map(|c| c.to_string()),
@@ -957,43 +954,40 @@ pub async fn update_gateway_score(
         && is_update_within_window;
     if !should_record_srv3_post_update {
         if let Some(metric_entry) = m_metric_entry.clone() {
-            crate::analytics::DomainAnalyticsEvent::record_score_snapshot(
-                score_snapshot_flow,
-                Some(MID::merchant_id_to_text(txn_detail.clone().merchantId)),
-                Some(txn_card_info.instrument.method_type_code().into_owned()),
-                Some(txn_card_info.instrument.method_code().to_string()),
-                txn_card_info
-                    .cardSwitchProvider
-                    .as_ref()
-                    .map(|provider| provider.peek().to_string()),
-                txn_card_info.card_isin.clone(),
-                Some(txn_detail.currency.to_string()),
-                txn_detail
+            crate::analytics::DomainAnalyticsEvent {
+                merchant_id: Some(MID::merchant_id_to_text(txn_detail.clone().merchantId)),
+                payment_method_type: Some(txn_card_info.instrument.method_type_code().into_owned()),
+                payment_method: Some(txn_card_info.instrument.method_code().to_string()),
+                card_network: txn_card_info.cardSwitchProvider.clone(),
+                card_is_in: txn_card_info.card_isin.clone(),
+                currency: Some(txn_detail.currency.to_string()),
+                country: txn_detail
                     .country
                     .as_ref()
                     .map(|country| country.to_string()),
-                txn_card_info
+                auth_type: txn_card_info
                     .authType
                     .as_ref()
                     .map(|auth_type| auth_type.to_string()),
-                txn_detail.gateway.clone().or(gateway_reference_id.clone()),
-                Some(metric_entry.success_rate.into()),
-                Some(metric_entry.sigma_factor.into()),
-                Some(metric_entry.average_latency.into()),
-                Some(metric_entry.tp99_latency.into()),
-                Some(metric_entry.n_value as i64),
-                analytics_route,
-                serialize_gateway_score_analytics_details(
+                gateway: txn_detail.gateway.clone().or(gateway_reference_id.clone()),
+                score_value: Some(metric_entry.success_rate.into()),
+                sigma_factor: Some(metric_entry.sigma_factor.into()),
+                average_latency: Some(metric_entry.average_latency.into()),
+                tp99_latency: Some(metric_entry.tp99_latency.into()),
+                transaction_count: Some(metric_entry.n_value as i64),
+                details: serialize_gateway_score_analytics_details(
                     &routing_approach,
                     &gateway_scoring_type,
                     "Gateway score updated successfully",
                 ),
-                Some(txn_detail.txnUuid.clone()),
-                None,
-                None,
-                None,
-                Some("score_updated".to_string()),
-            );
+                payment_id: Some(txn_detail.txnUuid.clone()),
+                event_stage: Some("score_updated".to_string()),
+                ..crate::analytics::DomainAnalyticsEvent::score_snapshot(
+                    score_snapshot_flow,
+                    analytics_route,
+                )
+            }
+            .emit();
         }
     }
 
@@ -1029,10 +1023,7 @@ pub async fn update_gateway_score(
                 let pmt_str = txn_card_info.instrument.method_code().to_string();
                 let pm_str = m_source_object.clone().unwrap_or_default();
                 let sr_routing_dimensions = SrRoutingDimensions {
-                    card_network: txn_card_info
-                        .cardSwitchProvider
-                        .as_ref()
-                        .map(|s| s.peek().to_string()),
+                    card_network: txn_card_info.cardSwitchProvider.clone(),
                     card_isin: txn_card_info.card_isin.clone(),
                     currency: Some(txn_detail.currency.to_string()),
                     country: txn_detail.country.as_ref().map(|c| c.to_string()),
@@ -1078,35 +1069,32 @@ pub async fn update_gateway_score(
                             redis_key,
                         )
                         .await;
-                    crate::analytics::DomainAnalyticsEvent::record_score_snapshot(
-                        score_snapshot_flow,
-                        Some(merchant_id),
+                    crate::analytics::DomainAnalyticsEvent {
+                        merchant_id: Some(merchant_id),
                         // Analytics columns in Hyperswitch's meaning: type, then category.
-                        Some(pm_str),
-                        Some(pmt_str),
-                        sr_routing_dimensions.card_network.clone(),
-                        sr_routing_dimensions.card_isin.clone(),
-                        sr_routing_dimensions.currency.clone(),
-                        sr_routing_dimensions.country.clone(),
-                        sr_routing_dimensions.auth_type.clone(),
-                        Some(gateway_name),
-                        Some(score_value),
-                        None,
-                        None,
-                        None,
-                        Some(bucket_size as i64),
-                        analytics_route,
-                        serialize_gateway_score_analytics_details(
+                        payment_method_type: Some(pm_str),
+                        payment_method: Some(pmt_str),
+                        card_network: sr_routing_dimensions.card_network.clone(),
+                        card_is_in: sr_routing_dimensions.card_isin.clone(),
+                        currency: sr_routing_dimensions.currency.clone(),
+                        country: sr_routing_dimensions.country.clone(),
+                        auth_type: sr_routing_dimensions.auth_type.clone(),
+                        gateway: Some(gateway_name),
+                        score_value: Some(score_value),
+                        transaction_count: Some(bucket_size as i64),
+                        details: serialize_gateway_score_analytics_details(
                             &routing_approach,
                             &gateway_scoring_type,
                             "Gateway score snapshot derived from sr_v3 redis score",
                         ),
-                        Some(txn_detail.txnUuid.clone()),
-                        None,
-                        None,
-                        None,
-                        Some("score_updated".to_string()),
-                    );
+                        payment_id: Some(txn_detail.txnUuid.clone()),
+                        event_stage: Some("score_updated".to_string()),
+                        ..crate::analytics::DomainAnalyticsEvent::score_snapshot(
+                            score_snapshot_flow,
+                            analytics_route,
+                        )
+                    }
+                    .emit();
                 }
             }
         }

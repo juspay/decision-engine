@@ -1,0 +1,3 @@
+disallowed-types = [
+    { path = "axum::Json", reason = "use crate::custom_extractors::Json: it records the masked analytics copy of typed bodies" },
+]

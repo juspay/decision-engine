@@ -1,5 +1,5 @@
-import { Navigate, Route, Routes, useNavigate } from 'react-router-dom'
-import { useEffect, useState } from 'react'
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
 import { AnalyticsPage } from './components/pages/AnalyticsPage'
 import { DecisionExplorerPage } from './components/pages/DecisionExplorerPage'
 import { DecisionSimulatorPage } from './components/pages/DecisionSimulatorPage'
@@ -31,6 +31,7 @@ import { useMerchantStore } from './store/merchantStore'
 import { apiPost } from './lib/api'
 import { stampDashboardHandoffScope, takeDashboardRoute } from './lib/dashboardHandoff'
 import { postToDashboard } from './lib/embedBridge'
+import { reloadIfNewerBuild, watchForNewerBuild } from './lib/buildVersion'
 
 interface ExchangeResponse {
   token: string
@@ -66,6 +67,25 @@ function UnknownRoute() {
       </div>
     </div>
   )
+}
+
+/**
+ * Moves a tab left open across a deploy onto the deployed build, at its next navigation. The page
+ * on screen is being replaced then anyway; the arrival render is skipped, as that load is already
+ * current.
+ */
+function ReloadIntoNewerBuild() {
+  const location = useLocation()
+  const arrived = useRef(false)
+  useEffect(() => watchForNewerBuild(), [])
+  useEffect(() => {
+    if (!arrived.current) {
+      arrived.current = true
+      return
+    }
+    reloadIfNewerBuild()
+  }, [location.key])
+  return null
 }
 
 export default function App() {
@@ -152,43 +172,46 @@ export default function App() {
   }
 
   return (
-    <Routes>
-      <Route path="login" element={<AuthPage />} />
-      {signupEnabled ? <Route path="signup" element={<AuthPage />} /> : null}
-      <Route path="verify-email" element={<VerifyEmailPage />} />
-      <Route path="forgot-password" element={<ForgotPasswordPage />} />
-      <Route path="reset-password" element={<ResetPasswordPage />} />
-      <Route element={<AuthGuard />}>
-        <Route path="onboarding" element={<OnboardingPage />} />
-        <Route element={<AppShell />}>
-          <Route index element={<OverviewPage />} />
-          <Route path="routing" element={<RoutingHubPage />} />
-          <Route path="routing/sr" element={<SRRoutingPage />} />
-          <Route path="routing/rules" element={<EuclidRulesPage />} />
-          <Route path="routing/rules/new" element={<EuclidRuleBuilderPage />} />
-          <Route path="routing/rules/:id/edit" element={<EuclidRuleBuilderPage />} />
-          <Route path="routing/volume" element={<VolumeSplitPage />} />
-          <Route path="routing/volume/new" element={<VolumeSplitBuilderPage />} />
-          <Route path="routing/volume/:id/edit" element={<VolumeSplitBuilderPage />} />
-          <Route path="routing/debit" element={<DebitRoutingPage />} />
-          <Route path="routing/volume-contracts" element={<Navigate to="/routing/sr?tab=volume" replace />} />
-          {/* Cost Estimation moved into the Multi Objective page as a tab; keep the
-              old path working for bookmarks/links. */}
-          <Route path="routing/cost" element={<Navigate to="/routing/sr?tab=cost" replace />} />
-          <Route path="routing/ab-testing" element={<ABTestingPage />} />
-          <Route path="decisions" element={<DecisionExplorerPage />} />
-          {simulatorEnabled ? (
-            <Route path="decisions/simulator" element={<DecisionSimulatorPage />} />
-          ) : null}
-          <Route path="analytics" element={<AnalyticsPage />} />
-          <Route path="audit" element={<PaymentAuditPage />} />
-          <Route path="events" element={<RoutingEventsPage />} />
-          <Route path="members" element={<MembersPage />} />
-          <Route path="api-keys" element={<ApiKeysPage />} />
-          <Route path="account" element={<AccountPage />} />
-          <Route path="*" element={<UnknownRoute />} />
+    <>
+      <ReloadIntoNewerBuild />
+      <Routes>
+        <Route path="login" element={<AuthPage />} />
+        {signupEnabled ? <Route path="signup" element={<AuthPage />} /> : null}
+        <Route path="verify-email" element={<VerifyEmailPage />} />
+        <Route path="forgot-password" element={<ForgotPasswordPage />} />
+        <Route path="reset-password" element={<ResetPasswordPage />} />
+        <Route element={<AuthGuard />}>
+          <Route path="onboarding" element={<OnboardingPage />} />
+          <Route element={<AppShell />}>
+            <Route index element={<OverviewPage />} />
+            <Route path="routing" element={<RoutingHubPage />} />
+            <Route path="routing/sr" element={<SRRoutingPage />} />
+            <Route path="routing/rules" element={<EuclidRulesPage />} />
+            <Route path="routing/rules/new" element={<EuclidRuleBuilderPage />} />
+            <Route path="routing/rules/:id/edit" element={<EuclidRuleBuilderPage />} />
+            <Route path="routing/volume" element={<VolumeSplitPage />} />
+            <Route path="routing/volume/new" element={<VolumeSplitBuilderPage />} />
+            <Route path="routing/volume/:id/edit" element={<VolumeSplitBuilderPage />} />
+            <Route path="routing/debit" element={<DebitRoutingPage />} />
+            <Route path="routing/volume-contracts" element={<Navigate to="/routing/sr?tab=volume" replace />} />
+            {/* Cost Estimation moved into the Multi Objective page as a tab; keep the
+                old path working for bookmarks/links. */}
+            <Route path="routing/cost" element={<Navigate to="/routing/sr?tab=cost" replace />} />
+            <Route path="routing/ab-testing" element={<ABTestingPage />} />
+            <Route path="decisions" element={<DecisionExplorerPage />} />
+            {simulatorEnabled ? (
+              <Route path="decisions/simulator" element={<DecisionSimulatorPage />} />
+            ) : null}
+            <Route path="analytics" element={<AnalyticsPage />} />
+            <Route path="audit" element={<PaymentAuditPage />} />
+            <Route path="events" element={<RoutingEventsPage />} />
+            <Route path="members" element={<MembersPage />} />
+            <Route path="api-keys" element={<ApiKeysPage />} />
+            <Route path="account" element={<AccountPage />} />
+            <Route path="*" element={<UnknownRoute />} />
+          </Route>
         </Route>
-      </Route>
-    </Routes>
+      </Routes>
+    </>
   )
 }

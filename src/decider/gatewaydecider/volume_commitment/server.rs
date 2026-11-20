@@ -2,9 +2,10 @@
 
 use std::sync::Arc;
 
+use crate::custom_extractors::Json;
 use axum::extract::State;
 use axum::routing::get;
-use axum::{Json, Router};
+use axum::Router;
 use tokio::signal::unix::{signal, SignalKind};
 
 use super::scheduler::{ScheduleEntry, Scheduler};

@@ -32,6 +32,8 @@ pub mod auth;
 pub mod config;
 pub mod cost_ingestion;
 pub mod crypto;
+// The shared `Json` wrapper is built on `axum::Json`, which every other module reaches through it.
+#[allow(clippy::disallowed_types)]
 pub mod custom_extractors;
 pub mod decider;
 pub mod email;

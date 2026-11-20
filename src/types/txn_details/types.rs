@@ -78,6 +78,21 @@ pub enum TxnObjectType {
     VanPayment,
     #[serde(rename = "MOTO_PAYMENT")]
     MotoPayment,
+    // The routing configuration's `payment_type` values, which `/decide` and hybrid payments carry.
+    #[serde(rename = "NORMAL")]
+    Normal,
+    #[serde(rename = "NEW_MANDATE")]
+    NewMandate,
+    #[serde(rename = "UPDATE_MANDATE")]
+    UpdateMandate,
+    #[serde(rename = "SETUP_MANDATE")]
+    SetupMandate,
+    #[serde(rename = "RECURRING_MANDATE")]
+    RecurringMandate,
+    #[serde(rename = "NON_MANDATE")]
+    NonMandate,
+    #[serde(rename = "PPT_MANDATE")]
+    PptMandate,
     #[serde(rename = "UNKNOWN")]
     Unknown,
 }
@@ -102,6 +117,13 @@ impl fmt::Display for TxnObjectType {
                 Self::PartialVoid => "PARTIAL_VOID",
                 Self::VanPayment => "VAN_PAYMENT",
                 Self::MotoPayment => "MOTO_PAYMENT",
+                Self::Normal => "NORMAL",
+                Self::NewMandate => "NEW_MANDATE",
+                Self::UpdateMandate => "UPDATE_MANDATE",
+                Self::SetupMandate => "SETUP_MANDATE",
+                Self::RecurringMandate => "RECURRING_MANDATE",
+                Self::NonMandate => "NON_MANDATE",
+                Self::PptMandate => "PPT_MANDATE",
                 Self::Unknown => "UNKNOWN",
             }
         )
@@ -125,6 +147,13 @@ impl TxnObjectType {
             "PARTIAL_VOID" => Some(Self::PartialVoid),
             "VAN_PAYMENT" => Some(Self::VanPayment),
             "MOTO_PAYMENT" => Some(Self::MotoPayment),
+            "NORMAL" => Some(Self::Normal),
+            "NEW_MANDATE" => Some(Self::NewMandate),
+            "UPDATE_MANDATE" => Some(Self::UpdateMandate),
+            "SETUP_MANDATE" => Some(Self::SetupMandate),
+            "RECURRING_MANDATE" => Some(Self::RecurringMandate),
+            "NON_MANDATE" => Some(Self::NonMandate),
+            "PPT_MANDATE" => Some(Self::PptMandate),
             "UNKNOWN" => Some(Self::Unknown),
             _ => None,
         }
@@ -146,6 +175,13 @@ impl TxnObjectType {
             Self::PartialVoid => "PARTIAL_VOID",
             Self::VanPayment => "VAN_PAYMENT",
             Self::MotoPayment => "MOTO_PAYMENT",
+            Self::Normal => "NORMAL",
+            Self::NewMandate => "NEW_MANDATE",
+            Self::UpdateMandate => "UPDATE_MANDATE",
+            Self::SetupMandate => "SETUP_MANDATE",
+            Self::RecurringMandate => "RECURRING_MANDATE",
+            Self::NonMandate => "NON_MANDATE",
+            Self::PptMandate => "PPT_MANDATE",
             Self::Unknown => "UNKNOWN",
         }
     }

@@ -126,6 +126,8 @@ report_poll_interval_secs = 30
 # `chase_report.csv`) and is filed under `acc_<connector>` automatically.
 aws_bucket = ""
 aws_region = ""
+# Cap on a single uploaded or sampled report, in bytes.
+max_upload_bytes = 209715200
 
 [cost_ingestion.connector]
 checkout_production_api_base_url = "https://api.checkout.com"
