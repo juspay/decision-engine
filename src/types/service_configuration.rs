@@ -247,6 +247,13 @@ impl MerchantConfig for DebitRoutingEnabled {
     type Value = bool;
 }
 
+/// A merchant's own scoring-context TTL in seconds, set only through the admin API.
+pub struct ScoringDataTtl;
+impl MerchantConfig for ScoringDataTtl {
+    const PREFIX: &'static str = "SCORING_DATA_TTL_SECS";
+    type Value = i64;
+}
+
 /// The dimensions SR clusters are split on.
 pub struct SrDimensions;
 impl MerchantConfig for SrDimensions {

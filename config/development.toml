@@ -101,6 +101,14 @@ api_key = "hyperswitch_api_key"
 timeout_ms = 2000
 tenant_id = "public"
 
+[scoring_data]
+# How long /decide keeps a payment's scoring context in Redis, in seconds: how late its
+# /update-gateway-score can arrive and still update scores. A merchant's own TTL, set with
+# PUT /admin/merchant-account/:merchant_id/scoring-data-ttl, replaces the default; neither can
+# go past the max, which bounds the Redis shared with other services.
+default_ttl_secs = 1800   # 30 minutes
+max_ttl_secs = 259200     # 3 days
+
 [cost_ingestion]
 # Drain webhook-enqueued jobs in this process. Off by default so only a dedicated ingest
 # deployment owns the worker; enable in dev to process pending jobs locally.

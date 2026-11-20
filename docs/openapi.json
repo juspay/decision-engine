@@ -9566,7 +9566,8 @@
               "autopilot",
               "volume-contracts",
               "sr-routing",
-              "sr-scores-from-rule-routing"
+              "sr-scores-from-rule-routing",
+              "latency-threshold"
             ]
           },
           "enabled": {

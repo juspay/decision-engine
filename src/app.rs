@@ -661,6 +661,19 @@ fn admin_routes() -> axum::Router<Arc<GlobalAppState>> {
             "/auth/admin/merchant-token",
             metered!(post, routes::user_auth::admin_merchant_token),
         )
+        // Read, set or clear a merchant's scoring-context TTL.
+        .route(
+            "/admin/merchant-account/:merchant_id/scoring-data-ttl",
+            metered!(get, routes::scoring_data_ttl::get_scoring_data_ttl)
+                .merge(metered!(
+                    put,
+                    routes::scoring_data_ttl::set_scoring_data_ttl
+                ))
+                .merge(metered!(
+                    delete,
+                    routes::scoring_data_ttl::delete_scoring_data_ttl
+                )),
+        )
         .route_layer(middleware::from_fn(custom_middleware::require_admin_secret))
 }
 

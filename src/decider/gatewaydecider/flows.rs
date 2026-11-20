@@ -804,6 +804,9 @@ pub async fn run_decider_flow(
     };
     let app_state = get_tenant_app_state().await;
     if deciderParams.dpShouldConsumeResult.unwrap_or(false) {
+        // The legacy flow writes the same key, so it uses the same TTL rule.
+        let ttl =
+            super::flow_new::scoring_data_ttl_secs(&updated_gateway_scoring_data.merchantId).await;
         app_state
             .redis_conn
             .setx(
@@ -811,7 +814,7 @@ pub async fn run_decider_flow(
                 serde_json::to_string(&updated_gateway_scoring_data.clone())
                     .unwrap_or_default()
                     .as_str(),
-                C::GATEWAY_SCORE_KEYS_TTL,
+                ttl,
                 deciderParams.dpRedisCompressionConfig.clone(),
                 RedisDataStruct::STRING,
             )

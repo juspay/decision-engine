@@ -762,7 +762,6 @@ pub const MERCHANTS_ENABLED_FOR_SCORE_KEYS_UNIFICATION: MerchantsEnabledForScore
 
 pub const GATEWAY_SELECTION_ORDER_TYPE_KEY_PREFIX: &str = "gw_sr_score";
 pub const GATEWAY_SELECTION_V3_ORDER_TYPE_KEY_PREFIX: &str = "{gw_sr_v3_score";
-pub const GATEWAY_SCORE_KEYS_TTL: i64 = 1800;
 pub const ELIMINATION_BASED_ROUTING_KEY_PREFIX: &str = "gw_score";
 pub const ELIMINATION_BASED_ROUTING_GLOBAL_KEY_PREFIX: &str = "gw_score_global";
 

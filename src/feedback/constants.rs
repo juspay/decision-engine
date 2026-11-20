@@ -315,6 +315,9 @@ impl SC::ServiceConfigKey for GsmBasedScoringFilterEnabledMerchant {
     }
 }
 
+/// Feature flag: when on for a merchant, its latency thresholds affect scoring.
+pub const LATENCY_THRESHOLD_SCORING_FEATURE_FLAG: &str = "latency_threshold_scoring_enabled";
+
 // Original Haskell function: kvRedis
 pub fn kvRedis() -> String {
     "kv_redis".into()
