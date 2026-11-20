@@ -654,7 +654,7 @@ test.describe('Decide scenarios (API)', () => {
     // The contract payment sends no payment_type, so the order type keys as UNKNOWN. The card
     // network keeps the case it was sent in, as the key does.
     expect(response.body.success_rate!.diagnostics).toMatchObject({
-      dimension: { value: 'UNKNOWN_CREDIT_CARD_Visa_US_001234' },
+      dimension: { value: 'UNKNOWN, CREDIT, CARD, Visa, US, 001234' },
     })
   })
 
@@ -675,7 +675,7 @@ test.describe('Decide scenarios (API)', () => {
     const response = await api.raw<DecideResponse>('POST', '/decide', { body })
     expect(response.body.success_rate?.status).toBe('applied')
     expect(response.body.success_rate!.diagnostics).toMatchObject({
-      dimension: { value: 'UNKNOWN_CREDIT_CARD_Visa_US' },
+      dimension: { value: 'UNKNOWN, CREDIT, CARD, Visa, US' },
     })
   })
 

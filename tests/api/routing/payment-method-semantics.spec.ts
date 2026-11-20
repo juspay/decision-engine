@@ -10,7 +10,7 @@ import { poll } from '../../helpers/poll'
 
 // The SR score key's dimensions, which is what the decider reports once it builds a key: the
 // order type, then the method type and method. This merchant configures no extra dimensions.
-const CARD_DIMENSION = 'ORDER_PAYMENT_CREDIT_CARD'
+const CARD_DIMENSION = 'ORDER_PAYMENT, CREDIT, CARD'
 
 async function setupSrMerchant(api: ApiClient, merchantId: string) {
   await api.createSuccessRateConfig(merchantId)
@@ -72,6 +72,13 @@ test.describe('Payment method meaning (API)', () => {
     expect(decided.body.routing_dimension).toBe(CARD_DIMENSION)
     expect(decided.body.routing_dimension_level).toBe('CARD_LEVEL')
 
+    const priority = await api.createRoutingAlgorithm(
+      factory.priorityRoutingPayload(m, {
+        connectors: [factory.gatewayConnector('stripe'), factory.gatewayConnector('adyen')],
+      }),
+    )
+    await api.activateRoutingAlgorithm(m, priority.body.rule_id)
+
     const paymentId = factory.paymentId('pm_semantics_hybrid')
     const hybrid = await api.raw('POST', '/routing/hybrid', {
       body: {
@@ -85,7 +92,7 @@ test.describe('Payment method meaning (API)', () => {
             card_type: { type: 'enum_variant', value: 'credit' },
             amount: { type: 'number', value: 100 },
           },
-          fallback_output: [factory.gatewayConnector('stripe')],
+          fallback_output: [factory.gatewayConnector('stripe'), factory.gatewayConnector('adyen')],
         },
         dynamic_routing_request: factory.srDecideGatewayRequest({
           merchantId: m,
