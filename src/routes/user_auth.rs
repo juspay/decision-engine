@@ -400,7 +400,9 @@ pub async fn login(
 
     // UserNotFound and InvalidPassword render as the same 401 in into_response, so there is no
     // enumeration oracle. AccountInactive and EmailNotVerified stay distinct so the user knows
-    // which step to take.
+    // which step to take. An unknown email returns before bcrypt runs, so response timing does
+    // differ, but separating the two needs repeated sampling and the edge rate limiter bounds
+    // that. Accepted, not a finding.
     let user = users.pop().ok_or(UserAuthError::UserNotFound)?;
 
     let is_active = {
