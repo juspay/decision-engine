@@ -71,12 +71,16 @@ export interface AuthUser {
   hierarchy?: AccountHierarchy
 }
 
+/** Bumped when stored session state is no longer usable as-is. 1 added `tokenClockSkew`. */
+const PERSIST_VERSION = 1
+
 interface AuthStore {
   token: string | null
   /**
    * Seconds the server's clock was ahead of this device's when `token` arrived, so its expiry can
-   * be read on the server's clock (see `lib/sessionExpiry`). `null` for a session stored before this
-   * was tracked; such a session is left to the server to expire.
+   * be read on the server's clock (see `lib/sessionExpiry`). `null` when the token carried no
+   * readable `iat`/`exp`; a session persisted before this field existed is dropped instead of
+   * kept with a null (see `migrate`).
    */
   tokenClockSkew: number | null
   user: AuthUser | null
@@ -146,6 +150,18 @@ export const useAuthStore = create<AuthStore>()(
     }),
     {
       name: 'auth-store',
+      version: PERSIST_VERSION,
+      // A session stored before skew was tracked has no `tokenClockSkew` and none can be recovered
+      // (see `measureClockSkew`), so drop it and let login or a re-mint supply a fresh one. These
+      // predate the field by longer than a token lives, so nothing usable is lost.
+      migrate: (persisted, version) => {
+        const state = persisted as Partial<AuthStore> | undefined
+        if (!state) return state
+        if (version < PERSIST_VERSION && typeof state.tokenClockSkew !== 'number') {
+          return { ...state, token: null, tokenClockSkew: null, user: null, merchants: [] }
+        }
+        return state
+      },
       onRehydrateStorage: () => (state) => {
         if (state?.token) {
           tokenRef.restore(state.token, state.tokenClockSkew ?? null)

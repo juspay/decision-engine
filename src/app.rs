@@ -667,6 +667,10 @@ fn admin_routes() -> axum::Router<Arc<GlobalAppState>> {
 /// Routes that take no deployment credential. The account routes sign users in and manage their
 /// own sessions, verifying the dashboard JWT in the handler; the settlement webhook is
 /// authenticated by the connector's signature.
+///
+/// Rate limiting for these is handled at the infrastructure layer, not here. Envoy fronts the
+/// deployment and applies the `app = decision-engine` descriptor through the envoyproxy
+/// ratelimit service, so there is deliberately no in-process limiter or lockout. By design.
 fn public_routes() -> axum::Router<Arc<GlobalAppState>> {
     axum::Router::new()
         .route(
