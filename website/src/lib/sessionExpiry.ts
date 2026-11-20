@@ -41,28 +41,36 @@ function deviceNowSeconds(): number {
 
 /**
  * Seconds the server's clock is ahead of this device's, measured from a token that has just
- * arrived. `null` when the token carries no readable `iat`/`exp`, in which case expiry is left
- * entirely to the server.
+ * arrived. `null` when the token carries no readable `iat`/`exp`.
+ *
+ * Valid only at arrival: it reads `iat` against the clock *now*, so measuring a stored token
+ * recovers its age, not the skew. Never re-measure a restored one.
  */
 export function measureClockSkew(token: string, nowSeconds = deviceNowSeconds()): number | null {
   const times = readTokenTimes(token)
   return times ? times.iat - nowSeconds : null
 }
 
+/** Tolerance for a wrong device clock when no skew is recorded. A dead token is hours past `exp`. */
+const UNKNOWN_SKEW_TOLERANCE_SECONDS = 300
+
 /**
- * Whether `token` has expired on the server's clock.
+ * Whether `token` has expired — on the server's clock when a skew was recorded, else on the device
+ * clock plus [`UNKNOWN_SKEW_TOLERANCE_SECONDS`].
  *
- * Answers `false` whenever it cannot be sure — an unreadable token, or no skew recorded for it (a
- * session stored before skew was tracked) — so that case falls back to the server's 401, exactly
- * as before.
+ * Without a skew this must not answer `false`: it is the only expiry check that runs *before* a
+ * request is sent, and embedded there is no second chance, since the 401 handler can only ask the
+ * dashboard to re-mint. An unreadable token still answers `false`.
  */
 export function isTokenExpired(
   token: string,
   clockSkew: number | null | undefined,
   nowSeconds = deviceNowSeconds(),
 ): boolean {
-  if (typeof clockSkew !== 'number' || !Number.isFinite(clockSkew)) return false
   const times = readTokenTimes(token)
   if (!times) return false
-  return nowSeconds + clockSkew >= times.exp
+  if (typeof clockSkew === 'number' && Number.isFinite(clockSkew)) {
+    return nowSeconds + clockSkew >= times.exp
+  }
+  return nowSeconds >= times.exp + UNKNOWN_SKEW_TOLERANCE_SECONDS
 }
