@@ -520,6 +520,27 @@ impl RedisConnectionWrapper {
     /// tag, so a single multi-key `DEL` could span slots and fail — one at a time stays
     /// slot-safe. Intended for scoped admin flushes (e.g. clearing one merchant's gateway
     /// scores), not hot-path use.
+    /// Every key matching `pattern`, read with SCAN so a large keyspace is walked in pages.
+    pub async fn keys_by_pattern(&self, pattern: &str) -> Result<Vec<String>, errors::RedisError> {
+        use fred::types::Scanner;
+        use futures::stream::StreamExt;
+
+        let client = self.conn.pool.next();
+        let mut scan_stream = client.scan(pattern.to_string(), Some(100), None);
+        let mut found = Vec::new();
+
+        while let Some(page) = scan_stream.next().await {
+            let mut page = page.change_context(errors::RedisError::GetFailed)?;
+            if let Some(keys) = page.take_results() {
+                found.extend(keys.iter().filter_map(|key| key.as_str().map(str::to_string)));
+            }
+            // Advance the cursor; without this the scan stops after the first page.
+            let _ = page.next();
+        }
+
+        Ok(found)
+    }
+
     pub async fn delete_keys_by_pattern(&self, pattern: &str) -> Result<usize, errors::RedisError> {
         use fred::types::Scanner;
         use futures::stream::StreamExt;

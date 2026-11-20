@@ -1,4 +1,4 @@
-use crate::custom_extractors::{Json, ScopedJson};
+use crate::custom_extractors::{Json, MerchantFromPath, ScopedJson};
 use crate::types::service_configuration::MerchantConfig;
 use error_stack::ResultExt;
 use serde::{Deserialize, Serialize};
@@ -81,6 +81,81 @@ pub async fn reset_gateway_scores(
         merchant_id,
         deleted_keys,
         removed_overrides,
+    }))
+}
+
+/// One SR v3 score window: the newest outcomes the router reads for one gateway in one segment.
+#[derive(Debug, Serialize)]
+pub struct GatewayScoreWindow {
+    /// The score key between the merchant id and the `_}queue` suffix: the segment's order type,
+    /// payment method type, payment method, dimensions and UDFs, then the gateway, joined by `_`.
+    /// Gateway names can contain `_`, so the split between segment and gateway is left to callers
+    /// that know the gateway names.
+    pub series: String,
+    pub success_count: usize,
+    pub total_count: usize,
+    /// `success_count / total_count`, as the router derives a gateway's score from its window.
+    pub success_rate: f64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct GatewayScoresResponse {
+    pub merchant_id: String,
+    pub windows: Vec<GatewayScoreWindow>,
+}
+
+/// The merchant's live SR v3 score windows from Redis, one per segment and gateway. Each is the
+/// list `/update-gateway-score` pushes outcomes onto (`1` success, `0` failure), trimmed to the
+/// bucket size, which every payment routed or reported in that segment shares.
+pub async fn list_gateway_scores(
+    TenantStateResolver(state): TenantStateResolver,
+    MerchantFromPath(merchant): MerchantFromPath,
+) -> Result<Json<GatewayScoresResponse>, error::ContainerError<error::ApiError>> {
+    let merchant_id = merchant.as_str().to_string();
+    let key_start = format!(
+        "{}_{}_",
+        C::GATEWAY_SELECTION_V3_ORDER_TYPE_KEY_PREFIX,
+        merchant_id
+    );
+    const QUEUE_SUFFIX: &str = "_}queue";
+
+    let mut keys = state
+        .redis_conn
+        .keys_by_pattern(&format!("{key_start}*{QUEUE_SUFFIX}"))
+        .await
+        .change_context(error::ApiError::UnknownError)?;
+    keys.sort();
+
+    let mut windows = Vec::with_capacity(keys.len());
+    for key in keys {
+        let Some(series) = key
+            .strip_prefix(&key_start)
+            .and_then(|rest| rest.strip_suffix(QUEUE_SUFFIX))
+        else {
+            continue;
+        };
+        let outcomes = state
+            .redis_conn
+            .get_list_range(&key, 0, -1)
+            .await
+            .change_context(error::ApiError::UnknownError)?;
+        let scores: Vec<f64> = outcomes.iter().filter_map(|v| v.parse().ok()).collect();
+        if scores.is_empty() {
+            continue;
+        }
+        // The same arithmetic as `get_score_from_redis`: the window's mean outcome.
+        let success_sum: f64 = scores.iter().sum();
+        windows.push(GatewayScoreWindow {
+            series: series.to_string(),
+            success_count: success_sum.round() as usize,
+            total_count: scores.len(),
+            success_rate: (success_sum / scores.len() as f64).clamp(0.0, 1.0),
+        });
+    }
+
+    Ok(Json(GatewayScoresResponse {
+        merchant_id,
+        windows,
     }))
 }
 

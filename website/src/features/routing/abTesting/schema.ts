@@ -1,7 +1,5 @@
-import { ABTestAlgorithmData } from '../../../types/api'
 import { ABTestFormValues, MAX_VARIANT_PCT, MIN_VARIANT_PCT } from './types'
-import { toABTestCreatePayload } from './payload'
-import { MAX_TOTAL_VARIANT_PCT, MAX_VARIANTS, resolvedControl, resolvedVariants, routesDifferently, scopedEndpoints } from './arms'
+import { MAX_TOTAL_VARIANT_PCT, MAX_VARIANTS } from './arms'
 
 /** Checks the fields that can still change on an experiment with recorded payments. */
 export function validateEvaluationSettings(
@@ -40,20 +38,8 @@ export function validateABTestForm(values: ABTestFormValues): string | null {
     return 'Pick a routing rule, an SR strategy, or both for the control arm'
 
   if (values.endpoints.length === 0) return 'Select at least one endpoint'
-  // Same checks the backend runs: on some selected endpoint every variant must route differently
-  // from control and from every other variant, or traffic would be split between identical setups.
-  const data = toABTestCreatePayload(values, '').algorithm.data as ABTestAlgorithmData
-  const endpoints = scopedEndpoints(data)
-  const control = resolvedControl(data)
-  const variants = resolvedVariants(data)
-  for (const [i, v] of variants.entries()) {
-    if (!endpoints.some(e => routesDifferently(control, v.arm, e)))
-      return variants.length === 1
-        ? 'Control and variant apply the same layers on every selected endpoint'
-        : `${v.name} applies the same layers as control on every selected endpoint`
-    const twin = variants.slice(0, i).find(other => !endpoints.some(e => routesDifferently(other.arm, v.arm, e)))
-    if (twin) return `${v.name} applies the same layers as ${twin.name} on every selected endpoint`
-  }
+  // Variants may route the same as control or as each other (an A/A comparison), so arms are not
+  // compared here.
 
   if (values.variants.some(v => v.splitPct < MIN_VARIANT_PCT || v.splitPct > MAX_VARIANT_PCT))
     return `Each variant's traffic must be between ${MIN_VARIANT_PCT}% and ${MAX_VARIANT_PCT}%`

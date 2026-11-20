@@ -337,21 +337,12 @@ pub async fn scoring_flow(
 
                 Utils::set_sr_v3_hedging_percent(decider_flow, hedging_percent);
 
-                let is_explore_and_exploit_enabled = is_feature_enabled(
-                    C::enableExploreAndExploitOnSrV3(pmt_str).get_key(),
-                    Utils::get_m_id(merchant.merchantId.clone()),
-                    "kv_redis".to_string(),
-                )
-                .await;
-
-                let should_explore = if is_explore_and_exploit_enabled {
-                    Utils::route_random_traffic_to_explore(
-                        hedging_percent,
-                        "SR_BASED_V3_ROUTING".to_string(),
-                    )
-                } else {
-                    false
-                };
+                // Explore at the resolved hedging %, which an A/B arm, autopilot or the merchant's
+                // SR config sets; 0 never explores. Every outcome trains the scores, explored or not.
+                let should_explore = Utils::route_random_traffic_to_explore(
+                    hedging_percent,
+                    "SR_BASED_V3_ROUTING".to_string(),
+                );
 
                 let sr_scores = get_cached_scores_based_on_srv3(
                     decider_flow,
@@ -397,25 +388,7 @@ pub async fn scoring_flow(
                         );
                     }
 
-                    let is_route_random_traffic_enabled = is_feature_enabled(
-                        C::ROUTE_RANDOM_TRAFFIC_SR_V3_ENABLED_MERCHANT.get_key(),
-                        Utils::get_m_id(merchant.merchantId.clone()),
-                        "kv_redis".to_string(),
-                    )
-                    .await;
-
-                    let sr_gw_score =
-                        if is_route_random_traffic_enabled && !is_explore_and_exploit_enabled {
-                            route_random_traffic(
-                                decider_flow,
-                                initial_sr_gw_scores.clone(),
-                                hedging_percent,
-                                true,
-                                "SR_BASED_V3_ROUTING".to_string(),
-                            )
-                        } else {
-                            initial_sr_gw_scores.clone()
-                        };
+                    let sr_gw_score = initial_sr_gw_scores.clone();
 
                     set_gwsm(decider_flow, sr_gw_score.clone());
                     return_sm_with_log(
@@ -424,8 +397,7 @@ pub async fn scoring_flow(
                         true,
                     );
 
-                    if sr_gw_score.len() > 1 && (!is_explore_and_exploit_enabled || should_explore)
-                    {
+                    if sr_gw_score.len() > 1 {
                         let _is_debug_mode_enabled = is_feature_enabled(
                             C::ENABLE_DEBUG_MODE_ON_SR_V3.get_key(),
                             Utils::get_m_id(merchant.merchantId.clone()),

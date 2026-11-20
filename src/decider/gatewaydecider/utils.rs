@@ -2073,6 +2073,7 @@ pub fn get_default_gateway_scoring_data(
         udfs,
         udfs_consumed_for_routing: None,
         gatewayReferenceId: gatewayRefId,
+        sr_key_scope: None,
     }
 }
 
@@ -2615,8 +2616,9 @@ pub async fn get_unified_sr_key(
 /// `{prefix}_{merchant}_{order type}_{payment method type}_{payment method}`, then the merchant's
 /// configured dimensions (`card_network`, `card_is_in`, `currency`, `country`, `auth_type`) and
 /// UDF values, skipping any the payment lacks. The type and method are the instrument's codes
-/// (`CREDIT`, `CARD`). Scores live under this key, so its format is pinned by tests: changing it
-/// strands every merchant's learned scores.
+/// (`CREDIT`, `CARD`). An A/B arm that keeps scores of its own (see `SrKeyScope`) adds its tag
+/// last. Scores live under this key, so its format is pinned by tests: changing it strands every
+/// merchant's learned scores.
 pub fn sr_key(
     gateway_scoring_data: &GatewayScoringData,
     is_sr_v3_metric_enabled: bool,
@@ -2659,6 +2661,13 @@ pub fn sr_key(
         key_components.extend(value);
     }
     key_components.extend(udf_values.into_iter().flatten());
+    // An A/B arm with scores of its own: last, so a key without one is unchanged.
+    key_components.extend(
+        gateway_scoring_data
+            .sr_key_scope
+            .as_ref()
+            .and_then(|scope| scope.own.clone()),
+    );
     intercalate_without_empty_string("_", &key_components)
 }
 
@@ -3374,6 +3383,32 @@ mod sr_key_tests {
                 Some(vec!["udf_1".to_string()]),
             ),
             "{gw_sr_v3_score_merchant_1_UNKNOWN_CREDIT_CARD_VISA_CAD_udf_1"
+        );
+        Ok(())
+    }
+
+    /// An A/B arm with scores of its own appends its tag; without one the key is unchanged.
+    #[test]
+    fn an_ab_arm_with_its_own_scores_appends_its_tag() -> Result<(), serde_json::Error> {
+        let mut data = scoring_data(PaymentInstrument::parse_lenient(
+            Some("card"),
+            Some("credit"),
+        ))?;
+        data.sr_key_scope = Some(crate::decider::gatewaydecider::types::SrKeyScope {
+            own: None,
+            also: vec!["ab_x_variant_a".to_string()],
+        });
+        assert_eq!(
+            sr_key(&data, true, &[], None),
+            "{gw_sr_v3_score_merchant_1_UNKNOWN_CREDIT_CARD"
+        );
+        data.sr_key_scope = Some(crate::decider::gatewaydecider::types::SrKeyScope {
+            own: Some("ab_x_variant_a".to_string()),
+            also: Vec::new(),
+        });
+        assert_eq!(
+            sr_key(&data, true, &["card_network".to_string()], None),
+            "{gw_sr_v3_score_merchant_1_UNKNOWN_CREDIT_CARD_VISA_ab_x_variant_a"
         );
         Ok(())
     }

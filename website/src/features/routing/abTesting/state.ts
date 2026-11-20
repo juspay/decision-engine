@@ -111,6 +111,7 @@ export function toABTestFormValues(algorithm: RoutingAlgorithm): ABTestFormValue
     endpoints: [...scopedEndpoints(abData)],
     minSampleSize: abData.min_sample_size,
     guardrailThresholdPp: abData.guardrail_threshold_pp,
+    feedbackSharing: abData.feedback_sharing ?? 'shared',
   }
 }
 

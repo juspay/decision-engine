@@ -47,7 +47,7 @@ Response is the same shape as the list call, re-read after the change so you alw
 | Slug | What it controls |
 | --- | --- |
 | `gsm-scoring-filter` | Filters gateway scoring using Gateway Status Mapper error-code classification. |
-| `explore-exploit-srv3` | Explore/exploit hedging on the SRv3 scoring path. |
+| `explore-exploit-srv3` | No longer read by routing. SRv3 explores at the resolved hedging % (an A/B arm's, autopilot's or the SR config's; 0 never explores), and every outcome, explored or not, updates the scores. |
 | `ab-test-real-payments` | Whether active A/B test experiments intercept real `/decide-gateway` traffic — see [A/B Testing: Results](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/ab-testing-results.mdx). |
 | `cost-savings` | Merchant-wide default for the cost-aware post-step — see [Multi-Objective Routing](https://github.com/juspay/decision-engine/blob/main/docs/api-refs/decide-gateway-multi-objective.mdx). Per-request `enableMultiObjective` overrides this. |
 | `elimination` | Gateway-level SR-based elimination (excluding gateways in downtime). |
@@ -62,7 +62,7 @@ Response is the same shape as the list call, re-read after the change so you alw
 
 Every polling interval (default 900s, configurable via `[sr_auto_calibration]` in `config/*.toml` or `SR_AUTO_CALIBRATION_INTERVAL_SECS`), the job:
 
-1. Reads recent traffic volume from ClickHouse (default 3600s lookback).
+1. Reads recent SR traffic volume from ClickHouse (default 3600s lookback): decisions from `/decide-gateway`, and from `/decide` and `/routing/hybrid` where SR picked the connector. Hybrid payments decided by their rule output alone aren't counted. A segment is calibrated once it has enough volume across at least two connectors.
 2. Derives two SRv3 knobs purely from observed data — no merchant input:
    - **Bucket size** — clamped between 100 and 2000, only rewritten on a meaningful (25-step) change.
    - **Hedging %** — capped at 30%, with a 1.0pp minimum move before it updates.

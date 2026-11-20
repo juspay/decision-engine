@@ -1,4 +1,4 @@
-import { ExperimentEndpoint } from '../../../types/api'
+import { ExperimentEndpoint, FeedbackSharing } from '../../../types/api'
 
 export type ABTestExperimentType =
   // Compare any two arms, each a bundle of layers: a saved routing config (rule-based / priority /
@@ -87,6 +87,8 @@ export interface ABTestFormValues {
   endpoints: ExperimentEndpoint[]
   minSampleSize: number
   guardrailThresholdPp: number
+  /** Which payments' outcomes each arm's SR scores learn from. */
+  feedbackSharing: FeedbackSharing
 }
 
 export interface SrConfigOverridePayload {
@@ -114,6 +116,7 @@ export interface ABTestAlgorithmPayload {
   endpoints: ExperimentEndpoint[]
   min_sample_size: number
   guardrail_threshold_pp: number
+  feedback_sharing: FeedbackSharing
 }
 
 export interface ABTestCreatePayload {

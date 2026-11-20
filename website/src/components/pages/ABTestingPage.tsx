@@ -19,6 +19,9 @@ import {
   SrConfigOverride,
   ExperimentResultsResponse,
   ExperimentTransactionsResponse,
+  FeedbackSharing,
+  GatewayScoreWindow,
+  GatewayScoresResponse,
 } from '../../types/api'
 import { ShieldAlert, PowerOff, Plus, CheckCircle2, XCircle, Clock, AlertTriangle, Sliders, Pencil, Trash2, Info, Copy, ArrowLeft, ChevronRight, Zap, BarChart3 } from 'lucide-react'
 import { HeaderFilter, HeaderSearch, RowMenu } from '../ui/TableControls'
@@ -46,9 +49,12 @@ import {
   resolvedControl,
   resolvedVariants,
   routesDifferently,
+  sameAsControlEverywhere,
+  scopedEndpoints,
 } from '../../features/routing/abTesting/arms'
 import { useMerchantFeatures } from '../../hooks/useMerchantFeatures'
 import { useConnectorFees } from '../../hooks/useCostRouting'
+import { ROUTABLE_CONNECTORS } from '../../lib/connectors'
 
 import { PageHeading } from '../ui/PageHeading'
 import { Notice } from '../ui/Notice'
@@ -470,7 +476,8 @@ function ControlArmSummary({ arm, source, runningExperimentName, algorithms, alg
 }
 
 // Read-only preview of what the experiment compares on each endpoint. Each endpoint applies only the
-// arm layers it supports, and a variant's traffic is split only where it differs from control.
+// arm layers it supports, and a variant's traffic is split only where it differs from control, or on
+// every selected endpoint when it is a copy of control.
 // Hybrid-only sessions see just `/routing/hybrid`.
 function EndpointPreview({ form, hybridOnly, algorithmName }: {
   form: ABTestFormValues
@@ -492,7 +499,8 @@ function EndpointPreview({ form, hybridOnly, algorithmName }: {
       <div className="space-y-2">
         {endpoints.map(endpoint => {
           const c = projectArm(control, endpoint)
-          const split = variants.filter(v => hasLayers(v.arm) && routesDifferently(control, v.arm, endpoint))
+          const split = variants.filter(v => hasLayers(v.arm) && (routesDifferently(control, v.arm, endpoint)
+            || (scopedEndpoints(data).includes(endpoint) && sameAsControlEverywhere(data, v.arm))))
           const identical = split.length === 0
           return (
             <div
@@ -520,7 +528,10 @@ function EndpointPreview({ form, hybridOnly, algorithmName }: {
                     <p key={v.id}>
                       <span className="font-medium">{v.name}:</span>{' '}
                       {split.includes(v)
-                        ? armLabel(projectArm(v.arm, endpoint), algorithmName, endpoint)
+                        ? <>
+                          {armLabel(projectArm(v.arm, endpoint), algorithmName, endpoint)}
+                          {!routesDifferently(control, v.arm, endpoint) && <span className="italic"> (same as control)</span>}
+                        </>
                         : <span className="italic">same as control here, so its traffic isn't part of the experiment</span>}
                     </p>
                   ))}
@@ -832,6 +843,17 @@ function ConfigComparisonTable({ abData, isTuning, live, autopilotOn, algorithmN
       rows.push({ label: 'Bucket size', cells: arms.map(bucket) })
     }
   }
+  if (abData.feedback_sharing === 'control_and_own') {
+    rows.push({
+      label: 'SR feedback',
+      cells: [
+        'Its own payments',
+        ...variants.map(() => 'Control’s payments + its own'),
+      ],
+    })
+  } else {
+    rows.push({ label: 'SR feedback', cells: arms.map(() => muted('Every arm’s payments (shared)')) })
+  }
 
   return (
     <div className="overflow-x-auto rounded-xl border border-slate-200 dark:border-[#222226]">
@@ -992,6 +1014,121 @@ interface DetailPanelProps {
 
 function formatTime(ms: number) {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'short', timeStyle: 'short' }).format(new Date(ms))
+}
+
+// Connector names longest first, so a key ending `_ctp_visa` reads as `ctp_visa`, not `visa`.
+const CONNECTORS_LONGEST_FIRST = [...ROUTABLE_CONNECTORS].sort((a, b) => b.length - a.length)
+
+/** Splits a score window's `series` into its segment and gateway. Gateway names can contain `_`. */
+function splitScoreSeries(series: string): { segment: string; gateway: string } {
+  const lower = series.toLowerCase()
+  const known = CONNECTORS_LONGEST_FIRST.find(c => lower === c || lower.endsWith(`_${c}`))
+  const cut = known ? series.length - known.length : series.lastIndexOf('_') + 1
+  return { segment: series.slice(0, Math.max(0, cut - 1)), gateway: series.slice(cut) }
+}
+
+/** An arm tag of any experiment in a score key: `_ab_<experiment uuid>_<variant>`. */
+const OTHER_ARM_TAG = /_ab_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}_/
+
+/** One arm's live score lists: the merchant's own lists for control, the variant's otherwise. */
+interface ArmScores {
+  id: string
+  name: string
+  pct: number
+  /** Keyed by segment + PSP. */
+  windows: Map<string, GatewayScoreWindow>
+}
+
+/**
+ * Each arm's live SR scores straight from Redis, the recent outcomes it routes on. With shared
+ * feedback every arm routes on the merchant's lists, so all arms read the same; with control + own
+ * each variant has lists of its own (tagged `ab_<experiment>_<variant>`), fed by control and itself.
+ * Lists another experiment left behind are ignored.
+ */
+function LiveRoutingScores({ merchantId, experimentId, abData }: {
+  merchantId: string
+  experimentId: string
+  abData: ABTestAlgorithmData
+}) {
+  const { data, error, isLoading } = useSWR<GatewayScoresResponse>(
+    merchantId ? `/gateway-score/${encodeURIComponent(merchantId)}` : null,
+    fetcher,
+    { refreshInterval: 10_000 },
+  )
+  const perArm = abData.feedback_sharing === 'control_and_own'
+  const variants = resolvedVariants(abData)
+  const experimentTag = `ab_${experimentId.replace(/^routing_/, '')}_`
+  const arms: ArmScores[] = [
+    { id: CONTROL_ARM_ID, name: 'Control', pct: controlSplitPct(abData), windows: new Map() },
+    ...variants.map(v => ({ id: v.id, name: v.name, pct: v.splitPct, windows: new Map<string, GatewayScoreWindow>() })),
+  ]
+  let windowCount = 0
+  for (const w of data?.windows ?? []) {
+    const { segment: tagged, gateway } = splitScoreSeries(w.series)
+    // An arm-tagged list sits at `<segment>_ab_<experiment>_<variant>`; anything else is the merchant's.
+    const variant = variants.find(v => tagged.endsWith(`_${experimentTag}${v.id}`))
+    if (!variant && OTHER_ARM_TAG.test(tagged)) continue
+    const segment = variant ? tagged.slice(0, -(`_${experimentTag}${variant.id}`.length)) : tagged
+    const key = `${segment}|${gateway}`
+    windowCount += 1
+    if (variant) {
+      if (perArm) arms.find(a => a.id === variant.id)?.windows.set(key, w)
+    } else {
+      // The merchant's lists: control's under control + own, every arm's when feedback is shared.
+      for (const arm of perArm ? arms.slice(0, 1) : arms) arm.windows.set(key, w)
+    }
+  }
+  const total = (arm: ArmScores) => {
+    const ws = [...arm.windows.values()]
+    return { success: ws.reduce((s, w) => s + w.success_count, 0), count: ws.reduce((s, w) => s + w.total_count, 0) }
+  }
+  const learnsFrom = (arm: ArmScores) => !perArm
+    ? 'Shared lists · every arm’s payments'
+    : arm.id === CONTROL_ARM_ID ? 'Its own payments' : 'Control’s payments + its own'
+
+  return (
+    <section className="space-y-3 border-t border-slate-200 dark:border-[#262d3a] pt-6">
+      <div>
+        <h3 className={type.heading}>Live routing scores</h3>
+        <p className="mt-0.5 text-[12px] text-slate-500 leading-4">
+          {perArm
+            ? 'Each arm’s own recent outcomes per PSP in Redis, the scores it routes on. Control learns from its own payments; each variant from control’s and its own.'
+            : 'The recent outcomes per PSP in Redis that every arm shares and routes on, so all arms read the same.'}
+          {' '}A recent window, not the whole experiment. Updates every 10 seconds.
+        </p>
+      </div>
+      {error ? (
+        <p className="text-sm italic text-slate-500">Couldn’t read the scores: {error instanceof Error ? error.message : String(error)}</p>
+      ) : isLoading && !data ? (
+        <div className="flex items-center gap-2 text-sm text-slate-500"><Spinner size={14} /> Loading scores…</div>
+      ) : windowCount === 0 ? (
+        <p className="text-sm italic text-slate-500">No scores recorded yet. They appear once payments report outcomes.</p>
+      ) : (
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {arms.map(arm => {
+              const { success, count } = total(arm)
+              return (
+                <div key={arm.id} className="rounded-xl border border-slate-200 px-4 py-3 dark:border-[#222226]">
+                  <div className="text-[12px] font-medium text-slate-500 dark:text-[#8d96aa] leading-4">{arm.name} routing score · {arm.pct}%</div>
+                  <div className={`${type.metric} mt-1`}>{count > 0 ? authRatePct(success / count) : '—'}</div>
+                  <div className="text-[12px] text-slate-500 dark:text-[#8d96aa] leading-4 [font-variant-numeric:tabular-nums]">
+                    {success.toLocaleString()} / {count.toLocaleString()} outcomes
+                  </div>
+                  <div className="mt-1 text-[12px] text-slate-500 dark:text-[#8d96aa] leading-4">{learnsFrom(arm)}</div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+    </section>
+  )
+}
+
+const FEEDBACK_SHARING_LABELS: Record<FeedbackSharing, string> = {
+  shared: 'Shared — every arm learns from every arm’s payments',
+  control_and_own: 'Control + own — each variant learns from control’s payments and its own',
 }
 
 const TXN_HEAD_CELL =
@@ -1403,6 +1540,9 @@ function ExperimentDetailPanel({
           </div>
         )}
       </section>
+
+      {/* ── Live routing scores ── */}
+      {abData && <LiveRoutingScores merchantId={merchantId} experimentId={algorithm.id} abData={abData} />}
 
       {/* ── Transactions ── */}
       <section className="space-y-3 border-t border-slate-200 dark:border-[#262d3a] pt-6">
@@ -1991,6 +2131,19 @@ function CreateForm({
               </div>
 
               {sampleTargetField}
+
+              <div>
+                <FieldLabel hint="Which payments' outcomes each arm's success-rate scores learn from.">SR feedback</FieldLabel>
+                <select
+                  className={`w-full ${fieldCls}`}
+                  value={form.feedbackSharing}
+                  onChange={e => setForm(f => ({ ...f, feedbackSharing: e.target.value as FeedbackSharing }))}
+                >
+                  {(Object.keys(FEEDBACK_SHARING_LABELS) as FeedbackSharing[]).map(mode => (
+                    <option key={mode} value={mode}>{FEEDBACK_SHARING_LABELS[mode]}</option>
+                  ))}
+                </select>
+              </div>
             </FormSection>
 
             {/* ── 3 · Safety ── */}
@@ -2217,6 +2370,7 @@ const DEFAULT_FORM: ABTestFormValues = {
   endpoints: [...EXPERIMENT_ENDPOINTS],
   minSampleSize: 5000,
   guardrailThresholdPp: 3,
+  feedbackSharing: 'shared',
 }
 
 export function ABTestingPage() {

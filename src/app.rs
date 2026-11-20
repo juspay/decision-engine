@@ -682,6 +682,10 @@ fn merchant_routes() -> axum::Router<Arc<GlobalAppState>> {
             metered!(post, routes::gateway_score::reset_gateway_scores),
         )
         .route(
+            "/gateway-score/:merchant_id",
+            metered!(get, routes::gateway_score::list_gateway_scores),
+        )
+        .route(
             "/api-key/create",
             metered!(post, routes::api_key::create_api_key),
         )

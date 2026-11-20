@@ -189,13 +189,17 @@ pub async fn decider_full_payload_hs_function(
     let mut ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride> = None;
     // Keep the assignment and layers so the routing event can include the final gateway.
     let mut ab_test_experiment = None;
+    // The arm's own SR scores, when the experiment keeps them per arm.
+    let mut ab_test_sr_key_scope = None;
     match super::ab_test::intercept(&dreq_, experiment_endpoint).await {
         super::ab_test::AbTestIntercept::SrArm {
             projection,
             experiment,
+            sr_key_scope,
         } => {
             ab_test_sr_override = projection.sr.clone();
             ab_test_experiment = Some((experiment, projection));
+            ab_test_sr_key_scope = sr_key_scope;
         }
         super::ab_test::AbTestIntercept::Disabled => {}
     }
@@ -270,6 +274,7 @@ pub async fn decider_full_payload_hs_function(
             false,
             cpu_start,
             ab_test_sr_override,
+            ab_test_sr_key_scope,
             dreq_.enable_multi_objective,
         )
         .await;
@@ -316,6 +321,7 @@ async fn perform_hybrid_routing(
         dreq_.clone().elimination_enabled,
         false,
         cpu_start,
+        None,
         None,
         dreq_.enable_multi_objective,
     )
@@ -412,6 +418,7 @@ async fn write_gateway_scoring_data(txn_uuid: &str, data: &T::GatewayScoringData
 pub async fn store_scoring_context_without_decider(
     dreq_: &T::DomainDeciderRequestForApiCallV2,
     routing_approach: &str,
+    sr_key_scope: Option<T::SrKeyScope>,
 ) -> Result<(), T::ErrorResponse> {
     let decider_params = prepare_decider_params(dreq_).await?;
     let mut decider_state = T::initial_decider_state(
@@ -439,6 +446,7 @@ pub async fn store_scoring_context_without_decider(
             routingApproach: Some(routing_approach.to_string()),
             eliminationEnabled: dreq_.elimination_enabled.unwrap_or_default(),
             udfs: Some(decider_params.dpOrder.udfs.clone()),
+            sr_key_scope,
             ..scoring_data
         },
     )
@@ -453,6 +461,7 @@ pub async fn run_decider_flow(
     is_legacy_decider_flow: bool,
     cpu_start: Instant,
     ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride>,
+    sr_key_scope: Option<T::SrKeyScope>,
     enable_multi_objective_override: Option<bool>,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let txnCreationTime = deciderParams
@@ -468,14 +477,18 @@ pub async fn run_decider_flow(
 
     let mut decider_flow =
         T::initial_decider_flow(deciderParams.clone(), &mut logger, &mut deciderState).await; // TODO: Check if this is correct & changes decider state
-    decider_flow.writer.gateway_scoring_data = Utils::get_gateway_scoring_data(
-        &mut decider_flow,
-        deciderParams.dpTxnDetail.clone(),
-        deciderParams.dpTxnCardInfo.clone(),
-        deciderParams.dpMerchantAccount.clone(),
-        is_legacy_decider_flow,
-    )
-    .await;
+    decider_flow.writer.gateway_scoring_data = T::GatewayScoringData {
+        // Set before scoring, so SR reads the arm's scores and the stored context updates them.
+        sr_key_scope,
+        ..Utils::get_gateway_scoring_data(
+            &mut decider_flow,
+            deciderParams.dpTxnDetail.clone(),
+            deciderParams.dpTxnCardInfo.clone(),
+            deciderParams.dpMerchantAccount.clone(),
+            is_legacy_decider_flow,
+        )
+        .await
+    };
     let functionalGateways = deciderParams
         .dpEnforceGatewayList
         .clone()

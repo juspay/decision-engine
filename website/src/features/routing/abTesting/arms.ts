@@ -3,7 +3,8 @@ import { ABTestAlgorithmData, ExperimentArm, ExperimentEndpoint, SrConfigOverrid
 // Mirrors the backend's `ab_test::arms`: an arm is a bundle of layers, and each endpoint applies
 // only the layers it supports. An experiment has one control and one or more variants. A variant's
 // traffic is split on an endpoint only when it is in the experiment's scope, the variant is still
-// running, and it differs from control there; elsewhere the control arm is served untracked.
+// running, and it differs from control there (or is a copy of control on every endpoint in scope);
+// elsewhere the control arm is served untracked.
 
 export const SR_ROUTING_ARM_ID = 'sr_routing'
 export const CONTROL_ARM_ID = 'control'
@@ -124,14 +125,21 @@ export function routesDifferently(a: ExperimentArm, b: ExperimentArm, endpoint: 
   return !sameArm(routingBehaviour(a, endpoint), routingBehaviour(b, endpoint))
 }
 
+/** Whether `arm` routes the same as control on every endpoint in scope: a copy of control (A/A). */
+export function sameAsControlEverywhere(data: ABTestAlgorithmData, arm: ExperimentArm): boolean {
+  const control = resolvedControl(data)
+  return scopedEndpoints(data).every(e => !routesDifferently(control, arm, e))
+}
+
 /**
  * Whether this variant is compared with control on `endpoint`: the endpoint is in scope and the
- * variant routes differently from control there. A stopped variant still is, since the payments it
- * recorded before it stopped are still read as its results.
+ * variant routes differently from control there, or it is a copy of control, which is split on
+ * every endpoint in scope. A stopped variant still is, since the payments it recorded before it
+ * stopped are still read as its results.
  */
 export function variantComparedOn(data: ABTestAlgorithmData, variant: ResolvedVariant, endpoint: ExperimentEndpoint): boolean {
   return scopedEndpoints(data).includes(endpoint)
-    && routesDifferently(resolvedControl(data), variant.arm, endpoint)
+    && (routesDifferently(resolvedControl(data), variant.arm, endpoint) || sameAsControlEverywhere(data, variant.arm))
 }
 
 /** Whether this variant's traffic is split from control on `endpoint` now. */

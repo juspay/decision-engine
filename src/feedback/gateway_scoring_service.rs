@@ -794,27 +794,11 @@ pub async fn update_gateway_score(
         true
     };
 
-    let should_update_explore_txn = if Cutover::is_feature_enabled(
-        DC::EnableExploreAndExploitOnSrv3(txn_card_info.instrument.method_code().to_string())
-            .get_key(),
-        MID::merchant_id_to_text(txn_detail.clone().merchantId),
-        C::kvRedis(),
-    )
-    .await
-    {
-        is_routing_approach_in_explore(routing_approach.clone())
-    } else {
-        true
-    };
-
     let redis_key = format!("{}{}", C::GATEWAY_SCORING_DATA, txn_detail.clone().txnUuid);
     let app_state = get_tenant_app_state().await;
 
     let redis_gateway_score_data_initial: Option<GatewayScoringData> =
-        if should_update_srv3_gateway_score
-            && should_isolate_srv3_producer
-            && should_update_explore_txn
-        {
+        if should_update_srv3_gateway_score && should_isolate_srv3_producer {
             let mb_gateway_scoring_data: Option<GatewayScoringData> = app_state
                 .redis_conn
                 .get_key(&redis_key, "GatewayScoringData")
@@ -896,10 +880,8 @@ pub async fn update_gateway_score(
     )
     .await;
 
-    let should_record_srv3_post_update = should_update_srv3_gateway_score
-        && should_isolate_srv3_producer
-        && should_update_explore_txn
-        && is_update_within_window;
+    let should_record_srv3_post_update =
+        should_update_srv3_gateway_score && should_isolate_srv3_producer && is_update_within_window;
     if !should_record_srv3_post_update {
         if let Some(metric_entry) = m_metric_entry.clone() {
             crate::analytics::DomainAnalyticsEvent::record_score_snapshot(
@@ -1185,24 +1167,6 @@ pub fn is_routing_approach_in_srv3(maybe_text: Option<String>) -> bool {
     match maybe_text {
         Some(text) => {
             text.contains("V3")
-                || text.contains("MULTI_OBJECTIVE")
-                || text.contains("PREFERRED_CONNECTOR")
-        }
-        None => false,
-    }
-}
-
-// Original Haskell function: isRoutingApproachInExplore
-//
-// Under explore/exploit, only off-policy ("explore") samples update SRv3 scores so
-// the estimates stay unbiased. Hedging is the usual explore path, but multi-objective
-// (cost) routing is also off-policy: it deliberately picks a *non-top*, SR-equivalent
-// (cheaper) PSP, which is exploration of that PSP. Treat it as explore too, otherwise
-// cost-routed outcomes are excluded from scoring whenever explore/exploit is enabled.
-pub fn is_routing_approach_in_explore(maybe_text: Option<String>) -> bool {
-    match maybe_text {
-        Some(text) => {
-            text.contains("HEDGING")
                 || text.contains("MULTI_OBJECTIVE")
                 || text.contains("PREFERRED_CONNECTOR")
         }
@@ -1520,8 +1484,8 @@ mod tests {
         )));
     }
 
-    // ── Routing-approach producer/explore gates ─────────────────────────────
-    use super::{is_routing_approach_in_explore, is_routing_approach_in_srv3};
+    // ── Routing-approach producer gate ──────────────────────────────────────
+    use super::is_routing_approach_in_srv3;
 
     #[test]
     fn srv3_gate_admits_v3_and_multi_objective() {
@@ -1546,31 +1510,13 @@ mod tests {
         )));
         assert!(!is_routing_approach_in_srv3(None));
     }
-
-    #[test]
-    fn explore_gate_admits_hedging_and_multi_objective() {
-        assert!(is_routing_approach_in_explore(Some("SR_V3_HEDGING".into())));
-        // Cost estimation picks a non-top, SR-equivalent PSP — off-policy exploration.
-        assert!(is_routing_approach_in_explore(Some(
-            "SR_SELECTION_MULTI_OBJECTIVE".into()
-        )));
-    }
-
-    #[test]
-    fn explore_gate_rejects_plain_exploit() {
-        // Pure exploit V3 routing is still excluded under explore/exploit gating.
-        assert!(!is_routing_approach_in_explore(Some(
-            "SR_SELECTION_V3_ROUTING".into()
-        )));
-        assert!(!is_routing_approach_in_explore(None));
-    }
 }
 
 // Helper function to filter by gateway only
 
 #[cfg(test)]
 mod preferred_connector_feedback_tests {
-    use super::{is_routing_approach_in_explore, is_routing_approach_in_srv3};
+    use super::is_routing_approach_in_srv3;
 
     #[test]
     fn preferred_connector_pins_keep_training_scores_during_downtime() {
@@ -1581,8 +1527,7 @@ mod preferred_connector_feedback_tests {
             "GLOBAL_DOWNTIME_ROUTING",
         ] {
             let label = format!("PREFERRED_CONNECTOR_{suffix}");
-            assert!(is_routing_approach_in_srv3(Some(label.clone())));
-            assert!(is_routing_approach_in_explore(Some(label)));
+            assert!(is_routing_approach_in_srv3(Some(label)));
         }
     }
 }

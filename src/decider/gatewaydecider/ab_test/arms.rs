@@ -17,8 +17,9 @@
 //! changes rules never runs an A/A test on `/decide-gateway`. Control payments are tracked on an
 //! endpoint when at least one variant is split there.
 
+use crate::decider::gatewaydecider::types::SrKeyScope;
 use crate::euclid::types::{
-    ABTestData, ExperimentArm, ExperimentEndpoint, SrConfigOverride, CONTROL_ARM_ID,
+    ABTestData, ExperimentArm, ExperimentEndpoint, FeedbackSharing, SrConfigOverride, CONTROL_ARM_ID,
     LEGACY_VARIANT_ARM_ID, MAX_EXPERIMENT_VARIANTS, MAX_TOTAL_VARIANT_SPLIT_PCT, SR_ROUTING_ARM_ID,
 };
 
@@ -174,7 +175,21 @@ fn routes_differently(a: &ExperimentArm, b: &ExperimentArm, endpoint: Experiment
     routing_behaviour(a, endpoint) != routing_behaviour(b, endpoint)
 }
 
-/// Whether `variant`'s payments are split from control on `endpoint`.
+/// Whether `variant` routes the same as control on every endpoint the experiment covers, i.e. it
+/// is a deliberate copy of control (an A/A comparison).
+fn same_as_control_everywhere(
+    data: &ABTestData,
+    control: &ExperimentArm,
+    variant: &ResolvedVariant,
+) -> bool {
+    ExperimentEndpoint::ALL
+        .into_iter()
+        .filter(|endpoint| in_scope(data, *endpoint))
+        .all(|endpoint| !routes_differently(control, &variant.arm, endpoint))
+}
+
+/// Whether `variant`'s payments are split from control on `endpoint`: where it routes differently
+/// from control, or on every covered endpoint when it is a copy of control.
 fn variant_splits_on(
     data: &ABTestData,
     control: &ExperimentArm,
@@ -183,7 +198,8 @@ fn variant_splits_on(
 ) -> bool {
     !variant.stopped
         && in_scope(data, endpoint)
-        && routes_differently(control, &variant.arm, endpoint)
+        && (routes_differently(control, &variant.arm, endpoint)
+            || same_as_control_everywhere(data, control, variant))
 }
 
 /// Whether traffic on `endpoint` is split between control and at least one running variant.
@@ -230,6 +246,37 @@ pub fn plan(data: &ABTestData, endpoint: ExperimentEndpoint, payment_id: &str) -
             },
             _ => untracked_control(),
         },
+    }
+}
+
+/// Tag of one variant's own SR scores in `experiment_id`.
+fn arm_score_tag(experiment_id: &str, variant_id: &str) -> String {
+    format!(
+        "ab_{}_{}",
+        experiment_id.trim_start_matches("routing_"),
+        variant_id
+    )
+}
+
+/// The SR scores a payment served on `side` routes on and updates. `None` when the experiment
+/// shares the merchant's scores across arms. Under `ControlAndOwn` control keeps the merchant's
+/// scores and also writes into every variant's; a variant reads and writes only its own.
+pub fn sr_key_scope(experiment_id: &str, data: &ABTestData, side: &ArmSide) -> Option<SrKeyScope> {
+    match data.feedback_sharing {
+        FeedbackSharing::Shared => None,
+        FeedbackSharing::ControlAndOwn => Some(match side {
+            ArmSide::Control => SrKeyScope {
+                own: None,
+                also: resolved_variants(data)
+                    .iter()
+                    .map(|variant| arm_score_tag(experiment_id, &variant.id))
+                    .collect(),
+            },
+            ArmSide::Variant(id) => SrKeyScope {
+                own: Some(arm_score_tag(experiment_id, id)),
+                also: Vec::new(),
+            },
+        }),
     }
 }
 
@@ -349,42 +396,6 @@ pub fn validate(data: &ABTestData) -> Vec<(String, String)> {
         }
     }
 
-    if errors.is_empty() {
-        let scoped: Vec<ExperimentEndpoint> = ExperimentEndpoint::ALL
-            .into_iter()
-            .filter(|endpoint| in_scope(data, *endpoint))
-            .collect();
-        for (index, variant) in variants.iter().enumerate() {
-            if !scoped
-                .iter()
-                .any(|endpoint| routes_differently(&control, &variant.arm, *endpoint))
-            {
-                let message = if multi {
-                    format!(
-                        "{} applies the same layers as control on every selected endpoint",
-                        variant.id
-                    )
-                } else {
-                    "control and variant apply the same layers on every selected endpoint".into()
-                };
-                errors.push((field(index), message));
-                continue;
-            }
-            if let Some(twin) = variants[..index].iter().find(|other| {
-                !scoped
-                    .iter()
-                    .any(|endpoint| routes_differently(&other.arm, &variant.arm, *endpoint))
-            }) {
-                errors.push((
-                    field(index),
-                    format!(
-                        "{} applies the same layers as {} on every selected endpoint",
-                        variant.id, twin.id
-                    ),
-                ));
-            }
-        }
-    }
     errors
 }
 
@@ -421,6 +432,7 @@ mod tests {
             guardrail_threshold_pp: 3.0,
             variant_sr_config: None,
             control_sr_config: None,
+            feedback_sharing: Default::default(),
         }
     }
 
@@ -609,7 +621,7 @@ mod tests {
     }
 
     #[test]
-    fn validation_rejects_empty_and_identical_arms() {
+    fn validation_rejects_empty_arms_and_accepts_identical_ones() {
         let fields = |data: &ABTestData| -> Vec<String> {
             validate(data).into_iter().map(|(f, _)| f).collect()
         };
@@ -621,14 +633,14 @@ mod tests {
             sr: Some(sr(true, false)),
         };
         let identical = layered(arm.clone(), arm);
-        assert_eq!(validate(&identical).len(), 1);
+        assert!(validate(&identical).is_empty());
 
-        // Only the rule differs, but the experiment is scoped to decide_gateway where rules
-        // are not applied — nothing would ever split.
+        // Only the rule differs, and the experiment is scoped to decide_gateway where rules are
+        // not applied, so the arms route alike there. That is an A/A comparison, which is allowed.
         let mut rules_on_decide = rule_and_sr_experiment();
         rules_on_decide.variant.as_mut().unwrap().sr = Some(sr(true, false));
         rules_on_decide.endpoints = Some(vec![ExperimentEndpoint::DecideGateway]);
-        assert_eq!(validate(&rules_on_decide).len(), 1);
+        assert!(validate(&rules_on_decide).is_empty());
 
         let mut no_endpoints = rule_and_sr_experiment();
         no_endpoints.endpoints = Some(vec![]);
@@ -806,6 +818,87 @@ mod tests {
     }
 
     #[test]
+    fn a_variant_identical_to_control_everywhere_is_split_on_every_covered_endpoint() {
+        let control = ExperimentArm {
+            rule_algorithm_id: Some("rule_1".into()),
+            sr: Some(sr(false, false)),
+        };
+        let mut data = multi(
+            control.clone(),
+            vec![
+                variant("copy_b", 25, control.clone()),
+                variant("copy_c", 25, control),
+            ],
+        );
+        data.endpoints = Some(vec![
+            ExperimentEndpoint::HybridRouting,
+            ExperimentEndpoint::DecideGateway,
+        ]);
+        assert!(splits_on(&data, ExperimentEndpoint::HybridRouting));
+        assert!(splits_on(&data, ExperimentEndpoint::DecideGateway));
+        assert!(!splits_on(&data, ExperimentEndpoint::Evaluate));
+
+        let mut seen = std::collections::HashSet::new();
+        for i in 0..500 {
+            let payment_id = format!("pay_{i}");
+            let on_hybrid = plan(&data, ExperimentEndpoint::HybridRouting, &payment_id);
+            assert!(on_hybrid.in_experiment);
+            assert_eq!(
+                plan(&data, ExperimentEndpoint::DecideGateway, &payment_id).side,
+                on_hybrid.side
+            );
+            seen.insert(on_hybrid.side);
+        }
+        assert_eq!(seen.len(), 3);
+    }
+
+    #[test]
+    fn shared_feedback_keeps_one_set_of_scores() {
+        let data = three_variant_experiment();
+        assert_eq!(sr_key_scope("routing_x", &data, &ArmSide::Control), None);
+        assert_eq!(sr_key_scope("routing_x", &data, &variant_side("rule_a")), None);
+    }
+
+    #[test]
+    fn control_and_own_feedback_feeds_control_into_every_variant() {
+        let data = ABTestData {
+            feedback_sharing: FeedbackSharing::ControlAndOwn,
+            ..three_variant_experiment()
+        };
+        assert_eq!(
+            sr_key_scope("routing_x", &data, &ArmSide::Control),
+            Some(SrKeyScope {
+                own: None,
+                also: vec![
+                    "ab_x_rule_a".to_string(),
+                    "ab_x_rule_b".to_string(),
+                    "ab_x_rule_c".to_string()
+                ],
+            })
+        );
+        assert_eq!(
+            sr_key_scope("routing_x", &data, &variant_side("rule_b")),
+            Some(SrKeyScope {
+                own: Some("ab_x_rule_b".to_string()),
+                also: Vec::new(),
+            })
+        );
+    }
+
+    #[test]
+    fn feedback_sharing_defaults_to_shared() {
+        let data: ABTestData = serde_json::from_value(serde_json::json!({
+            "control": { "sr": {} },
+            "variant": { "rule_algorithm_id": "rule_1" },
+            "variant_split_pct": 10,
+            "min_sample_size": 100,
+            "guardrail_threshold_pp": 3.0
+        }))
+        .unwrap();
+        assert_eq!(data.feedback_sharing, FeedbackSharing::Shared);
+    }
+
+    #[test]
     fn validation_checks_each_variant() {
         let fields = |data: &ABTestData| -> Vec<String> {
             validate(data).into_iter().map(|(f, _)| f).collect()
@@ -862,7 +955,7 @@ mod tests {
                 variant("rule_b", 10, rule("rule_1")),
             ],
         );
-        assert_eq!(fields(&same_as_control), vec!["variants[1]"]);
+        assert!(validate(&same_as_control).is_empty());
 
         let twins = multi(
             rule("rule_1"),
@@ -871,7 +964,7 @@ mod tests {
                 variant("rule_a_again", 10, rule("rule_a")),
             ],
         );
-        assert_eq!(fields(&twins), vec!["variants[1]"]);
+        assert!(validate(&twins).is_empty());
 
         let mut mixed = three_variant_experiment();
         mixed.variant_split_pct = 10;

@@ -34,7 +34,7 @@ use crate::logger;
 use crate::redis::cache::findByNameFromRedis;
 use crate::types::payment_instrument::PaymentMethod;
 use crate::{
-    decider::gatewaydecider::types::{GatewayScoringData, SrRoutingDimensions},
+    decider::gatewaydecider::types::{GatewayScoringData, SrKeyScope, SrRoutingDimensions},
     decider::{
         gatewaydecider::constants as DC, gatewaydecider::types::RoutingFlowType as RF,
         gatewaydecider::types::ScoreKeyType as SK, gatewaydecider::types::SrV3InputConfig,
@@ -74,6 +74,25 @@ pub async fn update_sr_v3_score(
             );
         }
         Some(_gateway) => {
+            // Under an A/B experiment that keeps SR scores per arm, other arms' scores take this
+            // outcome too (control's outcomes feed every variant).
+            let shared_with: Vec<GatewayScoringData> = mb_gateway_scoring_data
+                .iter()
+                .flat_map(|data| {
+                    let also = data
+                        .sr_key_scope
+                        .as_ref()
+                        .map(|scope| scope.also.clone())
+                        .unwrap_or_default();
+                    also.into_iter().map(move |tag| GatewayScoringData {
+                        sr_key_scope: Some(SrKeyScope {
+                            own: Some(tag),
+                            also: Vec::new(),
+                        }),
+                        ..data.clone()
+                    })
+                })
+                .collect();
             let unified_sr_v3_key = getProducerKey(
                 txn_detail.clone(),
                 mb_gateway_scoring_data,
@@ -120,6 +139,27 @@ pub async fn update_sr_v3_score(
                     )
                     .await;
                 }
+            }
+            for scoring_data in shared_with {
+                let Some(key) = getProducerKey(
+                    txn_detail.clone(),
+                    Some(scoring_data),
+                    SK::SrV3Key,
+                    false,
+                    gateway_reference_id.clone(),
+                )
+                .await
+                else {
+                    continue;
+                };
+                updateScoreAndQueue(
+                    format!("{}_{}queue", key, "}"),
+                    format!("{}_{}score", key, "}"),
+                    gateway_scoring_type.clone(),
+                    txn_detail.clone(),
+                    txn_card_info.clone(),
+                )
+                .await;
             }
             log_gateway_score_type(gateway_scoring_type, RF::Srv3Flow, txn_detail);
         }

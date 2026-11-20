@@ -551,6 +551,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             udfs: None,
             udfs_consumed_for_routing: None,
             gatewayReferenceId: None,
+            sr_key_scope: None,
         },
         ab_test_sr_override: None,
     }
@@ -584,6 +585,20 @@ pub struct GatewayScoringData {
     pub gatewayReferenceId: Option<String>,
     pub udfs: Option<UDFs>,
     pub udfs_consumed_for_routing: Option<String>,
+    /// Which A/B arm's SR scores this payment routes on and its outcome updates. Absent for a
+    /// payment outside an experiment, or one whose experiment shares one set of scores.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sr_key_scope: Option<SrKeyScope>,
+}
+
+/// The A/B arm scores a payment uses, for experiments where arms keep separate SR scores.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq, Default)]
+pub struct SrKeyScope {
+    /// Tag of the arm's own scores, appended to the SR key. `None` is the merchant's scores.
+    pub own: Option<String>,
+    /// Tags of other arms' scores the outcome is also written to.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub also: Vec<String>,
 }
 
 impl GatewayScoringData {

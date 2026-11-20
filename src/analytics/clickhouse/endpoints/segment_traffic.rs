@@ -5,7 +5,7 @@ use crate::analytics::flow::FlowType;
 use crate::analytics::store::SegmentTraffic;
 use crate::error::ApiError;
 
-use super::super::common::{fetch_all, DOMAIN_TABLE};
+use super::super::common::{fetch_all, DOMAIN_TABLE, STATIC_ROUTING_APPROACH};
 use super::super::filters::partition_lower_bound;
 use super::super::query::{BoundQueryBuilder, FilterClause};
 
@@ -29,7 +29,7 @@ fn norm(v: Option<String>) -> Option<String> {
     v.filter(|s| !s.is_empty())
 }
 
-/// Per-cluster decision volume + distinct-PSP count for a merchant since `since_ms`, grouped by
+/// Per-cluster SR decision volume + distinct-PSP count for a merchant since `since_ms`, grouped by
 /// (pmt, pm) plus the `active_dims` the merchant clusters on. Inactive dimensions are selected as
 /// a typed NULL (kept in the same column position) so they don't fragment the grouping. Derived
 /// entirely from analytics, so the decision hot path and Redis are untouched.
@@ -65,9 +65,13 @@ pub async fn load(
     builder.add_filter(FilterClause::eq("merchant_id", merchant_id.to_string()));
     builder.add_filter(FilterClause::raw(format!("created_at_ms >= {since_ms}")));
     builder.add_filter(partition_lower_bound(since_ms));
+    // SR decisions from every routing API: `/decide-gateway`, and `/decide` or `/routing/hybrid`
+    // where SR ran. A hybrid payment decided by its rule output alone is not SR traffic.
     builder.add_filter(FilterClause::raw(format!(
-        "flow_type = '{}'",
-        FlowType::DecideGatewayDecision.as_str()
+        "(flow_type = '{}' OR (flow_type = '{}' AND ifNull(routing_approach, '') != '{}'))",
+        FlowType::DecideGatewayDecision.as_str(),
+        FlowType::RoutingHybridDecision.as_str(),
+        STATIC_ROUTING_APPROACH
     )));
     builder.extend_group_bys(group_bys);
 

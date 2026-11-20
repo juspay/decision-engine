@@ -210,6 +210,23 @@ pub struct ABTestData {
     /// SR overrides for a single-strategy `sr_routing` control arm.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub control_sr_config: Option<SrConfigOverride>,
+    /// Which payments' outcomes each arm's SR scores learn from.
+    #[serde(default)]
+    pub feedback_sharing: FeedbackSharing,
+}
+
+/// Which payments' outcomes each arm's SR scores learn from.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FeedbackSharing {
+    /// Every arm reads and writes the merchant's one set of scores, so each learns from every
+    /// payment in the experiment.
+    #[default]
+    Shared,
+    /// Control keeps the merchant's scores; each variant gets scores of its own. A control
+    /// payment's outcome is written to control's scores and to every variant's, a variant
+    /// payment's only to that variant's. Each variant learns from control and itself alone.
+    ControlAndOwn,
 }
 
 #[derive(

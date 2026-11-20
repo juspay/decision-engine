@@ -132,7 +132,16 @@ export interface ABTestAlgorithmData {
   guardrail_threshold_pp: number
   variant_sr_config?: SrConfigOverride
   control_sr_config?: SrConfigOverride
+  /** Which payments' outcomes each arm's SR scores learn from. Absent means `shared`. */
+  feedback_sharing?: FeedbackSharing
 }
+
+/**
+ * `shared`: every arm learns from every payment in the experiment, one set of scores.
+ * `control_and_own`: each variant keeps its own scores, learning from control's payments and its
+ * own; control learns from its own.
+ */
+export type FeedbackSharing = 'shared' | 'control_and_own'
 
 export type RoutingAlgorithmData =
   | GatewayConnector[]              // priority
@@ -293,6 +302,20 @@ export interface ExperimentResultsResponse {
   min_sample_size: number
   net_delta_bps: number | null
   evaluation_margin: number
+}
+
+/** One live SR v3 score window from Redis: the newest outcomes the router reads for a gateway. */
+export interface GatewayScoreWindow {
+  /** Segment then gateway, joined by `_` (e.g. `ORDER_PAYMENT_DEBIT_CARD_VISA_USD_THREE_DS_adyen`). */
+  series: string
+  success_count: number
+  total_count: number
+  success_rate: number
+}
+
+export interface GatewayScoresResponse {
+  merchant_id: string
+  windows: GatewayScoreWindow[]
 }
 
 export interface ExperimentTransaction {

@@ -62,6 +62,7 @@ export function toABTestCreatePayload(
     endpoints: values.endpoints,
     min_sample_size: values.minSampleSize,
     guardrail_threshold_pp: values.guardrailThresholdPp,
+    feedback_sharing: values.feedbackSharing,
   }
 
   return {

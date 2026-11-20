@@ -502,8 +502,19 @@ pub(crate) async fn evaluate(
                     )
                     .await
                 {
-                    if let Err(err) =
-                        store_scoring_context_without_decider(&req, STATIC_ROUTING_APPROACH).await
+                    // A rule-routed arm still updates the scores its experiment assigns it.
+                    let sr_key_scope =
+                        crate::decider::gatewaydecider::ab_test::interceptor::hybrid_sr_key_scope(
+                            &req.merchant_id,
+                            req.payment_id(),
+                        )
+                        .await;
+                    if let Err(err) = store_scoring_context_without_decider(
+                        &req,
+                        STATIC_ROUTING_APPROACH,
+                        sr_key_scope,
+                    )
+                    .await
                     {
                         crate::logger::warn!(
                             "failed to store scoring context for rule-routed payment {}: {}",

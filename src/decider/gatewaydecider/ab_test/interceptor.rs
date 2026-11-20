@@ -17,6 +17,8 @@ pub enum AbTestIntercept {
         /// selected gateway alongside the same rule and SR configuration used to route it.
         projection: arms::ArmProjection,
         experiment: ExperimentAssignment,
+        /// The arm's own SR scores, when the experiment keeps them per arm.
+        sr_key_scope: Option<crate::decider::gatewaydecider::types::SrKeyScope>,
     },
 }
 
@@ -96,6 +98,32 @@ pub async fn hybrid_arm_has_sr_layer(merchant_id: &str, payment_id: &str) -> Opt
     plan.in_experiment.then_some(plan.projection.sr.is_some())
 }
 
+/// The SR scores the outcome of a `/routing/hybrid` payment decided by its rule output updates,
+/// when the active experiment covers it and keeps scores per arm.
+pub async fn hybrid_sr_key_scope(
+    merchant_id: &str,
+    payment_id: &str,
+) -> Option<crate::decider::gatewaydecider::types::SrKeyScope> {
+    if !config::is_enabled(merchant_id).await {
+        return None;
+    }
+    let AbTestConfig {
+        experiment_id,
+        data,
+    } = config::load_active_ab_test(merchant_id).await?;
+    let plan = guardrail::plan(
+        merchant_id,
+        &experiment_id,
+        &data,
+        ExperimentEndpoint::HybridRouting,
+        payment_id,
+    );
+    if !plan.in_experiment {
+        return None;
+    }
+    arms::sr_key_scope(&experiment_id, &data, &plan.side)
+}
+
 /// Applies the active experiment's SR layer for a decider call on `endpoint`
 /// (`DecideGateway`, or `HybridRouting` for the dynamic half of `/routing/hybrid`). The rule
 /// layer is applied by `/routing/evaluate`, which on a hybrid call has already narrowed
@@ -139,6 +167,7 @@ pub async fn intercept(
     if !plan.in_experiment {
         return AbTestIntercept::Disabled;
     }
+    let sr_key_scope = arms::sr_key_scope(&experiment_id, &data, &plan.side);
     let assignment = ExperimentAssignment {
         experiment_id,
         side: plan.side,
@@ -162,5 +191,6 @@ pub async fn intercept(
     AbTestIntercept::SrArm {
         projection: plan.projection,
         experiment: assignment,
+        sr_key_scope,
     }
 }

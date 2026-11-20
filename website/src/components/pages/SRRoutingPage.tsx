@@ -499,7 +499,7 @@ export function SRRoutingPage() {
                       className={configInputClass}
                     />
                     <p className={type.hint}>
-                      Traffic share sent to non-top connectors to keep their scores fresh. Needs Explore-exploit on.
+                      Traffic share sent to non-top connectors to keep their scores fresh. 0 never explores.
                     </p>
                   </label>
 
