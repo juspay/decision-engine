@@ -8,7 +8,9 @@ import { poll } from '../../helpers/poll'
  * (`CREDIT`). A card payment is routed as a card whichever endpoint it comes through.
  */
 
-const CARD_DIMENSION = 'ORDER_PAYMENT, CREDIT, CARD, CREDIT'
+// The SR score key's dimensions, which is what the decider reports once it builds a key: the
+// order type, then the method type and method. This merchant configures no extra dimensions.
+const CARD_DIMENSION = 'ORDER_PAYMENT_CREDIT_CARD'
 
 async function setupSrMerchant(api: ApiClient, merchantId: string) {
   await api.createSuccessRateConfig(merchantId)

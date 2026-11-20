@@ -2533,6 +2533,72 @@ pub async fn get_unified_key(
     gateway_redis_key_map
 }
 
+/// How many leading components of an SR key say where scores are stored rather than which
+/// cluster they are for. The prefix and the merchant.
+const SCOPE_COMPONENTS: usize = 2;
+
+/// A payment's SR score key, without the gateway suffix:
+/// `{prefix}_{merchant}_{order type}_{payment method type}_{payment method}`, then the merchant's
+/// configured dimensions (`card_network`, `card_is_in`, `currency`, `country`, `auth_type`) and
+/// UDF values, skipping any the payment lacks. The type and method are the instrument's codes
+/// (`CREDIT`, `CARD`). Scores live under this key, so its format is pinned by tests: changing it
+/// strands every merchant's learned scores.
+fn sr_key(components: &Vec<String>) -> String {
+    intercalate_without_empty_string("_", components)
+}
+
+/// The dimensions the payment keyed on, without the prefix, merchant or gateway. Joined the same
+/// way the key is, so it never disagrees with the key it came from.
+fn sr_cluster(components: &[String]) -> String {
+    intercalate_without_empty_string("_", &components[SCOPE_COMPONENTS..].to_vec())
+}
+
+/// The key's components in order. The first [`SCOPE_COMPONENTS`] of them are the scope.
+fn sr_key_components(
+    gateway_scoring_data: &GatewayScoringData,
+    is_sr_v3_metric_enabled: bool,
+    fields: &[String],
+    udf_values: Option<Vec<String>>,
+) -> Vec<String> {
+    let key_prefix = if is_sr_v3_metric_enabled {
+        C::GATEWAY_SELECTION_V3_ORDER_TYPE_KEY_PREFIX
+    } else {
+        C::GATEWAY_SELECTION_ORDER_TYPE_KEY_PREFIX
+    };
+    // The scope, which `sr_cluster` drops
+    let mut key_components = vec![
+        key_prefix.to_string(),
+        gateway_scoring_data.merchantId.clone(),
+    ];
+    key_components.extend([
+        gateway_scoring_data.orderType.clone(),
+        gateway_scoring_data
+            .instrument
+            .method_type_code()
+            .into_owned(),
+        gateway_scoring_data.instrument.method_code().to_string(),
+    ]);
+    for field in fields {
+        let value = match field.as_str() {
+            "card_network" => gateway_scoring_data.cardSwitchProvider.clone(),
+            "card_is_in" => gateway_scoring_data.cardIsIn.clone(),
+            "currency" => gateway_scoring_data
+                .currency
+                .as_ref()
+                .map(ToString::to_string),
+            "country" => gateway_scoring_data
+                .country
+                .as_ref()
+                .map(ToString::to_string),
+            "auth_type" => gateway_scoring_data.authType.clone(),
+            _ => None,
+        };
+        key_components.extend(value);
+    }
+    key_components.extend(udf_values.into_iter().flatten());
+    key_components
+}
+
 pub async fn get_unified_sr_key(
     gateway_scoring_data: &GatewayScoringData,
     is_sr_v3_metric_enabled: bool,
@@ -2570,18 +2636,11 @@ pub async fn get_unified_sr_key(
                 Some(values)
             });
 
-    if let Some(df) = decider_flow {
-        if let Some(udf_values) = udf_values.as_ref() {
-            if udf_values.len() == 1 {
-                df.writer.gateway_scoring_data.udfs_consumed_for_routing =
-                    Some(udf_values[0].clone());
-            }
-        }
-    }
-
     let is_legacy_decider_flow = gateway_scoring_data.is_legacy_decider_flow;
 
-    if is_legacy_decider_flow {
+    // The legacy key predates the configured dimensions and never reads them, so it reports no
+    // cluster. Only `/decision_gateway` takes that path.
+    let (key, cluster) = if is_legacy_decider_flow {
         let sr_keys =
             get_legacy_unified_sr_key(gateway_scoring_data, is_sr_v3_metric_enabled, enforce1d)
                 .await;
@@ -2593,70 +2652,37 @@ pub async fn get_unified_sr_key(
         } else {
             sr_keys
         };
-        return sr_key_with_udfs;
-    }
-
-    let fields: Vec<String> = service_config
-        .as_ref()
-        .map(|config| config.paymentInfo.fields.clone())
-        .unwrap_or_default()
-        .into_iter()
-        .flatten()
-        .collect();
-    sr_key(
-        gateway_scoring_data,
-        is_sr_v3_metric_enabled,
-        &fields,
-        udf_values,
-    )
-}
-
-/// A payment's SR score key, without the gateway suffix:
-/// `{prefix}_{merchant}_{order type}_{payment method type}_{payment method}`, then the merchant's
-/// configured dimensions (`card_network`, `card_is_in`, `currency`, `country`, `auth_type`) and
-/// UDF values, skipping any the payment lacks. The type and method are the instrument's codes
-/// (`CREDIT`, `CARD`). Scores live under this key, so its format is pinned by tests: changing it
-/// strands every merchant's learned scores.
-pub fn sr_key(
-    gateway_scoring_data: &GatewayScoringData,
-    is_sr_v3_metric_enabled: bool,
-    fields: &[String],
-    udf_values: Option<Vec<String>>,
-) -> String {
-    let key_prefix = if is_sr_v3_metric_enabled {
-        C::GATEWAY_SELECTION_V3_ORDER_TYPE_KEY_PREFIX
+        (sr_key_with_udfs, None)
     } else {
-        C::GATEWAY_SELECTION_ORDER_TYPE_KEY_PREFIX
+        let fields: Vec<String> = service_config
+            .as_ref()
+            .map(|config| config.paymentInfo.fields.clone())
+            .unwrap_or_default()
+            .into_iter()
+            .flatten()
+            .collect();
+        let components = sr_key_components(
+            gateway_scoring_data,
+            is_sr_v3_metric_enabled,
+            &fields,
+            udf_values.clone(),
+        );
+        (sr_key(&components), Some(sr_cluster(&components)))
     };
-    let mut key_components = vec![
-        key_prefix.to_string(),
-        gateway_scoring_data.merchantId.clone(),
-        gateway_scoring_data.orderType.clone(),
-        gateway_scoring_data
-            .instrument
-            .method_type_code()
-            .into_owned(),
-        gateway_scoring_data.instrument.method_code().to_string(),
-    ];
-    for field in fields {
-        let value = match field.as_str() {
-            "card_network" => gateway_scoring_data.cardSwitchProvider.clone(),
-            "card_is_in" => gateway_scoring_data.cardIsIn.clone(),
-            "currency" => gateway_scoring_data
-                .currency
-                .as_ref()
-                .map(ToString::to_string),
-            "country" => gateway_scoring_data
-                .country
-                .as_ref()
-                .map(ToString::to_string),
-            "auth_type" => gateway_scoring_data.authType.clone(),
-            _ => None,
-        };
-        key_components.extend(value);
+
+    if let Some(df) = decider_flow {
+        if let Some(udf_values) = udf_values.as_ref() {
+            if udf_values.len() == 1 {
+                df.writer.gateway_scoring_data.udfs_consumed_for_routing =
+                    Some(udf_values[0].clone());
+            }
+        }
+        if let Some(cluster) = cluster {
+            set_routing_dimension(df, cluster);
+        }
     }
-    key_components.extend(udf_values.into_iter().flatten());
-    intercalate_without_empty_string("_", &key_components)
+
+    key
 }
 
 async fn get_legacy_unified_sr_key(
@@ -3322,7 +3348,7 @@ mod card_auth_level_tests {
 #[cfg(test)]
 #[allow(clippy::panic_in_result_fn)]
 mod sr_key_tests {
-    use super::sr_key;
+    use super::{sr_cluster, sr_key, sr_key_components};
     use crate::decider::gatewaydecider::types::GatewayScoringData;
     use crate::types::payment_instrument::PaymentInstrument;
 
@@ -3356,11 +3382,11 @@ mod sr_key_tests {
             Some("credit"),
         ))?;
         assert_eq!(
-            sr_key(&data, true, &[], None),
+            sr_key(&sr_key_components(&data, true, &[], None)),
             "{gw_sr_v3_score_merchant_1_UNKNOWN_CREDIT_CARD"
         );
         assert_eq!(
-            sr_key(
+            sr_key(&sr_key_components(
                 &data,
                 true,
                 &[
@@ -3369,7 +3395,7 @@ mod sr_key_tests {
                     "country".to_string()
                 ],
                 Some(vec!["udf_1".to_string()]),
-            ),
+            )),
             "{gw_sr_v3_score_merchant_1_UNKNOWN_CREDIT_CARD_VISA_CAD_udf_1"
         );
         Ok(())
@@ -3381,8 +3407,61 @@ mod sr_key_tests {
         // A missing type keys as UNKNOWN, as every empty key part does (the order type here is
         // UNKNOWN too). Before the instrument, a hybrid payment without a type keyed as `NULL`.
         assert_eq!(
-            sr_key(&data, true, &[], None),
+            sr_key(&sr_key_components(&data, true, &[], None)),
             "{gw_sr_v3_score_merchant_1_UNKNOWN_UNKNOWN_WALLET"
+        );
+        Ok(())
+    }
+
+    /// The cluster `/decide` reports is the key without the prefix and merchant, so the two can
+    /// never disagree about which dimensions a payment scored under.
+    #[test]
+    fn a_cluster_is_the_key_without_its_prefix() -> Result<(), serde_json::Error> {
+        let data = scoring_data(PaymentInstrument::parse_lenient(
+            Some("card"),
+            Some("credit"),
+        ))?;
+        let fields = ["card_network".to_string(), "currency".to_string()];
+        let components = sr_key_components(&data, true, &fields, None);
+        assert_eq!(
+            sr_key(&components),
+            "{gw_sr_v3_score_merchant_1_UNKNOWN_CREDIT_CARD_VISA_CAD"
+        );
+        assert_eq!(sr_cluster(&components), "UNKNOWN_CREDIT_CARD_VISA_CAD");
+        Ok(())
+    }
+
+    /// A configured dimension the payment has no value for is dropped from the key, so the
+    /// reported cluster drops it too rather than claiming a grain the scores do not have.
+    #[test]
+    fn a_cluster_drops_a_dimension_the_payment_lacks() -> Result<(), serde_json::Error> {
+        let data = scoring_data(PaymentInstrument::parse_lenient(
+            Some("card"),
+            Some("credit"),
+        ))?;
+        let fields = ["card_network".to_string(), "country".to_string()];
+        assert_eq!(
+            sr_cluster(&sr_key_components(&data, true, &fields, None)),
+            "UNKNOWN_CREDIT_CARD_VISA"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn a_cluster_ends_with_the_udf_values() -> Result<(), serde_json::Error> {
+        let data = scoring_data(PaymentInstrument::parse_lenient(
+            Some("card"),
+            Some("credit"),
+        ))?;
+        let fields = ["card_network".to_string()];
+        assert_eq!(
+            sr_cluster(&sr_key_components(
+                &data,
+                true,
+                &fields,
+                Some(vec!["udf_1".to_string()])
+            )),
+            "UNKNOWN_CREDIT_CARD_VISA_udf_1"
         );
         Ok(())
     }
