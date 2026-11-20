@@ -28,9 +28,16 @@ use crate::error::RouteError;
 use crate::logger;
 use crate::storage::types::CostIngestion;
 
-/// Upper bound on a single uploaded report. Monthly reports run a few GB; this leaves headroom
-/// while still rejecting a runaway/accidental upload before it fills the disk.
-pub const MAX_UPLOAD_BYTES: usize = 8 * 1024 * 1024 * 1024;
+/// Cap on a single uploaded report, from `cost_ingestion.max_upload_bytes`. Bounds disk, not
+/// memory - `stream_to_file` writes each chunk straight out, so peak RAM is one chunk whatever
+/// the body size. The route is not classified by `analytics::classify_request` either, so
+/// `capture_api_event` never buffers it. Falls back to the default before app state is set.
+pub fn max_upload_bytes() -> usize {
+    crate::app::APP_STATE
+        .get()
+        .map(|state| state.global_config.cost_ingestion.max_upload_bytes)
+        .unwrap_or(crate::config::DEFAULT_MAX_UPLOAD_BYTES)
+}
 
 #[derive(Debug, Deserialize)]
 pub struct UploadParams {
@@ -240,7 +247,7 @@ pub async fn upload_report(
 
     // Stream the body to the temp file, capping total size. On any failure here we remove the
     // partial file and bail — the background task only takes over once the file is complete.
-    if let Err(err) = stream_to_file(&path, body).await {
+    if let Err(err) = stream_to_file(&path, body, max_upload_bytes()).await {
         let _ = tokio::fs::remove_file(&path).await;
         return Err(err.into());
     }
@@ -360,7 +367,7 @@ pub struct PreflightParams {
 /// Body of a mapping preview/save: the candidate mapping plus the file sample it was written
 /// against. The sample travels with the request because a mapping is only meaningful relative to a
 /// specific file's headers, and the server holds no copy of the merchant's file at this stage.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct MappingRequest {
     /// `expected label -> merchant's label`.
     pub columns: std::collections::HashMap<String, String>,
@@ -576,6 +583,7 @@ pub async fn run_sample_report(
         bucket,
         key,
         region,
+        cost_cfg.max_upload_bytes,
     ));
 
     Ok((
@@ -600,8 +608,10 @@ async fn process_sample(
     bucket: String,
     key: String,
     region: Option<String>,
+    max_bytes: usize,
 ) {
-    let download_result = fetch_sample_from_s3(&bucket, &key, region.as_deref(), &path).await;
+    let download_result =
+        fetch_sample_from_s3(&bucket, &key, region.as_deref(), &path, max_bytes).await;
     let result = match download_result {
         Ok(()) => {
             run_ingest(
@@ -641,6 +651,7 @@ async fn fetch_sample_from_s3(
     key: &str,
     region: Option<&str>,
     path: &PathBuf,
+    max_bytes: usize,
 ) -> Result<(), crate::cost_ingestion::IngestError> {
     use crate::cost_ingestion::IngestError;
     use aws_config::BehaviorVersion;
@@ -671,9 +682,9 @@ async fn fetch_sample_from_s3(
         let chunk =
             chunk.map_err(|e| IngestError::Download(format!("s3 body stream error: {e}")))?;
         total = total.saturating_add(chunk.len());
-        if total > MAX_UPLOAD_BYTES {
+        if total > max_bytes {
             return Err(IngestError::Download(format!(
-                "sample exceeds {MAX_UPLOAD_BYTES} byte limit"
+                "sample exceeds {max_bytes} byte limit"
             )));
         }
         file.write_all(&chunk)
@@ -690,8 +701,8 @@ async fn fetch_sample_from_s3(
     Ok(())
 }
 
-/// Stream a request body to `path`, enforcing `MAX_UPLOAD_BYTES`. Never holds the whole body in RAM.
-async fn stream_to_file(path: &PathBuf, body: Body) -> Result<(), RouteError> {
+/// Stream a request body to `path`, enforcing `max_bytes`. Never holds the whole body in RAM.
+async fn stream_to_file(path: &PathBuf, body: Body, max_bytes: usize) -> Result<(), RouteError> {
     let mut file = tokio::fs::File::create(path)
         .await
         .map_err(RouteError::internal)?;
@@ -702,10 +713,10 @@ async fn stream_to_file(path: &PathBuf, body: Body) -> Result<(), RouteError> {
         let chunk =
             chunk.map_err(|e| RouteError::bad_request(format!("upload read error: {e}")))?;
         total = total.saturating_add(chunk.len());
-        if total > MAX_UPLOAD_BYTES {
+        if total > max_bytes {
             return Err(RouteError::new(
                 StatusCode::PAYLOAD_TOO_LARGE,
-                format!("report exceeds {MAX_UPLOAD_BYTES} byte limit"),
+                format!("report exceeds {max_bytes} byte limit"),
             ));
         }
         file.write_all(&chunk).await.map_err(RouteError::internal)?;
@@ -824,3 +835,6 @@ async fn run_ingest(
     )
     .await
 }
+
+// These requests name no payment.
+crate::impl_api_event_payload!(MappingRequest);

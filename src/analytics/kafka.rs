@@ -4,11 +4,10 @@ use rdkafka::config::ClientConfig;
 use rdkafka::error::{KafkaError, RDKafkaErrorCode};
 use rdkafka::producer::{FutureProducer, FutureRecord, Producer};
 use rdkafka::util::Timeout;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use tokio::time::Instant;
 
 use crate::analytics::events::{ApiEvent, DomainAnalyticsEvent};
-use crate::analytics::flow::{ApiFlow, FlowType};
 use crate::analytics::store::AnalyticsWriteStore;
 use crate::config::KafkaAnalyticsConfig;
 use crate::error::{ApiError, ConfigurationError};
@@ -41,142 +40,21 @@ impl KafkaPublishOutcome {
     }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KafkaDomainEventRow {
+/// One Kafka message: the event's fields, preceded by the envelope ClickHouse ingests with them.
+#[derive(Debug, Serialize)]
+pub struct KafkaEventRow<'a, T> {
     pub schema_version: u8,
     pub produced_at_ms: i64,
-    pub event_id: String,
-    pub api_flow: ApiFlow,
-    pub flow_type: FlowType,
-    pub summary_kind: Option<String>,
-    pub merchant_id: Option<String>,
-    pub payment_id: Option<String>,
-    pub request_id: Option<String>,
-    pub lookup_key: Option<String>,
-    pub global_request_id: Option<String>,
-    pub trace_id: Option<String>,
-    pub payment_method_type: Option<String>,
-    pub payment_method: Option<String>,
-    pub card_network: Option<String>,
-    pub card_is_in: Option<String>,
-    pub currency: Option<String>,
-    pub country: Option<String>,
-    pub auth_type: Option<String>,
-    pub gateway: Option<String>,
-    pub event_stage: Option<String>,
-    pub routing_approach: Option<String>,
-    pub rule_name: Option<String>,
-    pub status: Option<String>,
-    pub error_code: Option<String>,
-    pub error_message: Option<String>,
-    pub score_value: Option<f64>,
-    pub sigma_factor: Option<f64>,
-    pub average_latency: Option<f64>,
-    pub tp99_latency: Option<f64>,
-    pub transaction_count: Option<i64>,
-    pub route: Option<String>,
-    pub details: Option<String>,
-    pub created_at_ms: i64,
+    #[serde(flatten)]
+    pub event: &'a T,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KafkaApiEventRow {
-    pub schema_version: u8,
-    pub produced_at_ms: i64,
-    pub event_id: String,
-    pub merchant_id: Option<String>,
-    pub payment_id: Option<String>,
-    pub api_flow: ApiFlow,
-    pub flow_type: FlowType,
-    pub created_at_timestamp: i64,
-    pub request_id: String,
-    pub global_request_id: Option<String>,
-    pub trace_id: Option<String>,
-    pub latency: u64,
-    pub status_code: u16,
-    pub auth_type: Option<String>,
-    pub request: String,
-    pub user_agent: Option<String>,
-    pub ip_addr: Option<String>,
-    pub url_path: String,
-    pub response: Option<String>,
-    pub error: Option<String>,
-    pub http_method: String,
-}
-
-impl From<DomainAnalyticsEvent> for KafkaDomainEventRow {
-    fn from(event: DomainAnalyticsEvent) -> Self {
-        let lookup_key = event.lookup_key.clone().or_else(|| {
-            crate::analytics::derive_lookup_key(
-                event.payment_id.as_deref(),
-                event.request_id.as_deref(),
-            )
-        });
+impl<'a, T> KafkaEventRow<'a, T> {
+    pub fn new(event: &'a T) -> Self {
         Self {
             schema_version: 1,
             produced_at_ms: crate::analytics::now_ms(),
-            event_id: event.event_id,
-            api_flow: event.api_flow,
-            flow_type: event.flow_type,
-            summary_kind: event.summary_kind,
-            merchant_id: event.merchant_id,
-            payment_id: event.payment_id,
-            request_id: event.request_id,
-            lookup_key,
-            global_request_id: event.global_request_id,
-            trace_id: event.trace_id,
-            payment_method_type: event.payment_method_type,
-            payment_method: event.payment_method,
-            card_network: event.card_network,
-            card_is_in: event.card_is_in,
-            currency: event.currency,
-            country: event.country,
-            auth_type: event.auth_type,
-            gateway: event.gateway,
-            event_stage: event.event_stage,
-            routing_approach: event.routing_approach,
-            rule_name: event.rule_name,
-            status: event.status,
-            error_code: event.error_code,
-            error_message: event.error_message,
-            score_value: event.score_value,
-            sigma_factor: event.sigma_factor,
-            average_latency: event.average_latency,
-            tp99_latency: event.tp99_latency,
-            transaction_count: event.transaction_count,
-            route: event.route,
-            details: event.details,
-            created_at_ms: event.created_at_ms,
-        }
-    }
-}
-
-impl From<ApiEvent> for KafkaApiEventRow {
-    fn from(event: ApiEvent) -> Self {
-        Self {
-            schema_version: 1,
-            produced_at_ms: crate::analytics::now_ms(),
-            event_id: event.event_id,
-            merchant_id: event.merchant_id,
-            payment_id: event.payment_id,
-            api_flow: event.api_flow,
-            flow_type: event.flow_type,
-            created_at_timestamp: event.created_at_timestamp,
-            request_id: event.request_id,
-            global_request_id: event.global_request_id,
-            trace_id: event.trace_id,
-            latency: event.latency,
-            status_code: event.status_code,
-            auth_type: event.auth_type,
-            request: event.request,
-            user_agent: event.user_agent,
-            ip_addr: event.ip_addr,
-            url_path: event.url_path,
-            response: event.response,
-            error: event
-                .error
-                .and_then(|value| serde_json::to_string(&value).ok()),
-            http_method: event.http_method,
+            event,
         }
     }
 }
@@ -222,7 +100,7 @@ impl KafkaAnalyticsStore {
     }
 
     async fn send_api_event(&self, event: &ApiEvent) -> KafkaPublishOutcome {
-        let payload = match serde_json::to_vec(&KafkaApiEventRow::from(event.clone())) {
+        let payload = match serde_json::to_vec(&KafkaEventRow::new(event)) {
             Ok(payload) => payload,
             Err(_) => {
                 return KafkaPublishOutcome::EncodingFailed;
@@ -234,7 +112,7 @@ impl KafkaAnalyticsStore {
     }
 
     async fn send_domain_event(&self, event: &DomainAnalyticsEvent) -> KafkaPublishOutcome {
-        let payload = match serde_json::to_vec(&KafkaDomainEventRow::from(event.clone())) {
+        let payload = match serde_json::to_vec(&KafkaEventRow::new(event)) {
             Ok(payload) => payload,
             Err(_) => {
                 return KafkaPublishOutcome::EncodingFailed;
@@ -396,64 +274,34 @@ fn build_client_config(config: &KafkaAnalyticsConfig) -> ClientConfig {
 
 #[cfg(test)]
 mod tests {
-    use crate::analytics::{ApiEvent, ApiFlow, DomainAnalyticsEvent, FlowType};
+    #![allow(clippy::unwrap_used)]
 
-    use super::{api_event_key, domain_event_key, KafkaApiEventRow, KafkaDomainEventRow};
+    use serde_json::json;
 
-    #[test]
-    fn domain_row_serializes_stably() {
-        let event = DomainAnalyticsEvent {
+    use crate::analytics::{
+        AnalyticsFlowContext, AnalyticsRoute, ApiEvent, ApiFlow, DomainAnalyticsEvent, FlowType,
+    };
+
+    use super::{api_event_key, domain_event_key, KafkaEventRow};
+
+    fn domain_event(payment_id: Option<&str>, request_id: Option<&str>) -> DomainAnalyticsEvent {
+        DomainAnalyticsEvent {
             event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed001".to_string(),
-            api_flow: ApiFlow::DynamicRouting,
-            flow_type: FlowType::DecideGatewayDecision,
-            summary_kind: Some("dynamic".to_string()),
-            merchant_id: None,
-            payment_id: Some("pay_1".to_string()),
-            request_id: Some("req_1".to_string()),
-            lookup_key: Some("pay_1".to_string()),
+            payment_id: payment_id.map(str::to_string),
+            request_id: request_id.map(str::to_string),
+            lookup_key: payment_id.or(request_id).map(str::to_string),
             global_request_id: Some("global_1".to_string()),
             trace_id: Some("trace_1".to_string()),
-            payment_method_type: None,
-            payment_method: None,
-            card_network: None,
-            card_is_in: None,
-            currency: None,
-            country: None,
-            auth_type: None,
-            gateway: None,
-            event_stage: None,
-            routing_approach: None,
-            rule_name: None,
-            status: None,
-            error_code: None,
-            error_message: None,
-            score_value: None,
-            sigma_factor: None,
-            average_latency: None,
-            tp99_latency: None,
-            transaction_count: None,
-            route: None,
-            details: None,
             created_at_ms: 123,
-        };
-        let row = KafkaDomainEventRow::from(event);
-        let json = match serde_json::to_string(&row) {
-            Ok(json) => json,
-            Err(error) => panic!("domain analytics row should serialize: {error}"),
-        };
-        assert!(json.contains("\"schema_version\":1"));
-        assert!(json.contains("\"created_at_ms\":123"));
-        assert!(json.contains("\"payment_id\":\"pay_1\""));
-        assert!(json.contains("\"lookup_key\":\"pay_1\""));
-        assert!(json.contains("\"api_flow\":\"dynamic_routing\""));
-        assert!(json.contains("\"flow_type\":\"decide_gateway_decision\""));
-        assert!(json.contains("\"global_request_id\":\"global_1\""));
-        assert!(json.contains("\"trace_id\":\"trace_1\""));
+            ..DomainAnalyticsEvent::new(
+                AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayDecision),
+                AnalyticsRoute::DecideGateway,
+            )
+        }
     }
 
-    #[test]
-    fn api_row_serializes_json_fields_as_strings() {
-        let event = ApiEvent {
+    fn api_event() -> ApiEvent {
+        ApiEvent {
             event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed010".to_string(),
             merchant_id: None,
             payment_id: Some("pay_123".to_string()),
@@ -464,123 +312,112 @@ mod tests {
             global_request_id: Some("global_123".to_string()),
             trace_id: Some("trace_123".to_string()),
             latency: 1,
-            status_code: 200,
-            auth_type: None,
+            status_code: 400,
             request: "{}".to_string(),
             user_agent: None,
             ip_addr: None,
             url_path: "/decide-gateway".to_string(),
-            response: None,
-            error: Some(serde_json::json!({"code":"bad_request"})),
+            response: Some(r#"{"code":"bad_request"}"#.to_string()),
+            error: Some(r#"{"code":"bad_request"}"#.to_string()),
             http_method: "POST".to_string(),
-        };
-        let row = KafkaApiEventRow::from(event);
-        assert_eq!(row.error.as_deref(), Some("{\"code\":\"bad_request\"}"));
-        assert_eq!(row.api_flow, ApiFlow::DynamicRouting);
-        assert_eq!(row.flow_type, FlowType::DecideGateway);
-        assert_eq!(row.global_request_id.as_deref(), Some("global_123"));
-        assert_eq!(row.trace_id.as_deref(), Some("trace_123"));
+        }
+    }
+
+    /// The message ClickHouse ingests: every column, by name, with the envelope.
+    fn message<T: serde::Serialize>(event: &T) -> serde_json::Value {
+        let mut message = serde_json::to_value(KafkaEventRow::new(event)).unwrap();
+        assert!(message["produced_at_ms"].as_i64().unwrap() > 0);
+        message["produced_at_ms"] = json!(0);
+        message
+    }
+
+    #[test]
+    fn domain_message_carries_every_column() {
+        let event = domain_event(Some("pay_1"), Some("req_1"));
+        assert_eq!(
+            message(&event),
+            json!({
+                "schema_version": 1,
+                "produced_at_ms": 0,
+                "event_id": "0195f4a8-bdf0-7f36-a227-c0ffefeed001",
+                "api_flow": "dynamic_routing",
+                "flow_type": "decide_gateway_decision",
+                "summary_kind": "dynamic",
+                "merchant_id": null,
+                "payment_id": "pay_1",
+                "request_id": "req_1",
+                "lookup_key": "pay_1",
+                "global_request_id": "global_1",
+                "trace_id": "trace_1",
+                "payment_method_type": null,
+                "payment_method": null,
+                "card_network": null,
+                "card_is_in": null,
+                "currency": null,
+                "country": null,
+                "auth_type": null,
+                "gateway": null,
+                "event_stage": null,
+                "routing_approach": null,
+                "rule_name": null,
+                "status": null,
+                "error_code": null,
+                "error_message": null,
+                "score_value": null,
+                "sigma_factor": null,
+                "average_latency": null,
+                "tp99_latency": null,
+                "transaction_count": null,
+                "route": "decide_gateway",
+                "details": null,
+                "created_at_ms": 123,
+            })
+        );
+    }
+
+    #[test]
+    fn api_message_carries_json_fields_as_strings() {
+        assert_eq!(
+            message(&api_event()),
+            json!({
+                "schema_version": 1,
+                "produced_at_ms": 0,
+                "event_id": "0195f4a8-bdf0-7f36-a227-c0ffefeed010",
+                "merchant_id": null,
+                "payment_id": "pay_123",
+                "api_flow": "dynamic_routing",
+                "flow_type": "decide_gateway",
+                "created_at_timestamp": 1,
+                "request_id": "req_123",
+                "global_request_id": "global_123",
+                "trace_id": "trace_123",
+                "latency": 1,
+                "status_code": 400,
+                "request": "{}",
+                "user_agent": null,
+                "ip_addr": null,
+                "url_path": "/decide-gateway",
+                "response": "{\"code\":\"bad_request\"}",
+                "error": "{\"code\":\"bad_request\"}",
+                "http_method": "POST",
+            })
+        );
     }
 
     #[test]
     fn message_keys_are_deterministic() {
-        let api = ApiEvent {
-            event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed010".to_string(),
-            merchant_id: None,
-            payment_id: Some("pay_123".to_string()),
-            api_flow: ApiFlow::DynamicRouting,
-            flow_type: FlowType::DecideGateway,
-            created_at_timestamp: 1,
-            request_id: "req_123".to_string(),
-            global_request_id: None,
-            trace_id: None,
-            latency: 1,
-            status_code: 200,
-            auth_type: None,
-            request: "{}".to_string(),
-            user_agent: None,
-            ip_addr: None,
-            url_path: "/decide-gateway".to_string(),
-            response: None,
-            error: None,
-            http_method: "POST".to_string(),
-        };
-        let domain = DomainAnalyticsEvent {
-            event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed011".to_string(),
-            api_flow: ApiFlow::DynamicRouting,
-            flow_type: FlowType::DecideGatewayDecision,
-            summary_kind: Some("dynamic".to_string()),
-            merchant_id: None,
-            payment_id: Some("pay_456".to_string()),
-            request_id: Some("req_456".to_string()),
-            lookup_key: Some("pay_456".to_string()),
-            global_request_id: None,
-            trace_id: None,
-            payment_method_type: None,
-            payment_method: None,
-            card_network: None,
-            card_is_in: None,
-            currency: None,
-            country: None,
-            auth_type: None,
-            gateway: None,
-            event_stage: None,
-            routing_approach: None,
-            rule_name: None,
-            status: None,
-            error_code: None,
-            error_message: None,
-            score_value: None,
-            sigma_factor: None,
-            average_latency: None,
-            tp99_latency: None,
-            transaction_count: None,
-            route: None,
-            details: None,
-            created_at_ms: 2,
-        };
-
-        assert_eq!(api_event_key(&api), "req_123");
-        assert_eq!(domain_event_key(&domain), "pay_456");
+        assert_eq!(api_event_key(&api_event()), "req_123");
+        assert_eq!(
+            domain_event_key(&domain_event(Some("pay_456"), Some("req_456"))),
+            "pay_456"
+        );
     }
 
     #[test]
     fn domain_key_falls_back_to_request_lookup_key() {
-        let domain = DomainAnalyticsEvent {
-            event_id: "0195f4a8-bdf0-7f36-a227-c0ffefeed012".to_string(),
-            api_flow: ApiFlow::DynamicRouting,
-            flow_type: FlowType::DecideGatewayDecision,
-            summary_kind: Some("dynamic".to_string()),
-            merchant_id: None,
-            payment_id: None,
-            request_id: Some("req_only".to_string()),
-            lookup_key: Some("req_only".to_string()),
-            global_request_id: None,
-            trace_id: None,
-            payment_method_type: None,
-            payment_method: None,
-            card_network: None,
-            card_is_in: None,
-            currency: None,
-            country: None,
-            auth_type: None,
-            gateway: None,
-            event_stage: None,
-            routing_approach: None,
-            rule_name: None,
-            status: None,
-            error_code: None,
-            error_message: None,
-            score_value: None,
-            sigma_factor: None,
-            average_latency: None,
-            tp99_latency: None,
-            transaction_count: None,
-            route: None,
-            details: None,
-            created_at_ms: 3,
-        };
-
-        assert_eq!(domain_event_key(&domain), "req_only");
+        assert_eq!(
+            domain_event_key(&domain_event(None, Some("req_only"))),
+            "req_only"
+        );
     }
 }

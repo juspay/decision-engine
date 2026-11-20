@@ -59,18 +59,18 @@ pub fn emit_routing_event(
         "amount": amount,
     }));
 
-    crate::analytics::DomainAnalyticsEvent::record_rule_evaluation_preview(
-        AnalyticsFlowContext::new(ApiFlow::RuleBasedRouting, FlowType::RoutingEvaluateAbTest),
-        Some(merchant_id.to_string()),
-        Some(payment_id.to_string()),
-        gateway.map(str::to_string),
-        Some(format!("ab_test_{variant_arm}_{arm_label}")),
-        Some("ab_test_decision".to_string()),
+    crate::analytics::DomainAnalyticsEvent {
+        merchant_id: Some(merchant_id.to_string()),
+        payment_id: Some(payment_id.to_string()),
+        gateway: gateway.map(str::to_string),
+        rule_name: Some(format!("ab_test_{variant_arm}_{arm_label}")),
+        status: Some("ab_test_decision".to_string()),
         details,
-        None,
-        None,
-        None,
-    );
+        ..crate::analytics::DomainAnalyticsEvent::rule_evaluation_preview(
+            AnalyticsFlowContext::new(ApiFlow::RuleBasedRouting, FlowType::RoutingEvaluateAbTest),
+        )
+    }
+    .emit();
 }
 
 /// Whether the arm served on `/routing/hybrid` for this payment has an SR layer, when an active

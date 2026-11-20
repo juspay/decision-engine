@@ -995,7 +995,7 @@ pub async fn get_token_supported_gateways(
     let brand = txn_card_info
         .cardSwitchProvider
         .as_ref()
-        .map_or("DEFAULT".to_string(), |secret| secret.peek().to_string());
+        .map_or("DEFAULT".to_string(), |network| network.to_string());
     let token_provider = get_token_provider(m_internal_meta, &txn_card_info, &brand);
     if token_type == "NETWORK_TOKEN" {
         get_network_token_supported_gateways(&flow, brand).await
@@ -2032,7 +2032,7 @@ pub fn get_default_gateway_scoring_data(
     is_gri_enabled_for_sr_routing: bool,
     date_created: OffsetDateTime,
     card_isin: Option<String>,
-    card_switch_provider: Option<Secret<String>>,
+    card_switch_provider: Option<String>,
     currency: Option<Currency>,
     country: Option<CountryISO2>,
     auth_type: Option<String>,
@@ -2640,10 +2640,7 @@ pub fn sr_key(
     ];
     for field in fields {
         let value = match field.as_str() {
-            "card_network" => gateway_scoring_data
-                .cardSwitchProvider
-                .as_ref()
-                .map(|network| network.peek().to_string()),
+            "card_network" => gateway_scoring_data.cardSwitchProvider.clone(),
             "card_is_in" => gateway_scoring_data.cardIsIn.clone(),
             "currency" => gateway_scoring_data
                 .currency

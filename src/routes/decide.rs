@@ -1,10 +1,8 @@
 use crate::custom_extractors::{ConnectedMerchant, Json, RequestIds};
 use crate::error::RouteError;
-use crate::euclid::errors::EuclidErrors;
 use crate::types::decide::response::DecideResponse;
 use crate::types::decide::DecideRequest;
-use axum::response::Response;
-use error_stack::ResultExt;
+use axum::response::{IntoResponse, Response};
 
 pub mod evaluation;
 
@@ -38,9 +36,7 @@ pub async fn decide(
                 payment_id,
                 merchant_reference_id,
             );
-            let value = serde_json::to_value(decision)
-                .change_context(EuclidErrors::FailedToSerializeJsonToString)?;
-            Ok(Some(value))
+            Ok(Some(Json(decision).into_response()))
         },
     )
     .await?;

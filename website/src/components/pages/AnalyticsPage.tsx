@@ -162,8 +162,8 @@ const CARD_INFO: Record<'hits' | 'share' | 'alignment' | 'sr' | 'preview_hits' |
   hits: {
     title: 'API call counts',
     purpose: 'Use these cards to see how much traffic each major decision-engine API handled in the selected window.',
-    calculation: 'Each request records one lightweight API-call event. The cards count those recorded calls for the endpoints surfaced in the current view.',
-    source: 'Counts come from ClickHouse-backed API analytics rows ingested from Kafka into `analytics_api_events`.',
+    calculation: 'Each request that reaches routing records one request-hit event. The cards count those events for the endpoints surfaced in the current view. Requests rejected before routing, for authentication or an invalid body, are not counted.',
+    source: 'Counts come from the request-hit rows ingested from Kafka into `analytics_domain_events`.',
   },
   share: {
     title: 'Selected connectors over time',

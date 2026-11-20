@@ -368,22 +368,19 @@ fn audit_plan(plan: &SteeringPlan) {
         })).collect::<Vec<_>>(),
     });
 
-    crate::analytics::DomainAnalyticsEvent::record_operation(
-        crate::analytics::AnalyticsFlowContext::new(
-            crate::analytics::ApiFlow::DynamicRouting,
-            crate::analytics::FlowType::VolumeCommitmentForecast,
-        ),
-        // Reusing an existing route, as the SR auto-calibrator does for its retune events.
-        crate::analytics::AnalyticsRoute::UpdateGatewayScore,
-        Some(plan.merchant_id.clone()),
-        None,
-        None,
-        None,
-        None,
-        Some("success".to_string()),
-        Some(details.to_string()),
-        None,
-    );
+    crate::analytics::DomainAnalyticsEvent {
+        merchant_id: Some(plan.merchant_id.clone()),
+        status: Some("success".to_string()),
+        details: Some(details.to_string()),
+        ..crate::analytics::DomainAnalyticsEvent::new(
+            crate::analytics::AnalyticsFlowContext::new(
+                crate::analytics::ApiFlow::DynamicRouting,
+                crate::analytics::FlowType::VolumeCommitmentForecast,
+            ), // Reusing an existing route, as the SR auto-calibrator does for its retune events.
+            crate::analytics::AnalyticsRoute::UpdateGatewayScore,
+        )
+    }
+    .emit();
 }
 
 /// One commitment's position: what is owed, what each remaining day must bring, and what routing

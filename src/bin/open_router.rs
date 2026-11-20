@@ -76,8 +76,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn log_startup_configuration(global_config: &open_router::config::GlobalConfig) {
     logger::info!("Decision engine started [{:?}]", global_config);
 
-    // Both default-secret checks below warn by design and must not fail closed. These are
-    // deployment-time placeholders the merchant overrides.
+    // Both checks below warn by design. These are placeholders the merchant overrides.
     if global_config.admin_secret.is_default() {
         logger::warn!(
             "SECURITY WARNING: admin_secret is set to the default value. \

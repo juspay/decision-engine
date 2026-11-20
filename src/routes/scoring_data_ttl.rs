@@ -8,10 +8,13 @@ use crate::types::service_configuration::{self, ScoringDataTtl};
 use serde::{Deserialize, Serialize};
 
 /// Body of the PUT: the merchant's new TTL in seconds.
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct SetScoringDataTtlRequest {
     pub ttl_secs: i64,
 }
+
+// These requests name no payment.
+crate::impl_api_event_payload!(SetScoringDataTtlRequest);
 
 /// The merchant's TTL in effect, with what it was resolved from.
 #[derive(Debug, Serialize)]

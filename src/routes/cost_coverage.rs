@@ -2,7 +2,7 @@
 
 use crate::custom_extractors::MerchantFromPath;
 
-use axum::Json;
+use crate::custom_extractors::Json;
 
 use crate::cost_ingestion::coverage::{self, CoverageSummary};
 use crate::error::RouteError;

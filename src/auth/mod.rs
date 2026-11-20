@@ -409,6 +409,9 @@ pub fn generate_api_key() -> String {
     format!("{}{}", KEY_PREFIX, hex::encode(combined))
 }
 
+/// Looked up by `key_hash.eq(..)` on an indexed column, so the digest must be deterministic and
+/// Argon2 or bcrypt cannot be used. Two UUIDv4s of entropy put brute force out of reach anyway.
+/// A peppered HMAC is the only upgrade that keeps the lookup, as defence-in-depth.
 pub fn hash_api_key(key: &str) -> String {
     let digest = digest::digest(&digest::SHA256, key.as_bytes());
     hex::encode(digest.as_ref())

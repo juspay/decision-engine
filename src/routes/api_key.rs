@@ -6,10 +6,11 @@ use crate::storage::api_keys;
 use crate::storage::types::{MerchantApiKey, MerchantApiKeyNew};
 use crate::utils::date_time;
 use axum::extract::Path;
+use masking::Secret;
 use serde::{Deserialize, Serialize};
 use time::PrimitiveDateTime;
 
-#[derive(Debug, Deserialize, crate::auth::MerchantScoped)]
+#[derive(Debug, Serialize, Deserialize, crate::auth::MerchantScoped)]
 pub struct CreateApiKeyRequest {
     #[merchant]
     pub merchant_id: String,
@@ -19,7 +20,7 @@ pub struct CreateApiKeyRequest {
 #[derive(Debug, Serialize)]
 pub struct CreateApiKeyResponse {
     pub key_id: String,
-    pub api_key: String,
+    pub api_key: Secret<String>,
     pub key_prefix: String,
     pub merchant_id: String,
     pub description: Option<String>,
@@ -189,13 +190,16 @@ pub async fn mint_api_key(
         .ok()?;
     Some(CreateApiKeyResponse {
         key_id,
-        api_key: raw_key,
+        api_key: Secret::new(raw_key),
         key_prefix,
         merchant_id: merchant.as_str().to_string(),
         description,
         created_at: now,
     })
 }
+
+// These requests name no payment.
+crate::impl_api_event_payload!(CreateApiKeyRequest);
 
 #[cfg(test)]
 mod tests {

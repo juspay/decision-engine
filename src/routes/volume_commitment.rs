@@ -3,10 +3,10 @@
 use crate::custom_extractors::MerchantFromPath;
 use std::collections::HashMap;
 
+use crate::custom_extractors::Json;
 use axum::extract::Query;
 use axum::http::StatusCode;
 use axum::Extension;
-use axum::Json;
 use futures::FutureExt;
 use serde::{Deserialize, Serialize};
 

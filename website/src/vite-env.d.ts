@@ -11,3 +11,6 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv
 }
+
+/** Id of this dashboard build, matching the `version.json` deployed with it; empty in dev. */
+declare const __DASHBOARD_BUILD_ID__: string

@@ -123,7 +123,7 @@ pub async fn list_connector_fees(
     Ok(Json(fees))
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Serialize)]
 pub struct SetFeeOverrideRequest {
     pub pct_bps: f64,
     pub fixed: f64,
@@ -210,3 +210,6 @@ pub(crate) async fn refresh_serving(merchant_id: &str) {
         );
     }
 }
+
+// These requests name no payment.
+crate::impl_api_event_payload!(SetFeeOverrideRequest);

@@ -1,4 +1,3 @@
-use masking::PeekInterface;
 use serde::{Deserialize, Serialize};
 
 use crate::types::card::txn_card_info::TxnCardInfo;
@@ -55,7 +54,7 @@ pub fn derive_cluster_key(txn_detail: &TxnDetail, txn_card_info: &TxnCardInfo) -
         card_network: txn_card_info
             .cardSwitchProvider
             .as_ref()
-            .map(|s| s.peek().to_lowercase()),
+            .map(|s| s.to_lowercase()),
         mcc: DEFAULT_MCC.to_string(),
         card_bin: txn_card_info
             .card_isin

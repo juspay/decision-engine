@@ -11,6 +11,9 @@ export default defineConfig(({ command }) => {
   const backendTarget = process.env.DE_BACKEND_URL ?? 'http://127.0.0.1:8080'
   const apiProxyPrefix = '/decision-engine-api'
   const hostedApiProxyPrefix = '/decision-engine/api'
+  // Stamped into the bundle and written to version.json, so an open tab can tell it is running an
+  // older build than the one deployed (see src/lib/buildVersion.ts).
+  const buildId = isDevServer ? '' : process.env.VITE_BUILD_ID?.trim() || new Date().toISOString()
 
   const createApiProxy = (rewritePrefix?: string) => ({
     target: backendTarget,
@@ -40,8 +43,24 @@ export default defineConfig(({ command }) => {
   })
 
   return {
-    plugins: [react()],
+    plugins: [
+      react(),
+      {
+        name: 'dashboard-build-id',
+        apply: 'build',
+        generateBundle() {
+          this.emitFile({
+            type: 'asset',
+            fileName: 'version.json',
+            source: JSON.stringify({ build: buildId }),
+          })
+        },
+      },
+    ],
     base: publicBaseUrl,
+    define: {
+      __DASHBOARD_BUILD_ID__: JSON.stringify(buildId),
+    },
     server: {
       proxy: {
         '^/decision-engine-api(?:/.*)?$': createApiProxy(apiProxyPrefix),

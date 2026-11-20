@@ -24,6 +24,10 @@ pub fn base_filters(builder: &mut BoundQueryBuilder, merchant_id: &str, flow: Fl
 
 /// Decisions the nudge diverted. `steered_approach` is supplied by the caller rather than read
 /// from the decider's enums, which keeps this layer free of that dependency.
+///
+/// Never request data, every caller passes the `steered_approach()` constant. `FilterClause::raw`
+/// inlines rather than binds, so keep callers constant-only and take the closed enum if a second
+/// one appears.
 pub fn steered_pred(steered_approach: &str) -> String {
     format!("routing_approach = '{steered_approach}'")
 }

@@ -1,6 +1,6 @@
-use std::{borrow::Cow, time::Instant};
+use std::time::Instant;
 
-use crate::custom_extractors::{RequestIds, ScopedJson, ScopedJsonRejection};
+use crate::custom_extractors::{Json, RequestIds, ScopedJson, ScopedJsonRejection};
 use crate::euclid::types::ExperimentEndpoint;
 use crate::{
     analytics::{
@@ -16,7 +16,6 @@ use crate::{
     },
     logger,
 };
-use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use serde::Serialize;
 
@@ -65,7 +64,7 @@ struct DecideGatewayFailureDetail<'a> {
 #[derive(Debug, Serialize)]
 struct DecideGatewayParseFailureDetail<'a> {
     request_id: &'a str,
-    raw_request: Cow<'a, str>,
+    raw_request: masking::Secret<String>,
     response: &'a ErrorResponse,
 }
 
@@ -118,12 +117,7 @@ fn invalid_payment_method_response(developer_message: String) -> ErrorResponse {
 
 impl IntoResponse for DecidedGateway {
     fn into_response(self) -> axum::http::Response<axum::body::Body> {
-        let body = serde_json::to_string(&self).unwrap();
-        axum::http::Response::builder()
-            .status(StatusCode::OK)
-            .header("Content-Type", "application/json")
-            .body(axum::body::Body::from(body))
-            .unwrap()
+        Json(self).into_response()
     }
 }
 
@@ -138,16 +132,19 @@ pub(crate) async fn run_decider_with_analytics(
     cpu_start: Instant,
 ) -> Result<DecidedGateway, ErrorResponse> {
     let auth_type = payload.auth_type();
-    DomainAnalyticsEvent::record_request_hit(
-        AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayRequestHit),
-        AnalyticsRoute::DecideGateway,
-        Some(payload.merchant_id.clone()),
-        Some(payload.payment_id().to_string()),
-        Some(x_request_id.to_string()),
-        global_request_id.clone(),
-        trace_id.clone(),
-        auth_type.clone(),
-    );
+    DomainAnalyticsEvent {
+        merchant_id: Some(payload.merchant_id.clone()),
+        payment_id: Some(payload.payment_id().to_string()),
+        request_id: Some(x_request_id.to_string()),
+        global_request_id: global_request_id.clone(),
+        trace_id: trace_id.clone(),
+        auth_type: auth_type.clone(),
+        ..DomainAnalyticsEvent::request_hit(
+            AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayRequestHit),
+            AnalyticsRoute::DecideGateway,
+        )
+    }
+    .emit();
 
     match decider_full_payload_hs_function(
         payload.clone(),
@@ -160,15 +157,13 @@ pub(crate) async fn run_decider_with_analytics(
             let routing_approach = decided_gateway.routing_approach.to_string();
             let (payment_method, payment_method_type) = payload.instrument().analytics_columns();
 
-            DomainAnalyticsEvent::record_decision(
-                AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayDecision),
-                Some(payload.merchant_id.clone()),
-                Some(routing_approach),
-                Some(decided_gateway.decided_gateway.clone()),
-                Some("success".to_string()),
-                AnalyticsRoute::DecideGateway,
-                decided_gateway.priority_logic_tag.clone(),
-                serialize_details(&DecideGatewaySuccessDetail {
+            DomainAnalyticsEvent {
+                merchant_id: Some(payload.merchant_id.clone()),
+                routing_approach: Some(routing_approach),
+                gateway: Some(decided_gateway.decided_gateway.clone()),
+                status: Some("success".to_string()),
+                rule_name: decided_gateway.priority_logic_tag.clone(),
+                details: serialize_details(&DecideGatewaySuccessDetail {
                     request: &payload,
                     response: &decided_gateway,
                     score_context: decided_gateway.gateway_priority_map.as_ref(),
@@ -182,18 +177,26 @@ pub(crate) async fn run_decider_with_analytics(
                         reset_approach: &decided_gateway.reset_approach,
                     },
                 }),
-                Some(payload.payment_id().to_string()),
-                Some(x_request_id.to_string()),
+                payment_id: Some(payload.payment_id().to_string()),
+                request_id: Some(x_request_id.to_string()),
                 global_request_id,
                 trace_id,
-                Some("gateway_decided".to_string()),
+                event_stage: Some("gateway_decided".to_string()),
                 payment_method_type,
                 payment_method,
                 auth_type,
-                payload.card_network(),
-                Some(payload.currency()),
-                payload.country(),
-            );
+                card_network: payload.card_network(),
+                currency: Some(payload.currency()),
+                country: payload.country(),
+                ..DomainAnalyticsEvent::new(
+                    AnalyticsFlowContext::new(
+                        ApiFlow::DynamicRouting,
+                        FlowType::DecideGatewayDecision,
+                    ),
+                    AnalyticsRoute::DecideGateway,
+                )
+            }
+            .emit_decision();
             Ok(decided_gateway)
         }
         Err(e) => {
@@ -202,27 +205,32 @@ pub(crate) async fn run_decider_with_analytics(
                 payload.ranking_algorithm.as_ref(),
                 e.routing_approach.as_ref(),
             );
-            DomainAnalyticsEvent::record_error(
-                AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayError),
-                AnalyticsRoute::DecideGateway,
-                Some(payload.merchant_id.clone()),
-                Some(payload.payment_id().to_string()),
-                Some(x_request_id.to_string()),
+            DomainAnalyticsEvent {
+                merchant_id: Some(payload.merchant_id.clone()),
+                payment_id: Some(payload.payment_id().to_string()),
+                request_id: Some(x_request_id.to_string()),
                 global_request_id,
                 trace_id,
-                None,
                 routing_approach,
-                e.error_code.clone(),
-                e.error_message.clone(),
-                serialize_details(&DecideGatewayFailureDetail {
+                details: serialize_details(&DecideGatewayFailureDetail {
                     request_id: x_request_id,
                     request: &payload,
                     routing_approach: e.routing_approach.as_ref(),
                     response: &e,
                 }),
-                Some("request_failed".to_string()),
+                event_stage: Some("request_failed".to_string()),
                 auth_type,
-            );
+                ..DomainAnalyticsEvent::error(
+                    AnalyticsFlowContext::new(
+                        ApiFlow::DynamicRouting,
+                        FlowType::DecideGatewayError,
+                    ),
+                    AnalyticsRoute::DecideGateway,
+                    e.error_code.clone(),
+                    e.error_message.clone(),
+                )
+            }
+            .emit();
             Err(e)
         }
     }
@@ -252,11 +260,11 @@ pub async fn decide_gateway(
     );
     let (body, parsed) = match request {
         Ok(ScopedJson { payload, body, .. }) => {
-            logger::debug!("Body: {:?}", body);
+            logger::debug!("Body: {:?}", masking::Secret::<_>::new(&body));
             (body, Ok(payload))
         }
         Err(ScopedJsonRejection::Parse { body, error }) => {
-            logger::debug!("Body: {:?}", body);
+            logger::debug!("Body: {:?}", masking::Secret::<_>::new(&body));
             (body, Err(error))
         }
         Err(ScopedJsonRejection::Scope(violation)) => {
@@ -266,25 +274,26 @@ pub async fn decide_gateway(
             let (error_code, error_message) = e.analytics_code_and_message();
             let analytics_stage = e.analytics_stage().to_string();
             let error_response = e.into_error_response();
-            DomainAnalyticsEvent::record_error(
-                AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayError),
-                AnalyticsRoute::DecideGateway,
-                None,
-                None,
-                Some(x_request_id.clone()),
-                global_request_id.clone(),
-                trace_id.clone(),
-                None,
-                None,
-                error_code,
-                error_message.to_string(),
-                serialize_details(&DecideGatewayReadFailureDetail {
+            DomainAnalyticsEvent {
+                request_id: Some(x_request_id.clone()),
+                global_request_id: global_request_id.clone(),
+                trace_id: trace_id.clone(),
+                details: serialize_details(&DecideGatewayReadFailureDetail {
                     request_id: &x_request_id,
                     response: &error_response,
                 }),
-                Some(analytics_stage),
-                None,
-            );
+                event_stage: Some(analytics_stage),
+                ..DomainAnalyticsEvent::error(
+                    AnalyticsFlowContext::new(
+                        ApiFlow::DynamicRouting,
+                        FlowType::DecideGatewayError,
+                    ),
+                    AnalyticsRoute::DecideGateway,
+                    error_code,
+                    error_message.to_string(),
+                )
+            }
+            .emit();
             return Err(error_response);
         }
     };
@@ -314,26 +323,27 @@ pub async fn decide_gateway(
             .await
         }
         Err(error_response) => {
-            DomainAnalyticsEvent::record_error(
-                AnalyticsFlowContext::new(ApiFlow::DynamicRouting, FlowType::DecideGatewayError),
-                AnalyticsRoute::DecideGateway,
-                None,
-                None,
-                Some(x_request_id.clone()),
+            DomainAnalyticsEvent {
+                request_id: Some(x_request_id.clone()),
                 global_request_id,
                 trace_id,
-                None,
-                None,
-                error_response.error_code.clone(),
-                error_response.error_message.clone(),
-                serialize_details(&DecideGatewayParseFailureDetail {
+                details: serialize_details(&DecideGatewayParseFailureDetail {
                     request_id: &x_request_id,
-                    raw_request: String::from_utf8_lossy(&body),
+                    raw_request: masking::Secret::new(String::from_utf8_lossy(&body).into_owned()),
                     response: &error_response,
                 }),
-                Some("request_parse_failed".to_string()),
-                None,
-            );
+                event_stage: Some("request_parse_failed".to_string()),
+                ..DomainAnalyticsEvent::error(
+                    AnalyticsFlowContext::new(
+                        ApiFlow::DynamicRouting,
+                        FlowType::DecideGatewayError,
+                    ),
+                    AnalyticsRoute::DecideGateway,
+                    error_response.error_code.clone(),
+                    error_response.error_message.clone(),
+                )
+            }
+            .emit();
             Err(error_response)
         }
     };

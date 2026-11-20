@@ -8,7 +8,7 @@ use crate::decider::gatewaydecider::constants as C;
 use crate::error;
 use crate::logger;
 
-#[derive(Debug, Deserialize, crate::auth::MerchantScoped)]
+#[derive(Debug, Deserialize, Serialize, crate::auth::MerchantScoped)]
 pub struct ResetGatewayScoresRequest {
     /// Merchant whose gateway (SR) scores should be flushed. Accepts both the
     /// snake_case and the camelCase the dashboard sends.
@@ -42,6 +42,10 @@ pub async fn reset_gateway_scores(
 
     // Both SR v2 and SR v3 (the multi-objective path) share the
     // `<prefix>_<merchant_id>_...` layout, with `_}score` / `_}queue` suffixes.
+    //
+    // Not a client string, `ScopedJson` resolves the id against the caller's session. Widening the
+    // glob would need a provisioned id holding a metacharacter, which no creation path produces.
+    // Validate the charset at merchant creation.
     let patterns = [
         format!(
             "{}_{}_*",
@@ -123,3 +127,6 @@ async fn clear_autopilot_sublevel_overrides(merchant_id: &str) -> usize {
     }
     removed
 }
+
+// These requests name no payment.
+crate::impl_api_event_payload!(ResetGatewayScoresRequest);
