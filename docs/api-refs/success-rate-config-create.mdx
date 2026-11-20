@@ -38,6 +38,8 @@ curl --location "$BASE_URL/rule/create" \
 
 Rows are checked when saved: an unknown method, a type that does not belong to its method, or a row with the two the legacy way round (`"paymentMethodType": "CARD"`) is rejected with a 400. Saved rows store the method and type as upper-case codes (`CARD`, `CREDIT`), which is how `/rule/get` returns them.
 
+`defaultLatencyThreshold` and `latencyThreshold` (seconds) apply only while the merchant's `latency-threshold` feature is on (see [Merchant Features](merchant-features.mdx)): a payment still pending after that long counts as a failure in its connector's SR score. With the feature off they are stored but ignored, and a pending update changes no SR score.
+
 ```json
 {
   "message": "Success Rate Configuration created successfully",

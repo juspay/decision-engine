@@ -18,6 +18,8 @@ pub mod merchant_account_config;
 pub mod profile_connectors;
 pub mod report_upload;
 pub mod rule_configuration;
+// Admin API for a merchant's scoring-context TTL.
+pub mod scoring_data_ttl;
 pub mod seed_costs;
 pub mod settlement_webhook;
 pub mod update_gateway_score;

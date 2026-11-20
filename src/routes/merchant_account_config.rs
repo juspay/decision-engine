@@ -51,6 +51,8 @@ pub enum KnownFeature {
     SrRouting,
     /// Outcomes of hybrid payments decided by their rule output also update SR scores.
     SrScoresFromRuleRouting,
+    /// The merchant's latency thresholds affect scoring; off, latency never does.
+    LatencyThreshold,
 }
 
 impl KnownFeature {
@@ -71,6 +73,9 @@ impl KnownFeature {
             Self::SrRouting => crate::routes::decide::evaluation::SR_ROUTING_FEATURE_FLAG,
             Self::SrScoresFromRuleRouting => {
                 crate::routes::decide::evaluation::SR_SCORES_FROM_RULE_ROUTING_FEATURE_FLAG
+            }
+            Self::LatencyThreshold => {
+                crate::feedback::constants::LATENCY_THRESHOLD_SCORING_FEATURE_FLAG
             }
         }
     }

@@ -26,6 +26,7 @@ use super::volume_commitment;
 use crate::decider::gatewaydecider::constants as C;
 use crate::feedback::constants::kvRedis;
 use crate::logger;
+use crate::redis::cache::findByNameFromRedis;
 use crate::redis::feature::is_feature_enabled;
 use crate::redis::feature::RedisDataStruct;
 use crate::types::card::txn_card_info::TxnCardInfo;
@@ -389,16 +390,29 @@ pub async fn load_srv3_default_bucket_size(merchant_id: &str) -> i32 {
         .unwrap_or(C::DEFAULT_SR_V3_BASED_BUCKET_SIZE)
 }
 
-/// Saves the scoring context `/update-gateway-score` reads to update SR scores for the payment.
+/// The merchant's scoring-context TTL: its own service config, else the default, capped at the max.
+pub(super) async fn scoring_data_ttl_secs(merchant_id: &str) -> i64 {
+    let merchant_ttl =
+        findByNameFromRedis::<i64>(service_configuration::ScoringDataTtl::name(merchant_id)).await;
+    get_tenant_app_state()
+        .await
+        .config
+        .scoring_data
+        .ttl_secs(merchant_ttl)
+}
+
+/// Saves the payment's scoring context, in the compact V2 form, for `/update-gateway-score`.
 async fn write_gateway_scoring_data(txn_uuid: &str, data: &T::GatewayScoringData) {
     let key = [C::GATEWAY_SCORING_DATA, txn_uuid].concat();
+    let ttl = scoring_data_ttl_secs(&data.merchantId).await;
+    let compact = T::GatewayScoringDataV2::from(data.clone());
     get_tenant_app_state()
         .await
         .redis_conn
         .setx(
             &key,
-            serde_json::to_string(data).unwrap_or_default().as_str(),
-            C::GATEWAY_SCORE_KEYS_TTL,
+            serde_json::to_string(&compact).unwrap_or_default().as_str(),
+            ttl,
             None,
             RedisDataStruct::STRING,
         )

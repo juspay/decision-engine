@@ -595,6 +595,169 @@ impl GatewayScoringData {
     }
 }
 
+/// Lets V2 leave `false` flags out of the stored JSON.
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
+/// Lets V2 leave out UDFs that are missing or empty.
+fn is_empty_udfs(udfs: &Option<UDFs>) -> bool {
+    udfs.as_ref().is_none_or(|udfs| udfs.0.is_empty())
+}
+
+/// Stores `dateCreated` as i64 Unix millis, readable by the untagged [`StoredGatewayScoringData`].
+mod unix_millis {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use time::OffsetDateTime;
+
+    // Writes the time as whole milliseconds.
+    pub fn serialize<S: Serializer>(
+        value: &OffsetDateTime,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        let millis = value.unix_timestamp_nanos() / 1_000_000;
+        serializer.serialize_i64(i64::try_from(millis).map_err(serde::ser::Error::custom)?)
+    }
+
+    // Reads whole milliseconds back into a time.
+    pub fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<OffsetDateTime, D::Error> {
+        let millis = i64::deserialize(deserializer)?;
+        OffsetDateTime::from_unix_timestamp_nanos(i128::from(millis) * 1_000_000)
+            .map_err(serde::de::Error::custom)
+    }
+}
+
+/// Compact [`GatewayScoringData`] for Redis: no empty or unread fields, millis `dateCreated`.
+#[derive(Debug, Serialize, Deserialize, Clone, PartialEq)]
+pub struct GatewayScoringDataV2 {
+    pub merchantId: String,
+    /// Stored as `paymentMethod` and `paymentMethodType`, in the standard meaning.
+    #[serde(flatten)]
+    pub instrument: crate::types::payment_instrument::PaymentInstrument,
+    pub orderType: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cardType: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bankCode: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub authType: Option<String>,
+    #[serde(
+        default,
+        serialize_with = "mask_secret_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub paymentSource: Option<Secret<String>>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub isPaymentSourceEnabledForSrRouting: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub isAuthLevelEnabledForSrRouting: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub isBankLevelEnabledForSrRouting: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub isGriEnabledForElimination: bool,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub isGriEnabledForSrRouting: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub routingApproach: Option<String>,
+    #[serde(with = "unix_millis")]
+    pub dateCreated: OffsetDateTime,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub eliminationEnabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cardIsIn: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cardSwitchProvider: Option<Secret<String>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency: Option<Currency>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub country: Option<CountryISO2>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gatewayReferenceId: Option<String>,
+    #[serde(default, skip_serializing_if = "is_empty_udfs")]
+    pub udfs: Option<UDFs>,
+}
+
+// Full scoring data to the compact form `flow_new` writes.
+impl From<GatewayScoringData> for GatewayScoringDataV2 {
+    fn from(data: GatewayScoringData) -> Self {
+        Self {
+            merchantId: data.merchantId,
+            instrument: data.instrument,
+            orderType: data.orderType,
+            cardType: data.cardType,
+            bankCode: data.bankCode,
+            authType: data.authType,
+            paymentSource: data.paymentSource,
+            isPaymentSourceEnabledForSrRouting: data.isPaymentSourceEnabledForSrRouting,
+            isAuthLevelEnabledForSrRouting: data.isAuthLevelEnabledForSrRouting,
+            isBankLevelEnabledForSrRouting: data.isBankLevelEnabledForSrRouting,
+            isGriEnabledForElimination: data.isGriEnabledForElimination,
+            isGriEnabledForSrRouting: data.isGriEnabledForSrRouting,
+            routingApproach: data.routingApproach,
+            dateCreated: data.dateCreated,
+            eliminationEnabled: data.eliminationEnabled,
+            cardIsIn: data.cardIsIn,
+            cardSwitchProvider: data.cardSwitchProvider,
+            currency: data.currency,
+            country: data.country,
+            gatewayReferenceId: data.gatewayReferenceId,
+            udfs: data.udfs,
+        }
+    }
+}
+
+// Compact form back to full scoring data, with the dropped fields at their defaults.
+impl From<GatewayScoringDataV2> for GatewayScoringData {
+    fn from(data: GatewayScoringDataV2) -> Self {
+        Self {
+            merchantId: data.merchantId,
+            instrument: data.instrument,
+            orderType: data.orderType,
+            cardType: data.cardType,
+            bankCode: data.bankCode,
+            authType: data.authType,
+            paymentSource: data.paymentSource,
+            isPaymentSourceEnabledForSrRouting: data.isPaymentSourceEnabledForSrRouting,
+            isAuthLevelEnabledForSrRouting: data.isAuthLevelEnabledForSrRouting,
+            isBankLevelEnabledForSrRouting: data.isBankLevelEnabledForSrRouting,
+            isGriEnabledForElimination: data.isGriEnabledForElimination,
+            isGriEnabledForSrRouting: data.isGriEnabledForSrRouting,
+            routingApproach: data.routingApproach,
+            dateCreated: data.dateCreated,
+            eliminationEnabled: data.eliminationEnabled,
+            cardIsIn: data.cardIsIn,
+            cardSwitchProvider: data.cardSwitchProvider,
+            currency: data.currency,
+            country: data.country,
+            is_legacy_decider_flow: false,
+            gatewayReferenceId: data.gatewayReferenceId,
+            // flow_new always wrote UDFs, empty when the order had none.
+            udfs: Some(data.udfs.unwrap_or_else(|| UDFs(HashMap::new()))),
+            udfs_consumed_for_routing: None,
+        }
+    }
+}
+
+/// A scoring context read from Redis: V1 (old, full) is tried first, then V2 (compact).
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+pub enum StoredGatewayScoringData {
+    V1(GatewayScoringData),
+    V2(GatewayScoringDataV2),
+}
+
+// Either stored form as the scoring data `/update-gateway-score` works with.
+impl From<StoredGatewayScoringData> for GatewayScoringData {
+    fn from(stored: StoredGatewayScoringData) -> Self {
+        match stored {
+            StoredGatewayScoringData::V2(data) => data.into(),
+            StoredGatewayScoringData::V1(data) => data,
+        }
+    }
+}
+
 #[derive(Debug)]
 #[allow(dead_code)]
 pub struct MetricsStreamKeyShard(String, i32);
@@ -2315,6 +2478,98 @@ mod preferred_connectors_contract_tests {
             assert_eq!(approach.to_string(), label);
             assert_eq!(serde_json::to_value(approach)?, json!(label));
         }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::panic_in_result_fn)]
+mod stored_gateway_scoring_data_tests {
+    use super::{GatewayScoringData, GatewayScoringDataV2, StoredGatewayScoringData};
+    use serde_json::json;
+
+    // Old (V1) and new (V2) scoring contexts both read, round-trip, and score the same SR v3 key.
+    #[test]
+    fn stored_scoring_data_reads_both_formats() -> Result<(), serde_json::Error> {
+        let read =
+            |value: serde_json::Value| -> Result<(bool, GatewayScoringData), serde_json::Error> {
+                let stored: StoredGatewayScoringData = serde_json::from_value(value)?;
+                let is_v1 = matches!(stored, StoredGatewayScoringData::V1(_));
+                Ok((is_v1, stored.into()))
+            };
+
+        // V1 as the deployed /decide writes it: "" card type, UNKNOWN bank code, empty UDFs.
+        let (is_v1, old) = read(json!({"merchantId":"m1","paymentMethod":"CARD",
+            "paymentMethodType":"CREDIT","orderType":"UNKNOWN","cardType":"","bankCode":"UNKNOWN",
+            "authType":"THREE_DS","paymentSource":"FILTERED",
+            "isPaymentSourceEnabledForSrRouting":false,
+            "isAuthLevelEnabledForSrRouting":false,"isBankLevelEnabledForSrRouting":false,
+            "isGriEnabledForElimination":false,"isGriEnabledForSrRouting":false,
+            "routingApproach":"PRIORITY_LOGIC","dateCreated":"2026-11-20 09:43:06.030351 +00:00:00",
+            "eliminationEnabled":true,"cardIsIn":"555534","cardSwitchProvider":"Mastercard",
+            "currency":"BRL","country":"BR","is_legacy_decider_flow":false,
+            "gatewayReferenceId":null,
+            "udfs":{},"udfs_consumed_for_routing":null}))?;
+        assert!(is_v1, "the deployed code's key reads as V1");
+
+        // V1 with the older array-form date also still reads.
+        let (is_v1, older) = read(json!({"merchantId":"m2","paymentMethod":"UNKNOWN",
+            "paymentMethodType":"","orderType":"UNKNOWN","cardType":null,"bankCode":null,
+            "authType":"THREE_DS","paymentSource":"FILTERED",
+            "isPaymentSourceEnabledForSrRouting":false,
+            "isAuthLevelEnabledForSrRouting":false,"isBankLevelEnabledForSrRouting":false,
+            "isGriEnabledForElimination":false,"isGriEnabledForSrRouting":false,
+            "routingApproach":"SR_SELECTION_V3_ROUTING",
+            "dateCreated":[2026, 322, 12, 20, 43, 479565000, 0, 0, 0],"eliminationEnabled":false,
+            "cardIsIn":null,"cardSwitchProvider":null,"currency":"EUR","country":null,
+            "is_legacy_decider_flow":false,"gatewayReferenceId":null,"udfs":{},
+            "udfs_consumed_for_routing":null}))?;
+        assert!(is_v1);
+        assert_eq!(older.merchantId, "m2");
+
+        // V2 as this branch writes the same payment: no empty fields, no bank code, no UDFs.
+        let v2 = json!({"merchantId":"m1","paymentMethod":"CARD","paymentMethodType":"CREDIT",
+            "orderType":"UNKNOWN","authType":"THREE_DS","routingApproach":"PRIORITY_LOGIC",
+            "dateCreated":1795167786030_i64,"eliminationEnabled":true,"cardIsIn":"555534",
+            "cardSwitchProvider":"Mastercard","currency":"BRL","country":"BR"});
+        let (is_v1, new) = read(v2.clone())?;
+        assert!(!is_v1, "a V2 key is not mistaken for V1");
+        assert_eq!(
+            (new.bankCode.as_deref(), new.cardType.as_deref()),
+            (None, None)
+        );
+        assert_eq!(
+            serde_json::to_value(GatewayScoringDataV2::from(new.clone()))?,
+            v2
+        );
+
+        // A real bank code is kept.
+        let mut with_bank = v2.clone();
+        with_bank["bankCode"] = json!("HDFC");
+        let (_, with_bank_read) = read(with_bank.clone())?;
+        assert_eq!(
+            serde_json::to_value(GatewayScoringDataV2::from(with_bank_read))?,
+            with_bank
+        );
+
+        // Old and new keys of one payment score the same SR v3 key, from the same instant.
+        let fields = [
+            "card_network",
+            "card_is_in",
+            "currency",
+            "country",
+            "auth_type",
+        ]
+        .map(String::from);
+        let key = |data: &GatewayScoringData| {
+            crate::decider::gatewaydecider::utils::sr_key(data, true, &fields, None)
+        };
+        assert_eq!(
+            key(&old),
+            "{gw_sr_v3_score_m1_UNKNOWN_CREDIT_CARD_Mastercard_555534_BRL_BR_THREE_DS"
+        );
+        assert_eq!(key(&old), key(&new));
+        assert_eq!((new.dateCreated - old.dateCreated).whole_milliseconds(), 0);
         Ok(())
     }
 }
