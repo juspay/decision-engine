@@ -138,6 +138,16 @@ pub static CARD_INFO_LOOKUP_FAILURE_COUNTER: LazyLock<CounterVec> = LazyLock::ne
     )
 });
 
+/// Count gateway-score feedback decisions by normalized GSM category and outcome.
+/// Labels are deliberately bounded; connector-provided codes/messages must not become labels.
+pub static GATEWAY_SCORE_FEEDBACK_COUNTER: LazyLock<CounterVec> = LazyLock::new(|| {
+    CounterVec::new(
+        "gateway_score_feedback_total",
+        "Count gateway-score feedback decisions grouped by normalized error category and outcome",
+        &["category", "outcome"],
+    )
+});
+
 /// Count of HTTP responses to routes this service defines, grouped by matched route template, method and status code; the only metric that sees 4xx/5xx as such, including auth rejections. Paths no route serves are not counted.
 pub static API_RESPONSE_COUNTER: LazyLock<CounterVec> = LazyLock::new(|| {
     CounterVec::new(

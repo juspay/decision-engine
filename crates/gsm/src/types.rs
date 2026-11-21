@@ -72,6 +72,8 @@ pub struct GsmRule {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct GsmErrorInfo {
+    /// The decision-engine feedback route derives this from the request's `gateway` field.
+    #[serde(default)]
     pub connector: String,
     #[serde(default)]
     pub flow: String,
