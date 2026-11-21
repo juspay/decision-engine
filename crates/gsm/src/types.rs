@@ -3,6 +3,7 @@
 #[serde(rename_all = "snake_case")]
 pub enum GsmDecision {
     Retry,
+    Requeue,
     #[default]
     DoDefault,
 }
@@ -11,6 +12,7 @@ impl std::fmt::Display for GsmDecision {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Retry => write!(f, "retry"),
+            Self::Requeue => write!(f, "requeue"),
             Self::DoDefault => write!(f, "do_default"),
         }
     }
@@ -22,6 +24,7 @@ impl std::str::FromStr for GsmDecision {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "retry" => Ok(Self::Retry),
+            "requeue" => Ok(Self::Requeue),
             "do_default" => Ok(Self::DoDefault),
             other => Err(other.to_string()),
         }
@@ -87,7 +90,7 @@ pub struct GsmErrorInfo {
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct GsmInfo {
-    /// `"retry"` or `"do_default"`.
+    /// `"retry"`, `"requeue"`, or `"do_default"`.
     pub decision: String,
     pub step_up_possible: bool,
     pub clear_pan_possible: bool,
