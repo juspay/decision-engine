@@ -1,5 +1,6 @@
 import { test, expect, factory } from '../../fixtures/test'
 import type { ApiClient } from '../../fixtures/api-client'
+import { abGuardrailCounts } from '../../helpers/redis'
 
 /** The payment id's bucket in 0..100, as the engine assigns arms from it. */
 function bucket(paymentId: string): bigint {
@@ -33,8 +34,9 @@ async function createExperiment(api: ApiClient, merchantId: string) {
     algorithm: { type: 'ab_test', data: {
       control: { rule_algorithm_id: control.body.rule_id },
       variant: { rule_algorithm_id: variant.body.rule_id },
+      // Large enough that the experiment doesn't complete during the test.
       endpoints: ['evaluate'], variant_split_pct: 20,
-      min_sample_size: 20, guardrail_threshold_pp: 10,
+      min_sample_size: 1000, guardrail_threshold_pp: 10,
     } },
   })
   await api.setMerchantFeature(merchantId, 'ab-test-real-payments', true)
@@ -51,6 +53,15 @@ async function feedback(api: ApiClient, merchantId: string, paymentId: string, g
   await api.updateGatewayScore(factory.updateGatewayScoreRequest({ merchantId, paymentId, gateway, status }))
 }
 
+/**
+ * Routes every payment, expecting `gateway`, then reports `status` for each. Routing comes first so
+ * a stop the outcomes trigger can't change where the rest are routed.
+ */
+async function resolve(api: ApiClient, merchantId: string, paymentIds: string[], gateway: string, status: 'AUTHORIZED' | 'FAILURE') {
+  for (const paymentId of paymentIds) expect(await route(api, merchantId, paymentId)).toBe(gateway)
+  for (const paymentId of paymentIds) await feedback(api, merchantId, paymentId, gateway, status)
+}
+
 async function experimentActive(api: ApiClient, merchantId: string, experimentId: string): Promise<boolean> {
   const active = await api.listActiveRoutingAlgorithms(merchantId)
   return active.body.some((algorithm: { id: string }) => algorithm.id === experimentId)
@@ -63,20 +74,18 @@ test('payment feedback stops a breached experiment and leaves the active rule in
     // Feature-flag reads are cached for five seconds. Wait for a real variant decision.
     await expect.poll(() => route(api, merchant.id, paymentForVariant()), { timeout: 15_000, intervals: [500] }).toBe('adyen')
 
-    const controls: string[] = []
-    const variants: string[] = []
-    for (let i = 0; (controls.length < 1 || variants.length < 1) && i < 100; i++) {
-      const paymentId = factory.paymentId('guardrail')
-      const gateway = await route(api, merchant.id, paymentId)
-      if (gateway === 'checkout' && controls.length < 1) controls.push(paymentId)
-      if (gateway === 'adyen' && variants.length < 1) variants.push(paymentId)
-    }
-    expect(controls).toHaveLength(1)
-    expect(variants).toHaveLength(1)
+    // Every control payment succeeds and every variant payment fails: a drop clear on few payments,
+    // but the guardrail judges only once each arm has 30 outcomes. 20 is under that; 40 is over it
+    // with room for the counts reading a payment or two low.
+    const controls = Array.from({ length: 40 }, () => paymentInBuckets(20, 100))
+    const variants = Array.from({ length: 40 }, () => paymentForVariant())
+    await resolve(api, merchant.id, controls, 'checkout', 'AUTHORIZED')
+    await resolve(api, merchant.id, variants.slice(0, 20), 'adyen', 'FAILURE')
+    await expect.poll(async () => (await abGuardrailCounts(merchant.id, experimentId)).variant_txns ?? 0)
+      .toBeGreaterThanOrEqual(19)
+    expect(await experimentActive(api, merchant.id, experimentId)).toBe(true)
 
-    await feedback(api, merchant.id, controls[0], 'checkout', 'AUTHORIZED')
-    expect(await experimentActive(api, merchant.id, experimentId)).toBe(true) // Both arms need an outcome.
-    await feedback(api, merchant.id, variants[0], 'adyen', 'FAILURE')
+    await resolve(api, merchant.id, variants.slice(20), 'adyen', 'FAILURE')
     // Feedback is processed after the response, so the stop lands shortly after.
     await expect.poll(() => experimentActive(api, merchant.id, experimentId), { timeout: 10_000, intervals: [200] }).toBe(false)
     expect(await route(api, merchant.id, paymentForVariant())).toBe('stripe')
@@ -115,7 +124,7 @@ test('with several variants, feedback stops only the breached variant', async ({
         { id: 'healthy', split_pct: 20, rule_algorithm_id: healthy.body.rule_id },
       ],
       endpoints: ['evaluate'],
-      min_sample_size: 20, guardrail_threshold_pp: 10,
+      min_sample_size: 1000, guardrail_threshold_pp: 10,
     } },
   })
   expect(created.status, JSON.stringify(created.body)).toBe(200)
@@ -126,16 +135,11 @@ test('with several variants, feedback stops only the breached variant', async ({
     // Feature-flag reads are cached for five seconds. Wait for a real variant decision.
     await expect.poll(() => route(api, merchant.id, paymentInBuckets(0, 20)), { timeout: 15_000, intervals: [500] }).toBe('adyen')
 
-    const controlPayment = paymentInBuckets(40, 100)
-    const failingPayment = paymentInBuckets(0, 20)
-    const healthyPayment = paymentInBuckets(20, 40)
-    expect(await route(api, merchant.id, controlPayment)).toBe('checkout')
-    expect(await route(api, merchant.id, failingPayment)).toBe('adyen')
-    expect(await route(api, merchant.id, healthyPayment)).toBe('razorpay')
-
-    await feedback(api, merchant.id, controlPayment, 'checkout', 'AUTHORIZED')
-    await feedback(api, merchant.id, healthyPayment, 'razorpay', 'AUTHORIZED')
-    await feedback(api, merchant.id, failingPayment, 'adyen', 'FAILURE')
+    // 40 outcomes per arm: over the 30 the guardrail needs, with room for the counts reading low.
+    const forty = (from: number, to: number) => Array.from({ length: 40 }, () => paymentInBuckets(from, to))
+    await resolve(api, merchant.id, forty(40, 100), 'checkout', 'AUTHORIZED')
+    await resolve(api, merchant.id, forty(20, 40), 'razorpay', 'AUTHORIZED')
+    await resolve(api, merchant.id, forty(0, 20), 'adyen', 'FAILURE')
 
     // Feedback is processed after the response, so the stop lands shortly after.
     const stoppedVariants = async () => {

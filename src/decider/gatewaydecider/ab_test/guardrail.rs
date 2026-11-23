@@ -15,10 +15,13 @@ use crate::app::get_tenant_app_state;
 use crate::euclid::types::{ABTestData, ExperimentEndpoint};
 use crate::logger;
 
-// Share of the merchant's sample target that must resolve before the guardrail can stop a
-// variant. A safety stop should react long before a significance verdict, but not on the first
-// few payments, where one binary outcome swings an arm's rate by tens of points.
-const GUARDRAIL_SAMPLE_PCT: u32 = 10;
+/// Resolved payments each arm needs before the guardrail judges: below it, one outcome swings an
+/// arm's rate by several points.
+const GUARDRAIL_MIN_RESOLVED_PER_ARM: u64 = 30;
+/// How many standard errors a drop must be from no difference for the guardrail to call it real:
+/// one-sided, about a 0.13% chance per check that an equal variant looks this far behind. Strict,
+/// because the guardrail checks again on every outcome.
+const GUARDRAIL_Z: f64 = 3.0;
 /// How long an arm's routed payments and counts are kept after their last write.
 const COUNTS_TTL_SECS: i64 = 30 * 24 * 60 * 60;
 
@@ -82,10 +85,36 @@ fn tracked_side(data: &ABTestData, payment_id: &str) -> Option<ArmSide> {
         .map(|plan| plan.side)
 }
 
-/// Resolved payments, control's plus a variant's, from which the guardrail judges that variant: a
-/// tenth of the sample target. The experiment results apply the same minimum.
-pub fn min_resolved(min_sample_size: u32) -> u64 {
-    u64::from(min_sample_size / GUARDRAIL_SAMPLE_PCT)
+/// Whether a variant breached the guardrail: its auth rate is more than `threshold_pp` below
+/// control's, and the drop is statistically clear (a one-sided two-proportion z-test of at least
+/// [`GUARDRAIL_Z`]) with at least [`GUARDRAIL_MIN_RESOLVED_PER_ARM`] resolved payments in each arm.
+/// A large drop is clear on few payments and a small one needs many, so the variant's own sample
+/// decides, whatever its share of traffic. The experiment results report a breach by the same rule.
+pub fn is_breached(
+    control_successes: u64,
+    control_resolved: u64,
+    variant_successes: u64,
+    variant_resolved: u64,
+    threshold_pp: f64,
+) -> bool {
+    if control_resolved < GUARDRAIL_MIN_RESOLVED_PER_ARM
+        || variant_resolved < GUARDRAIL_MIN_RESOLVED_PER_ARM
+    {
+        return false;
+    }
+    // HyperLogLog counts are approximate, so successes can read above the payments resolved.
+    let control_successes = control_successes.min(control_resolved) as f64;
+    let variant_successes = variant_successes.min(variant_resolved) as f64;
+    let (n_c, n_v) = (control_resolved as f64, variant_resolved as f64);
+    let drop = control_successes / n_c - variant_successes / n_v;
+    if drop * 100.0 <= threshold_pp {
+        return false;
+    }
+    // Pooled under "no difference": zero only when every payment succeeded or every one failed,
+    // and then there is no drop.
+    let pooled = (control_successes + variant_successes) / (n_c + n_v);
+    let standard_error = (pooled * (1.0 - pooled) * (1.0 / n_c + 1.0 / n_v)).sqrt();
+    standard_error > 0.0 && drop / standard_error >= GUARDRAIL_Z
 }
 
 /// Every arm that can have routed payments: control and each variant, stopped ones included.
@@ -108,18 +137,15 @@ fn candidates(side: &ArmSide, running: &[String]) -> Vec<String> {
     }
 }
 
-/// Whether `variant` fell more than `threshold_pp` below `control`, once both arms have outcomes
-/// and together reach `min_resolved`.
-fn breached(control: ArmCounts, variant: ArmCounts, threshold_pp: f64, min_resolved: u64) -> bool {
-    if control.transactions == 0
-        || variant.transactions == 0
-        || control.transactions + variant.transactions < min_resolved
-    {
-        return false;
-    }
-    let rate =
-        |arm: ArmCounts| arm.successes.min(arm.transactions) as f64 / arm.transactions as f64;
-    (rate(control) - rate(variant)) * 100.0 > threshold_pp
+/// Whether `variant` breached the guardrail against `control`; see [`is_breached`].
+fn breached(control: ArmCounts, variant: ArmCounts, threshold_pp: f64) -> bool {
+    is_breached(
+        control.successes,
+        control.transactions,
+        variant.successes,
+        variant.transactions,
+        threshold_pp,
+    )
 }
 
 /// Whether every running comparison, control's routed payments plus a variant's, has reached the
@@ -156,10 +182,9 @@ fn judge(
             run,
         }];
     }
-    let min_resolved = min_resolved(data.min_sample_size);
     variants
         .iter()
-        .filter(|(_, counts)| breached(control, *counts, data.guardrail_threshold_pp, min_resolved))
+        .filter(|(_, counts)| breached(control, *counts, data.guardrail_threshold_pp))
         .map(|(variant_id, _)| GuardrailAction::StopVariant {
             experiment_id: experiment_id.to_owned(),
             variant_id: variant_id.clone(),
@@ -182,21 +207,21 @@ pub async fn current_run(merchant_id: &str, experiment_id: &str) -> RedisResult<
 /// Records that the experiment routed the payment to `side` in its current observation period, so
 /// the payment's outcome counts whenever it arrives.
 pub async fn record_routed(
-    merchant_id: String,
-    experiment_id: String,
-    side: ArmSide,
-    payment_id: String,
+    merchant_id: &str,
+    experiment_id: &str,
+    side: &ArmSide,
+    payment_id: &str,
 ) {
     if payment_id.is_empty() {
         return;
     }
     let recorded = async {
-        let run = current_run(&merchant_id, &experiment_id).await?;
-        let keys = arm_keys(&merchant_id, &experiment_id, run, &side);
+        let run = current_run(merchant_id, experiment_id).await?;
+        let keys = arm_keys(merchant_id, experiment_id, run, side);
         get_tenant_app_state()
             .await
             .redis_conn
-            .sadd_with_ttl(&keys.routed, &payment_id, COUNTS_TTL_SECS)
+            .sadd_with_ttl(&keys.routed, payment_id, COUNTS_TTL_SECS)
             .await
     };
     if let Err(error) = recorded.await {
@@ -357,23 +382,34 @@ mod tests {
     }
 
     #[test]
-    fn breach_needs_both_arms_and_the_minimum_sample() {
-        // 80% against 50% is 30pp behind, over the 10pp threshold.
-        assert!(breached(counts(10, 8), counts(10, 5), 10.0, 20));
-        // Same gap, but only 19 resolved.
-        assert!(!breached(counts(10, 8), counts(9, 5), 10.0, 20));
-        assert!(!breached(counts(0, 0), counts(30, 0), 10.0, 20));
-        assert!(!breached(counts(30, 30), counts(0, 0), 10.0, 20));
-        // 80% against 75% is within the threshold.
-        assert!(!breached(counts(20, 16), counts(20, 15), 10.0, 20));
+    fn a_large_drop_is_clear_on_few_payments_and_noise_never_is() {
+        // 90/10 split: a broken variant, 96% against 80%, is clear on its first 50 payments.
+        assert!(breached(counts(450, 432), counts(50, 40), 3.0));
+        // An equal variant that happens to read 4pp behind on 50 payments is noise.
+        assert!(!breached(counts(450, 360), counts(50, 38), 3.0));
+        // The same 4pp drop is real on 5,000 payments in each arm.
+        assert!(breached(counts(5_000, 4_000), counts(5_000, 3_800), 3.0));
+        // A clear drop still has to exceed the threshold.
+        assert!(!breached(
+            counts(20_000, 16_000),
+            counts(20_000, 15_500),
+            3.0
+        ));
         // A variant ahead of control is never breached.
-        assert!(!breached(counts(20, 10), counts(20, 20), 10.0, 20));
+        assert!(!breached(counts(450, 360), counts(50, 50), 3.0));
+    }
+
+    #[test]
+    fn each_arm_needs_thirty_resolved_payments() {
+        assert!(!breached(counts(29, 29), counts(30, 0), 3.0));
+        assert!(!breached(counts(30, 30), counts(29, 0), 3.0));
+        assert!(breached(counts(30, 30), counts(30, 0), 3.0));
     }
 
     #[test]
     fn hyperloglog_overcount_of_successes_is_capped() {
         // PFCOUNT is approximate, so successes can read above transactions.
-        assert!(!breached(counts(10, 11), counts(10, 10), 10.0, 20));
+        assert!(!breached(counts(40, 41), counts(40, 40), 3.0));
     }
 
     #[test]
@@ -390,9 +426,8 @@ mod tests {
 
     #[test]
     fn judging_stops_breached_variants_until_the_sample_target_completes_the_experiment() {
-        // A target of 200 judges a breach from 20 resolved payments on.
         let config = data();
-        let variants = [("variant".to_string(), counts(10, 5))];
+        let variants = [("variant".to_string(), counts(40, 10))];
         let routed = |control, variant| {
             vec![
                 (ArmSide::Control, control),
@@ -405,7 +440,7 @@ mod tests {
                 "exp1",
                 7,
                 &routed(160, 39),
-                counts(10, 8),
+                counts(40, 38),
                 &variants
             ),
             vec![GuardrailAction::StopVariant {
@@ -421,7 +456,7 @@ mod tests {
                 "exp1",
                 7,
                 &routed(160, 40),
-                counts(10, 8),
+                counts(40, 38),
                 &variants
             ),
             vec![GuardrailAction::Complete {
@@ -455,12 +490,6 @@ mod tests {
         // Control + a has 210 of 200, but control + b only 199; the stopped c isn't waited on.
         assert!(!reached_sample_target(&config, &routed(49)));
         assert!(reached_sample_target(&config, &routed(50)));
-    }
-
-    #[test]
-    fn the_guardrail_judges_from_a_tenth_of_the_sample_target() {
-        assert_eq!(min_resolved(50_000), 5_000);
-        assert_eq!(min_resolved(200), 20);
     }
 
     #[test]

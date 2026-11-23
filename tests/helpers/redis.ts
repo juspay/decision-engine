@@ -107,3 +107,20 @@ export async function redisTtl(key: string): Promise<number> {
 export async function redisListLength(key: string): Promise<number> {
   return (await command(['LLEN', key])) as number
 }
+
+/**
+ * Distinct payments the A/B guardrail counted per arm in an experiment's current observation
+ * period, keyed `<arm>_txns` and `<arm>_succ`. Exact for a handful of payments; from a few dozen,
+ * HyperLogLog can read one or two low, so assert those with a margin.
+ */
+export async function abGuardrailCounts(merchantId: string, experimentId: string): Promise<Record<string, number>> {
+  const counts: Record<string, number> = {}
+  for (const key of await redisKeys(`ab_guardrail_{${merchantId}_${experimentId}}_*`)) {
+    // The period marker and the routed-payment sets aren't counts.
+    if (key.endsWith('_run') || key.endsWith('_routed')) continue
+    // ab_guardrail_{m_e}_<run>_<arm>_<txns|succ>
+    counts[key.split('}_')[1].replace(/^\d+_/, '')] = await redisPfcount(key)
+  }
+  return counts
+}
+

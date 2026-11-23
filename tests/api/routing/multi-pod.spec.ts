@@ -1,6 +1,6 @@
 import { test, expect, factory } from '../../fixtures/test'
 import type { ApiClient } from '../../fixtures/api-client'
-import { redisKeys, redisListLength, redisPfcount, redisTtl } from '../../helpers/redis'
+import { abGuardrailCounts, redisKeys, redisListLength, redisTtl } from '../../helpers/redis'
 
 /**
  * Behaviour that must hold when the engine runs as several instances sharing one Redis and
@@ -55,6 +55,22 @@ async function feedback(api: ApiClient, pod: string, merchantId: string, payment
   expect(r.status).toBe(200)
 }
 
+/**
+ * Routes every payment on `routePod`, expecting `gateway`, then reports `status` for each on
+ * `feedbackPod`. Routing comes first so a stop the outcomes trigger can't change where the rest are
+ * routed. The guardrail judges a variant only once each arm has 30 outcomes, so tests send 40 to
+ * leave room for the counts reading a payment or two low.
+ */
+async function resolve(
+  api: ApiClient, routePod: string, feedbackPod: string, merchantId: string,
+  paymentIds: string[], gateway: string, status: string,
+) {
+  for (const paymentId of paymentIds) expect(await route(api, routePod, merchantId, paymentId)).toBe(gateway)
+  for (const paymentId of paymentIds) await feedback(api, feedbackPod, merchantId, paymentId, gateway, status)
+}
+
+const many = (count: number, next: () => string) => Array.from({ length: count }, next)
+
 async function experimentActive(api: ApiClient, merchantId: string, experimentId: string): Promise<boolean> {
   const active = await api.listActiveRoutingAlgorithms(merchantId)
   return active.body.some((algorithm: { id: string }) => algorithm.id === experimentId)
@@ -65,18 +81,6 @@ async function deactivate(api: ApiClient, pod: string, merchantId: string, exper
     failOnStatusCode: false,
     body: { created_by: merchantId, routing_algorithm_id: experimentId },
   })
-}
-
-/** Distinct payments counted per arm in the experiment's current observation period. */
-async function guardrailCounts(merchantId: string, experimentId: string): Promise<Record<string, number>> {
-  const counts: Record<string, number> = {}
-  for (const key of await redisKeys(`ab_guardrail_{${merchantId}_${experimentId}}_*`)) {
-    // The period marker and the routed-payment sets aren't counts.
-    if (key.endsWith('_run') || key.endsWith('_routed')) continue
-    // ab_guardrail_{m_e}_<run>_<arm>_<txns|succ>
-    counts[key.split('}_')[1].replace(/^\d+_/, '')] = await redisPfcount(key)
-  }
-  return counts
 }
 
 /**
@@ -124,16 +128,11 @@ async function activate(api: ApiClient, pod: string, merchantId: string, experim
 test.describe('A/B guardrail across instances (API)', () => {
   test('feedback on another instance than routing stops a breached variant', async ({ api, merchant }) => {
     const m = merchant.id
-    const experimentId = await createExperiment(api, m, 20)
+    const experimentId = await createExperiment(api, m, 1000)
     try {
       await activate(api, POD_A, m, experimentId)
-      const control = controlPayment()
-      const variant = variantPayment()
-      expect(await route(api, POD_A, m, control)).toBe('checkout')
-      expect(await route(api, POD_A, m, variant)).toBe('adyen')
-
-      await feedback(api, POD_B, m, control, 'checkout', 'AUTHORIZED')
-      await feedback(api, POD_B, m, variant, 'adyen', 'FAILURE')
+      await resolve(api, POD_A, POD_B, m, many(40, controlPayment), 'checkout', 'AUTHORIZED')
+      await resolve(api, POD_A, POD_B, m, many(40, variantPayment), 'adyen', 'FAILURE')
       await expect.poll(() => experimentActive(api, m, experimentId), { timeout: 15_000, intervals: [300] }).toBe(false)
 
       // Both instances stop routing to the variant.
@@ -143,26 +142,21 @@ test.describe('A/B guardrail across instances (API)', () => {
     }
   })
 
-  test('outcomes reported to different instances add up to the minimum sample', async ({ api, merchant }) => {
+  test('outcomes reported to different instances add up to the 30 each arm needs', async ({ api, merchant }) => {
     const m = merchant.id
-    // A minimum sample of 40 needs 4 resolved payments before the guardrail judges.
-    const experimentId = await createExperiment(api, m, 40)
+    const experimentId = await createExperiment(api, m, 1000)
     try {
       await activate(api, POD_A, m, experimentId)
-      const controls = [controlPayment(), controlPayment()]
-      const variants = [variantPayment(), variantPayment()]
-      for (const id of controls) await route(api, POD_A, m, id)
-      for (const id of variants) await route(api, POD_B, m, id)
-
-      await feedback(api, POD_A, m, controls[0], 'checkout', 'AUTHORIZED')
-      await feedback(api, POD_B, m, variants[0], 'adyen', 'FAILURE')
-      await expect.poll(() => guardrailCounts(m, experimentId)).toEqual({
-        control_txns: 1, control_succ: 1, variant_txns: 1,
-      })
+      // Each instance receives half of each arm's outcomes: 20 per arm, under the 30 it needs.
+      await resolve(api, POD_A, POD_A, m, many(20, controlPayment), 'checkout', 'AUTHORIZED')
+      await resolve(api, POD_B, POD_A, m, many(20, variantPayment), 'adyen', 'FAILURE')
+      await expect.poll(async () => (await abGuardrailCounts(m, experimentId)).variant_txns ?? 0)
+        .toBeGreaterThanOrEqual(19)
       expect(await experimentActive(api, m, experimentId)).toBe(true)
 
-      await feedback(api, POD_B, m, controls[1], 'checkout', 'AUTHORIZED')
-      await feedback(api, POD_A, m, variants[1], 'adyen', 'FAILURE')
+      // The other instance's 20 per arm add to the same counts.
+      await resolve(api, POD_B, POD_B, m, many(20, controlPayment), 'checkout', 'AUTHORIZED')
+      await resolve(api, POD_A, POD_B, m, many(20, variantPayment), 'adyen', 'FAILURE')
       await expect.poll(() => experimentActive(api, m, experimentId), { timeout: 15_000, intervals: [300] }).toBe(false)
     } finally {
       await deactivate(api, POD_A, m, experimentId)
@@ -181,7 +175,7 @@ test.describe('A/B guardrail across instances (API)', () => {
       await feedback(api, POD_B, m, variant, 'adyen', 'FAILURE')
       await feedback(api, POD_B, m, variant, 'adyen', 'AUTHORIZED')
       await feedback(api, POD_A, m, variant, 'adyen', 'AUTHORIZED')
-      await expect.poll(() => guardrailCounts(m, experimentId)).toEqual({ variant_txns: 1, variant_succ: 1 })
+      await expect.poll(() => abGuardrailCounts(m, experimentId)).toEqual({ variant_txns: 1, variant_succ: 1 })
     } finally {
       await deactivate(api, POD_A, m, experimentId)
     }
@@ -199,7 +193,7 @@ test.describe('A/B guardrail across instances (API)', () => {
 
       await feedback(api, POD_B, m, early, 'stripe', 'FAILURE')
       await feedback(api, POD_B, m, late, 'adyen', 'FAILURE')
-      await expect.poll(() => guardrailCounts(m, experimentId)).toEqual({ variant_txns: 1 })
+      await expect.poll(() => abGuardrailCounts(m, experimentId)).toEqual({ variant_txns: 1 })
     } finally {
       await deactivate(api, POD_A, m, experimentId)
     }
@@ -207,15 +201,11 @@ test.describe('A/B guardrail across instances (API)', () => {
 
   test('a reactivation on one instance starts a fresh period the other instance judges in', async ({ api, merchant }) => {
     const m = merchant.id
-    const experimentId = await createExperiment(api, m, 20)
+    const experimentId = await createExperiment(api, m, 1000)
     try {
       await activate(api, POD_A, m, experimentId)
-      const control = controlPayment()
-      const variant = variantPayment()
-      await route(api, POD_A, m, control)
-      await route(api, POD_A, m, variant)
-      await feedback(api, POD_B, m, control, 'checkout', 'AUTHORIZED')
-      await feedback(api, POD_A, m, variant, 'adyen', 'FAILURE')
+      await resolve(api, POD_A, POD_B, m, many(40, controlPayment), 'checkout', 'AUTHORIZED')
+      await resolve(api, POD_A, POD_A, m, many(40, variantPayment), 'adyen', 'FAILURE')
       await expect.poll(() => experimentActive(api, m, experimentId), { timeout: 15_000, intervals: [300] }).toBe(false)
 
       // The breach was judged on the earlier period's outcomes, which must not stop the new one.
@@ -223,7 +213,7 @@ test.describe('A/B guardrail across instances (API)', () => {
       const nextControl = controlPayment()
       await route(api, POD_A, m, nextControl)
       await feedback(api, POD_A, m, nextControl, 'checkout', 'AUTHORIZED')
-      await expect.poll(() => guardrailCounts(m, experimentId)).toMatchObject({ control_txns: 1, control_succ: 1 })
+      await expect.poll(() => abGuardrailCounts(m, experimentId)).toMatchObject({ control_txns: 1, control_succ: 1 })
       expect(await experimentActive(api, m, experimentId)).toBe(true)
     } finally {
       await deactivate(api, POD_A, m, experimentId)
@@ -247,7 +237,7 @@ test.describe('A/B guardrail across instances (API)', () => {
           { id: 'failing', split_pct: 20, rule_algorithm_id: failing.body.rule_id },
           { id: 'healthy', split_pct: 20, rule_algorithm_id: healthy.body.rule_id },
         ],
-        endpoints: ['evaluate'], min_sample_size: 20, guardrail_threshold_pp: 10,
+        endpoints: ['evaluate'], min_sample_size: 1000, guardrail_threshold_pp: 10,
       } },
     })
     expect(created.status, JSON.stringify(created.body)).toBe(200)
@@ -258,16 +248,9 @@ test.describe('A/B guardrail across instances (API)', () => {
       for (const pod of PODS) {
         await expect.poll(() => route(api, pod, m, paymentIn(0, 20)), { timeout: 20_000, intervals: [500] }).toBe('adyen')
       }
-      const controlId = paymentIn(40, 100)
-      const failingId = paymentIn(0, 20)
-      const healthyId = paymentIn(20, 40)
-      await route(api, POD_A, m, controlId)
-      await route(api, POD_B, m, failingId)
-      await route(api, POD_A, m, healthyId)
-
-      await feedback(api, POD_B, m, controlId, 'checkout', 'AUTHORIZED')
-      await feedback(api, POD_A, m, healthyId, 'razorpay', 'AUTHORIZED')
-      await feedback(api, POD_A, m, failingId, 'adyen', 'FAILURE')
+      await resolve(api, POD_A, POD_B, m, many(40, () => paymentIn(40, 100)), 'checkout', 'AUTHORIZED')
+      await resolve(api, POD_A, POD_A, m, many(40, () => paymentIn(20, 40)), 'razorpay', 'AUTHORIZED')
+      await resolve(api, POD_B, POD_A, m, many(40, () => paymentIn(0, 20)), 'adyen', 'FAILURE')
 
       const stoppedVariants = async () => {
         const listed = await api.listActiveRoutingAlgorithms(m)
@@ -297,7 +280,7 @@ test.describe('A/B guardrail across instances (API)', () => {
       expect(await route(api, POD_A, m, variant)).toBe('adyen')
       await feedback(api, POD_B, m, variant, 'adyen', 'FAILURE')
 
-      await expect.poll(() => guardrailCounts(m, experimentId)).toEqual({ variant_txns: 1 })
+      await expect.poll(() => abGuardrailCounts(m, experimentId)).toEqual({ variant_txns: 1 })
       // Its context exists only for the guardrail, so no success-rate score was learned from it.
       expect(await redisKeys(`{gw_sr_v3_score_${m}_*`)).toEqual([])
     } finally {
@@ -345,7 +328,7 @@ test.describe('A/B guardrail outcomes and completion across instances (API)', ()
       // The context expires; the payment's outcome still belongs to the experiment.
       await expect.poll(() => redisKeys(`gateway_scoring_data_${m}_${variant}`), { timeout: 10_000, intervals: [500] }).toEqual([])
       await feedback(api, POD_B, m, variant, 'adyen', 'AUTHORIZED')
-      await expect.poll(() => guardrailCounts(m, experimentId)).toMatchObject({ variant_txns: 1, variant_succ: 1 })
+      await expect.poll(() => abGuardrailCounts(m, experimentId)).toMatchObject({ variant_txns: 1, variant_succ: 1 })
     } finally {
       await deactivate(api, POD_A, m, experimentId)
     }

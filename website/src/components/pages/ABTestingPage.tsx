@@ -1133,15 +1133,12 @@ function ExperimentDetailPanel({
   }
   const breachedVariants = results?.variants.filter(v => v.verdict === 'guardrail_breached') ?? []
   const minSample = abData?.min_sample_size ?? 1000
-  // The guardrail judges a variant once a tenth of the sample target has resolved across control
-  // and that variant, the same minimum the engine applies before it stops anything.
-  const guardrailMinResolved = Math.floor(minSample / 10)
-  // Variants already past the guardrail's drop on too few payments for it to judge yet.
+  // Variants past the guardrail's drop that the engine hasn't judged a breach: the drop isn't yet
+  // clear of normal variation on the payments behind it.
   const earlyGuardrailSignals = (results?.variants ?? []).flatMap(v => {
     const drop = guardrailDropPp(v.metrics)
-    const judged = controlResolved + resolvedTxns(v.metrics)
-    return v.verdict !== 'guardrail_breached' && drop !== null && abData && drop > abData.guardrail_threshold_pp && judged < guardrailMinResolved
-      ? [{ variant: v, drop, judged }]
+    return v.verdict !== 'guardrail_breached' && drop !== null && abData && drop > abData.guardrail_threshold_pp
+      ? [{ variant: v, drop, variantResolved: resolvedTxns(v.metrics) }]
       : []
   })
   // Each comparison needs its own sample (control plus that variant), so progress follows the
@@ -1406,11 +1403,11 @@ function ExperimentDetailPanel({
                 (5% split across {results.variants.length} comparisons), so the chance of a false winner across all of them stays at 5%.
               </p>
             )}
-            {earlyGuardrailSignals.map(({ variant: v, drop, judged }) => (
+            {earlyGuardrailSignals.map(({ variant: v, drop, variantResolved }) => (
               <Notice key={`early-${v.metrics.arm}`} tone="warning">
                 Early signal: among completed payments, {variants.length === 1 ? 'the variant' : armName(abData, v.metrics.arm)} is {drop.toFixed(2)}pp below control,
-                past the {abData?.guardrail_threshold_pp}pp guardrail, but on only {judged.toLocaleString()} payments. The guardrail
-                judges once {guardrailMinResolved.toLocaleString()} have completed across control and this variant, so this may still be noise.
+                past the {abData?.guardrail_threshold_pp}pp guardrail, but on {variantResolved.toLocaleString()} of its payments that is not yet clear of
+                normal variation. The guardrail stops it once the drop is statistically clear, with at least 30 completed payments in each arm.
               </Notice>
             ))}
             {breachedVariants.map(v => {

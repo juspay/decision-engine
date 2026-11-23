@@ -22,8 +22,9 @@ pub enum AbTestIntercept {
 
 /// Emit a routing-time `RoutingEvaluateAbTest` event: the decision the experiment results
 /// attribute to the arm (arm, endpoint, layers, gateway, cost and amount). The payment's outcome
-/// is joined to it later from the score updates reported for the same payment.
-pub fn emit_routing_event(
+/// is joined to it later from the score updates reported for the same payment. The payment is
+/// recorded for the guardrail before this returns, so its feedback finds it however soon it comes.
+pub async fn emit_routing_event(
     payment_id: &str,
     merchant_id: &str,
     assignment: &ExperimentAssignment,
@@ -32,13 +33,13 @@ pub fn emit_routing_event(
     cost: &CostOutcome,
     amount: Option<f64>,
 ) {
-    // Off the routing path: the guardrail needs the payment only once its feedback arrives.
-    tokio::spawn(guardrail::record_routed(
-        merchant_id.to_owned(),
-        assignment.experiment_id.clone(),
-        assignment.side.clone(),
-        payment_id.to_owned(),
-    ));
+    guardrail::record_routed(
+        merchant_id,
+        &assignment.experiment_id,
+        &assignment.side,
+        payment_id,
+    )
+    .await;
     let variant_arm = assignment.side.as_str();
     let arm_label = match (&projection.rule_algorithm_id, &projection.sr) {
         (Some(rule), Some(_)) => format!("{rule}+sr_routing"),

@@ -206,8 +206,8 @@ pub struct ABTestData {
     /// active rule routes every payment again. Its results report a significance verdict once
     /// this many have resolved. At most [`MAX_SAMPLE_SIZE`].
     pub min_sample_size: u32,
-    /// Stop a variant for new payments when its auth rate drops more than this many pp below
-    /// control, once a tenth of the sample target has resolved.
+    /// Stop a variant for new payments when its auth rate is more than this many pp below control
+    /// and the drop is statistically clear (see `ab_test::guardrail::is_breached`).
     pub guardrail_threshold_pp: f64,
     /// SR overrides for a single-strategy `sr_routing` variant arm.
     #[serde(skip_serializing_if = "Option::is_none")]

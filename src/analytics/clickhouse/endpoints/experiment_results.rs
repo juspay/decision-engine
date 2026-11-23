@@ -534,22 +534,17 @@ fn compute_significance(
     let n_c = resolved(control) as f64;
     let n_v = resolved(variant) as f64;
 
-    // Safety uses completed payment outcomes and the same minimum as the feedback-triggered stop,
-    // a tenth of the sample target, so a breach is reported only once that stop would act.
-    let resolved_rate = |arm: &ExperimentArmMetrics| {
-        let resolved = resolved(arm);
-        (resolved > 0).then(|| arm.success_count as f64 / resolved as f64)
-    };
-    let guardrail_judges = u64::try_from(total).unwrap_or(0)
-        >= crate::decider::gatewaydecider::ab_test::guardrail::min_resolved(min_sample_size);
-    if let (true, Some(control_rate), Some(variant_rate)) = (
-        guardrail_judges,
-        resolved_rate(control),
-        resolved_rate(variant),
+    // Safety uses completed payment outcomes and the feedback-triggered stop's own rule, so a
+    // breach is reported exactly when that stop acts.
+    let count = |value: i64| u64::try_from(value).unwrap_or(0);
+    if crate::decider::gatewaydecider::ab_test::guardrail::is_breached(
+        count(control.success_count),
+        count(resolved(control)),
+        count(variant.success_count),
+        count(resolved(variant)),
+        guardrail_threshold_pp,
     ) {
-        if (control_rate - variant_rate) * 100.0 > guardrail_threshold_pp {
-            return (None, None, ExperimentVerdict::GuardrailBreached);
-        }
+        return (None, None, ExperimentVerdict::GuardrailBreached);
     }
 
     if total < min_sample_size as i64 || n_c == 0.0 || n_v == 0.0 {
@@ -758,9 +753,8 @@ mod tests {
     }
 
     #[test]
-    fn a_breach_is_reported_once_the_guardrail_would_judge_it() {
-        // The query's target of 100 has the guardrail judge from 10 resolved payments.
-        let breach = |control: ArmRow, variant: ArmRow| {
+    fn a_breach_is_reported_by_the_guardrail_rule() {
+        let verdict = |control: ArmRow, variant: ArmRow| {
             build_response(
                 &results_query(&["variant"]),
                 &[named("control", control), named("variant", variant)],
@@ -769,13 +763,13 @@ mod tests {
                 .verdict
                 .clone()
         };
-        // 100% against 0% is past the 50pp guardrail, but only 9 payments have resolved.
+        // 100% against 0% is past the 50pp guardrail, but the variant has only 29 resolved.
         assert_eq!(
-            breach(arm_row(5, 5, 0, 5), arm_row(4, 0, 4, 0)),
+            verdict(arm_row(30, 30, 0, 30), arm_row(29, 0, 29, 0)),
             ExperimentVerdict::CollectingData
         );
         assert_eq!(
-            breach(arm_row(5, 5, 0, 5), arm_row(5, 0, 5, 0)),
+            verdict(arm_row(30, 30, 0, 30), arm_row(30, 0, 30, 0)),
             ExperimentVerdict::GuardrailBreached
         );
     }

@@ -1170,7 +1170,8 @@ async fn track_ab_rule_decision(
         Some(gateway.as_str()),
         &CostOutcome::default(),
         amount,
-    );
+    )
+    .await;
 }
 
 pub async fn routing_evaluate(

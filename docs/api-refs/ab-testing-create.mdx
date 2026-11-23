@@ -76,7 +76,7 @@ Response is the standard routing-algorithm create response:
 | `endpoints` | array, optional | Endpoints the experiment splits traffic on: any of `hybrid_routing`, `decide_gateway`, `evaluate`. Omitted means all three. Experiments saved from a Hyperswitch SSO dashboard session are always scoped to `["hybrid_routing"]`. |
 | `variant_split_pct` | integer, 1–50 | Single-variant format: percentage of traffic sent to the variant arm. |
 | `min_sample_size` | integer, at most 500,000 | The experiment's size: payments it routes, across all arms, before it completes. It is then deactivated and the active rule routes every payment again. Its results report a significance verdict once this many have resolved. |
-| `guardrail_threshold_pp` | number | Guardrail: when a variant's auth rate on completed payments drops this many percentage points below control, that variant stops (see [Guardrail](#guardrail)) and its results are marked `guardrail_breached`. |
+| `guardrail_threshold_pp` | number | Guardrail: when a variant's auth rate on completed payments is more than this many percentage points below control and the drop is statistically clear, that variant stops (see [Guardrail](#guardrail)) and its results are marked `guardrail_breached`. |
 
 ### Variant
 
@@ -104,7 +104,7 @@ An experiment has at most 5 variants. Each variant must apply different layers f
 
 ### Guardrail
 
-Each variant is compared with control on its own. When a variant breaches the guardrail, it stops: its payments are no longer recorded and are routed like payments the experiment doesn't cover, while the other variants keep running. The stopped variant is marked `"stopped": true` in the stored definition. When the last running variant breaches (always the case for a single-variant experiment), the whole experiment is deactivated. Activating the experiment again clears `stopped` and starts a new observation period.
+Each variant is compared with control on its own. A variant breaches the guardrail when, among completed payments, its auth rate is more than `guardrail_threshold_pp` below control's **and** the drop is statistically clear: a one-sided two-proportion z-test of at least 3 (about a 0.13% chance per check that an equal variant looks that far behind), with at least 30 completed payments in each arm. A large drop is clear on few payments and a small one needs many, whatever the variant's share of traffic. When a variant breaches the guardrail, it stops: its payments are no longer recorded and are routed like payments the experiment doesn't cover, while the other variants keep running. The stopped variant is marked `"stopped": true` in the stored definition. When the last running variant breaches (always the case for a single-variant experiment), the whole experiment is deactivated. Activating the experiment again clears `stopped` and starts a new observation period.
 
 The guardrail counts a payment's outcome only when the experiment routed that payment in the current observation period, and counts it whenever its feedback arrives, however late. Each payment counts once, as a success if any of its outcomes succeeded. Every instance shares the counts, so feedback is counted whichever instance receives it. Once the experiment has routed `min_sample_size` payments, it completes the same way.
 
