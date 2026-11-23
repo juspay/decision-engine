@@ -8,7 +8,8 @@ use fred::types::SetOptions;
 use fred::{
     clients::Transaction,
     interfaces::{
-        HashesInterface, HyperloglogInterface, KeysInterface, ListInterface, TransactionInterface,
+        HashesInterface, HyperloglogInterface, KeysInterface, ListInterface, SetsInterface,
+        TransactionInterface,
     },
     types::{Expiration, FromRedis, MultipleValues},
 };
@@ -609,20 +610,65 @@ impl RedisConnectionWrapper {
         Ok(())
     }
 
-    /// `PFCOUNT` of each HyperLogLog in `keys`, in order and in one pipelined round trip: the
-    /// approximate number of distinct members added to each, 0 for a key that doesn't exist.
-    pub async fn pfcount_each(&self, keys: &[String]) -> Result<Vec<u64>, errors::RedisError> {
+    /// `SADD` `member` to the set at `key` and sets its TTL to `ttl` seconds, in one pipelined
+    /// round trip.
+    pub async fn sadd_with_ttl(
+        &self,
+        key: &str,
+        member: &str,
+        ttl: i64,
+    ) -> Result<(), errors::RedisError> {
         let pipeline = self.conn.pool.next().pipeline();
-        for key in keys {
+        let _: () = pipeline
+            .sadd(key, member)
+            .await
+            .change_context(errors::RedisError::SetFailed)?;
+        let _: () = pipeline
+            .expire(key, ttl)
+            .await
+            .change_context(errors::RedisError::SetFailed)?;
+        let _: Vec<fred::types::RedisValue> = pipeline
+            .all()
+            .await
+            .change_context(errors::RedisError::SetFailed)?;
+        Ok(())
+    }
+
+    /// Whether `member` is in the set at `key`.
+    pub async fn sismember(&self, key: &str, member: &str) -> Result<bool, errors::RedisError> {
+        self.conn
+            .pool
+            .sismember(key, member)
+            .await
+            .change_context(errors::RedisError::GetFailed)
+    }
+
+    /// In one pipelined round trip: `PFCOUNT` of each HyperLogLog in `hyperloglogs`, then `SCARD`
+    /// of each set in `sets`, each in order and 0 for a key that doesn't exist.
+    pub async fn pfcount_and_scard(
+        &self,
+        hyperloglogs: &[String],
+        sets: &[String],
+    ) -> Result<(Vec<u64>, Vec<u64>), errors::RedisError> {
+        let pipeline = self.conn.pool.next().pipeline();
+        for key in hyperloglogs {
             let _: () = pipeline
                 .pfcount(key.as_str())
                 .await
                 .change_context(errors::RedisError::GetFailed)?;
         }
-        pipeline
+        for key in sets {
+            let _: () = pipeline
+                .scard(key.as_str())
+                .await
+                .change_context(errors::RedisError::GetFailed)?;
+        }
+        let mut counts: Vec<u64> = pipeline
             .all()
             .await
-            .change_context(errors::RedisError::GetFailed)
+            .change_context(errors::RedisError::GetFailed)?;
+        let set_counts = counts.split_off(hyperloglogs.len().min(counts.len()));
+        Ok((counts, set_counts))
     }
 
     /// Stores `value` at `key` as a plain integer with no expiry, readable by [`Self::get_counter`].
@@ -639,16 +685,6 @@ impl RedisConnectionWrapper {
         self.conn
             .pool
             .get(key)
-            .await
-            .change_context(errors::RedisError::GetFailed)
-    }
-
-    /// `PFCOUNT`: the approximate number of distinct members added to the HyperLogLog at `key`,
-    /// 0 when the key doesn't exist.
-    pub async fn pfcount(&self, key: &str) -> Result<u64, errors::RedisError> {
-        self.conn
-            .pool
-            .pfcount(key)
             .await
             .change_context(errors::RedisError::GetFailed)
     }

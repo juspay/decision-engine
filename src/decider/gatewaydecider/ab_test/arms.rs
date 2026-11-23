@@ -272,6 +272,17 @@ pub fn validate(data: &ABTestData) -> Vec<(String, String)> {
         ));
     }
 
+    if data.max_sample_size() < data.min_sample_size {
+        errors.push((
+            "max_sample_size".into(),
+            format!(
+                "max_sample_size ({}) must be at least min_sample_size ({})",
+                data.max_sample_size(),
+                data.min_sample_size
+            ),
+        ));
+    }
+
     let variants = resolved_variants(data);
     if variants.is_empty() {
         errors.push(("variants".into(), "add at least one variant".into()));
@@ -419,6 +430,7 @@ mod tests {
             variant_split_pct: 10,
             min_sample_size: 1000,
             guardrail_threshold_pp: 3.0,
+            max_sample_size: None,
             variant_sr_config: None,
             control_sr_config: None,
         }

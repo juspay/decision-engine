@@ -382,30 +382,28 @@ pub(crate) async fn evaluate(
     // Whether the dynamic (SR) half runs. An active experiment decides for the payments it serves
     // (its arm's SR layer); otherwise the merchant's `sr-routing` setting does. An arm without an SR
     // layer needs the static half's rule output, so without one the setting decides.
-    let experiment_arm = match dynamic_routing_request.as_ref() {
-        Some(req) => {
-            crate::decider::gatewaydecider::ab_test::interceptor::hybrid_arm(
-                &req.merchant_id,
-                req.payment_id(),
-            )
-            .await
-        }
-        None => None,
-    };
     let run_dynamic_routing = match dynamic_routing_request.as_ref() {
         None => false,
-        Some(req) => match experiment_arm.as_ref().map(|arm| arm.has_sr_layer) {
-            Some(true) => true,
-            Some(false) if static_routing_request.is_some() => false,
-            _ => {
-                is_feature_enabled(
-                    SR_ROUTING_FEATURE_FLAG.to_string(),
-                    req.merchant_id.clone(),
-                    kvRedis(),
+        Some(req) => {
+            let arm_has_sr_layer =
+                crate::decider::gatewaydecider::ab_test::interceptor::hybrid_arm_has_sr_layer(
+                    &req.merchant_id,
+                    req.payment_id(),
                 )
-                .await
+                .await;
+            match arm_has_sr_layer {
+                Some(true) => true,
+                Some(false) if static_routing_request.is_some() => false,
+                _ => {
+                    is_feature_enabled(
+                        SR_ROUTING_FEATURE_FLAG.to_string(),
+                        req.merchant_id.clone(),
+                        kvRedis(),
+                    )
+                    .await
+                }
             }
-        },
+        }
     };
 
     // The static half runs silently, this call records one event for both halves below.
@@ -512,36 +510,17 @@ pub(crate) async fn evaluate(
                     "dynamic routing skipped for merchant {}: sr_routing_enabled is off or the A/B arm has no SR layer",
                     req.merchant_id
                 );
-                // Saved before responding so the payment's `/update-gateway-score` finds it. A
-                // payment the experiment routed by its rule output gets an experiment-only context
-                // instead when its outcome isn't to train SR, so the guardrail can still count it.
-                let trains_sr = static_routing_response.is_some()
+                // Saved before responding so the payment's `/update-gateway-score` finds it.
+                if static_routing_response.is_some()
                     && is_feature_enabled(
                         SR_SCORES_FROM_RULE_ROUTING_FEATURE_FLAG.to_string(),
                         req.merchant_id.clone(),
                         kvRedis(),
                     )
-                    .await;
-                let experiment_decided = static_routing_response
-                    .as_ref()
-                    .and_then(crate::euclid::handlers::routing_rules::preview_gateway)
-                    .and(experiment_arm.as_ref());
-                if !trains_sr {
-                    if let Some(arm) = experiment_decided {
-                        crate::decider::gatewaydecider::flow_new::store_experiment_only_context(
-                            &req.merchant_id,
-                            req.payment_id(),
-                            &arm.experiment_id,
-                        )
-                        .await;
-                    }
-                } else {
-                    if let Err(err) = store_scoring_context_without_decider(
-                        &req,
-                        STATIC_ROUTING_APPROACH,
-                        experiment_arm.as_ref().map(|arm| arm.experiment_id.clone()),
-                    )
                     .await
+                {
+                    if let Err(err) =
+                        store_scoring_context_without_decider(&req, STATIC_ROUTING_APPROACH).await
                     {
                         crate::logger::warn!(
                             "failed to store scoring context for rule-routed payment {}: {}",

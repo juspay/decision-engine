@@ -1,5 +1,6 @@
 use super::arms;
 use super::config::{self, AbTestConfig};
+use super::guardrail;
 use super::outcome::{CostOutcome, ExperimentAssignment};
 use crate::analytics::{serialize_details, AnalyticsFlowContext, ApiFlow, FlowType};
 use crate::decider::gatewaydecider::types::DomainDeciderRequestForApiCallV2;
@@ -31,6 +32,13 @@ pub fn emit_routing_event(
     cost: &CostOutcome,
     amount: Option<f64>,
 ) {
+    // Off the routing path: the guardrail needs the payment only once its feedback arrives.
+    tokio::spawn(guardrail::record_routed(
+        merchant_id.to_owned(),
+        assignment.experiment_id.clone(),
+        assignment.side.clone(),
+        payment_id.to_owned(),
+    ));
     let variant_arm = assignment.side.as_str();
     let arm_label = match (&projection.rule_algorithm_id, &projection.sr) {
         (Some(rule), Some(_)) => format!("{rule}+sr_routing"),
@@ -66,31 +74,18 @@ pub fn emit_routing_event(
     .emit();
 }
 
-/// The experiment arm serving a payment on `/routing/hybrid`.
-pub struct HybridArm {
-    pub experiment_id: String,
-    /// Whether the arm has an SR layer. The experiment decides for its own traffic: an arm with
-    /// an SR layer runs SR even when the merchant's `sr-routing` setting is off, and an arm
-    /// without one is decided by its rule output alone.
-    pub has_sr_layer: bool,
-}
-
-/// The arm serving this payment on `/routing/hybrid`, when an active experiment covers it. `None`
-/// leaves the decision to `sr-routing`.
-pub async fn hybrid_arm(merchant_id: &str, payment_id: &str) -> Option<HybridArm> {
+/// Whether the arm served on `/routing/hybrid` for this payment has an SR layer, when an active
+/// experiment applies to the merchant. The experiment decides for its own traffic: an arm with an
+/// SR layer runs SR even when the merchant's `sr-routing` setting is off, and an arm without one
+/// is decided by its rule output alone. `None` leaves the decision to `sr-routing`.
+pub async fn hybrid_arm_has_sr_layer(merchant_id: &str, payment_id: &str) -> Option<bool> {
     if !config::is_enabled(merchant_id).await {
         return None;
     }
-    let AbTestConfig {
-        experiment_id,
-        data,
-    } = config::load_active_ab_test(merchant_id).await?;
+    let AbTestConfig { data, .. } = config::load_active_ab_test(merchant_id).await?;
     let plan = arms::plan(&data, ExperimentEndpoint::HybridRouting, payment_id);
     // A payment the experiment doesn't cover is routed by the live setup.
-    plan.in_experiment.then(|| HybridArm {
-        experiment_id,
-        has_sr_layer: plan.projection.sr.is_some(),
-    })
+    plan.in_experiment.then_some(plan.projection.sr.is_some())
 }
 
 /// Applies the active experiment's SR layer for a decider call on `endpoint`
@@ -137,7 +132,7 @@ pub async fn intercept(
     };
 
     // `/routing/hybrid` skips the decider for an arm without an SR layer (see
-    // `hybrid_arm`). Reaching here with one means there was no rule output to serve;
+    // `hybrid_arm_has_sr_layer`). Reaching here with one means there was no rule output to serve;
     // routing it via SR under the rule arm's attribution would corrupt the experiment, so the
     // payment is excluded and routes normally.
     if endpoint == ExperimentEndpoint::HybridRouting && plan.projection.sr.is_none() {

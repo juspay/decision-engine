@@ -1139,9 +1139,9 @@ async fn evaluate_algorithm_data(
 }
 
 /// Attributes a real payment's rule decision to its A/B arm with the routing event the
-/// experiment results count, and saves the payment's context for the guardrail; the payment's
-/// score updates supply its outcome. Skipped when real-payment A/B tracking is off, the request
-/// carries no payment id, or no connector was selected.
+/// experiment results count; the payment's score updates supply its outcome. Skipped when
+/// real-payment A/B tracking is off, the request carries no payment id, or no connector was
+/// selected.
 async fn track_ab_rule_decision(
     payload: &RoutingRequest,
     response: &RoutingEvaluateResponse,
@@ -1171,16 +1171,6 @@ async fn track_ab_rule_decision(
         &CostOutcome::default(),
         amount,
     );
-    // The rule output is the decision, so the decider saves no context for this payment; this one
-    // lets the guardrail count it. `/routing/hybrid` saves its payment's context itself.
-    if ab.assignment.endpoint != ExperimentEndpoint::HybridRouting {
-        crate::decider::gatewaydecider::flow_new::store_experiment_only_context(
-            &payload.created_by,
-            payment_id,
-            &ab.assignment.experiment_id,
-        )
-        .await;
-    }
 }
 
 pub async fn routing_evaluate(
@@ -2075,7 +2065,13 @@ pub(crate) async fn stop_breached_payment_experiment(
         .is_none_or(|mapping| mapping.routing_algorithm_id != experiment_id)
     {
         // The experiment is no longer running, so the variant gets no traffic either.
-        return stop_whole_experiment(&state, &merchant, experiment_id, variant_id).await;
+        return stop_whole_experiment(
+            &state,
+            &merchant,
+            experiment_id,
+            &format!("variant {variant_id} breached its guardrail"),
+        )
+        .await;
     }
 
     let algorithm = algorithm_store::find(&state.db, &merchant, experiment_id)
@@ -2095,7 +2091,13 @@ pub(crate) async fn stop_breached_payment_experiment(
         return Ok(());
     }
     if running.len() == 1 {
-        return stop_whole_experiment(&state, &merchant, experiment_id, variant_id).await;
+        return stop_whole_experiment(
+            &state,
+            &merchant,
+            experiment_id,
+            &format!("variant {variant_id} breached its guardrail"),
+        )
+        .await;
     }
 
     // Several variants are running, so `variants` is set: the single-variant format has one.
@@ -2152,7 +2154,7 @@ async fn stop_whole_experiment(
     state: &crate::app::TenantAppState,
     merchant: &crate::auth::AuthorizedMerchant,
     experiment_id: &str,
-    variant_id: &str,
+    reason: &str,
 ) -> Result<(), String> {
     let merchant_id = merchant.as_str();
     let payment = AlgorithmType::Payment.to_string();
@@ -2176,8 +2178,37 @@ async fn stop_whole_experiment(
     // whatever is actually active. Retry on later feedback if Redis is unavailable.
     drop_cached_experiment(state, merchant_id).await?;
     logger::warn!(merchant_id = %merchant_id, experiment_id = %experiment_id,
-        variant_id = %variant_id, "A/B experiment stopped after guardrail breach");
+        reason = %reason, "A/B experiment stopped");
     Ok(())
+}
+
+/// End the experiment that routed its `max_sample_size` payments in observation period `run`, so
+/// the active rule routes every payment again. The conditional delete cannot remove a replacement
+/// experiment activated in the meantime.
+pub(crate) async fn complete_payment_experiment(
+    merchant_id: &str,
+    experiment_id: &str,
+    run: u64,
+) -> Result<(), String> {
+    use crate::decider::gatewaydecider::ab_test::guardrail;
+
+    // A completion counted in an earlier observation period must not end the one that replaced it.
+    let current = guardrail::current_run(merchant_id, experiment_id)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    if current != run {
+        return Ok(());
+    }
+    let state = get_tenant_app_state().await;
+    // Internal work, since the guardrail only names experiments that routed this merchant's payments.
+    let merchant = crate::auth::AuthorizedMerchant::internal(merchant_id);
+    stop_whole_experiment(
+        &state,
+        &merchant,
+        experiment_id,
+        "reached its max_sample_size",
+    )
+    .await
 }
 
 /// Guard for the edit/delete flows: reject the operation if this algorithm is the merchant's
@@ -2201,8 +2232,9 @@ async fn ensure_routing_algorithm_inactive(
     Ok(())
 }
 
-/// Whether an edit changes how an experiment routes payments. The sample target and guardrail only
-/// affect how its results are judged, so changing only those is not a routing change.
+/// Whether an edit changes how an experiment routes payments. The sample target, the sample cap
+/// and the guardrail only affect how its results are judged and when it ends, so changing only
+/// those is not a routing change.
 fn changes_experiment_routing(
     existing: &StaticRoutingAlgorithm,
     updated: &StaticRoutingAlgorithm,
@@ -2213,6 +2245,7 @@ fn changes_experiment_routing(
                 StaticRoutingAlgorithm::AbTest(Box::new(crate::euclid::types::ABTestData {
                     min_sample_size: 0,
                     guardrail_threshold_pp: 0.0,
+                    max_sample_size: None,
                     // Display names and guardrail stops don't change how a payment is assigned.
                     variants: data.variants.as_ref().map(|variants| {
                         variants
@@ -2496,7 +2529,7 @@ fn format_output(output: &Output) -> Value {
     }
 }
 
-pub(crate) fn preview_gateway(response: &RoutingEvaluateResponse) -> Option<String> {
+fn preview_gateway(response: &RoutingEvaluateResponse) -> Option<String> {
     response
         .evaluated_output
         .first()

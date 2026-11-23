@@ -273,9 +273,6 @@ pub async fn decider_full_payload_hs_function(
             cpu_start,
             ab_test_sr_override,
             dreq_.enable_multi_objective,
-            ab_test_experiment
-                .as_ref()
-                .map(|(assignment, _)| assignment.experiment_id.clone()),
         )
         .await;
 
@@ -323,7 +320,6 @@ async fn perform_hybrid_routing(
         cpu_start,
         None,
         dreq_.enable_multi_objective,
-        None,
     )
     .await;
 
@@ -425,47 +421,12 @@ async fn write_gateway_scoring_data(txn_uuid: &str, data: &T::GatewayScoringData
         .unwrap_or_default();
 }
 
-/// Saves an experiment-only context for a payment `experiment_id` routed by its rule output
-/// alone, unless the payment already has a context, so the A/B guardrail can count its outcome.
-pub async fn store_experiment_only_context(
-    merchant_id: &str,
-    payment_id: &str,
-    experiment_id: &str,
-) {
-    let data = T::GatewayScoringData::experiment_only(
-        merchant_id,
-        experiment_id,
-        time::OffsetDateTime::now_utc(),
-    );
-    let value = match serde_json::to_string(&T::GatewayScoringDataV2::from(data)) {
-        Ok(value) => value,
-        Err(error) => {
-            logger::warn!(merchant_id = %merchant_id, payment_id = %payment_id, error = %error,
-                "Could not encode the experiment-only scoring context");
-            return;
-        }
-    };
-    let key = C::scoring_data_key(merchant_id, payment_id);
-    let ttl = scoring_data_ttl_secs(merchant_id).await;
-    if let Err(error) = get_tenant_app_state()
-        .await
-        .redis_conn
-        .set_key_if_not_exists(&key, &value, ttl)
-        .await
-    {
-        logger::warn!(merchant_id = %merchant_id, payment_id = %payment_id, error = ?error,
-            "Could not save the experiment-only scoring context");
-    }
-}
-
 /// Saves the scoring context for a payment routed without the decider, such as one decided by a
 /// hybrid call's rule output, so its outcome still updates SR scores. `routing_approach` is
-/// recorded as how the payment was routed, and `ab_experiment_id` as the A/B experiment that
-/// routed it, if any.
+/// recorded as how the payment was routed.
 pub async fn store_scoring_context_without_decider(
     dreq_: &T::DomainDeciderRequestForApiCallV2,
     routing_approach: &str,
-    ab_experiment_id: Option<String>,
 ) -> Result<(), T::ErrorResponse> {
     let decider_params = prepare_decider_params(dreq_).await?;
     let mut decider_state = T::initial_decider_state(
@@ -493,7 +454,6 @@ pub async fn store_scoring_context_without_decider(
             routingApproach: Some(routing_approach.to_string()),
             eliminationEnabled: dreq_.elimination_enabled.unwrap_or_default(),
             udfs: Some(decider_params.dpOrder.udfs.clone()),
-            abExperimentId: ab_experiment_id,
             ..scoring_data
         },
     )
@@ -509,7 +469,6 @@ pub async fn run_decider_flow(
     cpu_start: Instant,
     ab_test_sr_override: Option<crate::euclid::types::SrConfigOverride>,
     enable_multi_objective_override: Option<bool>,
-    ab_experiment_id: Option<String>,
 ) -> Result<T::DecidedGateway, T::ErrorResponse> {
     let txnCreationTime = deciderParams
         .dpTxnDetail
@@ -1051,7 +1010,6 @@ pub async fn run_decider_flow(
             eliminationEnabled: eliminationEnabled.unwrap_or_default(),
             is_legacy_decider_flow,
             udfs: Some(deciderParams.dpOrder.udfs.clone()),
-            abExperimentId: ab_experiment_id,
             ..decider_flow.writer.gateway_scoring_data.clone()
         },
     )

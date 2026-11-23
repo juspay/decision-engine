@@ -71,7 +71,8 @@ async function deactivate(api: ApiClient, pod: string, merchantId: string, exper
 async function guardrailCounts(merchantId: string, experimentId: string): Promise<Record<string, number>> {
   const counts: Record<string, number> = {}
   for (const key of await redisKeys(`ab_guardrail_{${merchantId}_${experimentId}}_*`)) {
-    if (key.endsWith('_run')) continue
+    // The period marker and the routed-payment sets aren't counts.
+    if (key.endsWith('_run') || key.endsWith('_routed')) continue
     // ab_guardrail_{m_e}_<run>_<arm>_<txns|succ>
     counts[key.split('}_')[1].replace(/^\d+_/, '')] = await redisPfcount(key)
   }
@@ -82,7 +83,12 @@ async function guardrailCounts(merchantId: string, experimentId: string): Promis
  * A baseline rule (stripe) is active; the experiment splits /routing/evaluate between control
  * (checkout) and a 20% variant (adyen). Returns the experiment id, not yet activated.
  */
-async function createExperiment(api: ApiClient, merchantId: string, minSampleSize: number): Promise<string> {
+async function createExperiment(
+  api: ApiClient,
+  merchantId: string,
+  minSampleSize: number,
+  extra: { endpoints?: string[]; max_sample_size?: number } = {},
+): Promise<string> {
   const baseline = await api.createRoutingAlgorithm(factory.singleRoutingPayload(merchantId, { gateway: 'stripe' }))
   const control = await api.createRoutingAlgorithm(factory.singleRoutingPayload(merchantId, { gateway: 'checkout' }))
   const variant = await api.createRoutingAlgorithm(factory.singleRoutingPayload(merchantId, { gateway: 'adyen' }))
@@ -95,6 +101,7 @@ async function createExperiment(api: ApiClient, merchantId: string, minSampleSiz
       variant: { rule_algorithm_id: variant.body.rule_id },
       endpoints: ['evaluate'], variant_split_pct: 20,
       min_sample_size: minSampleSize, guardrail_threshold_pp: 10,
+      ...extra,
     } },
   })
   expect(experiment.status, JSON.stringify(experiment.body)).toBe(200)
@@ -108,7 +115,7 @@ async function activate(api: ApiClient, pod: string, merchantId: string, experim
     body: { created_by: merchantId, routing_algorithm_id: experimentId },
   })
   expect(r.status, JSON.stringify(r.body)).toBe(200)
-  // Feature-flag reads are cached per instance for five seconds.
+  // Wait until both instances route the variant's payments to it.
   for (const each of PODS) {
     await expect.poll(() => route(api, each, merchantId, variantPayment()), { timeout: 20_000, intervals: [500] }).toBe('adyen')
   }
@@ -293,6 +300,74 @@ test.describe('A/B guardrail across instances (API)', () => {
       await expect.poll(() => guardrailCounts(m, experimentId)).toEqual({ variant_txns: 1 })
       // Its context exists only for the guardrail, so no success-rate score was learned from it.
       expect(await redisKeys(`{gw_sr_v3_score_${m}_*`)).toEqual([])
+    } finally {
+      await deactivate(api, POD_A, m, experimentId)
+    }
+  })
+})
+
+test.describe('A/B guardrail outcomes and completion across instances (API)', () => {
+  /** Routes a payment on `pod`'s /routing/hybrid; returns the connector its rule output chose. */
+  async function routeHybrid(api: ApiClient, pod: string, merchantId: string, paymentId: string): Promise<string> {
+    const r = await api.raw('POST', `${pod}/routing/hybrid`, {
+      body: {
+        // The same parameters /routing/evaluate is called with in these tests. A connector the rule
+        // chooses is served only when the caller can route to it.
+        static_routing_request: {
+          ...factory.ruleEvaluatePayload(merchantId, {}, { payment_id: paymentId }),
+          fallback_output: ['stripe', 'checkout', 'adyen'].map((gateway) => factory.gatewayConnector(gateway)),
+        },
+        dynamic_routing_request: factory.srDecideGatewayRequest({
+          merchantId,
+          paymentInfo: { ...factory.paymentInfo(), paymentId },
+        }),
+      },
+    })
+    expect(r.status, JSON.stringify(r.body).slice(0, 500)).toBe(200)
+    return r.body.evaluated_connectors[0].gateway_name
+  }
+
+  test('an outcome counts however late it arrives, after the payment\'s scoring context expired', async ({ api, merchant }) => {
+    const m = merchant.id
+    await api.createSuccessRateConfig(m)
+    // Rule-routed hybrid payments get a scoring context, kept for three seconds.
+    await api.setMerchantFeature(m, 'sr-scores-from-rule-routing', true)
+    const ttl = await api.raw('PUT', `${POD_A}/admin/merchant-account/${m}/scoring-data-ttl`, { body: { ttl_secs: 3 } })
+    expect(ttl.status, JSON.stringify(ttl.body)).toBe(200)
+    const experimentId = await createExperiment(api, m, 400, { endpoints: ['hybrid_routing'] })
+    try {
+      await api.activateRoutingAlgorithm(m, experimentId)
+      await expect.poll(() => routeHybrid(api, POD_A, m, variantPayment()), { timeout: 20_000, intervals: [500] }).toBe('adyen')
+
+      const variant = variantPayment()
+      expect(await routeHybrid(api, POD_A, m, variant)).toBe('adyen')
+      await expect.poll(() => redisKeys(`gateway_scoring_data_${m}_${variant}`)).toEqual([`gateway_scoring_data_${m}_${variant}`])
+      // The context expires; the payment's outcome still belongs to the experiment.
+      await expect.poll(() => redisKeys(`gateway_scoring_data_${m}_${variant}`), { timeout: 10_000, intervals: [500] }).toEqual([])
+      await feedback(api, POD_B, m, variant, 'adyen', 'AUTHORIZED')
+      await expect.poll(() => guardrailCounts(m, experimentId)).toMatchObject({ variant_txns: 1, variant_succ: 1 })
+    } finally {
+      await deactivate(api, POD_A, m, experimentId)
+    }
+  })
+
+  test('an experiment completes once it has routed its max_sample_size payments', async ({ api, merchant }) => {
+    const m = merchant.id
+    const experimentId = await createExperiment(api, m, 2, { max_sample_size: 3 })
+    try {
+      // Activation routes a variant payment on each instance; one more reaches the cap.
+      await activate(api, POD_A, m, experimentId)
+      const control = controlPayment()
+      expect(await route(api, POD_B, m, control)).toBe('checkout')
+      expect(await experimentActive(api, m, experimentId)).toBe(true)
+
+      await feedback(api, POD_A, m, control, 'checkout', 'AUTHORIZED')
+      await expect.poll(() => experimentActive(api, m, experimentId), { timeout: 15_000, intervals: [300] }).toBe(false)
+      // Both instances route every payment by the active rule again.
+      for (const pod of PODS) {
+        expect(await route(api, pod, m, variantPayment())).toBe('stripe')
+        expect(await route(api, pod, m, controlPayment())).toBe('stripe')
+      }
     } finally {
       await deactivate(api, POD_A, m, experimentId)
     }

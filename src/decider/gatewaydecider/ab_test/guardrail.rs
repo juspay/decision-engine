@@ -1,9 +1,13 @@
-//! Stops a variant whose auth rate falls too far below control. Outcomes are counted in Redis
-//! HyperLogLogs shared by every instance, one pair per arm and observation period, so feedback is
-//! counted whichever instance receives it and however late it arrives within the keys' TTL. A
-//! payment's arm is recomputed from its id. A payment counts only when its scoring context shows
-//! the experiment routed it within the current observation period, which is identified by when it
-//! started, in Unix milliseconds.
+//! Stops a variant whose auth rate falls too far below control, and completes an experiment once
+//! it has routed its `max_sample_size` payments. All state is in Redis, shared by every instance,
+//! per arm and observation period:
+//!
+//! - a set of the payments the experiment routed to the arm, added to when it routes them;
+//! - HyperLogLogs of those payments with an outcome, and of those that succeeded.
+//!
+//! An outcome counts only for a payment in its arm's set, whenever its feedback arrives within the
+//! keys' TTL. A payment's arm is recomputed from its id. An observation period is identified by
+//! when it started, in Unix milliseconds, and a new period starts with empty sets and counts.
 
 use super::arms::{self, ArmSide};
 use super::config::{self, AbTestConfig};
@@ -15,15 +19,22 @@ use crate::logger;
 // variant. A safety stop should react long before a significance verdict, but not on the first
 // few payments, where one binary outcome swings an arm's rate by tens of points.
 const GUARDRAIL_SAMPLE_PCT: u32 = 10;
-/// How long an arm's counts are kept after its last outcome.
+/// How long an arm's routed payments and counts are kept after their last write.
 const COUNTS_TTL_SECS: i64 = 30 * 24 * 60 * 60;
 
-/// One breached variant and the observation period it breached in.
+type RedisResult<T> = Result<T, error_stack::Report<redis_interface::errors::RedisError>>;
+
+/// What an outcome requires of the experiment, in the observation period `run`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct BreachedRun {
-    pub experiment_id: String,
-    pub variant_id: String,
-    pub run: u64,
+pub enum GuardrailAction {
+    /// The variant fell too far below control: stop routing to it.
+    StopVariant {
+        experiment_id: String,
+        variant_id: String,
+        run: u64,
+    },
+    /// The experiment routed its `max_sample_size` payments: end it.
+    Complete { experiment_id: String, run: u64 },
 }
 
 /// Distinct payments with an outcome, and those among them that succeeded, for one arm.
@@ -33,20 +44,32 @@ struct ArmCounts {
     successes: u64,
 }
 
-/// The start of the experiment's current observation period, in Unix milliseconds.
+/// An arm's keys in one observation period.
+struct ArmKeys {
+    /// Set of the payments the experiment routed to the arm.
+    routed: String,
+    /// HyperLogLog of the routed payments with an outcome.
+    transactions: String,
+    /// HyperLogLog of the routed payments that succeeded.
+    successes: String,
+}
+
 /// Every key of one experiment shares the `{merchant_experiment}` hash tag, so they sit in one
 /// cluster slot and are read and written in one pipeline.
 fn run_key(merchant_id: &str, experiment_id: &str) -> String {
     format!("ab_guardrail_{{{merchant_id}_{experiment_id}}}_run")
 }
 
-/// The HyperLogLogs of one arm in one observation period: (transactions, successes).
-fn arm_keys(merchant_id: &str, experiment_id: &str, run: u64, side: &ArmSide) -> (String, String) {
+fn arm_keys(merchant_id: &str, experiment_id: &str, run: u64, side: &ArmSide) -> ArmKeys {
     let prefix = format!(
         "ab_guardrail_{{{merchant_id}_{experiment_id}}}_{run}_{}",
         side.as_str()
     );
-    (format!("{prefix}_txns"), format!("{prefix}_succ"))
+    ArmKeys {
+        routed: format!("{prefix}_routed"),
+        transactions: format!("{prefix}_txns"),
+        successes: format!("{prefix}_succ"),
+    }
 }
 
 /// The payment's arm, when the experiment splits it on any endpoint. The arm is a hash of the
@@ -59,6 +82,17 @@ fn tracked_side(data: &ABTestData, payment_id: &str) -> Option<ArmSide> {
         .map(|plan| plan.side)
 }
 
+/// Every arm that can have routed payments: control and each variant, stopped ones included.
+fn all_arms(data: &ABTestData) -> Vec<ArmSide> {
+    std::iter::once(ArmSide::Control)
+        .chain(
+            arms::resolved_variants(data)
+                .into_iter()
+                .map(|variant| ArmSide::Variant(variant.id)),
+        )
+        .collect()
+}
+
 /// The running variants an outcome on `side` can tip: a control outcome moves the baseline every
 /// variant is judged against, and a variant outcome moves only that variant.
 fn candidates(side: &ArmSide, running: &[String]) -> Vec<String> {
@@ -66,28 +100,6 @@ fn candidates(side: &ArmSide, running: &[String]) -> Vec<String> {
         ArmSide::Control => running.to_vec(),
         ArmSide::Variant(id) => running.iter().filter(|r| *r == id).cloned().collect(),
     }
-}
-
-/// How a payment was routed, from its scoring context.
-#[derive(Debug, Clone, Copy)]
-pub struct Routing<'a> {
-    pub at: time::OffsetDateTime,
-    /// The A/B experiment that routed the payment, if any.
-    pub experiment_id: Option<&'a str>,
-}
-
-/// Whether `experiment_id` routed the payment within the period that started at `run_started_ms`
-/// (0 for a period with no recorded start). A payment without a scoring context can't show that,
-/// so it doesn't count.
-fn routed_in_period(
-    routing: Option<Routing<'_>>,
-    experiment_id: &str,
-    run_started_ms: u64,
-) -> bool {
-    routing.is_some_and(|routing| {
-        routing.experiment_id == Some(experiment_id)
-            && routing.at.unix_timestamp_nanos() / 1_000_000 >= i128::from(run_started_ms)
-    })
 }
 
 /// Whether `variant` fell more than `threshold_pp` below `control`, once both arms have outcomes
@@ -104,18 +116,70 @@ fn breached(control: ArmCounts, variant: ArmCounts, threshold_pp: f64, min_resol
     (rate(control) - rate(variant)) * 100.0 > threshold_pp
 }
 
+/// What the experiment's counts require: completion once `routed` reaches its `max_sample_size`,
+/// otherwise a stop for each of `variants` that breached against `control`.
+fn judge(
+    data: &ABTestData,
+    experiment_id: &str,
+    run: u64,
+    routed: u64,
+    control: ArmCounts,
+    variants: &[(String, ArmCounts)],
+) -> Vec<GuardrailAction> {
+    if routed >= u64::from(data.max_sample_size()) {
+        return vec![GuardrailAction::Complete {
+            experiment_id: experiment_id.to_owned(),
+            run,
+        }];
+    }
+    let min_resolved = u64::from(data.min_sample_size / GUARDRAIL_SAMPLE_PCT);
+    variants
+        .iter()
+        .filter(|(_, counts)| breached(control, *counts, data.guardrail_threshold_pp, min_resolved))
+        .map(|(variant_id, _)| GuardrailAction::StopVariant {
+            experiment_id: experiment_id.to_owned(),
+            variant_id: variant_id.clone(),
+            run,
+        })
+        .collect()
+}
+
 /// The experiment's current observation period: its start in Unix milliseconds, or 0 for an
 /// experiment activated before periods were recorded.
-pub async fn current_run(
-    merchant_id: &str,
-    experiment_id: &str,
-) -> Result<u64, error_stack::Report<redis_interface::errors::RedisError>> {
+pub async fn current_run(merchant_id: &str, experiment_id: &str) -> RedisResult<u64> {
     let run = get_tenant_app_state()
         .await
         .redis_conn
         .get_counter(&run_key(merchant_id, experiment_id))
         .await?;
     Ok(run.and_then(|run| u64::try_from(run).ok()).unwrap_or(0))
+}
+
+/// Records that the experiment routed the payment to `side` in its current observation period, so
+/// the payment's outcome counts whenever it arrives.
+pub async fn record_routed(
+    merchant_id: String,
+    experiment_id: String,
+    side: ArmSide,
+    payment_id: String,
+) {
+    if payment_id.is_empty() {
+        return;
+    }
+    let recorded = async {
+        let run = current_run(&merchant_id, &experiment_id).await?;
+        let keys = arm_keys(&merchant_id, &experiment_id, run, &side);
+        get_tenant_app_state()
+            .await
+            .redis_conn
+            .sadd_with_ttl(&keys.routed, &payment_id, COUNTS_TTL_SECS)
+            .await
+    };
+    if let Err(error) = recorded.await {
+        logger::warn!(merchant_id = %merchant_id, experiment_id = %experiment_id,
+            payment_id = %payment_id, error = ?error,
+            "A/B guardrail could not record the routed payment");
+    }
 }
 
 /// A payment in the merchant's running experiment, with the arm routing assigned it.
@@ -148,17 +212,13 @@ pub async fn track(merchant_id: &str, payment_id: &str) -> Option<TrackedPayment
 }
 
 impl TrackedPayment {
-    /// Counts the payment's outcome for its arm and returns the variants needing a durable stop.
-    /// A payment counts once as a transaction, and once as a success if any of its outcomes
-    /// succeeded, and only when `routing` shows this experiment routed it in the current
-    /// observation period. A breached variant is returned on each outcome until its stop lands.
-    pub async fn record_outcome(
-        &self,
-        routing: Option<Routing<'_>>,
-        is_success: bool,
-    ) -> Vec<BreachedRun> {
-        match self.count_and_judge(routing, is_success).await {
-            Ok(breached) => breached,
+    /// Counts the payment's outcome for its arm, if the experiment routed it in the current
+    /// observation period, and returns what the counts require. A payment counts once as a
+    /// transaction, and once as a success if any of its outcomes succeeded. A required stop or
+    /// completion is returned on each outcome until it lands.
+    pub async fn record_outcome(&self, is_success: bool) -> Vec<GuardrailAction> {
+        match self.count_and_judge(is_success).await {
+            Ok(actions) => actions,
             Err(error) => {
                 logger::warn!(merchant_id = %self.merchant_id,
                     experiment_id = %self.experiment_id, payment_id = %self.payment_id,
@@ -168,82 +228,72 @@ impl TrackedPayment {
         }
     }
 
-    async fn count_and_judge(
-        &self,
-        routing: Option<Routing<'_>>,
-        is_success: bool,
-    ) -> Result<Vec<BreachedRun>, error_stack::Report<redis_interface::errors::RedisError>> {
+    async fn count_and_judge(&self, is_success: bool) -> RedisResult<Vec<GuardrailAction>> {
         let (merchant_id, experiment_id) = (self.merchant_id.as_str(), self.experiment_id.as_str());
         let redis = &get_tenant_app_state().await.redis_conn;
         let run = current_run(merchant_id, experiment_id).await?;
-        if !routed_in_period(routing, experiment_id, run) {
+        let keys = arm_keys(merchant_id, experiment_id, run, &self.side);
+        // Payments routed outside the experiment, or before this period, aren't in the set.
+        if !redis.sismember(&keys.routed, &self.payment_id).await? {
             return Ok(Vec::new());
         }
-        let (txns, succ) = arm_keys(merchant_id, experiment_id, run, &self.side);
         let added = if is_success {
-            vec![txns, succ]
+            vec![keys.transactions, keys.successes]
         } else {
-            vec![txns]
+            vec![keys.transactions]
         };
         redis
             .pfadd_all_with_ttl(&added, &self.payment_id, COUNTS_TTL_SECS)
             .await?;
 
+        // Control's counts, then each candidate variant's, then every arm's routed payments, in
+        // one round trip.
         let candidates = candidates(&self.side, &arms::running_variant_ids(&self.data));
-        if candidates.is_empty() {
-            return Ok(Vec::new());
-        }
-        // Control's two counts, then each candidate's, read in one round trip.
-        let arms_read: Vec<ArmSide> = std::iter::once(ArmSide::Control)
+        let judged: Vec<ArmSide> = std::iter::once(ArmSide::Control)
             .chain(candidates.iter().cloned().map(ArmSide::Variant))
             .collect();
-        let keys: Vec<String> = arms_read
+        let hyperloglogs: Vec<String> = judged
             .iter()
             .flat_map(|side| {
-                let (txns, succ) = arm_keys(merchant_id, experiment_id, run, side);
-                [txns, succ]
+                let keys = arm_keys(merchant_id, experiment_id, run, side);
+                [keys.transactions, keys.successes]
             })
             .collect();
-        let read = redis.pfcount_each(&keys).await?;
-        let counts: Vec<ArmCounts> = read
-            .chunks(2)
-            .map(|pair| ArmCounts {
-                transactions: pair.first().copied().unwrap_or(0),
-                successes: pair.get(1).copied().unwrap_or(0),
-            })
+        let sets: Vec<String> = all_arms(&self.data)
+            .iter()
+            .map(|side| arm_keys(merchant_id, experiment_id, run, side).routed)
             .collect();
-        let Some((control, variants)) = counts.split_first() else {
-            return Ok(Vec::new());
-        };
-        let min_resolved = u64::from(self.data.min_sample_size / GUARDRAIL_SAMPLE_PCT);
-        let mut breached_runs = Vec::new();
-        for (variant_id, variant) in candidates.into_iter().zip(variants) {
-            if breached(
-                *control,
-                *variant,
-                self.data.guardrail_threshold_pp,
-                min_resolved,
-            ) {
-                logger::warn!(merchant_id = %merchant_id, experiment_id = %experiment_id,
-                    variant_id = %variant_id, threshold_pp = self.data.guardrail_threshold_pp,
-                    control_transactions = control.transactions,
-                    control_successes = control.successes,
-                    variant_transactions = variant.transactions,
-                    variant_successes = variant.successes,
-                    "A/B guardrail breached; stopping the variant");
-                breached_runs.push(BreachedRun {
-                    experiment_id: experiment_id.to_owned(),
-                    variant_id,
-                    run,
-                });
+        let (hyperloglog_counts, routed_counts) =
+            redis.pfcount_and_scard(&hyperloglogs, &sets).await?;
+        let mut counts = hyperloglog_counts.chunks(2).map(|pair| ArmCounts {
+            transactions: pair.first().copied().unwrap_or(0),
+            successes: pair.get(1).copied().unwrap_or(0),
+        });
+        let control = counts.next().unwrap_or_default();
+        let variants: Vec<(String, ArmCounts)> = candidates.into_iter().zip(counts).collect();
+        let routed: u64 = routed_counts.iter().sum();
+
+        let actions = judge(&self.data, experiment_id, run, routed, control, &variants);
+        for action in &actions {
+            match action {
+                GuardrailAction::StopVariant { variant_id, .. } => {
+                    logger::warn!(merchant_id = %merchant_id, experiment_id = %experiment_id,
+                        variant_id = %variant_id, threshold_pp = self.data.guardrail_threshold_pp,
+                        "A/B guardrail breached; stopping the variant");
+                }
+                GuardrailAction::Complete { .. } => {
+                    logger::info!(merchant_id = %merchant_id, experiment_id = %experiment_id,
+                        routed, max_sample_size = self.data.max_sample_size(),
+                        "A/B experiment reached its sample cap; completing it");
+                }
             }
         }
-        Ok(breached_runs)
+        Ok(actions)
     }
 }
 
-/// A deliberate activation or deactivation starts a new observation period, so outcomes counted
-/// before it no longer judge the experiment.
+/// A deliberate activation or deactivation starts a new observation period, so payments routed
+/// and outcomes counted before it no longer judge the experiment.
 pub async fn reset(merchant_id: &str, experiment_id: &str) {
     let started_ms =
         i64::try_from(time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000)
@@ -268,7 +318,7 @@ mod tests {
             "control": { "rule_algorithm_id": "control_rule" },
             "variant": { "rule_algorithm_id": "variant_rule" },
             "variant_split_pct": 20,
-            "min_sample_size": 40,
+            "min_sample_size": 200,
             "guardrail_threshold_pp": 10.0
         }))
         .unwrap()
@@ -314,6 +364,46 @@ mod tests {
     }
 
     #[test]
+    fn judging_stops_breached_variants_until_the_cap_completes_the_experiment() {
+        let mut config = data();
+        config.max_sample_size = Some(1_000);
+        let variants = [
+            ("failing".to_string(), counts(10, 5)),
+            ("healthy".to_string(), counts(10, 8)),
+        ];
+        assert_eq!(
+            judge(&config, "exp1", 7, 999, counts(10, 8), &variants),
+            vec![GuardrailAction::StopVariant {
+                experiment_id: "exp1".into(),
+                variant_id: "failing".into(),
+                run: 7,
+            }]
+        );
+        // At the cap the experiment completes, which ends every variant.
+        assert_eq!(
+            judge(&config, "exp1", 7, 1_000, counts(10, 8), &variants),
+            vec![GuardrailAction::Complete {
+                experiment_id: "exp1".into(),
+                run: 7,
+            }]
+        );
+    }
+
+    #[test]
+    fn the_cap_defaults_to_500k_routed_payments() {
+        let config = data();
+        assert_eq!(config.max_sample_size(), 500_000);
+        assert!(judge(&config, "exp1", 1, 499_999, counts(0, 0), &[]).is_empty());
+        assert_eq!(
+            judge(&config, "exp1", 1, 500_000, counts(0, 0), &[]),
+            vec![GuardrailAction::Complete {
+                experiment_id: "exp1".into(),
+                run: 1,
+            }]
+        );
+    }
+
+    #[test]
     fn tracked_side_matches_the_arm_routing_assigned() {
         let config = data();
         let variants = arms::resolved_variants(&config);
@@ -343,53 +433,23 @@ mod tests {
             .find(|id| super::super::assign_arm(id, &variants) == ArmSide::Variant("v1".into()))
             .unwrap();
         assert_eq!(tracked_side(&config, &stopped_payment), None);
-    }
-
-    #[test]
-    fn only_payments_the_experiment_routed_in_the_period_count() {
-        let started = time::macros::datetime!(2026-11-20 10:00 UTC);
-        let started_ms = u64::try_from(started.unix_timestamp() * 1000).unwrap();
-        let routed = |at, experiment_id| Some(Routing { at, experiment_id });
-
-        assert!(routed_in_period(
-            routed(started, Some("exp1")),
-            "exp1",
-            started_ms
-        ));
-        assert!(routed_in_period(
-            routed(started + time::Duration::hours(40), Some("exp1")),
-            "exp1",
-            started_ms
-        ));
-        // Routed before the period started.
-        assert!(!routed_in_period(
-            routed(started - time::Duration::milliseconds(1), Some("exp1")),
-            "exp1",
-            started_ms
-        ));
-        // Routed outside the experiment, or by another one.
-        assert!(!routed_in_period(routed(started, None), "exp1", started_ms));
-        assert!(!routed_in_period(
-            routed(started, Some("exp2")),
-            "exp1",
-            started_ms
-        ));
-        // No scoring context.
-        assert!(!routed_in_period(None, "exp1", started_ms));
-        // A period with no recorded start still needs the experiment to have routed the payment.
-        assert!(routed_in_period(routed(started, Some("exp1")), "exp1", 0));
-        assert!(!routed_in_period(routed(started, None), "exp1", 0));
+        // Its routed payments still count toward the cap.
+        assert_eq!(
+            all_arms(&config),
+            vec![ArmSide::Control, ArmSide::Variant("v1".into())]
+        );
     }
 
     #[test]
     fn each_period_and_arm_has_its_own_keys() {
-        let (txns, succ) = arm_keys("m1", "exp1", 3, &ArmSide::Variant("v1".into()));
-        assert_eq!(txns, "ab_guardrail_{m1_exp1}_3_v1_txns");
-        assert_eq!(succ, "ab_guardrail_{m1_exp1}_3_v1_succ");
+        let keys = arm_keys("m1", "exp1", 3, &ArmSide::Variant("v1".into()));
+        assert_eq!(keys.routed, "ab_guardrail_{m1_exp1}_3_v1_routed");
+        assert_eq!(keys.transactions, "ab_guardrail_{m1_exp1}_3_v1_txns");
+        assert_eq!(keys.successes, "ab_guardrail_{m1_exp1}_3_v1_succ");
         assert_eq!(run_key("m1", "exp1"), "ab_guardrail_{m1_exp1}_run");
         assert_ne!(
-            arm_keys("m1", "exp1", 4, &ArmSide::Control).0,
-            arm_keys("m1", "exp1", 3, &ArmSide::Control).0
+            arm_keys("m1", "exp1", 4, &ArmSide::Control).routed,
+            arm_keys("m1", "exp1", 3, &ArmSide::Control).routed
         );
     }
 }

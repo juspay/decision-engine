@@ -458,55 +458,55 @@ pub fn invalid_request_error(detail: &str, e: &impl std::fmt::Display) -> T::Err
 /// never routed by the decider, and no context was stored for it), so no score was updated.
 pub const SCORE_UPDATE_SKIPPED: &str = "Skipped";
 
+/// Stops the variant or completes the experiment the guardrail named. A failure is logged and
+/// retried on the experiment's next payment outcome.
+async fn apply_guardrail_action(
+    merchant_id: &str,
+    action: crate::decider::gatewaydecider::ab_test::guardrail::GuardrailAction,
+) {
+    use crate::decider::gatewaydecider::ab_test::guardrail::GuardrailAction;
+    use crate::euclid::handlers::routing_rules::{
+        complete_payment_experiment, stop_breached_payment_experiment,
+    };
+
+    let (experiment_id, result) = match &action {
+        GuardrailAction::StopVariant {
+            experiment_id,
+            variant_id,
+            run,
+        } => (
+            experiment_id,
+            stop_breached_payment_experiment(merchant_id, experiment_id, variant_id, *run).await,
+        ),
+        GuardrailAction::Complete { experiment_id, run } => (
+            experiment_id,
+            complete_payment_experiment(merchant_id, experiment_id, *run).await,
+        ),
+    };
+    if let Err(error) = result {
+        logger::error!(merchant_id = %merchant_id, experiment_id = %experiment_id,
+            action = ?action, error = %error,
+            "Failed to apply the A/B guardrail's action; the next payment outcome retries it");
+    }
+}
+
 pub async fn check_and_update_gateway_score_(
     api_payload: FT::UpdateScorePayload,
 ) -> Result<String, T::ErrorResponse> {
     // Before any early return, because the guardrail needs only the payment's outcome and must
-    // not be gated on the GSM scoring filter or on GatewayScoringData still being cached. It dates
-    // the payment from its scoring context, so for a payment it tracks the context is read here
-    // once, for both.
+    // not be gated on the GSM scoring filter or on GatewayScoringData still being cached.
     let is_success = is_transaction_success(api_payload.status.clone());
-    let tracked = if is_success || is_transaction_failure(api_payload.status.clone()) {
-        crate::decider::gatewaydecider::ab_test::guardrail::track(
+    if is_success || is_transaction_failure(api_payload.status.clone()) {
+        if let Some(tracked) = crate::decider::gatewaydecider::ab_test::guardrail::track(
             &api_payload.merchant_id,
             &api_payload.payment_id,
         )
         .await
-    } else {
-        None
-    };
-    let mut prefetched_context = None;
-    if let Some(tracked) = tracked {
-        let context = read_scoring_context(&api_payload.merchant_id, &api_payload.payment_id).await;
-        let routing = context
-            .1
-            .as_ref()
-            .ok()
-            .filter(|data| data.merchantId == api_payload.merchant_id)
-            .map(
-                |data| crate::decider::gatewaydecider::ab_test::guardrail::Routing {
-                    at: data.dateCreated,
-                    experiment_id: data.abExperimentId.as_deref(),
-                },
-            );
-        let experiments_to_stop = tracked.record_outcome(routing, is_success).await;
-        for breached in experiments_to_stop {
-            if let Err(error) =
-                crate::euclid::handlers::routing_rules::stop_breached_payment_experiment(
-                    &api_payload.merchant_id,
-                    &breached.experiment_id,
-                    &breached.variant_id,
-                    breached.run,
-                )
-                .await
-            {
-                logger::error!(merchant_id = %api_payload.merchant_id,
-                    experiment_id = %breached.experiment_id, variant_id = %breached.variant_id,
-                    error = %error,
-                    "Failed to stop breached A/B variant; later payment feedback will retry");
+        {
+            for action in tracked.record_outcome(is_success).await {
+                apply_guardrail_action(&api_payload.merchant_id, action).await;
             }
         }
-        prefetched_context = Some(context);
     }
 
     // GSM-based scoring filter: skip penalization for failures where the gateway
@@ -574,11 +574,18 @@ pub async fn check_and_update_gateway_score_(
         );
     }
 
-    let (redis_key, m_gateway_scoring_data) = match prefetched_context {
-        Some(context) => context,
-        None => read_scoring_context(&api_payload.merchant_id, &api_payload.payment_id).await,
-    };
+    let redis_key = scoring_data_redis_key(&api_payload.merchant_id, &api_payload.payment_id).await;
     let app_state = get_tenant_app_state().await;
+
+    // Attempt to fetch gateway scoring data from Redis
+    let m_gateway_scoring_data: Result<
+        GatewayScoringData,
+        error_stack::Report<redis_interface::errors::RedisError>,
+    > = app_state
+        .redis_conn
+        .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
+        .await
+        .map(GatewayScoringData::from);
 
     match m_gateway_scoring_data {
         Ok(gateway_scoring_data) => {
@@ -588,9 +595,6 @@ pub async fn check_and_update_gateway_score_(
                     "payment_id",
                     &"Payment does not belong to the requested merchant",
                 ));
-            }
-            if gateway_scoring_data.experimentOnly {
-                return Ok(SCORE_UPDATE_SKIPPED.to_string());
             }
             // Extract transaction details and card info from the API payload
             let txn_detail: TxnDetail = match Fbu::get_txn_detail_from_api_payload(
@@ -675,24 +679,6 @@ pub async fn check_and_update_gateway_score_(
             })
         }
     }
-}
-
-/// A payment's scoring-context key, and the context read from it.
-async fn read_scoring_context(
-    merchant_id: &str,
-    payment_id: &str,
-) -> (
-    String,
-    Result<GatewayScoringData, error_stack::Report<redis_interface::errors::RedisError>>,
-) {
-    let redis_key = scoring_data_redis_key(merchant_id, payment_id).await;
-    let context = get_tenant_app_state()
-        .await
-        .redis_conn
-        .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
-        .await
-        .map(GatewayScoringData::from);
-    (redis_key, context)
 }
 
 /// The key to read a payment's scoring context from: the merchant-keyed one, or the payment-id-only
@@ -866,9 +852,7 @@ pub async fn update_gateway_score(
                 .ok()
                 .map(GatewayScoringData::from)
         }
-    }
-    // An experiment-only context exists for the A/B guardrail, not to train scores.
-    .filter(|data| !data.experimentOnly);
+    };
 
     let redis_gateway_score_data_initial: Option<GatewayScoringData> =
         if should_update_srv3_gateway_score

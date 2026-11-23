@@ -172,6 +172,10 @@ fn is_zero_pct(pct: &u8) -> bool {
     *pct == 0
 }
 
+/// Payments an experiment routes, across all arms, before it completes, unless it sets its own
+/// `max_sample_size`.
+pub const DEFAULT_MAX_SAMPLE_SIZE: u32 = 500_000;
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct ABTestData {
     /// Layered control arm. When present it defines control and the single-strategy control
@@ -204,12 +208,23 @@ pub struct ABTestData {
     /// Stop a variant for new payments when its auth rate drops more than this many pp below
     /// control, once a tenth of the sample target has resolved.
     pub guardrail_threshold_pp: f64,
+    /// Payments routed through the experiment, across all arms, after which it completes and the
+    /// active rule routes every payment again. Absent means [`DEFAULT_MAX_SAMPLE_SIZE`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_sample_size: Option<u32>,
     /// SR overrides for a single-strategy `sr_routing` variant arm.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub variant_sr_config: Option<SrConfigOverride>,
     /// SR overrides for a single-strategy `sr_routing` control arm.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub control_sr_config: Option<SrConfigOverride>,
+}
+
+impl ABTestData {
+    /// Payments the experiment routes, across all arms, before it completes.
+    pub fn max_sample_size(&self) -> u32 {
+        self.max_sample_size.unwrap_or(DEFAULT_MAX_SAMPLE_SIZE)
+    }
 }
 
 #[derive(

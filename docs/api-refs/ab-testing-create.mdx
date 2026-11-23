@@ -77,6 +77,7 @@ Response is the standard routing-algorithm create response:
 | `variant_split_pct` | integer, 1–50 | Single-variant format: percentage of traffic sent to the variant arm. |
 | `min_sample_size` | integer | Transactions each arm needs before results are considered statistically meaningful. |
 | `guardrail_threshold_pp` | number | Guardrail: when a variant's auth rate on completed payments drops this many percentage points below control, that variant stops (see [Guardrail](#guardrail)) and its results are marked `guardrail_breached`. |
+| `max_sample_size` | integer, optional | Payments the experiment routes, across all arms, after which it completes: it is deactivated and the active rule routes every payment again. Defaults to 500,000; must be at least `min_sample_size`. |
 
 ### Variant
 
@@ -105,6 +106,8 @@ An experiment has at most 5 variants. Each variant must apply different layers f
 ### Guardrail
 
 Each variant is compared with control on its own. When a variant breaches the guardrail, it stops: its payments are no longer recorded and are routed like payments the experiment doesn't cover, while the other variants keep running. The stopped variant is marked `"stopped": true` in the stored definition. When the last running variant breaches (always the case for a single-variant experiment), the whole experiment is deactivated. Activating the experiment again clears `stopped` and starts a new observation period.
+
+The guardrail counts a payment's outcome only when the experiment routed that payment in the current observation period, and counts it whenever its feedback arrives, however late. Each payment counts once, as a success if any of its outcomes succeeded. Every instance shares the counts, so feedback is counted whichever instance receives it. Once the experiment has routed `max_sample_size` payments, it completes the same way.
 
 ### Arm
 
