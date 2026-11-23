@@ -1,5 +1,6 @@
 //! Stops a variant whose auth rate falls too far below control, and completes an experiment once
-//! it has routed its sample target (`min_sample_size`) of payments. All state is in Redis, shared by every instance,
+//! its outcomes reach the sample target (`min_sample_size`), the point its results report a verdict
+//! at. All state is in Redis, shared by every instance,
 //! per arm and observation period:
 //!
 //! - a set of the payments the experiment routed to the arm, added to when it routes them;
@@ -38,6 +39,10 @@ const GUARDRAIL_MIN_RESOLVED_PER_ARM: u64 = 30;
 const GUARDRAIL_Z: f64 = 3.0;
 /// How long an arm's routed payments and counts are kept after their last write.
 const COUNTS_TTL_SECS: i64 = 30 * 24 * 60 * 60;
+/// How many times its sample target an experiment may route while it waits for outcomes. Past it,
+/// the experiment completes anyway: the feedback that would reach the target isn't arriving, and
+/// the routed-payment sets must stay bounded.
+const ROUTED_CAP_FACTOR: u64 = 2;
 
 type RedisResult<T> = Result<T, error_stack::Report<redis_interface::errors::RedisError>>;
 
@@ -162,40 +167,74 @@ fn breached(control: ArmCounts, variant: ArmCounts, threshold_pp: f64) -> bool {
     )
 }
 
-/// Whether every running comparison, control's routed payments plus a variant's, has reached the
-/// sample target: the point its results report a verdict at. `routed` holds each arm's routed
-/// payments by arm id.
-fn reached_sample_target(data: &ABTestData, routed: &[(ArmSide, u64)]) -> bool {
-    let routed_to = |side: &ArmSide| {
-        routed
-            .iter()
-            .find(|(arm, _)| arm == side)
-            .map_or(0, |(_, count)| *count)
-    };
-    let control = routed_to(&ArmSide::Control);
-    let running = arms::running_variant_ids(data);
-    !running.is_empty()
-        && running
-            .into_iter()
-            .all(|id| control + routed_to(&ArmSide::Variant(id)) >= u64::from(data.min_sample_size))
+/// One arm's routed payments and counted outcomes in the current observation period.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ArmTally {
+    side: ArmSide,
+    routed: u64,
+    counts: ArmCounts,
 }
 
-/// What the experiment's counts require: completion once every comparison has routed the sample
-/// target, otherwise a stop for each of `variants` that breached against `control`.
+/// Whether the experiment is complete. It completes once every running comparison (control plus a
+/// variant) has resolved the sample target, the point its results report a verdict at, or once
+/// any comparison has routed [`ROUTED_CAP_FACTOR`] times the target while outcomes lag behind.
+fn is_complete(data: &ABTestData, tallies: &[ArmTally]) -> bool {
+    let tally_of = |side: &ArmSide| {
+        tallies
+            .iter()
+            .find(|tally| &tally.side == side)
+            .cloned()
+            .unwrap_or(ArmTally {
+                side: side.clone(),
+                routed: 0,
+                counts: ArmCounts::default(),
+            })
+    };
+    let control = tally_of(&ArmSide::Control);
+    let comparisons: Vec<(u64, u64)> = arms::running_variant_ids(data)
+        .into_iter()
+        .map(|id| {
+            let variant = tally_of(&ArmSide::Variant(id));
+            (
+                control.counts.transactions + variant.counts.transactions,
+                control.routed + variant.routed,
+            )
+        })
+        .collect();
+    let target = u64::from(data.min_sample_size);
+    !comparisons.is_empty()
+        && (comparisons.iter().all(|(resolved, _)| *resolved >= target)
+            || comparisons
+                .iter()
+                .any(|(_, routed)| *routed >= target.saturating_mul(ROUTED_CAP_FACTOR)))
+}
+
+/// What the experiment's counts require: completion (see [`is_complete`]), otherwise a stop for
+/// each of `candidates` that breached against control.
 fn judge(
     data: &ABTestData,
     experiment_id: &str,
     run: u64,
-    routed: &[(ArmSide, u64)],
-    control: ArmCounts,
-    variants: &[(String, ArmCounts)],
+    tallies: &[ArmTally],
+    candidates: &[String],
 ) -> Vec<GuardrailAction> {
-    if reached_sample_target(data, routed) {
+    if is_complete(data, tallies) {
         return vec![GuardrailAction::Complete {
             experiment_id: experiment_id.to_owned(),
             run,
         }];
     }
+    let counts_of = |side: ArmSide| {
+        tallies
+            .iter()
+            .find(|tally| tally.side == side)
+            .map_or_else(ArmCounts::default, |tally| tally.counts)
+    };
+    let control = counts_of(ArmSide::Control);
+    let variants: Vec<(String, ArmCounts)> = candidates
+        .iter()
+        .map(|id| (id.clone(), counts_of(ArmSide::Variant(id.clone()))))
+        .collect();
     variants
         .iter()
         .filter(|(_, counts)| breached(control, *counts, data.guardrail_threshold_pp))
@@ -309,35 +348,37 @@ impl TrackedPayment {
             .pfadd_all_with_ttl(&added, &self.payment_id, COUNTS_TTL_SECS)
             .await?;
 
-        // Control's counts, then each candidate variant's, then every arm's routed payments, in
-        // one round trip.
-        let candidates = candidates(&self.side, &arms::running_variant_ids(&self.data));
-        let judged: Vec<ArmSide> = std::iter::once(ArmSide::Control)
-            .chain(candidates.iter().cloned().map(ArmSide::Variant))
-            .collect();
-        let hyperloglogs: Vec<String> = judged
+        // Every arm's counts and routed payments, in one round trip.
+        let every_arm = all_arms(&self.data);
+        let hyperloglogs: Vec<String> = every_arm
             .iter()
             .flat_map(|side| {
                 let keys = arm_keys(merchant_id, experiment_id, run, side);
                 [keys.transactions, keys.successes]
             })
             .collect();
-        let every_arm = all_arms(&self.data);
         let sets: Vec<String> = every_arm
             .iter()
             .map(|side| arm_keys(merchant_id, experiment_id, run, side).routed)
             .collect();
         let (hyperloglog_counts, routed_counts) =
             redis.pfcount_and_scard(&hyperloglogs, &sets).await?;
-        let mut counts = hyperloglog_counts.chunks(2).map(|pair| ArmCounts {
-            transactions: pair.first().copied().unwrap_or(0),
-            successes: pair.get(1).copied().unwrap_or(0),
-        });
-        let control = counts.next().unwrap_or_default();
-        let variants: Vec<(String, ArmCounts)> = candidates.into_iter().zip(counts).collect();
-        let routed: Vec<(ArmSide, u64)> = every_arm.into_iter().zip(routed_counts).collect();
+        let tallies: Vec<ArmTally> = every_arm
+            .into_iter()
+            .zip(hyperloglog_counts.chunks(2))
+            .zip(routed_counts)
+            .map(|((side, pair), routed)| ArmTally {
+                side,
+                routed,
+                counts: ArmCounts {
+                    transactions: pair.first().copied().unwrap_or(0),
+                    successes: pair.get(1).copied().unwrap_or(0),
+                },
+            })
+            .collect();
+        let candidates = candidates(&self.side, &arms::running_variant_ids(&self.data));
 
-        let actions = judge(&self.data, experiment_id, run, &routed, control, &variants);
+        let actions = judge(&self.data, experiment_id, run, &tallies, &candidates);
         for action in &actions {
             match action {
                 GuardrailAction::StopVariant { variant_id, .. } => {
@@ -348,7 +389,7 @@ impl TrackedPayment {
                 GuardrailAction::Complete { .. } => {
                     logger::info!(merchant_id = %merchant_id, experiment_id = %experiment_id,
                         sample_target = self.data.min_sample_size,
-                        "A/B experiment reached its sample target; completing it");
+                        "A/B experiment reached its sample target, or its routing cap; completing it");
                 }
             }
         }
@@ -438,41 +479,45 @@ mod tests {
         assert!(candidates(&ArmSide::Variant("v3".into()), &running).is_empty());
     }
 
+    fn tally(side: ArmSide, routed: u64, transactions: u64, successes: u64) -> ArmTally {
+        ArmTally {
+            side,
+            routed,
+            counts: counts(transactions, successes),
+        }
+    }
+
+    fn variant(id: &str) -> ArmSide {
+        ArmSide::Variant(id.into())
+    }
+
     #[test]
-    fn judging_stops_breached_variants_until_the_sample_target_completes_the_experiment() {
+    fn judging_stops_a_breached_variant_until_outcomes_complete_the_experiment() {
+        // Target 200; control 40/38 against variant 40/10 is a clear breach.
         let config = data();
-        let variants = [("variant".to_string(), counts(40, 10))];
-        let routed = |control, variant| {
+        let candidates = ["variant".to_string()];
+        let tallies = |control_resolved: u64| {
             vec![
-                (ArmSide::Control, control),
-                (ArmSide::Variant("variant".into()), variant),
+                tally(
+                    ArmSide::Control,
+                    300,
+                    control_resolved,
+                    control_resolved - 2,
+                ),
+                tally(variant("variant"), 60, 40, 10),
             ]
         };
         assert_eq!(
-            judge(
-                &config,
-                "exp1",
-                7,
-                &routed(160, 39),
-                counts(40, 38),
-                &variants
-            ),
+            judge(&config, "exp1", 7, &tallies(159), &candidates),
             vec![GuardrailAction::StopVariant {
                 experiment_id: "exp1".into(),
                 variant_id: "variant".into(),
                 run: 7,
             }]
         );
-        // Having routed its target, the experiment completes, which ends every variant.
+        // 160 + 40 resolved reaches the target: the experiment completes, ending every variant.
         assert_eq!(
-            judge(
-                &config,
-                "exp1",
-                7,
-                &routed(160, 40),
-                counts(40, 38),
-                &variants
-            ),
+            judge(&config, "exp1", 7, &tallies(160), &candidates),
             vec![GuardrailAction::Complete {
                 experiment_id: "exp1".into(),
                 run: 7,
@@ -481,7 +526,28 @@ mod tests {
     }
 
     #[test]
-    fn with_several_variants_every_running_comparison_must_reach_the_target() {
+    fn routing_the_target_without_its_outcomes_does_not_complete() {
+        let config = data();
+        // 360 routed, past the target of 200, but only 150 resolved: the verdict needs 200.
+        assert!(!is_complete(
+            &config,
+            &[
+                tally(ArmSide::Control, 300, 120, 100),
+                tally(variant("variant"), 60, 30, 25),
+            ]
+        ));
+        // At twice the target routed, it completes anyway: those outcomes aren't arriving.
+        assert!(is_complete(
+            &config,
+            &[
+                tally(ArmSide::Control, 340, 120, 100),
+                tally(variant("variant"), 60, 30, 25),
+            ]
+        ));
+    }
+
+    #[test]
+    fn with_several_variants_every_running_comparison_must_resolve_the_target() {
         let mut config = data();
         config.variant = None;
         config.variants = Some(
@@ -493,17 +559,17 @@ mod tests {
             ]))
             .unwrap(),
         );
-        let routed = |b| {
+        let tallies = |b_resolved| {
             vec![
-                (ArmSide::Control, 150),
-                (ArmSide::Variant("a".into()), 60),
-                (ArmSide::Variant("b".into()), b),
-                (ArmSide::Variant("c".into()), 0),
+                tally(ArmSide::Control, 150, 150, 120),
+                tally(variant("a"), 60, 60, 50),
+                tally(variant("b"), 50, b_resolved, 40),
+                tally(variant("c"), 0, 0, 0),
             ]
         };
         // Control + a has 210 of 200, but control + b only 199; the stopped c isn't waited on.
-        assert!(!reached_sample_target(&config, &routed(49)));
-        assert!(reached_sample_target(&config, &routed(50)));
+        assert!(!is_complete(&config, &tallies(49)));
+        assert!(is_complete(&config, &tallies(50)));
     }
 
     #[test]

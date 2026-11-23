@@ -1150,11 +1150,13 @@ function ExperimentDetailPanel({
   // A handful of transactions against a 5,000 target would paint an empty track, which reads as
   // "nothing collected", so the bar keeps a sliver.
   const progressWidth = sampleTxns > 0 ? Math.max(collectedShare * 100, 1.5) : 0
-  // The experiment completes once each comparison, control plus a variant, has routed the target.
+  // The experiment completes once each comparison (control plus a variant) has the target's outcomes,
+  // or, should outcomes stop arriving, once one has routed twice the target.
   const routedTxns = results && results.variants.length > 0
-    ? Math.min(...results.variants.map(v => results.control.transaction_count + v.metrics.transaction_count))
+    ? Math.max(...results.variants.map(v => results.control.transaction_count + v.metrics.transaction_count))
     : 0
-  const completed = !isActive && routedTxns >= minSample
+  const completedWithVerdict = !isActive && sampleTxns >= minSample
+  const completedWithoutOutcomes = !isActive && sampleTxns < minSample && routedTxns >= 2 * minSample
   const controlPct = abData ? controlSplitPct(abData) : 90
 
   const status: 'active' | 'paused' | 'inactive' = isActive ? (realPaymentsOn ? 'active' : 'paused') : 'inactive'
@@ -1162,18 +1164,18 @@ function ExperimentDetailPanel({
   // The banner speaks for the experiment as a whole: still collecting while any comparison is.
   const overallVerdict = results?.variants.some(v => v.verdict === 'collecting_data') ? 'collecting_data' : 'not_significant'
 
-  // Rough "time to completion" projection for the progress card. There's no served routing rate, so
-  // the rate is derived from payments routed so far over the time the experiment has been live —
+  // Rough "time to completion" projection for the progress card. There's no served outcome rate, so
+  // the rate is derived from outcomes so far over the time the experiment has been live —
   // `modified_at` is a sound proxy for activation, since edits are blocked once an experiment is
-  // running. Only shown while actively routing with real progress; any missing/degenerate input
+  // running. Only shown while actively collecting with real progress; any missing/degenerate input
   // returns null rather than a misleading estimate.
   const remainingEta: string | null = (() => {
-    if (status !== 'active' || routedTxns <= 0 || routedTxns >= minSample) return null
+    if (status !== 'active' || sampleTxns <= 0 || sampleTxns >= minSample) return null
     const startMs = algorithm.modified_at ? Date.parse(algorithm.modified_at) : NaN
     if (!Number.isFinite(startMs)) return null
     const elapsedMs = Date.now() - startMs
     if (elapsedMs <= 0) return null
-    const remainMs = (elapsedMs / routedTxns) * (minSample - routedTxns)
+    const remainMs = (elapsedMs / sampleTxns) * (minSample - sampleTxns)
     const hrs = remainMs / 3_600_000
     if (!Number.isFinite(hrs) || hrs <= 0) return null
     const at = 'to completion at current volume'
@@ -1196,8 +1198,8 @@ function ExperimentDetailPanel({
           value: `${minSample.toLocaleString()} txns`,
           icon: BarChart3,
           caption: variants.length === 1
-            ? 'Payments routed before the experiment completes with a verdict'
-            : 'Payments each comparison routes before the experiment completes',
+            ? 'Outcomes collected before the experiment completes with a verdict'
+            : 'Outcomes each comparison collects before the experiment completes',
           visual: null,
         },
         {
@@ -1298,10 +1300,12 @@ function ExperimentDetailPanel({
               />
             </div>
             <p className="text-[12px] text-slate-500 max-w-[80ch] leading-4">
-              {completed
-                ? `Completed after routing ${minSample.toLocaleString()} payments. The verdict settles as the remaining outcomes arrive.`
-                : `The experiment completes once ${variants.length > 1 ? 'each comparison has' : 'it has'} routed ${minSample.toLocaleString()} payments: ${routedTxns.toLocaleString()} so far`}
-              {!completed && remainingEta ? ` · ${remainingEta}` : ''}
+              {completedWithVerdict
+                ? `Completed with ${minSample.toLocaleString()} outcomes.`
+                : completedWithoutOutcomes
+                  ? `Completed after routing ${routedTxns.toLocaleString()} payments, twice the target, but only ${sampleTxns.toLocaleString()} of the ${minSample.toLocaleString()} outcomes needed arrived, so there is no verdict. Check that payment feedback is being sent to Decision Engine.`
+                  : `The experiment completes once ${variants.length > 1 ? 'each comparison has' : 'it has'} ${minSample.toLocaleString()} outcomes: ${sampleTxns.toLocaleString()} so far`}
+              {!completedWithVerdict && !completedWithoutOutcomes && remainingEta ? ` · ${remainingEta}` : ''}
             </p>
           </div>
         )}
@@ -1755,8 +1759,8 @@ function CreateForm({
       />
       <span>percentage points below control</span>
       <InfoHint text={form.variants.length === 1
-        ? 'After both arms have a completed payment, each new outcome checks the saved guardrail and stops a breached experiment, even before the sample target. A value of 3 stops the experiment at 88% vs 92%; new payments use the active routing rule.'
-        : 'Each variant is checked against control on its own, even before the sample target. A breached variant stops and its payments use your live routing setup, while the other variants keep running. When the last running variant breaches, the experiment stops and new payments use the active routing rule.'} />
+        ? 'Each new outcome checks the guardrail, even before the sample target. Once each arm has 30 completed payments, a drop past this many points that is statistically clear stops the experiment: with 3, 88% vs 92% stops it once the gap is clear of normal variation. New payments then use the active routing rule.'
+        : 'Each variant is checked against control on its own, even before the sample target: once each arm has 30 completed payments, a drop past this many points that is statistically clear stops that variant. Its payments then use your live routing setup, while the other variants keep running. When the last running variant breaches, the experiment stops and new payments use the active routing rule.'} />
     </label>
   )
 

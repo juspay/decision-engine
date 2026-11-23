@@ -330,23 +330,59 @@ test.describe('A/B guardrail outcomes and completion across instances (API)', ()
     }
   })
 
-  test('an experiment completes once it has routed its sample target', async ({ api, merchant }) => {
+  test('an experiment completes once its outcomes reach the sample target, not when it has routed it', async ({ api, merchant }) => {
     const m = merchant.id
-    const experimentId = await createExperiment(api, m, 3)
+    // Target 10 outcomes; routing alone ends it only at 20.
+    const experimentId = await createExperiment(api, m, 10)
     try {
-      // Activation routes a variant payment on each instance; one more reaches the target of 3.
       await activate(api, POD_A, m, experimentId)
-      const control = controlPayment()
-      expect(await route(api, POD_B, m, control)).toBe('checkout')
+      // Route 12 payments first (past the target), then report outcomes, every one a success so
+      // only the target can end the experiment.
+      const controls = many(9, controlPayment)
+      const variants = many(3, variantPayment)
+      for (const id of controls) expect(await route(api, POD_A, m, id)).toBe('checkout')
+      for (const id of variants) expect(await route(api, POD_B, m, id)).toBe('adyen')
+      const outcomes: [string, string][] = [
+        ...controls.map((id): [string, string] => [id, 'checkout']),
+        ...variants.map((id): [string, string] => [id, 'adyen']),
+      ]
+
+      // Nine outcomes: routed past the target, but one outcome short of a verdict.
+      for (const [id, gateway] of outcomes.slice(0, 9)) await feedback(api, POD_B, m, id, gateway, 'AUTHORIZED')
+      await expect.poll(async () => {
+        const counts = await abGuardrailCounts(m, experimentId)
+        return (counts.control_txns ?? 0) + (counts.variant_txns ?? 0)
+      }).toBe(9)
       expect(await experimentActive(api, m, experimentId)).toBe(true)
 
-      await feedback(api, POD_A, m, control, 'checkout', 'AUTHORIZED')
+      // The tenth reaches it.
+      await feedback(api, POD_A, m, outcomes[9][0], outcomes[9][1], 'AUTHORIZED')
       await expect.poll(() => experimentActive(api, m, experimentId), { timeout: 15_000, intervals: [300] }).toBe(false)
       // Both instances route every payment by the active rule again.
       for (const pod of PODS) {
         expect(await route(api, pod, m, variantPayment())).toBe('stripe')
         expect(await route(api, pod, m, controlPayment())).toBe('stripe')
       }
+    } finally {
+      await deactivate(api, POD_A, m, experimentId)
+    }
+  })
+
+  test('an experiment whose outcomes stop arriving completes once it has routed twice its target', async ({ api, merchant }) => {
+    const m = merchant.id
+    const experimentId = await createExperiment(api, m, 5)
+    try {
+      await activate(api, POD_A, m, experimentId)
+      // Route 10 payments, twice the target of 5, across both instances; only one outcome arrives.
+      const controls = many(7, controlPayment)
+      const variants = many(3, variantPayment)
+      for (const id of controls) expect(await route(api, POD_B, m, id)).toBe('checkout')
+      for (const id of variants) expect(await route(api, POD_A, m, id)).toBe('adyen')
+      expect(await experimentActive(api, m, experimentId)).toBe(true)
+
+      await feedback(api, POD_A, m, controls[0], 'checkout', 'AUTHORIZED')
+      await expect.poll(() => experimentActive(api, m, experimentId), { timeout: 15_000, intervals: [300] }).toBe(false)
+      expect(await abGuardrailCounts(m, experimentId)).toMatchObject({ control_txns: 1 })
     } finally {
       await deactivate(api, POD_A, m, experimentId)
     }
