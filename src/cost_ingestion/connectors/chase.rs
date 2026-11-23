@@ -33,7 +33,7 @@
 //! Reports are discovered by polling Chase's reporting API and downloaded with OAuth credentials.
 //! Token and reports endpoints are server-configured; file URLs come from the reporting API.
 
-use super::common::{http_client, parse_us_date, to_float};
+use super::common::{http_client, http_client_without_redirects, parse_us_date, to_float};
 use crate::cost_ingestion::card_network::chase_network_key;
 use std::collections::HashMap;
 use std::io::{BufReader, Read};
@@ -78,12 +78,34 @@ const TOKEN_REFRESH_SKEW: u64 = 300;
 /// Cap on pages followed when listing reports — a backstop against a runaway `next` cursor.
 const MAX_REPORT_PAGES: usize = 50;
 
+/// J.P. Morgan serves report files from its own hosts (`api.reports-files.jpmorgan.com`).
+const JPMORGAN_DOMAIN: &str = "jpmorgan.com";
+
 /// Whether a `reportTypeNames` entry is the Submission details type, tolerant of the API's spacing
 /// (`"Submission details"`) vs the envelope's (`"SubmissionDetails"`).
 fn is_submission_details(name: &str) -> bool {
     name.split_whitespace()
         .collect::<String>()
         .eq_ignore_ascii_case(SUBMISSION_DETAILS_REPORT_TYPE)
+}
+
+/// Whether a report file URL is one of J.P. Morgan's own https hosts. The reporting API names this
+/// host in its response, so it is untrusted input and is held to the allowlist before any
+/// credential-bearing request is sent to it. Mirrors Adyen's `is_adyen_report_url`.
+fn is_chase_report_url(raw: &str) -> bool {
+    let Ok(url) = reqwest::Url::parse(raw) else {
+        return false;
+    };
+    url.scheme() == "https"
+        && url.username().is_empty()
+        && url.password().is_none()
+        && url.port().is_none()
+        && url.host_str().is_some_and(|host| {
+            host == JPMORGAN_DOMAIN
+                || host
+                    .strip_suffix(JPMORGAN_DOMAIN)
+                    .is_some_and(|sub| sub.ends_with('.'))
+        })
 }
 
 pub struct ChaseReportSource;
@@ -228,11 +250,20 @@ impl SettlementReportSource for ChaseReportSource {
         creds: &ConnectorCreds,
         note: &ReportNotification,
     ) -> Result<Bytes, IngestError> {
+        // The URL came from the reporting API response, so it is held to J.P. Morgan's hosts here
+        // too, not only at poll time — a queued job can never send the merchant's token anywhere
+        // else. Redirects are refused as well, since following one is the only way left out of the
+        // allowlist.
+        if !is_chase_report_url(&note.report_ref) {
+            return Err(IngestError::Download(
+                "report URL is not an https J.P. Morgan URL".to_string(),
+            ));
+        }
         let app_state = crate::app::get_tenant_app_state().await;
         let config = &app_state.config.cost_ingestion.connector;
         let chase = ChaseCreds::parse(creds)?;
         let token = oauth_token(&chase, &config.chase_token_url).await?;
-        let resp = http_client()
+        let resp = http_client_without_redirects()
             .get(&note.report_ref)
             .bearer_auth(&token)
             .send()
@@ -452,7 +483,8 @@ fn ready_report(r: SummarizedReport) -> Option<ReadyReport> {
     let report_ref = r
         .report_details
         .and_then(|d| d.url)
-        .filter(|u| !u.trim().is_empty())?;
+        .map(|u| u.trim().to_string())
+        .filter(|u| is_chase_report_url(u))?;
     let (period_start, period_end) = match r.interval_param {
         Some(p) => (
             p.reporting_period_start_timestamp
