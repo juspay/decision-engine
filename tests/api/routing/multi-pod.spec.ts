@@ -392,6 +392,28 @@ test.describe('Cached configuration across instances (API)', () => {
     await expect.poll(hybrid, PROPAGATION).toBe('skipped')
   })
 
+  test('live A/B testing toggled on one instance applies on the other', async ({ api, merchant }) => {
+    const m = merchant.id
+    const experimentId = await createExperiment(api, m, 400)
+    try {
+      // Both instances route the variant's payments to it, so pod B has the flag cached as on.
+      await activate(api, POD_A, m, experimentId)
+      const toggle = (enabled: boolean) =>
+        api.raw('POST', `${POD_A}/merchant-account/${m}/features/ab-test-real-payments`, { body: { enabled } })
+      const routedOnB = () => route(api, POD_B, m, variantPayment())
+      // Well inside even the shortest cache lifetime the flag has had, so only invalidation explains it.
+      const promptly = { timeout: 1_500, intervals: [100] }
+
+      expect((await toggle(false)).status).toBe(200)
+      await expect.poll(routedOnB, promptly).toBe('stripe')
+
+      expect((await toggle(true)).status).toBe(200)
+      await expect.poll(routedOnB, promptly).toBe('adyen')
+    } finally {
+      await deactivate(api, POD_A, m, experimentId)
+    }
+  })
+
   test("a merchant's scoring-context TTL set on one instance applies on the other", async ({ api, merchant }) => {
     const m = merchant.id
     await api.createSuccessRateConfig(m)
