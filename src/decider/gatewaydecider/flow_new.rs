@@ -423,10 +423,11 @@ async fn write_gateway_scoring_data(txn_uuid: &str, data: &T::GatewayScoringData
 
 /// Saves the scoring context for a payment routed without the decider, such as one decided by a
 /// hybrid call's rule output, so its outcome still updates SR scores. `routing_approach` is
-/// recorded as how the payment was routed.
+/// recorded as how the payment was routed, and `decided_gateway` as the gateway returned for it.
 pub async fn store_scoring_context_without_decider(
     dreq_: &T::DomainDeciderRequestForApiCallV2,
     routing_approach: &str,
+    decided_gateway: Option<String>,
 ) -> Result<(), T::ErrorResponse> {
     let decider_params = prepare_decider_params(dreq_).await?;
     let mut decider_state = T::initial_decider_state(
@@ -454,6 +455,7 @@ pub async fn store_scoring_context_without_decider(
             routingApproach: Some(routing_approach.to_string()),
             eliminationEnabled: dreq_.elimination_enabled.unwrap_or_default(),
             udfs: Some(decider_params.dpOrder.udfs.clone()),
+            decidedGateway: decided_gateway,
             ..scoring_data
         },
     )
@@ -1010,6 +1012,10 @@ pub async fn run_decider_flow(
             eliminationEnabled: eliminationEnabled.unwrap_or_default(),
             is_legacy_decider_flow,
             udfs: Some(deciderParams.dpOrder.udfs.clone()),
+            decidedGateway: dResult
+                .as_ref()
+                .ok()
+                .map(|decided| decided.decided_gateway.clone()),
             ..decider_flow.writer.gateway_scoring_data.clone()
         },
     )

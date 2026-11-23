@@ -519,8 +519,16 @@ pub(crate) async fn evaluate(
                     )
                     .await
                 {
-                    if let Err(err) =
-                        store_scoring_context_without_decider(&req, STATIC_ROUTING_APPROACH).await
+                    let rule_gateway = static_eligible_gateways
+                        .as_ref()
+                        .and_then(|connectors| connectors.first())
+                        .map(ConnectorInfo::identifier);
+                    if let Err(err) = store_scoring_context_without_decider(
+                        &req,
+                        STATIC_ROUTING_APPROACH,
+                        rule_gateway,
+                    )
+                    .await
                     {
                         crate::logger::warn!(
                             "failed to store scoring context for rule-routed payment {}: {}",

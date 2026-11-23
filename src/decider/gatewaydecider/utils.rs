@@ -2073,6 +2073,7 @@ pub fn get_default_gateway_scoring_data(
         udfs,
         udfs_consumed_for_routing: None,
         gatewayReferenceId: gatewayRefId,
+        decidedGateway: None,
     }
 }
 

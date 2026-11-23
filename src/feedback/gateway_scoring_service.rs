@@ -458,6 +458,91 @@ pub fn invalid_request_error(detail: &str, e: &impl std::fmt::Display) -> T::Err
 /// never routed by the decider, and no context was stored for it), so no score was updated.
 pub const SCORE_UPDATE_SKIPPED: &str = "Skipped";
 
+/// Whether the gateway that processed a payment is the one DE returned for it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RoutingDecisionHonored {
+    Honored,
+    Overridden,
+    /// The scoring context has no decided gateway.
+    Unknown,
+}
+
+impl RoutingDecisionHonored {
+    /// Compares the context's `decided` gateway with the feedback's `processed` gateway, ignoring
+    /// case and surrounding spaces.
+    pub fn classify(decided: Option<&str>, processed: &str) -> Self {
+        match decided.map(str::trim).filter(|gateway| !gateway.is_empty()) {
+            None => Self::Unknown,
+            Some(decided) if decided.eq_ignore_ascii_case(processed.trim()) => Self::Honored,
+            Some(_) => Self::Overridden,
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Honored => "honored",
+            Self::Overridden => "overridden",
+            Self::Unknown => "unknown",
+        }
+    }
+}
+
+/// Counts a payment in `routing_decision_honored_total` on its first feedback only, so a retry
+/// on another gateway after the decided one is not counted as an override.
+async fn record_routing_decision_honored(
+    api_payload: &FT::UpdateScorePayload,
+    gateway_scoring_data: &GatewayScoringData,
+) {
+    let key = format!(
+        "routing_decision_honored_{}_{}",
+        api_payload.merchant_id, api_payload.payment_id
+    );
+    let ttl =
+        crate::decider::gatewaydecider::flow_new::scoring_data_ttl_secs(&api_payload.merchant_id)
+            .await;
+    match get_tenant_app_state()
+        .await
+        .redis_conn
+        .set_key_if_not_exists(&key, "1", ttl)
+        .await
+    {
+        Ok(true) => {}
+        Ok(false) => return,
+        Err(error) => {
+            logger::warn!(
+                action = "ROUTING_DECISION_HONORED_DEDUP_FAILED",
+                tag = "ROUTING_DECISION_HONORED_DEDUP_FAILED",
+                "Not counting payment {} for merchant {}: {:?}",
+                api_payload.payment_id,
+                api_payload.merchant_id,
+                error
+            );
+            return;
+        }
+    }
+    let result = RoutingDecisionHonored::classify(
+        gateway_scoring_data.decidedGateway.as_deref(),
+        &api_payload.gateway,
+    );
+    if result == RoutingDecisionHonored::Overridden {
+        logger::info!(
+            action = "ROUTING_DECISION_OVERRIDDEN",
+            tag = "ROUTING_DECISION_OVERRIDDEN",
+            "Payment {} for merchant {} was processed on {} instead of the decided {}",
+            api_payload.payment_id,
+            api_payload.merchant_id,
+            api_payload.gateway,
+            gateway_scoring_data
+                .decidedGateway
+                .as_deref()
+                .unwrap_or_default()
+        );
+    }
+    crate::metrics::ROUTING_DECISION_HONORED_COUNTER
+        .with_label_values(&[&api_payload.merchant_id, result.as_str()])
+        .inc();
+}
+
 pub async fn check_and_update_gateway_score_(
     api_payload: FT::UpdateScorePayload,
 ) -> Result<String, T::ErrorResponse> {
@@ -576,6 +661,7 @@ pub async fn check_and_update_gateway_score_(
                     &"Payment does not belong to the requested merchant",
                 ));
             }
+            record_routing_decision_honored(&api_payload, &gateway_scoring_data).await;
             // Extract transaction details and card info from the API payload
             let txn_detail: TxnDetail = match Fbu::get_txn_detail_from_api_payload(
                 api_payload.clone(),
@@ -1399,6 +1485,32 @@ pub fn get_gateway_wise_latency(
 
 #[cfg(test)]
 mod tests {
+    use super::RoutingDecisionHonored;
+
+    #[test]
+    fn routing_decision_honored_compares_decided_and_processed_gateways() {
+        assert_eq!(
+            RoutingDecisionHonored::classify(Some("adyen:mca_1"), "adyen:mca_1"),
+            RoutingDecisionHonored::Honored
+        );
+        assert_eq!(
+            RoutingDecisionHonored::classify(Some(" Adyen:MCA_1 "), "adyen:mca_1"),
+            RoutingDecisionHonored::Honored
+        );
+        assert_eq!(
+            RoutingDecisionHonored::classify(Some("stripe:mca_2"), "adyen:mca_1"),
+            RoutingDecisionHonored::Overridden
+        );
+        assert_eq!(
+            RoutingDecisionHonored::classify(None, "adyen:mca_1"),
+            RoutingDecisionHonored::Unknown
+        );
+        assert_eq!(
+            RoutingDecisionHonored::classify(Some(""), "adyen:mca_1"),
+            RoutingDecisionHonored::Unknown
+        );
+    }
+
     use super::is_gateway_healthy_failure;
     use crate::gsm::GsmInfo;
 

@@ -551,6 +551,7 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             udfs: None,
             udfs_consumed_for_routing: None,
             gatewayReferenceId: None,
+            decidedGateway: None,
         },
         ab_test_sr_override: None,
     }
@@ -584,6 +585,9 @@ pub struct GatewayScoringData {
     pub gatewayReferenceId: Option<String>,
     pub udfs: Option<UDFs>,
     pub udfs_consumed_for_routing: Option<String>,
+    /// The gateway DE returned for the payment; feedback naming another gateway was overridden.
+    #[serde(default)]
+    pub decidedGateway: Option<String>,
 }
 
 impl GatewayScoringData {
@@ -677,6 +681,8 @@ pub struct GatewayScoringDataV2 {
     pub gatewayReferenceId: Option<String>,
     #[serde(default, skip_serializing_if = "is_empty_udfs")]
     pub udfs: Option<UDFs>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub decidedGateway: Option<String>,
 }
 
 // Full scoring data to the compact form `flow_new` writes.
@@ -704,6 +710,7 @@ impl From<GatewayScoringData> for GatewayScoringDataV2 {
             country: data.country,
             gatewayReferenceId: data.gatewayReferenceId,
             udfs: data.udfs,
+            decidedGateway: data.decidedGateway,
         }
     }
 }
@@ -736,6 +743,7 @@ impl From<GatewayScoringDataV2> for GatewayScoringData {
             // flow_new always wrote UDFs, empty when the order had none.
             udfs: Some(data.udfs.unwrap_or_else(|| UDFs(HashMap::new()))),
             udfs_consumed_for_routing: None,
+            decidedGateway: data.decidedGateway,
         }
     }
 }
@@ -2484,6 +2492,27 @@ mod stored_gateway_scoring_data_tests {
     use super::{GatewayScoringData, GatewayScoringDataV2, StoredGatewayScoringData};
     use crate::decider::gatewaydecider::utils::{sr_key, sr_key_components};
     use serde_json::json;
+
+    // The decided gateway round-trips in V2, and contexts written without it read as None.
+    #[test]
+    fn stored_scoring_data_keeps_the_decided_gateway() -> Result<(), serde_json::Error> {
+        let without = json!({"merchantId":"m1","paymentMethod":"CARD",
+            "paymentMethodType":"CREDIT","orderType":"UNKNOWN","dateCreated":1795167786030_i64});
+        let read: GatewayScoringData =
+            serde_json::from_value::<StoredGatewayScoringData>(without.clone())?.into();
+        assert_eq!(read.decidedGateway, None);
+
+        let mut with = without;
+        with["decidedGateway"] = json!("adyen:mca_1");
+        let read: GatewayScoringData =
+            serde_json::from_value::<StoredGatewayScoringData>(with.clone())?.into();
+        assert_eq!(read.decidedGateway.as_deref(), Some("adyen:mca_1"));
+        assert_eq!(
+            serde_json::to_value(GatewayScoringDataV2::from(read))?,
+            with
+        );
+        Ok(())
+    }
 
     // Old (V1) and new (V2) scoring contexts both read, round-trip, and score the same SR v3 key.
     #[test]

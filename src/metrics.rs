@@ -156,6 +156,15 @@ pub static CACHE_INVALIDATION_COUNTER: LazyLock<CounterVec> = LazyLock::new(|| {
     )
 });
 
+/// Count of payments by whether the gateway in their first feedback is the one DE returned (honored, overridden, unknown when no decided gateway was recorded), per merchant.
+pub static ROUTING_DECISION_HONORED_COUNTER: LazyLock<CounterVec> = LazyLock::new(|| {
+    CounterVec::new(
+        "routing_decision_honored_total",
+        "Count of payments by whether the processing gateway matched the gateway DE returned",
+        &["merchant_id", "result"],
+    )
+});
+
 /// `count` bucket boundaries starting at `start`, each `factor` times the previous one.
 fn exponential_buckets(start: f64, factor: f64, count: i32) -> Vec<f64> {
     (0..count).map(|i| start * factor.powi(i)).collect()
