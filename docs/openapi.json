@@ -2284,8 +2284,8 @@
                         "adyen": 0.87,
                         "paypal": 0.72
                       },
-                      "routing_dimension": "CARD_BRAND",
-                      "routing_dimension_level": "visa",
+                      "routing_dimension": "ORDER_PAYMENT, CREDIT, CARD",
+                      "routing_dimension_level": "CARD_LEVEL",
                       "reset_approach": "NoReset",
                       "is_scheduled_outage": false,
                       "is_rust_based_decider": true,
@@ -2391,7 +2391,7 @@
                       },
                       "debit_routing_output": null,
                       "reset_approach": "NO_RESET",
-                      "routing_dimension": "ORDER_PAYMENT, CARD, DEBIT, DEBIT",
+                      "routing_dimension": "ORDER_PAYMENT, DEBIT, CARD",
                       "routing_dimension_level": "CARD_LEVEL",
                       "is_scheduled_outage": false,
                       "is_dynamic_mga_enabled": false,
@@ -2434,7 +2434,7 @@
                       "routing_approach": "SR_SELECTION_MULTI_OBJECTIVE",
                       "gateway_before_evaluation": "stripe",
                       "reset_approach": "NO_RESET",
-                      "routing_dimension": "ORDER_PAYMENT,CARD,CREDIT,UNKNOWN",
+                      "routing_dimension": "ORDER_PAYMENT, CREDIT, CARD",
                       "routing_dimension_level": "CARD_LEVEL",
                       "is_scheduled_outage": false,
                       "is_dynamic_mga_enabled": false,
@@ -5737,13 +5737,15 @@
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "example": "ORDER_PAYMENT, CREDIT, CARD, VISA, US"
           },
           "routing_dimension_level": {
             "type": [
               "string",
               "null"
-            ]
+            ],
+            "example": "CARD_LEVEL"
           },
           "is_scheduled_outage": {
             "type": "boolean"

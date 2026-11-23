@@ -634,6 +634,51 @@ test.describe('Decide scenarios (API)', () => {
     expect(decide.outcome).toMatchObject({ type: 'routed', strategy: 'success_rate', reason: 'preferred_connector' })
   })
 
+  /**
+   * The dimension a decision reports is the SR score key it scored under, so a merchant can see
+   * whether the dimensions it configured actually split its clusters.
+   */
+  test('reports the dimensions the SR score key was built from', async ({ api, merchant }) => {
+    await api.createSuccessRateConfig(merchant.id, { defaultHedgingPercent: 0 })
+    await api.setMerchantFeature(merchant.id, 'sr-routing', true)
+    await api.raw('POST', '/config-sr-dimension', {
+      body: {
+        merchant_id: merchant.id,
+        paymentInfo: { udfs: [], fields: ['card_network', 'country', 'card_is_in'] },
+      },
+    })
+
+    const body = decideRequest()
+    const response = await api.raw<DecideResponse>('POST', '/decide', { body })
+    expect(response.body.success_rate?.status).toBe('applied')
+    // The contract payment sends no payment_type, so the order type keys as UNKNOWN. The card
+    // network keeps the case it was sent in, as the key does.
+    expect(response.body.success_rate!.diagnostics).toMatchObject({
+      dimension: { value: 'UNKNOWN, CREDIT, CARD, Visa, US, 001234' },
+    })
+  })
+
+  test('drops a configured dimension the payment has no value for', async ({ api, merchant }) => {
+    await api.createSuccessRateConfig(merchant.id, { defaultHedgingPercent: 0 })
+    await api.setMerchantFeature(merchant.id, 'sr-routing', true)
+    await api.raw('POST', '/config-sr-dimension', {
+      body: {
+        merchant_id: merchant.id,
+        paymentInfo: { udfs: [], fields: ['card_network', 'country', 'card_is_in'] },
+      },
+    })
+
+    const body = decideRequest()
+    // No BIN, so the key cannot split on card_is_in and the payment scores in a broader cluster.
+    body.card!.card_isin = null
+    body.card!.card_extended_bin = null
+    const response = await api.raw<DecideResponse>('POST', '/decide', { body })
+    expect(response.body.success_rate?.status).toBe('applied')
+    expect(response.body.success_rate!.diagnostics).toMatchObject({
+      dimension: { value: 'UNKNOWN, CREDIT, CARD, Visa, US' },
+    })
+  })
+
   test('mints a new id for every decision of the same payment', async ({ api, merchant }) => {
     const body = decideRequest()
     const first = await api.raw<DecideResponse>('POST', '/decide', { body })
