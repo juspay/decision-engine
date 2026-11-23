@@ -2482,6 +2482,7 @@ mod preferred_connectors_contract_tests {
 #[allow(clippy::panic_in_result_fn)]
 mod stored_gateway_scoring_data_tests {
     use super::{GatewayScoringData, GatewayScoringDataV2, StoredGatewayScoringData};
+    use crate::decider::gatewaydecider::utils::{sr_key, sr_key_components};
     use serde_json::json;
 
     // Old (V1) and new (V2) scoring contexts both read, round-trip, and score the same SR v3 key.
@@ -2557,9 +2558,7 @@ mod stored_gateway_scoring_data_tests {
             "auth_type",
         ]
         .map(String::from);
-        let key = |data: &GatewayScoringData| {
-            crate::decider::gatewaydecider::utils::sr_key(data, true, &fields, None)
-        };
+        let key = |data: &GatewayScoringData| sr_key(&sr_key_components(data, true, &fields, None));
         assert_eq!(
             key(&old),
             "{gw_sr_v3_score_m1_UNKNOWN_CREDIT_CARD_Mastercard_555534_BRL_BR_THREE_DS"

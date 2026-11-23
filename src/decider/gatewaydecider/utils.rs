@@ -2543,7 +2543,7 @@ const SCOPE_COMPONENTS: usize = 2;
 /// UDF values, skipping any the payment lacks. The type and method are the instrument's codes
 /// (`CREDIT`, `CARD`). Scores live under this key, so its format is pinned by tests: changing it
 /// strands every merchant's learned scores.
-fn sr_key(components: &Vec<String>) -> String {
+pub(crate) fn sr_key(components: &Vec<String>) -> String {
     intercalate_without_empty_string("_", components)
 }
 
@@ -2553,7 +2553,7 @@ fn sr_cluster(components: &[String]) -> String {
 }
 
 /// The key's components in order. The first [`SCOPE_COMPONENTS`] of them are the scope.
-fn sr_key_components(
+pub(crate) fn sr_key_components(
     gateway_scoring_data: &GatewayScoringData,
     is_sr_v3_metric_enabled: bool,
     fields: &[String],
