@@ -1,10 +1,11 @@
 import { test, expect, factory } from '../../fixtures/test'
 import type { Page } from '@playwright/test'
 import type { ApiClient } from '../../fixtures/api-client'
+import { decidedConnector } from '../../helpers/decide'
 
 /**
  * An experiment's page through its lifecycle, against the real engine: payments are routed through
- * /routing/evaluate and their outcomes reported, and the page shows what the engine did.
+ * /decide and their outcomes reported, and the page shows what the engine did.
  *
  * - A variant whose drop is clear breaches the guardrail and stops the experiment.
  * - An experiment completes once it has routed its sample target.
@@ -29,9 +30,8 @@ function paymentIn(from: number, to: number): string {
   throw new Error(`Unable to find a payment ID in buckets ${from}..${to}`)
 }
 
-async function route(api: ApiClient, merchantId: string, paymentId: string): Promise<string> {
-  const r = await api.evaluateRoutingAlgorithm(factory.ruleEvaluatePayload(merchantId, {}, { payment_id: paymentId }))
-  return r.body.output.connector.gateway_name
+async function route(api: ApiClient, _merchantId: string, paymentId: string): Promise<string> {
+  return decidedConnector(api, paymentId)
 }
 
 /**
@@ -57,7 +57,8 @@ async function startExperiment(api: ApiClient, merchantId: string, name: string,
   await api.activateRoutingAlgorithm(merchantId, await rule(api, merchantId, 'stripe'))
   const experiment = await api.createRoutingAlgorithm({
     name, description: 'A/B lifecycle', created_by: merchantId, algorithm_for: 'payment', metadata: {},
-    algorithm: { type: 'ab_test', data: { endpoints: ['evaluate'], guardrail_threshold_pp: 3, ...data } },
+    // /decide applies an experiment's `hybrid_routing` split.
+    algorithm: { type: 'ab_test', data: { endpoints: ['hybrid_routing'], guardrail_threshold_pp: 3, ...data } },
   })
   expect(experiment.status, JSON.stringify(experiment.body)).toBe(200)
   const id = experiment.body.rule_id as string

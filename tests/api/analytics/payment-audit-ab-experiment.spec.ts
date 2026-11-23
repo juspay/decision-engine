@@ -1,10 +1,11 @@
 import { test, expect, factory } from '../../fixtures/test'
 import type { ApiClient } from '../../fixtures/api-client'
 import { poll } from '../../helpers/poll'
+import { decide } from '../../helpers/decide'
 
 /**
- * The payment audit tells which A/B arm routed a payment, or that none did. Hyperswitch routes a
- * cut-over profile's payments through /routing/hybrid, so that is where the experiment splits.
+ * The payment audit tells which A/B arm routed a payment, or that none did. Payments route through
+ * /decide, which applies an experiment's `hybrid_routing` split.
  */
 
 const FEATURE_FLAG_CACHE_MS = 5_000
@@ -34,8 +35,8 @@ async function singleRule(api: ApiClient, merchantId: string, gateway: string) {
   return created.body.rule_id as string
 }
 
-/** A merchant whose payments route through /routing/hybrid with a stripe rule plus SR. */
-async function hybridMerchant(api: ApiClient, merchantId: string) {
+/** A merchant whose payments route through /decide with a stripe rule plus SR. */
+async function decideMerchant(api: ApiClient, merchantId: string) {
   await api.setMerchantFeature(merchantId, 'sr-routing', true)
   await api.createSuccessRateConfig(merchantId)
   const stripeRule = await singleRule(api, merchantId, 'stripe')
@@ -43,31 +44,11 @@ async function hybridMerchant(api: ApiClient, merchantId: string) {
   return stripeRule
 }
 
-async function routeHybrid(api: ApiClient, merchantId: string, paymentId: string) {
-  const r = await api.raw('POST', '/routing/hybrid', {
-    body: {
-      static_routing_request: {
-        created_by: merchantId,
-        payment_id: paymentId,
-        parameters: {
-          payment_method: { type: 'enum_variant', value: 'card' },
-          amount: { type: 'number', value: 100 },
-        },
-        fallback_output: [factory.gatewayConnector('stripe')],
-      },
-      dynamic_routing_request: factory.srDecideGatewayRequest({
-        merchantId,
-        eliminationEnabled: false,
-        paymentInfo: { paymentId },
-      }),
-    },
-  })
-  // Either half may decide: the merchant's sr-routing setting gates the dynamic half outside an
+async function routeDecide(api: ApiClient, paymentId: string) {
+  // Either the rule or SR may decide: the merchant's sr-routing setting gates SR outside an
   // experiment, while an experiment arm with an SR layer always runs it.
-  const decided =
-    r.body?.dynamic_routing?.decision?.decided_gateway ??
-    r.body?.evaluated_connectors?.[0]?.gateway_name
-  expect(decided, JSON.stringify(r.body).slice(0, 500)).toBeTruthy()
+  const decided = await decide(api, paymentId, ['stripe', 'razorpay'])
+  expect(decided.connectors?.[0]?.connector, JSON.stringify(decided).slice(0, 500)).toBeTruthy()
 }
 
 function audit(api: ApiClient, paymentId: string) {
@@ -84,7 +65,7 @@ test.describe('Payment audit A/B experiment assignment (API)', () => {
 
   test('each payment routed under the experiment shows its arm', async ({ api, merchant }) => {
     const m = merchant.id
-    const stripeRule = await hybridMerchant(api, m)
+    const stripeRule = await decideMerchant(api, m)
     const razorpayRule = await singleRule(api, m, 'razorpay')
     const experiment = await api.createRoutingAlgorithm({
       name: factory.ruleName('audit_ab'),
@@ -112,7 +93,7 @@ test.describe('Payment audit A/B experiment assignment (API)', () => {
     const paymentIds: string[] = []
     for (let i = 0; i < 8; i++) {
       const paymentId = factory.paymentId(`audit_ab_${i}`)
-      await routeHybrid(api, m, paymentId)
+      await routeDecide(api, paymentId)
       paymentIds.push(paymentId)
     }
 
@@ -159,10 +140,10 @@ test.describe('Payment audit A/B experiment assignment (API)', () => {
 
   test('a payment routed without an experiment says so', async ({ api, merchant }) => {
     const m = merchant.id
-    await hybridMerchant(api, m)
+    await decideMerchant(api, m)
 
     const paymentId = factory.paymentId('audit_no_ab')
-    await routeHybrid(api, m, paymentId)
+    await routeDecide(api, paymentId)
 
     const r = await poll(
       () => audit(api, paymentId),

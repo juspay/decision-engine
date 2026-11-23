@@ -1,6 +1,7 @@
 import { test, expect, factory } from '../../fixtures/test'
 import type { ApiClient } from '../../fixtures/api-client'
 import { abGuardrailCounts } from '../../helpers/redis'
+import { decidedConnector } from '../../helpers/decide'
 
 /** The payment id's bucket in 0..100, as the engine assigns arms from it. */
 function bucket(paymentId: string): bigint {
@@ -35,7 +36,7 @@ async function createExperiment(api: ApiClient, merchantId: string) {
       control: { rule_algorithm_id: control.body.rule_id },
       variant: { rule_algorithm_id: variant.body.rule_id },
       // Large enough that the experiment doesn't complete during the test.
-      endpoints: ['evaluate'], variant_split_pct: 20,
+      endpoints: ['hybrid_routing'], variant_split_pct: 20,
       min_sample_size: 1000, guardrail_threshold_pp: 10,
     } },
   })
@@ -44,9 +45,9 @@ async function createExperiment(api: ApiClient, merchantId: string) {
   return experiment.body.rule_id as string
 }
 
-async function route(api: ApiClient, merchantId: string, paymentId: string): Promise<string> {
-  const result = await api.evaluateRoutingAlgorithm(factory.ruleEvaluatePayload(merchantId, {}, { payment_id: paymentId }))
-  return result.body.output.connector.gateway_name
+/** Routes a payment through /decide; returns the connector chosen. */
+async function route(api: ApiClient, _merchantId: string, paymentId: string): Promise<string> {
+  return decidedConnector(api, paymentId)
 }
 
 async function feedback(api: ApiClient, merchantId: string, paymentId: string, gateway: string, status: 'AUTHORIZED' | 'FAILURE') {
@@ -123,7 +124,7 @@ test('with several variants, feedback stops only the breached variant', async ({
         { id: 'failing', split_pct: 20, rule_algorithm_id: failing.body.rule_id },
         { id: 'healthy', split_pct: 20, rule_algorithm_id: healthy.body.rule_id },
       ],
-      endpoints: ['evaluate'],
+      endpoints: ['hybrid_routing'],
       min_sample_size: 1000, guardrail_threshold_pp: 10,
     } },
   })
