@@ -92,3 +92,8 @@ export async function redisKeys(pattern: string): Promise<string[]> {
   } while (cursor !== '0')
   return keys.sort()
 }
+
+/** `PFCOUNT` of the HyperLogLog at `key`: 0 when it doesn't exist. */
+export async function redisPfcount(key: string): Promise<number> {
+  return (await command(['PFCOUNT', key])) as number
+}
