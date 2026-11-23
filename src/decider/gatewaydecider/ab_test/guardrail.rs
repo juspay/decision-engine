@@ -1,9 +1,9 @@
 //! Stops a variant whose auth rate falls too far below control. Outcomes are counted in Redis
 //! HyperLogLogs shared by every instance, one pair per arm and observation period, so feedback is
 //! counted whichever instance receives it and however late it arrives within the keys' TTL. A
-//! payment's arm is recomputed from its id, so nothing is stored per payment. An observation
-//! period is identified by when it started, in Unix milliseconds, and a payment routed before
-//! then is not counted in it.
+//! payment's arm is recomputed from its id. A payment counts only when its scoring context shows
+//! the experiment routed it within the current observation period, which is identified by when it
+//! started, in Unix milliseconds.
 
 use super::arms::{self, ArmSide};
 use super::config::{self, AbTestConfig};
@@ -68,10 +68,26 @@ fn candidates(side: &ArmSide, running: &[String]) -> Vec<String> {
     }
 }
 
-/// Whether a payment routed at `routed_at` predates the period that started at `run_started_ms`.
-/// A payment without a scoring context has no routing time and is counted.
-fn routed_before(routed_at: Option<time::OffsetDateTime>, run_started_ms: u64) -> bool {
-    routed_at.is_some_and(|at| at.unix_timestamp_nanos() / 1_000_000 < i128::from(run_started_ms))
+/// How a payment was routed, from its scoring context.
+#[derive(Debug, Clone, Copy)]
+pub struct Routing<'a> {
+    pub at: time::OffsetDateTime,
+    /// The A/B experiment that routed the payment, if any.
+    pub experiment_id: Option<&'a str>,
+}
+
+/// Whether `experiment_id` routed the payment within the period that started at `run_started_ms`
+/// (0 for a period with no recorded start). A payment without a scoring context can't show that,
+/// so it doesn't count.
+fn routed_in_period(
+    routing: Option<Routing<'_>>,
+    experiment_id: &str,
+    run_started_ms: u64,
+) -> bool {
+    routing.is_some_and(|routing| {
+        routing.experiment_id == Some(experiment_id)
+            && routing.at.unix_timestamp_nanos() / 1_000_000 >= i128::from(run_started_ms)
+    })
 }
 
 /// Whether `variant` fell more than `threshold_pp` below `control`, once both arms have outcomes
@@ -134,14 +150,14 @@ pub async fn track(merchant_id: &str, payment_id: &str) -> Option<TrackedPayment
 impl TrackedPayment {
     /// Counts the payment's outcome for its arm and returns the variants needing a durable stop.
     /// A payment counts once as a transaction, and once as a success if any of its outcomes
-    /// succeeded; one routed before the observation period, per `routed_at`, is not counted. A
-    /// breached variant is returned on each outcome until its stop lands.
+    /// succeeded, and only when `routing` shows this experiment routed it in the current
+    /// observation period. A breached variant is returned on each outcome until its stop lands.
     pub async fn record_outcome(
         &self,
-        routed_at: Option<time::OffsetDateTime>,
+        routing: Option<Routing<'_>>,
         is_success: bool,
     ) -> Vec<BreachedRun> {
-        match self.count_and_judge(routed_at, is_success).await {
+        match self.count_and_judge(routing, is_success).await {
             Ok(breached) => breached,
             Err(error) => {
                 logger::warn!(merchant_id = %self.merchant_id,
@@ -154,13 +170,13 @@ impl TrackedPayment {
 
     async fn count_and_judge(
         &self,
-        routed_at: Option<time::OffsetDateTime>,
+        routing: Option<Routing<'_>>,
         is_success: bool,
     ) -> Result<Vec<BreachedRun>, error_stack::Report<redis_interface::errors::RedisError>> {
         let (merchant_id, experiment_id) = (self.merchant_id.as_str(), self.experiment_id.as_str());
         let redis = &get_tenant_app_state().await.redis_conn;
         let run = current_run(merchant_id, experiment_id).await?;
-        if run > 0 && routed_before(routed_at, run) {
+        if !routed_in_period(routing, experiment_id, run) {
             return Ok(Vec::new());
         }
         let (txns, succ) = arm_keys(merchant_id, experiment_id, run, &self.side);
@@ -330,18 +346,39 @@ mod tests {
     }
 
     #[test]
-    fn payments_routed_before_the_period_are_not_counted() {
+    fn only_payments_the_experiment_routed_in_the_period_count() {
         let started = time::macros::datetime!(2026-11-20 10:00 UTC);
         let started_ms = u64::try_from(started.unix_timestamp() * 1000).unwrap();
-        let before = started - time::Duration::milliseconds(1);
-        assert!(routed_before(Some(before), started_ms));
-        assert!(!routed_before(Some(started), started_ms));
-        assert!(!routed_before(
-            Some(started + time::Duration::hours(40)),
+        let routed = |at, experiment_id| Some(Routing { at, experiment_id });
+
+        assert!(routed_in_period(
+            routed(started, Some("exp1")),
+            "exp1",
             started_ms
         ));
-        // Without a scoring context the routing time is unknown, so the payment counts.
-        assert!(!routed_before(None, started_ms));
+        assert!(routed_in_period(
+            routed(started + time::Duration::hours(40), Some("exp1")),
+            "exp1",
+            started_ms
+        ));
+        // Routed before the period started.
+        assert!(!routed_in_period(
+            routed(started - time::Duration::milliseconds(1), Some("exp1")),
+            "exp1",
+            started_ms
+        ));
+        // Routed outside the experiment, or by another one.
+        assert!(!routed_in_period(routed(started, None), "exp1", started_ms));
+        assert!(!routed_in_period(
+            routed(started, Some("exp2")),
+            "exp1",
+            started_ms
+        ));
+        // No scoring context.
+        assert!(!routed_in_period(None, "exp1", started_ms));
+        // A period with no recorded start still needs the experiment to have routed the payment.
+        assert!(routed_in_period(routed(started, Some("exp1")), "exp1", 0));
+        assert!(!routed_in_period(routed(started, None), "exp1", 0));
     }
 
     #[test]

@@ -551,6 +551,8 @@ pub fn initial_decider_state(date_created: String) -> DeciderState {
             udfs: None,
             udfs_consumed_for_routing: None,
             gatewayReferenceId: None,
+            abExperimentId: None,
+            experimentOnly: false,
         },
         ab_test_sr_override: None,
     }
@@ -584,6 +586,13 @@ pub struct GatewayScoringData {
     pub gatewayReferenceId: Option<String>,
     pub udfs: Option<UDFs>,
     pub udfs_consumed_for_routing: Option<String>,
+    /// The A/B experiment that routed the payment, when one did.
+    #[serde(default)]
+    pub abExperimentId: Option<String>,
+    /// Saved only so the A/B guardrail can count the payment's outcome; its feedback leaves SR
+    /// scores untouched.
+    #[serde(default)]
+    pub experimentOnly: bool,
 }
 
 impl GatewayScoringData {
@@ -592,6 +601,42 @@ impl GatewayScoringData {
             .as_ref()
             .map(|s| s.peek().to_string())
             .unwrap_or_default()
+    }
+
+    /// The context of a payment an A/B experiment routed by its rule output alone, which no
+    /// other context is saved for: enough for the guardrail to date and attribute its outcome.
+    pub fn experiment_only(
+        merchant_id: &str,
+        experiment_id: &str,
+        routed_at: OffsetDateTime,
+    ) -> Self {
+        Self {
+            merchantId: merchant_id.to_owned(),
+            instrument: PaymentInstrument::default(),
+            orderType: String::new(),
+            cardType: None,
+            bankCode: None,
+            authType: None,
+            paymentSource: None,
+            isPaymentSourceEnabledForSrRouting: false,
+            isAuthLevelEnabledForSrRouting: false,
+            isBankLevelEnabledForSrRouting: false,
+            isGriEnabledForElimination: false,
+            isGriEnabledForSrRouting: false,
+            routingApproach: None,
+            dateCreated: routed_at,
+            eliminationEnabled: false,
+            cardIsIn: None,
+            cardSwitchProvider: None,
+            currency: None,
+            country: None,
+            is_legacy_decider_flow: false,
+            gatewayReferenceId: None,
+            udfs: None,
+            udfs_consumed_for_routing: None,
+            abExperimentId: Some(experiment_id.to_owned()),
+            experimentOnly: true,
+        }
     }
 }
 
@@ -677,6 +722,10 @@ pub struct GatewayScoringDataV2 {
     pub gatewayReferenceId: Option<String>,
     #[serde(default, skip_serializing_if = "is_empty_udfs")]
     pub udfs: Option<UDFs>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub abExperimentId: Option<String>,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub experimentOnly: bool,
 }
 
 // Full scoring data to the compact form `flow_new` writes.
@@ -704,6 +753,8 @@ impl From<GatewayScoringData> for GatewayScoringDataV2 {
             country: data.country,
             gatewayReferenceId: data.gatewayReferenceId,
             udfs: data.udfs,
+            abExperimentId: data.abExperimentId,
+            experimentOnly: data.experimentOnly,
         }
     }
 }
@@ -736,6 +787,8 @@ impl From<GatewayScoringDataV2> for GatewayScoringData {
             // flow_new always wrote UDFs, empty when the order had none.
             udfs: Some(data.udfs.unwrap_or_else(|| UDFs(HashMap::new()))),
             udfs_consumed_for_routing: None,
+            abExperimentId: data.abExperimentId,
+            experimentOnly: data.experimentOnly,
         }
     }
 }
@@ -2484,6 +2537,31 @@ mod stored_gateway_scoring_data_tests {
     use super::{GatewayScoringData, GatewayScoringDataV2, StoredGatewayScoringData};
     use crate::decider::gatewaydecider::utils::{sr_key, sr_key_components};
     use serde_json::json;
+
+    // The experiment fields round-trip in V2, and contexts written without them read as unset.
+    #[test]
+    fn stored_scoring_data_keeps_the_experiment_fields() -> Result<(), serde_json::Error> {
+        let without = json!({"merchantId":"m1","paymentMethod":"CARD",
+            "paymentMethodType":"CREDIT","orderType":"UNKNOWN","dateCreated":1795167786030_i64});
+        let read: GatewayScoringData =
+            serde_json::from_value::<StoredGatewayScoringData>(without.clone())?.into();
+        assert_eq!((read.abExperimentId, read.experimentOnly), (None, false));
+
+        let only = GatewayScoringData::experiment_only(
+            "m1",
+            "exp1",
+            time::macros::datetime!(2026-11-20 10:00 UTC),
+        );
+        let stored = serde_json::to_value(GatewayScoringDataV2::from(only))?;
+        assert_eq!(stored["abExperimentId"], json!("exp1"));
+        assert_eq!(stored["experimentOnly"], json!(true));
+        let read: GatewayScoringData =
+            serde_json::from_value::<StoredGatewayScoringData>(stored)?.into();
+        assert_eq!(read.abExperimentId.as_deref(), Some("exp1"));
+        assert!(read.experimentOnly);
+        assert_eq!(read.merchantId, "m1");
+        Ok(())
+    }
 
     // Old (V1) and new (V2) scoring contexts both read, round-trip, and score the same SR v3 key.
     #[test]

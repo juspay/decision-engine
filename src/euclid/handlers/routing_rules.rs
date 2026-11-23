@@ -1139,9 +1139,9 @@ async fn evaluate_algorithm_data(
 }
 
 /// Attributes a real payment's rule decision to its A/B arm with the routing event the
-/// experiment results count; the payment's score updates supply its outcome. Skipped when
-/// real-payment A/B tracking is off, the request carries no payment id, or no connector was
-/// selected.
+/// experiment results count, and saves the payment's context for the guardrail; the payment's
+/// score updates supply its outcome. Skipped when real-payment A/B tracking is off, the request
+/// carries no payment id, or no connector was selected.
 async fn track_ab_rule_decision(
     payload: &RoutingRequest,
     response: &RoutingEvaluateResponse,
@@ -1171,6 +1171,14 @@ async fn track_ab_rule_decision(
         &CostOutcome::default(),
         amount,
     );
+    // The rule output is the decision, so the decider saves no context for this payment; this one
+    // lets the guardrail count it. A context the hybrid flow saves to train SR replaces it.
+    crate::decider::gatewaydecider::flow_new::store_experiment_only_context(
+        &payload.created_by,
+        payment_id,
+        &ab.assignment.experiment_id,
+    )
+    .await;
 }
 
 pub async fn routing_evaluate(
@@ -2052,7 +2060,7 @@ pub(crate) async fn stop_breached_payment_experiment(
         return Ok(());
     }
     let state = get_tenant_app_state().await;
-    // Internal work, since the guardrail only names pairs the decider recorded while routing.
+    // Internal work, since the guardrail only names experiments that routed this merchant's payments.
     let merchant = crate::auth::AuthorizedMerchant::internal(merchant_id);
     let payment = AlgorithmType::Payment.to_string();
     let slot = experiment_slot(&payment);

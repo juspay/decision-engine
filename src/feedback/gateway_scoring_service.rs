@@ -478,13 +478,18 @@ pub async fn check_and_update_gateway_score_(
     let mut prefetched_context = None;
     if let Some(tracked) = tracked {
         let context = read_scoring_context(&api_payload.merchant_id, &api_payload.payment_id).await;
-        let routed_at = context
+        let routing = context
             .1
             .as_ref()
             .ok()
             .filter(|data| data.merchantId == api_payload.merchant_id)
-            .map(|data| data.dateCreated);
-        let experiments_to_stop = tracked.record_outcome(routed_at, is_success).await;
+            .map(
+                |data| crate::decider::gatewaydecider::ab_test::guardrail::Routing {
+                    at: data.dateCreated,
+                    experiment_id: data.abExperimentId.as_deref(),
+                },
+            );
+        let experiments_to_stop = tracked.record_outcome(routing, is_success).await;
         for breached in experiments_to_stop {
             if let Err(error) =
                 crate::euclid::handlers::routing_rules::stop_breached_payment_experiment(
@@ -583,6 +588,9 @@ pub async fn check_and_update_gateway_score_(
                     "payment_id",
                     &"Payment does not belong to the requested merchant",
                 ));
+            }
+            if gateway_scoring_data.experimentOnly {
+                return Ok(SCORE_UPDATE_SKIPPED.to_string());
             }
             // Extract transaction details and card info from the API payload
             let txn_detail: TxnDetail = match Fbu::get_txn_detail_from_api_payload(
@@ -858,7 +866,9 @@ pub async fn update_gateway_score(
                 .ok()
                 .map(GatewayScoringData::from)
         }
-    };
+    }
+    // An experiment-only context exists for the A/B guardrail, not to train scores.
+    .filter(|data| !data.experimentOnly);
 
     let redis_gateway_score_data_initial: Option<GatewayScoringData> =
         if should_update_srv3_gateway_score
