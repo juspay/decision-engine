@@ -554,7 +554,7 @@ pub async fn check_and_update_gateway_score_(
         );
     }
 
-    let redis_key = DC::scoring_data_key(&api_payload.merchant_id, &api_payload.payment_id);
+    let redis_key = scoring_data_redis_key(&api_payload.merchant_id, &api_payload.payment_id).await;
     let app_state = get_tenant_app_state().await;
 
     // Attempt to fetch gateway scoring data from Redis
@@ -657,6 +657,21 @@ pub async fn check_and_update_gateway_score_(
                 is_dynamic_mga_enabled: false,
             })
         }
+    }
+}
+
+/// The key to read a payment's scoring context from: the merchant-keyed one, or the payment-id-only
+/// key older code stored it under, while that one has not expired.
+async fn scoring_data_redis_key(merchant_id: &str, payment_id: &str) -> String {
+    let key = DC::scoring_data_key(merchant_id, payment_id);
+    let legacy_key = format!("{}{}", C::GATEWAY_SCORING_DATA, payment_id);
+    let redis = &get_tenant_app_state().await.redis_conn;
+    if matches!(redis.key_exists(&key).await, Ok(false))
+        && matches!(redis.key_exists(&legacy_key).await, Ok(true))
+    {
+        legacy_key
+    } else {
+        key
     }
 }
 
@@ -800,7 +815,7 @@ pub async fn update_gateway_score(
         true
     };
 
-    let redis_key = DC::scoring_data_key(&merchant_id, &txn_detail.txnUuid);
+    let redis_key = scoring_data_redis_key(&merchant_id, &txn_detail.txnUuid).await;
     let app_state = get_tenant_app_state().await;
 
     let redis_gateway_score_data_initial: Option<GatewayScoringData> =

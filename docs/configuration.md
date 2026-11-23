@@ -128,7 +128,7 @@ Publishing is best effort. If Redis is unavailable, the write still succeeds and
 
 ### Gateway scoring context TTL
 
-Each routed payment stores a scoring context in Redis (`gateway_scoring_data_<payment_id>`). Its TTL is how late that payment's `/update-gateway-score` can arrive and still update scores; there is no other age limit on that endpoint. Two deployment settings bound it:
+Each routed payment stores a scoring context in Redis (`gateway_scoring_data_<merchant_id>_<payment_id>`, so merchants that reuse a payment id never share one; a context stored under the earlier `gateway_scoring_data_<payment_id>` key is still read, for its own merchant only, until it expires). Its TTL is how late that payment's `/update-gateway-score` can arrive and still update scores; there is no other age limit on that endpoint. Two deployment settings bound it:
 
 ```toml
 [scoring_data]
@@ -153,7 +153,7 @@ curl http://localhost:8080/admin/merchant-account/<merchant_id>/scoring-data-ttl
 curl -X DELETE http://localhost:8080/admin/merchant-account/<merchant_id>/scoring-data-ttl -H 'x-admin-secret: <admin secret>'
 ```
 
-Each call returns `{"merchant_id", "ttl_secs", "merchant_ttl_secs", "default_ttl_secs", "max_ttl_secs"}`, where `ttl_secs` is the TTL new contexts get. A merchant that was never created gets `404`, and a `ttl_secs` below 1 gets `400`. A change reaches every pod at once and applies to payments routed after it; contexts already in Redis keep the TTL they were written with. A success deletes the context, and so does a failure unless its `error_info` maps to a GSM `retry` decision: a retryable failure keeps it for the retry attempt's own update, and a pending update keeps it for the outcome still to come. Each context takes about 480 bytes of Redis memory, so 48 hours of a merchant's traffic needs about 83 MB per transaction per second.
+Each call returns `{"merchant_id", "ttl_secs", "merchant_ttl_secs", "default_ttl_secs", "max_ttl_secs"}`, where `ttl_secs` is the TTL new contexts get. A merchant that was never created gets `404`, and a `ttl_secs` below 1 gets `400`. A change reaches every pod at once and applies to payments routed after it; contexts already in Redis keep the TTL they were written with. A context stays until its TTL, whatever the outcome, so a retry of the same `payment_id` on another connector is still scored. A repeated update is scored once: the first update of each kind (reward, SR failure, pending) for a merchant's payment on a connector takes a lock that lasts as long as the context, and later ones are skipped. Each context takes about 480 bytes of Redis memory, so 48 hours of a merchant's traffic needs about 83 MB per transaction per second, plus about 150 bytes for each lock (one or two per payment).
 
 ### Database
 
