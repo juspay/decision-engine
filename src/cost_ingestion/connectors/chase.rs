@@ -33,7 +33,7 @@
 //! Reports are discovered by polling Chase's reporting API and downloaded with OAuth credentials.
 //! Token and reports endpoints are server-configured; file URLs come from the reporting API.
 
-use super::common::{http_client, http_client_without_redirects, parse_us_date, to_float};
+use super::common::{http_client_without_redirects, parse_us_date, to_float};
 use crate::cost_ingestion::card_network::chase_network_key;
 use std::collections::HashMap;
 use std::io::{BufReader, Read};
@@ -416,7 +416,7 @@ async fn list_ready_reports(
     let mut out = Vec::new();
     let mut next: Option<String> = None;
     for _ in 0..MAX_REPORT_PAGES {
-        let mut req = http_client()
+        let mut req = http_client_without_redirects()
             .get(&config.chase_reports_url)
             .bearer_auth(&token)
             .header("Accept", "application/json");
@@ -529,7 +529,7 @@ async fn oauth_token(creds: &ChaseCreds, token_url: &str) -> Result<String, Inge
         &Uuid::new_v4().to_string(),
     )?;
     let form = build_token_form(creds, &assertion);
-    let resp = http_client()
+    let resp = http_client_without_redirects()
         .post(token_url)
         .form(&form)
         .send()
