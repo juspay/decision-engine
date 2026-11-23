@@ -1147,10 +1147,8 @@ function ExperimentDetailPanel({
     ? Math.min(...results.variants.map(v => controlResolved + resolvedTxns(v.metrics)))
     : 0
   const collectedShare = minSample > 0 ? Math.min(1, sampleTxns / minSample) : 0
-  const progress = Math.round(collectedShare * 100)
-  // A handful of transactions against a 5,000 target rounds to 0% and paints an empty track, which
-  // reads as "nothing collected". Keep a sliver of bar, and say "<1%" rather than "0%".
-  const progressLabel = progress === 0 && sampleTxns > 0 ? '<1%' : `${progress}%`
+  // A handful of transactions against a 5,000 target would paint an empty track, which reads as
+  // "nothing collected", so the bar keeps a sliver.
   const progressWidth = sampleTxns > 0 ? Math.max(collectedShare * 100, 1.5) : 0
   // The experiment completes once each comparison, control plus a variant, has routed the target.
   const routedTxns = results && results.variants.length > 0
@@ -1299,11 +1297,6 @@ function ExperimentDetailPanel({
                 style={{ width: `${progressWidth}%` }}
               />
             </div>
-            <p className="text-[12px] text-slate-500 max-w-[80ch] leading-4">
-              {progressLabel} of the {minSample.toLocaleString()} needed for a verdict
-              {variants.length > 1 ? ' (control plus each variant; showing the furthest behind)' : ''}
-              {awaitingTxns > 0 ? ` · ${awaitingTxns.toLocaleString()} more awaiting an outcome` : ''}
-            </p>
             <p className="text-[12px] text-slate-500 max-w-[80ch] leading-4">
               {completed
                 ? `Completed after routing ${minSample.toLocaleString()} payments. The verdict settles as the remaining outcomes arrive.`
