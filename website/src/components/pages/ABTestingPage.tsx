@@ -1133,6 +1133,17 @@ function ExperimentDetailPanel({
   }
   const breachedVariants = results?.variants.filter(v => v.verdict === 'guardrail_breached') ?? []
   const minSample = abData?.min_sample_size ?? 1000
+  // The guardrail judges a variant once a tenth of the sample target has resolved across control
+  // and that variant, the same minimum the engine applies before it stops anything.
+  const guardrailMinResolved = Math.floor(minSample / 10)
+  // Variants already past the guardrail's drop on too few payments for it to judge yet.
+  const earlyGuardrailSignals = (results?.variants ?? []).flatMap(v => {
+    const drop = guardrailDropPp(v.metrics)
+    const judged = controlResolved + resolvedTxns(v.metrics)
+    return v.verdict !== 'guardrail_breached' && drop !== null && abData && drop > abData.guardrail_threshold_pp && judged < guardrailMinResolved
+      ? [{ variant: v, drop, judged }]
+      : []
+  })
   // Each comparison needs its own sample (control plus that variant), so progress follows the
   // comparison furthest from its target.
   const sampleTxns = results && results.variants.length > 0
@@ -1144,6 +1155,11 @@ function ExperimentDetailPanel({
   // reads as "nothing collected". Keep a sliver of bar, and say "<1%" rather than "0%".
   const progressLabel = progress === 0 && sampleTxns > 0 ? '<1%' : `${progress}%`
   const progressWidth = sampleTxns > 0 ? Math.max(collectedShare * 100, 1.5) : 0
+  // The experiment completes once each comparison, control plus a variant, has routed the target.
+  const routedTxns = results && results.variants.length > 0
+    ? Math.min(...results.variants.map(v => results.control.transaction_count + v.metrics.transaction_count))
+    : 0
+  const completed = !isActive && routedTxns >= minSample
   const controlPct = abData ? controlSplitPct(abData) : 90
 
   const status: 'active' | 'paused' | 'inactive' = isActive ? (realPaymentsOn ? 'active' : 'paused') : 'inactive'
@@ -1151,21 +1167,21 @@ function ExperimentDetailPanel({
   // The banner speaks for the experiment as a whole: still collecting while any comparison is.
   const overallVerdict = results?.variants.some(v => v.verdict === 'collecting_data') ? 'collecting_data' : 'not_significant'
 
-  // Rough "time to target" projection for the progress card. There's no served ingestion rate, so
-  // the rate is derived from txns-so-far over the time the experiment has been live — `modified_at`
-  // is a sound proxy for activation, since edits are blocked once an experiment is running. Only
-  // shown while actively collecting with real progress; any missing/degenerate input returns null
-  // rather than a misleading estimate.
+  // Rough "time to completion" projection for the progress card. There's no served routing rate, so
+  // the rate is derived from payments routed so far over the time the experiment has been live —
+  // `modified_at` is a sound proxy for activation, since edits are blocked once an experiment is
+  // running. Only shown while actively routing with real progress; any missing/degenerate input
+  // returns null rather than a misleading estimate.
   const remainingEta: string | null = (() => {
-    if (status !== 'active' || sampleTxns <= 0 || sampleTxns >= minSample) return null
+    if (status !== 'active' || routedTxns <= 0 || routedTxns >= minSample) return null
     const startMs = algorithm.modified_at ? Date.parse(algorithm.modified_at) : NaN
     if (!Number.isFinite(startMs)) return null
     const elapsedMs = Date.now() - startMs
     if (elapsedMs <= 0) return null
-    const remainMs = (elapsedMs / sampleTxns) * (minSample - sampleTxns)
+    const remainMs = (elapsedMs / routedTxns) * (minSample - routedTxns)
     const hrs = remainMs / 3_600_000
     if (!Number.isFinite(hrs) || hrs <= 0) return null
-    const at = 'at current volume'
+    const at = 'to completion at current volume'
     if (hrs < 1) return `~${Math.max(1, Math.round(hrs * 60))} min remaining ${at}`
     if (hrs < 48) return `~${Math.round(hrs)} hrs remaining ${at}`
     return `~${Math.round(hrs / 24)} days remaining ${at}`
@@ -1184,7 +1200,9 @@ function ExperimentDetailPanel({
           label: 'Sample target',
           value: `${minSample.toLocaleString()} txns`,
           icon: BarChart3,
-          caption: 'Collected before a significance verdict',
+          caption: variants.length === 1
+            ? 'Payments routed before the experiment completes with a verdict'
+            : 'Payments each comparison routes before the experiment completes',
           visual: null,
         },
         {
@@ -1288,7 +1306,12 @@ function ExperimentDetailPanel({
               {progressLabel} of the {minSample.toLocaleString()} needed for a verdict
               {variants.length > 1 ? ' (control plus each variant; showing the furthest behind)' : ''}
               {awaitingTxns > 0 ? ` · ${awaitingTxns.toLocaleString()} more awaiting an outcome` : ''}
-              {remainingEta ? ` · ${remainingEta}` : ''}
+            </p>
+            <p className="text-[12px] text-slate-500 max-w-[80ch] leading-4">
+              {completed
+                ? `Completed after routing ${minSample.toLocaleString()} payments. The verdict settles as the remaining outcomes arrive.`
+                : `The experiment completes once ${variants.length > 1 ? 'each comparison has' : 'it has'} routed ${minSample.toLocaleString()} payments: ${routedTxns.toLocaleString()} so far`}
+              {!completed && remainingEta ? ` · ${remainingEta}` : ''}
             </p>
           </div>
         )}
@@ -1383,6 +1406,13 @@ function ExperimentDetailPanel({
                 (5% split across {results.variants.length} comparisons), so the chance of a false winner across all of them stays at 5%.
               </p>
             )}
+            {earlyGuardrailSignals.map(({ variant: v, drop, judged }) => (
+              <Notice key={`early-${v.metrics.arm}`} tone="warning">
+                Early signal: among completed payments, {variants.length === 1 ? 'the variant' : armName(abData, v.metrics.arm)} is {drop.toFixed(2)}pp below control,
+                past the {abData?.guardrail_threshold_pp}pp guardrail, but on only {judged.toLocaleString()} payments. The guardrail
+                judges once {guardrailMinResolved.toLocaleString()} have completed across control and this variant, so this may still be noise.
+              </Notice>
+            ))}
             {breachedVariants.map(v => {
               const name = armName(abData, v.metrics.arm)
               const stopped = variants.find(x => x.id === v.metrics.arm)?.stopped
@@ -1395,8 +1425,8 @@ function ExperimentDetailPanel({
                     : stopped
                       ? `${name} is stopped: its payments now use your live routing setup, while the other variants keep running.`
                       : others > 0
-                        ? `${name} stops when payment feedback confirms the breach, and its payments then use your live routing setup; check feedback delivery if it keeps running.`
-                        : 'The experiment stops when payment feedback confirms the breach; check feedback delivery if it remains active.'}
+                        ? `${name} stops on the next payment outcome Decision Engine receives, and its payments then use your live routing setup. If it keeps running, check that payment feedback is being sent.`
+                        : 'The experiment stops on the next payment outcome Decision Engine receives. If it remains active, check that payment feedback is being sent.'}
                 </Notice>
               )
             })}

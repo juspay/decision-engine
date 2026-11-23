@@ -82,6 +82,12 @@ fn tracked_side(data: &ABTestData, payment_id: &str) -> Option<ArmSide> {
         .map(|plan| plan.side)
 }
 
+/// Resolved payments, control's plus a variant's, from which the guardrail judges that variant: a
+/// tenth of the sample target. The experiment results apply the same minimum.
+pub fn min_resolved(min_sample_size: u32) -> u64 {
+    u64::from(min_sample_size / GUARDRAIL_SAMPLE_PCT)
+}
+
 /// Every arm that can have routed payments: control and each variant, stopped ones included.
 fn all_arms(data: &ABTestData) -> Vec<ArmSide> {
     std::iter::once(ArmSide::Control)
@@ -116,23 +122,41 @@ fn breached(control: ArmCounts, variant: ArmCounts, threshold_pp: f64, min_resol
     (rate(control) - rate(variant)) * 100.0 > threshold_pp
 }
 
-/// What the experiment's counts require: completion once `routed` reaches its sample target,
-/// otherwise a stop for each of `variants` that breached against `control`.
+/// Whether every running comparison, control's routed payments plus a variant's, has reached the
+/// sample target: the point its results report a verdict at. `routed` holds each arm's routed
+/// payments by arm id.
+fn reached_sample_target(data: &ABTestData, routed: &[(ArmSide, u64)]) -> bool {
+    let routed_to = |side: &ArmSide| {
+        routed
+            .iter()
+            .find(|(arm, _)| arm == side)
+            .map_or(0, |(_, count)| *count)
+    };
+    let control = routed_to(&ArmSide::Control);
+    let running = arms::running_variant_ids(data);
+    !running.is_empty()
+        && running
+            .into_iter()
+            .all(|id| control + routed_to(&ArmSide::Variant(id)) >= u64::from(data.min_sample_size))
+}
+
+/// What the experiment's counts require: completion once every comparison has routed the sample
+/// target, otherwise a stop for each of `variants` that breached against `control`.
 fn judge(
     data: &ABTestData,
     experiment_id: &str,
     run: u64,
-    routed: u64,
+    routed: &[(ArmSide, u64)],
     control: ArmCounts,
     variants: &[(String, ArmCounts)],
 ) -> Vec<GuardrailAction> {
-    if routed >= u64::from(data.min_sample_size) {
+    if reached_sample_target(data, routed) {
         return vec![GuardrailAction::Complete {
             experiment_id: experiment_id.to_owned(),
             run,
         }];
     }
-    let min_resolved = u64::from(data.min_sample_size / GUARDRAIL_SAMPLE_PCT);
+    let min_resolved = min_resolved(data.min_sample_size);
     variants
         .iter()
         .filter(|(_, counts)| breached(control, *counts, data.guardrail_threshold_pp, min_resolved))
@@ -259,7 +283,8 @@ impl TrackedPayment {
                 [keys.transactions, keys.successes]
             })
             .collect();
-        let sets: Vec<String> = all_arms(&self.data)
+        let every_arm = all_arms(&self.data);
+        let sets: Vec<String> = every_arm
             .iter()
             .map(|side| arm_keys(merchant_id, experiment_id, run, side).routed)
             .collect();
@@ -271,9 +296,9 @@ impl TrackedPayment {
         });
         let control = counts.next().unwrap_or_default();
         let variants: Vec<(String, ArmCounts)> = candidates.into_iter().zip(counts).collect();
-        let routed: u64 = routed_counts.iter().sum();
+        let routed: Vec<(ArmSide, u64)> = every_arm.into_iter().zip(routed_counts).collect();
 
-        let actions = judge(&self.data, experiment_id, run, routed, control, &variants);
+        let actions = judge(&self.data, experiment_id, run, &routed, control, &variants);
         for action in &actions {
             match action {
                 GuardrailAction::StopVariant { variant_id, .. } => {
@@ -283,7 +308,7 @@ impl TrackedPayment {
                 }
                 GuardrailAction::Complete { .. } => {
                     logger::info!(merchant_id = %merchant_id, experiment_id = %experiment_id,
-                        routed, sample_target = self.data.min_sample_size,
+                        sample_target = self.data.min_sample_size,
                         "A/B experiment reached its sample target; completing it");
                 }
             }
@@ -367,26 +392,75 @@ mod tests {
     fn judging_stops_breached_variants_until_the_sample_target_completes_the_experiment() {
         // A target of 200 judges a breach from 20 resolved payments on.
         let config = data();
-        let variants = [
-            ("failing".to_string(), counts(10, 5)),
-            ("healthy".to_string(), counts(10, 8)),
-        ];
+        let variants = [("variant".to_string(), counts(10, 5))];
+        let routed = |control, variant| {
+            vec![
+                (ArmSide::Control, control),
+                (ArmSide::Variant("variant".into()), variant),
+            ]
+        };
         assert_eq!(
-            judge(&config, "exp1", 7, 199, counts(10, 8), &variants),
+            judge(
+                &config,
+                "exp1",
+                7,
+                &routed(160, 39),
+                counts(10, 8),
+                &variants
+            ),
             vec![GuardrailAction::StopVariant {
                 experiment_id: "exp1".into(),
-                variant_id: "failing".into(),
+                variant_id: "variant".into(),
                 run: 7,
             }]
         );
         // Having routed its target, the experiment completes, which ends every variant.
         assert_eq!(
-            judge(&config, "exp1", 7, 200, counts(10, 8), &variants),
+            judge(
+                &config,
+                "exp1",
+                7,
+                &routed(160, 40),
+                counts(10, 8),
+                &variants
+            ),
             vec![GuardrailAction::Complete {
                 experiment_id: "exp1".into(),
                 run: 7,
             }]
         );
+    }
+
+    #[test]
+    fn with_several_variants_every_running_comparison_must_reach_the_target() {
+        let mut config = data();
+        config.variant = None;
+        config.variants = Some(
+            serde_json::from_value(serde_json::json!([
+                { "id": "a", "split_pct": 20, "arm": { "rule_algorithm_id": "rule_a" } },
+                { "id": "b", "split_pct": 20, "arm": { "rule_algorithm_id": "rule_b" } },
+                { "id": "c", "split_pct": 10, "stopped": true,
+                  "arm": { "rule_algorithm_id": "rule_c" } }
+            ]))
+            .unwrap(),
+        );
+        let routed = |b| {
+            vec![
+                (ArmSide::Control, 150),
+                (ArmSide::Variant("a".into()), 60),
+                (ArmSide::Variant("b".into()), b),
+                (ArmSide::Variant("c".into()), 0),
+            ]
+        };
+        // Control + a has 210 of 200, but control + b only 199; the stopped c isn't waited on.
+        assert!(!reached_sample_target(&config, &routed(49)));
+        assert!(reached_sample_target(&config, &routed(50)));
+    }
+
+    #[test]
+    fn the_guardrail_judges_from_a_tenth_of_the_sample_target() {
+        assert_eq!(min_resolved(50_000), 5_000);
+        assert_eq!(min_resolved(200), 20);
     }
 
     #[test]

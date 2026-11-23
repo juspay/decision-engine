@@ -534,15 +534,19 @@ fn compute_significance(
     let n_c = resolved(control) as f64;
     let n_v = resolved(variant) as f64;
 
-    // Safety uses completed payment outcomes, just like the feedback-triggered stop. It needs
-    // one resolved payment in each arm but does not wait for the significance sample target.
+    // Safety uses completed payment outcomes and the same minimum as the feedback-triggered stop,
+    // a tenth of the sample target, so a breach is reported only once that stop would act.
     let resolved_rate = |arm: &ExperimentArmMetrics| {
         let resolved = resolved(arm);
         (resolved > 0).then(|| arm.success_count as f64 / resolved as f64)
     };
-    if let (Some(control_rate), Some(variant_rate)) =
-        (resolved_rate(control), resolved_rate(variant))
-    {
+    let guardrail_judges = u64::try_from(total).unwrap_or(0)
+        >= crate::decider::gatewaydecider::ab_test::guardrail::min_resolved(min_sample_size);
+    if let (true, Some(control_rate), Some(variant_rate)) = (
+        guardrail_judges,
+        resolved_rate(control),
+        resolved_rate(variant),
+    ) {
         if (control_rate - variant_rate) * 100.0 > guardrail_threshold_pp {
             return (None, None, ExperimentVerdict::GuardrailBreached);
         }
@@ -751,6 +755,29 @@ mod tests {
             endpoint: None,
             variant_ids: variant_ids.iter().map(|id| id.to_string()).collect(),
         }
+    }
+
+    #[test]
+    fn a_breach_is_reported_once_the_guardrail_would_judge_it() {
+        // The query's target of 100 has the guardrail judge from 10 resolved payments.
+        let breach = |control: ArmRow, variant: ArmRow| {
+            build_response(
+                &results_query(&["variant"]),
+                &[named("control", control), named("variant", variant)],
+            )
+            .variants[0]
+                .verdict
+                .clone()
+        };
+        // 100% against 0% is past the 50pp guardrail, but only 9 payments have resolved.
+        assert_eq!(
+            breach(arm_row(5, 5, 0, 5), arm_row(4, 0, 4, 0)),
+            ExperimentVerdict::CollectingData
+        );
+        assert_eq!(
+            breach(arm_row(5, 5, 0, 5), arm_row(5, 0, 5, 0)),
+            ExperimentVerdict::GuardrailBreached
+        );
     }
 
     #[test]
