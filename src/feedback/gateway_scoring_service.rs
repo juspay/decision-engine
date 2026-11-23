@@ -610,6 +610,7 @@ pub async fn check_and_update_gateway_score_(
                     crate::analytics::FlowType::UpdateGatewayScoreScoreSnapshot,
                 ),
                 None,
+                Some(gateway_scoring_data),
             )
             .await;
 
@@ -685,6 +686,7 @@ pub async fn check_and_update_gateway_score(
     analytics_route: crate::analytics::AnalyticsRoute,
     score_snapshot_flow: crate::analytics::AnalyticsFlowContext,
     redis_comp_config: Option<RedisCompressionConfigCombined>,
+    gateway_scoring_data: Option<GatewayScoringData>,
 ) -> () {
     // Get gateway scoring type
     let gateway_scoring_type =
@@ -729,6 +731,7 @@ pub async fn check_and_update_gateway_score(
             analytics_route,
             score_snapshot_flow,
             redis_comp_config,
+            gateway_scoring_data,
         )
         .await;
     } else {
@@ -754,6 +757,7 @@ pub async fn update_gateway_score(
     analytics_route: crate::analytics::AnalyticsRoute,
     score_snapshot_flow: crate::analytics::AnalyticsFlowContext,
     redis_compression_config: Option<RedisCompressionConfigCombined>,
+    gateway_scoring_data: Option<GatewayScoringData>,
 ) -> () {
     let merchant_id = MID::merchant_id_to_text(txn_detail.clone().merchantId);
     let Some(mer_acc) = MA::load_merchant_by_merchant_id(merchant_id.clone()).await else {
@@ -815,38 +819,33 @@ pub async fn update_gateway_score(
         true
     };
 
-    let redis_key = scoring_data_redis_key(&merchant_id, &txn_detail.txnUuid).await;
-    let app_state = get_tenant_app_state().await;
+    // The context the caller read; the legacy `/update-score` passes none, so it is read here.
+    let gateway_scoring_data = match gateway_scoring_data {
+        Some(data) => Some(data),
+        None => {
+            let redis_key = scoring_data_redis_key(&merchant_id, &txn_detail.txnUuid).await;
+            get_tenant_app_state()
+                .await
+                .redis_conn
+                .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
+                .await
+                .ok()
+                .map(GatewayScoringData::from)
+        }
+    };
 
     let redis_gateway_score_data_initial: Option<GatewayScoringData> =
         if should_update_srv3_gateway_score
             && should_isolate_srv3_producer
             && should_update_explore_txn
         {
-            let mb_gateway_scoring_data: Option<GatewayScoringData> = app_state
-                .redis_conn
-                .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
-                .await
-                .ok()
-                .map(GatewayScoringData::from);
-            mb_gateway_scoring_data
+            gateway_scoring_data.clone()
         } else {
             None
         };
 
     let mb_gateway_scoring_data: Option<GatewayScoringData> = if should_update_gateway_score {
-        match redis_gateway_score_data_initial {
-            None => {
-                let redis_data: Option<GatewayScoringData> = app_state
-                    .redis_conn
-                    .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
-                    .await
-                    .ok()
-                    .map(GatewayScoringData::from);
-                redis_data
-            }
-            Some(_) => redis_gateway_score_data_initial,
-        }
+        redis_gateway_score_data_initial.or_else(|| gateway_scoring_data.clone())
     } else {
         None
     };
@@ -959,13 +958,7 @@ pub async fn update_gateway_score(
             gateway_scoring_type,
             txn_detail.status
         );
-        let app_state = get_tenant_app_state().await;
-        let mb_gateway_scoring_data: Option<GatewayScoringData> = app_state
-            .redis_conn
-            .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
-            .await
-            .ok()
-            .map(GatewayScoringData::from);
+        let mb_gateway_scoring_data: Option<GatewayScoringData> = gateway_scoring_data.clone();
         GSSV3::flow::update_sr_v3_score(
             gateway_scoring_type.clone(),
             txn_detail.clone(),
@@ -1063,19 +1056,7 @@ pub async fn update_gateway_score(
     if should_update_gateway_score && is_update_within_window {
         let mer_acc_p_id: ETM::id::MerchantPId = mer_acc.id;
         let m_pf_mc_config = MerchantConfig::getMerchantConfigEntityLevelLookupConfig().await;
-        let mb_gateway_scoring_data = match mb_gateway_scoring_data {
-            None => {
-                let app_state = get_tenant_app_state().await;
-                let redis_data: Option<GatewayScoringData> = app_state
-                    .redis_conn
-                    .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
-                    .await
-                    .ok()
-                    .map(GatewayScoringData::from);
-                redis_data
-            }
-            Some(_) => mb_gateway_scoring_data,
-        };
+        let mb_gateway_scoring_data = mb_gateway_scoring_data.or(gateway_scoring_data);
         logger::debug!(tag = "GatewayScoringData", "{:?}", mb_gateway_scoring_data);
         match mb_gateway_scoring_data {
             None => {

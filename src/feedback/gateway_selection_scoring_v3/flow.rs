@@ -81,6 +81,10 @@ pub async fn update_sr_v3_score(
                 gateway_reference_id.clone(),
             )
             .await;
+            // No scoring context means no SR key: skip rather than write to a bare `_}queue`.
+            if unified_sr_v3_key.is_none() {
+                return;
+            }
             let key_for_gateway_selection =
                 unified_sr_v3_key.clone().unwrap_or_else(|| "".to_string());
             let payment_method = txn_card_info.instrument.method();
