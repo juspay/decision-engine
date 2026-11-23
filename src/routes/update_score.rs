@@ -1,3 +1,4 @@
+use crate::analytics::payload::{masked_payload, omitted_payload};
 use crate::custom_extractors::{RequestIds, ScopedJson, ScopedJsonRejection};
 use crate::decider::gatewaydecider::types::{ErrorResponse, UnifiedError};
 use crate::feedback::gateway_scoring_service::{
@@ -113,7 +114,7 @@ pub async fn update_score(
                 error_message = error_response.error_message.clone(),
                 developer_message = error_response.error_info.developer_message.clone(),
                 user_message = error_response.error_info.user_message.clone(),
-                req_body = "Failed to parse body",
+                req_body = omitted_payload().to_string(),
                 req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                 level = "Error",
                 category = "INCOMING_API",
@@ -173,10 +174,6 @@ pub async fn update_score(
                 }
                 .emit();
 
-                // Mask the payload before logging
-                let masked_req_body = masking::masked_serialize(&payload)
-                    .map(|value| value.to_string())
-                    .unwrap_or_else(|_| "[REDACTED]".to_string());
                 logger::error!(
                     url = original_url,
                     method = "POST",
@@ -192,7 +189,7 @@ pub async fn update_score(
                     error_message = error_response.error_message,
                     developer_message = error_response.error_info.developer_message,
                     user_message = error_response.error_info.user_message,
-                    req_body = masked_req_body,
+                    req_body = masked_payload(&payload).to_string(),
                     req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                     category = "INCOMING_API",
                     "Gateway field is empty"
@@ -262,10 +259,6 @@ pub async fn update_score(
             // Log the successful response
             let latency = start_time.elapsed().as_millis() as u64;
             let cpu_time = cpu_start.elapsed().as_millis() as u64;
-            // Mask the payload before logging
-            let masked_req_body = masking::masked_serialize(&payload)
-                .map(|value| value.to_string())
-                .unwrap_or_else(|_| "[REDACTED]".to_string());
             logger::info!(
                 url = original_url,
                 method = "POST",
@@ -278,7 +271,7 @@ pub async fn update_score(
                 request_time = request_time,
                 env = crate::logger::env::app_env(),
                 action = "POST",
-                req_body = masked_req_body,
+                req_body = masked_payload(&payload).to_string(),
                 category = "INCOMING_API",
                 req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                 "Successfully updated score"
@@ -321,7 +314,7 @@ pub async fn update_score(
                 error_message = error_response.error_message,
                 developer_message = error_response.error_info.developer_message,
                 user_message = error_response.error_info.user_message,
-                req_body = "Failed to parse body",
+                req_body = omitted_payload().to_string(),
                 req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                 category = "INCOMING_API",
                 "Error occurred while parsing request payload"

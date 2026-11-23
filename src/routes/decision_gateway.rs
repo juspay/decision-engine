@@ -1,6 +1,7 @@
 use crate::custom_extractors::{Json, RequestIds, ScopedJson, ScopedJsonRejection};
 use std::time::Instant;
 
+use crate::analytics::payload::masked_payload;
 use crate::decider::gatewaydecider::{
     flows::decider_full_payload_hs_function,
     types::{DecidedGateway, DomainDeciderRequest, ErrorResponse, UnifiedError},
@@ -158,18 +159,12 @@ where
                         latency: Some(cpu_time),
                     };
                     // Serialize response body and headers for logging
-                    let res_body = masking::masked_serialize(&response)
-                        .map(|value| value.to_string())
-                        .unwrap_or_else(|_| "[REDACTED]".to_string());
+                    let res_body = masked_payload(&response).to_string();
                     // let res_headers = r#"{"Content-Type": "application/json"}"#;
 
                     // Log the successful response
                     let latency = start_time.elapsed().as_millis() as u64;
                     let cpu_time = cpu_start.elapsed().as_millis() as u64;
-                    // Mask the payload before logging
-                    let masked_req_body = masking::masked_serialize(&payload)
-                        .map(|value| value.to_string())
-                        .unwrap_or_else(|_| "[REDACTED]".to_string());
                     logger::info!(
                         url = original_url,
                         method = "POST",
@@ -182,7 +177,7 @@ where
                         bytes_allocated = bytes_allocated.to_string(),
                         env = crate::logger::env::app_env(),
                         action = "POST",
-                        req_body = masked_req_body,
+                        req_body = masked_payload(&payload).to_string(),
                         req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                         res_body = res_body,
                         res_code = 200,
