@@ -8,6 +8,20 @@
 //! An outcome counts only for a payment in its arm's set, whenever its feedback arrives within the
 //! keys' TTL. A payment's arm is recomputed from its id. An observation period is identified by
 //! when it started, in Unix milliseconds, and a new period starts with empty sets and counts.
+//!
+//! Why two structures:
+//!
+//! - **The routed payments are a set** because feedback has to ask about one payment: did this
+//!   experiment route it, to this arm, in this period? Only an exact membership test answers that;
+//!   a HyperLogLog can't. Its size grows with the experiment, which the sample target bounds (at most
+//!   `MAX_SAMPLE_SIZE` per comparison).
+//! - **The outcomes are HyperLogLogs** because they only need counting, once per payment: retries
+//!   and repeated feedback for one payment must not count twice. A HyperLogLog adds a payment at most
+//!   once and stays at most 12 KB however many it holds, about a third of the memory sets of the
+//!   outcomes would add. Its counts are about 0.8% approximate, well inside what a guardrail of a few
+//!   points needs.
+//!
+//! Neither needs a key per payment, so the guardrail's Redis footprint is a few keys per experiment.
 
 use super::arms::{self, ArmSide};
 use super::config::{self, AbTestConfig};

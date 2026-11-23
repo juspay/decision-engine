@@ -1381,12 +1381,6 @@ function ExperimentDetailPanel({
           </p>
         ) : (
           <div className="space-y-4">
-            {totalTxns === 0 && (
-              <div className="rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-900 dark:border-blue-900/40 dark:bg-blue-950/30 dark:text-blue-200">
-                No payments have been recorded for this experiment on {endpoint === 'hybrid_routing' ? 'Hybrid routing' : endpoint === 'decide_gateway' ? 'Decide gateway' : 'Rule evaluate'}.
-                {endpoint === 'hybrid_routing' && ' Decision Simulator uses Decide gateway by default. To test this view, choose More → Endpoint → Hybrid routing, then run new payments for the same merchant while this experiment is active.'}
-              </div>
-            )}
             {/* Statistical rigor first: while the verdict isn't trustworthy, lead with the confidence
                 notice and keep every delta neutral (handled inside the table). */}
             {!significant && (
