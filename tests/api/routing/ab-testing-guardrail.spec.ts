@@ -107,6 +107,27 @@ test('payment feedback stops a breached experiment and leaves the active rule in
   }
 })
 
+test('an experiment needs a sample target of at least one payment', async ({ api, merchant }) => {
+  const control = await api.createRoutingAlgorithm(factory.singleRoutingPayload(merchant.id, { gateway: 'checkout' }))
+  const variant = await api.createRoutingAlgorithm(factory.singleRoutingPayload(merchant.id, { gateway: 'adyen' }))
+  const create = (minSampleSize: number) => api.createRoutingAlgorithm({
+    name: factory.ruleName('sample_target'), description: 'Sample target bounds',
+    created_by: merchant.id, algorithm_for: 'payment', metadata: {},
+    algorithm: { type: 'ab_test', data: {
+      control: { rule_algorithm_id: control.body.rule_id },
+      variant: { rule_algorithm_id: variant.body.rule_id },
+      endpoints: ['hybrid_routing'], variant_split_pct: 20,
+      min_sample_size: minSampleSize, guardrail_threshold_pp: 10,
+    } },
+  }, { failOnStatusCode: false })
+
+  // At zero the experiment would complete on its first outcome.
+  const zero = await create(0)
+  expect(zero.status).toBe(400)
+  expect(JSON.stringify(zero.body)).toContain('min_sample_size')
+  expect((await create(1)).status).toBe(200)
+})
+
 test('every guardrail key expires, the observation period included', async ({ api, merchant }) => {
   const experimentId = await createExperiment(api, merchant.id)
   try {

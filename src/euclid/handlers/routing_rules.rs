@@ -1888,14 +1888,21 @@ pub async fn activate_routing_rule(
         let occupant = algorithm_store::find_slot(&state.db, &merchant, &slot)
             .await
             .change_context(EuclidErrors::StorageError)?;
-        // The experiment leaving the slot, when a different algorithm replaces it.
-        let replaced = occupant
-            .as_ref()
-            .map(|mapping| mapping.routing_algorithm_id.clone())
-            .filter(|id| *id != algorithm.id);
         let already_active = occupant
             .as_ref()
             .is_some_and(|mapping| mapping.routing_algorithm_id == algorithm.id);
+        // A deliberate activation starts a new guardrail observation period. Started before
+        // anything changes, so an activation that can't start one fails and changes nothing,
+        // instead of running on the previous period's counts.
+        if is_experiment && !already_active {
+            crate::decider::gatewaydecider::ab_test::guardrail::start_period(
+                merchant.as_str(),
+                &algorithm.id,
+            )
+            .await
+            .change_context(EuclidErrors::StorageError)
+            .attach_printable("could not start the experiment's guardrail observation period")?;
+        }
         if is_experiment && !already_active {
             if let Some(resumed) = with_stopped_variants_resumed(&algorithm.algorithm_data) {
                 let modified_at = utc_now();
@@ -1933,22 +1940,6 @@ pub async fn activate_routing_rule(
 
         if changed {
             stamp_contract_activation(&conn, &algorithm).await?;
-            if is_experiment {
-                // A deliberate activation starts a new guardrail observation period, for the
-                // experiment taking the slot and for the one it displaced.
-                if let Some(previous) = replaced.as_deref() {
-                    crate::decider::gatewaydecider::ab_test::guardrail::reset(
-                        merchant.as_str(),
-                        previous,
-                    )
-                    .await;
-                }
-                crate::decider::gatewaydecider::ab_test::guardrail::reset(
-                    merchant.as_str(),
-                    &algorithm.id,
-                )
-                .await;
-            }
         }
         cache_activated_algorithm(&state, merchant.as_str(), &algorithm, is_experiment).await;
         if changed {
@@ -1998,9 +1989,6 @@ pub async fn deactivate_routing_rule(
             algorithm.id,
             merchant
         );
-        // A deliberate deactivation ends the guardrail's observation period.
-        crate::decider::gatewaydecider::ab_test::guardrail::reset(merchant.as_str(), &algorithm.id)
-            .await;
         invalidate_routing_algorithm_cache(&state, merchant.as_str()).await;
         clear_volume_commitment_plan(&algorithm.algorithm_for, merchant.as_str()).await;
         Ok::<_, ContainerError<EuclidErrors>>(())

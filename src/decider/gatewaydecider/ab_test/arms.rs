@@ -272,6 +272,12 @@ pub fn validate(data: &ABTestData) -> Vec<(String, String)> {
         ));
     }
 
+    if data.min_sample_size < 1 {
+        errors.push((
+            "min_sample_size".into(),
+            "min_sample_size must be at least 1".into(),
+        ));
+    }
     if data.min_sample_size > crate::euclid::types::MAX_SAMPLE_SIZE {
         errors.push((
             "min_sample_size".into(),
@@ -647,6 +653,12 @@ mod tests {
         let mut no_traffic = rule_and_sr_experiment();
         no_traffic.variant_split_pct = 0;
         assert_eq!(fields(&no_traffic), vec!["variant_split_pct"]);
+
+        // The sample target is at least one payment: at zero the experiment would complete on its
+        // first outcome.
+        let mut zero = rule_and_sr_experiment();
+        zero.min_sample_size = 0;
+        assert_eq!(fields(&zero), vec!["min_sample_size"]);
 
         // The sample target bounds how many payments the experiment routes.
         let mut at_most = rule_and_sr_experiment();

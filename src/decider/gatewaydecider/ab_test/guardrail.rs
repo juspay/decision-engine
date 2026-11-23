@@ -410,13 +410,14 @@ impl TrackedPayment {
     }
 }
 
-/// A deliberate activation or deactivation starts a new observation period, so payments routed
-/// and outcomes counted before it no longer judge the experiment.
-pub async fn reset(merchant_id: &str, experiment_id: &str) {
+/// Starts a new observation period for the experiment, so payments routed and outcomes counted
+/// before it no longer judge it. Activation calls this before the experiment takes its slot, and
+/// fails when it errors, so an activated experiment never carries the previous period's counts.
+pub async fn start_period(merchant_id: &str, experiment_id: &str) -> RedisResult<()> {
     let started_ms =
         i64::try_from(time::OffsetDateTime::now_utc().unix_timestamp_nanos() / 1_000_000)
             .unwrap_or(i64::MAX);
-    if let Err(error) = get_tenant_app_state()
+    get_tenant_app_state()
         .await
         .redis_conn
         .set_counter(
@@ -425,10 +426,6 @@ pub async fn reset(merchant_id: &str, experiment_id: &str) {
             keys_ttl_secs().await,
         )
         .await
-    {
-        logger::warn!(merchant_id = %merchant_id, experiment_id = %experiment_id, error = ?error,
-            "A/B guardrail could not start a new observation period");
-    }
 }
 
 #[cfg(test)]
