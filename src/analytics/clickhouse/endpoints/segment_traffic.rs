@@ -4,7 +4,9 @@ use serde::Deserialize;
 use crate::analytics::store::SegmentTraffic;
 use crate::error::ApiError;
 
-use super::super::common::{all_decisions_filter, fetch_all, DOMAIN_TABLE};
+use super::super::common::{
+    all_decisions_filter, fetch_all, DOMAIN_TABLE, STATIC_ROUTING_APPROACH,
+};
 use super::super::filters::partition_lower_bound;
 use super::super::query::{BoundQueryBuilder, FilterClause};
 
@@ -29,11 +31,13 @@ fn norm(v: Option<String>) -> Option<String> {
 }
 
 /// Per-cluster decision volume + distinct-PSP count for a merchant since `since_ms`, grouped by
-/// (pmt, pm) plus the `active_dims` the merchant clusters on. Counts SR decisions from every
-/// decision endpoint (`/decide`, `/decide-gateway`, `/routing/hybrid`); payments decided another
-/// way are left out. Inactive dimensions are selected as
-/// a typed NULL (kept in the same column position) so they don't fragment the grouping. Derived
-/// entirely from analytics, so the decision hot path and Redis are untouched.
+/// (pmt, pm) plus the `active_dims` the merchant clusters on. Counts the decisions whose outcomes
+/// feed SR scores, from every decision endpoint (`/decide`, `/decide-gateway`, `/routing/hybrid`)
+/// and whatever decided them; a `/decide` or hybrid payment decided by its rule output alone is
+/// left out, as its outcome trains SR only when `sr_scores_from_rule_routing_enabled` is on.
+/// Inactive dimensions are selected as a typed NULL (kept in the same column position) so they
+/// don't fragment the grouping. Derived entirely from analytics, so the decision hot path and
+/// Redis are untouched.
 pub async fn load(
     client: &clickhouse::Client,
     merchant_id: &str,
@@ -67,11 +71,9 @@ pub async fn load(
     builder.add_filter(FilterClause::raw(format!("created_at_ms >= {since_ms}")));
     builder.add_filter(partition_lower_bound(since_ms));
     builder.add_filter(all_decisions_filter());
-    // Success-rate decisions only: their approaches are all `SR_…`. A payment decided by a rule,
-    // a preferred connector or the default order isn't traffic SR routed.
-    builder.add_filter(FilterClause::raw(
-        "startsWith(ifNull(routing_approach, ''), 'SR_')".to_string(),
-    ));
+    builder.add_filter(FilterClause::raw(format!(
+        "ifNull(routing_approach, '') != '{STATIC_ROUTING_APPROACH}'"
+    )));
     builder.extend_group_bys(group_bys);
 
     let rows = fetch_all::<SegmentTrafficRow>(builder.build(client)).await?;
