@@ -81,7 +81,6 @@ use serde::{Deserialize, Serialize};
 
 use super::constants::{
     default_sr_v3_latency_threshold_in_secs, GsmBasedScoringFilterEnabledMerchant, SrV3InputConfig,
-    UpdateGatewayScoreLockFlagTtl, UpdateScoreLockFeatureEnabledMerchant,
 };
 use super::utils::get_time_from_txn_created_in_mills;
 use crate::logger;
@@ -265,7 +264,7 @@ pub fn txn_failure_states() -> Vec<TxnStatus> {
 
 pub async fn check_and_send_should_update_gateway_score(
     lock_key: String,
-    lock_key_ttl: i32,
+    lock_key_ttl: i64,
     redis_comp_config: Option<RedisCompressionConfigCombined>,
 ) -> bool {
     let app_state = get_tenant_app_state().await;
@@ -274,7 +273,7 @@ pub async fn check_and_send_should_update_gateway_score(
         .setXWithOption(
             lock_key.as_str(),
             "true",
-            lock_key_ttl as i64,
+            lock_key_ttl,
             SetOptions::NX,
             redis_comp_config,
             RedisDataStruct::STRING,
@@ -397,41 +396,19 @@ async fn is_latency_threshold_enabled(merchant_id: String) -> bool {
     .await
 }
 
+/// The score lock for one kind of update to a merchant's payment on a gateway.
 pub fn update_gateway_score_lock(
     gateway_scoring_type: GatewayScoringType,
-    txn_uuid: String,
-    gateway: String,
+    merchant_id: &str,
+    txn_uuid: &str,
+    gateway: &str,
 ) -> String {
-    match gateway_scoring_type {
-        GatewayScoringType::Penalise => {
-            format!("gateway_scores_lock_PENALISE_{}_{}", txn_uuid, gateway)
-        }
-        GatewayScoringType::PenaliseSrv3 => {
-            format!("gateway_scores_lock_PENALISE_SRV3_{}_{}", txn_uuid, gateway)
-        }
-        GatewayScoringType::Reward => {
-            format!("gateway_scores_lock_REWARD_{}_{}", txn_uuid, gateway)
-        }
-    }
-}
-
-/// Whether GSM marks the update's error as one Hyperswitch retries on another connector.
-fn is_retryable_failure(api_payload: &FT::UpdateScorePayload) -> bool {
-    api_payload
-        .error_info
-        .as_ref()
-        .and_then(|error_info| {
-            crate::gsm::lookup(&crate::gsm::GsmErrorInfo {
-                connector: api_payload.gateway.clone(),
-                ..error_info.clone()
-            })
-        })
-        .is_some_and(|gsm_info| gsm_info.decision == gsm::GsmDecision::Retry.to_string())
-}
-
-/// Whether the txn is completed: a success, or a failure Hyperswitch will not retry.
-fn is_txn_completed(status: TxnStatus, retryable_failure: bool) -> bool {
-    is_transaction_success(status.clone()) || (is_transaction_failure(status) && !retryable_failure)
+    let kind = match gateway_scoring_type {
+        GatewayScoringType::Penalise => "PENALISE",
+        GatewayScoringType::PenaliseSrv3 => "PENALISE_SRV3",
+        GatewayScoringType::Reward => "REWARD",
+    };
+    format!("gateway_scores_lock_{kind}_{merchant_id}_{txn_uuid}_{gateway}")
 }
 
 /// Returns true when the GSM rule indicates the failure is user/issuer-originated
@@ -577,11 +554,7 @@ pub async fn check_and_update_gateway_score_(
         );
     }
 
-    let redis_key = format!(
-        "{}{}",
-        C::GATEWAY_SCORING_DATA,
-        api_payload.clone().payment_id
-    );
+    let redis_key = DC::scoring_data_key(&api_payload.merchant_id, &api_payload.payment_id);
     let app_state = get_tenant_app_state().await;
 
     // Attempt to fetch gateway scoring data from Redis
@@ -620,11 +593,9 @@ pub async fn check_and_update_gateway_score_(
 
             let log_message = "update_gateway_score";
             let enforce_failure = api_payload.enforce_dynamic_routing_failure.unwrap_or(false);
-            let is_txn_completed = is_txn_completed(
-                txn_detail.status.clone(),
-                is_retryable_failure(&api_payload),
-            );
 
+            // The context stays until its TTL, so a retry on another connector is still scored;
+            // the score lock keeps a repeated update from counting twice.
             // Call the function to check and update the gateway score
             check_and_update_gateway_score(
                 txn_detail,
@@ -641,19 +612,6 @@ pub async fn check_and_update_gateway_score_(
                 None,
             )
             .await;
-
-            // A completed txn's scoring context is deleted so a repeated update can't count twice.
-            if is_txn_completed {
-                if let Err(error) = app_state.redis_conn.delete_key(&redis_key).await {
-                    logger::warn!(
-                        action = "GATEWAY_SCORING_DATA_DELETE_FAILED",
-                        tag = "GATEWAY_SCORING_DATA_DELETE_FAILED",
-                        "Could not delete GatewayScoringData for payment_id={}: {:?}",
-                        api_payload.payment_id,
-                        error
-                    );
-                }
-            }
 
             // Return success response
             Ok("Success".to_string())
@@ -719,16 +677,16 @@ pub async fn check_and_update_gateway_score(
 
     let gateway_in_string = txn_detail.gateway.clone().unwrap_or_default();
 
-    // Create update score lock key
+    let merchant_id = get_m_id(txn_detail.merchantId.clone());
     let update_score_lock_key = update_gateway_score_lock(
         gateway_scoring_type.clone(),
-        txn_detail.txnUuid.clone(), // This is Maybe type in haskell and here it is not Option
-        gateway_in_string,          // Convert Option to String
+        &merchant_id,
+        &txn_detail.txnUuid,
+        &gateway_in_string,
     );
-
-    let lock_key_ttl = findByNameFromRedis(UpdateGatewayScoreLockFlagTtl.get_key())
-        .await
-        .unwrap_or(300);
+    // The lock lasts as long as the context, so a repeat is dropped for as long as it could score.
+    let lock_key_ttl =
+        crate::decider::gatewaydecider::flow_new::scoring_data_ttl_secs(&merchant_id).await;
 
     let should_compute_gw_score = check_and_send_should_update_gateway_score(
         update_score_lock_key,
@@ -737,57 +695,37 @@ pub async fn check_and_update_gateway_score(
     )
     .await;
 
-    // Check if feature is enabled for merchant
-    let feature_enabled = is_feature_enabled(
-        UpdateScoreLockFeatureEnabledMerchant.get_key(),
-        get_m_id(txn_detail.merchantId.clone()),
-        "kv_redis".to_string(),
-    )
-    .await;
-
-    // Logging and score update logic
-    if feature_enabled {
-        if should_compute_gw_score {
-            logger::debug!(
-                action = "UPDATE_GATEWAY_SCORE_LOCK",
-                tag = "UPDATE_GATEWAY_SCORE_LOCK",
-                "Updating Gateway Score in {} flow with status as {:?} and scoring type as {:?}",
-                log_message,
-                txn_detail.status,
-                gateway_scoring_type
-            );
-            update_gateway_score(
-                gateway_scoring_type.clone(),
-                txn_detail.clone(),
-                txn_card_info.clone(),
-                gateway_reference_id.clone(),
-                txn_latency.clone(),
-                analytics_route,
-                score_snapshot_flow,
-                redis_comp_config.clone(),
-            )
-            .await;
-        }
-    } else {
+    // Every merchant is locked: only the first update of a kind, per payment and gateway, scores.
+    if should_compute_gw_score {
         logger::debug!(
-            action = "GW_SCORE_LOCK_FEATURE_NOT_ENABLED",
-            tag = "GW_SCORE_LOCK_FEATURE_NOT_ENABLED",
+            action = "UPDATE_GATEWAY_SCORE_LOCK",
+            tag = "UPDATE_GATEWAY_SCORE_LOCK",
             "Updating Gateway Score in {} flow with status as {:?} and scoring type as {:?}",
             log_message,
             txn_detail.status,
             gateway_scoring_type
         );
         update_gateway_score(
-            gateway_scoring_type.clone(),
+            gateway_scoring_type,
             txn_detail,
-            txn_card_info.clone(),
-            gateway_reference_id.clone(),
-            txn_latency.clone(),
+            txn_card_info,
+            gateway_reference_id,
+            txn_latency,
             analytics_route,
             score_snapshot_flow,
             redis_comp_config,
         )
         .await;
+    } else {
+        logger::info!(
+            action = "UPDATE_GATEWAY_SCORE_DUPLICATE_SKIP",
+            tag = "UPDATE_GATEWAY_SCORE_DUPLICATE_SKIP",
+            "Skipping a repeated {:?} update in {} flow for payment_id={} gateway={}",
+            gateway_scoring_type,
+            log_message,
+            txn_detail.txnUuid,
+            gateway_in_string,
+        );
     }
 }
 
@@ -862,7 +800,7 @@ pub async fn update_gateway_score(
         true
     };
 
-    let redis_key = format!("{}{}", C::GATEWAY_SCORING_DATA, txn_detail.clone().txnUuid);
+    let redis_key = DC::scoring_data_key(&merchant_id, &txn_detail.txnUuid);
     let app_state = get_tenant_app_state().await;
 
     let redis_gateway_score_data_initial: Option<GatewayScoringData> =
@@ -1644,25 +1582,5 @@ mod preferred_connector_feedback_tests {
             assert!(is_routing_approach_in_srv3(Some(label.clone())));
             assert!(is_routing_approach_in_explore(Some(label)));
         }
-    }
-}
-
-#[cfg(test)]
-mod txn_completed_tests {
-    use super::is_txn_completed;
-    use crate::types::txn_details::types::TxnStatus;
-
-    // A success or a failure that won't be retried completes the txn.
-    #[test]
-    fn a_success_or_unretried_failure_completes_the_txn() {
-        assert!(is_txn_completed(TxnStatus::Charged, false));
-        assert!(is_txn_completed(TxnStatus::AuthorizationFailed, false));
-    }
-
-    // A retryable failure or a pending update leaves the txn open.
-    #[test]
-    fn a_retryable_failure_or_pending_does_not() {
-        assert!(!is_txn_completed(TxnStatus::AuthorizationFailed, true));
-        assert!(!is_txn_completed(TxnStatus::PendingVBV, false));
     }
 }

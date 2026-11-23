@@ -748,6 +748,11 @@ pub const PAYMENT_FLOWS_REQUIRED_FOR_GW_FILTERING: [&str; 13] = [
 
 pub const GET_CARD_BRAND_CACHE_EXPIRY: i32 = 2 * 24 * 60 * 60;
 pub const GATEWAY_SCORING_DATA: &str = "gateway_scoring_data_";
+
+/// A payment's scoring-context key, per merchant: merchants reusing a payment id never collide.
+pub fn scoring_data_key(merchant_id: &str, payment_id: &str) -> String {
+    format!("{GATEWAY_SCORING_DATA}{merchant_id}_{payment_id}")
+}
 pub const GLOBAL_LEVEL_OUTAGE_KEY_PREFIX: &str = "gw_score_global_outage";
 pub const MERCHANT_LEVEL_OUTAGE_KEY_PREFIX: &str = "gw_score_outage";
 

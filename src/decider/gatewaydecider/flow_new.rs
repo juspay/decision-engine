@@ -392,7 +392,7 @@ pub async fn load_srv3_default_bucket_size(merchant_id: &str) -> i32 {
 }
 
 /// The merchant's scoring-context TTL: its own service config, else the default, capped at the max.
-pub(super) async fn scoring_data_ttl_secs(merchant_id: &str) -> i64 {
+pub(crate) async fn scoring_data_ttl_secs(merchant_id: &str) -> i64 {
     let merchant_ttl =
         findByNameFromRedis::<i64>(service_configuration::ScoringDataTtl::name(merchant_id)).await;
     get_tenant_app_state()
@@ -404,7 +404,7 @@ pub(super) async fn scoring_data_ttl_secs(merchant_id: &str) -> i64 {
 
 /// Saves the payment's scoring context, in the compact V2 form, for `/update-gateway-score`.
 async fn write_gateway_scoring_data(txn_uuid: &str, data: &T::GatewayScoringData) {
-    let key = [C::GATEWAY_SCORING_DATA, txn_uuid].concat();
+    let key = C::scoring_data_key(&data.merchantId, txn_uuid);
     let ttl = scoring_data_ttl_secs(&data.merchantId).await;
     let compact = T::GatewayScoringDataV2::from(data.clone());
     get_tenant_app_state()
