@@ -1,6 +1,6 @@
 import { test, expect, factory } from '../../fixtures/test'
 import type { ApiClient } from '../../fixtures/api-client'
-import { abGuardrailCounts } from '../../helpers/redis'
+import { abGuardrailCounts, redisKeys, redisTtl } from '../../helpers/redis'
 import { decidedConnector } from '../../helpers/decide'
 
 /** The payment id's bucket in 0..100, as the engine assigns arms from it. */
@@ -99,6 +99,31 @@ test('payment feedback stops a breached experiment and leaves the active rule in
     await api.activateRoutingAlgorithm(merchant.id, experimentId)
     expect(await experimentActive(api, merchant.id, experimentId)).toBe(true)
     expect(await route(api, merchant.id, paymentForVariant())).toBe('adyen')
+  } finally {
+    await api.raw('POST', '/routing/deactivate', {
+      failOnStatusCode: false,
+      body: { created_by: merchant.id, routing_algorithm_id: experimentId },
+    })
+  }
+})
+
+test('every guardrail key expires, the observation period included', async ({ api, merchant }) => {
+  const experimentId = await createExperiment(api, merchant.id)
+  try {
+    await expect.poll(() => route(api, merchant.id, paymentForVariant()), { timeout: 15_000, intervals: [500] }).toBe('adyen')
+    const payment = paymentForVariant()
+    expect(await route(api, merchant.id, payment)).toBe('adyen')
+    await feedback(api, merchant.id, payment, 'adyen', 'AUTHORIZED')
+    await expect.poll(() => abGuardrailCounts(merchant.id, experimentId)).toMatchObject({ variant_txns: 1 })
+
+    // The period key, the routed set and both outcome counts: each set to the configured 30 days.
+    const keys = await redisKeys(`ab_guardrail_{${merchant.id}_${experimentId}}_*`)
+    expect(keys.some((key) => key.endsWith('_run'))).toBe(true)
+    for (const key of keys) {
+      const ttl = await redisTtl(key)
+      expect(ttl, key).toBeGreaterThan(2_592_000 - 60)
+      expect(ttl, key).toBeLessThanOrEqual(2_592_000)
+    }
   } finally {
     await api.raw('POST', '/routing/deactivate', {
       failOnStatusCode: false,

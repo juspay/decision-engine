@@ -610,23 +610,26 @@ impl RedisConnectionWrapper {
         Ok(())
     }
 
-    /// `SADD` `member` to the set at `key` and sets its TTL to `ttl` seconds, in one pipelined
-    /// round trip.
+    /// `SADD` `member` to the set at `key`, then sets the TTL of `key` and of each of `also_expire`
+    /// to `ttl` seconds, in one pipelined round trip.
     pub async fn sadd_with_ttl(
         &self,
         key: &str,
         member: &str,
         ttl: i64,
+        also_expire: &[&str],
     ) -> Result<(), errors::RedisError> {
         let pipeline = self.conn.pool.next().pipeline();
         let _: () = pipeline
             .sadd(key, member)
             .await
             .change_context(errors::RedisError::SetFailed)?;
-        let _: () = pipeline
-            .expire(key, ttl)
-            .await
-            .change_context(errors::RedisError::SetFailed)?;
+        for expiring in std::iter::once(key).chain(also_expire.iter().copied()) {
+            let _: () = pipeline
+                .expire(expiring, ttl)
+                .await
+                .change_context(errors::RedisError::SetFailed)?;
+        }
         let _: Vec<fred::types::RedisValue> = pipeline
             .all()
             .await
@@ -671,11 +674,17 @@ impl RedisConnectionWrapper {
         Ok((counts, set_counts))
     }
 
-    /// Stores `value` at `key` as a plain integer with no expiry, readable by [`Self::get_counter`].
-    pub async fn set_counter(&self, key: &str, value: i64) -> Result<(), errors::RedisError> {
+    /// Stores `value` at `key` as a plain integer expiring in `ttl` seconds, readable by
+    /// [`Self::get_counter`].
+    pub async fn set_counter(
+        &self,
+        key: &str,
+        value: i64,
+        ttl: i64,
+    ) -> Result<(), errors::RedisError> {
         self.conn
             .pool
-            .set(key, value, None, None, false)
+            .set(key, value, Some(Expiration::EX(ttl)), None, false)
             .await
             .change_context(errors::RedisError::SetFailed)
     }

@@ -10,6 +10,9 @@
 //! keys' TTL. A payment's arm is recomputed from its id. An observation period is identified by
 //! when it started, in Unix milliseconds, and a new period starts with empty sets and counts.
 //!
+//! Every key expires `[ab_test] guardrail_keys_ttl_secs` (30 days by default) after its last write,
+//! the period's own key included: each routed payment refreshes it.
+//!
 //! Why two structures:
 //!
 //! - **The routed payments are a set** because feedback has to ask about one payment: did this
@@ -37,8 +40,6 @@ const GUARDRAIL_MIN_RESOLVED_PER_ARM: u64 = 30;
 /// one-sided, about a 0.13% chance per check that an equal variant looks this far behind. Strict,
 /// because the guardrail checks again on every outcome.
 const GUARDRAIL_Z: f64 = 3.0;
-/// How long an arm's routed payments and counts are kept after their last write.
-const COUNTS_TTL_SECS: i64 = 30 * 24 * 60 * 60;
 /// How many times its sample target an experiment may route while it waits for outcomes. Past it,
 /// the experiment completes anyway: the feedback that would reach the target isn't arriving, and
 /// the routed-payment sets must stay bounded.
@@ -246,6 +247,16 @@ fn judge(
         .collect()
 }
 
+/// How long the guardrail's keys are kept after their last write: `[ab_test]
+/// guardrail_keys_ttl_secs`.
+async fn keys_ttl_secs() -> i64 {
+    get_tenant_app_state()
+        .await
+        .config
+        .ab_test
+        .guardrail_keys_ttl_secs
+}
+
 /// The experiment's current observation period: its start in Unix milliseconds, or 0 for an
 /// experiment activated before periods were recorded.
 pub async fn current_run(merchant_id: &str, experiment_id: &str) -> RedisResult<u64> {
@@ -271,10 +282,12 @@ pub async fn record_routed(
     let recorded = async {
         let run = current_run(merchant_id, experiment_id).await?;
         let keys = arm_keys(merchant_id, experiment_id, run, side);
+        // The period's key lives as long as the experiment routes payments.
+        let run_key = run_key(merchant_id, experiment_id);
         get_tenant_app_state()
             .await
             .redis_conn
-            .sadd_with_ttl(&keys.routed, payment_id, COUNTS_TTL_SECS)
+            .sadd_with_ttl(&keys.routed, payment_id, keys_ttl_secs().await, &[&run_key])
             .await
     };
     if let Err(error) = recorded.await {
@@ -345,7 +358,7 @@ impl TrackedPayment {
             vec![keys.transactions]
         };
         redis
-            .pfadd_all_with_ttl(&added, &self.payment_id, COUNTS_TTL_SECS)
+            .pfadd_all_with_ttl(&added, &self.payment_id, keys_ttl_secs().await)
             .await?;
 
         // Every arm's counts and routed payments, in one round trip.
@@ -406,7 +419,11 @@ pub async fn reset(merchant_id: &str, experiment_id: &str) {
     if let Err(error) = get_tenant_app_state()
         .await
         .redis_conn
-        .set_counter(&run_key(merchant_id, experiment_id), started_ms)
+        .set_counter(
+            &run_key(merchant_id, experiment_id),
+            started_ms,
+            keys_ttl_secs().await,
+        )
         .await
     {
         logger::warn!(merchant_id = %merchant_id, experiment_id = %experiment_id, error = ?error,

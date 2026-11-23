@@ -109,6 +109,12 @@ tenant_id = "public"
 default_ttl_secs = 1800   # 30 minutes
 max_ttl_secs = 259200     # 3 days
 
+[ab_test]
+# How long an A/B experiment's guardrail keys in Redis (its observation period, routed payments and
+# outcome counts) are kept after their last write, in seconds. Each routed payment and outcome
+# resets it, so a running experiment keeps its keys; they go 30 days after it stops getting traffic.
+guardrail_keys_ttl_secs = 2592000   # 30 days
+
 [cost_ingestion]
 # Drain webhook-enqueued jobs in this process. Off by default so only a dedicated ingest
 # deployment owns the worker; enable in dev to process pending jobs locally.

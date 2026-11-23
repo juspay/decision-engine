@@ -155,6 +155,17 @@ curl -X DELETE http://localhost:8080/admin/merchant-account/<merchant_id>/scorin
 
 Each call returns `{"merchant_id", "ttl_secs", "merchant_ttl_secs", "default_ttl_secs", "max_ttl_secs"}`, where `ttl_secs` is the TTL new contexts get. A merchant that was never created gets `404`, and a `ttl_secs` below 1 gets `400`. A change reaches every pod at once and applies to payments routed after it; contexts already in Redis keep the TTL they were written with. A context stays until its TTL, whatever the outcome, so a retry of the same `payment_id` on another connector is still scored. A repeated update is scored once: the first update of each kind (reward, SR failure, pending) for a merchant's payment on a connector takes a lock that lasts as long as the context, and later ones are skipped. Each context takes about 480 bytes of Redis memory, so 48 hours of a merchant's traffic needs about 83 MB per transaction per second, plus about 150 bytes for each lock (one or two per payment).
 
+### A/B guardrail key retention
+
+An A/B experiment's guardrail keeps its state in Redis under `ab_guardrail_{<merchant_id>_<experiment_id>}_…`: the observation period's start, each arm's routed payments, and its outcome counts. Each key expires `guardrail_keys_ttl_secs` after its last write, and every routed payment and outcome resets it, so a running experiment keeps its keys and they go once it stops getting traffic:
+
+```toml
+[ab_test]
+guardrail_keys_ttl_secs = 2592000   # 30 days
+```
+
+Override it per deployment with `DECISION_ENGINE__AB_TEST__GUARDRAIL_KEYS_TTL_SECS`. Startup fails unless it is positive. Experiment results are read from analytics, not these keys, so their expiry never removes results.
+
 ### Database
 
 MySQL and PostgreSQL use separate config sections.
