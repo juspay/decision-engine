@@ -12,6 +12,10 @@ This chart bootstraps a [Decision Engine](https://github.com/juspay/decision-eng
 - Helm 3.2.0+
 - PV provisioner support in the underlying infrastructure (if persistence is needed)
 
+## Required Secrets
+
+The chart's config ships placeholder values for the admin secret and the JWT signing key, and the deployment refuses to start on them. Set `DECISION_ENGINE__ADMIN_SECRET__SECRET` and `DECISION_ENGINE__USER_AUTH__JWT_SECRET` through `extraEnvVars` before installing.
+
 ## Installing the Chart
 
 ### Option 1: Using the Install Script (Recommended)

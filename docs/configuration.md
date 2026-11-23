@@ -203,6 +203,15 @@ secret = "test_admin"
 
 Used to authenticate the `POST /merchant-account/create` endpoint (admin bootstrap). Change this in production.
 
+### Placeholder Secrets
+
+```toml
+[server]
+allow_placeholder_secrets = true
+```
+
+Startup fails when `admin_secret.secret` or `user_auth.jwt_secret` is left at its shipped placeholder, unless this flag is on. Only `config/development.toml` and `config/docker-configuration.toml` set it — every other deployment must supply both secrets, through `DECISION_ENGINE__ADMIN_SECRET__SECRET` and `DECISION_ENGINE__USER_AUTH__JWT_SECRET` if not through the config file.
+
 ### Analytics
 
 Both Kafka and ClickHouse require `enabled = true` — without it, analytics is disabled even if the connection details are configured.

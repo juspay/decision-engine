@@ -12,6 +12,8 @@ otel_exporter_otlp_timeout = 10000 # milliseconds per export request (exporter d
 [server]
 host = "0.0.0.0"
 port = 8080
+# Local quickstart only. Override both secrets before exposing a compose stack.
+allow_placeholder_secrets = true
 
 [limit]
 request_count = 1
