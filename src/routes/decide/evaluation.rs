@@ -512,15 +512,30 @@ pub(crate) async fn evaluate(
                     "dynamic routing skipped for merchant {}: sr_routing_enabled is off or the A/B arm has no SR layer",
                     req.merchant_id
                 );
-                // Saved before responding so the payment's `/update-gateway-score` finds it.
-                if static_routing_response.is_some()
+                // Saved before responding so the payment's `/update-gateway-score` finds it. A
+                // payment the experiment routed by its rule output gets an experiment-only context
+                // instead when its outcome isn't to train SR, so the guardrail can still count it.
+                let trains_sr = static_routing_response.is_some()
                     && is_feature_enabled(
                         SR_SCORES_FROM_RULE_ROUTING_FEATURE_FLAG.to_string(),
                         req.merchant_id.clone(),
                         kvRedis(),
                     )
-                    .await
-                {
+                    .await;
+                let experiment_decided = static_routing_response
+                    .as_ref()
+                    .and_then(crate::euclid::handlers::routing_rules::preview_gateway)
+                    .and(experiment_arm.as_ref());
+                if !trains_sr {
+                    if let Some(arm) = experiment_decided {
+                        crate::decider::gatewaydecider::flow_new::store_experiment_only_context(
+                            &req.merchant_id,
+                            req.payment_id(),
+                            &arm.experiment_id,
+                        )
+                        .await;
+                    }
+                } else {
                     if let Err(err) = store_scoring_context_without_decider(
                         &req,
                         STATIC_ROUTING_APPROACH,

@@ -1172,13 +1172,15 @@ async fn track_ab_rule_decision(
         amount,
     );
     // The rule output is the decision, so the decider saves no context for this payment; this one
-    // lets the guardrail count it. A context the hybrid flow saves to train SR replaces it.
-    crate::decider::gatewaydecider::flow_new::store_experiment_only_context(
-        &payload.created_by,
-        payment_id,
-        &ab.assignment.experiment_id,
-    )
-    .await;
+    // lets the guardrail count it. `/routing/hybrid` saves its payment's context itself.
+    if ab.assignment.endpoint != ExperimentEndpoint::HybridRouting {
+        crate::decider::gatewaydecider::flow_new::store_experiment_only_context(
+            &payload.created_by,
+            payment_id,
+            &ab.assignment.experiment_id,
+        )
+        .await;
+    }
 }
 
 pub async fn routing_evaluate(
@@ -2494,7 +2496,7 @@ fn format_output(output: &Output) -> Value {
     }
 }
 
-fn preview_gateway(response: &RoutingEvaluateResponse) -> Option<String> {
+pub(crate) fn preview_gateway(response: &RoutingEvaluateResponse) -> Option<String> {
     response
         .evaluated_output
         .first()
