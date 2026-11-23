@@ -166,6 +166,10 @@ where
                     // Log the successful response
                     let latency = start_time.elapsed().as_millis() as u64;
                     let cpu_time = cpu_start.elapsed().as_millis() as u64;
+                    // Mask the payload before logging
+                    let masked_req_body = masking::masked_serialize(&payload)
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|_| "[REDACTED]".to_string());
                     logger::info!(
                         url = original_url,
                         method = "POST",
@@ -178,7 +182,7 @@ where
                         bytes_allocated = bytes_allocated.to_string(),
                         env = crate::logger::env::app_env(),
                         action = "POST",
-                        req_body = format!("{:?}", payload),
+                        req_body = masked_req_body,
                         req_headers = format!("{:?}", masking::Secret::<_>::new(&headers)),
                         res_body = res_body,
                         res_code = 200,
