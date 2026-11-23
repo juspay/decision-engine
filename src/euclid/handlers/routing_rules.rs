@@ -2182,7 +2182,7 @@ async fn stop_whole_experiment(
     Ok(())
 }
 
-/// End the experiment that routed its `max_sample_size` payments in observation period `run`, so
+/// End the experiment that routed its sample target of payments in observation period `run`, so
 /// the active rule routes every payment again. The conditional delete cannot remove a replacement
 /// experiment activated in the meantime.
 pub(crate) async fn complete_payment_experiment(
@@ -2206,7 +2206,7 @@ pub(crate) async fn complete_payment_experiment(
         &state,
         &merchant,
         experiment_id,
-        "reached its max_sample_size",
+        "reached its sample target",
     )
     .await
 }
@@ -2232,9 +2232,9 @@ async fn ensure_routing_algorithm_inactive(
     Ok(())
 }
 
-/// Whether an edit changes how an experiment routes payments. The sample target, the sample cap
-/// and the guardrail only affect how its results are judged and when it ends, so changing only
-/// those is not a routing change.
+/// Whether an edit changes how an experiment routes payments. The sample target and guardrail only
+/// affect how its results are judged and when it ends, so changing only those is not a routing
+/// change.
 fn changes_experiment_routing(
     existing: &StaticRoutingAlgorithm,
     updated: &StaticRoutingAlgorithm,
@@ -2245,7 +2245,6 @@ fn changes_experiment_routing(
                 StaticRoutingAlgorithm::AbTest(Box::new(crate::euclid::types::ABTestData {
                     min_sample_size: 0,
                     guardrail_threshold_pp: 0.0,
-                    max_sample_size: None,
                     // Display names and guardrail stops don't change how a payment is assigned.
                     variants: data.variants.as_ref().map(|variants| {
                         variants

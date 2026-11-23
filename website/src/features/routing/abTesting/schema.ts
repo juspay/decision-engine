@@ -1,5 +1,8 @@
 import { ABTestAlgorithmData } from '../../../types/api'
 import { ABTestFormValues, MAX_VARIANT_PCT, MIN_VARIANT_PCT } from './types'
+
+/** The largest sample target the engine accepts, which bounds the payments an experiment routes. */
+const MAX_SAMPLE_SIZE = 500_000
 import { toABTestCreatePayload } from './payload'
 import { MAX_TOTAL_VARIANT_PCT, MAX_VARIANTS, resolvedControl, resolvedVariants, routesDifferently, scopedEndpoints } from './arms'
 
@@ -10,6 +13,8 @@ export function validateEvaluationSettings(
   if (!values.name.trim()) return 'Enter an experiment name'
   if (values.minSampleSize < 100)
     return 'Minimum sample size must be at least 100 transactions'
+  if (values.minSampleSize > MAX_SAMPLE_SIZE)
+    return `Minimum sample size can be at most ${MAX_SAMPLE_SIZE.toLocaleString()} transactions`
   if (values.guardrailThresholdPp <= 0 || values.guardrailThresholdPp > 20)
     return 'Guardrail threshold must be between 0.1 and 20 percentage points'
   return null

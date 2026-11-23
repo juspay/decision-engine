@@ -1,5 +1,5 @@
 //! Stops a variant whose auth rate falls too far below control, and completes an experiment once
-//! it has routed its `max_sample_size` payments. All state is in Redis, shared by every instance,
+//! it has routed its sample target (`min_sample_size`) of payments. All state is in Redis, shared by every instance,
 //! per arm and observation period:
 //!
 //! - a set of the payments the experiment routed to the arm, added to when it routes them;
@@ -33,7 +33,7 @@ pub enum GuardrailAction {
         variant_id: String,
         run: u64,
     },
-    /// The experiment routed its `max_sample_size` payments: end it.
+    /// The experiment routed its sample target of payments: end it.
     Complete { experiment_id: String, run: u64 },
 }
 
@@ -116,7 +116,7 @@ fn breached(control: ArmCounts, variant: ArmCounts, threshold_pp: f64, min_resol
     (rate(control) - rate(variant)) * 100.0 > threshold_pp
 }
 
-/// What the experiment's counts require: completion once `routed` reaches its `max_sample_size`,
+/// What the experiment's counts require: completion once `routed` reaches its sample target,
 /// otherwise a stop for each of `variants` that breached against `control`.
 fn judge(
     data: &ABTestData,
@@ -126,7 +126,7 @@ fn judge(
     control: ArmCounts,
     variants: &[(String, ArmCounts)],
 ) -> Vec<GuardrailAction> {
-    if routed >= u64::from(data.max_sample_size()) {
+    if routed >= u64::from(data.min_sample_size) {
         return vec![GuardrailAction::Complete {
             experiment_id: experiment_id.to_owned(),
             run,
@@ -283,8 +283,8 @@ impl TrackedPayment {
                 }
                 GuardrailAction::Complete { .. } => {
                     logger::info!(merchant_id = %merchant_id, experiment_id = %experiment_id,
-                        routed, max_sample_size = self.data.max_sample_size(),
-                        "A/B experiment reached its sample cap; completing it");
+                        routed, sample_target = self.data.min_sample_size,
+                        "A/B experiment reached its sample target; completing it");
                 }
             }
         }
@@ -364,41 +364,27 @@ mod tests {
     }
 
     #[test]
-    fn judging_stops_breached_variants_until_the_cap_completes_the_experiment() {
-        let mut config = data();
-        config.max_sample_size = Some(1_000);
+    fn judging_stops_breached_variants_until_the_sample_target_completes_the_experiment() {
+        // A target of 200 judges a breach from 20 resolved payments on.
+        let config = data();
         let variants = [
             ("failing".to_string(), counts(10, 5)),
             ("healthy".to_string(), counts(10, 8)),
         ];
         assert_eq!(
-            judge(&config, "exp1", 7, 999, counts(10, 8), &variants),
+            judge(&config, "exp1", 7, 199, counts(10, 8), &variants),
             vec![GuardrailAction::StopVariant {
                 experiment_id: "exp1".into(),
                 variant_id: "failing".into(),
                 run: 7,
             }]
         );
-        // At the cap the experiment completes, which ends every variant.
+        // Having routed its target, the experiment completes, which ends every variant.
         assert_eq!(
-            judge(&config, "exp1", 7, 1_000, counts(10, 8), &variants),
+            judge(&config, "exp1", 7, 200, counts(10, 8), &variants),
             vec![GuardrailAction::Complete {
                 experiment_id: "exp1".into(),
                 run: 7,
-            }]
-        );
-    }
-
-    #[test]
-    fn the_cap_defaults_to_500k_routed_payments() {
-        let config = data();
-        assert_eq!(config.max_sample_size(), 500_000);
-        assert!(judge(&config, "exp1", 1, 499_999, counts(0, 0), &[]).is_empty());
-        assert_eq!(
-            judge(&config, "exp1", 1, 500_000, counts(0, 0), &[]),
-            vec![GuardrailAction::Complete {
-                experiment_id: "exp1".into(),
-                run: 1,
             }]
         );
     }
@@ -433,7 +419,7 @@ mod tests {
             .find(|id| super::super::assign_arm(id, &variants) == ArmSide::Variant("v1".into()))
             .unwrap();
         assert_eq!(tracked_side(&config, &stopped_payment), None);
-        // Its routed payments still count toward the cap.
+        // Its routed payments still count toward the sample target.
         assert_eq!(
             all_arms(&config),
             vec![ArmSide::Control, ArmSide::Variant("v1".into())]

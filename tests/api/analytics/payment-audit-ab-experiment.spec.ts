@@ -99,7 +99,7 @@ test.describe('Payment audit A/B experiment assignment (API)', () => {
           variant: { rule_algorithm_id: razorpayRule, sr: {} },
           endpoints: ['hybrid_routing'],
           variant_split_pct: 49,
-          min_sample_size: 1,
+          min_sample_size: 1000,
           guardrail_threshold_pp: 100,
         },
       },

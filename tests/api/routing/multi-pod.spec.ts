@@ -87,7 +87,7 @@ async function createExperiment(
   api: ApiClient,
   merchantId: string,
   minSampleSize: number,
-  extra: { endpoints?: string[]; max_sample_size?: number } = {},
+  extra: { endpoints?: string[] } = {},
 ): Promise<string> {
   const baseline = await api.createRoutingAlgorithm(factory.singleRoutingPayload(merchantId, { gateway: 'stripe' }))
   const control = await api.createRoutingAlgorithm(factory.singleRoutingPayload(merchantId, { gateway: 'checkout' }))
@@ -351,11 +351,11 @@ test.describe('A/B guardrail outcomes and completion across instances (API)', ()
     }
   })
 
-  test('an experiment completes once it has routed its max_sample_size payments', async ({ api, merchant }) => {
+  test('an experiment completes once it has routed its sample target', async ({ api, merchant }) => {
     const m = merchant.id
-    const experimentId = await createExperiment(api, m, 2, { max_sample_size: 3 })
+    const experimentId = await createExperiment(api, m, 3)
     try {
-      // Activation routes a variant payment on each instance; one more reaches the cap.
+      // Activation routes a variant payment on each instance; one more reaches the target of 3.
       await activate(api, POD_A, m, experimentId)
       const control = controlPayment()
       expect(await route(api, POD_B, m, control)).toBe('checkout')

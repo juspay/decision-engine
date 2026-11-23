@@ -272,13 +272,12 @@ pub fn validate(data: &ABTestData) -> Vec<(String, String)> {
         ));
     }
 
-    if data.max_sample_size() < data.min_sample_size {
+    if data.min_sample_size > crate::euclid::types::MAX_SAMPLE_SIZE {
         errors.push((
-            "max_sample_size".into(),
+            "min_sample_size".into(),
             format!(
-                "max_sample_size ({}) must be at least min_sample_size ({})",
-                data.max_sample_size(),
-                data.min_sample_size
+                "min_sample_size can be at most {}",
+                crate::euclid::types::MAX_SAMPLE_SIZE
             ),
         ));
     }
@@ -430,7 +429,6 @@ mod tests {
             variant_split_pct: 10,
             min_sample_size: 1000,
             guardrail_threshold_pp: 3.0,
-            max_sample_size: None,
             variant_sr_config: None,
             control_sr_config: None,
         }
@@ -649,6 +647,14 @@ mod tests {
         let mut no_traffic = rule_and_sr_experiment();
         no_traffic.variant_split_pct = 0;
         assert_eq!(fields(&no_traffic), vec!["variant_split_pct"]);
+
+        // The sample target bounds how many payments the experiment routes.
+        let mut at_most = rule_and_sr_experiment();
+        at_most.min_sample_size = crate::euclid::types::MAX_SAMPLE_SIZE;
+        assert!(validate(&at_most).is_empty());
+        let mut too_large = rule_and_sr_experiment();
+        too_large.min_sample_size = crate::euclid::types::MAX_SAMPLE_SIZE + 1;
+        assert_eq!(fields(&too_large), vec!["min_sample_size"]);
 
         assert!(validate(&rule_and_sr_experiment()).is_empty());
     }
