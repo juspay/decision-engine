@@ -462,16 +462,29 @@ pub async fn check_and_update_gateway_score_(
     api_payload: FT::UpdateScorePayload,
 ) -> Result<String, T::ErrorResponse> {
     // Before any early return, because the guardrail needs only the payment's outcome and must
-    // not be gated on the GSM scoring filter or on GatewayScoringData still being cached.
+    // not be gated on the GSM scoring filter or on GatewayScoringData still being cached. It dates
+    // the payment from its scoring context, so for a payment it tracks the context is read here
+    // once, for both.
     let is_success = is_transaction_success(api_payload.status.clone());
-    if is_success || is_transaction_failure(api_payload.status.clone()) {
-        let experiments_to_stop =
-            crate::decider::gatewaydecider::ab_test::guardrail::record_outcome(
-                &api_payload.merchant_id,
-                &api_payload.payment_id,
-                is_success,
-            )
-            .await;
+    let tracked = if is_success || is_transaction_failure(api_payload.status.clone()) {
+        crate::decider::gatewaydecider::ab_test::guardrail::track(
+            &api_payload.merchant_id,
+            &api_payload.payment_id,
+        )
+        .await
+    } else {
+        None
+    };
+    let mut prefetched_context = None;
+    if let Some(tracked) = tracked {
+        let context = read_scoring_context(&api_payload.merchant_id, &api_payload.payment_id).await;
+        let routed_at = context
+            .1
+            .as_ref()
+            .ok()
+            .filter(|data| data.merchantId == api_payload.merchant_id)
+            .map(|data| data.dateCreated);
+        let experiments_to_stop = tracked.record_outcome(routed_at, is_success).await;
         for breached in experiments_to_stop {
             if let Err(error) =
                 crate::euclid::handlers::routing_rules::stop_breached_payment_experiment(
@@ -488,6 +501,7 @@ pub async fn check_and_update_gateway_score_(
                     "Failed to stop breached A/B variant; later payment feedback will retry");
             }
         }
+        prefetched_context = Some(context);
     }
 
     // GSM-based scoring filter: skip penalization for failures where the gateway
@@ -555,18 +569,11 @@ pub async fn check_and_update_gateway_score_(
         );
     }
 
-    let redis_key = scoring_data_redis_key(&api_payload.merchant_id, &api_payload.payment_id).await;
+    let (redis_key, m_gateway_scoring_data) = match prefetched_context {
+        Some(context) => context,
+        None => read_scoring_context(&api_payload.merchant_id, &api_payload.payment_id).await,
+    };
     let app_state = get_tenant_app_state().await;
-
-    // Attempt to fetch gateway scoring data from Redis
-    let m_gateway_scoring_data: Result<
-        GatewayScoringData,
-        error_stack::Report<redis_interface::errors::RedisError>,
-    > = app_state
-        .redis_conn
-        .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
-        .await
-        .map(GatewayScoringData::from);
 
     match m_gateway_scoring_data {
         Ok(gateway_scoring_data) => {
@@ -662,18 +669,22 @@ pub async fn check_and_update_gateway_score_(
     }
 }
 
-/// When the payment was routed, from its scoring context; `None` when it has no context.
-pub(crate) async fn routed_at(merchant_id: &str, payment_id: &str) -> Option<time::OffsetDateTime> {
-    let key = scoring_data_redis_key(merchant_id, payment_id).await;
-    get_tenant_app_state()
+/// A payment's scoring-context key, and the context read from it.
+async fn read_scoring_context(
+    merchant_id: &str,
+    payment_id: &str,
+) -> (
+    String,
+    Result<GatewayScoringData, error_stack::Report<redis_interface::errors::RedisError>>,
+) {
+    let redis_key = scoring_data_redis_key(merchant_id, payment_id).await;
+    let context = get_tenant_app_state()
         .await
         .redis_conn
-        .get_key::<StoredGatewayScoringData>(&key, "GatewayScoringData")
+        .get_key::<StoredGatewayScoringData>(&redis_key, "GatewayScoringData")
         .await
-        .ok()
-        .map(GatewayScoringData::from)
-        .filter(|data| data.merchantId == merchant_id)
-        .map(|data| data.dateCreated)
+        .map(GatewayScoringData::from);
+    (redis_key, context)
 }
 
 /// The key to read a payment's scoring context from: the merchant-keyed one, or the payment-id-only

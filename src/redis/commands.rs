@@ -583,20 +583,46 @@ impl RedisConnectionWrapper {
             .change_context(errors::RedisError::IncrementHashFieldFailed)
     }
 
-    /// `PFADD` `member` to the HyperLogLog at `key`, then sets its TTL to `ttl` seconds.
-    pub async fn pfadd_with_ttl(
+    /// `PFADD` `member` to each HyperLogLog in `keys` and sets each one's TTL to `ttl` seconds, in
+    /// one pipelined round trip.
+    pub async fn pfadd_all_with_ttl(
         &self,
-        key: &str,
+        keys: &[String],
         member: &str,
         ttl: i64,
     ) -> Result<(), errors::RedisError> {
-        let _: i64 = self
-            .conn
-            .pool
-            .pfadd(key, member)
+        let pipeline = self.conn.pool.next().pipeline();
+        for key in keys {
+            let _: () = pipeline
+                .pfadd(key.as_str(), member)
+                .await
+                .change_context(errors::RedisError::SetFailed)?;
+            let _: () = pipeline
+                .expire(key.as_str(), ttl)
+                .await
+                .change_context(errors::RedisError::SetFailed)?;
+        }
+        let _: Vec<fred::types::RedisValue> = pipeline
+            .all()
             .await
             .change_context(errors::RedisError::SetFailed)?;
-        self.expire_key(key, ttl).await
+        Ok(())
+    }
+
+    /// `PFCOUNT` of each HyperLogLog in `keys`, in order and in one pipelined round trip: the
+    /// approximate number of distinct members added to each, 0 for a key that doesn't exist.
+    pub async fn pfcount_each(&self, keys: &[String]) -> Result<Vec<u64>, errors::RedisError> {
+        let pipeline = self.conn.pool.next().pipeline();
+        for key in keys {
+            let _: () = pipeline
+                .pfcount(key.as_str())
+                .await
+                .change_context(errors::RedisError::GetFailed)?;
+        }
+        pipeline
+            .all()
+            .await
+            .change_context(errors::RedisError::GetFailed)
     }
 
     /// Stores `value` at `key` as a plain integer with no expiry, readable by [`Self::get_counter`].
