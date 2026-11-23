@@ -76,17 +76,17 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 fn log_startup_configuration(global_config: &open_router::config::GlobalConfig) {
     logger::info!("Decision engine started [{:?}]", global_config);
 
-    // Both checks below warn by design. These are placeholders the merchant overrides.
+    // Reachable only with allow_placeholder_secrets on, since validate() rejects both otherwise.
     if global_config.admin_secret.is_default() {
         logger::warn!(
-            "SECURITY WARNING: admin_secret is set to the default value. \
-             Set `admin_secret.secret` in your config to a strong secret before exposing this server."
+            "SECURITY WARNING: admin_secret is the built-in placeholder and \
+             `server.allow_placeholder_secrets` is on."
         );
     }
-    if global_config.user_auth.jwt_secret.peek() == "change_me_in_production_use_32chars!!" {
+    if global_config.user_auth.is_default_jwt_secret() {
         logger::warn!(
-            "SECURITY WARNING: user_auth.jwt_secret is set to the default value. \
-             Set it to a strong random secret in production."
+            "SECURITY WARNING: user_auth.jwt_secret is the built-in placeholder and \
+             `server.allow_placeholder_secrets` is on."
         );
     }
 

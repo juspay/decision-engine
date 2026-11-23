@@ -7,9 +7,8 @@
 //!
 //! - A per-merchant session (JWT or api key) is authorized for its own merchant and that merchant's
 //!   sub-merchants. A request that names any other merchant is refused with `403`.
-//! - A service credential (the admin secret, or the `api_key_auth_enabled = false` compat lane)
-//!   carries no session and acts on behalf of whichever merchant the request names. This is how
-//!   Hyperswitch calls Decision Engine.
+//! - A service credential (the admin secret) carries no session and acts on behalf of whichever
+//!   merchant the request names. This is how Hyperswitch calls Decision Engine.
 //!
 //! # Adding an endpoint
 //!

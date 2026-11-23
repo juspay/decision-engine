@@ -14,6 +14,8 @@ host = "127.0.0.1"
 port = 8080
 shutdown_drain_delay = 5 # seconds serving with readiness down after SIGTERM/SIGINT
 shutdown_timeout = 20    # seconds in-flight requests get to finish once the listener closes
+# Local runs only. Real deployments pin it false by env and supply both secrets.
+allow_placeholder_secrets = true
 
 [limit]
 request_count = 1
@@ -1113,8 +1115,6 @@ super_admin_emails = []
 
 [admin_secret]
 secret = "test_admin"
-
-api_key_auth_enabled = true
 
 [email]
 sender_email = "noreply@example.com"

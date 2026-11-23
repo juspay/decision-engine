@@ -3,11 +3,10 @@ import { test, expect, factory } from '../../fixtures/test'
 /**
  * Every protected route must actually be protected.
  *
- * SELF-VALIDATING BY DESIGN: the `authenticate` middleware short-circuits and lets requests through
- * unauthenticated when `api_key_auth_enabled` is false (src/middleware.rs). If that ever gets flipped
- * off in the environment under test, the first test here fails loudly rather than the whole suite
- * silently passing for the wrong reason. Treat a failure in 'rejects a request with no credentials' as
- * "auth is disabled", not as "one endpoint regressed".
+ * The `authenticate` middleware (src/middleware.rs) admits only an `x-api-key`, a bearer JWT, or the
+ * deployment's admin secret, and rejects everything else with 401. A failure in 'rejects a request
+ * with no credentials' across all routes at once means auth stopped being enforced, not that one
+ * endpoint regressed.
  *
  * Middleware errors are plain text, not the JSON error envelope the handlers use — so these assert on
  * status only.

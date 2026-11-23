@@ -232,13 +232,14 @@ secret = "test_admin"
 
 Used to authenticate the `POST /merchant-account/create` endpoint (admin bootstrap). Change this in production.
 
-### API Key Auth
+### Placeholder Secrets
 
 ```toml
-api_key_auth_enabled = true
+[server]
+allow_placeholder_secrets = true
 ```
 
-Top-level flag. When `true`, protected routes accept `x-api-key` in addition to JWT bearer tokens. When `false`, the auth middleware allows **all requests through without authentication** — this effectively disables auth for every protected route. Do not set this to `false` in any environment that should enforce auth.
+Startup fails when `admin_secret.secret` or `user_auth.jwt_secret` is left at its shipped placeholder, unless this flag is on. Only `config/development.toml` and `config/docker-configuration.toml` set it — every other deployment must supply both secrets, through `DECISION_ENGINE__ADMIN_SECRET__SECRET` and `DECISION_ENGINE__USER_AUTH__JWT_SECRET` if not through the config file.
 
 ### Analytics
 

@@ -49,8 +49,6 @@ pub struct GlobalConfig {
     #[serde(default)]
     pub debit_routing_config: network_decider::types::DebitRoutingConfig,
     pub compression_filepath: Option<CompressionFilepath>,
-    #[serde(default = "default_true")]
-    pub api_key_auth_enabled: bool,
     pub user_auth: UserAuthConfig,
     pub admin_secret: AdminSecretConfig,
     #[serde(default)]
@@ -258,9 +256,9 @@ fn default_hs_redirect_jwt_expiry() -> u64 {
     1200 // 20 minutes
 }
 
-// Placeholder for local and docker runs. The merchant overrides it when self-hosting, so startup
-// warns rather than refusing to boot. Accepted risk, not a finding.
+// Placeholders for local and docker runs. Booting with either needs allow_placeholder_secrets.
 const DEFAULT_ADMIN_SECRET: &str = "test_admin";
+const DEFAULT_JWT_SECRET: &str = "change_me_in_production_use_32chars!!";
 
 #[derive(Clone, serde::Deserialize, Debug)]
 pub struct AdminSecretConfig {
@@ -282,12 +280,17 @@ impl AdminSecretConfig {
     }
 }
 
+impl UserAuthConfig {
+    pub fn is_default_jwt_secret(&self) -> bool {
+        self.jwt_secret.peek() == DEFAULT_JWT_SECRET
+    }
+}
+
 impl Default for UserAuthConfig {
     fn default() -> Self {
         Self {
-            // Same placeholder contract as DEFAULT_ADMIN_SECRET above. Accepted risk, not a
-            // finding.
-            jwt_secret: "change_me_in_production_use_32chars!!".to_string().into(),
+            // Same placeholder contract as DEFAULT_ADMIN_SECRET.
+            jwt_secret: DEFAULT_JWT_SECRET.to_string().into(),
             jwt_expiry_seconds: default_jwt_expiry(),
             hs_redirect_jwt_expiry_seconds: default_hs_redirect_jwt_expiry(),
             email_verification_enabled: false,
@@ -517,6 +520,7 @@ impl Default for VolumeCommitmentConfig {
                 shutdown_timeout: Server::default_shutdown_timeout(),
                 shutdown_drain_delay: Server::default_shutdown_drain_delay(),
                 routing_request_timeout_ms: Server::default_routing_request_timeout_ms(),
+                allow_placeholder_secrets: false,
             },
             main_server_url: "http://127.0.0.1:8080".to_string(),
             tick_secs: 30,
@@ -785,6 +789,8 @@ pub struct Server {
     /// it is answered with `504`. Bounds how long a slow Redis or database holds a connection.
     #[serde(default = "Server::default_routing_request_timeout_ms")]
     pub routing_request_timeout_ms: u64,
+    #[serde(default)]
+    pub allow_placeholder_secrets: bool,
 }
 
 impl Server {
@@ -1289,6 +1295,26 @@ impl GlobalConfig {
 
     pub fn validate(&self) -> error_stack::Result<(), error::ConfigurationError> {
         self.secrets_management.validate()?;
+        if !self.server.allow_placeholder_secrets {
+            if self.admin_secret.is_default() {
+                return Err(error_stack::report!(
+                    error::ConfigurationError::InvalidConfigurationValueError(
+                        "admin_secret.secret is the built-in placeholder. Set a strong secret, or \
+                         set server.allow_placeholder_secrets = true for local runs"
+                            .to_string(),
+                    )
+                ));
+            }
+            if self.user_auth.is_default_jwt_secret() {
+                return Err(error_stack::report!(
+                    error::ConfigurationError::InvalidConfigurationValueError(
+                        "user_auth.jwt_secret is the built-in placeholder. Set a strong random \
+                         secret, or set server.allow_placeholder_secrets = true for local runs"
+                            .to_string(),
+                    )
+                ));
+            }
+        }
         if self.analytics.capture.details_max_bytes == 0 {
             return Err(error_stack::report!(
                 error::ConfigurationError::InvalidConfigurationValueError(
@@ -1342,6 +1368,27 @@ mod tests {
     struct TestDeser {
         #[serde(default)]
         pub secrets_management: SecretsManagementConfig,
+    }
+
+    // Only the dev config opts into the placeholders.
+    #[test]
+    fn test_placeholder_secrets_gate_startup() {
+        let mut config = GlobalConfig::new().expect("failed to parse the development config");
+        assert!(config.server.allow_placeholder_secrets);
+        assert!(config.admin_secret.is_default());
+        assert!(config.user_auth.is_default_jwt_secret());
+        config.validate().expect("the dev config should validate");
+
+        config.server.allow_placeholder_secrets = false;
+        assert!(config.validate().is_err());
+
+        config.admin_secret.secret = "a-real-admin-secret".to_string().into();
+        assert!(config.validate().is_err());
+
+        config.user_auth.jwt_secret = "a-real-jwt-secret-of-32-chars-min".to_string().into();
+        config
+            .validate()
+            .expect("real secrets should validate without the opt-out");
     }
 
     #[test]
