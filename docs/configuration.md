@@ -203,14 +203,6 @@ secret = "test_admin"
 
 Used to authenticate the `POST /merchant-account/create` endpoint (admin bootstrap). Change this in production.
 
-### API Key Auth
-
-```toml
-api_key_auth_enabled = true
-```
-
-Top-level flag. When `true`, protected routes accept `x-api-key` in addition to JWT bearer tokens. When `false`, the auth middleware allows **all requests through without authentication** — this effectively disables auth for every protected route. Do not set this to `false` in any environment that should enforce auth.
-
 ### Analytics
 
 Both Kafka and ClickHouse require `enabled = true` — without it, analytics is disabled even if the connection details are configured.

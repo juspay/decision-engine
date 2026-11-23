@@ -127,16 +127,15 @@ fn outcome(status: StatusCode) -> &'static str {
 /// [`crate::custom_extractors::MerchantFromPath`], from the body with
 /// [`crate::custom_extractors::ScopedJson`] — which per-merchant storage requires.
 ///
-/// Service credentials (the shared admin secret, and the `api_key_auth_enabled = false`
-/// backward-compat lane) insert *no* `AuthContext`, so they fall through unrestricted exactly as
-/// before — they are trusted callers that scope requests off the path/body themselves.
+/// The shared admin secret inserts *no* `AuthContext`, so it falls through unrestricted — a
+/// trusted caller that scopes requests off the path/body itself.
 pub async fn enforce_merchant_scope(
     req: Request<Body>,
     next: Next,
 ) -> Result<Response<Body>, ContainerError<error::ApiError>> {
     use axum::extract::{FromRequestParts, RawPathParams};
 
-    // No context ⇒ admin-secret / compat lane ⇒ trusted service caller, nothing to scope.
+    // No context ⇒ admin-secret lane ⇒ trusted service caller, nothing to scope.
     let Some(context) = req.extensions().get::<auth::AuthContext>().cloned() else {
         return Ok(next.run(req).await);
     };
@@ -252,7 +251,7 @@ pub async fn middleware(
 /// - `x-api-key` header (service-to-service / programmatic access)
 /// - `Authorization: Bearer <jwt>` header (dashboard / user sessions)
 ///
-/// When `api_key_auth_enabled` is false in config, all requests pass through (backward compat mode).
+/// A request presenting neither is rejected with `401`.
 pub async fn authenticate(
     req: Request<Body>,
     next: Next,
@@ -319,10 +318,9 @@ pub async fn authenticate(
     }
 
     // Accept the shared admin secret (service-to-service callers such as Hyperswitch, which
-    // has no merchant api-key or dashboard session). Checked before the api-key compat mode so
-    // a wrong secret is always rejected. No AuthContext is inserted, only `AdminCaller` — like
-    // compat mode, these callers scope requests off the body/path, and extractors that require an
-    // AuthContext (e.g. analytics) keep rejecting them.
+    // has no merchant api-key or dashboard session). No AuthContext is inserted, only
+    // `AdminCaller` — these callers scope requests off the body/path, and extractors that require
+    // an AuthContext (e.g. analytics) keep rejecting them.
     if req.headers().contains_key(auth::ADMIN_SECRET_HEADER) {
         if auth::presents_admin_secret(
             req.headers(),
@@ -335,12 +333,6 @@ pub async fn authenticate(
             StatusCode::UNAUTHORIZED,
             "Invalid admin secret",
         ));
-    }
-
-    // Backward-compat lane for deployments predating API keys. Off in every shipped config, and
-    // `default_true` means a missing or misspelled key leaves auth on, so a typo cannot open it.
-    if !app_state.global_config.api_key_auth_enabled {
-        return Ok(next.run(req).await);
     }
 
     let api_key = match req.headers().get("x-api-key").and_then(|v| v.to_str().ok()) {

@@ -83,8 +83,6 @@ url = "http://localhost:8123"
 database = "default"
 user = "default"
 
-api_key_auth_enabled = true
-
 [user_auth]
 jwt_secret = "change_me_in_production_use_32chars!!"
 jwt_expiry_seconds = 86400

@@ -31,20 +31,7 @@ echo "[ Health ]"
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" "$BASE_URL/health/ready")
 check "GET /health/ready → 200" "200" "$STATUS"
 
-# ── 2. Backward compat (no auth header, no key) ────────
-echo ""
-echo "[ Backward-compat mode — expect 401 only when api_key_auth_enabled=true ]"
-STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
-    -H "Content-Type: application/json" -d '{}')
-if [ "$STATUS" = "401" ]; then
-    echo "  INFO  Auth is ENFORCED (api_key_auth_enabled=true) — skipping backward-compat check"
-    AUTH_ENFORCED=true
-else
-    check "No x-api-key passes through (backward compat)" "422" "$STATUS"
-    AUTH_ENFORCED=false
-fi
-
-# ── 3. Merchant create → returns api_key ───────────────
+# ── 2. Merchant create → returns api_key ───────────────
 echo ""
 echo "[ Merchant create ]"
 RESPONSE=$(curl -s -X POST "$BASE_URL/merchant-account/create" \
@@ -65,29 +52,27 @@ else
     exit 1
 fi
 
-# ── 4. Auth enforcement checks ─────────────────────────
-if [ "$AUTH_ENFORCED" = "true" ]; then
-    echo ""
-    echo "[ Auth enforcement ]"
+# ── 3. Auth enforcement checks ─────────────────────────
+echo ""
+echo "[ Auth enforcement ]"
 
-    STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
-        -H "Content-Type: application/json" -d '{}')
-    check "No key → 401" "401" "$STATUS"
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
+    -H "Content-Type: application/json" -d '{}')
+check "No key → 401" "401" "$STATUS"
 
-    STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
-        -H "Content-Type: application/json" \
-        -H "x-api-key: DE_wrongkeydeadbeef00000000000000000000000000000000000000000000000" \
-        -d '{}')
-    check "Wrong key → 401" "401" "$STATUS"
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
+    -H "Content-Type: application/json" \
+    -H "x-api-key: DE_wrongkeydeadbeef00000000000000000000000000000000000000000000000" \
+    -d '{}')
+check "Wrong key → 401" "401" "$STATUS"
 
-    STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
-        -H "Content-Type: application/json" \
-        -H "x-api-key: $API_KEY" \
-        -d '{}')
-    check "Valid key passes auth (422 = body error, not 401)" "422" "$STATUS"
-fi
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X POST "$BASE_URL/rule/get" \
+    -H "Content-Type: application/json" \
+    -H "x-api-key: $API_KEY" \
+    -d '{}')
+check "Valid key passes auth (422 = body error, not 401)" "422" "$STATUS"
 
-# ── 5. Create additional key ───────────────────────────
+# ── 4. Create additional key ───────────────────────────
 echo ""
 echo "[ Create additional API key ]"
 CREATE_RESPONSE=$(curl -s -X POST "$BASE_URL/api-key/create" \
@@ -107,7 +92,7 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# ── 6. List keys ───────────────────────────────────────
+# ── 5. List keys ───────────────────────────────────────
 echo ""
 echo "[ List API keys ]"
 LIST_RESPONSE=$(curl -s "$BASE_URL/api-key/list/$MERCHANT_ID" \
@@ -121,7 +106,7 @@ else
     FAIL=$((FAIL + 1))
 fi
 
-# ── 7. New key works ───────────────────────────────────
+# ── 6. New key works ───────────────────────────────────
 if [ -n "$NEW_KEY" ]; then
     echo ""
     echo "[ New key is usable ]"
@@ -132,7 +117,7 @@ if [ -n "$NEW_KEY" ]; then
     check "Newly created key passes auth (422, not 401)" "422" "$STATUS"
 fi
 
-# ── 8. Revoke key ──────────────────────────────────────
+# ── 7. Revoke key ──────────────────────────────────────
 if [ -n "$NEW_KEY_ID" ]; then
     echo ""
     echo "[ Revoke API key ]"
@@ -171,7 +156,7 @@ if [ -n "$NEW_KEY_ID" ]; then
     fi
 fi
 
-# ── 11. Redis cache hit ────────────────────────────────
+# ── 10. Redis cache hit ────────────────────────────────
 echo ""
 echo "[ Redis cache hit ]"
 for i in 1 2; do
