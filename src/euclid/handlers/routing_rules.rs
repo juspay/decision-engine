@@ -1016,14 +1016,10 @@ async fn evaluate_algorithm_data(
             }
 
             StaticRoutingAlgorithm::AbTest(ab_data) => {
-                use crate::decider::gatewaydecider::ab_test::{guardrail, outcome, preview};
+                use crate::decider::gatewaydecider::ab_test::{arms, outcome, preview};
 
                 let payment_id = payload.payment_id.as_deref().unwrap_or("");
-                let plan = if crate::decider::gatewaydecider::ab_test::config::is_enabled(&payload.created_by).await && !payment_id.is_empty() {
-                    guardrail::plan(&payload.created_by, &algorithm.id, ab_data, experiment_endpoint, payment_id)
-                } else {
-                    crate::decider::gatewaydecider::ab_test::arms::plan(ab_data, experiment_endpoint, payment_id)
-                };
+                let plan = arms::plan(ab_data, experiment_endpoint, payment_id);
                 logger::debug!(
                     "A/B test routing evaluate: payment_id={:?} endpoint={} arm={} in_experiment={} rule={:?}",
                     payload.payment_id,
@@ -1943,12 +1939,14 @@ pub async fn activate_routing_rule(
                     crate::decider::gatewaydecider::ab_test::guardrail::reset(
                         merchant.as_str(),
                         previous,
-                    );
+                    )
+                    .await;
                 }
                 crate::decider::gatewaydecider::ab_test::guardrail::reset(
                     merchant.as_str(),
                     &algorithm.id,
-                );
+                )
+                .await;
             }
         }
         cache_activated_algorithm(&state, merchant.as_str(), &algorithm, is_experiment).await;
@@ -2000,7 +1998,8 @@ pub async fn deactivate_routing_rule(
             merchant
         );
         // A deliberate deactivation ends the guardrail's observation period.
-        crate::decider::gatewaydecider::ab_test::guardrail::reset(merchant.as_str(), &algorithm.id);
+        crate::decider::gatewaydecider::ab_test::guardrail::reset(merchant.as_str(), &algorithm.id)
+            .await;
         invalidate_routing_algorithm_cache(&state, merchant.as_str()).await;
         clear_volume_commitment_plan(&algorithm.algorithm_for, merchant.as_str()).await;
         Ok::<_, ContainerError<EuclidErrors>>(())
@@ -2045,6 +2044,13 @@ pub(crate) async fn stop_breached_payment_experiment(
 ) -> Result<(), String> {
     use crate::decider::gatewaydecider::ab_test::{arms, guardrail};
 
+    // A stop judged in an earlier observation period must not stop the run that replaced it.
+    let current = guardrail::current_run(merchant_id, experiment_id)
+        .await
+        .map_err(|e| format!("{e:?}"))?;
+    if current != run {
+        return Ok(());
+    }
     let state = get_tenant_app_state().await;
     // Internal work, since the guardrail only names pairs the decider recorded while routing.
     let merchant = crate::auth::AuthorizedMerchant::internal(merchant_id);
@@ -2059,7 +2065,7 @@ pub(crate) async fn stop_breached_payment_experiment(
         .is_none_or(|mapping| mapping.routing_algorithm_id != experiment_id)
     {
         // The experiment is no longer running, so the variant gets no traffic either.
-        return stop_whole_experiment(&state, &merchant, experiment_id, variant_id, run).await;
+        return stop_whole_experiment(&state, &merchant, experiment_id, variant_id).await;
     }
 
     let algorithm = algorithm_store::find(&state.db, &merchant, experiment_id)
@@ -2076,11 +2082,10 @@ pub(crate) async fn stop_breached_payment_experiment(
         // Already stopped by an earlier attempt or another instance. That attempt may have saved
         // the definition but failed to drop the cached slot, so drop it again before finishing.
         drop_cached_experiment(&state, merchant_id).await?;
-        guardrail::mark_stopped(merchant_id, experiment_id, variant_id, run);
         return Ok(());
     }
     if running.len() == 1 {
-        return stop_whole_experiment(&state, &merchant, experiment_id, variant_id, run).await;
+        return stop_whole_experiment(&state, &merchant, experiment_id, variant_id).await;
     }
 
     // Several variants are running, so `variants` is set: the single-variant format has one.
@@ -2111,7 +2116,6 @@ pub(crate) async fn stop_breached_payment_experiment(
     }
     // Drop the cached slot so every instance reads the updated definition on its next payment.
     drop_cached_experiment(&state, merchant_id).await?;
-    guardrail::mark_stopped(merchant_id, experiment_id, variant_id, run);
     logger::warn!(merchant_id = %merchant_id, experiment_id = %experiment_id,
         variant_id = %variant_id, "A/B variant stopped after guardrail breach");
     Ok(())
@@ -2139,7 +2143,6 @@ async fn stop_whole_experiment(
     merchant: &crate::auth::AuthorizedMerchant,
     experiment_id: &str,
     variant_id: &str,
-    run: u64,
 ) -> Result<(), String> {
     let merchant_id = merchant.as_str();
     let payment = AlgorithmType::Payment.to_string();
@@ -2154,12 +2157,6 @@ async fn stop_whole_experiment(
             .await
             .map_err(|e| format!("{e:?}"))?;
         if active.is_some() {
-            crate::decider::gatewaydecider::ab_test::guardrail::mark_stopped(
-                merchant_id,
-                experiment_id,
-                variant_id,
-                run,
-            );
             return Ok(());
         }
     }
@@ -2168,14 +2165,8 @@ async fn stop_whole_experiment(
     // entry expired. Dropping the key only costs the next read a database lookup, which back-fills
     // whatever is actually active. Retry on later feedback if Redis is unavailable.
     drop_cached_experiment(state, merchant_id).await?;
-    crate::decider::gatewaydecider::ab_test::guardrail::mark_stopped(
-        merchant_id,
-        experiment_id,
-        variant_id,
-        run,
-    );
     logger::warn!(merchant_id = %merchant_id, experiment_id = %experiment_id,
-        "A/B experiment stopped after guardrail breach");
+        variant_id = %variant_id, "A/B experiment stopped after guardrail breach");
     Ok(())
 }
 

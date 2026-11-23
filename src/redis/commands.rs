@@ -7,7 +7,9 @@ use fred::prelude::RedisKey;
 use fred::types::SetOptions;
 use fred::{
     clients::Transaction,
-    interfaces::{HashesInterface, KeysInterface, ListInterface, TransactionInterface},
+    interfaces::{
+        HashesInterface, HyperloglogInterface, KeysInterface, ListInterface, TransactionInterface,
+    },
     types::{Expiration, FromRedis, MultipleValues},
 };
 use redis_interface::{errors, types::DelReply, RedisConnectionPool, RedisConnectionWithContext};
@@ -579,6 +581,50 @@ impl RedisConnectionWrapper {
             .decr(key)
             .await
             .change_context(errors::RedisError::IncrementHashFieldFailed)
+    }
+
+    /// `PFADD` `member` to the HyperLogLog at `key`, then sets its TTL to `ttl` seconds.
+    pub async fn pfadd_with_ttl(
+        &self,
+        key: &str,
+        member: &str,
+        ttl: i64,
+    ) -> Result<(), errors::RedisError> {
+        let _: i64 = self
+            .conn
+            .pool
+            .pfadd(key, member)
+            .await
+            .change_context(errors::RedisError::SetFailed)?;
+        self.expire_key(key, ttl).await
+    }
+
+    /// Stores `value` at `key` as a plain integer with no expiry, readable by [`Self::get_counter`].
+    pub async fn set_counter(&self, key: &str, value: i64) -> Result<(), errors::RedisError> {
+        self.conn
+            .pool
+            .set(key, value, None, None, false)
+            .await
+            .change_context(errors::RedisError::SetFailed)
+    }
+
+    /// Reads an integer counter written by `INCR` or [`Self::set_counter`], `None` when the key doesn't exist.
+    pub async fn get_counter(&self, key: &str) -> Result<Option<i64>, errors::RedisError> {
+        self.conn
+            .pool
+            .get(key)
+            .await
+            .change_context(errors::RedisError::GetFailed)
+    }
+
+    /// `PFCOUNT`: the approximate number of distinct members added to the HyperLogLog at `key`,
+    /// 0 when the key doesn't exist.
+    pub async fn pfcount(&self, key: &str) -> Result<u64, errors::RedisError> {
+        self.conn
+            .pool
+            .pfcount(key)
+            .await
+            .change_context(errors::RedisError::GetFailed)
     }
 
     pub async fn expire_key(&self, key: &str, ttl: i64) -> Result<(), errors::RedisError> {

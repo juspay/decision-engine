@@ -470,7 +470,8 @@ pub async fn check_and_update_gateway_score_(
                 &api_payload.merchant_id,
                 &api_payload.payment_id,
                 is_success,
-            );
+            )
+            .await;
         for breached in experiments_to_stop {
             if let Err(error) =
                 crate::euclid::handlers::routing_rules::stop_breached_payment_experiment(
@@ -659,6 +660,20 @@ pub async fn check_and_update_gateway_score_(
             })
         }
     }
+}
+
+/// When the payment was routed, from its scoring context; `None` when it has no context.
+pub(crate) async fn routed_at(merchant_id: &str, payment_id: &str) -> Option<time::OffsetDateTime> {
+    let key = scoring_data_redis_key(merchant_id, payment_id).await;
+    get_tenant_app_state()
+        .await
+        .redis_conn
+        .get_key::<StoredGatewayScoringData>(&key, "GatewayScoringData")
+        .await
+        .ok()
+        .map(GatewayScoringData::from)
+        .filter(|data| data.merchantId == merchant_id)
+        .map(|data| data.dateCreated)
 }
 
 /// The key to read a payment's scoring context from: the merchant-keyed one, or the payment-id-only
