@@ -1,6 +1,6 @@
 import { test, expect, factory } from '../../fixtures/test'
 import type { ApiClient } from '../../fixtures/api-client'
-import { redisKeys, redisPfcount } from '../../helpers/redis'
+import { redisKeys, redisListLength, redisPfcount, redisTtl } from '../../helpers/redis'
 
 /**
  * Behaviour that must hold when the engine runs as several instances sharing one Redis and
@@ -336,5 +336,105 @@ test.describe('Success-rate scoring across instances (API)', () => {
     await feedback(api, POD_B, m, paymentId, gateway, 'CHARGED')
     const base = `{gw_sr_v3_score_${m}_ORDER_PAYMENT_CREDIT_CARD_${gateway}_}`
     await expect.poll(() => redisKeys(`{gw_sr_v3_score_${m}_*`)).toEqual([`${base}queue`, `${base}score`])
+  })
+})
+
+/**
+ * Each instance caches service configs and merchant accounts in memory for minutes; a change made
+ * through one instance reaches the others by Redis pub/sub invalidation. Every test first makes pod
+ * B cache the old value, changes it through pod A, and expects pod B to act on the new one within
+ * seconds, far inside the cache TTL, which only the invalidation explains.
+ */
+test.describe('Cached configuration across instances (API)', () => {
+  const PROPAGATION = { timeout: 5_000, intervals: [200] }
+
+  /** Decides one payment on `pod`; `paymentInfo` overrides the default card payment. */
+  async function decide(api: ApiClient, pod: string, merchantId: string, paymentInfo: Record<string, unknown>) {
+    const r = await api.raw('POST', `${pod}/decide-gateway`, {
+      body: factory.srDecideGatewayRequest({
+        merchantId,
+        eliminationEnabled: false,
+        paymentInfo: { ...factory.paymentInfo(), ...paymentInfo },
+      }),
+    })
+    expect(r.status, JSON.stringify(r.body).slice(0, 500)).toBe(200)
+    return r.body.decided_gateway as string
+  }
+
+  test('a merchant feature toggled on one instance applies on the other', async ({ api, merchant }) => {
+    const m = merchant.id
+    await api.createSuccessRateConfig(m)
+    const rule = await api.createRoutingAlgorithm(factory.singleRoutingPayload(m, { gateway: 'stripe' }))
+    await api.activateRoutingAlgorithm(m, rule.body.rule_id)
+    const hybrid = () => api.raw('POST', `${POD_B}/routing/hybrid`, {
+      body: {
+        static_routing_request: {
+          created_by: m,
+          parameters: {
+            payment_method: { type: 'enum_variant', value: 'card' },
+            amount: { type: 'number', value: 100 },
+          },
+          fallback_output: [factory.gatewayConnector('stripe')],
+        },
+        dynamic_routing_request: factory.srDecideGatewayRequest({ merchantId: m }),
+      },
+    }).then((r) => r.body.dynamic_routing?.status ?? 'skipped')
+
+    // Pod B caches sr-routing as off.
+    expect(await hybrid()).toBe('skipped')
+
+    const on = await api.raw('POST', `${POD_A}/merchant-account/${m}/features/sr-routing`, { body: { enabled: true } })
+    expect(on.status).toBe(200)
+    await expect.poll(hybrid, PROPAGATION).toBe('success')
+
+    const off = await api.raw('POST', `${POD_A}/merchant-account/${m}/features/sr-routing`, { body: { enabled: false } })
+    expect(off.status).toBe(200)
+    await expect.poll(hybrid, PROPAGATION).toBe('skipped')
+  })
+
+  test("a merchant's scoring-context TTL set on one instance applies on the other", async ({ api, merchant }) => {
+    const m = merchant.id
+    await api.createSuccessRateConfig(m)
+    const contextTtl = async () => {
+      const paymentId = factory.paymentId('multi_pod_ttl')
+      await decide(api, POD_B, m, { paymentId })
+      return redisTtl(`gateway_scoring_data_${m}_${paymentId}`)
+    }
+
+    // Pod B caches the merchant as having no TTL of its own: contexts get the default.
+    const defaultTtl = await contextTtl()
+    expect(defaultTtl).toBeGreaterThan(0)
+
+    const set = await api.raw('PUT', `${POD_A}/admin/merchant-account/${m}/scoring-data-ttl`, {
+      body: { ttl_secs: defaultTtl + 3600 },
+    })
+    expect(set.status, JSON.stringify(set.body)).toBe(200)
+    await expect.poll(contextTtl, PROPAGATION).toBeGreaterThan(defaultTtl + 3000)
+  })
+
+  test("a merchant's success-rate config updated on one instance applies on the other", async ({ api, merchant }) => {
+    const m = merchant.id
+    await api.createSuccessRateConfig(m, { defaultBucketSize: 200, subLevelInputConfig: [] })
+    /** Routes and reports a fresh payment of `paymentMethodType` on pod B; returns its score queue length. */
+    const learnedBucket = async (paymentMethodType: string) => {
+      const paymentId = factory.paymentId('multi_pod_bucket')
+      const gateway = await decide(api, POD_B, m, {
+        paymentId, paymentMethod: 'card', paymentMethodType, cardType: paymentMethodType.toUpperCase(),
+      })
+      await feedback(api, POD_B, m, paymentId, gateway, 'CHARGED')
+      const queue = `{gw_sr_v3_score_${m}_ORDER_PAYMENT_${paymentMethodType.toUpperCase()}_CARD_${gateway}_}queue`
+      await expect.poll(() => redisListLength(queue)).toBeGreaterThan(0)
+      return redisListLength(queue)
+    }
+
+    // Pod B caches the merchant's config with a bucket of 200.
+    expect(await learnedBucket('credit')).toBe(200)
+
+    const updated = await api.raw('POST', `${POD_A}/rule/update`, {
+      body: { merchant_id: m, config: { type: 'successRate', data: factory.srConfigData({ defaultBucketSize: 60, subLevelInputConfig: [] }) } },
+    })
+    expect(updated.status, JSON.stringify(updated.body)).toBe(200)
+    // A new segment's queue is created at the bucket size pod B has for the merchant.
+    await expect.poll(() => learnedBucket('debit'), PROPAGATION).toBe(60)
   })
 })

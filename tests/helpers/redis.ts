@@ -97,3 +97,13 @@ export async function redisKeys(pattern: string): Promise<string[]> {
 export async function redisPfcount(key: string): Promise<number> {
   return (await command(['PFCOUNT', key])) as number
 }
+
+/** Seconds until the key at `key` expires: -1 without an expiry, -2 when it doesn't exist. */
+export async function redisTtl(key: string): Promise<number> {
+  return (await command(['TTL', key])) as number
+}
+
+/** Length of the list at `key`: 0 when it doesn't exist. */
+export async function redisListLength(key: string): Promise<number> {
+  return (await command(['LLEN', key])) as number
+}
