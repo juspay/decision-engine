@@ -1,6 +1,7 @@
 import { test, expect, factory } from '../../fixtures/test'
 import type { ApiClient } from '../../fixtures/api-client'
 import { abGuardrailCounts, redisKeys, redisListLength, redisTtl } from '../../helpers/redis'
+import decideContract from '../../fixtures/contracts/decide-request.json'
 
 /**
  * Behaviour that must hold when the engine runs as several instances sharing one Redis and
@@ -19,6 +20,27 @@ test.beforeAll(async ({ request }) => {
   if (!process.env.CI) test.skip(!reachable, `second instance not running at ${POD_B}`)
   expect(reachable, `second instance not running at ${POD_B}`).toBe(true)
 })
+
+/**
+ * A `/decide` request on `pod` for `paymentId` (a credit card payment), routable to `connectors`.
+ * Answers with the connectors in the order chosen.
+ */
+async function decideOn(api: ApiClient, pod: string, paymentId: string, connectors: string[]) {
+  const body = {
+    ...structuredClone(decideContract),
+    payment_id: paymentId,
+    routing_config: {
+      ...structuredClone(decideContract.routing_config),
+      eligible_connectors: connectors.map((name) => {
+        const { gateway_name, gateway_id } = factory.gatewayConnector(name)
+        return { connector: gateway_name, merchant_connector_id: gateway_id! }
+      }),
+    },
+  }
+  const r = await api.raw('POST', `${pod}/decide`, { body })
+  expect(r.status, JSON.stringify(r.body).slice(0, 500)).toBe(200)
+  return r.body
+}
 
 /** The payment id's bucket in 0..100, as the engine assigns arms from it. */
 function bucket(paymentId: string): bigint {
@@ -290,40 +312,29 @@ test.describe('A/B guardrail across instances (API)', () => {
 })
 
 test.describe('A/B guardrail outcomes and completion across instances (API)', () => {
-  /** Routes a payment on `pod`'s /routing/hybrid; returns the connector its rule output chose. */
-  async function routeHybrid(api: ApiClient, pod: string, merchantId: string, paymentId: string): Promise<string> {
-    const r = await api.raw('POST', `${pod}/routing/hybrid`, {
-      body: {
-        // The same parameters /routing/evaluate is called with in these tests. A connector the rule
-        // chooses is served only when the caller can route to it.
-        static_routing_request: {
-          ...factory.ruleEvaluatePayload(merchantId, {}, { payment_id: paymentId }),
-          fallback_output: ['stripe', 'checkout', 'adyen'].map((gateway) => factory.gatewayConnector(gateway)),
-        },
-        dynamic_routing_request: factory.srDecideGatewayRequest({
-          merchantId,
-          paymentInfo: { ...factory.paymentInfo(), paymentId },
-        }),
-      },
-    })
-    expect(r.status, JSON.stringify(r.body).slice(0, 500)).toBe(200)
-    return r.body.evaluated_connectors[0].gateway_name
+  /**
+   * Routes a payment on `pod`'s /decide; returns the connector chosen. A connector the rule chooses
+   * is served only when the payment is routable to it, so all three are eligible.
+   */
+  async function routeDecide(api: ApiClient, pod: string, paymentId: string): Promise<string> {
+    return (await decideOn(api, pod, paymentId, ['stripe', 'checkout', 'adyen'])).connectors[0].connector
   }
 
   test('an outcome counts however late it arrives, after the payment\'s scoring context expired', async ({ api, merchant }) => {
     const m = merchant.id
     await api.createSuccessRateConfig(m)
-    // Rule-routed hybrid payments get a scoring context, kept for three seconds.
+    // Rule-routed /decide payments get a scoring context, kept for three seconds.
     await api.setMerchantFeature(m, 'sr-scores-from-rule-routing', true)
     const ttl = await api.raw('PUT', `${POD_A}/admin/merchant-account/${m}/scoring-data-ttl`, { body: { ttl_secs: 3 } })
     expect(ttl.status, JSON.stringify(ttl.body)).toBe(200)
+    // /decide applies the experiment's `hybrid_routing` split, as the endpoint it replaces did.
     const experimentId = await createExperiment(api, m, 400, { endpoints: ['hybrid_routing'] })
     try {
       await api.activateRoutingAlgorithm(m, experimentId)
-      await expect.poll(() => routeHybrid(api, POD_A, m, variantPayment()), { timeout: 20_000, intervals: [500] }).toBe('adyen')
+      await expect.poll(() => routeDecide(api, POD_A, variantPayment()), { timeout: 20_000, intervals: [500] }).toBe('adyen')
 
       const variant = variantPayment()
-      expect(await routeHybrid(api, POD_A, m, variant)).toBe('adyen')
+      expect(await routeDecide(api, POD_A, variant)).toBe('adyen')
       await expect.poll(() => redisKeys(`gateway_scoring_data_${m}_${variant}`)).toEqual([`gateway_scoring_data_${m}_${variant}`])
       // The context expires; the payment's outcome still belongs to the experiment.
       await expect.poll(() => redisKeys(`gateway_scoring_data_${m}_${variant}`), { timeout: 10_000, intervals: [500] }).toEqual([])
@@ -424,30 +435,20 @@ test.describe('Cached configuration across instances (API)', () => {
     await api.createSuccessRateConfig(m)
     const rule = await api.createRoutingAlgorithm(factory.singleRoutingPayload(m, { gateway: 'stripe' }))
     await api.activateRoutingAlgorithm(m, rule.body.rule_id)
-    const hybrid = () => api.raw('POST', `${POD_B}/routing/hybrid`, {
-      body: {
-        static_routing_request: {
-          created_by: m,
-          parameters: {
-            payment_method: { type: 'enum_variant', value: 'card' },
-            amount: { type: 'number', value: 100 },
-          },
-          fallback_output: [factory.gatewayConnector('stripe')],
-        },
-        dynamic_routing_request: factory.srDecideGatewayRequest({ merchantId: m }),
-      },
-    }).then((r) => r.body.dynamic_routing?.status ?? 'skipped')
+    // Whether /decide on pod B ran success-rate routing for a payment.
+    const srOnB = () => decideOn(api, POD_B, factory.paymentId('multi_pod_flag'), ['stripe'])
+      .then((body) => body.success_rate?.status ?? 'skipped')
 
     // Pod B caches sr-routing as off.
-    expect(await hybrid()).toBe('skipped')
+    expect(await srOnB()).toBe('skipped')
 
     const on = await api.raw('POST', `${POD_A}/merchant-account/${m}/features/sr-routing`, { body: { enabled: true } })
     expect(on.status).toBe(200)
-    await expect.poll(hybrid, PROPAGATION).toBe('success')
+    await expect.poll(srOnB, PROPAGATION).toBe('applied')
 
     const off = await api.raw('POST', `${POD_A}/merchant-account/${m}/features/sr-routing`, { body: { enabled: false } })
     expect(off.status).toBe(200)
-    await expect.poll(hybrid, PROPAGATION).toBe('skipped')
+    await expect.poll(srOnB, PROPAGATION).toBe('skipped')
   })
 
   test('live A/B testing toggled on one instance applies on the other', async ({ api, merchant }) => {

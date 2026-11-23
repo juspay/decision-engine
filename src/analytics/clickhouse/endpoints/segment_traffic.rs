@@ -1,11 +1,12 @@
 use clickhouse::Row;
 use serde::Deserialize;
 
-use crate::analytics::flow::FlowType;
 use crate::analytics::store::SegmentTraffic;
 use crate::error::ApiError;
 
-use super::super::common::{fetch_all, DOMAIN_TABLE};
+use super::super::common::{
+    all_decisions_filter, fetch_all, DOMAIN_TABLE, STATIC_ROUTING_APPROACH,
+};
 use super::super::filters::partition_lower_bound;
 use super::super::query::{BoundQueryBuilder, FilterClause};
 
@@ -30,7 +31,8 @@ fn norm(v: Option<String>) -> Option<String> {
 }
 
 /// Per-cluster decision volume + distinct-PSP count for a merchant since `since_ms`, grouped by
-/// (pmt, pm) plus the `active_dims` the merchant clusters on. Inactive dimensions are selected as
+/// (pmt, pm) plus the `active_dims` the merchant clusters on. Counts SR decisions from both
+/// `/decide-gateway` and `/routing/hybrid`; a hybrid payment its rule output decided is left out. Inactive dimensions are selected as
 /// a typed NULL (kept in the same column position) so they don't fragment the grouping. Derived
 /// entirely from analytics, so the decision hot path and Redis are untouched.
 pub async fn load(
@@ -65,9 +67,9 @@ pub async fn load(
     builder.add_filter(FilterClause::eq("merchant_id", merchant_id.to_string()));
     builder.add_filter(FilterClause::raw(format!("created_at_ms >= {since_ms}")));
     builder.add_filter(partition_lower_bound(since_ms));
+    builder.add_filter(all_decisions_filter());
     builder.add_filter(FilterClause::raw(format!(
-        "flow_type = '{}'",
-        FlowType::DecideGatewayDecision.as_str()
+        "ifNull(routing_approach, '') != '{STATIC_ROUTING_APPROACH}'"
     )));
     builder.extend_group_bys(group_bys);
 
